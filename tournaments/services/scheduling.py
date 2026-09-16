@@ -558,9 +558,18 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 # takes this same branch too (nothing fires that early, so
                 # gap/replaces come back as the plain DEFAULT_GAP case) --
                 # its own gap was just never added to candidate_start above.
+                #
+                # Resets to 1 game (this one), not 0: the match just placed
+                # is itself the first game of the new block, and every placed
+                # match counts as one game "since the break" regardless of
+                # whether it's the one that triggered the reset -- resetting
+                # to 0 silently gave every block after the first an extra
+                # game before its own break fired (e.g. "every 3 games" was
+                # really honoured for the first block only, then drifted to
+                # 4 games per block from the second one on).
                 if gap != DEFAULT_GAP or not replaces or candidate_start.date() != pre_roll_date:
-                    field_games_since_break[field.id] = 0
-                    field_minutes_since_break[field.id] = 0
+                    field_games_since_break[field.id] = 1
+                    field_minutes_since_break[field.id] = int(match_duration.total_seconds() // 60)
                 else:
                     field_games_since_break[field.id] += 1
                     field_minutes_since_break[field.id] += int(match_duration.total_seconds() // 60)

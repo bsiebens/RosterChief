@@ -2337,6 +2337,30 @@ class AllocateScheduleTests(TournamentsTestCase):
         gap = ordered[1].scheduled_start - (ordered[0].scheduled_start + DEFAULT_MATCH_DURATION)
         self.assertEqual(gap, datetime.timedelta(minutes=30))
 
+    def test_break_rule_recurs_consistently_across_multiple_cycles(self):
+        # Regression test: the "games since last break" counter used to
+        # reset to 0 instead of 1 once a break fired -- the match that just
+        # received the break is itself the first game of the new block, and
+        # every placed match should count as one game toward the *next*
+        # break regardless of whether it's the one the reset happened on.
+        # Resetting to 0 silently gave every block after the first an extra
+        # game before its own break fired: "every 3 games" held for the
+        # first block (3 games), then drifted to 4 games per block from the
+        # second one on.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 9)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "23:59"}])
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=3, gap_minutes=15, replaces_default_gap=True, priority=0)
+        BreakRule.objects.create(tournament=self.tournament, field=field, trigger_type=BreakRule.TriggerType.GAME_COUNT, trigger_every_n_games=1, gap_minutes=5, replaces_default_gap=True, priority=10)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        ordered = list(Match.objects.filter(stage=stage).order_by("scheduled_start"))
+        gaps = [ordered[i + 1].scheduled_start - (ordered[i].scheduled_start + DEFAULT_MATCH_DURATION) for i in range(9)]
+        five, fifteen = datetime.timedelta(minutes=5), datetime.timedelta(minutes=15)
+        self.assertEqual(gaps, [five, five, fifteen, five, five, fifteen, five, five, fifteen])
+
     def test_tbd_matches_are_scheduled_too(self):
         # A still-TBD slot (here, the final -- sourced from the two
         # semifinals' own winners) gets a field/time exactly like any other
