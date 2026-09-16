@@ -39,6 +39,23 @@ class SchedulingError(Exception):
     """A stage's matches could not be generated, or a placement is invalid."""
 
 
+class GroupRankSeed:
+    """A bracket-seed placeholder standing in for "whichever team finishes
+    Nth in this group" -- an entry a caller can pass to
+    ``generate_stage_matches`` (single/double-elim only) instead of a
+    concrete ``TournamentTeam`` when that slot isn't decided yet.
+    ``_persist_bracket`` recognises it and populates a ``Match``'s
+    ``*_source_group``/``*_source_rank`` instead of ``*_team``;
+    ``resolve_match_slots`` (already fully built, no changes needed here)
+    fills the real team in once that group's own matches complete."""
+
+    __slots__ = ("group", "rank")
+
+    def __init__(self, group, rank: int):
+        self.group = group
+        self.rank = rank
+
+
 # --------------------------------------------------------------------------
 # Format -> matches
 # --------------------------------------------------------------------------
@@ -96,7 +113,10 @@ def generate_stage_matches(stage: TournamentStage, *, entries: list | None = Non
 
     ``entries`` defaults to every non-withdrawn ``TournamentTeam`` in the
     tournament, seed-ordered -- pass an explicit list for a stage that only
-    a subset should enter (e.g. a plate/consolation stage).
+    a subset should enter (e.g. a plate/consolation stage). For
+    ``SINGLE_ELIM``/``DOUBLE_ELIM`` only, an entry may also be a
+    ``GroupRankSeed`` in place of a concrete team, for a slot that isn't
+    decided until an earlier group stage finishes.
     """
     if stage.matches.exists():
         raise SchedulingError(_("This stage already has matches -- delete them first to regenerate."))
@@ -157,33 +177,54 @@ def _generate_double_elim(stage, entries):
     return _persist_bracket(stage, bracket)
 
 
+def _slot_team_kwargs(prefix: str, value) -> dict:
+    """``value`` is whatever a round-1 slot's ``home_team``/``away_team``
+    entry actually is: a concrete ``TournamentTeam`` (or ``None``, a bye
+    seat) goes straight into ``<prefix>_team``; a ``GroupRankSeed`` instead
+    goes into ``<prefix>_source_group``/``<prefix>_source_rank``, leaving
+    ``<prefix>_team`` unset until ``resolve_match_slots`` fills it in."""
+    if isinstance(value, GroupRankSeed):
+        return {f"{prefix}_team": None, f"{prefix}_source_group": value.group, f"{prefix}_source_rank": value.rank}
+    return {f"{prefix}_team": value}
+
+
 def _persist_bracket(stage, bracket_rounds):
     """Shared by single/double-elim: ``bracket_rounds`` is a list of rounds,
     each a list of slot dicts (see ``tournaments.services.brackets``'s own
     module docstring for the exact shape) -- persists them as ``Match`` rows
     in order, resolving each slot's ``source_match`` reference (given as a
     0-based index into the flat list of matches created so far) to a real
-    ``Match`` instance. A round-1 slot with only one side filled (the other
-    entry didn't exist -- a bye) is created as a ``WALKOVER`` match; once
-    every row exists, ``_resolve_byes`` pushes the lone team straight into
-    whichever match(es) reference this one, the same way a real completed
-    result would, so a bye never leaves a downstream slot stuck on "TBD"."""
+    ``Match`` instance. A round-1 slot with only one side filled by a real
+    team (the other entry didn't exist -- a bye) is created as a
+    ``WALKOVER`` match; once every row exists, ``_resolve_byes`` pushes the
+    lone team straight into whichever match(es) reference this one, the same
+    way a real completed result would, so a bye never leaves a downstream
+    slot stuck on "TBD".
+
+    A lone ``GroupRankSeed`` side is deliberately *not* treated as a bye --
+    there's no team yet to advance, only a placeholder that resolves later
+    (see ``GroupRankSeed``'s own docstring) -- it becomes a normal
+    ``SCHEDULED`` match with a genuinely empty other side, left for staff to
+    notice and handle by hand once that group resolves. A known, tested edge
+    case (a bracket built to avoid it never hits it at all), not an
+    automated one."""
     created: list[Match] = []
     for round_number, round_slots in enumerate(bracket_rounds, start=1):
         for sequence, slot in enumerate(round_slots):
-            is_bye = ("home_team" in slot or "away_team" in slot) and (slot.get("home_team") is None) != (slot.get("away_team") is None)
+            home, away = slot.get("home_team"), slot.get("away_team")
+            is_bye = ("home_team" in slot or "away_team" in slot) and (home is None) != (away is None) and not isinstance(home, GroupRankSeed) and not isinstance(away, GroupRankSeed)
             match = Match.objects.create(
                 stage=stage,
                 round_number=round_number,
                 round_label=slot.get("round_label", ""),
                 sequence=sequence,
                 status=Match.Status.WALKOVER if is_bye else Match.Status.SCHEDULED,
-                home_team=slot.get("home_team"),
-                away_team=slot.get("away_team"),
                 home_source_match=created[slot["home_source_index"]] if slot.get("home_source_index") is not None else None,
                 home_source_is_winner=slot.get("home_source_is_winner", True),
                 away_source_match=created[slot["away_source_index"]] if slot.get("away_source_index") is not None else None,
                 away_source_is_winner=slot.get("away_source_is_winner", True),
+                **_slot_team_kwargs("home", home),
+                **_slot_team_kwargs("away", away),
             )
             created.append(match)
 

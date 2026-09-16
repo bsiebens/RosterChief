@@ -146,6 +146,8 @@ from tournaments.forms import (
     DressingRoomAssignmentForm,
     DressingRoomForm,
     ScheduleBlockForm,
+    SeedSlotFormSet,
+    SeedSlotRowForm,
     TournamentFieldForm,
     TournamentForm,
     TournamentRosterEntryForm,
@@ -160,7 +162,7 @@ from tournaments.services.dressing_rooms import DressingRoomAssignmentError, ass
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
-from tournaments.services.scheduling import SchedulingError, allocate_schedule, generate_stage_matches, record_result, reschedule_match
+from tournaments.services.scheduling import GroupRankSeed, SchedulingError, allocate_schedule, generate_stage_matches, record_result, reschedule_match
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
@@ -8144,6 +8146,84 @@ class TournamentStageGenerateMatchesView(TournamentOperatorRequiredMixin, View):
             body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
             notify(request, f"s|{_('Matches generated')}|{body}")
 
+        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+
+class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
+    """An alternative to the plain "Generate matches" button, for a single/
+    double-elimination stage only: instead of auto-filling round 1 from
+    every non-withdrawn team in seed order, staff pick each slot's source by
+    hand -- a direct team, or "Nth place of [a TournamentGroup]" (any group
+    in this tournament, typically an earlier stage's) -- so a knockout stage
+    can be drafted before that earlier stage has even finished; its group-
+    sourced slots stay TBD until tournaments.services.scheduling.
+    resolve_match_slots (already fully built, untouched by this view) fills
+    them in once that group's own matches complete.
+
+    Reuses generate_stage_matches itself (same format dispatch, same
+    "already has matches"/"fewer than two entries" guards as the plain
+    button above) -- only entries differs: a mix of TournamentTeam and
+    GroupRankSeed built from the submitted formset, instead of always a
+    plain team list."""
+
+    template_name = "management/tournament_stage_seed.html"
+
+    def get_stage(self, tournament):
+        stage = get_object_or_404(TournamentStage, pk=self.kwargs["stage_pk"], tournament=tournament)
+        if stage.format not in (TournamentStage.Format.SINGLE_ELIM, TournamentStage.Format.DOUBLE_ELIM):
+            raise Http404
+        return stage
+
+    @staticmethod
+    def default_slot_count(tournament):
+        count = TournamentTeam.objects.filter(tournament=tournament, withdrawn_at__isnull=True).count()
+        slots = 2
+        while slots < count:
+            slots *= 2
+        return slots
+
+    def render_form(self, request, tournament, stage, formset):
+        return render(request, self.template_name, {"tournament": tournament, "stage": stage, "formset": formset, **self.tournament_permissions(tournament)})
+
+    def get(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = self.get_stage(tournament)
+        if stage.matches.exists():
+            notify(request, f"w|{_('Already generated')}|{_('This stage already has matches -- delete them first to reseed it.')}")
+            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+
+        teams = list(TournamentTeam.objects.filter(tournament=tournament, withdrawn_at__isnull=True).order_by("seed"))
+        initial = [{"entry_type": SeedSlotRowForm.ENTRY_TEAM, "team": team.pk} for team in teams]
+        while len(initial) < self.default_slot_count(tournament):
+            initial.append({})
+        formset = SeedSlotFormSet(initial=initial, form_kwargs={"tournament": tournament})
+        return self.render_form(request, tournament, stage, formset)
+
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = self.get_stage(tournament)
+        formset = SeedSlotFormSet(request.POST, form_kwargs={"tournament": tournament})
+
+        if not formset.is_valid():
+            notify(request, f"e|{_('Could not seed stage')}|{_('Some slots need attention -- see the errors below.')}")
+            return self.render_form(request, tournament, stage, formset)
+
+        entries = []
+        for form in formset.forms:
+            entry_type = form.cleaned_data.get("entry_type")
+            if entry_type == SeedSlotRowForm.ENTRY_TEAM and form.cleaned_data.get("team"):
+                entries.append(form.cleaned_data["team"])
+            elif entry_type == SeedSlotRowForm.ENTRY_GROUP and form.cleaned_data.get("group") and form.cleaned_data.get("rank"):
+                entries.append(GroupRankSeed(group=form.cleaned_data["group"], rank=form.cleaned_data["rank"]))
+
+        try:
+            matches = generate_stage_matches(stage, entries=entries)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Could not seed stage')}|{error}")
+            return self.render_form(request, tournament, stage, formset)
+
+        body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
+        notify(request, f"s|{_('Stage seeded')}|{body}")
         return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
 
 

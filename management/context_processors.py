@@ -220,6 +220,7 @@ _NAV_SECTIONS = {
     "tournament_stage_update": "tournament_list",
     "tournament_stage_delete": "tournament_list",
     "tournament_stage_generate_matches": "tournament_list",
+    "tournament_stage_seed": "tournament_list",
     "tournament_break_rule_create": "tournament_list",
     "tournament_break_rule_update": "tournament_list",
     "tournament_break_rule_delete": "tournament_list",

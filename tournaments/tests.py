@@ -48,6 +48,7 @@ from .services.registration import RegistrationDecisionError, TeamDeletionError,
 from .services.scheduling import (
     DEFAULT_GAP,
     DEFAULT_MATCH_DURATION,
+    GroupRankSeed,
     SchedulingError,
     allocate_schedule,
     compute_standings,
@@ -2012,6 +2013,70 @@ class GenerateStageMatchesTests(TournamentsTestCase):
         # The losers-round match takes the LOSER of each semifinal, not the winner.
         self.assertFalse(losers_final.home_source_is_winner)
         self.assertFalse(losers_final.away_source_is_winner)
+
+
+class GroupRankSeedTests(TournamentsTestCase):
+    def make_group(self, team_count):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, team_count + 1)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        return group_stage, group_stage.groups.get()
+
+    def test_a_group_rank_seed_sets_the_source_fields_not_a_direct_team(self):
+        _group_stage, group = self.make_group(4)
+        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 1", seed=1)
+        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 2", seed=2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+
+        matches = generate_stage_matches(stage, entries=[team1, team2, GroupRankSeed(group, 1), GroupRankSeed(group, 2)])
+
+        round1 = [m for m in matches if m.round_number == 1]
+        self.assertEqual(len(round1), 2)
+        for match in round1:
+            self.assertEqual(match.status, Match.Status.SCHEDULED)
+
+        seed_sourced = [m for m in round1 if m.home_source_group_id or m.away_source_group_id]
+        self.assertEqual(len(seed_sourced), 2)
+        self.assertCountEqual([m.home_source_rank or m.away_source_rank for m in seed_sourced], [1, 2])
+        for match in seed_sourced:
+            if match.home_source_group_id:
+                self.assertIsNone(match.home_team_id)
+                self.assertIsNotNone(match.away_team_id)
+            else:
+                self.assertIsNone(match.away_team_id)
+                self.assertIsNotNone(match.home_team_id)
+
+    def test_a_lone_group_rank_seed_bye_slot_is_scheduled_not_a_walkover(self):
+        _group_stage, group = self.make_group(2)
+        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 1", seed=2)
+        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Direct 2", seed=3)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+
+        # 3 entries pads to a bracket of 4 -- seed order [1, 4, 2, 3] leaves
+        # the 4th slot empty, pairing this GroupRankSeed (seed 1) against it.
+        generate_stage_matches(stage, entries=[GroupRankSeed(group, 1), team1, team2])
+
+        bye_slot = Match.objects.get(stage=stage, round_number=1, home_source_group=group)
+        self.assertEqual(bye_slot.status, Match.Status.SCHEDULED)
+        self.assertIsNone(bye_slot.home_team_id)
+        self.assertIsNone(bye_slot.away_team_id)
+        self.assertEqual(bye_slot.home_source_rank, 1)
+
+    def test_a_group_rank_seed_resolves_once_the_group_completes(self):
+        group_stage, group = self.make_group(2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        generate_stage_matches(stage, entries=[GroupRankSeed(group, 1), GroupRankSeed(group, 2)])
+        final = stage.matches.get()
+        self.assertIsNone(final.home_team_id)
+        self.assertIsNone(final.away_team_id)
+
+        only_match = group.matches.get()
+        record_result(only_match, score_home=2, score_away=0)
+
+        standings = compute_standings(group_stage, group=group)
+        final.refresh_from_db()
+        self.assertEqual(final.home_team_id, standings[0]["team"].id)
+        self.assertEqual(final.away_team_id, standings[1]["team"].id)
 
 
 class ResolveMatchSlotsTests(TournamentsTestCase):

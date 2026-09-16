@@ -69,6 +69,9 @@
                                     {% csrf_token %}
                                     <button class="btn btn-outline btn-xs" type="submit">{% lucide "shuffle" size=12 %} {% trans "Generate matches" %}</button>
                                 </form>
+                                {% if stage.format == "single_elim" or stage.format == "double_elim" %}
+                                    <a class="btn btn-outline btn-xs" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">{% lucide "list-tree" size=12 %} {% trans "Seed from standings" %}</a>
+                                {% endif %}
                             {% endif %}
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>

@@ -1,0 +1,29 @@
+{% load i18n lucide %}
+{% comment %}
+    One row of the "Seed from standings" formset -- rendered both for the
+    rows already in the formset and (with __prefix__ placeholders) into the
+    <template> the "Add slot" button clones from, same
+    management/_team_bulk_add_row.html convention.
+{% endcomment %}
+<tr class="bulk-add-row">
+    <td class="py-2">
+        {{ form.entry_type }}
+        {% for error in form.entry_type.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+        {% for error in form.non_field_errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="py-2 entry-team-cell">
+        {{ form.team }}
+        {% for error in form.team.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="py-2 entry-group-cell">
+        {{ form.group }}
+        {% for error in form.group.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-24 py-2 entry-rank-cell">
+        {{ form.rank }}
+        {% for error in form.rank.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+    </td>
+    <td class="w-12 py-2">
+        <button class="btn btn-ghost btn-sm btn-square remove-row" type="button" aria-label="{% trans 'Remove this slot' %}" title="{% trans 'Remove this slot' %}">{% lucide "x" size=16 %}</button>
+    </td>
+</tr>

@@ -1,0 +1,109 @@
+{% extends "management/base.html" %}
+{% load i18n lucide static %}
+
+{% comment %}
+    "Seed from standings" -- an alternative to the Fields & stages tab's plain
+    "Generate matches" button, single/double-elim stages only: each round-1
+    slot is either a direct team or "Nth place of [group]" (any
+    TournamentGroup in this tournament), so a knockout stage can be drafted
+    before an earlier group stage has even finished. See
+    management.views.TournamentStageSeedView's own docstring.
+
+    Context: tournament, stage, formset (SeedSlotFormSet).
+{% endcomment %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{{ stage.name }} &middot; {% trans "Seed from standings" %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_field_stage_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <form method="post">
+        {% csrf_token %}
+        {{ formset.management_form }}
+
+        <div class="card">
+            <div class="card-body">
+                <p class="text-sm text-muted">
+                    {% blocktrans %}Each slot is either a direct team or "Nth place of" a group -- a group-sourced slot stays undecided until that group's own matches are all complete, then fills in on its own. Slot order is seed order (top of this list plays the bottom). Leave a slot on "— skip —" to shrink the bracket.{% endblocktrans %}
+                </p>
+
+                {% for error in formset.non_form_errors %}
+                    <div class="alert alert-error">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{% trans "Slot" %}</th>
+                            <th>{% trans "Team" %}</th>
+                            <th>{% trans "Group" %}</th>
+                            <th>{% trans "Rank" %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulk-add-rows" data-prefix="{{ formset.prefix }}">
+                        {% for form in formset %}
+                            {% include "management/_seed_slot_row.html" with form=form %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <template id="bulk-add-row-template">
+                    {% include "management/_seed_slot_row.html" with form=formset.empty_form %}
+                </template>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button class="btn btn-outline btn-sm gap-2" type="button" id="add-row">{% lucide "plus" size=14 %} {% trans "Add slot" %}</button>
+                    <button class="btn btn-primary btn-sm gap-2" type="submit">{% lucide "list-tree" size=14 %} {% trans "Seed stage" %}</button>
+                </div>
+            </div>
+        </div>
+    </form>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/bulk-add-rows.js' %}"></script>
+    <script>
+        // Shows/hides each row's team vs. group+rank fields by its own
+        // entry_type select -- event delegation on the shared rows
+        // container (not per-row listeners) so a row cloned later by
+        // bulk-add-rows.js is covered automatically, same reasoning
+        // tournament_field_stage_list.html's own format/trigger-type
+        // toggles give for scoping to closest("dialog") there (there's no
+        // dialog here, so this scopes to closest("tr") instead).
+        (() => {
+            const rows = document.getElementById("bulk-add-rows");
+            if (!rows) return;
+
+            const sync = (row) => {
+                const select = row.querySelector(".entry-type-select");
+                if (!select) return;
+                const type = select.value;
+                row.querySelector(".entry-team-cell")?.classList.toggle("hidden", type !== "team");
+                row.querySelector(".entry-group-cell")?.classList.toggle("hidden", type !== "group");
+                row.querySelector(".entry-rank-cell")?.classList.toggle("hidden", type !== "group");
+            };
+
+            rows.addEventListener("change", (event) => {
+                if (!event.target.matches(".entry-type-select")) return;
+                sync(event.target.closest("tr"));
+            });
+
+            // A freshly cloned row (bulk-add-rows.js's "Add slot" handler)
+            // defaults its own entry_type select to the first option --
+            // "-- skip --", same as an untouched padding row from the
+            // server -- which already means every conditional cell below
+            // starts correctly hidden with no JS needed on the new row at
+            // all; only the rows rendered with a real choice already
+            // selected (the pre-filled team rows) need this initial pass.
+            rows.querySelectorAll(".bulk-add-row").forEach(sync);
+        })();
+    </script>
+{% endblock extra_body %}

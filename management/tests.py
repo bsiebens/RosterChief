@@ -66,6 +66,7 @@ from tournaments.models import (
     ScheduleBlock,
     Tournament,
     TournamentField,
+    TournamentGroup,
     TournamentRegistration,
     TournamentRegistrationPlayer,
     TournamentRosterEntry,
@@ -15324,6 +15325,158 @@ class TournamentFieldStageCrudTests(ManagementTestBase):
 
         self.assertEqual(self.club_post("tournament_break_rule_update", {"trigger_type": BreakRule.TriggerType.GAME_COUNT}, self.tournament.pk, other_rule.pk).status_code, 404)
         self.assertEqual(self.club_post("tournament_break_rule_delete", {}, self.tournament.pk, other_rule.pk).status_code, 404)
+
+
+class TournamentStageSeedViewTests(ManagementTestBase):
+    """management:tournament_stage_seed -- the "Seed from standings"
+    alternative to the plain "Generate matches" button, single/double-elim
+    stages only: each round-1 slot is either a direct team or "Nth place of
+    [a TournamentGroup]", letting a knockout stage be drafted before an
+    earlier group stage even finishes."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_group(self, team_count):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"G{i}", seed=i) for i in range(1, team_count + 1)]
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=teams)
+        return TournamentGroup.objects.get(stage=group_stage)
+
+    def slot_data(self, *rows):
+        data = {"form-TOTAL_FORMS": str(len(rows)), "form-INITIAL_FORMS": "0", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000"}
+        for index, row in enumerate(rows):
+            for name, value in row.items():
+                data[f"form-{index}-{name}"] = value
+        return data
+
+    def test_404s_for_a_non_elimination_stage(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk).status_code, 404)
+
+    def test_redirects_with_a_warning_when_the_stage_already_has_matches(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        generate_stage_matches(stage)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+
+    def test_get_prefills_one_row_per_registered_team(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk)
+
+        self.assertEqual(response.status_code, 200)
+        formset = response.context["formset"]
+        self.assertEqual(len(formset.forms), 2)
+        self.assertEqual(formset.forms[0].initial.get("team"), team1.pk)
+        self.assertEqual(formset.forms[1].initial.get("team"), team2.pk)
+
+    def test_posting_a_mix_of_teams_and_group_ranks_seeds_the_stage(self):
+        self.activate_flag()
+        group = self.make_group(4)
+        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(
+            {"entry_type": "team", "team": str(team1.pk)},
+            {"entry_type": "team", "team": str(team2.pk)},
+            {"entry_type": "group", "group": str(group.pk), "rank": "1"},
+            {"entry_type": "group", "group": str(group.pk), "rank": "2"},
+        )
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 3)  # 4-entry bracket, no bye: 2 round-1 + final
+        round1 = list(stage.matches.filter(round_number=1))
+        seed_sourced = [m for m in round1 if m.home_source_group_id or m.away_source_group_id]
+        self.assertEqual(len(seed_sourced), 2)
+
+    def test_a_row_left_blank_is_silently_skipped(self):
+        self.activate_flag()
+        team1 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        team2 = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(
+            {"entry_type": "team", "team": str(team1.pk)},
+            {"entry_type": "team", "team": str(team2.pk)},
+            {"entry_type": ""},
+            {"entry_type": ""},
+        )
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertEqual(stage.matches.count(), 1)
+
+    def test_a_half_filled_group_row_is_rejected(self):
+        self.activate_flag()
+        group = self.make_group(2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(
+            {"entry_type": "group", "group": str(group.pk)},  # rank missing
+            {"entry_type": ""},
+        )
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertEqual(response.status_code, 200)  # redisplayed with errors, not redirected
+        self.assertEqual(stage.matches.count(), 0)
+
+    def test_the_same_group_rank_claimed_twice_is_rejected(self):
+        self.activate_flag()
+        group = self.make_group(2)
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(
+            {"entry_type": "group", "group": str(group.pk), "rank": "1"},
+            {"entry_type": "group", "group": str(group.pk), "rank": "1"},
+        )
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(stage.matches.count(), 0)
+
+    def test_403s_for_a_non_operator_even_with_the_flag_active(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        coach_user = User.objects.create_user(email="coach-seed@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(coach_user)
+
+        response = self.club_get("tournament_stage_seed", self.tournament.pk, stage.pk)
+
+        self.assertEqual(response.status_code, 403)
 
 
 class TournamentTaskManagementTests(ManagementTestBase):

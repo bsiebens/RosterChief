@@ -186,6 +186,7 @@ urlpatterns = [
     path("tournaments/<uuid:tournament_pk>/stages/<uuid:stage_pk>/update/", views.TournamentStageUpdateView.as_view(), name="tournament_stage_update"),
     path("tournaments/<uuid:tournament_pk>/stages/<uuid:stage_pk>/delete/", views.TournamentStageDeleteView.as_view(), name="tournament_stage_delete"),
     path("tournaments/<uuid:tournament_pk>/stages/<uuid:stage_pk>/generate-matches/", views.TournamentStageGenerateMatchesView.as_view(), name="tournament_stage_generate_matches"),
+    path("tournaments/<uuid:tournament_pk>/stages/<uuid:stage_pk>/seed/", views.TournamentStageSeedView.as_view(), name="tournament_stage_seed"),
     path("tournaments/<uuid:tournament_pk>/break-rules/create/", views.TournamentBreakRuleCreateView.as_view(), name="tournament_break_rule_create"),
     path("tournaments/<uuid:tournament_pk>/break-rules/<uuid:rule_pk>/update/", views.TournamentBreakRuleUpdateView.as_view(), name="tournament_break_rule_update"),
     path("tournaments/<uuid:tournament_pk>/break-rules/<uuid:rule_pk>/delete/", views.TournamentBreakRuleDeleteView.as_view(), name="tournament_break_rule_delete"),

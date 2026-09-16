@@ -7,7 +7,7 @@ from club.models import Season
 from members.models import Member
 from teams.models import Team
 
-from .models import BreakRule, DressingRoom, ScheduleBlock, Tournament, TournamentField, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
+from .models import BreakRule, DressingRoom, ScheduleBlock, Tournament, TournamentField, TournamentGroup, TournamentRegistration, TournamentRosterEntry, TournamentRosterRole, TournamentStage, TournamentTask, TournamentTeam
 
 
 class TournamentRegistrationForm(forms.ModelForm):
@@ -596,6 +596,82 @@ class ScheduleBlockForm(forms.ModelForm):
         if start and end and end <= start:
             self.add_error("ends_at", _("Must be after the start time."))
         return cleaned
+
+
+class SeedSlotRowForm(forms.Form):
+    """One bracket slot on the "Seed from standings" page -- a direct team,
+    "Nth place of [group]" (any ``TournamentGroup`` in the tournament,
+    resolved later by ``tournaments.services.scheduling.resolve_match_slots``
+    once that group's own matches complete -- see ``GroupRankSeed``'s own
+    docstring), or left blank to skip this slot entirely. Rows are added/
+    removed client-side from this form's own ``empty_form``, same
+    ``static/js/bulk-add-rows.js`` pattern ``management.forms.TeamBulkAddRowForm``
+    already uses -- a skipped/never-touched row simply posts
+    ``entry_type=""`` and is ignored, the same "leftover blank row is
+    silently dropped" convention ``TeamBulkAddView.post`` already applies
+    (there, by filtering after the fact; here, by not requiring anything of
+    a blank row in the first place, since "team required" only makes sense
+    once a type is actually chosen)."""
+
+    ENTRY_TEAM = "team"
+    ENTRY_GROUP = "group"
+    ENTRY_CHOICES = [("", _("— skip —")), (ENTRY_TEAM, _("Direct team")), (ENTRY_GROUP, _("Group standing"))]
+
+    entry_type = forms.ChoiceField(choices=ENTRY_CHOICES, required=False, label=_("Slot"), widget=forms.Select(attrs={"class": "select select-bordered w-full entry-type-select"}))
+    team = forms.ModelChoiceField(queryset=TournamentTeam.objects.none(), required=False, label=_("Team"), widget=forms.Select(attrs={"class": "select select-bordered w-full entry-team-field"}))
+    group = forms.ModelChoiceField(queryset=TournamentGroup.objects.none(), required=False, label=_("Group"), widget=forms.Select(attrs={"class": "select select-bordered w-full entry-group-field"}))
+    rank = forms.IntegerField(required=False, min_value=1, label=_("Rank"), widget=forms.NumberInput(attrs={"class": "input input-bordered w-full entry-rank-field", "min": "1", "placeholder": "1"}))
+
+    def __init__(self, *args, tournament=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = TournamentTeam.objects.filter(tournament=tournament, withdrawn_at__isnull=True).order_by("seed") if tournament is not None else TournamentTeam.objects.none()
+        self.fields["group"].queryset = TournamentGroup.objects.filter(stage__tournament=tournament).select_related("stage") if tournament is not None else TournamentGroup.objects.none()
+        self.fields["group"].label_from_instance = lambda group: f"{group.stage.name} - {group.name}"
+
+    def clean(self):
+        cleaned = super().clean()
+        entry_type = cleaned.get("entry_type")
+        if entry_type == self.ENTRY_TEAM and not cleaned.get("team"):
+            self.add_error("team", _("Pick a team for this slot, or switch it to a group standing or skip."))
+        elif entry_type == self.ENTRY_GROUP:
+            if not cleaned.get("group"):
+                self.add_error("group", _("Pick a group for this slot."))
+            if not cleaned.get("rank"):
+                self.add_error("rank", _("Enter which place in the group this slot is (1 for first, 2 for second, ...)."))
+        return cleaned
+
+
+class BaseSeedSlotFormSet(forms.BaseFormSet):
+    """Cross-row checks a single row can't see: the same team, or the same
+    place in the same group, claimed by more than one slot -- mirrors
+    ``management.forms.BaseTeamBulkAddFormSet``'s own cross-row dedup."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+
+        seen_teams, seen_group_ranks = set(), set()
+        for form in self.forms:
+            entry_type = form.cleaned_data.get("entry_type")
+            if entry_type == SeedSlotRowForm.ENTRY_TEAM:
+                team = form.cleaned_data.get("team")
+                if team is None:
+                    continue
+                if team.pk in seen_teams:
+                    form.add_error("team", _("%(team)s is already used in another slot.") % {"team": team})
+                seen_teams.add(team.pk)
+            elif entry_type == SeedSlotRowForm.ENTRY_GROUP:
+                group, rank = form.cleaned_data.get("group"), form.cleaned_data.get("rank")
+                if group is None or rank is None:
+                    continue
+                key = (group.pk, rank)
+                if key in seen_group_ranks:
+                    form.add_error("rank", _("Rank %(rank)s of “%(group)s” is already used in another slot.") % {"rank": rank, "group": group})
+                seen_group_ranks.add(key)
+
+
+SeedSlotFormSet = forms.formset_factory(SeedSlotRowForm, formset=BaseSeedSlotFormSet, extra=0)
 
 
 class TournamentTeamForm(forms.Form):
