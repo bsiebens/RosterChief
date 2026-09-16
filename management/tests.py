@@ -14719,6 +14719,47 @@ class TournamentScheduleTests(ManagementTestBase):
         self.assertContains(response, "Field 1")
         self.assertContains(response, "min free")
 
+    def test_manual_reschedule_shows_the_regeneration_banner_on_both_views(self):
+        self.activate_flag()
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        table_response = self.club_get("tournament_schedule", self.tournament.pk)
+        self.assertNotContains(table_response, "run Generate schedule again")
+
+        self.club_post("match_reschedule", {"field": field.pk, "scheduled_start": "2026-09-20T09:00"}, match.pk)
+
+        table_response = self.club_get("tournament_schedule", self.tournament.pk)
+        board_response = self.club_get("tournament_schedule_board", self.tournament.pk)
+        self.assertContains(table_response, "run Generate schedule again")
+        self.assertContains(board_response, "run Generate schedule again")
+
+    def test_generate_schedule_clears_the_regeneration_banner(self):
+        self.activate_flag()
+        self.tournament.schedule_needs_regeneration = True
+        self.tournament.save(update_fields=["schedule_needs_regeneration"])
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+        self.assertNotContains(response, "run Generate schedule again")
+
+    def test_delete_schedule_clears_the_regeneration_banner(self):
+        self.activate_flag()
+        self.tournament.schedule_needs_regeneration = True
+        self.tournament.save(update_fields=["schedule_needs_regeneration"])
+        self.client.force_login(self.admin_user)
+
+        self.club_post("tournament_schedule_clear", {}, self.tournament.pk)
+
+        response = self.club_get("tournament_schedule", self.tournament.pk)
+        self.assertNotContains(response, "run Generate schedule again")
+
     def test_schedule_page_shows_the_default_match_duration_pre_filled(self):
         self.activate_flag()
         self.tournament.default_match_duration_minutes = 30

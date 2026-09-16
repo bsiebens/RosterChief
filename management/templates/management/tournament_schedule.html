@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide ui %}
+{% load i18n lucide ui static %}
 
 {% block heading %}{{ tournament.name }}{% endblock heading %}
 {% block topbar_context %}
@@ -24,6 +24,7 @@
 
 {% block panel %}
     {% include "management/_tournament_tabs.html" %}
+    {% include "management/_schedule_regeneration_banner.html" %}
 
     <div class="card card-body mb-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -151,3 +152,7 @@
         {% include "controlpanel/_confirm_modal.html" with modal_id="clear_schedule_modal" title=clear_schedule_title body=clear_schedule_body action_url=clear_schedule_url submit_label=clear_schedule_label submit_icon="eraser" %}
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script src="{% static 'js/searchable-select.js' %}"></script>
+{% endblock extra_body %}

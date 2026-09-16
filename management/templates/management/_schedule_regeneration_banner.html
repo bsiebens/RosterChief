@@ -1,0 +1,26 @@
+{% load i18n lucide %}
+{% comment %}
+    Shown on both the Schedule tab's table and board views whenever
+    Tournament.schedule_needs_regeneration is set -- tournaments.services.
+    scheduling.reschedule_match sets it on every manual hand-move (a drag on
+    the board, or the table's own inline "field + time" form), specifically
+    so staff can make several such tweaks first and only click Generate
+    schedule once, rather than being nagged after every single edit. Cleared
+    by allocate_schedule (Generate schedule, reset or not) and clear_schedule
+    (Delete schedule) -- see schedule_needs_regeneration's own model docstring.
+
+    Context: tournament, can_operate_tournament.
+{% endcomment %}
+{% if tournament.schedule_needs_regeneration %}
+    <div class="alert alert-warning mb-4">
+        {% lucide "triangle-alert" size=20 %}
+        <span>{% blocktrans %}A match was rescheduled by hand -- the auto-generated matches won't reflect it until you run Generate schedule again. Make any other manual changes first, then run it once.{% endblocktrans %}</span>
+        {% if can_operate_tournament %}
+            <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="match_duration_minutes" value="{{ tournament.default_match_duration_minutes }}">
+                <button class="btn btn-warning btn-sm gap-2" type="submit">{% lucide "shuffle" size=14 %} {% trans "Generate schedule" %}</button>
+            </form>
+        {% endif %}
+    </div>
+{% endif %}

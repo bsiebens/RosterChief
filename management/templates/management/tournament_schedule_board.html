@@ -31,6 +31,7 @@
 
 {% block panel %}
     {% include "management/_tournament_tabs.html" %}
+    {% include "management/_schedule_regeneration_banner.html" %}
 
     {% if can_operate_tournament %}
         <p class="mb-3 text-sm text-muted">{% blocktrans %}Drag a match card onto a gap (or another spot on any field's timeline) to replan it there.{% endblocktrans %}</p>

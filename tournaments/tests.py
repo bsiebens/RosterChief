@@ -2460,6 +2460,82 @@ class AllocateScheduleTests(TournamentsTestCase):
         match.refresh_from_db()
         self.assertEqual(match.scheduled_start, played_start)
 
+    def test_never_overlaps_a_match_it_isnt_placing(self):
+        # Regression test: field/team clocks used to be seeded purely from
+        # matches this call itself places, with no awareness of a match
+        # already sitting on the field's timeline (hand-moved, or simply
+        # left over from an earlier non-reset run) -- a fresh placement
+        # could land right on top of it. _skip_occupied_windows now treats
+        # any already-scheduled match the same way a ScheduleBlock already
+        # was: a reservation the greedy walk must route around.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "13:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+        hand_placed = stage.matches.first()
+        hand_placed_start = timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0))
+        reschedule_match(hand_placed, field=field, scheduled_start=hand_placed_start)
+        hand_placed_end = hand_placed_start + datetime.timedelta(minutes=self.tournament.default_match_duration_minutes)
+
+        allocate_schedule(self.tournament)
+
+        for match in Match.objects.filter(stage=stage).exclude(pk=hand_placed.pk):
+            self.assertIsNotNone(match.scheduled_start)
+            match_end = match.scheduled_start + DEFAULT_MATCH_DURATION
+            overlaps = match.scheduled_start < hand_placed_end and hand_placed_start < match_end
+            self.assertFalse(overlaps, f"{match} at {match.scheduled_start} overlaps the hand-placed match ({hand_placed_start}-{hand_placed_end})")
+
+
+class ScheduleNeedsRegenerationTests(TournamentsTestCase):
+    """Tournament.schedule_needs_regeneration -- the Schedule tab's own "you
+    moved a match by hand, run Generate schedule to replan the rest around
+    it" banner. Set by reschedule_match, cleared by allocate_schedule/
+    clear_schedule, so staff can make several manual tweaks and only
+    regenerate once."""
+
+    def test_manual_reschedule_sets_the_flag(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+        self.assertFalse(self.tournament.schedule_needs_regeneration)
+
+        reschedule_match(match, field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0)))
+
+        self.tournament.refresh_from_db()
+        self.assertTrue(self.tournament.schedule_needs_regeneration)
+
+    def test_a_second_manual_reschedule_leaves_the_flag_set(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}") for i in range(1, 3)]
+        field = TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=teams[0], away_team=teams[1])
+        reschedule_match(match, field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 10, 0)))
+
+        reschedule_match(match, field=field, scheduled_start=timezone.make_aware(datetime.datetime(2026, 9, 19, 11, 0)))
+
+        self.tournament.refresh_from_db()
+        self.assertTrue(self.tournament.schedule_needs_regeneration)
+
+    def test_allocate_schedule_clears_the_flag(self):
+        self.tournament.schedule_needs_regeneration = True
+        self.tournament.save(update_fields=["schedule_needs_regeneration"])
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1")
+
+        allocate_schedule(self.tournament)
+
+        self.tournament.refresh_from_db()
+        self.assertFalse(self.tournament.schedule_needs_regeneration)
+
+    def test_clear_schedule_clears_the_flag(self):
+        self.tournament.schedule_needs_regeneration = True
+        self.tournament.save(update_fields=["schedule_needs_regeneration"])
+
+        clear_schedule(self.tournament)
+
+        self.tournament.refresh_from_db()
+        self.assertFalse(self.tournament.schedule_needs_regeneration)
+
 
 class ClearScheduleTests(TournamentsTestCase):
     def test_unschedules_a_not_yet_played_match_but_keeps_it(self):

@@ -21,7 +21,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import BreakRule, Match, ScheduleBlock, TournamentGroup, TournamentStage, TournamentTeam
+from ..models import BreakRule, Match, ScheduleBlock, Tournament, TournamentGroup, TournamentStage, TournamentTeam
 from .brackets import BracketError, double_elimination_bracket, single_elimination_bracket
 
 #: The one thing every tournament falls back to when no BreakRule fires --
@@ -436,17 +436,27 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     earliest; the break-rule engine supplies the gap before it fires (or the
     tournament's own ``DEFAULT_GAP`` otherwise); each field and each team
     gets its own running clock, so no field and no team is ever
-    double-booked by construction.
+    double-booked *among matches this call itself places*. Any match this
+    call is *not* placing but that already has a ``scheduled_start`` --
+    COMPLETE/IN_PROGRESS, or hand-moved by staff via ``reschedule_match`` --
+    is treated as reserved too (``_skip_occupied_windows``, the same
+    mechanism a ``ScheduleBlock`` already used), so a fresh placement can
+    never land on top of one of those either.
 
     ``reset=True`` (the "Generate schedule" button's own mode) first clears
     every match this function placed on an earlier run (``auto_scheduled``,
     not yet played) so it can be replanned under today's parameters -- a
     match staff hand-moved via ``reschedule_match`` is never touched, since
     that call clears its own ``auto_scheduled`` flag the moment a human
-    takes over its placement. Every match this function itself places (both
-    below and by extension any left alone from a previous run) gets
+    takes over its placement (and, per the paragraph above, is still
+    respected as a reservation once this run replans everything else around
+    it). Every match this function itself places (both below and by
+    extension any left alone from a previous run) gets
     ``auto_scheduled=True``, so a *later* reset run can still tell the two
-    apart."""
+    apart. Also clears ``Tournament.schedule_needs_regeneration`` -- the
+    Schedule tab's own "you moved a match by hand -- run this to replan the
+    rest" banner -- since a run of this function is exactly that
+    acknowledgement, reset or not."""
     if reset:
         (Match.objects.filter(stage__tournament=tournament, auto_scheduled=True).exclude(status__in=(Match.Status.COMPLETE, Match.Status.IN_PROGRESS)).update(field=None, scheduled_start=None, auto_scheduled=False))
 
@@ -454,11 +464,21 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     if not fields:
         raise SchedulingError(_("Add at least one field before generating a schedule."))
 
-    # Fetched once, not per-match -- a tournament has few enough blocks that
-    # re-checking every one of them against every candidate placement is
-    # cheap, and prefetching .teams here avoids an extra query per block on
-    # every _skip_schedule_blocks() call below.
+    # Fetched once, not per-match -- a tournament has few enough blocks/
+    # already-placed matches that re-checking every one of them against
+    # every candidate placement is cheap. "Already placed" here means any
+    # match this run isn't itself scheduling: COMPLETE/IN_PROGRESS ones
+    # (their slot is history) and, now that "Generate schedule" only resets
+    # auto_scheduled matches, any match staff hand-moved -- both must be
+    # treated as reserved the same way a ScheduleBlock is, or a fresh
+    # placement could double-book straight through them (see
+    # _skip_occupied_windows's own docstring).
     schedule_blocks = list(ScheduleBlock.objects.filter(tournament=tournament).select_related("field").prefetch_related("teams"))
+    occupied = [_occupied_window(block.starts_at, block.ends_at, field_id=block.field_id, team_ids=frozenset(team.id for team in block.teams.all())) for block in schedule_blocks]
+    occupied += [
+        _occupied_window(match.scheduled_start, match.scheduled_start + match_duration, field_id=match.field_id, team_ids=frozenset(team_id for team_id in (match.home_team_id, match.away_team_id) if team_id))
+        for match in Match.objects.filter(stage__tournament=tournament, scheduled_start__isnull=False)
+    ]
 
     # The tournament's own start date, not "today" -- a draft generated a
     # week before the tournament runs must not land on the day it happened
@@ -488,7 +508,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 pre_roll_date = candidate_start.date()
 
                 # Each push below (blackouts, an already-busy team, a
-                # schedule block, rolling into the field's next available
+                # reserved window, rolling into the field's next available
                 # day) only ever moves candidate_start forward -- but one
                 # push can reintroduce a conflict another already cleared
                 # (rolling into tomorrow can land inside tomorrow's own
@@ -500,8 +520,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     for team in (match.home_team, match.away_team):
                         if team.id in team_clock and team_clock[team.id] > candidate_start:
                             candidate_start = team_clock[team.id]
-                    if schedule_blocks:
-                        candidate_start = _skip_schedule_blocks(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, blocks=schedule_blocks)
+                    if occupied:
+                        candidate_start = _skip_occupied_windows(candidate_start, match_duration, field_id=field.id, team_ids={match.home_team_id, match.away_team_id}, occupied=occupied)
                     candidate_start = _skip_to_available_window(field, candidate_start, match_duration, tournament.start_date)
                     if candidate_start == before:
                         break
@@ -528,6 +548,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 team_clock[match.home_team_id] = field_end
                 team_clock[match.away_team_id] = field_end
 
+    Tournament.objects.filter(pk=tournament.pk, schedule_needs_regeneration=True).update(schedule_needs_regeneration=False)
     return scheduled
 
 
@@ -544,29 +565,35 @@ def _skip_blackouts(field, candidate_start: datetime.datetime) -> datetime.datet
     return candidate_start
 
 
-def _skip_schedule_blocks(candidate_start: datetime.datetime, match_duration: datetime.timedelta, *, field_id, team_ids: set, blocks: list) -> datetime.datetime:
-    """Pushes ``candidate_start`` past any ``ScheduleBlock`` that reserves
-    either this field or one of ``team_ids`` and overlaps the candidate
-    window -- the auto-generator's own counterpart to the field/team clocks
-    it already keeps for placed matches (see ``allocate_schedule``'s own
-    docstring), just reserved in advance rather than by an earlier match.
+def _occupied_window(start, end, *, field_id=None, team_ids: frozenset = frozenset()) -> dict:
+    return {"start": start, "end": end, "field_id": field_id, "team_ids": team_ids}
 
-    Pushing past a field block can newly overlap a team block (or vice
-    versa: the team's block might start right where the field block just
-    pushed to), so this re-checks every block against the *updated*
-    candidate window in a bounded loop rather than a single pass -- each
-    pass only ever pushes forward, so 5 passes is always enough headroom for
-    the handful of blocks a real tournament has, and this always
-    terminates."""
+
+def _skip_occupied_windows(candidate_start: datetime.datetime, match_duration: datetime.timedelta, *, field_id, team_ids: set, occupied: list) -> datetime.datetime:
+    """Pushes ``candidate_start`` past any reserved window (a ``ScheduleBlock``,
+    or a match this run isn't placing -- already played, or hand-rescheduled
+    by staff, see ``allocate_schedule``'s own docstring for why those must be
+    treated the same way a block is) that touches either this field or one
+    of ``team_ids`` and overlaps the candidate window -- the auto-generator's
+    own counterpart to the field/team clocks it already keeps for matches
+    it's placing *this run*, just reserved in advance rather than by one of
+    those.
+
+    Pushing past one window can newly overlap another (a team's own
+    reservation might start right where the field's just pushed to), so this
+    re-checks every window against the *updated* candidate window in a
+    bounded loop rather than a single pass -- each pass only ever pushes
+    forward, so 5 passes is always enough headroom for the handful of
+    reservations a real tournament has, and this always terminates."""
     for _pass in range(5):
         candidate_end = candidate_start + match_duration
         moved = False
-        for block in blocks:
-            if block.starts_at >= candidate_end or candidate_start >= block.ends_at:
+        for window in occupied:
+            if window["start"] >= candidate_end or candidate_start >= window["end"]:
                 continue
-            applies = block.field_id == field_id or bool(team_ids & {team.id for team in block.teams.all()})
+            applies = window["field_id"] == field_id or bool(team_ids & window["team_ids"])
             if applies:
-                candidate_start = max(candidate_start, block.ends_at)
+                candidate_start = max(candidate_start, window["end"])
                 moved = True
         if not moved:
             break
@@ -894,7 +921,13 @@ def reschedule_match(match: Match, *, field, scheduled_start: datetime.datetime)
     Always clears ``auto_scheduled`` -- a human just took over this match's
     placement, so a later "Generate schedule" re-run (``allocate_schedule``
     with ``reset=True``) must leave it alone rather than replanning over
-    this edit."""
+    this edit. Also sets ``Tournament.schedule_needs_regeneration`` -- the
+    Schedule tab's own warning banner telling staff a hand-move has happened
+    and the rest of the draft hasn't been replanned around it yet. Left set
+    across any number of further manual edits (each one is a no-op update
+    once it's already True) so staff can make several changes before
+    running Generate schedule just once -- see ``allocate_schedule``, which
+    clears it."""
     end = scheduled_start + datetime.timedelta(minutes=field.tournament.default_match_duration_minutes)
     violations = validate_placement(match, field, scheduled_start, end)
     if violations:
@@ -904,6 +937,7 @@ def reschedule_match(match: Match, *, field, scheduled_start: datetime.datetime)
     match.scheduled_start = scheduled_start
     match.auto_scheduled = False
     match.save(update_fields=["field", "scheduled_start", "auto_scheduled"])
+    Tournament.objects.filter(pk=field.tournament_id, schedule_needs_regeneration=False).update(schedule_needs_regeneration=True)
     return match
 
 
@@ -914,9 +948,13 @@ def clear_schedule(tournament) -> int:
     bracket/round-robin/group structure survives; only the timing is wiped).
     A ``COMPLETE``/``IN_PROGRESS`` match already happened -- its placement is
     history, not a draft to discard -- so it's left untouched, same guard
-    ``allocate_schedule``'s own ``reset=True`` uses. Returns the number of
-    matches cleared."""
-    return Match.objects.filter(stage__tournament=tournament).exclude(status__in=(Match.Status.COMPLETE, Match.Status.IN_PROGRESS)).update(field=None, scheduled_start=None, auto_scheduled=False)
+    ``allocate_schedule``'s own ``reset=True`` uses. Also clears
+    ``schedule_needs_regeneration`` -- with nothing left scheduled, there's
+    nothing left for a hand-move to be out of sync with. Returns the number
+    of matches cleared."""
+    count = Match.objects.filter(stage__tournament=tournament).exclude(status__in=(Match.Status.COMPLETE, Match.Status.IN_PROGRESS)).update(field=None, scheduled_start=None, auto_scheduled=False)
+    Tournament.objects.filter(pk=tournament.pk, schedule_needs_regeneration=True).update(schedule_needs_regeneration=False)
+    return count
 
 
 def record_result(match: Match, *, score_home: int, score_away: int, went_to_overtime: bool = False, penalty_home: int | None = None, penalty_away: int | None = None) -> list[Match]:

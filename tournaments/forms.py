@@ -598,6 +598,7 @@ class ScheduleBlockForm(forms.ModelForm):
         widgets = {
             "starts_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "ends_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")}),
         }
 
     def __init__(self, *args, tournament=None, **kwargs):

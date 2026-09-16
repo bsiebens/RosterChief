@@ -146,6 +146,13 @@ class Tournament(ClubScopedModel):
     #: assumption, now a real per-tournament setting instead of a hardcoded
     #: module constant.
     default_match_duration_minutes = models.PositiveSmallIntegerField(_("default match duration (minutes)"), default=45, help_text=_("How long a single match is assumed to run. Pre-fills the “Generate schedule” form -- still adjustable per run."))
+    #: Set by ``tournaments.services.scheduling.reschedule_match`` on every
+    #: manual hand-move (the schedule table's inline form, or a board-view
+    #: drag), cleared the next time ``allocate_schedule``/``clear_schedule``
+    #: runs -- drives the Schedule tab's own "you moved a match by hand --
+    #: run Generate schedule to replan the rest around it" banner, so staff
+    #: can make several manual tweaks first and only regenerate once.
+    schedule_needs_regeneration = models.BooleanField(_("schedule needs regeneration"), default=False, help_text=_("Set automatically when a match is manually rescheduled; cleared the next time Generate schedule runs."))
 
     class Meta:
         verbose_name = _("tournament")
