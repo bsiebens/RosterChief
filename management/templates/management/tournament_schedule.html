@@ -11,9 +11,10 @@
     {% if can_operate_tournament %}
         <form method="post" action="{% url 'management:tournament_schedule_generate' tournament.pk %}" class="flex items-center gap-1.5">
             {% csrf_token %}
-            <div class="join" title="{% trans 'Match duration (minutes) -- pre-fills from this tournament\'s own default, still overridable per run' %}">
-                <input type="number" min="1" name="match_duration_minutes" class="input join-item w-20" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}">
-                <span class="join-item flex items-center border border-l-0 border-line bg-subhead px-2.5 font-mono text-xs text-muted">{% trans "min" %}</span>
+            <div class="flex h-9 items-center gap-2 rounded-[0.5rem] border border-edge bg-white px-3 has-[:focus]:border-club" title="{% trans 'Pre-fills from this tournament\'s own default, still overridable per run' %}">
+                <label for="match_duration_minutes" class="font-mono text-xs text-dim whitespace-nowrap">{% trans "Duration" %}</label>
+                <input type="number" min="1" id="match_duration_minutes" name="match_duration_minutes" class="w-10 border-0 bg-transparent p-0 text-sm text-ink focus:outline-none" value="{{ tournament.default_match_duration_minutes }}" aria-label="{% trans 'Match duration (minutes)' %}">
+                <span class="font-mono text-xs text-dim">{% trans "min" %}</span>
             </div>
             <button class="btn btn-primary gap-2" type="submit">{% lucide "shuffle" size=16 %} {% trans "Generate schedule" %}</button>
         </form>
