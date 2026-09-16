@@ -144,21 +144,29 @@
                 <div class="modal-box max-w-md">
                     <h3 class="text-lg font-bold">{% trans "Generate matches" %}</h3>
                     <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}How should “{{ name }}” get its teams?{% endblocktrans %}</p>
+                    {% comment %}
+                        Not .btn for these two -- that class forces uppercase,
+                        wide letter-spacing, nowrap and a fixed single-line
+                        height (fine for a short label, not for a wrapping
+                        two-line description), which overflowed the modal
+                        instead of wrapping. Plain bordered option cards
+                        instead, normal case/weight/wrapping throughout.
+                    {% endcomment %}
                     <div class="flex flex-col gap-2">
-                        <a class="btn btn-primary w-full justify-start gap-2" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">
-                            {% lucide "list-tree" size=16 %}
-                            <span class="flex flex-col items-start">
-                                <span>{% trans "Seed from standings" %}</span>
-                                <span class="font-normal text-xs opacity-70">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
+                        <a class="flex items-start gap-2.5 rounded-box border-2 border-club bg-club/5 p-3 text-left hover:bg-club/10" href="{% url 'management:tournament_stage_seed' tournament.pk stage.pk %}">
+                            {% lucide "list-tree" size=18 class="mt-0.5 shrink-0 text-club" %}
+                            <span class="flex flex-col gap-0.5">
+                                <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Seed from standings" %}</span>
+                                <span class="text-xs text-muted">{% trans "Pick each slot by hand -- a direct team, or \"Nth place of\" an earlier group." %}</span>
                             </span>
                         </a>
                         <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
                             {% csrf_token %}
-                            <button class="btn btn-outline w-full justify-start gap-2" type="submit">
-                                {% lucide "shuffle" size=16 %}
-                                <span class="flex flex-col items-start">
-                                    <span>{% trans "Direct assignment" %}</span>
-                                    <span class="font-normal text-xs opacity-70">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
+                            <button class="flex w-full items-start gap-2.5 rounded-box border border-line p-3 text-left hover:bg-subhead" type="submit">
+                                {% lucide "shuffle" size=18 class="mt-0.5 shrink-0 text-dim" %}
+                                <span class="flex flex-col gap-0.5">
+                                    <span class="font-display text-sm font-bold tracking-[.04em] text-ink uppercase">{% trans "Direct assignment" %}</span>
+                                    <span class="text-xs text-muted">{% trans "Auto-fill straight from every team's own seed, same as any other stage." %}</span>
                                 </span>
                             </button>
                         </form>
