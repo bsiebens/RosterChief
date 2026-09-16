@@ -40,21 +40,31 @@
     {% if not timeline %}
         <div class="card p-6 text-center text-muted">{% trans "Add at least one field to see its timeline here." %}</div>
     {% else %}
+        {% comment %}
+            One field per column, days stacked below each other -- except with
+            only a single field, where that's a narrow column with a lot of
+            wasted horizontal room and (for a multi-day tournament) a lot of
+            vertical scrolling; its own days run side by side instead, same
+            "use the space that's actually there" idea.
+        {% endcomment %}
         <div class="flex items-start gap-5 overflow-x-auto pb-4">
             {% for field_row in timeline %}
-                <div class="flex w-[26rem] shrink-0 flex-col gap-3">
-                    <h2 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ field_row.field.name }}</h2>
+                <div class="flex flex-col gap-3">
+                    <div class="{% if timeline|length > 1 %}w-[26rem]{% endif %}">
+                        <h2 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ field_row.field.name }}</h2>
 
-                    {% if field_row.rules %}
-                        <ul class="flex flex-col gap-1 rounded-box border border-line bg-paper p-2 text-[11px] text-muted">
-                            {% for rule in field_row.rules %}
-                                <li>#{{ rule.priority }} &middot; {{ rule.display_summary }}</li>
-                            {% endfor %}
-                        </ul>
-                    {% endif %}
+                        {% if field_row.rules %}
+                            <ul class="mt-2 flex flex-col gap-1 rounded-box border border-line bg-paper p-2 text-[11px] text-muted">
+                                {% for rule in field_row.rules %}
+                                    <li>#{{ rule.priority }} &middot; {{ rule.display_summary }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    </div>
 
+                    <div class="flex items-start gap-3 {% if timeline|length == 1 %}flex-row{% else %}flex-col{% endif %}">
                     {% for day in field_row.days %}
-                        <div class="card overflow-hidden">
+                        <div class="card w-[26rem] shrink-0 overflow-hidden">
                             <div class="border-b border-line bg-subhead px-3 py-1.5 font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ day.date|date:"D j M" }}</div>
                             <div class="flex">
                                 {# Calendar-style hour ruler, one label per whole clock hour in the window -- day.hour_marks (tournaments.services.scheduling._hour_marks) already carries each mark's own pixel offset, so this does no arithmetic of its own. #}
@@ -97,6 +107,7 @@
                             </div>
                         </div>
                     {% endfor %}
+                    </div>
                 </div>
             {% endfor %}
         </div>

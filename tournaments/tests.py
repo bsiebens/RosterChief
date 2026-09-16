@@ -2399,6 +2399,38 @@ class AllocateScheduleTests(TournamentsTestCase):
         gap_after_rollover = matches[rollover_index + 1].scheduled_start - (matches[rollover_index].scheduled_start + DEFAULT_MATCH_DURATION)
         self.assertEqual(gap_after_rollover, DEFAULT_GAP)
 
+    def test_a_fields_first_game_starts_right_when_it_opens(self):
+        # Regression test: every field's very first placement used to get
+        # the plain DEFAULT_GAP added before it too (nothing had fired yet,
+        # so gap_for_placement fell back to that default) -- a field open
+        # from 09:00 put its first game at 09:05 for no visible reason.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        match = Match.objects.get(stage=stage)
+        self.assertEqual(match.scheduled_start, timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0)))
+
+    def test_each_fields_own_first_game_starts_right_when_it_opens(self):
+        # 4 teams round-robin's round 1 is exactly 2 matches -- one lands on
+        # each field (both fields' clocks tie at their own opening time, so
+        # the second match routes to whichever field the first one didn't),
+        # each genuinely that field's own first game.
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        TournamentField.objects.create(tournament=self.tournament, name="Field 2", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="RR", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        allocate_schedule(self.tournament)
+
+        opening = timezone.make_aware(datetime.datetime(2026, 9, 19, 9, 0))
+        first_round = Match.objects.filter(stage=stage, round_number=1)
+        self.assertEqual([match.scheduled_start for match in first_round], [opening, opening])
+
     def test_placed_matches_are_flagged_auto_scheduled(self):
         teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
         TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": "2026-09-19", "start": "09:00", "end": "20:00"}])

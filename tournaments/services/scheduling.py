@@ -487,6 +487,12 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
     field_games_since_break = dict.fromkeys((field.id for field in fields), 0)
     field_minutes_since_break = dict.fromkeys((field.id for field in fields), 0)
     field_last_round = dict.fromkeys((field.id for field in fields), None)
+    #: Whether this run has placed anything on a field yet -- its own very
+    #: first game starts right when the field opens, not nudged forward by
+    #: the default/break gap below (there's nothing before it to have a gap
+    #: *from*; see field_timeline's own leading-gap suppression for the
+    #: display-side counterpart of this same idea).
+    field_has_game = dict.fromkeys((field.id for field in fields), False)
     team_clock: dict = {}
 
     scheduled: list[Match] = []
@@ -496,7 +502,16 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
             for match in [m for m in matches if m.round_number == round_number]:
                 field = min(fields, key=lambda f: field_clock[f.id])
                 candidate_start = field_clock[field.id]
+                is_first_game_on_field = not field_has_game[field.id]
 
+                # Always computed (bookkeeping below still needs it), but only
+                # ever added to candidate_start once the field has a first
+                # game to actually have a gap *from* -- nothing fires this
+                # early anyway (games_since_last_break/just_finished_round_number
+                # both start at their own "nothing yet" value), so this is
+                # equivalent to DEFAULT_GAP firing for real; skipping the add
+                # here is what keeps a field's very first game right at its
+                # own opening time instead of nudged forward by it.
                 gap, replaces = gap_for_placement(
                     field,
                     games_since_last_break=field_games_since_break[field.id],
@@ -504,7 +519,8 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     round_number=round_number,
                     just_finished_round_number=field_last_round[field.id],
                 )
-                candidate_start += gap if replaces else DEFAULT_GAP + gap
+                if not is_first_game_on_field:
+                    candidate_start += gap if replaces else DEFAULT_GAP + gap
                 pre_roll_date = candidate_start.date()
 
                 # Each push below (blackouts, an already-busy team, a
@@ -536,7 +552,10 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                 # Rolling into a new day is its own implicit break -- carrying
                 # a "games/minutes since break" count across a day boundary
                 # would fire an intraday break rule on the very first game of
-                # the next morning.
+                # the next morning. A field's actual first game naturally
+                # takes this same branch too (nothing fires that early, so
+                # gap/replaces come back as the plain DEFAULT_GAP case) --
+                # its own gap was just never added to candidate_start above.
                 if gap != DEFAULT_GAP or not replaces or candidate_start.date() != pre_roll_date:
                     field_games_since_break[field.id] = 0
                     field_minutes_since_break[field.id] = 0
@@ -545,6 +564,7 @@ def allocate_schedule(tournament, *, match_duration: datetime.timedelta = DEFAUL
                     field_minutes_since_break[field.id] += int(match_duration.total_seconds() // 60)
                 field_clock[field.id] = field_end
                 field_last_round[field.id] = round_number
+                field_has_game[field.id] = True
                 team_clock[match.home_team_id] = field_end
                 team_clock[match.away_team_id] = field_end
 
