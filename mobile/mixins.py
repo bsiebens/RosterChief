@@ -37,9 +37,7 @@ class DesktopTemplateMixin:
 
 class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
     """Resolves the signed-in account's own Member record plus every child
-    they're a parent/guardian of *in this club* (mirrors members.views.MyFamilyView's
-    own query -- kept separate rather than imported from there, since that view
-    is public/unauthenticated-reachable and this one is always behind login).
+    they're a parent/guardian of *in this club*.
 
     ``?as=<member-id>`` re-scopes the current screen to one managed person,
     same as the design doc's horizontally-scrolling chip row -- it re-scopes in
@@ -75,6 +73,11 @@ class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
         children = list(
             Member.objects.filter(
                 family_memberships__role=FamilyMembership.FamilyRole.CHILD,
+                # family__club: self.me is global -- without this, a family
+                # relationship from another club could make its children
+                # manageable here too, just because they also happen to have a
+                # ClubMembership in this one (2026-09-12 leak).
+                family_memberships__family__club=request.club,
                 family_memberships__family__memberships__member=self.me,
                 family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
                 member_of__club=request.club,

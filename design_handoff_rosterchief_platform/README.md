@@ -261,7 +261,9 @@ Desktop: route, table filters + saved view, selection set, drawer target + tab, 
 
 | File | What it is |
 |---|---|
-| `RosterChief Platform.dc.html` | The design document — all 25 screens. Open in a browser; it is the visual source of truth. |
+| `RosterChief Platform.dc.html` | The design document — all 25 app screens. Open in a browser; it is the visual source of truth. |
+| `WEBSITE.md` | Handoff for the public marketing site — structure, final copy, pricing, and how to build the contact form server-side. |
+| `RosterChief Website.dc.html` | The marketing site design. |
 | `ios-frame.jsx` | Presentation-only iOS bezel used by the mobile screens. Not for production. |
 | `image-slot.js` | Photo placeholder component. Not for production. |
 | `support.js` | Runtime for the design document. **Do not port.** |

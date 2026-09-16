@@ -43,9 +43,7 @@
                         <tr class="cursor-pointer {% if membership.is_oldest_pending %}bg-row-focus shadow-[inset_3px_0_0_var(--color-info)]{% endif %}" onclick="openDrawer('{{ membership.pk|dom_id:"signup_drawer" }}')">
                             <td>
                                 <div class="flex items-center gap-2.5">
-                                    <span class="avatar avatar-placeholder shrink-0">
-                                        <div class="h-8 w-8 rounded-full text-xs">{{ membership.member.first_name|slice:":1" }}{{ membership.member.last_name|slice:":1" }}</div>
-                                    </span>
+                                    {% include "management/_avatar.html" with person=membership.member %}
                                     <div>
                                         <a class="link link-hover font-semibold text-ink" href="{% url 'management:member_detail' membership.member.pk %}" onclick="event.stopPropagation()">{{ membership.member.get_full_name }}</a>
                                         <div class="text-xs text-muted">
@@ -103,9 +101,7 @@
         <div id="{{ membership.pk|dom_id:"signup_drawer" }}" class="drawer-backdrop">
             <div class="drawer">
                 <div class="flex items-center gap-3 border-b border-line p-5">
-                    <span class="avatar avatar-placeholder shrink-0">
-                        <div class="h-11 w-11 rounded-full text-base">{{ membership.member.first_name|slice:":1" }}{{ membership.member.last_name|slice:":1" }}</div>
-                    </span>
+                    {% include "management/_avatar.html" with person=membership.member size_class="h-11 w-11" text_class="text-base" %}
                     <div class="min-w-0 flex-1">
                         <div class="truncate font-display text-xl font-extrabold text-ink uppercase">{{ membership.member.get_full_name }}</div>
                         <div class="text-[13px] text-muted">{% blocktrans with date=membership.created|date:"j M" %}Applied {{ date }}{% endblocktrans %}{% if membership.teams_registered %} · {% for team in membership.teams_registered %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</div>

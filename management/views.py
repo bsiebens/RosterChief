@@ -6,7 +6,7 @@ from itertools import groupby
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, F, OuterRef, ProtectedError, Q, Sum
+from django.db.models import Count, Exists, F, OuterRef, Prefetch, ProtectedError, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -67,20 +67,26 @@ from club.services.signup_linking import link_to_existing_member
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
-from evaluations.models import EvaluationChecklist, PlayerEvaluation
+from evaluations.models import EvaluationChecklist, EvaluationSession, PlayerEvaluation
 from evaluations.services import (
     EvaluationRubricNotConfigured,
     EvaluationSubmissionError,
     active_checklists,
+    active_session,
     add_evaluation_note,
     checklist_players,
     current_rubric_form,
+    end_session,
+    latest_session,
     player_evaluation_history,
     player_notes,
     question_stats,
+    record_outcome,
     results_matrix,
     rubric_field_rows,
+    session_outcome_rows,
     start_new_rubric_version,
+    start_session,
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
@@ -99,9 +105,7 @@ from formbuilder.services.audience import effective_members as form_effective_me
 from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
 from formbuilder.services.reporting import form_report
-from members.forms import ClaimRejectForm, ClaimReviewForm
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
-from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, send_claim_approved_email, suggested_children
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
@@ -208,7 +212,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -281,7 +285,7 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
 # --- Members (full tier) -----------------------------------------------------------
 
 
-def group_by_family(members):
+def group_by_family(members, club):
     """Bucket an already-scoped Member iterable by family: {family, guardians,
     children, others}, plus whatever's left un-grouped.
 
@@ -289,8 +293,15 @@ def group_by_family(members):
     (members/models.py) -- those query a family's *entire* membership unconditionally,
     which would leak people outside whatever visibility scope ``members`` already
     represents (e.g. a coach who only sees their own rostered players).
+
+    ``club`` scopes the family lookup itself, on top of whatever ``members`` was
+    already narrowed to: Member is global, so a member also belonging to
+    another club would otherwise pull that other club's family in here too
+    (2026-09-12 leak) even when ``members`` itself is correctly scoped --
+    every caller's ``members`` queryset restricts *who*, not *which club's
+    family row* to read for them.
     """
-    memberships = FamilyMembership.objects.filter(member__in=members).select_related("family", "member")
+    memberships = FamilyMembership.objects.filter(member__in=members, family__club=club).select_related("family", "member")
 
     groups = {}
     for fm in memberships:
@@ -441,7 +452,10 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         )
         members = list(context["members"])
 
-        memberships = FamilyMembership.objects.filter(member__in=members).select_related("family")
+        # family__club=request.club: Member is global (shared across every club a
+        # person belongs to), but Family is per-club -- without this, a member in
+        # two clubs would show the other club's family here (2026-09-12 leak).
+        memberships = FamilyMembership.objects.filter(member__in=members, family__club=self.request.club).select_related("family")
         memberships_by_member_id = {}
         for fm in memberships:
             memberships_by_member_id.setdefault(fm.member_id, []).append(fm)
@@ -531,8 +545,8 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
                 | memberships.filter(member__last_name__icontains=search)
                 | memberships.filter(member__email__icontains=search)
                 | memberships.filter(member__user__email__icontains=search)
-                | memberships.filter(member__family_memberships__family__name__icontains=search)
-                | memberships.filter(member__family_memberships__family__memberships__member__last_name__icontains=search)
+                | memberships.filter(member__family_memberships__family__club=self.request.club, member__family_memberships__family__name__icontains=search)
+                | memberships.filter(member__family_memberships__family__club=self.request.club, member__family_memberships__family__memberships__member__last_name__icontains=search)
                 | memberships.filter(registration_details__batch__invoice_number__icontains=search)
                 | memberships.filter(registration_details__batch__contact_first_name__icontains=search)
                 | memberships.filter(registration_details__batch__contact_last_name__icontains=search)
@@ -595,7 +609,9 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
         # this page's own club/season/filter scoping entirely).
         memberships = list(context["memberships"])
         members = [membership.member for membership in memberships]
-        family_memberships = FamilyMembership.objects.filter(member__in=members).select_related("family")
+        # family__club=club: Member is global -- without this, a member also
+        # belonging to another club would show that club's family here (2026-09-12 leak).
+        family_memberships = FamilyMembership.objects.filter(member__in=members, family__club=club).select_related("family")
         family_memberships_by_member_id = {}
         for fm in family_memberships:
             family_memberships_by_member_id.setdefault(fm.member_id, []).append(fm)
@@ -637,7 +653,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             # more than one who should actually see this.
             own_email = membership.member.contact_email
             email_rows = [{"email": own_email, "label": None}] if own_email else []
-            for contact in family_contacts(membership.member):
+            for contact in family_contacts(membership.member, membership.club):
                 if contact["email"].lower() == (own_email or "").lower():
                     continue
                 email_rows.append({"email": contact["email"], "label": contact["role_label"]})
@@ -795,7 +811,7 @@ class MembershipSendInvoicesView(ClubAdminRequiredMixin, View):
         memberships = ClubMembership.objects.filter(pk__in=ids, club=request.club).select_related("member")
         sent = failed = unreachable = 0
         for membership in memberships:
-            email, sent_to_guardian = recipient_for(membership.member)
+            email, sent_to_guardian = recipient_for(membership.member, request.club)
             if not email:
                 unreachable += 1
                 continue
@@ -963,15 +979,14 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
                         chosen_pk = request.POST.get(family_choice_field_name(family_group), "new")
                         family = families_of_club(request.club).filter(pk=chosen_pk).first() if chosen_pk != "new" else None
                         if family is None:
-                            family = Family.objects.create()
+                            family = Family.objects.create(club=request.club)
                         families_by_group[family_group] = family
-                    attach_to_family(member, role=family_role, family=family)
+                    attach_to_family(member, role=family_role, family=family, club=request.club)
                 elif family_role == FamilyMembership.FamilyRole.CHILD:
                     # A child with no family_group: nobody is on file for them yet.
-                    # A family of their own is what makes that state visible -- it's
-                    # what members.services.claims.families_awaiting_a_parent looks
-                    # for, and what an approved claim adds the parent to.
-                    attach_to_family(member, role=family_role)
+                    # A family of their own is what makes that state visible -- an
+                    # admin can add a parent to it later from the family's own page.
+                    attach_to_family(member, role=family_role, club=request.club)
 
                 if season is not None:
                     ClubMembership.objects.create(club=request.club, member=member, season=season, signed_up_at=timezone.localdate(), **result["membership_kwargs"])
@@ -1048,7 +1063,7 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        form = MemberForm(request.POST, instance=member)
+        form = MemberForm(request.POST, request.FILES, instance=member)
         membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):
@@ -1070,14 +1085,14 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
-        my_family_ids = FamilyMembership.objects.filter(member=self.object).values_list("family_id", flat=True)
+        my_family_ids = FamilyMembership.objects.filter(member=self.object, family__club=self.request.club).values_list("family_id", flat=True)
         family_scoped_members = visible.filter(family_memberships__family_id__in=my_family_ids).distinct()
-        family_groups, _ = group_by_family(family_scoped_members)
+        family_groups, _ = group_by_family(family_scoped_members, self.request.club)
 
         is_admin = is_club_admin(self.request.user, self.request.club)
-        referee_profile = RefereeProfile.objects.filter(member=self.object).select_related("level").first()
+        referee_profile = RefereeProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").first()
         officials_enabled = flag_is_active(self.request, "officials")
-        official_profile = OfficialProfile.objects.filter(member=self.object).select_related("level").first() if officials_enabled else None
+        official_profile = OfficialProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").first() if officials_enabled else None
         season = current_season(self.request.club)
         current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=season).first()
 
@@ -1113,7 +1128,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             # Non-empty only when `member` is a CHILD in some family -- that's the same
             # signal the Personal information card uses to decide whether to show parent
             # contact numbers at all.
-            guardians=self.object.guardians,
+            guardians=self.object.guardians(self.request.club),
             referee_profile=referee_profile,
             referee_eligibility_form=MemberRefereeEligibilityForm(club=self.request.club, member=self.object) if is_admin else None,
             officials_enabled=officials_enabled,
@@ -1145,7 +1160,7 @@ class MemberAttachToFamilyView(MemberAdminRequiredMixin, RedirectOnInvalidMixin,
 
     def form_valid(self, form):
         member = get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
-        family = attach_to_family(member, role=form.cleaned_data["role"], family=form.cleaned_data["family"])
+        family = attach_to_family(member, role=form.cleaned_data["role"], family=form.cleaned_data["family"], club=self.request.club)
         body = _("“%(member)s” is now part of %(family)s.") % {"member": member, "family": family}
         notify(self.request, f"s|{_('Added to family')}|{body}")
         return redirect("management:member_detail", pk=member.pk)
@@ -1457,9 +1472,11 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             # same reasoning as events.services.referees.eligible_referees, since
             # a level may qualify for this team only via what it inherits from.
             eligible_referees=(
-                Member.objects.filter(referee_profile__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()], referee_profile__valid_until__gte=timezone.localdate()).order_by(
-                    "last_name", "first_name"
-                )
+                Member.objects.filter(
+                    referee_profiles__club=club,
+                    referee_profiles__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()],
+                    referee_profiles__valid_until__gte=timezone.localdate(),
+                ).order_by("last_name", "first_name")
                 if team.referee_management == Team.RefereeManagement.CLUB
                 else None
             ),
@@ -1817,7 +1834,7 @@ class TeamPhotoDeleteView(TeamManagerRequiredMixin, View):
 ROLE_DESCRIPTIONS = {
     ClubRole.Roles.ADMIN: _("Full control over the club: memberships, positions, roles, teams, shop, every event, and news."),
     ClubRole.Roles.EDITOR: _("Can create and edit events, and publish news items, but not memberships, positions, roles, or shop settings."),
-    ClubRole.Roles.MEMBER_ADMIN: _("Full read/write on people: members, families, groups, parent claims, teams, referee setup, and onboarding requirements — without Finance/Shop, Club identity, Sponsors, or granting/revoking roles."),
+    ClubRole.Roles.MEMBER_ADMIN: _("Full read/write on people: members, families, groups, teams, referee setup, and onboarding requirements — without Finance/Shop, Club identity, Sponsors, or granting/revoking roles."),
 }
 
 
@@ -1983,7 +2000,7 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
         families = list(context["families"])
 
         visible = members_visible_to(self.request.user, self.request.club, include_guardians=True)
-        groups, _ungrouped = group_by_family(visible.filter(family_memberships__family__in=families))
+        groups, _ungrouped = group_by_family(visible.filter(family_memberships__family__in=families), self.request.club)
         groups_by_family = {group["family"]: group for group in groups}
         for family in families:
             group = groups_by_family.get(family, {"guardians": [], "children": []})
@@ -2047,7 +2064,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
         # because they're in *this* family can also belong to another one, in
         # which case groups has more than one entry. groups[0] would then pick
         # whichever family happened to sort first, not necessarily this page's own.
-        groups, _ = group_by_family(members)
+        groups, _ = group_by_family(members, self.request.club)
         group = next((g for g in groups if g["family"] == self.object), None) or {"family": self.object, "guardians": [], "children": [], "others": [], "all": []}
 
         return super().get_context_data(
@@ -2096,87 +2113,6 @@ class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, Form
         body = _("“%(parent)s” added to %(family)s.") % {"parent": parent, "family": family}
         notify(self.request, f"s|{_('Parent registered')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
-
-
-class ParentClaimListView(MemberAdminRequiredMixin, ListView):
-    """The review queue for parents asking to be linked to a child.
-
-    Approving is a human decision on purpose -- see members.models.ParentClaim.
-    Each pending claim is shown with what the parent typed *and* a shortlist of
-    children who have nobody on file, so the admin matches rather than searches.
-    """
-
-    template_name = "management/parent_claim_list.html"
-    context_object_name = "claims"
-
-    def get_queryset(self):
-        return ParentClaim.objects.filter(club=self.request.club).select_related("child", "reviewed_by")
-
-    def get_context_data(self, **kwargs):
-        claims = list(self.get_queryset())
-        pending = [claim for claim in claims if claim.is_pending]
-        for claim in pending:
-            candidates = suggested_children(claim)
-            initial = {"child": candidates[0].pk} if candidates else None
-            claim.review_form = ClaimReviewForm(candidates=Member.objects.filter(pk__in=[child.pk for child in candidates]), initial=initial)
-            claim.has_candidates = bool(candidates)
-            claim.reject_form = ClaimRejectForm()
-
-        # Last season's history is clutter, not context -- only what was reviewed
-        # within the club's current season stays in view. No current season (a
-        # club between seasons) means nothing qualifies, rather than erroring.
-        season = current_season(self.request.club)
-        reviewed = self.get_queryset().exclude(status=ParentClaim.Status.PENDING).filter(reviewed_at__date__gte=season.start_date) if season is not None else ParentClaim.objects.none()
-
-        return super().get_context_data(
-            pending=pending,
-            reviewed=reviewed,
-            awaiting_a_parent=children_awaiting_a_parent(self.request.club).order_by("last_name", "first_name"),
-            **kwargs,
-        )
-
-
-class ParentClaimApproveView(MemberAdminRequiredMixin, View):
-    """Link the claim's parent to the chosen child. The parent lands as a
-    guardian, not a member -- see members.services.claims.approve_claim."""
-
-    def post(self, request, pk):
-        claim = get_object_or_404(ParentClaim.objects.filter(club=request.club), pk=pk)
-        form = ClaimReviewForm(request.POST, candidates=children_awaiting_a_parent(request.club))
-        if not form.is_valid():
-            notify(request, f"e|{_('Could not approve')}|{_('Choose which child this claim refers to.')}")
-            return redirect("management:parent_claim_list")
-
-        reviewer = Member.objects.filter(user=request.user).first()
-        try:
-            approve_claim(claim, child=form.cleaned_data["child"], season=current_season(request.club), reviewed_by=reviewer)
-        except ClaimError as error:
-            notify(request, f"e|{_('Could not approve')}|{error}")
-        else:
-            child = form.cleaned_data["child"]
-            emailed = send_claim_approved_email(claim, child=child, request=request)
-            if emailed:
-                body = _("“%(parent)s” is now linked to %(child)s. They've been emailed a link to set their password.") % {"parent": claim.parent_name, "child": child}
-                notify(request, f"s|{_('Claim approved')}|{body}")
-            else:
-                # The link is made either way -- say so plainly rather than letting
-                # the club assume the parent has been told.
-                body = _("“%(parent)s” is now linked to %(child)s, but the email could not be sent. Ask them to use “Forgot your password?” on the sign-in page.") % {"parent": claim.parent_name, "child": child}
-                notify(request, f"w|{_('Claim approved, email not sent')}|{body}")
-        return redirect("management:parent_claim_list")
-
-
-class ParentClaimRejectView(MemberAdminRequiredMixin, View):
-    def post(self, request, pk):
-        claim = get_object_or_404(ParentClaim.objects.filter(club=request.club), pk=pk)
-        reviewer = Member.objects.filter(user=request.user).first()
-        try:
-            reject_claim(claim, reviewed_by=reviewer, note=request.POST.get("note", "").strip())
-        except ClaimError as error:
-            notify(request, f"e|{_('Could not reject')}|{error}")
-        else:
-            notify(request, f"w|{_('Claim rejected')}|" + _("“%(parent)s” was not linked.") % {"parent": claim.parent_name})
-        return redirect("management:parent_claim_list")
 
 
 class PositionListView(ClubStaffRequiredMixin, ListView):
@@ -2391,12 +2327,16 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        # No prefetch for eligible_teams below select_related's level: it walks the
-        # level's own inherits_from chain (RefereeLevel.eligible_team_ids), which a
-        # single prefetch_related path can't cover anyway -- see get_context_data,
-        # which precomputes it once per level instead.
-        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profile__isnull=False)
-        return members.select_related("referee_profile", "referee_profile__level").order_by("last_name", "first_name")
+        # RefereeProfile is now a plain FK (a member can hold one per club), so
+        # select_related can't reach it directly -- prefetched instead, scoped to
+        # this club and stashed under a private attr get_context_data reads
+        # through (see _referee_profile below). No prefetch for eligible_teams
+        # itself: it walks the level's own inherits_from chain
+        # (RefereeLevel.eligible_team_ids), which a single prefetch_related path
+        # can't cover anyway -- get_context_data precomputes it once per level
+        # instead.
+        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profiles__club=self.request.club)
+        return members.prefetch_related(Prefetch("referee_profiles", queryset=RefereeProfile.objects.filter(club=self.request.club).select_related("level"), to_attr="_club_referee_profiles")).order_by("last_name", "first_name")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2404,7 +2344,10 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
         team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(self.request.club)
         teams_by_id = {team.pk: team for team in Team.objects.filter(club=self.request.club)}
         for referee in referees:
-            profile = referee.referee_profile
+            # Exactly one, by unique_referee_profile_per_club_per_member -- attached
+            # under the same name the template already reads (referee.referee_profile)
+            # so this club-scoping stays invisible to it.
+            profile = referee.referee_profile = referee._club_referee_profiles[0]
             team_ids = team_ids_by_level.get(profile.level_id, set()) if profile.is_eligible else set()
             profile.cached_eligible_teams = [teams_by_id[team_id] for team_id in team_ids if team_id in teams_by_id]
         return context
@@ -2488,8 +2431,9 @@ class OfficialListView(OfficialsStaffRequiredMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(official_profile__isnull=False)
-        return members.select_related("official_profile", "official_profile__level").order_by("last_name", "first_name")
+        # See RefereeListView.get_queryset's own comment -- same shape, same reason.
+        members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(official_profiles__club=self.request.club)
+        return members.prefetch_related(Prefetch("official_profiles", queryset=OfficialProfile.objects.filter(club=self.request.club).select_related("level"), to_attr="_club_official_profiles")).order_by("last_name", "first_name")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2497,7 +2441,7 @@ class OfficialListView(OfficialsStaffRequiredMixin, ListView):
         team_ids_by_level = OfficialLevel.eligible_team_ids_by_level(self.request.club)
         teams_by_id = {team.pk: team for team in Team.objects.filter(club=self.request.club)}
         for official in officials:
-            profile = official.official_profile
+            profile = official.official_profile = official._club_official_profiles[0]
             team_ids = team_ids_by_level.get(profile.level_id, set()) if profile.is_eligible else set()
             profile.cached_eligible_teams = [teams_by_id[team_id] for team_id in team_ids if team_id in teams_by_id]
         return context
@@ -3188,7 +3132,7 @@ class EventListView(ClubStaffRequiredMixin, ListView):
             for event in events:
                 event.task_rows = list(event.tasks.all())
                 for task in event.task_rows:
-                    task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+                    task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
                     task.is_full = len(task.claim_labels) >= task.needed_quantity
 
                 event.needs_referees = needs_referee_management(event)
@@ -3339,7 +3283,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
 
         tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
         for task in tasks:
-            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = EventTaskForm(instance=task)
         task_form = EventTaskForm()
@@ -5014,8 +4958,8 @@ class OrderListView(ShopManagerRequiredMixin, ListView):
             orders = (
                 orders.filter(purchaser__first_name__icontains=search)
                 | orders.filter(purchaser__last_name__icontains=search)
-                | orders.filter(purchaser__family_memberships__family__name__icontains=search)
-                | orders.filter(purchaser__family_memberships__family__memberships__member__last_name__icontains=search)
+                | orders.filter(purchaser__family_memberships__family__club=self.request.club, purchaser__family_memberships__family__name__icontains=search)
+                | orders.filter(purchaser__family_memberships__family__club=self.request.club, purchaser__family_memberships__family__memberships__member__last_name__icontains=search)
                 | orders.filter(number__icontains=search)
             )
             orders = orders.distinct()
@@ -5854,22 +5798,25 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
         )
 
     @staticmethod
-    def _search_by_member_or_family(queryset, prefix, search):
+    def _search_by_member_or_family(queryset, prefix, search, club):
         # Also matches by family -- searching "Smith" finds every invoice for
         # a family that has an explicit name of "Smith" or that includes
         # anyone surnamed Smith, not just an invoice literally billed to a
-        # Smith -- same search shape as MembershipListView's own ?q=.
+        # Smith -- same search shape as MembershipListView's own ?q=. `club`
+        # scopes the family match itself: the member behind `prefix` is
+        # global, so without it a match could come from another club's
+        # family (2026-09-12 leak).
         return (
             queryset.filter(**{f"{prefix}__first_name__icontains": search})
             | queryset.filter(**{f"{prefix}__last_name__icontains": search})
-            | queryset.filter(**{f"{prefix}__family_memberships__family__name__icontains": search})
-            | queryset.filter(**{f"{prefix}__family_memberships__family__memberships__member__last_name__icontains": search})
+            | queryset.filter(**{f"{prefix}__family_memberships__family__club": club, f"{prefix}__family_memberships__family__name__icontains": search})
+            | queryset.filter(**{f"{prefix}__family_memberships__family__club": club, f"{prefix}__family_memberships__family__memberships__member__last_name__icontains": search})
         ).distinct()
 
     def _order_rows(self, club, search):
         invoices = Invoice.objects.filter(club=club).select_related("order__purchaser")
         if search:
-            invoices = self._search_by_member_or_family(invoices, "order__purchaser", search)
+            invoices = self._search_by_member_or_family(invoices, "order__purchaser", search, club)
 
         rows = []
         for invoice in invoices:
@@ -5898,7 +5845,7 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
         # (or has been paid) for.
         invoices = DuesInvoice.objects.filter(club=club, sent_at__isnull=False).exclude(membership__status=ClubMembership.StatusChoices.CANCELLED).select_related("membership__member")
         if search:
-            invoices = self._search_by_member_or_family(invoices, "membership__member", search)
+            invoices = self._search_by_member_or_family(invoices, "membership__member", search, club)
 
         rows = []
         for invoice in invoices:
@@ -6506,8 +6453,18 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
 
     Nothing here writes a PlayerEvaluation -- a "New evaluation" link is
     offered for once the discussion actually produces a fresh score, going
-    through the ordinary EvaluationCreateView flow like any other. POST
-    here only ever adds a discussion note."""
+    through the ordinary EvaluationCreateView flow like any other.
+
+    A separate, explicit meeting (evaluations.models.EvaluationSession) can be
+    started/ended from here too -- while one's open, an "Outcome decision"
+    box sits above the results for the coaching staff to record what was
+    actually decided about the player currently on screen. Kept apart from
+    the discussion notes below (EvaluationNote, "note" action): a decision is
+    what the meeting exports as a PDF afterwards
+    (EvaluationSessionOutcomesPdfView), the running discussion log never
+    leaves this screen. POST routes on ``action`` -- "note" (the default, for
+    old links/tests that never send one), "outcome", "start_session", or
+    "end_session"."""
 
     template_name = "management/evaluation_walkthrough.html"
 
@@ -6532,11 +6489,20 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
         since = self.get_since()
         players = checklist_players(self.checklist, since=since)
         player = self.get_player(players)
-        context = {"checklist": self.checklist, "players": players, "player": player, "since": since}
+        session = active_session(self.checklist)
+        context = {
+            "checklist": self.checklist,
+            "players": players,
+            "player": player,
+            "since": since,
+            "session": session,
+            "latest_session": session or latest_session(self.checklist),
+        }
 
         if player is not None:
             index = players.index(player)
             season = current_season(self.request.club)
+            outcome = session.outcomes.filter(player=player).first() if session is not None else None
             context.update(
                 previous_player=players[index - 1] if index > 0 else None,
                 next_player=players[index + 1] if index + 1 < len(players) else None,
@@ -6546,6 +6512,7 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
                 attendance_counts=member_attendance_counts(player, season) if season else None,
                 history=player_evaluation_history(self.checklist, player),
                 notes=player_notes(self.checklist, player),
+                outcome=outcome,
             )
 
         return context
@@ -6553,21 +6520,77 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
     def get(self, request, *args, **kwargs):
         return render(request, self.template_name, self.build_context())
 
+    def _redirect(self, *, player=None, since_raw=""):
+        url = reverse("management:evaluation_walkthrough", args=[self.checklist.slug])
+        params = []
+        if player is not None:
+            params.append(f"player={player.pk}")
+        if since_raw:
+            params.append(f"since={since_raw}")
+        if params:
+            url += "?" + "&".join(params)
+        return redirect(url)
+
     def post(self, request, *args, **kwargs):
-        player = get_object_or_404(Member, pk=request.POST.get("player_pk"))
+        action = request.POST.get("action", "note")
+        since_raw = request.POST.get("since", "")
+        player_pk = request.POST.get("player_pk")
+        player = get_object_or_404(Member, pk=player_pk) if player_pk else None
+        author = Member.objects.filter(user=request.user).first()
+
+        if action == "start_session":
+            start_session(club=request.club, checklist=self.checklist, started_by=author)
+            notify(request, f"s|{_('Meeting started')}|{_('Record an outcome decision for each player as you go -- download the PDF once the meeting ends.')}")
+            return self._redirect(player=player, since_raw=since_raw)
+
+        if action == "end_session":
+            session = active_session(self.checklist)
+            if session is not None:
+                end_session(session)
+                notify(request, f"s|{_('Meeting ended')}|{_('Download the outcomes PDF from the button above.')}")
+            return self._redirect(player=player, since_raw=since_raw)
+
+        if action == "outcome":
+            session = active_session(self.checklist)
+            decision = request.POST.get("decision", "").strip()
+            if session is None:
+                notify(request, f"e|{_('No meeting in progress')}|{_('Start a meeting before recording an outcome decision.')}")
+            elif not decision:
+                notify(request, f"e|{_('Nothing to save')}|{_('Write something before saving an outcome decision.')}")
+            else:
+                record_outcome(club=request.club, session=session, player=player, decision=decision, recorded_by=author)
+                notify(request, f"s|{_('Outcome saved')}|" + _("The outcome decision for “%(player)s” was saved.") % {"player": player})
+            return self._redirect(player=player, since_raw=since_raw)
+
         note = request.POST.get("note", "").strip()
         if note:
-            author = Member.objects.filter(user=request.user).first()
             add_evaluation_note(club=request.club, checklist=self.checklist, player=player, author=author, note=note)
-            notify(request, f"s|{_('Note added')}|{_('Your note about “%(player)s” was saved.') % {'player': player}}")
+            notify(request, f"s|{_('Note added')}|" + _("Your note about “%(player)s” was saved.") % {"player": player})
         else:
             notify(request, f"e|{_('Nothing to save')}|{_('Write something before adding a note.')}")
+        return self._redirect(player=player, since_raw=since_raw)
 
-        redirect_url = f"{reverse('management:evaluation_walkthrough', args=[self.checklist.slug])}?player={player.pk}"
-        since_raw = request.POST.get("since", "")
-        if since_raw:
-            redirect_url += f"&since={since_raw}"
-        return redirect(redirect_url)
+
+class EvaluationSessionOutcomesPdfView(EvaluationManagerRequiredMixin, View):
+    """One meeting's outcome decisions, and nothing else -- name + decision
+    per player, no evaluation scores, no discussion notes. See
+    EvaluationOutcome's own docstring for why those stay out: the PDF is
+    meant to leave the room, the private log never should."""
+
+    def get(self, request, pk):
+        session = get_object_or_404(EvaluationSession.objects.filter(club=request.club).select_related("checklist"), pk=pk)
+        rows = session_outcome_rows(session)
+
+        try:
+            pdf = evaluation_outcomes_pdf({"club": request.club, "session": session, "checklist": session.checklist, "rows": rows, "generated_at": timezone.now()})
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:evaluation_walkthrough", checklist_slug=session.checklist.slug)
+
+        filename = f"outcomes-{session.checklist.slug}-{timezone.localtime(session.started_at):%Y-%m-%d}.pdf"
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class EvaluationCreateView(EvaluationManagerRequiredMixin, View):

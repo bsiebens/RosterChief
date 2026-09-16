@@ -5,14 +5,15 @@
     M6 -- design_handoff_rosterchief_platform/README.md's M6 section, "Edit
     personal info". See EditProfileView's own docstring (mobile/views.py) for
     the judgment calls: the design mock's "National register no.", "Address",
-    "Allergies / notes" and the two "Consent" toggles have no backing field on
-    Member and are omitted entirely; the guardian ("Contact 1") and open
-    onboarding-requirements ("Medical form... missing") rows are real data,
-    shown read-only.
+    "Allergies / notes" and "share contact with team parents" toggle have no
+    backing field on Member and are omitted entirely; the guardian ("Contact
+    1") and open onboarding-requirements ("Medical form... missing") rows are
+    real data, shown read-only. The mock's other toggle, "photos on club
+    channels", is now real (form.photo_public_consent).
 {% endcomment %}
 
 {% block content %}
-    <form method="post" class="flex flex-col gap-4" hx-boost="false">
+    <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
         {% csrf_token %}
 
         <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
@@ -28,6 +29,24 @@
                 {% blocktrans count counter=open_requirement_names|length with names=open_requirement_summary %}{{ counter }} requirement still open: {{ names }}{% plural %}{{ counter }} requirements still open: {{ names }}{% endblocktrans %}
             </div>
         {% endif %}
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Photo" %}</div>
+            <div class="m-card overflow-hidden">
+                <div class="flex items-center gap-3 p-3.5">
+                    {% include "mobile/_avatar.html" with person=member size_class="h-14 w-14" text_class="text-xl" %}
+                    <div class="min-w-0 flex-1">
+                        {{ form.photo }}
+                        {% for error in form.photo.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                    </div>
+                </div>
+                <div class="h-px bg-rule"></div>
+                <label class="flex items-center gap-2.5 p-3.5 text-[15px] text-ink">
+                    {{ form.photo_public_consent }}
+                    {{ form.photo_public_consent.label }}
+                </label>
+            </div>
+        </div>
 
         <div>
             <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Identity" %}</div>

@@ -255,9 +255,9 @@ class AuthFormRenderingTests(TestCase):
 
     def test_self_registration_is_closed(self):
         # A club has no reason to let a stranger create an account: they're made by
-        # an admin, by the family-registration form, or by an approved parent claim
-        # (members/views.py). The route is shadowed rather than removed so that the
-        # `account_signup` name allauth's own templates reverse still resolves.
+        # an admin or by the family-registration form. The route is shadowed rather
+        # than removed so that the `account_signup` name allauth's own templates
+        # reverse still resolves.
         response = self.client.get(reverse("account_signup"))
 
         self.assertEqual(response.status_code, 403)

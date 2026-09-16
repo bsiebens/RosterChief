@@ -27,15 +27,19 @@ urlpatterns = [
     path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
     path("admin/", admin.site.urls),
     # Before allauth's own urls so it wins the match: self-registration is closed.
-    # Accounts are created by an admin, by the family-registration form, or by an
-    # approved parent claim (members/views.py) -- a club has no reason to let a
-    # stranger create one, and the claim queue would be the first thing to suffer.
+    # Accounts are created by an admin or by the family-registration form -- a
+    # club has no reason to let a stranger create one.
     path("accounts/signup/", signup_closed, name="account_signup"),
     path("accounts/", include("allauth.urls")),
+    # Gives the "set_language" name the marketing site's language switcher posts to
+    # (django.views.i18n.set_language) -- not i18n_patterns()-wrapped, since this is a
+    # multi-tenant, subdomain-routed project and a /en/ or /nl/ URL prefix on every
+    # path would fight that everywhere else.
+    path("i18n/", include("django.conf.urls.i18n")),
     path("", include("members.urls")),
     path("register/", include("registration.urls")),
     path("forms/", include("formbuilder.urls")),
-    path("controlpanel/", include("controlpanel.urls")),
+    path("control/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
     path("app/", include("mobile.urls")),
     path("api/v1/", api.urls),
@@ -43,7 +47,8 @@ urlpatterns = [
     # not nested under either app's urls.py, since both surfaces hit this one verbatim.
     path("announcements/pending/", PendingAnnouncementView.as_view(), name="announcement_pending"),
     # "/" resolves per tenant: a club subdomain lands on the club, the base domain
-    # hands off to the control panel. This is why LOGIN_REDIRECT_URL can stay "/".
+    # serves the public marketing site (marketing.views.home). This is why
+    # LOGIN_REDIRECT_URL can stay "/".
     path("", root, name="root"),
 ]
 

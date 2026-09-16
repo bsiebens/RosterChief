@@ -1,6 +1,6 @@
 [project]
 name = "rosterchief"
-version = "0.6.3"
+version = "0.7.0"
 requires-python = ">=3.14"
 dependencies = [
     "apscheduler>=3.11.3",
@@ -67,7 +67,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "api", "billing", "bugs", "announcements", "authentication", "club", "members", "teams", "events", "formbuilder", "evaluations", "shop", "registration", "controlpanel", "management", "mobile", "news", "notifications", "features", "rosterchief"]
+    "api", "billing", "bugs", "announcements", "authentication", "club", "members", "teams", "events", "formbuilder", "evaluations", "shop", "registration", "controlpanel", "management", "marketing", "mobile", "news", "notifications", "features", "rosterchief"]
 
 [tool.uv.sources]
 django-lucide = { git = "https://github.com/bsiebens/lucide" }

@@ -346,7 +346,14 @@
 
     .btn-primary {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
+        /* Fixed, not club-derived: a club's colour can land close to the page
+           background (white, or near it) -- this keeps the button's own shape
+           visible regardless, on top of the text-contrast fix above. Same
+           light border colour used elsewhere in the app; the full shorthand
+           is needed since this .btn's own border is "none" (a bare
+           border-color has no border-style to show). */
+        border: 1px solid var(--color-stroke);
     }
 
     .btn-dark {
@@ -467,6 +474,7 @@
 
     .person-chip-active .person-chip-avatar {
         background: var(--color-club);
+        color: var(--color-club-content);
     }
 
     .person-chip-label {
@@ -855,7 +863,14 @@
 
     .btn-primary {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
+        /* Fixed, not club-derived: a club's colour can land close to the page
+           background (near-black, on this dark auth shim) -- this keeps the
+           button's own shape visible regardless, on top of the text-contrast
+           fix above. Same border colour .btn-outline already uses right
+           below for the same reason -- a black border would be as invisible
+           here as no border at all. */
+        border-color: var(--color-on-dark-faint, rgb(255 255 255 / 25%));
     }
 
     .btn-success {
@@ -1090,7 +1105,7 @@
 
     .menu li a.menu-active {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
     }
 
     /* Taller variant for a code-entry input that has fallen back out of the boxed

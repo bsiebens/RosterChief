@@ -49,7 +49,7 @@ class ClubAdminRequiredMixin(ClubStaffRequiredMixin):
 
 class MemberAdminRequiredMixin(ClubStaffRequiredMixin):
     """ADMIN, a platform superuser, or MEMBER_ADMIN specifically -- full read/write
-    on people: members, families, groups, parent claims, member import, teams
+    on people: members, families, groups, member import, teams
     (roster/staff/CRUD), referee levels, referee management, and onboarding
     requirements. Deliberately does NOT cover Finance/Shop, Club identity,
     Sponsors, or role-granting (role_list/role_create/role_revoke stay

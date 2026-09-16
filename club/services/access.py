@@ -86,8 +86,8 @@ def get_club_admin(request: HttpRequest) -> bool:
 
 
 def is_member_admin(user: User, club: Club) -> bool:
-    """MEMBER_ADMIN: full read/write on people (members, families, groups, parent
-    claims, teams, referee setup, onboarding requirements) without Finance/Shop,
+    """MEMBER_ADMIN: full read/write on people (members, families, groups,
+    teams, referee setup, onboarding requirements) without Finance/Shop,
     Club identity, Sponsors, or the ability to grant/revoke ClubRole itself --
     see can_manage_members for the actual gate, this is just the role check."""
     return has_club_role(user, club, ClubRole.Roles.MEMBER_ADMIN)
@@ -206,6 +206,10 @@ def members_visible_to(user: User, club: Club, *, include_guardians: bool = Fals
 
     children = Member.objects.filter(
         family_memberships__role=FamilyMembership.FamilyRole.CHILD,
+        # family__club: me is global -- without this, a family relationship from
+        # another club would make that club's children visible here too
+        # (2026-09-12 leak).
+        family_memberships__family__club=club,
         family_memberships__family__memberships__member=me,
         family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
     )

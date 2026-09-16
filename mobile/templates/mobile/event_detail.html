@@ -29,7 +29,7 @@
             <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% if request.GET.from == "calendar" %}{% url "mobile:calendar" %}{% else %}{% url "mobile:home" %}{% endif %}" aria-label="{% trans "Back" %}">
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
             </a>
-            <span class="mb-2 inline-block w-fit rounded bg-club px-2 py-1 font-display text-xs font-extrabold tracking-wide text-white uppercase">
+            <span class="mb-2 inline-block w-fit rounded bg-club px-2 py-1 font-display text-xs font-extrabold tracking-wide text-club-content uppercase">
                 {% if event.kind == "game" %}{% if event.is_home_game %}{% trans "Home game" %}{% else %}{% trans "Away game" %}{% endif %}{% else %}{{ event.get_kind_display }}{% endif %}
             </span>
             <h1 class="font-display text-4xl leading-[.98] font-extrabold uppercase">{{ event.title }}</h1>
@@ -225,7 +225,7 @@
                                             <button type="submit" class="btn h-11 w-full text-[15px] {% if status == "present" %}btn-positive{% else %}bg-paper border border-stroke text-muted{% endif %}">{{ label_in }}</button>
                                         </form>
                                         <button type="button" class="btn h-11 w-full text-[15px] {% if status == "maybe" %}bg-steel text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'maybe'">{{ label_maybe }}</button>
-                                        <button type="button" class="btn h-11 w-full text-[15px] {% if status == "absent" %}bg-club text-white{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'absent'">{{ label_out }}</button>
+                                        <button type="button" class="btn h-11 w-full text-[15px] {% if status == "absent" %}bg-club text-club-content{% else %}bg-paper border border-stroke text-muted{% endif %}" @click="asking = 'absent'">{{ label_out }}</button>
                                     </div>
 
                                     {% comment %}

@@ -11,7 +11,6 @@ from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
 from club.services.access import can_add_news, can_manage_members, get_club_admin, get_current_season, has_management_access, is_coach_manager
-from members.models import ParentClaim
 from members.services.lookup import get_request_member
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -61,9 +60,6 @@ _NAV_SECTIONS = {
     "role_list": "role_list",
     "role_create": "role_list",
     "role_revoke": "role_list",
-    "parent_claim_list": "parent_claim_list",
-    "parent_claim_approve": "parent_claim_list",
-    "parent_claim_reject": "parent_claim_list",
     "group_list": "group_list",
     "group_create": "group_list",
     "group_detail": "group_list",
@@ -240,7 +236,6 @@ _TOP_SECTION = {
     "member_list": "members",
     "signup_list": "members",
     "family_list": "members",
-    "parent_claim_list": "members",
     "group_list": "members",
     "volunteer_list": "members",
     "membership_list": "finance",
@@ -368,22 +363,21 @@ def news_permissions(request):
 
 def sidebar_counters(request):
     """Small always-visible counts next to nav links that flag a queue
-    waiting on an admin: pending parent claims, upcoming club-managed games
-    nobody's down to referee yet (management.views.games_missing_referees_count,
-    the same shape RefereeManagementDashboardView's own kpi_no_referee uses for
-    its default "next 10" range), and registrations awaiting invoice
-    confirmation (registration.services.invoicing.
-    registrations_awaiting_confirmation).
+    waiting on an admin: upcoming club-managed games nobody's down to referee
+    yet (management.views.games_missing_referees_count, the same shape
+    RefereeManagementDashboardView's own kpi_no_referee uses for its default
+    "next 10" range), and registrations awaiting invoice confirmation
+    (registration.services.invoicing.registrations_awaiting_confirmation).
 
-    The first two are gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
-    matching how _nav_items.html itself gates both links -- a coach never sees
-    either link, so there's no reason to run either query for them.
-    Registrations/Sign-up are gated tighter, on is_club_admin alone: both live
-    behind links the nav itself only ever shows to a real ADMIN, not a
-    MEMBER_ADMIN. Always an int when shown, never hidden at 0: "the queue is
-    empty" and "nobody checked" have to read differently.
+    The first is gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
+    matching how _nav_items.html itself gates that link -- a coach never sees
+    it, so there's no reason to run the query for them. Registrations/Sign-up
+    are gated tighter, on is_club_admin alone: both live behind links the nav
+    itself only ever shows to a real ADMIN, not a MEMBER_ADMIN. Always an int
+    when shown, never hidden at 0: "the queue is empty" and "nobody checked"
+    have to read differently.
     """
-    counters = {"pending_parent_claims_count": None, "games_missing_referees_count": None, "registrations_awaiting_count": None, "signup_pending_count": None}
+    counters = {"games_missing_referees_count": None, "registrations_awaiting_count": None, "signup_pending_count": None}
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
         return counters
@@ -394,7 +388,6 @@ def sidebar_counters(request):
         # models/services, none of which any other context processor here needs.
         from management.views import RefereeManagementDashboardView, games_missing_referee_or_official_count
 
-        counters["pending_parent_claims_count"] = ParentClaim.objects.filter(club=club, status=ParentClaim.Status.PENDING).count()
         # games_missing_referee_or_official_count, not games_missing_referees_count(...)
         # + games_missing_officials_count(...) -- that naive sum double-counts a
         # game missing both (see that function's own docstring for why). It's

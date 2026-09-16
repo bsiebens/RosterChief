@@ -368,7 +368,7 @@ class SubmitRegistrationTests(TestCase):
     def test_a_returning_contact_is_matched_by_email_not_forked_into_a_new_family(self):
         parent_user = User.objects.create_user(email="pat@example.com", password="pw-secret-123")
         parent = Member.objects.create(user=parent_user, first_name="Pat", last_name="Parent")
-        FamilyMembership.objects.create(family=Family.objects.create(), member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=Family.objects.create(club=self.club), member=parent, role=FamilyMembership.FamilyRole.PARENT)
         entries = [EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.u10)]
 
         submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)

@@ -32,6 +32,7 @@
                 :root {
                     --tenant-club: {{ club.secondary_color }};
                     --tenant-club-dark: color-mix(in srgb, {{ club.secondary_color }} 80%, black);
+                    --tenant-club-content: {{ club.secondary_content_color }};
                 }
             </style>
         {% endif %}
@@ -45,7 +46,7 @@
                     <img class="crest h-8 w-8 shrink-0 object-cover" src="{{ club.logo.url }}" alt="">
                 {% else %}
                     <span class="crest flex h-8 w-8 shrink-0 items-center justify-center bg-club">
-                        <span class="font-display text-[11px] font-extrabold text-white">{{ club.initials }}</span>
+                        <span class="font-display text-[11px] font-extrabold text-club-content">{{ club.initials }}</span>
                     </span>
                 {% endif %}
                 <span class="min-w-0 truncate font-display text-lg font-extrabold tracking-[.08em] text-white uppercase">{{ club.name }}</span>

@@ -339,6 +339,15 @@ def dashboard_snapshot() -> dict:
     return snapshot
 
 
+def invalidate_dashboard_snapshot():
+    """Bust dashboard_snapshot()'s cache early. Most of the numbers it bundles are fine
+    to sit stale for up to DASHBOARD_CACHE_SECONDS (see that docstring), but a club
+    archive/restore/delete is a rare, deliberate staff action, not routine traffic --
+    the admin who just did it lands straight back on a dashboard that still shows the
+    club as live, which reads as the action having silently failed."""
+    cache.delete(DASHBOARD_CACHE_KEY % get_language())
+
+
 def previous_season(club, season):
     """The season immediately before ``season``. Seasons are ordered by name (which is
     derived from the years), so go by the date instead — a club may skip a year."""

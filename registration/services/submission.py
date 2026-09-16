@@ -57,8 +57,8 @@ class EntryInput:
 def _resolve_contact_member(submitted_by_user, contact_email):
     """The Member behind whoever is filling in the form, if already known --
     an authenticated submitter's own account (mobile re-registration) takes
-    priority over an email lookup (the public flow), same precedence
-    members.services.claims.approve_claim uses for its own submitter."""
+    priority over an email lookup (the public flow): the signed-in account is
+    the authoritative "who is this" signal, never the client-supplied email."""
     if submitted_by_user is not None and submitted_by_user.is_authenticated:
         member = Member.objects.filter(user=submitted_by_user).first()
         if member is not None:
@@ -99,15 +99,17 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
     if parent is None:
         parent = get_or_create_login_member(contact_email, contact_first_name, contact_last_name)
 
-    parent_family_membership = parent.family_memberships.first()
-    family = parent_family_membership.family if parent_family_membership is not None else Family.objects.create()
+    # Scoped to this club: parent is a global Member, so an unscoped .first() here
+    # could otherwise reuse a family from a club they'd separately registered
+    # with elsewhere, attaching this club's new registrant to another club's household.
+    parent_family_membership = parent.family_memberships.filter(family__club=club).first()
+    family = parent_family_membership.family if parent_family_membership is not None else Family.objects.create(club=club)
     if parent_family_membership is None:
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
     has_self_entry = any(entry.is_contact for entry in entries)
     if not has_self_entry:
-        # A pure guardian -- no fee, active immediately, same as
-        # members.services.claims.approve_claim's own guardian enrolment.
+        # A pure guardian -- no fee, active immediately.
         add_parent_to_family(club, season, family, parent=parent)
 
     batch = RegistrationBatch.objects.create(

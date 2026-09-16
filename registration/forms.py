@@ -21,8 +21,7 @@ class RegistrationStatusDocumentForm(forms.Form):
 
 
 class RegistrationContactForm(forms.Form):
-    """The "about you" half of the public registration page -- same
-    ``lock_*_fields`` idea as members.forms.ParentClaimForm: a signed-in
+    """The "about you" half of the public registration page: a signed-in
     submitter (mobile re-registration, or a returning public visitor who
     happens to be logged in) is shown read-only text instead of editable
     inputs, so a mismatched typed email can never fork off a second

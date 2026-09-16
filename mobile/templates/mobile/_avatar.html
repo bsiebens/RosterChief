@@ -1,11 +1,22 @@
 {% comment %}
-    Avatar-initials circle -- the one idiom repeated across every M-screen
-    (event_detail's "Your answers" rows, me.html's own header + "People I
-    manage" rows, news_detail's byline). Expects ``person`` (anything with
-    first_name/last_name) in scope; all other vars are optional and default
-    to the most common case (me.html's "People I manage" rows):
+    Avatar -- either ``person``'s own uploaded photo, or the initials circle
+    that's the fallback idiom repeated across every M-screen (event_detail's
+    "Your answers" rows, me.html's own header + "People I manage" rows,
+    news_detail's byline). Expects ``person`` (anything with first_name/
+    last_name; a Member also gets a real photo, anything else -- e.g.
+    news_detail's User byline -- always falls back to initials since
+    ``person.photo`` resolves to nothing) in scope; all other vars are
+    optional and default to the most common case (me.html's "People I
+    manage" rows):
       - size_class: the h-*/w-* pair, default "h-10 w-10"
       - text_class: the initials' font size, default "text-sm"
       - bg_class: the circle's background, default "bg-steel"
+      - content_class: the initials' colour, default "text-white" -- override to
+        "text-club-content" when bg_class is "bg-club", since the club's own colour
+        isn't guaranteed to be dark enough for white text to read.
 {% endcomment %}
-<span class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 items-center justify-center rounded-full {{ bg_class|default:"bg-steel" }} font-display {{ text_class|default:"text-sm" }} font-extrabold text-white">{{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}</span>
+{% if person.photo %}
+    <img src="{{ person.photo.url }}" alt="" class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 rounded-full object-cover">
+{% else %}
+    <span class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 items-center justify-center rounded-full {{ bg_class|default:"bg-steel" }} font-display {{ text_class|default:"text-sm" }} font-extrabold {{ content_class|default:"text-white" }}">{{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}</span>
+{% endif %}

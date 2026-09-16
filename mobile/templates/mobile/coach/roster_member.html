@@ -105,7 +105,7 @@
         {% trans "Remove this player from the roster? This cannot be undone." as remove_confirm_text %}
         <form class="mt-3" method="post" action="{% url "mobile:coach_roster_remove" membership.pk %}" hx-boost="false" onsubmit="return confirm('{{ remove_confirm_text|escapejs }}')">
             {% csrf_token %}
-            <button class="btn w-full gap-2 bg-club text-white" type="submit">{% lucide "trash-2" size=16 %} {% trans "Remove from roster" %}</button>
+            <button class="btn w-full gap-2 bg-club text-club-content" type="submit">{% lucide "trash-2" size=16 %} {% trans "Remove from roster" %}</button>
         </form>
     {% endif %}
 {% endblock content %}

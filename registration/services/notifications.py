@@ -1,10 +1,9 @@
 """Registration app emails: the confirmation sent right at submission (below),
 and -- once staff has reviewed and confirmed a registration's own invoice on
 the management Registrations screen -- the invoice itself and its overdue
-reminder. All three are never fatal, same shape as members.services.claims.
-send_claim_approved_email: the underlying record (batch, or the confirmed
-invoice state) exists in the database whether or not the mail actually
-leaves the building.
+reminder. All three are never fatal, same shape as every other branded send in
+this app: the underlying record (batch, or the confirmed invoice state)
+exists in the database whether or not the mail actually leaves the building.
 
 confirm_and_send_invoice/send_registration_reminders are the one entry point
 each for "confirm state, then email" -- they live here, not in registration.
@@ -75,7 +74,7 @@ def registration_invoice_recipients(batch) -> list[str]:
     members = {entry.membership.member for entry in active_batch_entries(batch)}
     emails = set()
     for member in members:
-        emails.update(contact["email"] for contact in family_contacts(member))
+        emails.update(contact["email"] for contact in family_contacts(member, batch.club))
     return sorted(emails, key=str.lower) or [batch.contact_email]
 
 

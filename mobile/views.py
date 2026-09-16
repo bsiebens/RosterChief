@@ -173,6 +173,10 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
         if me is not None:
             children = Member.objects.filter(
                 family_memberships__role=FamilyMembership.FamilyRole.CHILD,
+                # family__club: me is global -- without this, a family relationship
+                # from another club could surface here just because the child also
+                # happens to have a ClubMembership in this one (2026-09-12 leak).
+                family_memberships__family__club=request.club,
                 family_memberships__family__memberships__member=me,
                 family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
                 member_of__club=request.club,
@@ -664,7 +668,7 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # member's own name) and whether self.me has already claimed a slot.
         tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
         for task in tasks:
-            task.claim_labels = [claim_label_for(claim.member) for claim in task.claims.all()]
+            task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
 
@@ -952,7 +956,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # status pill -- nothing here can actually be spent.
         vouchers = []
         if self.me is not None:
-            family_ids = {self.me.pk, *self.me.family_members.values_list("pk", flat=True)}
+            family_ids = {self.me.pk, *self.me.family_members(club).values_list("pk", flat=True)}
             vouchers = list(Voucher.objects.filter(club=club, issued_to__in=family_ids, is_active=True, expiry_date__gte=timezone.localdate(), consumed_amount__lt=F("amount")).select_related("issued_to").order_by("expiry_date"))
 
         # Just the count for the "Forms" menu row's own pill -- the full,
@@ -1200,12 +1204,13 @@ class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
     "Edit personal info". The design mock also shows a "National register
-    no.", an "Address", an "Allergies / notes" field and two "Consent"
-    toggles (photos on club channels / share contact with team parents) --
-    none of those exist on ``members.models.Member``, so (per this build's
-    "no schema changes for a screen-building pass" rule) they're simply not
-    part of this screen; MemberProfileForm (mobile/forms.py) only covers the
-    fields the model actually has.
+    no.", an "Address", an "Allergies / notes" field and a "share contact
+    with team parents" consent toggle -- none of those exist on
+    ``members.models.Member``, so they're simply not part of this screen;
+    MemberProfileForm (mobile/forms.py) only covers the fields the model
+    actually has. The mock's other consent toggle, "photos on club
+    channels", now does have a backing field (``photo_public_consent``,
+    gating ``Member.public_photo``) and is part of the form.
 
     Two more mock rows *do* have real backing data, both rendered read-only
     (never editable here -- family links and staff document review each live
@@ -1249,7 +1254,7 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):
         member = self._target_member()
-        form = MemberProfileForm(request.POST, instance=member)
+        form = MemberProfileForm(request.POST, request.FILES, instance=member)
         if form.is_valid():
             form.save()
             title = _("Saved")
@@ -1265,6 +1270,10 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             {"member": family_membership.member, "role": family_membership.get_role_display()}
             for family_membership in FamilyMembership.objects.filter(
                 role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
+                # family__club: Member is global -- without this, a member also
+                # belonging to another club would show that club's guardians here
+                # (2026-09-12 leak).
+                family__club=self.request.club,
                 family__memberships__member=member,
                 family__memberships__role=FamilyMembership.FamilyRole.CHILD,
             )

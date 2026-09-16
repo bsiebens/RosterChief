@@ -103,9 +103,7 @@
                     <tr>
                         <td>
                             <div class="flex items-center gap-2.5">
-                                <span class="avatar avatar-placeholder shrink-0">
-                                    <div class="h-8 w-8 rounded-full text-xs">{{ member.first_name|slice:":1" }}{{ member.last_name|slice:":1" }}</div>
-                                </span>
+                                {% include "management/_avatar.html" with person=member %}
                                 <div>
                                     <div class="flex items-center gap-1.5">
                                         <a class="link link-hover font-semibold text-ink" href="{% url 'management:member_detail' member.pk %}">{{ member.last_name }}, {{ member.first_name }}</a>

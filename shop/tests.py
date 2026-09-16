@@ -1103,6 +1103,18 @@ class InvoicePdfTests(TestCase):
 
         self.assertIn("AU", html)
 
+    def test_white_secondary_colour_does_not_produce_white_on_white_initials(self):
+        # A club could set secondary_color to #ffffff -- the fallback badge's
+        # background and text color must not both resolve to white.
+        self.club.secondary_color = "#ffffff"
+        self.club.save(update_fields=["secondary_color"])
+        invalidate_cached_invoice_pdf(self.order.invoice)
+
+        html = self.render()
+
+        self.assertIn("background: #ffffff", html)
+        self.assertIn("color: #000000", html)
+
     @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app")
     def test_a_scannable_qr_code_is_embedded(self):
         html = self.render()

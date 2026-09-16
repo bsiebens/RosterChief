@@ -1322,7 +1322,14 @@ class RBIHFImportPlanTests(EventsTestBase):
         cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Antwerp", zip_code="1000", country="BE", is_home=True)
         cls.away_location = Location.objects.create(club=cls.club, name="Deurne Ice Hall", address="2 St", city="Deurne", zip_code="2100", country="BE")
 
-    def home_fixture_row(self, game_id="5002", date="2026-09-12"):
+    def home_fixture_row(self, game_id="5002", date=None):
+        # A fixed future offset, not a hardcoded calendar date: build_plan's own
+        # to_delete logic (events.services.rbihf_import) compares a fixture's
+        # start against timezone.now(), so a literal date eventually becomes
+        # "today" (or the past) and silently flips these tests' own "this is a
+        # future fixture" premise depending on what day -- and time -- they
+        # happen to run.
+        date = date or (timezone.now() + timedelta(days=7)).strftime("%Y-%m-%d")
         return {"game_id": game_id, "date": date, "hour": "12:15", "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": "Amsterdam Tigers"}
 
     # -- suggested_location --------------------------------------------------
@@ -1578,10 +1585,10 @@ class RefereeServiceTests(EventsTestBase):
         cls.level.teams.add(cls.team)
 
         cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        cls.referee_profile = RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+        cls.referee_profile = RefereeProfile.objects.create(club=cls.club, member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_eligible_profile(self, member, level=None):
-        return RefereeProfile.objects.create(member=member, level=level or self.level, valid_until=timezone.localdate() + timedelta(days=30))
+        return RefereeProfile.objects.create(club=self.club, member=member, level=level or self.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_home_game(self, **kwargs):
         kwargs.setdefault("kind", Event.EventKind.GAME)
@@ -1651,7 +1658,7 @@ class RefereeServiceTests(EventsTestBase):
     def test_eligible_referees_ignores_someone_not_eligible_for_this_team(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         unrelated_referee = Member.objects.create(first_name="Not", last_name="Eligible")
-        RefereeProfile.objects.create(member=unrelated_referee)  # no level set
+        RefereeProfile.objects.create(club=self.club, member=unrelated_referee)  # no level set
 
         game = self.make_home_game(teams=other_team)
 
@@ -1671,7 +1678,7 @@ class RefereeServiceTests(EventsTestBase):
 
     def test_eligible_referees_ignores_an_expired_profile(self):
         expired_referee = Member.objects.create(first_name="Ex", last_name="Pired")
-        RefereeProfile.objects.create(member=expired_referee, level=self.level, valid_until=timezone.localdate() - timedelta(days=1))
+        RefereeProfile.objects.create(club=self.club, member=expired_referee, level=self.level, valid_until=timezone.localdate() - timedelta(days=1))
 
         game = self.make_home_game()
 
@@ -1830,7 +1837,7 @@ class RefereeSignupServiceTests(EventsTestBase):
         cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
         cls.level.teams.add(cls.team)
         cls.referee = Member.objects.create(first_name="Ref", last_name="Eree")
-        cls.referee_profile = RefereeProfile.objects.create(member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+        cls.referee_profile = RefereeProfile.objects.create(club=cls.club, member=cls.referee, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_home_game(self, **kwargs):
         kwargs.setdefault("kind", Event.EventKind.GAME)
@@ -2004,7 +2011,7 @@ class OfficialServiceTests(OfficialsTestBase):
         cls.level.teams.add(cls.team)
 
         cls.official = Member.objects.create(first_name="Off", last_name="Icial")
-        cls.official_profile = OfficialProfile.objects.create(member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+        cls.official_profile = OfficialProfile.objects.create(club=cls.club, member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_home_game(self, **kwargs):
         kwargs.setdefault("kind", Event.EventKind.GAME)
@@ -2043,7 +2050,7 @@ class OfficialServiceTests(OfficialsTestBase):
     def test_eligible_officials_includes_a_higher_level_via_inheritance(self):
         national = OfficialLevel.objects.create(club=self.club, name="National", inherits_from=self.level)
         national_official = Member.objects.create(first_name="Nat", last_name="Ional")
-        OfficialProfile.objects.create(member=national_official, level=national, valid_until=timezone.localdate() + timedelta(days=30))
+        OfficialProfile.objects.create(club=self.club, member=national_official, level=national, valid_until=timezone.localdate() + timedelta(days=30))
 
         game = self.make_home_game()
 
@@ -2061,7 +2068,7 @@ class OfficialServiceTests(OfficialsTestBase):
         game = self.make_home_game(max_officials=1)
         assign_official(game, self.official, assigned_by=self.alice)
         second = Member.objects.create(first_name="Second", last_name="Off")
-        OfficialProfile.objects.create(member=second, level=self.level, valid_until=timezone.localdate() + timedelta(days=30))
+        OfficialProfile.objects.create(club=self.club, member=second, level=self.level, valid_until=timezone.localdate() + timedelta(days=30))
 
         with self.assertRaises(OfficialAssignmentError):
             assign_official(game, second, assigned_by=self.alice)
@@ -2112,7 +2119,7 @@ class OfficialSignupServiceTests(OfficialsTestBase):
         cls.level = OfficialLevel.objects.create(club=cls.club, name="Regional")
         cls.level.teams.add(cls.team)
         cls.official = Member.objects.create(first_name="Off", last_name="Icial")
-        cls.official_profile = OfficialProfile.objects.create(member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
+        cls.official_profile = OfficialProfile.objects.create(club=cls.club, member=cls.official, level=cls.level, valid_until=timezone.localdate() + timedelta(days=30))
 
     def make_home_game(self, **kwargs):
         kwargs.setdefault("kind", Event.EventKind.GAME)

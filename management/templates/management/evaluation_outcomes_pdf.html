@@ -1,0 +1,73 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same standalone-document convention as
+    membership_list_pdf.html (no app.css; daisyUI's dark theme/flex layouts mean
+    nothing on paper).
+
+    Deliberately renders only `rows` (evaluations.services.session_outcome_rows --
+    player + EvaluationOutcome.decision, nothing else): this document is meant to
+    leave the room after a meeting, so it must never carry a player's evaluation
+    scores or the private EvaluationNote discussion log alongside the decision
+    actually made about them.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% trans "Outcomes" %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 18mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {% trans "evaluation outcomes" %} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
+            h1 { font-size: 18pt; margin: 0 0 2mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 8mm; }
+            table { width: 100%; border-collapse: collapse; }
+            th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #999; padding: 2mm 2mm 1mm 0; }
+            td { padding: 2mm 2mm 2mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
+            td.decision { white-space: pre-line; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ club.name }}</h1>
+                <div class="muted">{% blocktrans with name=checklist.name %}{{ name }} — meeting outcomes{% endblocktrans %}</div>
+            </div>
+            <div class="muted">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}<br>
+                {% blocktrans with started=session.started_at|date:"j F Y, H:i" %}Meeting started {{ started }}{% endblocktrans %}<br>
+                {% blocktrans count counter=rows|length %}{{ counter }} player{% plural %}{{ counter }} players{% endblocktrans %}
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>{% trans "Player" %}</th>
+                    <th>{% trans "Outcome decision" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for outcome in rows %}
+                    <tr>
+                        <td>{{ outcome.player.get_full_name }}</td>
+                        <td class="decision">{{ outcome.decision }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="2" class="muted">{% trans "No outcome decisions were recorded in this meeting." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </body>
+</html>

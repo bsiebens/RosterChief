@@ -228,7 +228,12 @@
 
     .btn-primary {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
+        /* Fixed, not club-derived: a club's colour can land close to the page
+           background (white, or near it) -- this keeps the button's own shape
+           visible regardless, on top of the text-contrast fix above. Same
+           border colour .btn-outline already uses for the same reason. */
+        border-color: var(--color-stroke);
     }
 
     .btn-success {
@@ -664,7 +669,7 @@
        background). */
     .desktop-crest-fallback {
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -718,7 +723,7 @@
         top: -4px;
         right: -4px;
         background: var(--color-club);
-        color: #fff;
+        color: var(--color-club-content);
         font-family: var(--font-mono);
         font-size: 10px;
         font-weight: 600;
@@ -812,6 +817,7 @@
 
     .person-chip-active .person-chip-avatar {
         background: var(--color-club);
+        color: var(--color-club-content);
     }
 
     .person-chip-label {

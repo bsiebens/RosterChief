@@ -70,7 +70,7 @@
                             <button type="button" class="flex-1" :class="state === 'true' ? 'bg-ok text-white' : 'bg-rule text-dim'" @click="state = 'true'" aria-label="{% trans "In" %}">
                                 {% lucide "check" size=18 stroke_width=2.4 class="mx-auto" %}
                             </button>
-                            <button type="button" class="flex-1" :class="state === 'false' ? 'bg-club text-white' : 'bg-rule text-dim'" @click="state = 'false'" aria-label="{% trans "Out" %}">
+                            <button type="button" class="flex-1" :class="state === 'false' ? 'bg-club text-club-content' : 'bg-rule text-dim'" @click="state = 'false'" aria-label="{% trans "Out" %}">
                                 {% lucide "x" size=18 stroke_width=2.4 class="mx-auto" %}
                             </button>
                         </div>

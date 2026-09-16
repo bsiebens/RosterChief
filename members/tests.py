@@ -1,4 +1,3 @@
-import datetime
 import tempfile
 from datetime import date, timedelta
 from io import StringIO
@@ -6,7 +5,7 @@ from pathlib import Path
 
 from allauth.mfa.models import Authenticator
 from django.contrib.admin.sites import AdminSite
-from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
@@ -17,9 +16,8 @@ from django.utils import timezone
 from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from members.admin import FamilyAdmin
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member, ParentClaim
+from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services import MemberImportResult
-from members.services.claims import ClaimError, approve_claim, children_awaiting_a_parent, reject_claim, submit_claim, suggested_children
 from members.services.family import claim_label_for, family_contacts
 
 
@@ -73,17 +71,33 @@ class MemberModelTests(TestCase):
         with self.assertRaises(IntegrityError):
             Member.objects.create(user=user, first_name="Second", last_name="Member")
 
+    def test_public_photo_is_none_without_a_photo(self):
+        member = Member.objects.create(first_name="No", last_name="Photo", photo_public_consent=True)
+        self.assertIsNone(member.public_photo)
+
+    def test_public_photo_is_none_without_consent(self):
+        member = Member.objects.create(first_name="Not", last_name="Consenting", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
+        self.assertIsNone(member.public_photo)
+
+    def test_public_photo_is_the_photo_once_consent_is_given(self):
+        member = Member.objects.create(first_name="Consents", last_name="Fully", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        self.assertEqual(member.public_photo, member.photo)
+
 
 class FamilyNameOptionalTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_family_can_be_created_without_a_name(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         self.assertEqual(family.name, "")
 
     def test_str_uses_name_when_present(self):
-        self.assertEqual(str(Family.objects.create(name="The Smiths")), "The Smiths")
+        self.assertEqual(str(Family.objects.create(club=self.club, name="The Smiths")), "The Smiths")
 
     def test_str_falls_back_to_member_surnames(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         smith = Member.objects.create(first_name="Pat", last_name="Smith")
         jones = Member.objects.create(first_name="Kim", last_name="Jones")
         FamilyMembership.objects.create(family=family, member=smith, role=FamilyMembership.FamilyRole.PARENT)
@@ -93,7 +107,7 @@ class FamilyNameOptionalTests(TestCase):
         self.assertEqual(str(family), "Jones / Smith")
 
     def test_str_falls_back_to_short_id_when_empty(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         self.assertEqual(str(family), f"Family {str(family.pk)[:8]}")
 
 
@@ -101,7 +115,8 @@ class FamilyModelTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         # One family with a member in every role -- read-only for all four tests.
-        cls.family = Family.objects.create(name="The Smiths")
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.family = Family.objects.create(club=cls.club, name="The Smiths")
         cls.parent = Member.objects.create(first_name="Pat", last_name="Smith")
         cls.guardian = Member.objects.create(first_name="Gale", last_name="Smith")
         cls.child = Member.objects.create(first_name="Kim", last_name="Smith")
@@ -124,7 +139,7 @@ class FamilyModelTests(TestCase):
         self.assertEqual(children, [self.child])
 
     def test_guardians_are_scoped_to_the_family(self):
-        other_family = Family.objects.create(name="The Joneses")
+        other_family = Family.objects.create(club=self.club, name="The Joneses")
         outsider = Member.objects.create(first_name="Out", last_name="Sider")
         FamilyMembership.objects.create(family=other_family, member=outsider, role=FamilyMembership.FamilyRole.PARENT)
 
@@ -132,8 +147,12 @@ class FamilyModelTests(TestCase):
 
 
 class MemberGuardiansTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_guardians_of_a_child_are_family_parents_and_guardians(self):
-        family = Family.objects.create(name="The Does")
+        family = Family.objects.create(club=self.club, name="The Does")
         mum = Member.objects.create(first_name="Mary", last_name="Doe")
         legal = Member.objects.create(first_name="Lee", last_name="Doe")
         kid = Member.objects.create(first_name="Kit", last_name="Doe")
@@ -142,21 +161,21 @@ class MemberGuardiansTests(TestCase):
         FamilyMembership.objects.create(family=family, member=legal, role=FamilyMembership.FamilyRole.GUARDIAN)
         FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
 
-        self.assertEqual(set(kid.guardians), {mum, legal})
+        self.assertEqual(set(kid.guardians(self.club)), {mum, legal})
 
     def test_guardians_empty_for_a_parent(self):
-        family = Family.objects.create(name="The Roes")
+        family = Family.objects.create(club=self.club, name="The Roes")
         parent = Member.objects.create(first_name="Ray", last_name="Roe")
         kid = Member.objects.create(first_name="Ren", last_name="Roe")
 
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
 
-        self.assertEqual(list(parent.guardians), [])
+        self.assertEqual(list(parent.guardians(self.club)), [])
 
     def test_guardians_do_not_leak_across_families(self):
-        family_a = Family.objects.create(name="Family A")
-        family_b = Family.objects.create(name="Family B")
+        family_a = Family.objects.create(club=self.club, name="Family A")
+        family_b = Family.objects.create(club=self.club, name="Family B")
         parent_a = Member.objects.create(first_name="Ann", last_name="A")
         parent_b = Member.objects.create(first_name="Ben", last_name="B")
         kid = Member.objects.create(first_name="Cody", last_name="A")
@@ -166,15 +185,19 @@ class MemberGuardiansTests(TestCase):
         # parent_b belongs to a different family and must not appear as kid's guardian.
         FamilyMembership.objects.create(family=family_b, member=parent_b, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(set(kid.guardians), {parent_a})
+        self.assertEqual(set(kid.guardians(self.club)), {parent_a})
 
 
 class MemberFamilyMembersTests(TestCase):
     """Member.family_members -- every role, both directions, unlike the
     one-directional child->guardians shape of Member.guardians."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_includes_parents_children_and_guardians_but_not_self(self):
-        family = Family.objects.create(name="The Does")
+        family = Family.objects.create(club=self.club, name="The Does")
         parent = Member.objects.create(first_name="Mary", last_name="Doe")
         guardian = Member.objects.create(first_name="Lee", last_name="Doe")
         kid = Member.objects.create(first_name="Kit", last_name="Doe")
@@ -182,42 +205,46 @@ class MemberFamilyMembersTests(TestCase):
         FamilyMembership.objects.create(family=family, member=guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
         FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
 
-        self.assertEqual(set(parent.family_members), {guardian, kid})
-        self.assertEqual(set(kid.family_members), {parent, guardian})
+        self.assertEqual(set(parent.family_members(self.club)), {guardian, kid})
+        self.assertEqual(set(kid.family_members(self.club)), {parent, guardian})
 
     def test_a_lone_member_has_no_family_members(self):
         lone = Member.objects.create(first_name="Lonnie", last_name="Loner")
 
-        self.assertEqual(list(lone.family_members), [])
+        self.assertEqual(list(lone.family_members(self.club)), [])
 
     def test_does_not_leak_across_families(self):
-        family_a = Family.objects.create(name="Family A")
-        family_b = Family.objects.create(name="Family B")
+        family_a = Family.objects.create(club=self.club, name="Family A")
+        family_b = Family.objects.create(club=self.club, name="Family B")
         member_a = Member.objects.create(first_name="Ann", last_name="A")
         member_b = Member.objects.create(first_name="Ben", last_name="B")
         FamilyMembership.objects.create(family=family_a, member=member_a, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family_b, member=member_b, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(list(member_a.family_members), [])
+        self.assertEqual(list(member_a.family_members(self.club)), [])
 
 
 class FamilyMembershipModelTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_default_role_is_parent(self):
-        family = Family.objects.create(name="Fam")
+        family = Family.objects.create(club=self.club, name="Fam")
         member = Member.objects.create(first_name="D", last_name="Efault")
         membership = FamilyMembership.objects.create(family=family, member=member)
 
         self.assertEqual(membership.role, FamilyMembership.FamilyRole.PARENT)
 
     def test_str_includes_family_member_and_role(self):
-        family = Family.objects.create(name="The Smiths")
+        family = Family.objects.create(club=self.club, name="The Smiths")
         member = Member.objects.create(first_name="Pat", last_name="Smith")
         membership = FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.GUARDIAN)
 
         self.assertEqual(str(membership), "The Smiths - Pat Smith (guardian)")
 
     def test_member_unique_per_family(self):
-        family = Family.objects.create(name="Fam")
+        family = Family.objects.create(club=self.club, name="Fam")
         member = Member.objects.create(first_name="Solo", last_name="Once")
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
 
@@ -226,8 +253,8 @@ class FamilyMembershipModelTests(TestCase):
 
     def test_same_member_can_join_multiple_families(self):
         member = Member.objects.create(first_name="Multi", last_name="Fam")
-        family_a = Family.objects.create(name="A")
-        family_b = Family.objects.create(name="B")
+        family_a = Family.objects.create(club=self.club, name="A")
+        family_b = Family.objects.create(club=self.club, name="B")
 
         FamilyMembership.objects.create(family=family_a, member=member, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family_b, member=member, role=FamilyMembership.FamilyRole.PARENT)
@@ -235,7 +262,7 @@ class FamilyMembershipModelTests(TestCase):
         self.assertEqual(member.family_memberships.count(), 2)
 
     def test_deleting_family_cascades_to_memberships(self):
-        family = Family.objects.create(name="Doomed")
+        family = Family.objects.create(club=self.club, name="Doomed")
         member = Member.objects.create(first_name="Cas", last_name="Cade")
         FamilyMembership.objects.create(family=family, member=member)
 
@@ -305,8 +332,12 @@ class GroupMembershipModelTests(TestCase):
 
 
 class FamilyAdminTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_member_count_reflects_memberships(self):
-        family = Family.objects.create(name="The Smiths")
+        family = Family.objects.create(club=self.club, name="The Smiths")
         for i in range(3):
             member = Member.objects.create(first_name=f"Kid{i}", last_name="Smith")
             FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
@@ -315,7 +346,7 @@ class FamilyAdminTests(TestCase):
         self.assertEqual(admin_instance.member_count(family), 3)
 
     def test_member_count_is_zero_without_members(self):
-        family = Family.objects.create(name="Empty")
+        family = Family.objects.create(club=self.club, name="Empty")
         admin_instance = FamilyAdmin(Family, AdminSite())
         self.assertEqual(admin_instance.member_count(family), 0)
 
@@ -721,194 +752,6 @@ class MemberImportResultTests(TestCase):
         self.assertEqual(result.successful_rows, 5)
 
 
-class ParentClaimTests(TestCase):
-    """The onboarding path for a club that arrives with a list of children and no
-    parent records -- see members.services.claims."""
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
-        today = timezone.localdate()
-        cls.season = Season.objects.create(club=cls.club, start_date=today, end_date=today + datetime.timedelta(days=300))
-
-        # An imported child: no login, and a family of their own with nobody on it.
-        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe", date_of_birth=datetime.date(2014, 3, 2))
-        ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
-        cls.family = Family.objects.create()
-        FamilyMembership.objects.create(family=cls.family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
-
-    def make_claim(self, **overrides):
-        details = {
-            "parent_first_name": "Taylor",
-            "parent_last_name": "Doe",
-            "parent_email": "taylor.doe@example.com",
-            "child_first_name": "Jamie",
-            "child_last_name": "Doe",
-            "child_date_of_birth": datetime.date(2014, 3, 2),
-        }
-        details.update(overrides)
-        return submit_claim(self.club, **details)
-
-    def test_a_child_with_no_parent_is_on_the_worklist(self):
-        self.assertIn(self.child, children_awaiting_a_parent(self.club))
-
-    def test_a_child_who_has_a_parent_is_not(self):
-        parent = Member.objects.create(first_name="Taylor", last_name="Doe")
-        FamilyMembership.objects.create(family=self.family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
-
-        self.assertNotIn(self.child, children_awaiting_a_parent(self.club))
-
-    def test_submitting_records_a_pending_claim_without_matching_anything(self):
-        # The form is public, so it must not resolve the child -- doing so would
-        # let an anonymous submitter test which children the club has.
-        claim = self.make_claim(child_last_name="Nonexistent")
-
-        self.assertTrue(claim.is_pending)
-        self.assertIsNone(claim.child)
-
-    def test_suggestions_rank_the_real_child_first(self):
-        claim = self.make_claim()
-
-        self.assertEqual(suggested_children(claim)[0], self.child)
-
-    def test_suggestions_never_include_a_child_who_already_has_a_parent(self):
-        parent = Member.objects.create(first_name="Existing", last_name="Doe")
-        FamilyMembership.objects.create(family=self.family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
-        claim = self.make_claim()
-
-        self.assertEqual(suggested_children(claim), [])
-
-    def test_approving_links_the_parent_as_a_guardian(self):
-        claim = self.make_claim()
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        parent = Member.objects.get(user__email="taylor.doe@example.com")
-        self.assertEqual(FamilyMembership.objects.get(family=self.family, member=parent).role, FamilyMembership.FamilyRole.PARENT)
-        # A guardian, not a member: they hold the login but owe no fee and are
-        # not counted in the club's roll.
-        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
-
-    def test_approving_gives_the_parent_an_unusable_password_to_reset(self):
-        claim = self.make_claim()
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        user = get_user_model().objects.get(email="taylor.doe@example.com")
-        self.assertFalse(user.has_usable_password())
-
-    def test_approving_closes_the_claim_and_records_the_match(self):
-        claim = self.make_claim()
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        claim.refresh_from_db()
-        self.assertEqual(claim.status, ParentClaim.Status.APPROVED)
-        self.assertEqual(claim.child, self.child)
-        self.assertIsNotNone(claim.reviewed_at)
-
-    def test_an_approved_child_leaves_the_worklist(self):
-        claim = self.make_claim()
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        # The state is the shape of the data, so it corrects itself rather than
-        # needing a flag cleared.
-        self.assertNotIn(self.child, children_awaiting_a_parent(self.club))
-
-    def test_a_claim_cannot_be_approved_twice(self):
-        claim = self.make_claim()
-        approve_claim(claim, child=self.child, season=self.season)
-
-        with self.assertRaises(ClaimError):
-            approve_claim(claim, child=self.child, season=self.season)
-
-    def test_rejecting_records_the_reason_and_links_nobody(self):
-        claim = self.make_claim()
-
-        reject_claim(claim, note="Not on our records.")
-
-        claim.refresh_from_db()
-        self.assertEqual(claim.status, ParentClaim.Status.REJECTED)
-        self.assertEqual(claim.note, "Not on our records.")
-        self.assertFalse(Member.objects.filter(user__email="taylor.doe@example.com").exists())
-
-    def test_a_rejected_claim_cannot_then_be_approved(self):
-        claim = self.make_claim()
-        reject_claim(claim)
-
-        with self.assertRaises(ClaimError):
-            approve_claim(claim, child=self.child, season=self.season)
-
-    def test_submit_claim_records_the_signed_in_submitter(self):
-        user = User.objects.create_user(email="taylor.doe@example.com", password="x")
-
-        claim = self.make_claim(submitted_by_user=user)
-
-        self.assertEqual(claim.submitted_by_user, user)
-
-    def test_submit_claim_leaves_the_submitter_blank_for_an_anonymous_submission(self):
-        claim = self.make_claim()
-
-        self.assertIsNone(claim.submitted_by_user)
-
-    def test_approving_a_second_claim_from_a_known_parent_merges_into_their_existing_family(self):
-        # A parent claiming a second (or third) child of theirs: the child's own
-        # solo family (created for them on import) must merge into the family
-        # the parent already belongs to, not sit alongside it in a second row.
-        first_claim = self.make_claim()
-        approve_claim(first_claim, child=self.child, season=self.season)
-        parent_user = User.objects.get(email="taylor.doe@example.com")
-        parent = Member.objects.get(user=parent_user)
-
-        second_child = Member.objects.create(first_name="Robin", last_name="Doe", date_of_birth=datetime.date(2016, 5, 1))
-        ClubMembership.objects.create(club=self.club, member=second_child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        second_family = Family.objects.create()
-        FamilyMembership.objects.create(family=second_family, member=second_child, role=FamilyMembership.FamilyRole.CHILD)
-        second_claim = self.make_claim(
-            child_first_name="Robin",
-            child_last_name="Doe",
-            child_date_of_birth=datetime.date(2016, 5, 1),
-            submitted_by_user=parent_user,
-        )
-
-        approve_claim(second_claim, child=second_child, season=self.season)
-
-        # Exactly one account and one household with both children.
-        self.assertEqual(User.objects.filter(email="taylor.doe@example.com").count(), 1)
-        self.assertEqual(Member.objects.filter(user=parent_user).count(), 1)
-        family = FamilyMembership.objects.get(member=parent).family
-        self.assertCountEqual(family.children, [self.child, second_child])
-        self.assertFalse(Family.objects.filter(pk=second_family.pk).exists())
-        # Still a guardian on the second child's enrolment too, not a member.
-        self.assertEqual(ClubMembership.objects.get(club=self.club, member=parent).kind, ClubMembership.Kind.GUARDIAN)
-
-    def test_approving_falls_back_to_the_childs_family_when_the_parent_has_none_yet(self):
-        # A known account with no family link at all (e.g. login granted without
-        # ever being attached to a family) -- nothing to anchor to, so this
-        # behaves exactly like the original, family-less flow.
-        user = User.objects.create_user(email="taylor.doe@example.com", password="x")
-        parent = Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
-        claim = self.make_claim(submitted_by_user=user)
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        self.assertEqual(FamilyMembership.objects.get(member=parent).family, self.family)
-        self.assertEqual(Member.objects.filter(user=user).count(), 1)
-
-    def test_approving_uses_the_authenticated_members_account_even_if_the_typed_email_differs(self):
-        # submitted_by_user is authoritative -- a stale or mistyped parent_email
-        # must never fork off a second User/Member for someone already known.
-        user = User.objects.create_user(email="real.taylor@example.com", password="x")
-        Member.objects.create(user=user, first_name="Taylor", last_name="Doe")
-        claim = self.make_claim(parent_email="typo.taylor@example.com", submitted_by_user=user)
-
-        approve_claim(claim, child=self.child, season=self.season)
-
-        self.assertEqual(Member.objects.filter(first_name="Taylor", last_name="Doe").count(), 1)
-        self.assertFalse(User.objects.filter(email="typo.taylor@example.com").exists())
-
-
 class FamilyContactsTests(TestCase):
     """members.services.family.family_contacts -- every parent/guardian on
     record for a member's own family, used both by the registration invoice
@@ -916,7 +759,8 @@ class FamilyContactsTests(TestCase):
     (what it shows)."""
 
     def setUp(self):
-        self.family = Family.objects.create()
+        self.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        self.family = Family.objects.create(club=self.club)
         self.child = Member.objects.create(first_name="Cam", last_name="Childless")
         FamilyMembership.objects.create(family=self.family, member=self.child, role=FamilyMembership.FamilyRole.CHILD)
 
@@ -928,33 +772,33 @@ class FamilyContactsTests(TestCase):
     def test_a_parent_is_included_and_labelled_parent(self):
         parent = self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="pia@example.com")
 
-        contacts = family_contacts(self.child)
+        contacts = family_contacts(self.child, self.club)
 
         self.assertEqual(contacts, [{"member": parent, "email": "pia@example.com", "role_label": "parent"}])
 
     def test_a_guardian_is_included_and_labelled_guardian(self):
         guardian = self.make_contact("Gia", FamilyMembership.FamilyRole.GUARDIAN, email="gia@example.com")
 
-        contacts = family_contacts(self.child)
+        contacts = family_contacts(self.child, self.club)
 
         self.assertEqual(contacts, [{"member": guardian, "email": "gia@example.com", "role_label": "guardian"}])
 
     def test_another_child_in_the_family_is_excluded(self):
         self.make_contact("Sib", FamilyMembership.FamilyRole.CHILD, email="sib@example.com")
 
-        self.assertEqual(family_contacts(self.child), [])
+        self.assertEqual(family_contacts(self.child, self.club), [])
 
     def test_a_contact_with_no_email_is_excluded(self):
         Member.objects.create(first_name="Noe", last_name="Mail")
         FamilyMembership.objects.create(family=self.family, member=Member.objects.get(first_name="Noe"), role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(family_contacts(self.child), [])
+        self.assertEqual(family_contacts(self.child, self.club), [])
 
     def test_both_parents_are_included(self):
         self.make_contact("Bernard", FamilyMembership.FamilyRole.PARENT, email="bernard@example.com")
         self.make_contact("Charlotte", FamilyMembership.FamilyRole.PARENT, email="charlotte@example.com")
 
-        emails = {contact["email"] for contact in family_contacts(self.child)}
+        emails = {contact["email"] for contact in family_contacts(self.child, self.club)}
 
         self.assertEqual(emails, {"bernard@example.com", "charlotte@example.com"})
 
@@ -962,12 +806,12 @@ class FamilyContactsTests(TestCase):
         self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="shared@example.com")
         self.make_contact("Gia", FamilyMembership.FamilyRole.GUARDIAN, email="SHARED@example.com")
 
-        self.assertEqual(len(family_contacts(self.child)), 1)
+        self.assertEqual(len(family_contacts(self.child, self.club)), 1)
 
     def test_a_member_asking_about_their_own_family_is_not_their_own_contact(self):
         parent = self.make_contact("Pia", FamilyMembership.FamilyRole.PARENT, email="pia@example.com")
 
-        contacts = family_contacts(parent)
+        contacts = family_contacts(parent, self.club)
 
         self.assertEqual(contacts, [])
         self.assertEqual(FamilyMembership.objects.get(member=parent).family, self.family)
@@ -979,33 +823,37 @@ class ClaimLabelForTests(TestCase):
     one, their own name otherwise. Doesn't broadcast which specific parent
     or child in a family is covering it."""
 
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
     def test_a_standalone_member_shows_their_own_name(self):
         member = Member.objects.create(first_name="Sam", last_name="Solo")
 
-        self.assertEqual(claim_label_for(member), "Sam Solo")
+        self.assertEqual(claim_label_for(member, self.club), "Sam Solo")
 
     def test_a_member_in_a_named_family_shows_the_family_name(self):
-        family = Family.objects.create(name="Siebens")
+        family = Family.objects.create(club=self.club, name="Siebens")
         member = Member.objects.create(first_name="Bernard", last_name="Siebens")
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(claim_label_for(member), "Siebens family")
+        self.assertEqual(claim_label_for(member, self.club), "Siebens family")
 
     def test_a_child_in_the_family_shows_the_same_family_label(self):
         # The label doesn't distinguish which family member claimed it --
         # a child claiming reads identically to their parent claiming.
-        family = Family.objects.create(name="Siebens")
+        family = Family.objects.create(club=self.club, name="Siebens")
         child = Member.objects.create(first_name="Charlotte", last_name="Siebens")
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
 
-        self.assertEqual(claim_label_for(child), "Siebens family")
+        self.assertEqual(claim_label_for(child, self.club), "Siebens family")
 
     def test_an_unnamed_family_falls_back_to_the_surname_join(self):
         # Family.__str__'s own fallback (no explicit name -- shared surnames
         # instead) is what claim_label_for leans on, so this stays correct
         # without duplicating that logic.
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         member = Member.objects.create(first_name="Bernard", last_name="Siebens")
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
 
-        self.assertEqual(claim_label_for(member), "Siebens family")
+        self.assertEqual(claim_label_for(member, self.club), "Siebens family")

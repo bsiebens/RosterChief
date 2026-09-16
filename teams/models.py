@@ -302,7 +302,7 @@ class RefereeLevel(ClubScopedModel):
         return {level.pk: level.eligible_team_ids() for level in RefereeLevel.objects.filter(club=club).select_related("inherits_from")}
 
 
-class RefereeProfile(UUIDModel):
+class RefereeProfile(ClubScopedModel):
     """Marks a member as a club referee: their level (which determines which
     teams they're eligible for, via RefereeLevel.teams) and how long that
     qualification is valid. A member-level fact, not a group-level one --
@@ -310,13 +310,19 @@ class RefereeProfile(UUIDModel):
     stays a plain, opaque collection of people with no referee-specific
     knowledge).
 
+    Club-scoped, and `member` a plain FK rather than OneToOne: Member is
+    global (shared across every club a person belongs to), but a referee
+    qualification is club-specific -- a person can hold independent levels
+    in different clubs, and one club's level/validity must never surface
+    when looking at that same person from another club.
+
     No level, or an expired/unset validity, both mean "not currently
     eligible" -- see `is_currently_valid`/`eligible_teams` below, the single
     definitions every consumer (the event assign panel, the team page, the
     referees list) reads through, so "eligible" never drifts out of sync.
     """
 
-    member = models.OneToOneField(Member, on_delete=models.CASCADE, related_name="referee_profile", verbose_name=_("member"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_profiles", verbose_name=_("member"))
     level = models.ForeignKey(RefereeLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="referees", verbose_name=_("level"))
     valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the referee is not eligible for assignment until it's extended."))
 
@@ -324,9 +330,16 @@ class RefereeProfile(UUIDModel):
         verbose_name = _("referee profile")
         verbose_name_plural = _("referee profiles")
         ordering = ["member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_referee_profile_per_club_per_member"),
+        ]
 
     def __str__(self):
         return f"{self.member} (referee)"
+
+    def clean(self):
+        if self.club_id is not None:
+            validate_club_scope(self, self.club_id, same_club_fields=("level",))
 
     @property
     def is_currently_valid(self) -> bool:
@@ -414,12 +427,14 @@ class OfficialLevel(ClubScopedModel):
         return {level.pk: level.eligible_team_ids() for level in OfficialLevel.objects.filter(club=club).select_related("inherits_from")}
 
 
-class OfficialProfile(UUIDModel):
+class OfficialProfile(ClubScopedModel):
     """The match-officials counterpart to RefereeProfile -- same shape, same
     reasoning: a member-level fact (which level, how long it's valid), not a
-    group-level one, managed from the member's own page."""
+    group-level one, managed from the member's own page. Club-scoped, and
+    `member` a plain FK rather than OneToOne, for the same reason as
+    RefereeProfile: Member is global, an official qualification isn't."""
 
-    member = models.OneToOneField(Member, on_delete=models.CASCADE, related_name="official_profile", verbose_name=_("member"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="official_profiles", verbose_name=_("member"))
     level = models.ForeignKey(OfficialLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="officials", verbose_name=_("level"))
     valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the official is not eligible for assignment until it's extended."))
 
@@ -427,9 +442,16 @@ class OfficialProfile(UUIDModel):
         verbose_name = _("official profile")
         verbose_name_plural = _("official profiles")
         ordering = ["member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_official_profile_per_club_per_member"),
+        ]
 
     def __str__(self):
         return f"{self.member} (official)"
+
+    def clean(self):
+        if self.club_id is not None:
+            validate_club_scope(self, self.club_id, same_club_fields=("level",))
 
     @property
     def is_currently_valid(self) -> bool:

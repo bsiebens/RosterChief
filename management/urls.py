@@ -65,9 +65,6 @@ urlpatterns = [
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
     path("roles/shop-admins/<uuid:pk>/revoke/", views.ShopManagerRevokeView.as_view(), name="shop_admin_revoke"),
     path("roles/evaluation-managers/<uuid:pk>/revoke/", views.EvaluationManagerRevokeView.as_view(), name="evaluation_manager_revoke"),
-    path("parent-claims/", views.ParentClaimListView.as_view(), name="parent_claim_list"),
-    path("parent-claims/<uuid:pk>/approve/", views.ParentClaimApproveView.as_view(), name="parent_claim_approve"),
-    path("parent-claims/<uuid:pk>/reject/", views.ParentClaimRejectView.as_view(), name="parent_claim_reject"),
     path("groups/", views.GroupListView.as_view(), name="group_list"),
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),
     path("groups/<uuid:pk>/", views.GroupDetailView.as_view(), name="group_detail"),
@@ -226,6 +223,7 @@ urlpatterns = [
     path("evaluations/<slug:checklist_slug>/matrix/", views.EvaluationMatrixView.as_view(), name="evaluation_matrix"),
     path("evaluations/<slug:checklist_slug>/walkthrough/", views.EvaluationWalkthroughView.as_view(), name="evaluation_walkthrough"),
     path("evaluations/entries/<uuid:pk>/", views.EvaluationDetailView.as_view(), name="evaluation_detail"),
+    path("evaluations/sessions/<uuid:pk>/outcomes.pdf", views.EvaluationSessionOutcomesPdfView.as_view(), name="evaluation_session_outcomes_pdf"),
     path("members/<uuid:pk>/evaluations/new/", views.EvaluationCreateView.as_view(), name="evaluation_create"),
     path("members/<uuid:pk>/evaluations/new/<slug:checklist_slug>/", views.EvaluationCreateView.as_view(), name="evaluation_create_for_checklist"),
     # Settings (admin only)

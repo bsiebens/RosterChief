@@ -952,7 +952,7 @@ class AccessServiceTests(TestCase):
     def test_parent_sees_self_and_children(self):
         user, parent = self.make_user_member("parent@example.com")
         child = Member.objects.create(first_name="Kid", last_name="Doe")
-        family = Family.objects.create(name="Doe")
+        family = Family.objects.create(club=self.club, name="Doe")
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
 
@@ -1576,6 +1576,12 @@ class ClubBrandingModelTests(TestCase):
         self.assertEqual(Club(primary_color="#fef08a").primary_content_color, "#000000")
         self.assertEqual(Club(primary_color="#1e40af").primary_content_color, "#ffffff")
 
+    def test_pure_white_gets_black_text(self):
+        # The most extreme case of the pale-colour rule above: white-on-white
+        # buttons are unreadable, not just low-contrast.
+        self.assertEqual(Club(primary_color="#ffffff").primary_content_color, "#000000")
+        self.assertEqual(Club(secondary_color="#ffffff").secondary_content_color, "#000000")
+
     def test_no_colour_means_no_contrast_colour(self):
         self.assertEqual(Club(primary_color="").primary_content_color, "")
 
@@ -1596,6 +1602,18 @@ class ClubBrandingModelTests(TestCase):
         with self.assertRaises(ValidationError):
             club.full_clean()
 
+    def test_white_is_blocked_as_primary_or_secondary_colour(self):
+        # Temporary, until every hand-authored CSS surface that assumes a
+        # visible edge against the app's own white backgrounds is audited --
+        # see Club.clean()'s own docstring.
+        with self.assertRaises(ValidationError):
+            Club(name="Ajax United", primary_color="#FFFFFF").full_clean()
+        with self.assertRaises(ValidationError):
+            Club(name="Ajax United", secondary_color="#ffffff").full_clean()
+
+    def test_near_white_colours_are_still_allowed(self):
+        Club(name="Ajax United", primary_color="#fefefe", secondary_color="#fafafa").full_clean()
+
     def test_logos_are_stored_per_club(self):
         self.assertEqual(club_logo_path(Club(slug="ajax-united"), "crest.png"), "clubs/ajax-united/crest.png")
 
@@ -1614,10 +1632,11 @@ class RootViewTests(TestCase):
         cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
         cls.season = make_season(cls.club)
 
-    def test_the_base_domain_hands_off_to_the_control_panel(self):
+    def test_the_base_domain_serves_the_marketing_homepage(self):
         response = self.client.get("/", HTTP_HOST="rosterchief.app")
 
-        self.assertRedirects(response, reverse("controlpanel:dashboard"), fetch_redirect_response=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "marketing/home.html")
 
     def test_a_phone_always_lands_on_the_member_app(self):
         # Unconditional, even for staff -- management isn't responsive yet.
@@ -1932,31 +1951,31 @@ class RecipientForTests(TestCase):
     def test_the_members_own_email_wins(self):
         member = Member.objects.create(first_name="Jane", last_name="Doe", email="jane@example.com")
 
-        email, used_guardian = recipient_for(member)
+        email, used_guardian = recipient_for(member, self.club)
 
         self.assertEqual(email, "jane@example.com")
         self.assertFalse(used_guardian)
 
     def test_falls_back_to_a_guardians_email_when_the_member_has_none(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         member = Member.objects.create(first_name="Jane", last_name="Doe")
         parent = Member.objects.create(first_name="Pat", last_name="Doe", email="pat@example.com")
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-        email, used_guardian = recipient_for(member)
+        email, used_guardian = recipient_for(member, self.club)
 
         self.assertEqual(email, "pat@example.com")
         self.assertTrue(used_guardian)
 
     def test_empty_when_nobody_is_reachable(self):
-        family = Family.objects.create()
+        family = Family.objects.create(club=self.club)
         member = Member.objects.create(first_name="Jane", last_name="Doe")
         parent = Member.objects.create(first_name="Pat", last_name="Doe")
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-        email, used_guardian = recipient_for(member)
+        email, used_guardian = recipient_for(member, self.club)
 
         self.assertEqual(email, "")
         self.assertFalse(used_guardian)

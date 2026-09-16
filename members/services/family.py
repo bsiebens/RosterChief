@@ -20,22 +20,26 @@ def find_member_by_email(email):
 
 
 def families_of_club(club):
-    return Family.objects.filter(memberships__member__member_of__club=club).distinct()
+    return Family.objects.filter(club=club)
 
 
-def family_contacts(member):
+def family_contacts(member, club):
     """Every parent/guardian on record in any family ``member`` belongs to
-    (almost always exactly one) -- each as {"member", "email", "role_label"},
-    deduplicated by email address (case-insensitively) and sorted by it for
-    a stable display order. A contact with no email of their own is skipped
-    entirely -- there's nothing to show or send to.
+    within ``club`` (almost always exactly one) -- each as {"member", "email",
+    "role_label"}, deduplicated by email address (case-insensitively) and
+    sorted by it for a stable display order. A contact with no email of
+    their own is skipped entirely -- there's nothing to show or send to.
+
+    Scoped to ``club`` because ``member`` is global: without it, a member
+    who belongs to families in more than one club would surface another
+    club's guardians here.
 
     Used wherever a message meant for "the family" (a registration invoice
     and its reminders) needs to reach everyone responsible for a child, not
     just whoever happened to submit the online form that one time -- and
     wherever staff needs to see who that actually is (management's own Dues
     & billing page)."""
-    contacts = FamilyMembership.objects.filter(family__memberships__member=member, role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN]).exclude(member=member).select_related("member").distinct()
+    contacts = FamilyMembership.objects.filter(family__club=club, family__memberships__member=member, role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN]).exclude(member=member).select_related("member").distinct()
 
     seen_emails = set()
     results = []
@@ -49,14 +53,16 @@ def family_contacts(member):
     return results
 
 
-def claim_label_for(member):
+def claim_label_for(member, club):
     """How ``member`` reads when they've claimed something the rest of a
     team can see (currently: EventTaskClaim) -- "<Family> family" when they
-    belong to one (leaning on Family.__str__'s own name-or-surnames-or-id
-    fallback), else their own name. Keeps the claim from broadcasting
+    belong to one *in `club`* (leaning on Family.__str__'s own
+    name-or-surnames-or-id fallback), else their own name. Scoped to `club`
+    since member is global -- otherwise this could pick an arbitrary family
+    from another club they also belong to. Keeps the claim from broadcasting
     exactly which parent or child in a family is covering it -- the team
     only needs to know it's handled."""
-    family_membership = member.family_memberships.select_related("family").first()
+    family_membership = member.family_memberships.filter(family__club=club).select_related("family").first()
     if family_membership is not None:
         return _("%(family)s family") % {"family": family_membership.family}
     return member.get_full_name()
@@ -167,7 +173,7 @@ def register_family(club, season, *, parent_email, parent_first_name, parent_las
     parent = get_or_create_login_member(parent_email, parent_first_name, parent_last_name)
     child = Member.objects.create(first_name=child_first_name, last_name=child_last_name, date_of_birth=child_date_of_birth)
 
-    family = Family.objects.create()
+    family = Family.objects.create(club=club)
     FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
     FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
 
@@ -194,8 +200,8 @@ def add_parent_to_family(club, season, family, *, email="", first_name="", last_
     unless ``parent_is_member`` says they belong to the club in their own right.
 
     ``parent`` lets a caller that already knows the Member (e.g.
-    members.services.claims.approve_claim, once a claim carries a signed-in
-    submitter) attach them directly instead of resolving ``email`` again --
+    registration.services.submission, once a signed-in submitter is already
+    resolved) attach them directly instead of resolving ``email`` again --
     authoritative when the caller has it, and the only way to guarantee no
     second User/Member is ever created for the same person. ``status`` --
     see _enrol's own docstring -- only matters when ``parent_is_member``.
@@ -210,11 +216,13 @@ def add_parent_to_family(club, season, family, *, email="", first_name="", last_
     return parent
 
 
-def attach_to_family(member, *, role, family=None):
+def attach_to_family(member, *, role, club, family=None):
     """Link a standalone member into a family -- a new one, or an existing one they
-    turn out to belong to (e.g. a second parent already registered separately)."""
+    turn out to belong to (e.g. a second parent already registered separately).
+    ``club`` is only used for the new-family branch -- an existing ``family``
+    is trusted to already carry the right one."""
     if family is None:
-        family = Family.objects.create()
+        family = Family.objects.create(club=club)
 
     FamilyMembership.objects.get_or_create(family=family, member=member, defaults={"role": role})
     return family

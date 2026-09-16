@@ -28,14 +28,14 @@ class DuesInvoicePDFError(Exception):
     """Raised when WeasyPrint's native libraries aren't available."""
 
 
-def recipient_for(member) -> tuple[str, bool]:
+def recipient_for(member, club) -> tuple[str, bool]:
     """Best email to invoice ``member`` at: their own, else the first parent/guardian
     who has one. Empty string means nobody reachable at all -- the caller must not
     create or send an invoice in that case."""
     if member.contact_email:
         return member.contact_email, False
 
-    for guardian in member.guardians.order_by("last_name", "first_name"):
+    for guardian in member.guardians(club).order_by("last_name", "first_name"):
         if guardian.contact_email:
             return guardian.contact_email, True
 
@@ -86,7 +86,8 @@ def _attach_pdf(message: EmailMultiAlternatives, invoice: DuesInvoice) -> None:
 def send_invoice_email(invoice: DuesInvoice, *, request=None) -> bool:
     """Mail the branded invoice to invoice.sent_to_email. Never fatal: the invoice
     row (and its sent_at stamp) exists whether or not the mail leaves the building --
-    see members.services.claims.send_claim_approved_email for the same reasoning."""
+    same reasoning as every other branded send in this app (see e.g.
+    notifications.services.recipient_emails's own callers)."""
     if not invoice.sent_to_email:
         return False
 

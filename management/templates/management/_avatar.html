@@ -1,0 +1,18 @@
+{% comment %}
+    Avatar -- either ``person``'s own uploaded photo, or the daisyUI
+    avatar-placeholder initials circle used across the staff app (member_list,
+    event_detail's attendance rows, signup_list, evaluation_walkthrough).
+    Expects ``person`` (anything with first_name/last_name; a Member also
+    gets a real photo) in scope. Optional:
+      - size_class: the inner box's h-*/w-* pair, default "h-8 w-8"
+      - text_class: the initials' font size, default "text-xs"
+{% endcomment %}
+<span class="avatar {% if not person.photo %}avatar-placeholder{% endif %} shrink-0">
+    <div class="{{ size_class|default:"h-8 w-8" }} rounded-full {{ text_class|default:"text-xs" }}">
+        {% if person.photo %}
+            <img src="{{ person.photo.url }}" alt="" class="h-full w-full object-cover">
+        {% else %}
+            {{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}
+        {% endif %}
+    </div>
+</span>

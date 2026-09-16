@@ -6,7 +6,20 @@ from phonenumber_field.modelfields import PhoneNumberField
 from rosterchief.base import ClubScopedModel, UUIDModel
 
 
-class Family(UUIDModel):
+def member_photo_path(instance, filename):
+    # Keyed off the member's own id, not e.g. a club slug -- Member is the one
+    # global model in this codebase (shared across every club a person
+    # belongs to), so there's no single club to scope the path by. Same
+    # "stable id, not a name/slug" reasoning as news_photo_path/team_photo_path.
+    return f"members/{instance.pk}/{filename}"
+
+
+class Family(ClubScopedModel):
+    """Club-scoped: a household's registration is with one club, and a person
+    who belongs to more than one club (e.g. a coach who's also a parent
+    elsewhere) gets a separate Family row per club rather than one shared
+    row leaking one club's household composition into another's admin view."""
+
     name = models.CharField(_("name"), max_length=255, blank=True)
 
     class Meta:
@@ -49,6 +62,16 @@ class Member(UUIDModel):
     phone = PhoneNumberField(_("phone number"), null=True, blank=True)
     emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
+    photo = models.ImageField(_("photo"), upload_to=member_photo_path, blank=True)
+    #: Gates only the *public* surfaces (a club's public website/API roster) --
+    #: someone already inside the club (coach roster, staff lists, the app's
+    #: own "People I manage" rows) sees the photo regardless, same as they
+    #: already see this member's name. Off by default: a photo uploaded for
+    #: in-app use (e.g. a parent picking their own kid out of a roster list)
+    #: shouldn't become world-visible without a separate, explicit opt-in --
+    #: this matters most for underage players.
+    photo_public_consent = models.BooleanField(_("show this photo on the public website/API"), default=False)
+
     class Meta:
         verbose_name = _("member")
         verbose_name_plural = _("members")
@@ -65,26 +88,37 @@ class Member(UUIDModel):
         return self.first_name
 
     @property
+    def public_photo(self):
+        """``self.photo``, but only once ``photo_public_consent`` says it can
+        leave the club's own app/staff views -- the one gate every public
+        surface (teams.api's roster endpoints, a club's public website) must
+        go through, so consent can't be forgotten at a new call site."""
+        return self.photo if self.photo and self.photo_public_consent else None
+
+    @property
     def contact_email(self):
         """Best email to reach this member: own contact email, else login email."""
         return self.email or (self.user.email if self.user_id else "")
 
-    @property
-    def guardians(self):
+    def guardians(self, club):
+        """This member's parents/guardians, scoped to `club` -- a Member row
+        is global (shared across every club a person belongs to), but Family
+        is per-club, so without this filter a member in two clubs would leak
+        one club's guardians into the other's."""
         return Member.objects.filter(
             family_memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
+            family_memberships__family__club=club,
             family_memberships__family__memberships__member=self,
             family_memberships__family__memberships__role=FamilyMembership.FamilyRole.CHILD,
         ).distinct()
 
-    @property
-    def family_members(self):
-        """Everyone sharing any Family with this member, any role, either
-        direction -- not just this member's own children (see ``guardians``
-        for the parent-scoped, one-directional version). Excludes self.
-        Used e.g. to decide whose vouchers are relevant to an order this
-        member placed (management.forms.AddPaymentForm)."""
-        return Member.objects.filter(family_memberships__family__memberships__member=self).exclude(pk=self.pk).distinct()
+    def family_members(self, club):
+        """Everyone sharing any Family with this member within `club`, any role,
+        either direction -- not just this member's own children (see
+        ``guardians`` for the parent-scoped, one-directional version).
+        Excludes self. Used e.g. to decide whose vouchers are relevant to an
+        order this member placed (management.forms.AddPaymentForm)."""
+        return Member.objects.filter(family_memberships__family__club=club, family_memberships__family__memberships__member=self).exclude(pk=self.pk).distinct()
 
 
 class FamilyMembership(models.Model):
@@ -108,78 +142,6 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.family} - {self.member} ({self.get_role_display()})"
-
-
-class ParentClaim(ClubScopedModel):
-    """A parent asking to be linked to a child the club already has on file.
-
-    The migration path this exists for: a club arrives with a list of children
-    from a federation export and no parent records at all. The children are
-    imported without logins (each into a family of their own, see
-    members.services.claims.children_awaiting_a_parent), and parents come forward
-    afterwards.
-
-    Verification is a human decision, deliberately. The alternatives -- a claim
-    code, or matching on name and date of birth -- either need a delivery channel
-    the club may not have, or hand out someone else's child to whoever guesses a
-    birthday. The club already knows its own families, so an admin approving from
-    a queue is the only check that is actually worth anything.
-
-    The parent's details are held here as plain text rather than as a User: this
-    form is public, so creating an account per submission would let anyone fill
-    the table with them. The account is created on approval, by which point a
-    human has vouched for it.
-    """
-
-    class Status(models.TextChoices):
-        PENDING = "pending", _("pending")
-        APPROVED = "approved", _("approved")
-        REJECTED = "rejected", _("rejected")
-
-    parent_first_name = models.CharField(_("parent first name"), max_length=150)
-    parent_last_name = models.CharField(_("parent last name"), max_length=150)
-    parent_email = models.EmailField(_("parent email"))
-
-    # The signed-in account that submitted this claim, if any -- e.g. a parent
-    # already linked to one child, claiming a second. Distinct from parent_email
-    # above: that stays free text kept verbatim as the evidence an admin judged,
-    # while this is the authoritative "is this actually you" signal, set from
-    # request.user and never taken from anything the client could fake. Null for
-    # an anonymous public submission, which is the common case for a family's
-    # first claim.
-    submitted_by_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="submitted_parent_claims", verbose_name=_("submitted by"))
-
-    # What the parent typed, kept verbatim even after the claim is matched -- it is
-    # the evidence the admin judged, and a later dispute needs to see it unchanged.
-    child_first_name = models.CharField(_("child first name"), max_length=150)
-    child_last_name = models.CharField(_("child last name"), max_length=150)
-    child_date_of_birth = models.DateField(_("child date of birth"))
-
-    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.PENDING)
-    child = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="parent_claims", verbose_name=_("matched child"), help_text=_("Set when an admin approves the claim -- the child it was matched to."))
-    reviewed_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("reviewed by"))
-    reviewed_at = models.DateTimeField(_("reviewed at"), null=True, blank=True)
-    note = models.TextField(_("note"), blank=True, help_text=_("Why it was rejected, or anything worth recording about the decision."))
-
-    class Meta:
-        verbose_name = _("parent claim")
-        verbose_name_plural = _("parent claims")
-        ordering = ["-created"]
-
-    def __str__(self):
-        return f"{self.parent_first_name} {self.parent_last_name} -> {self.child_first_name} {self.child_last_name}"
-
-    @property
-    def is_pending(self) -> bool:
-        return self.status == self.Status.PENDING
-
-    @property
-    def claimed_child_name(self) -> str:
-        return f"{self.child_first_name} {self.child_last_name}".strip()
-
-    @property
-    def parent_name(self) -> str:
-        return f"{self.parent_first_name} {self.parent_last_name}".strip()
 
 
 class Group(ClubScopedModel):
