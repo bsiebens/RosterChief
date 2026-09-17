@@ -96,3 +96,8 @@ def tournament_team_roster_pdf(context: dict) -> bytes:
 def tournament_team_lunch_pdf(context: dict) -> bytes:
     html = render_to_string("management/tournament_team_lunch_pdf.html", context)
     return render_pdf(html)
+
+
+def tournament_lunch_summary_pdf(context: dict) -> bytes:
+    html = render_to_string("management/tournament_lunch_summary_pdf.html", context)
+    return render_pdf(html)

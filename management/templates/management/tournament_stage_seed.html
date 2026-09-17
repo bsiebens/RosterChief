@@ -9,7 +9,9 @@
     before an earlier group stage has even finished. See
     management.views.TournamentStageSeedView's own docstring.
 
-    Context: tournament, stage, formset (SeedSlotFormSet).
+    Context: tournament, stage, formset (SeedSlotFormSet), with_placement
+    (the "Full placement ladder" checkbox's own carried-over/redisplayed
+    state -- see TournamentStageSeedView.get/render_form).
 {% endcomment %}
 
 {% block heading %}{{ tournament.name }}{% endblock heading %}
@@ -29,12 +31,12 @@
         <div class="card">
             <div class="card-body">
                 <p class="text-sm text-muted">
-                    {% blocktrans %}Each slot is either a direct team or "Nth place of" a group -- a group-sourced slot stays undecided until that group's own matches are all complete, then fills in on its own. Slot order is seed order (top of this list plays the bottom). Leave a slot on "— skip —" to shrink the bracket.{% endblocktrans %}
+                    {% blocktrans %}Each slot is either a direct team or "Nth place of" a group -- a group-sourced slot stays undecided until that group's own matches are all complete, then fills in on its own. Rows are grouped here by which round-1 game they'd actually play (see each row's Game badge) -- a lone row with no partner gets a bye and advances automatically. Leave a slot on "— skip —" to shrink the bracket.{% endblocktrans %}
                 </p>
 
                 {% if stage.format == "single_elim" %}
-                    <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
-                        <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
+                    <label class="my-4 flex cursor-pointer items-start gap-2 text-sm text-slate">
+                        <input type="checkbox" name="with_placement" class="checkbox mt-0.5" {% if with_placement %}checked{% endif %}>
                         <span>
                             <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
                             <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins." %}</span>
@@ -51,6 +53,7 @@
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>{% trans "Game" %}</th>
                             <th>{% trans "Slot" %}</th>
                             <th>{% trans "Team" %}</th>
                             <th>{% trans "Group" %}</th>
@@ -88,8 +91,31 @@
         // tournament_field_stage_list.html's own format/trigger-type
         // toggles give for scoping to closest("dialog") there (there's no
         // dialog here, so this scopes to closest("tr") instead).
+        //
+        // Also groups round 1's actual pairs visually -- a plain top-to-
+        // bottom "Game 1, 2, 3, 4, 4, 3, 2, 1" badge (mirrored, since seed 1
+        // plays the *last* seed, seed 2 the second-last, ...) reads as
+        // broken rather than intentional, so rows are physically regrouped
+        // into adjacent match pairs instead, in game order -- badges then
+        // read a plain 1, 1, 2, 2, 3, 3, ... top to bottom. This only moves
+        // each <tr> in the DOM; every field inside it keeps the same
+        // form-<index>-* name it was built with (Django reads submitted
+        // data by that name, never by DOM position -- see
+        // tournaments.services.scheduling.generate_stage_matches' own
+        // "list position is seed rank" rule), so a row's real seed number
+        // never changes, only where it's drawn on screen.
+        //
+        // Mirrors single_elimination_bracket's own seeding recursion
+        // (tournaments/services/brackets.py's _seed_order/_next_power_of_two)
+        // so a non-power-of-two active count byes the same top seeds that
+        // function would. Recomputed whenever a row's own entry_type
+        // changes or the row count changes, not just once on load -- a
+        // skipped slot contributes nothing to the seed sequence at all (see
+        // TournamentStageSeedView.post, which drops it before building
+        // entries), so toggling one shifts everyone after it.
         (() => {
             const rows = document.getElementById("bulk-add-rows");
+            const addButton = document.getElementById("add-row");
             if (!rows) return;
 
             const sync = (row) => {
@@ -101,10 +127,84 @@
                 row.querySelector(".entry-rank-cell")?.classList.toggle("hidden", type !== "group");
             };
 
+            const formIndex = (row) => {
+                const match = row.querySelector(".entry-type-select")?.name.match(/-(\d+)-entry_type$/);
+                return match ? Number(match[1]) : Infinity;
+            };
+
+            const nextPowerOfTwo = (n) => {
+                let power = 1;
+                while (power < n) power *= 2;
+                return power;
+            };
+
+            // Same recursive-doubling seed table single_elimination_bracket's
+            // own _seed_order builds -- every pairing sums to size+1 (1v8,
+            // 4v5, 2v7, 3v6 for size 8), which is exactly what makes "row i
+            // pairs with row (count-1-i)" true for the compacted active list.
+            const seedOrder = (size) => {
+                if (size <= 1) return [1];
+                const previous = seedOrder(size / 2);
+                const order = [];
+                previous.forEach((seed) => {
+                    order.push(seed);
+                    order.push(size + 1 - seed);
+                });
+                return order;
+            };
+
+            const renumberGames = () => {
+                const active = Array.from(rows.querySelectorAll(".bulk-add-row"))
+                    .filter((row) => row.querySelector(".entry-type-select")?.value)
+                    .sort((a, b) => formIndex(a) - formIndex(b));
+                const skipped = Array.from(rows.querySelectorAll(".bulk-add-row")).filter((row) => !row.querySelector(".entry-type-select")?.value);
+
+                rows.querySelectorAll(".seed-game-badge").forEach((badge) => badge.classList.add("hidden"));
+
+                const size = active.length > 1 ? nextPowerOfTwo(active.length) : active.length;
+                const order = size > 1 ? seedOrder(size) : active.length === 1 ? [1] : [];
+                const seeded = order.map((position) => (position <= active.length ? active[position - 1] : null));
+
+                const display = [];
+                for (let i = 0; i < seeded.length; i += 2) {
+                    const gameNumber = i / 2 + 1;
+                    const home = seeded[i];
+                    const away = seeded[i + 1];
+                    [home, away].forEach((row) => {
+                        if (!row) return;
+                        const badge = row.querySelector(".seed-game-badge");
+                        if (badge) {
+                            badge.classList.toggle("badge-outline", Boolean(home && away));
+                            badge.classList.toggle("badge-neutral", !(home && away));
+                            badge.textContent = home && away ? "{% trans 'Game' %} " + gameNumber : "{% trans 'Bye' %}";
+                            badge.classList.remove("hidden");
+                        }
+                        display.push(row);
+                    });
+                }
+
+                display.concat(skipped).forEach((row) => rows.appendChild(row));
+            };
+
             rows.addEventListener("change", (event) => {
                 if (!event.target.matches(".entry-type-select")) return;
                 sync(event.target.closest("tr"));
+                renumberGames();
             });
+
+            // A row removed by bulk-add-rows.js's own remove-row handler
+            // (attached directly to the button, so it's already run by the
+            // time this delegated listener sees the bubbled click) changes
+            // the active count too -- catch that the same way.
+            rows.addEventListener("click", (event) => {
+                if (event.target.closest(".remove-row")) renumberGames();
+            });
+
+            // A freshly added row defaults to "-- skip --" (bulk-add-rows.js's
+            // clone-from-<template>), which doesn't move the count on its
+            // own, but it still needs to land in the skipped group at the
+            // bottom rather than wherever appendChild happened to leave it.
+            addButton?.addEventListener("click", renumberGames);
 
             // A freshly cloned row (bulk-add-rows.js's "Add slot" handler)
             // defaults its own entry_type select to the first option --
@@ -114,6 +214,7 @@
             // all; only the rows rendered with a real choice already
             // selected (the pre-filled team rows) need this initial pass.
             rows.querySelectorAll(".bulk-add-row").forEach(sync);
+            renumberGames();
         })();
     </script>
 {% endblock extra_body %}

@@ -6,6 +6,9 @@
     management/_team_bulk_add_row.html convention.
 {% endcomment %}
 <tr class="bulk-add-row">
+    <td class="w-20 py-2">
+        <span class="badge badge-sm badge-outline seed-game-badge hidden"></span>
+    </td>
     <td class="py-2">
         {{ form.entry_type }}
         {% for error in form.entry_type.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}

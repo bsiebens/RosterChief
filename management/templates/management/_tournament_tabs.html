@@ -1,7 +1,7 @@
 {% load i18n lucide %}
 {% comment %}
     Shared sub-nav for every tournament-scoped management page. ``active_tab`` is one
-    of "registrations"/"teams"/"schedule"/"fields_stages"/"tasks"/"dressing_rooms". Mirrors
+    of "registrations"/"teams"/"standings"/"schedule"/"scores"/"fields_stages"/"tasks"/"dressing_rooms". Mirrors
     _evaluation_checklist_tabs.html's own shape, plus a "Settings" link on the right --
     not itself one of the tabs (editing the tournament's own name/season/dates isn't a
     "browse this tournament's data" concern the way the tabs are), but styled to pick up
@@ -20,7 +20,9 @@
     <div class="tabs tabs-boxed">
         <a href="{% url 'management:tournament_registration_queue' tournament.pk %}" class="tab {% if active_tab == "registrations" %}tab-active{% endif %}">{% trans "Registrations" %}</a>
         <a href="{% url 'management:tournament_team_list' tournament.pk %}" class="tab {% if active_tab == "teams" %}tab-active{% endif %}">{% trans "Teams" %}</a>
+        <a href="{% url 'management:tournament_standings' tournament.pk %}" class="tab {% if active_tab == "standings" %}tab-active{% endif %}">{% trans "Standings" %}</a>
         <a href="{% url 'management:tournament_schedule' tournament.pk %}" class="tab {% if active_tab == "schedule" %}tab-active{% endif %}">{% trans "Schedule" %}</a>
+        <a href="{% url 'management:tournament_scores' tournament.pk %}" class="tab {% if active_tab == "scores" %}tab-active{% endif %}">{% trans "Scores" %}</a>
         <a href="{% url 'management:tournament_field_stage_list' tournament.pk %}" class="tab {% if active_tab == "fields_stages" %}tab-active{% endif %}">{% trans "Fields & stages" %}</a>
         <a href="{% url 'management:tournament_task_list' tournament.pk %}" class="tab {% if active_tab == "tasks" %}tab-active{% endif %}">{% trans "Tasks" %}</a>
         <a href="{% url 'management:tournament_dressing_room_list' tournament.pk %}" class="tab {% if active_tab == "dressing_rooms" %}tab-active{% endif %}">{% trans "Dressing rooms" %}</a>

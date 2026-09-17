@@ -569,6 +569,29 @@ class MatchModelTests(TournamentsTestCase):
         self.assertEqual(match.home_display, "TBD")
         self.assertEqual(match.away_display, "TBD")
 
+    def test_display_for_a_side_sourced_from_a_match_names_the_round(self):
+        # Two quarterfinals sharing "Quarterfinal" as their own round_label --
+        # the semifinal sourced from them should disambiguate by position,
+        # not just repeat the shared label.
+        qf1 = Match.objects.create(stage=self.stage, round_number=1, sequence=0, round_label="Quarterfinal", home_team=self.home, away_team=self.away)
+        qf2 = Match.objects.create(stage=self.stage, round_number=1, sequence=1, round_label="Quarterfinal", home_team=self.home, away_team=self.away)
+        semi = Match.objects.create(stage=self.stage, round_number=2, sequence=0, round_label="Semifinal", home_source_match=qf1, home_source_is_winner=True, away_source_match=qf2, away_source_is_winner=False)
+
+        self.assertEqual(semi.home_display, "Winner of Quarterfinal 1")
+        self.assertEqual(semi.away_display, "Loser of Quarterfinal 2")
+
+    def test_display_for_a_side_sourced_from_a_match_skips_the_number_when_unique(self):
+        semi = Match.objects.create(stage=self.stage, round_number=1, sequence=0, round_label="Semifinal", home_team=self.home, away_team=self.away)
+        final = Match.objects.create(stage=self.stage, round_number=2, sequence=0, round_label="Final", home_source_match=semi, home_source_is_winner=True)
+
+        self.assertEqual(final.home_display, "Winner of Semifinal")
+
+    def test_display_for_a_side_sourced_from_a_group_shows_the_rank(self):
+        group = TournamentGroup.objects.create(stage=self.stage, name="Group A")
+        match = Match.objects.create(stage=self.stage, home_source_group=group, home_source_rank=1)
+
+        self.assertEqual(match.home_display, "1st of Group A")
+
     def test_clean_allows_every_side_left_undetermined(self):
         # A still-undetermined bracket slot -- none of team/source_match/source_group
         # set yet on either side -- is valid, not just "not yet filled in".
@@ -1932,7 +1955,11 @@ class SingleEliminationPlacementBracketTests(TestCase):
 
         matches = [slot for round_ in rounds for slot in round_]
         self.assertEqual(len(matches), 4)  # 2 semis + final (1st/2nd) + 3rd place
-        self.assertEqual([slot["round_label"] for slot in matches], ["Semifinal", "Semifinal", "Final", "3rd place"])
+        # The trailing single-match "deciding" rounds run worst-to-best --
+        # 3rd place decided before the Final, so a real schedule built from
+        # this (allocate_schedule places round_number in order) plays minor
+        # placement games early and saves the Final for last.
+        self.assertEqual([slot["round_label"] for slot in matches], ["Semifinal", "Semifinal", "3rd place", "Final"])
         # Round 1 pairing is untouched by this option -- same seed order as
         # the plain bracket (1v4, 2v3).
         self.assertEqual(matches[0]["home_team"], "T1")
@@ -1957,6 +1984,14 @@ class SingleEliminationPlacementBracketTests(TestCase):
                 source = slot.get(f"{side}_source_index")
                 if source is not None:
                     self.assertLess(source, index)
+
+    def test_deciding_rounds_run_worst_to_best_with_the_final_last(self):
+        rounds = single_elimination_placement_bracket([f"T{i}" for i in range(1, 9)])
+
+        # Quarterfinal/Semifinal/Ranks 5-8 Semifinal keep their own
+        # (unaffected, still-developing) order; only the trailing run of
+        # single-match deciders reverses.
+        self.assertEqual([round_[0]["round_label"] for round_ in rounds], ["Quarterfinal", "Semifinal", "Ranks 5-8 · Semifinal", "7th place", "5th place", "3rd place", "Final"])
 
 
 class GenerateStageMatchesTests(TournamentsTestCase):
@@ -2245,6 +2280,27 @@ class ResolveGroupSlotsTests(TournamentsTestCase):
         crossover.refresh_from_db()
         self.assertEqual(crossover.home_team_id, only_match.home_team_id)
         self.assertTrue(conflicts)
+
+    def test_team_order_overrides_the_computed_standings(self):
+        # The "Start next phase" review screen's own correction lever --
+        # T1 beats T2 head-to-head (so plain standings would rank T1 1st),
+        # but team_order says otherwise, and that's what must win.
+        team1, team2 = (TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3))
+        group_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, sequence=0, config={"num_groups": 1})
+        generate_stage_matches(group_stage, entries=[team1, team2])
+        group = group_stage.groups.get()
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        first_place_slot = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
+        second_place_slot = Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=2)
+        only_match = group.matches.get()
+        record_result(only_match, score_home=2, score_away=0)  # team1 wins
+
+        resolve_group_slots(group, team_order=[team2, team1])
+
+        first_place_slot.refresh_from_db()
+        second_place_slot.refresh_from_db()
+        self.assertEqual(first_place_slot.home_team_id, team2.pk)
+        self.assertEqual(second_place_slot.home_team_id, team1.pk)
 
 
 class BreakRuleModelTests(TournamentsTestCase):
@@ -3589,6 +3645,26 @@ class TournamentScheduleViewTests(TournamentsTestCase):
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_a_knockout_stage_renders_as_a_bracket_not_a_table(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Semifinal")
+        self.assertNotContains(response, "<table")
+
+    def test_a_round_robin_stage_still_renders_as_a_table(self):
+        teams = [TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=f"T{i}", seed=i) for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Round Robin", format=TournamentStage.Format.ROUND_ROBIN)
+        generate_stage_matches(stage, entries=teams)
+
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "<table")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])

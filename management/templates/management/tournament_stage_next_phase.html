@@ -1,5 +1,5 @@
 {% extends "management/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide static %}
 
 {% comment %}
     "Start next phase" -- the review-and-confirm gate in front of
@@ -22,70 +22,86 @@
 {% endblock topbar_context %}
 
 {% block actions %}
-    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_field_stage_list' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:tournament_scores' tournament.pk %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
 {% endblock actions %}
 
 {% block panel %}
-    <p class="mb-4 text-sm text-muted">{% blocktrans %}Every match in this stage is complete. Check each group's final standings below -- confirming pushes these teams into every slot that sources from them (a knockout match may already show a field and time, waiting on exactly this).{% endblocktrans %}</p>
+    <p class="mb-4 text-sm text-muted">{% blocktrans %}Every match in this stage is complete. Check each group's final standings below -- drag a row by its handle to reorder if a rank needs correcting (a tie you'd break differently, say). Confirming pushes these teams into every slot that sources from them (a knockout match may already show a field and time, waiting on exactly this).{% endblocktrans %}</p>
 
-    {% for group_row in groups %}
-        <div class="card mb-4 overflow-hidden">
-            <div class="border-b border-line bg-subhead px-4 py-2">
-                <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ group_row.group.name }}</span>
+    <form method="post">
+        {% csrf_token %}
+        {% for group_row in groups %}
+            <div class="card mb-4 overflow-hidden">
+                <div class="border-b border-line bg-subhead px-4 py-2">
+                    <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ group_row.group.name }}</span>
+                </div>
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-[6%]">#</th>
+                            <th class="w-[20%]">{% trans "Team" %}</th>
+                            <th class="w-[6%]">{% trans "P" %}</th>
+                            <th class="w-[6%]">{% trans "W" %}</th>
+                            <th class="w-[6%]">{% trans "D" %}</th>
+                            <th class="w-[6%]">{% trans "L" %}</th>
+                            <th class="w-[7%]">{% trans "GD" %}</th>
+                            <th class="w-[7%]">{% trans "Pts" %}</th>
+                            <th class="w-[36%]">{% trans "Feeds" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="{% if can_operate_tournament %}rank-reorder-body{% endif %}" data-group="{{ group_row.group.pk }}">
+                        {% for row in group_row.standings %}
+                            <tr class="{% if can_operate_tournament %}rank-reorder-row{% endif %}" {% if can_operate_tournament %}draggable="true"{% endif %} data-team="{{ row.team.pk }}">
+                                <td>
+                                    {% if can_operate_tournament %}
+                                        <div class="flex cursor-grab items-center gap-1.5 active:cursor-grabbing">
+                                            {% lucide "grip-vertical" size=14 class="shrink-0 text-dim" %}
+                                            <span class="font-mono text-sm text-muted rank-reorder-number">{{ row.rank }}</span>
+                                        </div>
+                                        <input type="hidden" name="rank__{{ group_row.group.pk }}__{{ row.team.pk }}" value="{{ row.rank }}" class="rank-reorder-input">
+                                    {% else %}
+                                        <span class="font-mono text-sm text-muted">{{ row.rank }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="font-semibold text-ink">{{ row.team }}</td>
+                                <td>{{ row.played }}</td>
+                                <td>{{ row.won }}</td>
+                                <td>{{ row.drawn }}</td>
+                                <td>{{ row.lost }}</td>
+                                <td>{{ row.goal_diff }}</td>
+                                <td class="font-bold text-ink">{{ row.points }}</td>
+                                <td class="text-xs text-muted">
+                                    {% for entry in row.feeds %}
+                                        <div>
+                                            {{ entry.match.stage.name }}: {{ entry.match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ entry.match.away_display }}
+                                            {% blocktrans with side=entry.side %}({{ side }}){% endblocktrans %}
+                                            {% if entry.match.scheduled_start %}&middot; {% if entry.match.field %}{{ entry.match.field.name }}, {% endif %}{{ entry.match.scheduled_start|date:"j M, H:i" }}{% endif %}
+                                        </div>
+                                    {% empty %}
+                                        <span class="text-dim">&mdash;</span>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="9" class="text-center text-muted">{% trans "No completed matches in this group." %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>{% trans "Team" %}</th>
-                        <th>{% trans "P" %}</th>
-                        <th>{% trans "W" %}</th>
-                        <th>{% trans "D" %}</th>
-                        <th>{% trans "L" %}</th>
-                        <th>{% trans "GD" %}</th>
-                        <th>{% trans "Pts" %}</th>
-                        <th>{% trans "Feeds" %}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in group_row.standings %}
-                        <tr>
-                            <td class="font-mono text-sm text-muted">{{ row.rank }}</td>
-                            <td class="font-semibold text-ink">{{ row.team }}</td>
-                            <td>{{ row.played }}</td>
-                            <td>{{ row.won }}</td>
-                            <td>{{ row.drawn }}</td>
-                            <td>{{ row.lost }}</td>
-                            <td>{{ row.goal_diff }}</td>
-                            <td class="font-bold text-ink">{{ row.points }}</td>
-                            <td class="text-xs text-muted">
-                                {% for entry in row.feeds %}
-                                    <div>
-                                        {{ entry.match.stage.name }}: {{ entry.match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ entry.match.away_display }}
-                                        {% blocktrans with side=entry.side %}({{ side }}){% endblocktrans %}
-                                        {% if entry.match.scheduled_start %}&middot; {% if entry.match.field %}{{ entry.match.field.name }}, {% endif %}{{ entry.match.scheduled_start|date:"j M, H:i" }}{% endif %}
-                                    </div>
-                                {% empty %}
-                                    <span class="text-dim">&mdash;</span>
-                                {% endfor %}
-                            </td>
-                        </tr>
-                    {% empty %}
-                        <tr>
-                            <td colspan="9" class="text-center text-muted">{% trans "No completed matches in this group." %}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    {% empty %}
-        <div class="card p-6 text-center text-muted">{% trans "This stage has no groups to resolve." %}</div>
-    {% endfor %}
+        {% empty %}
+            <div class="card p-6 text-center text-muted">{% trans "This stage has no groups to resolve." %}</div>
+        {% endfor %}
 
-    {% if can_operate_tournament %}
-        <form method="post">
-            {% csrf_token %}
+        {% if can_operate_tournament %}
             <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Push teams into their slots" %}</button>
-        </form>
-    {% endif %}
+        {% endif %}
+    </form>
 {% endblock panel %}
+
+{% block extra_body %}
+    {% if can_operate_tournament %}
+        <script src="{% static 'js/tournament-next-phase-reorder.js' %}"></script>
+    {% endif %}
+{% endblock extra_body %}

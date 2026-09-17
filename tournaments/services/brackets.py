@@ -186,6 +186,23 @@ def single_elimination_placement_bracket(entries: list) -> list[list[dict]]:
         queue.append({"frontier": winners_frontier, "hi": hi, "lo": mid})
         queue.append({"frontier": losers_frontier, "hi": mid + 1, "lo": lo})
 
+    # The trailing run of single-match "deciding" rounds (Final, 3rd place,
+    # 5th place, ...) comes out of the queue above in best-rank-first order
+    # (FIFO drains the winners lineage before the losers one at each level)
+    # -- reversed here to worst-rank-first instead, so the schedule this
+    # feeds (allocate_schedule places round_number in order) plays the minor
+    # placement games early and saves the Final for last, the way a real
+    # tournament actually runs. Every round in this run is a terminal,
+    # single-entry FIFO leaf -- see this function's own docstring on why
+    # `len(frontier) == 2` never spawns a further child -- so nothing else
+    # in the bracket sources from one of these matches; permuting them
+    # among themselves can't invalidate any earlier *_source_index, which
+    # only ever points at a strictly earlier, untouched position.
+    tail_start = len(rounds)
+    while tail_start > 0 and len(rounds[tail_start - 1]) == 1:
+        tail_start -= 1
+    rounds[tail_start:] = reversed(rounds[tail_start:])
+
     return rounds
 
 

@@ -14258,6 +14258,24 @@ class TournamentTeamListTests(ManagementTestBase):
 
         self.assertTrue(TournamentTeam.objects.filter(pk=team.pk).exists())
 
+    def test_lunch_summary_button_hidden_when_lunch_mode_is_none(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertNotContains(response, reverse("management:tournament_lunch_summary_pdf", args=[self.tournament.pk]))
+
+    def test_lunch_summary_button_shown_when_lunch_is_configured(self):
+        self.activate_flag()
+        self.tournament.lunch_mode = Tournament.LunchMode.OPTIONAL
+        self.tournament.save(update_fields=["lunch_mode"])
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_team_list", self.tournament.pk)
+
+        self.assertContains(response, reverse("management:tournament_lunch_summary_pdf", args=[self.tournament.pk]))
+
 
 class TournamentTeamRosterTests(ManagementTestBase):
     """management:tournament_team_roster and its create/update/delete/lunch
@@ -14524,14 +14542,138 @@ class TournamentTeamRosterExportTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_lunch_summary_pdf_redirects_back_when_weasyprint_is_unavailable(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_lunch_summary_pdf", self.tournament.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_team_list", args=[self.tournament.pk]))
+
+    def test_lunch_summary_pdf_returns_a_pdf_across_every_team(self):
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.tournament_lunch_summary_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("tournament_lunch_summary_pdf", self.tournament.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_lunch_summary_pdf_breaks_down_by_team_and_excludes_withdrawn(self):
+        other_team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Home Side")
+        withdrawn_team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Dropped Out", withdrawn_at=timezone.now())
+        start = self.tournament.start_date.isoformat()
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker", lunch_days=[start])
+        TournamentRosterEntry.objects.create(tournament_team=other_team, foreign_first_name="Pat", foreign_last_name="Keeper", lunch_days=[start])
+        TournamentRosterEntry.objects.create(tournament_team=withdrawn_team, foreign_first_name="Gone", foreign_last_name="Team", lunch_days=[start])
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.tournament_lunch_summary_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("tournament_lunch_summary_pdf", self.tournament.pk)
+
+        context = renderer.call_args[0][0]
+        first_day = context["days"][0]
+        self.assertEqual(first_day["player_count"], 2)
+        team_names = {row["team"].foreign_name for row in first_day["team_counts"]}
+        self.assertEqual(team_names, {"Visiting FC", "Home Side"})
+        counts_by_team = {row["team"].foreign_name: row["count"] for row in first_day["team_counts"]}
+        self.assertEqual(counts_by_team, {"Visiting FC": 1, "Home Side": 1})
+
+    def test_lunch_summary_pdf_names_each_affected_member_per_team(self):
+        other_team = TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="Home Side")
+        start = self.tournament.start_date.isoformat()
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Sam", foreign_last_name="Striker", lunch_days=[start], dietary_restrictions="Nut allergy")
+        TournamentRosterEntry.objects.create(tournament_team=self.team, foreign_first_name="Alex", foreign_last_name="Player", lunch_days=[start])
+        TournamentRosterEntry.objects.create(tournament_team=other_team, foreign_first_name="Pat", foreign_last_name="Keeper", lunch_days=[start])
+        self.client.force_login(self.admin_user)
+
+        with mock.patch("management.views.tournament_lunch_summary_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("tournament_lunch_summary_pdf", self.tournament.pk)
+
+        context = renderer.call_args[0][0]
+        first_day = context["days"][0]
+        people_by_team = {row["team"].foreign_name: row["dietary_people"] for row in first_day["team_counts"]}
+        self.assertEqual(people_by_team, {"Visiting FC": [{"name": "Sam Striker", "restriction": "Nut allergy"}], "Home Side": []})
+
+
+class TournamentStandingsTests(ManagementTestBase):
+    """management:tournament_standings -- staff's own copy of the public
+    standings/bracket page, so current standings are checkable without
+    leaving the club subdomain. Reuses tournaments.views._standings_context
+    unchanged, which is already exercised in depth by tournaments/tests.py
+    (TournamentStandingsViewTests, TournamentDetailViewTests); these tests
+    just check the management view/template wire it through correctly."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_team(self, name):
+        return TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name)
+
+    def test_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_standings", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_a_round_robin_stages_own_standings_table(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.ROUND_ROBIN)
+        match = Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b, score_home=3, score_away=1, status=Match.Status.COMPLETE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_standings", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Team A")
+        standings_stages = response.context["standings_stages"]
+        self.assertEqual(standings_stages[0]["stage"], stage)
+        self.assertEqual(standings_stages[0]["tables"][0]["rows"][0]["team"], match.home_team)
+
+    def test_shows_a_knockout_stages_own_bracket_progression(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
+        Match.objects.create(stage=stage, round_number=1, sequence=0, round_label="Final", home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_standings", self.tournament.pk)
+
+        self.assertContains(response, "Final")
+        self.assertEqual(response.context["bracket_stages"][0]["stage"], stage)
+
+    def test_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_standings", self.tournament.pk)
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
+
 
 class TournamentScheduleTests(ManagementTestBase):
-    """management:tournament_schedule and its two inline-edit actions
-    (match_reschedule/match_result) -- same gating and fixture conventions as
-    TournamentRegistrationQueueTests above. reschedule_match/record_result
-    themselves are exercised in depth by tournaments/tests.py
-    (RescheduleMatchTests/RecordResultTests); these tests check that the two
-    new views actually call through to them and flash/redirect correctly."""
+    """management:tournament_schedule and its own inline-edit action,
+    match_reschedule -- same gating and fixture conventions as
+    TournamentRegistrationQueueTests above. reschedule_match itself is
+    exercised in depth by tournaments/tests.py (RescheduleMatchTests); these
+    tests check that the view actually calls through to it and flashes/
+    redirects correctly. Score entry (match_result) lives on its own page --
+    see TournamentScoresTests below."""
 
     @classmethod
     def setUpTestData(cls):
@@ -14718,6 +14860,22 @@ class TournamentScheduleTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Field 1")
         self.assertContains(response, "min free")
+
+    def test_board_view_shows_each_matchs_own_round(self):
+        self.activate_flag()
+        TournamentField.objects.create(tournament=self.tournament, name="Field 1", availability=[{"date": self.tournament.start_date.isoformat(), "start": "09:00", "end": "20:00"}])
+        team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
+        bracket_stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(bracket_stage, entries=[team_a, team_b])
+        round_robin_stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=round_robin_stage, round_number=1, sequence=0, home_team=team_c, away_team=team_d)
+        self.client.force_login(self.admin_user)
+        self.club_post("tournament_schedule_generate", {}, self.tournament.pk)
+
+        response = self.club_get("tournament_schedule_board", self.tournament.pk)
+
+        self.assertContains(response, "Final")  # a 2-team bracket's only match, round_label already set
+        self.assertContains(response, "Round 1")  # round_robin/CUSTOM leaves round_label blank -- falls back to round_number
 
     def test_manual_reschedule_shows_the_regeneration_banner_on_both_views(self):
         self.activate_flag()
@@ -14940,6 +15098,224 @@ class TournamentScheduleTests(ManagementTestBase):
         messages = [str(message) for message in get_messages(response.wsgi_request)]
         self.assertTrue(any("already scheduled on this field" in message for message in messages))
 
+    def test_reschedule_and_result_404_for_a_match_in_another_club(self):
+        self.activate_flag()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
+        other_field = TournamentField.objects.create(tournament=other_tournament, name="Field 1")
+        other_stage = TournamentStage.objects.create(tournament=other_tournament, name="Group", format=TournamentStage.Format.CUSTOM)
+        team_x = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="X")
+        team_y = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Y")
+        other_match = Match.objects.create(stage=other_stage, home_team=team_x, away_team=team_y)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_post("match_reschedule", {"field": other_field.pk, "scheduled_start": "2026-09-20T09:00"}, other_match.pk).status_code, 404)
+        self.assertEqual(self.club_post("match_result", {"score_home": 1, "score_away": 0}, other_match.pk).status_code, 404)
+
+
+class TournamentScoresTests(ManagementTestBase):
+    """management:tournament_scores and match_result -- the results page
+    split out from the Schedule tab (TournamentScheduleTests above), plus
+    "Start next phase" (TournamentStageNextPhaseView), which moved here from
+    Fields & stages. record_result itself is exercised in depth by
+    tournaments/tests.py's RecordResultTests; these tests check that the
+    views actually call through to it and flash/redirect correctly."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.tournament = Tournament.objects.create(club=cls.club, name="Fall Classic", season=cls.season, start_date=today, end_date=today + datetime.timedelta(days=2))
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="tournaments")
+        flag.clubs.add(self.club)
+
+    def make_coach(self, email="coach-scores@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return coach_user
+
+    def make_team(self, name):
+        return TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name=name)
+
+    def test_scores_404s_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_scores_403s_for_a_non_admin_even_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.make_coach())
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_scores_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
+
+    def test_scores_groups_matches_by_stage_then_round(self):
+        self.activate_flag()
+        team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
+        stage1 = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", sequence=0, format=TournamentStage.Format.CUSTOM)
+        stage2 = TournamentStage.objects.create(tournament=self.tournament, name="Final Four", sequence=1, format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage1, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        Match.objects.create(stage=stage1, round_number=1, sequence=1, home_team=team_c, away_team=team_d)
+        Match.objects.create(stage=stage2, round_number=1, sequence=0, round_label="Final", home_team=team_a, away_team=team_d)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        stages = response.context["stages"]
+        self.assertEqual([row["stage"] for row in stages], [stage1, stage2])
+        self.assertContains(response, "Team A")
+        self.assertContains(response, "Final")
+
+    def test_a_round_with_every_match_complete_starts_collapsed(self):
+        self.activate_flag()
+        team_a, team_b, team_c, team_d = (self.make_team(f"Team {letter}") for letter in "ABCD")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Knockout", format=TournamentStage.Format.SINGLE_ELIM)
+        generate_stage_matches(stage, entries=[team_a, team_b, team_c, team_d])
+        semi1, semi2 = Match.objects.filter(stage=stage, round_number=1)
+        semi1.score_home, semi1.score_away, semi1.status = 2, 0, Match.Status.COMPLETE
+        semi1.save()
+        semi2.score_home, semi2.score_away, semi2.status = 3, 1, Match.Status.COMPLETE
+        semi2.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        rounds = {round_row["round_number"]: round_row["all_complete"] for stage_row in response.context["stages"] for round_row in stage_row["rounds"]}
+        self.assertTrue(rounds[1])  # both semis complete -- starts collapsed
+        self.assertFalse(rounds[2])  # final not played yet -- starts expanded
+
+    def test_scores_page_has_no_field_time_controls(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        Match.objects.create(stage=stage, round_number=1, sequence=0, home_team=team_a, away_team=team_b)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertNotContains(response, reverse("management:match_reschedule", args=[Match.objects.get().pk]))
+
+    def test_start_next_phase_button_shows_only_when_the_stage_is_ready(self):
+        self.activate_flag()
+        teams = [self.make_team(f"G{i}") for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, config={"num_groups": 1})
+        generate_stage_matches(stage, entries=teams)
+        group = TournamentGroup.objects.get(stage=stage)
+        knockout_stage = TournamentStage.objects.create(tournament=self.tournament, name="Final", format=TournamentStage.Format.CUSTOM, sequence=1)
+        Match.objects.create(stage=knockout_stage, round_number=1, home_source_group=group, home_source_rank=1)
+        self.client.force_login(self.admin_user)
+
+        not_ready_response = self.club_get("tournament_scores", self.tournament.pk)
+        self.assertNotContains(not_ready_response, "Start next phase")
+
+        for match in stage.matches.all():
+            match.score_home, match.score_away, match.status = 1, 0, Match.Status.COMPLETE
+            match.save()
+
+        ready_response = self.club_get("tournament_scores", self.tournament.pk)
+        self.assertContains(ready_response, "Start next phase")
+        self.assertContains(ready_response, reverse("management:tournament_stage_next_phase", args=[self.tournament.pk, stage.pk]))
+
+    def test_start_next_phase_button_hidden_when_nothing_sources_from_the_stage(self):
+        # A finished GROUPS stage nobody ever seeded a downstream "Nth place
+        # of" slot from (e.g. it's the last stage in the tournament) has
+        # nothing for "Start next phase" to push anywhere -- the button
+        # would just be a dead click.
+        self.activate_flag()
+        teams = [self.make_team(f"G{i}") for i in range(1, 3)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Groups", format=TournamentStage.Format.GROUPS, config={"num_groups": 1})
+        generate_stage_matches(stage, entries=teams)
+        for match in stage.matches.all():
+            match.score_home, match.score_away, match.status = 1, 0, Match.Status.COMPLETE
+            match.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertNotContains(response, "Start next phase")
+
+    def test_generate_next_round_button_shows_only_once_the_round_just_played_is_complete(self):
+        self.activate_flag()
+        teams = [self.make_team(f"S{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS, config={"rounds": 3})
+        generate_stage_matches(stage, entries=teams)
+        self.client.force_login(self.admin_user)
+
+        not_ready_response = self.club_get("tournament_scores", self.tournament.pk)
+        self.assertNotContains(not_ready_response, "Generate next round")
+
+        for match in stage.matches.all():
+            match.score_home, match.score_away, match.status = 1, 0, Match.Status.COMPLETE
+            match.save()
+
+        ready_response = self.club_get("tournament_scores", self.tournament.pk)
+        self.assertContains(ready_response, "Generate next round")
+        self.assertContains(ready_response, reverse("management:tournament_stage_generate_next_swiss_round", args=[self.tournament.pk, stage.pk]))
+
+    def test_generate_next_round_button_hidden_once_the_configured_round_count_is_reached(self):
+        self.activate_flag()
+        teams = [self.make_team(f"S{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS, config={"rounds": 1})
+        generate_stage_matches(stage, entries=teams)
+        for match in stage.matches.all():
+            match.score_home, match.score_away, match.status = 1, 0, Match.Status.COMPLETE
+            match.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertNotContains(response, "Generate next round")
+
+    def test_generate_next_round_actually_generates_it(self):
+        # Regression test: generate_next_swiss_round existed as a fully
+        # built, tested service with nothing in the UI ever calling it past
+        # round 1 -- this is the button now wired through to it.
+        self.activate_flag()
+        teams = [self.make_team(f"S{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS, config={"rounds": 3})
+        generate_stage_matches(stage, entries=teams)
+        for match in stage.matches.all():
+            match.score_home, match.score_away, match.status = 1, 0, Match.Status.COMPLETE
+            match.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_next_swiss_round", {}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
+        self.assertTrue(stage.matches.filter(round_number=2).exists())
+
+    def test_generate_next_round_flashes_a_warning_when_the_previous_round_isnt_done(self):
+        self.activate_flag()
+        teams = [self.make_team(f"S{i}") for i in range(1, 5)]
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Swiss", format=TournamentStage.Format.SWISS, config={"rounds": 3})
+        generate_stage_matches(stage, entries=teams)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("tournament_stage_generate_next_swiss_round", {}, self.tournament.pk, stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
+        self.assertFalse(stage.matches.filter(round_number=2).exists())
+
     def test_valid_result_marks_the_match_complete_and_updates_a_downstream_slot(self):
         self.activate_flag()
         teams = [self.make_team(f"Team {i}") for i in range(1, 5)]
@@ -14953,7 +15329,7 @@ class TournamentScheduleTests(ManagementTestBase):
 
         response = self.club_post("match_result", {"score_home": 3, "score_away": 1}, semi.pk)
 
-        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
         semi.refresh_from_db()
         self.assertEqual(semi.status, Match.Status.COMPLETE)
         final = Match.objects.get(stage=stage, round_number=2)
@@ -14970,25 +15346,41 @@ class TournamentScheduleTests(ManagementTestBase):
 
         response = self.club_post("match_result", {"score_home": 1, "score_away": 0}, match.pk)
 
-        self.assertRedirects(response, reverse("management:tournament_schedule", args=[self.tournament.pk]))
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
         match.refresh_from_db()
         self.assertEqual(match.status, Match.Status.SCHEDULED)
         self.assertIsNone(match.score_home)
 
-    def test_reschedule_and_result_404_for_a_match_in_another_club(self):
+    def test_a_complete_match_still_shows_an_editable_score_form(self):
+        # Regression test: the Scores page used to render a completed
+        # match's score as plain text with no way to fix a mis-entered
+        # result -- the edit form must still be there, pre-filled.
         self.activate_flag()
-        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
-        other_season = make_season(other_club)
-        other_tournament = Tournament.objects.create(club=other_club, name="Rival Cup", season=other_season, start_date=timezone.localdate(), end_date=timezone.localdate())
-        other_field = TournamentField.objects.create(tournament=other_tournament, name="Field 1")
-        other_stage = TournamentStage.objects.create(tournament=other_tournament, name="Group", format=TournamentStage.Format.CUSTOM)
-        team_x = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="X")
-        team_y = TournamentTeam.objects.create(club=other_club, tournament=other_tournament, foreign_name="Y")
-        other_match = Match.objects.create(stage=other_stage, home_team=team_x, away_team=team_y)
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=team_a, away_team=team_b, score_home=3, score_away=1, status=Match.Status.COMPLETE)
         self.client.force_login(self.admin_user)
 
-        self.assertEqual(self.club_post("match_reschedule", {"field": other_field.pk, "scheduled_start": "2026-09-20T09:00"}, other_match.pk).status_code, 404)
-        self.assertEqual(self.club_post("match_result", {"score_home": 1, "score_away": 0}, other_match.pk).status_code, 404)
+        response = self.club_get("tournament_scores", self.tournament.pk)
+
+        self.assertContains(response, reverse("management:match_result", args=[match.pk]))
+        self.assertContains(response, 'value="3"')
+        self.assertContains(response, 'value="1"')
+
+    def test_posting_a_corrected_score_to_an_already_complete_match_updates_it(self):
+        self.activate_flag()
+        team_a, team_b = self.make_team("Team A"), self.make_team("Team B")
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="Group Stage", format=TournamentStage.Format.CUSTOM)
+        match = Match.objects.create(stage=stage, home_team=team_a, away_team=team_b, score_home=3, score_away=1, status=Match.Status.COMPLETE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("match_result", {"score_home": 2, "score_away": 2}, match.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
+        match.refresh_from_db()
+        self.assertEqual(match.score_home, 2)
+        self.assertEqual(match.score_away, 2)
+        self.assertEqual(match.status, Match.Status.COMPLETE)
 
 
 class TournamentCreateUpdateTests(ManagementTestBase):
@@ -15673,6 +16065,37 @@ class TournamentStageSeedViewTests(ManagementTestBase):
         self.assertEqual(formset.forms[1].initial.get("team"), team2.pk)
         self.assertContains(response, 'name="with_placement"')
 
+    def test_placement_checkbox_carries_over_from_the_generate_modal(self):
+        # Regression test: the "Generate matches" modal's own placement
+        # checkbox used to be forgotten the moment "Seed from standings"
+        # navigated here -- the seed-choice-ok JS now appends
+        # ?with_placement=on to that navigation, and this must pre-check
+        # the box on landing.
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="A", seed=1)
+        TournamentTeam.objects.create(club=self.club, tournament=self.tournament, foreign_name="B", seed=2)
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("management:tournament_stage_seed", args=[self.tournament.pk, stage.pk]) + "?with_placement=on", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'name="with_placement" class="checkbox mt-0.5" checked')
+
+    def test_placement_checkbox_stays_checked_after_a_redisplayed_error(self):
+        self.activate_flag()
+        stage = TournamentStage.objects.create(tournament=self.tournament, name="KO", format=TournamentStage.Format.SINGLE_ELIM, sequence=1)
+        group = self.make_group(2)
+        self.client.force_login(self.admin_user)
+
+        data = self.slot_data(
+            {"entry_type": "group", "group": str(group.pk)},  # rank missing -- rejected, redisplayed
+        )
+        data["with_placement"] = "on"
+        response = self.club_post("tournament_stage_seed", data, self.tournament.pk, stage.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="with_placement" class="checkbox mt-0.5" checked')
+
     def test_the_placement_checkbox_is_absent_for_double_elim(self):
         self.activate_flag()
         stage = TournamentStage.objects.create(tournament=self.tournament, name="DE", format=TournamentStage.Format.DOUBLE_ELIM)
@@ -15821,7 +16244,7 @@ class TournamentStageNextPhaseViewTests(ManagementTestBase):
 
         response = self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk)
 
-        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
         group_stage.refresh_from_db()
         self.assertNotEqual(group_stage.status, TournamentStage.Status.COMPLETE)
 
@@ -15838,6 +16261,15 @@ class TournamentStageNextPhaseViewTests(ManagementTestBase):
         crossover.refresh_from_db()
         self.assertIsNone(crossover.home_team_id)  # not resolved by GET
 
+    def test_next_phase_lights_up_the_tournaments_nav_section_not_settings(self):
+        self.activate_flag()
+        group_stage, _group, _crossover = self.make_finished_group_stage()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk)
+
+        self.assertEqual(response.context["nav_section"], "tournaments")
+
     def test_confirming_resolves_the_slots_and_completes_the_stage(self):
         self.activate_flag()
         group_stage, group, crossover = self.make_finished_group_stage()
@@ -15846,11 +16278,38 @@ class TournamentStageNextPhaseViewTests(ManagementTestBase):
 
         response = self.club_post("tournament_stage_next_phase", {}, self.tournament.pk, group_stage.pk)
 
-        self.assertRedirects(response, reverse("management:tournament_field_stage_list", args=[self.tournament.pk]))
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
         crossover.refresh_from_db()
         group_stage.refresh_from_db()
         self.assertEqual(crossover.home_team_id, only_match.home_team_id)
         self.assertEqual(group_stage.status, TournamentStage.Status.COMPLETE)
+
+    def test_rank_input_defaults_to_the_computed_rank(self):
+        self.activate_flag()
+        group_stage, group, _crossover = self.make_finished_group_stage()
+        only_match = group.matches.get()
+        winner = only_match.home_team
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("tournament_stage_next_phase", self.tournament.pk, group_stage.pk)
+
+        self.assertContains(response, f'name="rank__{group.pk}__{winner.pk}" value="1"')
+
+    def test_confirming_with_an_overridden_rank_uses_the_new_order(self):
+        # The point of a review screen: staff can correct the computed
+        # order (a tie broken the wrong way, say) before it's locked in.
+        self.activate_flag()
+        group_stage, group, crossover = self.make_finished_group_stage()
+        only_match = group.matches.get()
+        winner, loser = only_match.home_team, only_match.away_team
+        self.client.force_login(self.admin_user)
+
+        data = {f"rank__{group.pk}__{winner.pk}": "2", f"rank__{group.pk}__{loser.pk}": "1"}
+        response = self.club_post("tournament_stage_next_phase", data, self.tournament.pk, group_stage.pk)
+
+        self.assertRedirects(response, reverse("management:tournament_scores", args=[self.tournament.pk]))
+        crossover.refresh_from_db()
+        self.assertEqual(crossover.home_team_id, loser.pk)
 
     def test_generate_matches_marks_the_stage_active(self):
         self.activate_flag()
@@ -16546,6 +17005,7 @@ class TournamentPermissionTiersTests(ManagementTestBase):
             ("match_result", [self.match.pk]),
             ("tournament_dressing_room_assign", [self.tournament.pk]),
             ("tournament_stage_generate_matches", [self.tournament.pk, self.stage.pk]),
+            ("tournament_stage_generate_next_swiss_round", [self.tournament.pk, self.stage.pk]),
             ("tournament_schedule_generate", [self.tournament.pk]),
             ("tournament_break_rule_create", [self.tournament.pk]),
             ("tournament_break_rule_update", [self.tournament.pk, self.break_rule.pk]),
@@ -16618,7 +17078,9 @@ class TournamentPermissionTiersTests(ManagementTestBase):
             ("tournament_registration_queue", [self.tournament.pk]),
             ("tournament_team_list", [self.tournament.pk]),
             ("tournament_team_roster", [self.tournament.pk, self.team_entry.pk]),
+            ("tournament_standings", [self.tournament.pk]),
             ("tournament_schedule", [self.tournament.pk]),
+            ("tournament_scores", [self.tournament.pk]),
             ("tournament_field_stage_list", [self.tournament.pk]),
             ("tournament_task_list", [self.tournament.pk]),
             ("tournament_dressing_room_list", [self.tournament.pk]),

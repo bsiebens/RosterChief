@@ -163,8 +163,22 @@ from tournaments.services.dressing_rooms import DressingRoomAssignmentError, ass
 from tournaments.services.lunch import daily_lunch_summary
 from tournaments.services.notifications import dispatch_notify_tournament_shifts_open, send_registration_decision_email
 from tournaments.services.registration import RegistrationDecisionError, TeamDeletionError, TeamWithdrawalError, approve_registration, create_manual_team, delete_manual_team, ensure_home_team, reject_registration, withdraw_team
-from tournaments.services.scheduling import PX_PER_MINUTE, GroupRankSeed, SchedulingError, allocate_schedule, clear_schedule, field_timeline, generate_stage_matches, group_standings_preview, record_result, reschedule_match, resolve_group_slots
+from tournaments.services.scheduling import (
+    PX_PER_MINUTE,
+    GroupRankSeed,
+    SchedulingError,
+    allocate_schedule,
+    clear_schedule,
+    field_timeline,
+    generate_next_swiss_round,
+    generate_stage_matches,
+    group_standings_preview,
+    record_result,
+    reschedule_match,
+    resolve_group_slots,
+)
 from tournaments.services.tasks import TaskClaimError, claim_task, generate_task_shifts
+from tournaments.views import _standings_context
 
 from .bulk_import import build_member_import_template, family_choice_field_name, match_candidate_families, parse_member_import_rows, read_member_import_workbook
 from .email_previews import EMAIL_PREVIEWS, EMAIL_PREVIEWS_BY_KEY, render_preview
@@ -241,7 +255,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors, tournament_team_lunch_pdf, tournament_team_roster_pdf
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors, tournament_lunch_summary_pdf, tournament_team_lunch_pdf, tournament_team_roster_pdf
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -7670,6 +7684,50 @@ class TournamentTeamLunchPdfView(TournamentsManagerRequiredMixin, View):
         return response
 
 
+class TournamentLunchSummaryPdfView(TournamentsManagerRequiredMixin, View):
+    """Downloadable per-day lunch summary across every team in the
+    tournament -- one button on the Teams tab, for whoever's catering the
+    whole event rather than one team at a time (``TournamentTeamLunchPdfView``
+    above). Same day-by-day shape (``tournaments.services.lunch.
+    daily_lunch_summary``), plus a per-team headcount each day, and --
+    unlike the day-level ``dietary_notes`` list, which is just the distinct
+    restriction *text*, with no names -- each team row also names exactly
+    which of its own people (``dietary_people``) have one, and what it is,
+    so the kitchen doesn't have to guess who a plain "nut allergy" note
+    downstairs belongs to. Withdrawn teams are left out entirely -- they
+    aren't showing up to eat."""
+
+    def get(self, request, tournament_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        teams = list(tournament.teams.filter(withdrawn_at__isnull=True))
+        entries = list(TournamentRosterEntry.objects.filter(tournament_team__in=teams).select_related("tournament_team"))
+        days = daily_lunch_summary(tournament, entries)
+        for day in days:
+            iso = day["date"].isoformat()
+            day["team_counts"] = []
+            for team in teams:
+                eating = [entry for entry in entries if entry.tournament_team_id == team.id and iso in entry.lunch_days]
+                dietary_people = [{"name": entry.display_name, "restriction": entry.dietary_restrictions.strip()} for entry in eating if entry.dietary_restrictions.strip()]
+                day["team_counts"].append({"team": team, "count": len(eating), "dietary_people": dietary_people})
+
+        context = {
+            "club": request.club,
+            "tournament": tournament,
+            "days": days,
+            "generated_at": timezone.now(),
+        }
+
+        try:
+            pdf = tournament_lunch_summary_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect("management:tournament_team_list", tournament_pk=tournament.pk)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{tournament.slug}-lunch-summary.pdf"'
+        return response
+
+
 class TournamentRosterEntryCreateView(TournamentOperatorRequiredMixin, View):
     def post(self, request, tournament_pk, team_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
@@ -7733,19 +7791,47 @@ class TournamentRosterEntryLunchUpdateView(TournamentOperatorRequiredMixin, View
         return redirect("management:tournament_team_roster", tournament_pk=tournament.pk, team_pk=team.pk)
 
 
+class TournamentStandingsView(TournamentsManagerRequiredMixin, TemplateView):
+    """Staff's own copy of the public standings/bracket page (tournaments.
+    views.TournamentScheduleView's own public sibling) -- reuses
+    tournaments.views._standings_context unchanged (the exact same
+    standings-table/bracket-progression split the public page and
+    TournamentDetailView's own snapshot already share) so staff can check
+    current standings without leaving the club subdomain or needing the
+    tournament to even be published yet."""
+
+    template_name = "management/tournament_standings.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        return super().get_context_data(
+            tournament=tournament,
+            active_tab="standings",
+            **_standings_context(tournament),
+            **self.tournament_permissions(tournament),
+            **kwargs,
+        )
+
+
 class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
     """One tournament's full match schedule -- every ``Match`` across every
     ``TournamentStage``, grouped by stage then round (mirrors
     ``VolunteerListView``'s own ``itertools.groupby`` idiom for turning an
     ordered queryset into a ``[{key, items}, ...]`` shape a template can walk
-    without doing the grouping itself). Each row's inline "field + time" and
-    score forms post to ``MatchRescheduleView``/``MatchResultView`` below."""
+    without doing the grouping itself). Each row's inline "field + time" form
+    posts to ``MatchRescheduleView`` below -- entering a score itself is a
+    separate page, ``TournamentScoresView``, one concern per page rather than
+    cramming field/time and score into the same row."""
 
     template_name = "management/tournament_schedule.html"
 
     def get_context_data(self, **kwargs):
         tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
-        matches = Match.objects.filter(stage__tournament=tournament).select_related("stage", "group", "field", "home_team", "away_team").order_by("stage__sequence", "round_number", "sequence")
+        matches = (
+            Match.objects.filter(stage__tournament=tournament)
+            .select_related("stage", "group", "field", "home_team", "away_team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
+            .order_by("stage__sequence", "round_number", "sequence")
+        )
 
         stages = []
         for stage, stage_matches in groupby(matches, key=lambda match: match.stage):
@@ -7773,6 +7859,98 @@ class TournamentScheduleView(TournamentsManagerRequiredMixin, TemplateView):
             **self.tournament_permissions(tournament),
             **kwargs,
         )
+
+
+class TournamentScoresView(TournamentsManagerRequiredMixin, TemplateView):
+    """One tournament's own results page -- every ``Match``, grouped by
+    stage then round exactly like ``TournamentScheduleView``, but for
+    entering a score rather than a field/time (``MatchResultView`` below).
+    Split out from the Schedule tab so a score can grow its own attributes
+    later (cards, a match report, ...) without cramming that into the same
+    row as field/time, and so "Start next phase" -- reviewing a just-finished
+    group's own standings before pushing them into the next stage's slots,
+    ``TournamentStageNextPhaseView`` -- has a home next to the results that
+    make a stage "finished" in the first place, instead of sitting on the
+    unrelated Fields & stages tab. Each round's own "all_complete" flag
+    drives whether that round starts collapsed (a <details> in the
+    template) -- a long bracket otherwise buries whatever's actually still
+    waiting on a score under every already-decided round above it."""
+
+    template_name = "management/tournament_scores.html"
+
+    def get_context_data(self, **kwargs):
+        tournament = get_object_or_404(Tournament, pk=self.kwargs["tournament_pk"], club=self.request.club)
+        matches = (
+            Match.objects.filter(stage__tournament=tournament)
+            .select_related("stage", "group", "home_team", "away_team", "home_source_match", "away_source_match", "home_source_group", "away_source_group")
+            .order_by("stage__sequence", "round_number", "sequence")
+        )
+
+        stages = []
+        for stage, stage_matches in groupby(matches, key=lambda match: match.stage):
+            # Same "only a finished GROUPS stage has anything to do here"
+            # rule TournamentFieldStageView used to compute this under --
+            # see TournamentStageNextPhaseView.get_ready_stage. Also
+            # requires some *other* match to actually source from one of
+            # this stage's own groups -- a finished GROUPS stage nobody
+            # ever seeded a downstream "Nth place of" slot from (the last
+            # stage in the tournament, say) has nothing for "Start next
+            # phase" to push anywhere, so the button would just be a dead
+            # click.
+            stage_has_dependents = Match.objects.filter(Q(home_source_group__stage=stage) | Q(away_source_group__stage=stage)).exists()
+            stage.ready_for_next_phase = stage.format == TournamentStage.Format.GROUPS and stage_has_dependents and stage.matches.exists() and not stage.matches.exclude(status=Match.Status.COMPLETE).exists()
+            rounds = []
+            for round_number, round_matches in groupby(stage_matches, key=lambda match: match.round_number):
+                round_matches = list(round_matches)
+                label = next((match.round_label for match in round_matches if match.round_label), "") or (_("Round %(number)d") % {"number": round_number})
+                all_complete = all(match.status == Match.Status.COMPLETE for match in round_matches)
+                rounds.append({"round_number": round_number, "label": label, "matches": round_matches, "all_complete": all_complete})
+
+            # Swiss is the one format generated round-by-round *during* the
+            # tournament (see generate_next_swiss_round's own docstring) --
+            # "Generate next round" only makes sense once the round just
+            # played is fully in, and only while the stage's own configured
+            # round count (if any) hasn't already been reached.
+            stage.swiss_ready_for_next_round = False
+            if stage.format == TournamentStage.Format.SWISS and rounds:
+                last_round = rounds[-1]
+                total_rounds = stage.config.get("rounds")
+                next_round_number = last_round["round_number"] + 1
+                stage.swiss_ready_for_next_round = last_round["all_complete"] and not (total_rounds and next_round_number > total_rounds)
+
+            stages.append({"stage": stage, "rounds": rounds})
+
+        return super().get_context_data(
+            tournament=tournament,
+            stages=stages,
+            active_tab="scores",
+            **self.tournament_permissions(tournament),
+            **kwargs,
+        )
+
+
+class TournamentStageGenerateNextSwissRoundView(TournamentOperatorRequiredMixin, View):
+    """The Scores page's own "Generate next round" button for a Swiss-format
+    stage -- generate_next_swiss_round itself was already fully built and
+    tested, but nothing in the UI ever called it past round 1 (that first
+    round comes from the plain "Generate matches" button, which dispatches
+    to it too -- see generate_stage_matches). Every later round needs this
+    explicit, repeatable action instead, since Swiss pairs each round by
+    the standings the *previous* round's results just produced."""
+
+    def post(self, request, tournament_pk, stage_pk):
+        tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
+        stage = get_object_or_404(TournamentStage, pk=stage_pk, tournament=tournament)
+
+        try:
+            matches = generate_next_swiss_round(stage)
+        except SchedulingError as error:
+            notify(request, f"w|{_('Could not generate the next round')}|{error}")
+        else:
+            body = ngettext("%(count)d match generated for “%(name)s”.", "%(count)d matches generated for “%(name)s”.", len(matches)) % {"count": len(matches), "name": stage.name}
+            notify(request, f"s|{_('Next round generated')}|{body}")
+
+        return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
 
 class TournamentAllocateScheduleView(TournamentOperatorRequiredMixin, View):
@@ -7901,7 +8079,7 @@ class MatchRescheduleView(TournamentOperatorRequiredMixin, View):
 
 
 class MatchResultView(TournamentOperatorRequiredMixin, View):
-    """The schedule view's own inline score-entry form -- always routed
+    """The Scores page's own inline score-entry form -- always routed
     through ``tournaments.services.scheduling.record_result``, which marks
     the match complete and cascades the result forward through the bracket
     (``resolve_match_slots``) in one call."""
@@ -7917,14 +8095,14 @@ class MatchResultView(TournamentOperatorRequiredMixin, View):
 
         if match.home_team_id is None or match.away_team_id is None:
             notify(request, f"e|{_('Could not record result')}|{_('Both teams must be known before a score can be recorded.')}")
-            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+            return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
         try:
             score_home = int(request.POST.get("score_home"))
             score_away = int(request.POST.get("score_away"))
         except TypeError, ValueError:
             notify(request, f"e|{_('Could not record result')}|{_('Enter a score for both teams.')}")
-            return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+            return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
         updated = record_result(match, score_home=score_home, score_away=score_away)
 
@@ -7942,7 +8120,7 @@ class MatchResultView(TournamentOperatorRequiredMixin, View):
         else:
             notify(request, f"s|{_('Score recorded')}|" + _("%(home)s vs %(away)s is now marked complete.") % {"home": match.home_display, "away": match.away_display})
 
-        return redirect("management:tournament_schedule", tournament_pk=tournament.pk)
+        return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
 
 class TournamentScheduleBlockCreateView(TournamentOperatorRequiredMixin, View):
@@ -8069,10 +8247,6 @@ class TournamentFieldStageView(TournamentsManagerRequiredMixin, TemplateView):
         stages = list(tournament.stages.all())
         for stage in stages:
             stage.edit_form = TournamentStageForm(instance=stage)
-            # "Start next phase" (TournamentStageNextPhaseView) only ever has
-            # anything to do for a GROUPS-format stage whose own matches are
-            # all in -- see that view's own get_ready_stage().
-            stage.ready_for_next_phase = stage.format == TournamentStage.Format.GROUPS and stage.matches.exists() and not stage.matches.exclude(status=Match.Status.COMPLETE).exists()
             # Whether "Generate matches" should prompt seed-vs-direct instead
             # of just running the plain seed-order fill: only single/double-
             # elim can be seeded "from standings" at all (TournamentStageSeedView),
@@ -8268,8 +8442,8 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
             slots *= 2
         return slots
 
-    def render_form(self, request, tournament, stage, formset):
-        return render(request, self.template_name, {"tournament": tournament, "stage": stage, "formset": formset, **self.tournament_permissions(tournament)})
+    def render_form(self, request, tournament, stage, formset, with_placement=False):
+        return render(request, self.template_name, {"tournament": tournament, "stage": stage, "formset": formset, "with_placement": with_placement, **self.tournament_permissions(tournament)})
 
     def get(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
@@ -8283,7 +8457,13 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
         while len(initial) < self.default_slot_count(tournament):
             initial.append({})
         formset = SeedSlotFormSet(initial=initial, form_kwargs={"tournament": tournament})
-        return self.render_form(request, tournament, stage, formset)
+        # Carries over from the "Generate matches" modal's own placement
+        # checkbox (tournament_field_stage_list.html's seed-choice-ok
+        # handler appends this when "Seed from standings" is picked with it
+        # checked) -- otherwise checking it there and landing here would
+        # silently forget it.
+        with_placement = request.GET.get("with_placement") == "on"
+        return self.render_form(request, tournament, stage, formset, with_placement=with_placement)
 
     def post(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
@@ -8293,7 +8473,7 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
 
         if not formset.is_valid():
             notify(request, f"e|{_('Could not seed stage')}|{_('Some slots need attention -- see the errors below.')}")
-            return self.render_form(request, tournament, stage, formset)
+            return self.render_form(request, tournament, stage, formset, with_placement=with_placement)
 
         entries = []
         for form in formset.forms:
@@ -8317,7 +8497,7 @@ class TournamentStageSeedView(TournamentOperatorRequiredMixin, View):
 
 
 class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
-    """"Start next phase" -- the Fields & stages tab's own review-and-confirm
+    """"Start next phase" -- the Scores page's own review-and-confirm
     gate in front of tournaments.services.scheduling.resolve_group_slots:
     a group-rank slot ("Nth place of Group X", typically in a *different*,
     later stage) no longer resolves into a real team the instant this
@@ -8328,7 +8508,12 @@ class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
 
     GET redirects back with a warning if the stage isn't actually done yet
     (a stray click, or a result got reopened since); POST resolves every
-    group under the stage in one pass and marks the stage COMPLETE."""
+    group under the stage in one pass and marks the stage COMPLETE. Each
+    group's standings table is also drag-to-reorder (tournament-next-phase-
+    reorder.js) -- staff can fix the computed order before confirming (a tie
+    broken the wrong way, or anything else), not just review then
+    rubber-stamp it (see ``resolve_group_slots``'s own ``team_order`` for how
+    that's applied)."""
 
     template_name = "management/tournament_stage_next_phase.html"
 
@@ -8344,10 +8529,27 @@ class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
             stage = self.get_ready_stage(tournament)
         except SchedulingError as error:
             notify(request, f"w|{_('Not ready yet')}|{error}")
-            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+            return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
         groups = [{"group": group, "standings": group_standings_preview(group)} for group in stage.groups.all()]
         return render(request, self.template_name, {"tournament": tournament, "stage": stage, "groups": groups, **self.tournament_permissions(tournament)})
+
+    def team_order_from_post(self, request, group, standings):
+        # Sorted by whatever rank each row's drag ended up at (its hidden
+        # rank__<group>__<team> input -- see tournament_stage_next_phase.html/
+        # tournament-next-phase-reorder.js), falling back to the row's own
+        # computed rank for a value that didn't come through (e.g. a
+        # tampered/missing field), ties broken by that same computed rank so
+        # an unmoved row never drifts.
+        def submitted_rank(row):
+            raw = request.POST.get(f"rank__{group.pk}__{row['team'].pk}")
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return row["rank"]
+
+        ordered = sorted(standings, key=lambda row: (submitted_rank(row), row["rank"]))
+        return [row["team"] for row in ordered]
 
     def post(self, request, tournament_pk, stage_pk):
         tournament = get_object_or_404(Tournament, pk=tournament_pk, club=request.club)
@@ -8355,11 +8557,13 @@ class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
             stage = self.get_ready_stage(tournament)
         except SchedulingError as error:
             notify(request, f"w|{_('Not ready yet')}|{error}")
-            return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+            return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
         updated_count, conflicts = 0, []
         for group in stage.groups.all():
-            updated, group_conflicts = resolve_group_slots(group)
+            standings = group_standings_preview(group)
+            team_order = self.team_order_from_post(request, group, standings)
+            updated, group_conflicts = resolve_group_slots(group, team_order=team_order)
             updated_count += len(updated)
             conflicts.extend(group_conflicts)
 
@@ -8370,7 +8574,7 @@ class TournamentStageNextPhaseView(TournamentOperatorRequiredMixin, View):
         notify(request, f"s|{_('Next phase started')}|{body}")
         if conflicts:
             notify(request, f"w|{_('Double-check the schedule')}|{' '.join(conflicts)}")
-        return redirect("management:tournament_field_stage_list", tournament_pk=tournament.pk)
+        return redirect("management:tournament_scores", tournament_pk=tournament.pk)
 
 
 class TournamentBreakRuleCreateView(TournamentOperatorRequiredMixin, View):

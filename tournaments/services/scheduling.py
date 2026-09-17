@@ -713,7 +713,7 @@ def field_timeline(tournament) -> list[dict]:
     result = []
 
     for field in tournament.fields.all():
-        matches = list(Match.objects.filter(field=field, scheduled_start__isnull=False).select_related("home_team", "away_team", "stage").order_by("scheduled_start"))
+        matches = list(Match.objects.filter(field=field, scheduled_start__isnull=False).select_related("home_team", "away_team", "stage", "home_source_match", "away_source_match", "home_source_group", "away_source_group").order_by("scheduled_start"))
 
         windows = _field_availability_windows(field, tournament.start_date)
         if not windows:
@@ -949,7 +949,7 @@ def group_standings_preview(group: TournamentGroup) -> list[dict]:
     docstring). What the "Start next phase" review screen shows staff before
     ``resolve_group_slots`` actually commits anything."""
     standings = compute_standings(group.stage, group=group)
-    dependents = list(Match.objects.filter(Q(home_source_group=group) | Q(away_source_group=group)).select_related("field"))
+    dependents = list(Match.objects.filter(Q(home_source_group=group) | Q(away_source_group=group)).select_related("field", "home_team", "away_team", "home_source_match", "away_source_match", "home_source_group", "away_source_group"))
     for row in standings:
         row["feeds"] = [{"match": dependent, "side": "home"} for dependent in dependents if dependent.home_source_group_id == group.id and dependent.home_source_rank == row["rank"]] + [
             {"match": dependent, "side": "away"} for dependent in dependents if dependent.away_source_group_id == group.id and dependent.away_source_rank == row["rank"]
@@ -957,7 +957,7 @@ def group_standings_preview(group: TournamentGroup) -> list[dict]:
     return standings
 
 
-def resolve_group_slots(group: TournamentGroup) -> tuple[list[Match], list[str]]:
+def resolve_group_slots(group: TournamentGroup, *, team_order: list | None = None) -> tuple[list[Match], list[str]]:
     """"Start next phase"'s own confirm step: pushes ``group``'s final
     standings into every downstream slot that sources from it (the
     resolution ``resolve_match_slots`` used to do automatically the instant
@@ -966,6 +966,14 @@ def resolve_group_slots(group: TournamentGroup) -> tuple[list[Match], list[str]]
     ``SchedulingError`` if the group isn't actually complete yet -- this is
     reachable directly from a view now, not only right after the completing
     check already passed.
+
+    ``team_order``, if given, is ``group``'s own teams in final rank order
+    (1st first) -- the review screen's own way of letting staff correct the
+    computed order before committing (a tie broken the wrong way, or
+    anything else) instead of just rubber-stamping whatever
+    ``compute_standings`` produced, which is the whole point of a
+    review-then-confirm screen rather than the old auto-resolve. Left unset,
+    falls back to ``compute_standings`` unchanged.
 
     Returns ``(updated_matches, conflicts)``: a newly-real pairing can
     double-book a team that was fine while its slot was still TBD (the
@@ -977,8 +985,11 @@ def resolve_group_slots(group: TournamentGroup) -> tuple[list[Match], list[str]]
     if group.matches.exclude(status=Match.Status.COMPLETE).exists():
         raise SchedulingError(_("Not every match in this group is complete yet."))
 
-    standings = compute_standings(group.stage, group=group)
-    by_rank = {row["rank"]: row["team"] for row in standings}
+    if team_order is not None:
+        by_rank = dict(enumerate(team_order, start=1))
+    else:
+        standings = compute_standings(group.stage, group=group)
+        by_rank = {row["rank"]: row["team"] for row in standings}
 
     dependents = {match.pk: match for match in Match.objects.filter(Q(home_source_group=group) | Q(away_source_group=group)).select_related("field", "stage__tournament")}
     for dependent in dependents.values():

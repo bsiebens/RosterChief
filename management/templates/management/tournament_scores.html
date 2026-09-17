@@ -1,0 +1,102 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    One tournament's own results page -- every Match, grouped by stage then
+    round, for entering a score (MatchResultView) rather than a field/time
+    (that's the Schedule tab's own concern, TournamentScheduleView). Also
+    where "Start next phase" lives -- see management.views.TournamentScoresView's
+    own docstring for why it moved here from Fields & stages.
+
+    Context: tournament, stages ([{stage, rounds: [{round_number, label,
+    matches, all_complete}, ...]}, ...] -- TournamentScheduleView's own
+    shape, minus fields/schedule_blocks, which don't apply to a
+    results-only page, plus "all_complete" per round: a <details> below is
+    collapsed by default exactly when every one of its own matches is
+    already complete, so a long bracket doesn't bury whatever's still
+    waiting on a score under a wall of already-decided rounds.
+{% endcomment %}
+
+{% block heading %}{{ tournament.name }}{% endblock heading %}
+{% block topbar_context %}
+    <span class="font-mono text-[13px] text-muted">{% trans "Scores" %}</span>
+{% endblock topbar_context %}
+
+{% block panel %}
+    {% include "management/_tournament_tabs.html" %}
+
+    {% for stage_row in stages %}
+        <div class="card mb-4 overflow-hidden">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+                <span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{{ stage_row.stage.name }}</span>
+                {% if stage_row.stage.ready_for_next_phase and can_operate_tournament %}
+                    <a class="btn btn-primary btn-xs gap-1.5" href="{% url 'management:tournament_stage_next_phase' tournament.pk stage_row.stage.pk %}">{% lucide "arrow-right-circle" size=12 %} {% trans "Start next phase" %}</a>
+                {% endif %}
+                {% if stage_row.stage.swiss_ready_for_next_round and can_operate_tournament %}
+                    <form method="post" action="{% url 'management:tournament_stage_generate_next_swiss_round' tournament.pk stage_row.stage.pk %}">
+                        {% csrf_token %}
+                        <button class="btn btn-primary btn-xs gap-1.5" type="submit">{% lucide "shuffle" size=12 %} {% trans "Generate next round" %}</button>
+                    </form>
+                {% endif %}
+            </div>
+
+            {% for round_row in stage_row.rounds %}
+                <details class="group {% if not forloop.first %}border-t border-line{% endif %}" {% if not round_row.all_complete %}open{% endif %}>
+                    <summary class="flex cursor-pointer list-none items-center justify-between gap-2 bg-subhead px-4 py-2.5">
+                        <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
+                        <span class="flex items-center gap-2">
+                            {% if round_row.all_complete %}<span class="badge badge-sm badge-success">{% trans "All scores in" %}</span>{% endif %}
+                            {% lucide "chevron-down" size=14 class="shrink-0 text-dim transition-transform group-open:rotate-180" %}
+                        </span>
+                    </summary>
+                    <table class="table table-fixed">
+                        <thead>
+                            <tr>
+                                <th class="w-[55%]">{% trans "Match" %}</th>
+                                <th class="w-[20%]">{% trans "Status" %}</th>
+                                <th class="w-[25%]">{% trans "Score" %}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for match in round_row.matches %}
+                                <tr>
+                                    <td>
+                                        <div class="font-semibold text-ink">{{ match.home_display }} <span class="text-dim">{% trans "vs" %}</span> {{ match.away_display }}</div>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-sm {% if match.status == "complete" %}badge-success{% elif match.status == "cancelled" %}badge-error{% elif match.status == "in_progress" %}badge-info{% elif match.status == "walkover" %}badge-warning{% else %}badge-outline{% endif %}">{{ match.get_status_display }}</span>
+                                    </td>
+                                    <td>
+                                        {% if match.home_team_id and match.away_team_id and can_operate_tournament %}
+                                            {% comment %}
+                                                Editable even once complete -- entering a score
+                                                wrong is a real, recoverable mistake, not
+                                                something staff should have to delete/regenerate
+                                                matches to fix (see MatchResultView, which always
+                                                re-cascades through resolve_match_slots on save,
+                                                correction or not).
+                                            {% endcomment %}
+                                            <form method="post" action="{% url 'management:match_result' match.pk %}" class="flex items-center gap-1.5">
+                                                {% csrf_token %}
+                                                <input type="number" min="0" name="score_home" class="input w-14" aria-label="{% blocktrans with team=match.home_display %}{{ team }} score{% endblocktrans %}" value="{% if match.score_home is not None %}{{ match.score_home }}{% endif %}" required>
+                                                <span class="text-dim">-</span>
+                                                <input type="number" min="0" name="score_away" class="input w-14" aria-label="{% blocktrans with team=match.away_display %}{{ team }} score{% endblocktrans %}" value="{% if match.score_away is not None %}{{ match.score_away }}{% endif %}" required>
+                                                <button class="btn btn-outline btn-sm" type="submit">{% trans "Save" %}</button>
+                                            </form>
+                                        {% elif match.status == "complete" %}
+                                            <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
+                                        {% else %}
+                                            <span class="text-xs text-dim">&mdash;</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </details>
+            {% endfor %}
+        </div>
+    {% empty %}
+        <div class="card p-6 text-center text-muted">{% trans "No matches have been generated for this tournament yet." %}</div>
+    {% endfor %}
+{% endblock panel %}

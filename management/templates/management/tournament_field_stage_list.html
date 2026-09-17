@@ -76,9 +76,6 @@
                                     </form>
                                 {% endif %}
                             {% endif %}
-                            {% if stage.ready_for_next_phase %}
-                                <a class="btn btn-primary btn-xs" href="{% url 'management:tournament_stage_next_phase' tournament.pk stage.pk %}">{% lucide "arrow-right-circle" size=12 %} {% trans "Start next phase" %}</a>
-                            {% endif %}
                             <button class="btn btn-outline btn-xs" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_update_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Edit" %}</button>
                             <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ stage.pk|dom_id:"stage_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
                         </div>
@@ -177,11 +174,11 @@
                                 </label>
                             </div>
                             {% if stage.format == "single_elim" %}
-                                <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate">
+                                <label class="my-4 flex cursor-pointer items-start gap-2 text-sm text-slate">
                                     <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
                                     <span>
                                         <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
-                                        <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins. Applies to \"Direct assignment\" above." %}</span>
+                                        <span class="block text-xs text-muted">{% trans "Keep playing consolation matches until every rank, 1st to last, is decided -- not just who wins. Applies either way -- direct assignment right away, or carried over to the seed page if you pick that instead." %}</span>
                                     </span>
                                 </label>
                             {% endif %}
@@ -196,7 +193,7 @@
                         <form method="post" action="{% url 'management:tournament_stage_generate_matches' tournament.pk stage.pk %}">
                             {% csrf_token %}
                             <p class="py-2 text-sm opacity-70">{% blocktrans with name=stage.name %}“{{ name }}” fills straight from every team's own seed.{% endblocktrans %}</p>
-                            <label class="flex cursor-pointer items-start gap-2 text-sm text-slate">
+                            <label class="my-4 flex cursor-pointer items-start gap-2 text-sm text-slate">
                                 <input type="checkbox" name="with_placement" class="checkbox mt-0.5">
                                 <span>
                                     <span class="font-medium text-ink">{% trans "Full placement ladder" %}</span>
@@ -219,13 +216,13 @@
 
     {% trans "Add break rule" as add_rule_title %}
     {% url 'management:tournament_break_rule_create' tournament.pk as rule_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="break_rule_create_modal" title=add_rule_title form=break_rule_form action_url=rule_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
+    {% include "controlpanel/_modal_form.html" with modal_id="break_rule_create_modal" title=add_rule_title form=break_rule_form action_url=rule_create_url submit_label=add_label submit_icon="plus" box_class="max-w-lg" %}
 
     {% trans "Edit break rule" as edit_rule_title %}
     {% trans "Delete break rule" as delete_rule_title %}
     {% for rule in break_rules %}
         {% url 'management:tournament_break_rule_update' tournament.pk rule.pk as rule_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=rule.pk|dom_id:"break_rule_update_modal" title=edit_rule_title form=rule.edit_form action_url=rule_update_url submit_icon="check" box_class="max-w-2xl" two_columns=True %}
+        {% include "controlpanel/_modal_form.html" with modal_id=rule.pk|dom_id:"break_rule_update_modal" title=edit_rule_title form=rule.edit_form action_url=rule_update_url submit_icon="check" box_class="max-w-lg" %}
 
         {% url 'management:tournament_break_rule_delete' tournament.pk rule.pk as rule_delete_url %}
         {% blocktrans with summary=rule.display_summary asvar delete_rule_body %}Delete “{{ summary }}”? This cannot be undone.{% endblocktrans %}
@@ -326,14 +323,20 @@
         // .seed-choice-option in assets/management.css); OK is the one
         // moment that actually acts on it, navigating to the seed page or
         // submitting the plain generate-matches form depending on which
-        // card ended up checked.
+        // card ended up checked. The placement checkbox lives in the same
+        // form as the radios either way, so a "seed" navigation carries its
+        // own checked state along as a query param -- TournamentStageSeedView.get
+        // pre-checks the seed page's own copy of the checkbox from it,
+        // rather than silently forgetting what was just ticked here.
         document.querySelectorAll(".seed-choice-ok").forEach((okButton) => {
             okButton.addEventListener("click", () => {
                 const dialog = okButton.closest("dialog");
                 const checked = dialog?.querySelector('input[name="seed_choice"]:checked');
                 if (!checked) return;
                 if (checked.value === "seed") {
-                    window.location.href = okButton.dataset.seedUrl;
+                    const placement = dialog.querySelector('input[name="with_placement"]');
+                    const seedUrl = okButton.dataset.seedUrl;
+                    window.location.href = placement?.checked ? `${seedUrl}?with_placement=on` : seedUrl;
                 } else {
                     document.getElementById(okButton.dataset.formId)?.submit();
                 }

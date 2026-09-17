@@ -1,0 +1,105 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint -- the whole-tournament counterpart to
+    tournament_team_lunch_pdf.html: one section per tournament day, total
+    counts and dietary notes first (same tournaments.services.lunch.
+    daily_lunch_summary shape), then a per-team breakdown -- headcount, and
+    (unlike the day-level dietary_notes list above it, which is just the
+    distinct restriction text with no names) exactly which of that team's
+    own people have a restriction and what it is, so the kitchen doesn't
+    have to guess who a plain note upstairs belongs to.
+
+    Context: club, tournament, days (list of {date, player_count,
+    staff_count, dietary_notes, team_counts: [{team, count, dietary_people:
+    [{name, restriction}, ...]}, ...]}), generated_at.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% blocktrans with name=tournament.name %}{{ name }} lunch summary{% endblocktrans %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 18mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {{ tournament.name }} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
+            h1 { font-size: 18pt; margin: 0 0 2mm; }
+            h2 { font-size: 12pt; margin: 6mm 0 2mm; border-bottom: 1px solid #999; padding-bottom: 1mm; }
+            .muted { color: #666; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 6mm; }
+            .counts { display: flex; gap: 6mm; margin-bottom: 2mm; }
+            .stat { border: 1px solid #ddd; border-radius: 2mm; padding: 2mm 4mm; }
+            .stat .value { font-size: 14pt; font-weight: bold; }
+            .stat .label { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.5pt; }
+            ul { margin: 1mm 0 0; padding-left: 5mm; }
+            table { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+            th, td { text-align: left; padding: 1mm 2mm; border-bottom: 1px solid #eee; }
+            th { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.5pt; }
+            td.count { text-align: right; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ tournament.name }}</h1>
+                <div class="muted">{% trans "Lunch summary — all teams" %}</div>
+            </div>
+            <div class="muted">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
+            </div>
+        </div>
+
+        {% for day in days %}
+            <h2>{{ day.date|date:"l j F Y" }}</h2>
+            <div class="counts">
+                <div class="stat"><div class="value">{{ day.player_count }}</div><div class="label">{% trans "Players" %}</div></div>
+                <div class="stat"><div class="value">{{ day.staff_count }}</div><div class="label">{% trans "Staff" %}</div></div>
+            </div>
+            {% if day.dietary_notes %}
+                <div class="muted">{% trans "Dietary restrictions among those having lunch:" %}</div>
+                <ul>
+                    {% for note in day.dietary_notes %}
+                        <li>{{ note }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <div class="muted">{% trans "No dietary restrictions noted." %}</div>
+            {% endif %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>{% trans "Team" %}</th>
+                        <th class="count">{% trans "Lunches" %}</th>
+                        <th>{% trans "Dietary restrictions" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in day.team_counts %}
+                        <tr>
+                            <td>{{ row.team.display_name }}</td>
+                            <td class="count">{{ row.count }}</td>
+                            <td>
+                                {% if row.dietary_people %}
+                                    {% for person in row.dietary_people %}
+                                        <div>{{ person.name }} &mdash; {{ person.restriction }}</div>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="muted">&mdash;</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% empty %}
+            <p class="muted">{% trans "This tournament has no lunch days configured." %}</p>
+        {% endfor %}
+    </body>
+</html>

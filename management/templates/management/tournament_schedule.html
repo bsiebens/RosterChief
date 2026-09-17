@@ -65,13 +65,12 @@
                 <div class="bg-subhead px-4 py-2.5 {% if not forloop.first %}border-t border-line{% endif %}">
                     <span class="font-mono text-xs font-semibold tracking-[.08em] text-muted uppercase">{{ round_row.label }}</span>
                 </div>
-                <table class="table">
+                <table class="table table-fixed">
                     <thead>
                         <tr>
-                            <th>{% trans "Match" %}</th>
-                            <th>{% trans "Field & time" %}</th>
-                            <th>{% trans "Status" %}</th>
-                            <th>{% trans "Score" %}</th>
+                            <th class="w-[45%]">{% trans "Match" %}</th>
+                            <th class="w-[35%]">{% trans "Field & time" %}</th>
+                            <th class="w-[20%]">{% trans "Status" %}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -102,21 +101,6 @@
                                 <td>
                                     <span class="badge badge-sm {% if match.status == "complete" %}badge-success{% elif match.status == "cancelled" %}badge-error{% elif match.status == "in_progress" %}badge-info{% elif match.status == "walkover" %}badge-warning{% else %}badge-outline{% endif %}">{{ match.get_status_display }}</span>
                                 </td>
-                                <td>
-                                    {% if match.status == "complete" %}
-                                        <span class="font-mono text-sm text-ink">{{ match.score_home }} - {{ match.score_away }}</span>
-                                    {% elif match.home_team_id and match.away_team_id and can_operate_tournament %}
-                                        <form method="post" action="{% url 'management:match_result' match.pk %}" class="flex items-center gap-1.5">
-                                            {% csrf_token %}
-                                            <input type="number" min="0" name="score_home" class="input w-14" aria-label="{% blocktrans with team=match.home_display %}{{ team }} score{% endblocktrans %}" required>
-                                            <span class="text-dim">-</span>
-                                            <input type="number" min="0" name="score_away" class="input w-14" aria-label="{% blocktrans with team=match.away_display %}{{ team }} score{% endblocktrans %}" required>
-                                            <button class="btn btn-outline btn-sm" type="submit">{% trans "Save" %}</button>
-                                        </form>
-                                    {% else %}
-                                        <span class="text-xs text-dim">&mdash;</span>
-                                    {% endif %}
-                                </td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -130,14 +114,14 @@
     {% trans "Add schedule block" as add_block_title %}
     {% trans "Add" as add_label %}
     {% url 'management:tournament_schedule_block_create' tournament.pk as block_create_url %}
-    {% include "controlpanel/_modal_form.html" with modal_id="schedule_block_create_modal" title=add_block_title form=schedule_block_form action_url=block_create_url submit_label=add_label submit_icon="plus" box_class="max-w-2xl" two_columns=True %}
+    {% include "controlpanel/_modal_form.html" with modal_id="schedule_block_create_modal" title=add_block_title form=schedule_block_form action_url=block_create_url submit_label=add_label submit_icon="plus" box_class="max-w-lg" %}
 
     {% trans "Edit schedule block" as edit_block_title %}
     {% trans "Delete schedule block" as delete_block_title %}
     {% trans "Delete" as delete_label %}
     {% for block in schedule_blocks %}
         {% url 'management:tournament_schedule_block_update' tournament.pk block.pk as block_update_url %}
-        {% include "controlpanel/_modal_form.html" with modal_id=block.pk|dom_id:"schedule_block_update_modal" title=edit_block_title form=block.edit_form action_url=block_update_url submit_icon="check" box_class="max-w-2xl" two_columns=True %}
+        {% include "controlpanel/_modal_form.html" with modal_id=block.pk|dom_id:"schedule_block_update_modal" title=edit_block_title form=block.edit_form action_url=block_update_url submit_icon="check" box_class="max-w-lg" %}
 
         {% url 'management:tournament_schedule_block_delete' tournament.pk block.pk as block_delete_url %}
         {% blocktrans with title=block.title asvar delete_block_body %}Delete “{{ title }}”? This cannot be undone.{% endblocktrans %}

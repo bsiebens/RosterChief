@@ -725,6 +725,11 @@ class TournamentRosterEntry(UUIDModel):
         return str(self.member) if self.member_id else f"{self.foreign_first_name} {self.foreign_last_name}".strip()
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= (n % 100) <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 class Match(UUIDModel):
     """One game. Deliberately *not* an ``events.Event`` row -- one Event per
     match would drag in RSVP semantics that don't fit a bracket game and
@@ -805,11 +810,41 @@ class Match(UUIDModel):
 
     @property
     def home_display(self) -> str:
-        return str(self.home_team) if self.home_team_id else "TBD"
+        return self._side_display("home")
 
     @property
     def away_display(self) -> str:
-        return str(self.away_team) if self.away_team_id else "TBD"
+        return self._side_display("away")
+
+    def _side_display(self, label: str) -> str:
+        """What to show for a side that isn't a plain, already-known team --
+        "Winner/Loser of [that match's own round]" for a bracket slot
+        sourced from another match (see ``home_source_match``/
+        ``away_source_match``), or "Nth of [group]" for one sourced from a
+        group's own standings (``home_source_group``/``away_source_group``,
+        filled in later by ``resolve_match_slots``) -- so an unplayed
+        knockout slot reads as an actual bracket position instead of a bare,
+        undifferentiated "TBD"."""
+        if getattr(self, f"{label}_team_id"):
+            return str(getattr(self, f"{label}_team"))
+        if getattr(self, f"{label}_source_match_id"):
+            source_match = getattr(self, f"{label}_source_match")
+            is_winner = getattr(self, f"{label}_source_is_winner")
+            return source_match._winner_or_loser_label(is_winner)
+        if getattr(self, f"{label}_source_group_id"):
+            source_group = getattr(self, f"{label}_source_group")
+            rank = getattr(self, f"{label}_source_rank")
+            rank_label = _ordinal(rank) if rank else "?"
+            return str(_("%(rank)s of %(group)s") % {"rank": rank_label, "group": source_group.name})
+        return str(_("TBD"))
+
+    def _winner_or_loser_label(self, is_winner: bool) -> str:
+        label = self.round_label or str(_("Match %(n)s") % {"n": self.sequence + 1})
+        has_siblings = type(self).objects.filter(stage_id=self.stage_id, round_number=self.round_number, round_label=self.round_label).count() > 1
+        if has_siblings:
+            label = f"{label} {self.sequence + 1}"
+        template = _("Winner of %(match)s") if is_winner else _("Loser of %(match)s")
+        return str(template % {"match": label})
 
     @property
     def winner(self):

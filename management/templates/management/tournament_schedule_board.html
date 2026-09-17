@@ -90,7 +90,12 @@
                                                 style="top: {{ slot.top_px|add:2 }}px; height: {{ slot.height_px|add:"-4" }}px;"
                                                 {% if can_operate_tournament %}draggable="true" data-match-pk="{{ slot.match.pk }}"{% endif %}
                                             >
-                                                <div class="font-mono text-[10px] text-dim">{{ slot.start|date:"H:i" }}</div>
+                                                <div class="flex items-baseline justify-between gap-1">
+                                                    <span class="font-mono text-[10px] text-dim">{{ slot.start|date:"H:i" }}</span>
+                                                    <span class="truncate text-[10px] font-bold tracking-[.04em] text-club uppercase">
+                                                        {% if slot.match.round_label %}{{ slot.match.round_label }}{% else %}{% blocktrans with n=slot.match.round_number %}Round {{ n }}{% endblocktrans %}{% endif %}
+                                                    </span>
+                                                </div>
                                                 <div class="truncate font-semibold text-ink">{{ slot.match.home_display }} <span class="text-dim">v</span> {{ slot.match.away_display }}</div>
                                             </div>
                                         {% else %}

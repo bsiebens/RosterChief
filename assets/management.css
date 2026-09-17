@@ -31,6 +31,13 @@
  */
 @source "../registration";
 
+/* Same reasoning again: the public tournament pages (tournaments/templates/
+ * tournaments/*.html -- standings, schedule, teams, ...) extend
+ * registration/_base.html and link this same compiled stylesheet, so a
+ * utility class used only there needs scanning here too.
+ */
+@source "../tournaments";
+
 @theme {
     --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
     --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
@@ -2463,5 +2470,16 @@
     .article-body th[align="right"],
     .article-body td[align="right"] {
         text-align: right;
+    }
+}
+
+@layer components {
+    /* `list-none` (Tailwind's `list-style: none`) hides <summary>'s default
+       disclosure triangle in Chrome/Firefox, but Safari draws its own via
+       ::-webkit-details-marker regardless -- the Scores page's own
+       collapsible rounds (tournament_scores.html) supply their own chevron
+       icon instead, so this needs suppressing everywhere, not just there. */
+    summary::-webkit-details-marker {
+        display: none;
     }
 }

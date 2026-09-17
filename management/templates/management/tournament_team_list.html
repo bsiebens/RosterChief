@@ -29,6 +29,9 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    {% if tournament.lunch_mode != "none" %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:tournament_lunch_summary_pdf' tournament.pk %}">{% lucide "utensils" size=16 %} {% trans "Lunch summary" %}</a>
+    {% endif %}
     {% if can_operate_tournament %}
         <button class="btn btn-primary gap-2" type="button" onclick="document.getElementById('team_create_modal').showModal()">{% lucide "plus" size=16 %} {% trans "Add team" %}</button>
     {% endif %}
