@@ -39,7 +39,7 @@ from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, in
 from .services.notifications import _notify_order_placed_by_id, notify_order_ready_for_pickup
 from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
 from .services.pricing import cart_totals, order_total
-from .services.production import mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
+from .services.production import mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
 from .services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from .signals import ProtectedCategoryError
 
@@ -1400,6 +1400,156 @@ class ProductionServiceTests(TestCase):
 
         self.order.refresh_from_db()
         self.assertEqual(self.order.production_status, ProductionStatus.IN_PRODUCTION)
+
+
+class ProductionReceivingTests(TestCase):
+    """shop.services.production -- production_receiving_summary/
+    receive_production, the bulk "mark everything that just arrived back
+    from the manufacturer as received" flow."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        cls.variant = ProductVariant.objects.create(product=cls.product, name="Medium")
+
+    def make_order(self, days_ago=0):
+        order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("25.00"))
+        order.created = timezone.now() - timedelta(days=days_ago)
+        order.save(update_fields=["created"])
+        return order
+
+    def make_line(self, order=None, product=None, variant=None, **kwargs):
+        kwargs.setdefault("order", order or self.make_order())
+        kwargs.setdefault("product", product or self.product)
+        kwargs.setdefault("variant", variant)
+        kwargs.setdefault("quantity", 1)
+        kwargs.setdefault("unit_price", Decimal("25.00"))
+        kwargs.setdefault("line_total", Decimal("25.00"))
+        kwargs.setdefault("production_status", ProductionStatus.IN_PRODUCTION)
+        return OrderLine.objects.create(**kwargs)
+
+    def test_summary_sums_quantity_per_product_and_variant(self):
+        self.make_line(quantity=2, variant=self.variant)
+        self.make_line(quantity=3, variant=self.variant)
+
+        summary = production_receiving_summary()
+
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(summary[0]["product"], self.product)
+        self.assertEqual(summary[0]["variants"], [{"variant": self.variant, "expected_quantity": 5}])
+        self.assertEqual(summary[0]["personalized_count"], 0)
+
+    def test_summary_excludes_pending_and_received_lines(self):
+        self.make_line(production_status=ProductionStatus.PENDING, variant=self.variant)
+        self.make_line(production_status=ProductionStatus.RECEIVED, variant=self.variant)
+
+        self.assertEqual(production_receiving_summary(), [])
+
+    def test_summary_excludes_cancelled_orders(self):
+        cancelled = self.make_order()
+        cancelled.fulfillment_status = Order.FulfillmentStatus.CANCELLED
+        cancelled.save(update_fields=["fulfillment_status"])
+        self.make_line(order=cancelled, variant=self.variant)
+
+        self.assertEqual(production_receiving_summary(), [])
+
+    def test_summary_counts_personalized_lines_separately_from_expected_quantity(self):
+        self.make_line(quantity=2, variant=self.variant)
+        self.make_line(personalization_name="Sam", variant=self.variant)
+        self.make_line(personalization_number="7", variant=self.variant)
+
+        summary = production_receiving_summary()
+
+        self.assertEqual(summary[0]["variants"], [{"variant": self.variant, "expected_quantity": 2}])
+        self.assertEqual(summary[0]["personalized_count"], 2)
+
+    def test_summary_reports_a_product_with_only_personalized_lines(self):
+        self.make_line(personalization_name="Sam", variant=self.variant)
+
+        summary = production_receiving_summary()
+
+        self.assertEqual(summary[0]["variants"], [])
+        self.assertEqual(summary[0]["personalized_count"], 1)
+
+    def test_receive_allocates_the_oldest_order_first(self):
+        older = self.make_line(order=self.make_order(days_ago=2), quantity=2, variant=self.variant)
+        newer = self.make_line(order=self.make_order(days_ago=1), quantity=2, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): 2})
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(newer.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(results[0].allocated_lines, [older])
+        self.assertEqual(results[0].remaining_lines, [newer])
+
+    def test_receive_leaves_a_partially_coverable_line_untouched_and_reports_the_shortfall(self):
+        first = self.make_line(order=self.make_order(days_ago=2), quantity=20, variant=self.variant)
+        second = self.make_line(order=self.make_order(days_ago=1), quantity=10, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): 25})  # covers `first` fully, not enough left for `second`
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(second.production_status, ProductionStatus.IN_PRODUCTION)
+        result = results[0]
+        self.assertEqual(result.expected_quantity, 30)
+        self.assertEqual(result.received_quantity, 25)
+        self.assertEqual(result.shortfall, 5)
+        self.assertEqual(result.surplus, 0)
+        self.assertTrue(result.has_discrepancy)
+
+    def test_receive_reports_an_unexplained_surplus_but_still_allocates_everything_owed(self):
+        line = self.make_line(quantity=5, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): 8})
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        result = results[0]
+        self.assertEqual(result.shortfall, 0)
+        self.assertEqual(result.surplus, 3)
+        self.assertTrue(result.has_discrepancy)
+
+    def test_receive_an_exact_match_has_no_discrepancy(self):
+        self.make_line(quantity=4, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): 4})
+
+        self.assertFalse(results[0].has_discrepancy)
+
+    def test_receive_never_touches_a_personalized_line(self):
+        personalized = self.make_line(personalization_name="Sam", quantity=1, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): 1})
+
+        personalized.refresh_from_db()
+        self.assertEqual(personalized.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(results[0].expected_quantity, 0)  # personalized lines aren't "expected" here at all
+        self.assertEqual(results[0].surplus, 1)  # nothing non-personalized for the entered count to match
+
+    def test_receive_resyncs_the_orders_own_rollup(self):
+        order = self.make_order()
+        line = self.make_line(order=order, quantity=1, variant=self.variant)
+
+        receive_production({(self.product, self.variant): 1})
+
+        order.refresh_from_db()
+        self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(line.pk, OrderLine.objects.get(pk=line.pk).pk)  # sanity: still the same row
+
+    def test_receive_ignores_a_none_entry(self):
+        line = self.make_line(quantity=1, variant=self.variant)
+
+        results = receive_production({(self.product, self.variant): None})
+
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(results, [])
 
 
 class OrderKPIsTests(TestCase):

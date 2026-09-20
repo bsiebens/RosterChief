@@ -176,6 +176,14 @@
                             {% for day in calendar.days %}
                                 <div class="cal-week-daycol {% if day.is_today %}is-today{% endif %}">
                                     {% for block in day.blocks %}
+                                        {% if block.gathering_height_pct %}
+                                            <div class="cal-gathering-slot" style="top: {{ block.gathering_top_pct }}%; height: {{ block.gathering_height_pct }}%; left: {{ block.left_pct }}%; width: {{ block.width_pct }}%" title="{% blocktrans with time=block.event.gathering|date:'H:i' %}Gathering at {{ time }}{% endblocktrans %}">
+                                                <div class="cal-gathering-strip cal-gathering-strip-{{ block.event.kind }}">
+                                                <span class="cal-gathering-strip-time">{{ block.event.gathering|date:"H:i" }}</span>
+                                                <span class="cal-gathering-strip-label">{% trans "Gathering" %}</span>
+                                            </div>
+                                            </div>
+                                        {% endif %}
                                         <div class="cal-block-slot" style="top: {{ block.top_pct }}%; height: {{ block.height_pct }}%; left: {{ block.left_pct }}%; width: {{ block.width_pct }}%">
                                             <a class="cal-block cal-block-{{ block.event.kind }}" href="{% url 'management:event_detail' block.event.pk %}" title="{{ block.event.title }}">
                                                 <span class="flex items-center gap-1">

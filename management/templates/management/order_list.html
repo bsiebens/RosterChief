@@ -9,6 +9,8 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_ready_for_pickup' %}">{% lucide "package-check" size=16 %} {% trans "Ready for pickup" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_receive_production' %}">{% lucide "package-open" size=16 %} {% trans "Receive production" %}</a>
     {% if production_products %}
         <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('download_production_modal').showModal()">{% lucide "file-down" size=16 %} {% trans "Download order list" %}</button>
     {% endif %}

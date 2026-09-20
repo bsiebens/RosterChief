@@ -52,10 +52,20 @@ def build_feed(club, people) -> bytes:
         if end < now:
             continue
 
+        # A synced calendar invite is exactly where a gathering time matters
+        # most -- it's the one place someone actually checks "when do I need
+        # to leave", and today it only ever showed up as a line of free text
+        # in the description, which most calendar apps don't surface without
+        # opening the event. Using it as DTSTART instead blocks the whole
+        # gathering-to-end span off on the calendar itself; DTEND stays the
+        # event's own end either way, so the invite's *length* only ever
+        # grows to cover the extra lead time, never shrinks.
+        start = event.gathering or event.start
+
         component = ICalEvent()
         component.add("uid", f"attendance-{attendance.pk}@rosterchief.app")
         component.add("dtstamp", dtstamp)
-        component.add("dtstart", _utc(event.start))
+        component.add("dtstart", _utc(start))
         component.add("dtend", _utc(end))
         component.add("summary", _("%(title)s — %(name)s") % {"title": event.title, "name": attendance.member.first_name} if show_member_name else event.title)
         component.add("status", "CANCELLED" if event.cancelled else "CONFIRMED")
@@ -70,7 +80,10 @@ def build_feed(club, people) -> bytes:
 
         description_lines = [_("RSVP: %(status)s") % {"status": attendance.get_status_display()}]
         if event.gathering:
-            description_lines.append(_("Meet: %(time)s") % {"time": timezone.localtime(event.gathering).strftime("%H:%M")})
+            # The invite's own DTSTART is the gathering time now -- what's
+            # otherwise not obvious from the block itself is when the event
+            # actually starts, not when to meet.
+            description_lines.append(_("Starts: %(time)s") % {"time": timezone.localtime(event.start).strftime("%H:%M")})
         component.add("description", "\n".join(description_lines))
 
         calendar.add_component(component)

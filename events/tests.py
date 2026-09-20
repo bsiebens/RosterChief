@@ -2421,6 +2421,57 @@ class CalendarGridTests(EventsTestBase):
         blocks = grid["days"][0]["blocks"]
         self.assertTrue(all(block["width_pct"] == 100.0 for block in blocks))
 
+    def test_week_grid_block_carries_the_gathering_strips_own_position(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 9, 30))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        span = 24
+        self.assertAlmostEqual(block["gathering_top_pct"], 100 * 9.5 / span, places=2)
+        self.assertAlmostEqual(block["gathering_height_pct"], 100 * 0.5 / span, places=2)
+
+    def test_week_grid_floors_a_very_short_gathering_strips_own_height(self):
+        # A 5-minute gap would otherwise render as an unreadable sliver --
+        # too short even for its own time label.
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 9, 55))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertEqual(block["gathering_height_pct"], 2.0)
+
+    def test_week_grid_omits_the_gathering_strip_with_no_gathering_time(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
+
+    def test_week_grid_omits_the_gathering_strip_crossing_into_the_previous_day(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 0, 15), end=self.at(monday, 1), gathering=self.at(monday - timedelta(days=1), 23, 45))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
+
+    def test_week_grid_omits_the_gathering_strip_when_its_not_actually_earlier(self):
+        # Defensive -- nothing currently stops a single (non-recurring) event's
+        # gathering time from being entered after its own start.
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 10, 30))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
+
     def test_month_grid_always_spans_full_weeks_of_seven_days(self):
         grid = month_grid([], date(2026, 2, 1))  # Feb 2026 starts on a Sunday
 

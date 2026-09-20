@@ -677,6 +677,25 @@ class HomeViewTests(TestCase):
 
         self.assertIsNone(response.context["going_attendance"])
 
+    def test_going_card_shows_the_gathering_time_alongside_face_off(self):
+        soon = self.make_event(title="Soonest", start=self.future, gathering=self.future - datetime.timedelta(minutes=30))
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertContains(response, "face-off")
+        self.assertContains(response, "Meet")
+
+    def test_going_card_omits_the_meet_line_with_no_gathering_time(self):
+        soon = self.make_event(title="Soonest", start=self.future)
+        Attendance.objects.create(event=soon, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self._get("home")
+
+        self.assertNotContains(response, "Meet")
+
     def test_hero_and_going_cards_can_appear_together_for_different_events(self):
         unanswered = self.make_event(title="Needs a reply", start=self.future)
         attending = self.make_event(title="Already going", start=self.future + datetime.timedelta(days=1))
@@ -3681,6 +3700,35 @@ class CalendarFeedViewTests(TestCase):
         component = next(iter(calendar.walk("VEVENT")))
         self.assertEqual(str(component.get("location")), "Straat 1, 2800 Mechelen")
         self.assertNotIn("Sportcentrum", str(component.get("location")))
+
+    def test_dtstart_is_the_gathering_time_when_one_is_set(self):
+        # A synced calendar invite is exactly where a gathering time matters
+        # most -- it used to only ever show up as free text in the
+        # description, easy to miss without opening the event.
+        gathering = timezone.now().replace(microsecond=0) + datetime.timedelta(days=1, hours=-1)
+        end = timezone.now().replace(microsecond=0) + datetime.timedelta(days=1, hours=1)
+        event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1), end=end, gathering=gathering)
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        component = next(iter(calendar.walk("VEVENT")))
+        self.assertEqual(component.get("dtstart").dt, timezone.localtime(gathering).astimezone(datetime.UTC))
+        self.assertEqual(component.get("dtend").dt, timezone.localtime(end).astimezone(datetime.UTC))
+        self.assertIn("Starts:", str(component.get("description")))
+
+    def test_dtstart_is_the_events_own_start_with_no_gathering_time(self):
+        start = timezone.now().replace(microsecond=0) + datetime.timedelta(days=1)
+        event = Event.objects.create(club=self.club, title="Practice", start=start)
+        Attendance.objects.create(event=event, member=self.member)
+
+        response = self._get()
+
+        calendar = ICalCalendar.from_ical(response.content)
+        component = next(iter(calendar.walk("VEVENT")))
+        self.assertEqual(component.get("dtstart").dt, timezone.localtime(start).astimezone(datetime.UTC))
+        self.assertNotIn("Starts:", str(component.get("description")))
 
     def test_scoped_to_the_club_the_url_is_fetched_on(self):
         # The same token/account can be a member of more than one club -- the

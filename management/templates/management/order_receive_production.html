@@ -1,0 +1,118 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    One screen for entering everything that just came back from a
+    manufacturer, instead of opening each order and clicking "Mark
+    received" line by line. Fed by shop.services.production.
+    production_receiving_summary (one row per product+variant still
+    IN_PRODUCTION, with the total quantity expected); POSTing runs
+    shop.services.production.receive_production, which FIFO-allocates each
+    entered count against that product/variant's own oldest orders first,
+    and re-renders this same page with the per-row "results" instead of
+    redirecting, so a shortfall/surplus sits right next to the row that
+    produced it.
+
+    Context: summary (production_receiving_summary's own shape), results
+    (ProductionReceipt list, only present right after a POST).
+{% endcomment %}
+
+{% block panel_title %}{% trans "Receive production" %}{% endblock panel_title %}
+{% block heading %}{% trans "Receive production" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to orders" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="mb-4 text-sm text-muted">{% trans "Enter how many of each item actually arrived. Leave a field blank to skip it -- only a field with a number in it gets acted on. Matching lines are marked received oldest order first; a count that doesn't cover a whole line leaves it in production rather than guessing which part of it arrived." %}</p>
+
+    {% if results %}
+        <div class="card mb-4 overflow-hidden">
+            <div class="border-b border-line px-4 py-3 font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{% trans "Just received" %}</div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Item" %}</th>
+                        <th>{% trans "Expected" %}</th>
+                        <th>{% trans "Received" %}</th>
+                        <th>{% trans "Marked received" %}</th>
+                        <th>{% trans "Discrepancy" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in results %}
+                        <tr>
+                            <td class="font-semibold">{{ result.product.name }}{% if result.variant %} &middot; {{ result.variant.name }}{% endif %}</td>
+                            <td class="font-mono">{{ result.expected_quantity }}</td>
+                            <td class="font-mono">{{ result.received_quantity }}</td>
+                            <td>{% blocktrans count counter=result.allocated_lines|length %}{{ counter }} line{% plural %}{{ counter }} lines{% endblocktrans %}</td>
+                            <td>
+                                {% if result.shortfall %}
+                                    <span class="badge badge-warning">{% blocktrans with count=result.shortfall %}Short {{ count }}{% endblocktrans %}</span>
+                                {% elif result.surplus %}
+                                    <span class="badge badge-error">{% blocktrans with count=result.surplus %}Surplus {{ count }}{% endblocktrans %}</span>
+                                {% else %}
+                                    <span class="badge badge-success">{% trans "Matched" %}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if result.remaining_lines %}
+                            <tr>
+                                <td colspan="5" class="text-xs text-muted">
+                                    {% trans "Still in production, oldest first:" %}
+                                    {% for line in result.remaining_lines %}
+                                        <a class="link" href="{% url 'management:order_detail' line.order.pk %}">{{ line.order.number }}</a>{% if not forloop.last %}, {% endif %}
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="card overflow-hidden">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Product" %}</th>
+                        <th>{% trans "Variant" %}</th>
+                        <th>{% trans "Expected" %}</th>
+                        <th>{% trans "Received" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in summary %}
+                        {% if entry.personalized_count %}
+                            <tr>
+                                <td colspan="4" class="bg-warn-bg px-3 py-2 text-xs font-semibold text-warn-text">
+                                    {% lucide "user-pen" size=13 class="mr-1 inline" %}
+                                    {% blocktrans with product=entry.product.name count counter=entry.personalized_count %}{{ product }} — {{ counter }} personalized item still in production needs individual handling on its own order page, not counted here.{% plural %}{{ product }} — {{ counter }} personalized items still in production need individual handling on their own order pages, not counted here.{% endblocktrans %}
+                                </td>
+                            </tr>
+                        {% endif %}
+                        {% for row in entry.variants %}
+                            <tr>
+                                {% if forloop.first %}<td class="font-semibold" rowspan="{{ entry.variants|length }}">{{ entry.product.name }}</td>{% endif %}
+                                <td>{{ row.variant.name|default:"—" }}</td>
+                                <td class="font-mono">{{ row.expected_quantity }}</td>
+                                <td><input type="number" min="0" name="received__{{ entry.product.pk }}__{{ row.variant.pk|default:"none" }}" class="input w-24" placeholder="—"></td>
+                            </tr>
+                        {% endfor %}
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-center text-dim">{% trans "Nothing currently in production." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if summary %}
+            <button class="btn btn-primary mt-4 gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Receive entered quantities" %}</button>
+        {% endif %}
+    </form>
+{% endblock panel %}
