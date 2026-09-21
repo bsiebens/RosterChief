@@ -2040,6 +2040,19 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
 
+    def test_one_member_on_two_teams_sharing_the_pool_is_taken_not_conflict(self):
+        # Same player fielded by two teams in one pool with the same number --
+        # not a clash with themselves, so no conflict flag.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=self.member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertCountEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})", f"{self.member} ({other_team.short_name})"])
+
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
         TeamMembership.objects.create(team=self.team, member=self.member, season=previous_season, jersey_number=4)

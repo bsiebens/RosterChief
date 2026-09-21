@@ -86,8 +86,12 @@ def has_unresolved_conflict(holders: list[Member]) -> bool:
     data from before numbers were tracked accurately. Two holders the age gap
     *does* cover is a legitimate, by-design share, not a conflict to flag --
     management.views.NumberListView uses this to tell the two apart on the
-    Numbers page."""
-    return any(not _age_gap_exempts(a, b) for a, b in itertools.combinations(holders, 2))
+    Numbers page.
+
+    The same member appearing more than once (on two teams sharing a pool, or
+    placed on one and pending on another) is one player, not a clash with
+    themselves, so a pair with the same pk is never a conflict."""
+    return any(a.pk != b.pk and not _age_gap_exempts(a, b) for a, b in itertools.combinations(holders, 2))
 
 
 def available_numbers(pool, season: Season, *, for_member: Member | None = None) -> list[int]:
