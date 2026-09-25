@@ -27,7 +27,7 @@ from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoic
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
@@ -7628,6 +7628,45 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_understaffed"], 1)
         self.assertEqual(response.context["kpi_fully_staffed"], 0)
 
+    def test_a_fully_staffed_game_is_counted_even_though_the_list_hides_it_by_default(self):
+        # The list only ever shows understaffed games (unless show_completed
+        # is on), but the KPI itself must still count a fully-staffed game --
+        # it's season-wide, not derived from whatever's currently rendered.
+        game = self.make_game(max_referees=1)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_fully_staffed"], 1)
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_show_completed_reveals_the_fully_staffed_game_in_the_list(self):
+        game = self.make_game(max_referees=1)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"show_completed": "1"})
+
+        self.assertTrue(response.context["show_completed"])
+        self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_the_fully_staffed_kpi_is_unaffected_by_the_range_choice(self):
+        # KPIs are season-wide, not bound to the range/need filters -- a
+        # narrow "this week" range must not hide a fully-staffed game from
+        # the count, even with show_completed on (so the only reason it's
+        # out of the rendered list is the date window, not staffing).
+        today = timezone.localdate()
+        beyond_this_week = today + datetime.timedelta(days=14)
+        far_away = self.make_game(max_referees=1, start=timezone.make_aware(datetime.datetime.combine(beyond_this_week, datetime.time(10, 0))))
+        EventReferee.objects.create(event=far_away, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"range": "week", "show_completed": "1"})
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[far_away.pk]))
+        self.assertEqual(response.context["kpi_fully_staffed"], 1)
+
     def test_an_assigned_referee_gets_a_fee_form_for_the_dashboard_modal(self):
         game = self.make_game()
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
@@ -7786,6 +7825,31 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         self.assertEqual(response.context["need_choice"], "both")
         self.assertEqual(list(response.context["games"]), [])
+
+    def test_show_completed_also_raises_the_need_counts(self):
+        game = self.make_game(title="Fully staffed", max_referees=1)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"show_completed": "1"})
+
+        self.assertEqual(response.context["need_counts"]["referees"], 1)
+        self.assertEqual(list(response.context["games"]), [game])
+
+    def test_officials_fully_staffed_kpi_counts_even_though_hidden_by_default(self):
+        self.setUp_officials()
+        # federation_team needs officials only (referee_management=FEDERATION),
+        # so assigning an official is the only thing standing between "missing"
+        # and "fully staffed" here -- otherwise a still-missing referee would
+        # keep the game in the "both" bucket's list regardless.
+        game = self.make_game(team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_officials_fully_staffed"], 1)
+        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
 
     def test_each_buckets_count_matches_what_it_actually_shows(self):
         self.setUp_officials()

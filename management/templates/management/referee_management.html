@@ -39,6 +39,14 @@
             <a href="{% querystring range="25" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "25" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Next 25" %}</a>
             <a href="{% querystring range="50" %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if range_choice == "50" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Next 50" %}</a>
         </div>
+        <form method="get">
+            <input type="hidden" name="range" value="{{ range_choice }}">
+            {% if officials_enabled %}<input type="hidden" name="need" value="{{ need_choice }}">{% endif %}
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-slate">
+                <input type="checkbox" name="show_completed" value="1" class="checkbox checkbox-sm" {% if show_completed %}checked{% endif %} onchange="this.form.submit()">
+                {% trans "Also show fully staffed games" %}
+            </label>
+        </form>
     </div>
 {% endblock filter_strip %}
 
