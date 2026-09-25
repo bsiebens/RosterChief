@@ -6,7 +6,13 @@
 {% block panel %}
     <div class="alert alert-info">
         {% lucide "info" size=16 %}
-        <span>{% blocktrans with scraped=plan.scraped_team_name team=plan.team %}Importing fixtures for “{{ scraped }}” onto your team “{{ team }}”. Double check that's the right match before confirming.{% endblocktrans %}</span>
+        <span>
+            {% if plan.competition_label %}
+                {% blocktrans with scraped=plan.scraped_team_name team=plan.team label=plan.competition_label %}Importing “{{ label }}” fixtures for “{{ scraped }}” onto your team “{{ team }}”. Double check that's the right match before confirming.{% endblocktrans %}
+            {% else %}
+                {% blocktrans with scraped=plan.scraped_team_name team=plan.team %}Importing fixtures for “{{ scraped }}” onto your team “{{ team }}”. Double check that's the right match before confirming.{% endblocktrans %}
+            {% endif %}
+        </span>
     </div>
 
     <form method="post" action="{% url 'management:rbihf_import_confirm' %}">

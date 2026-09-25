@@ -2040,6 +2040,19 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
 
+    def test_one_member_on_two_teams_sharing_the_pool_is_taken_not_conflict(self):
+        # Same player fielded by two teams in one pool with the same number --
+        # not a clash with themselves, so no conflict flag.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=self.member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertCountEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})", f"{self.member} ({other_team.short_name})"])
+
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
         TeamMembership.objects.create(team=self.team, member=self.member, season=previous_season, jersey_number=4)
@@ -6259,6 +6272,25 @@ class EventManagementTests(ManagementTestBase):
 
         self.assertContains(response, 'aria-label="Friendly"')
 
+    def test_the_week_calendar_shows_a_gathering_strip_before_the_block(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), gathering=timezone.now() - datetime.timedelta(minutes=30))
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list")  # default view=calendar, range=week
+
+        self.assertContains(response, "cal-gathering-strip-game")  # coloured to match the event's own kind
+        self.assertContains(response, timezone.localtime(game.gathering).strftime("%H:%M"))  # the gathering time itself, not just a tooltip
+
+    def test_the_week_calendar_omits_the_gathering_strip_with_no_gathering_time(self):
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now())
+        game.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_list")  # default view=calendar, range=week
+
+        self.assertNotContains(response, "cal-gathering-strip")
+
     def test_the_month_calendar_marks_a_friendly_game(self):
         game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), is_friendly=True)
         game.teams.add(self.own_team)
@@ -8835,6 +8867,19 @@ class RBIHFImportViewTests(ManagementTestBase):
         event = Event.objects.get(club=self.club, external_game_id="5002")
         self.assertEqual(event.opponent.name, "Amsterdam Tigers")
         self.assertIn(self.team, event.teams.all())
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_the_competition_label_survives_from_form_to_confirm(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "competition_label": "Division 1"})
+
+        response = self.club_post("rbihf_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.competition_label, "Division 1")
+        self.assertEqual(event.external_source_id, "4460")
 
     @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_respects_the_chosen_location(self, mock_fetch):
@@ -12325,6 +12370,166 @@ class OrderProductionReprintTests(ShopTestBase):
         self.client.force_login(self.make_plain_staff())
 
         response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        self.assertEqual(response.status_code, 403)
+
+
+class OrderReceiveProductionTests(ShopTestBase):
+    """OrderReceiveProductionView -- the "Receive production" screen. The
+    FIFO allocation/discrepancy math itself is exercised in depth by
+    shop.tests.ProductionReceivingTests; these tests check the view/template
+    wire it through correctly."""
+
+    def setUp(self):
+        super().setUp()
+        self.variant = ProductVariant.objects.create(product=self.product, name="Medium")
+        self.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly-receive@example.com")
+
+    def make_line(self, order=None, **overrides):
+        order = order or Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"))
+        kwargs = {"order": order, "product": self.product, "variant": self.variant, "quantity": 1, "unit_price": Decimal("25.00"), "line_total": Decimal("25.00"), "production_status": ProductionStatus.IN_PRODUCTION}
+        kwargs.update(overrides)
+        return OrderLine.objects.create(**kwargs)
+
+    def field_name(self, variant=None):
+        variant = self.variant if variant is None else variant
+        return f"received__{self.product.pk}__{variant.pk if variant else 'none'}"
+
+    def test_lists_the_expected_quantity_for_each_variant(self):
+        self.make_line(quantity=3)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_receive_production")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["summary"][0]["variants"], [{"variant": self.variant, "expected_quantity": 3}])
+
+    def test_an_entered_quantity_marks_the_matching_line_received(self):
+        line = self.make_line(quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_receive_production", {self.field_name(): "1"})
+
+        self.assertEqual(response.status_code, 200)
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(len(response.context["results"]), 1)
+
+    def test_a_blank_field_is_skipped_entirely(self):
+        line = self.make_line(quantity=1)
+        other_variant = ProductVariant.objects.create(product=self.product, name="Large")
+        other_line = self.make_line(variant=other_variant, quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_receive_production", {self.field_name(): "1", self.field_name(other_variant): ""})
+
+        line.refresh_from_db()
+        other_line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(other_line.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(len(response.context["results"]), 1)  # the blank field never became a receipt
+
+    def test_nothing_entered_at_all_flashes_a_warning_and_redirects(self):
+        self.make_line(quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_receive_production", {})
+
+        self.assertRedirects(response, reverse("management:order_receive_production"))
+
+    def test_a_non_numeric_entry_is_flagged_and_skipped_rather_than_500ing(self):
+        line = self.make_line(quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_receive_production", {self.field_name(): "lots"})
+
+        self.assertRedirects(response, reverse("management:order_receive_production"))
+        line.refresh_from_db()
+        self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_personalized_items_still_in_production_are_flagged_on_the_page(self):
+        self.make_line(personalization_name="Sam")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_receive_production")
+
+        self.assertContains(response, "personalized")
+        self.assertEqual(response.context["summary"][0]["personalized_count"], 1)
+
+    def test_plain_staff_cannot_receive_production(self):
+        self.make_line(quantity=1)
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_post("order_receive_production", {self.field_name(): "1"})
+
+        self.assertEqual(response.status_code, 403)
+
+
+class OrderReadyForPickupTests(ShopTestBase):
+    """OrderReadyForPickupView -- the "what can I hand over right now"
+    screen, filtered to orders whose merchandise is fully back from
+    production but not yet marked ready for pickup. The bulk action itself
+    (OrderBulkMarkReadyForPickupView) is exercised in depth elsewhere; these
+    tests just check the filtering/flagging this view adds."""
+
+    def setUp(self):
+        super().setUp()
+        self.purchaser = Member.objects.create(first_name="Rae", last_name="Ready", email="rae-ready@example.com")
+
+    def make_order(self, production_status=ProductionStatus.RECEIVED, fulfillment_status=Order.FulfillmentStatus.NOT_READY, **line_overrides):
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("25.00"), production_status=production_status, fulfillment_status=fulfillment_status)
+        kwargs = {"order": order, "product": self.product, "quantity": 1, "unit_price": Decimal("25.00"), "line_total": Decimal("25.00"), "production_status": production_status}
+        kwargs.update(line_overrides)
+        OrderLine.objects.create(**kwargs)
+        return order
+
+    def test_lists_a_fully_received_not_yet_ready_order(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_ready_for_pickup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(order, response.context["orders"])
+
+    def test_excludes_an_order_still_in_production(self):
+        order = self.make_order(production_status=ProductionStatus.IN_PRODUCTION)
+
+        self.client.force_login(self.make_shop_manager())
+        response = self.club_get("order_ready_for_pickup")
+
+        self.assertNotIn(order, response.context["orders"])
+
+    def test_excludes_an_order_already_marked_ready(self):
+        order = self.make_order(fulfillment_status=Order.FulfillmentStatus.READY_FOR_PICKUP)
+
+        self.client.force_login(self.make_shop_manager())
+        response = self.club_get("order_ready_for_pickup")
+
+        self.assertNotIn(order, response.context["orders"])
+
+    def test_flags_an_order_that_had_a_personalized_line(self):
+        order = self.make_order(personalization_name="Sam")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_ready_for_pickup")
+
+        flagged = {o.pk: o.has_personalized_lines for o in response.context["orders"]}
+        self.assertTrue(flagged[order.pk])
+
+    def test_the_bulk_ready_for_pickup_action_is_reachable_from_here(self):
+        order = self.make_order()
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_bulk_mark_ready_for_pickup", {"order_ids": [str(order.pk)], "pickup_instructions": ""})
+
+        order.refresh_from_db()
+        self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.READY_FOR_PICKUP)
+
+    def test_plain_staff_cannot_view_ready_for_pickup(self):
+        self.client.force_login(self.make_plain_staff())
+
+        response = self.club_get("order_ready_for_pickup")
 
         self.assertEqual(response.status_code, 403)
 

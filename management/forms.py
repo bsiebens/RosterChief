@@ -768,7 +768,13 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
 class RBIHFImportForm(forms.Form):
     """Step 1 of importing a team's fixtures from RBIHF's own website -- see
     events.services.rbihf_import. Only the URL and which of the club's own
-    teams it applies to; everything else is scraped."""
+    teams it applies to; everything else is scraped.
+
+    RBIHF gives a team a *separate* page (and so a separate URL/team id) per
+    competition it plays in -- a team in both Division 1 and the Cup has two
+    pages, imported separately. competition_label is how staff tell those
+    two imports apart on the schedule afterwards; it's optional, since a
+    team with only one RBIHF competition has nothing to disambiguate."""
 
     url = forms.CharField(
         label=_("RBIHF team page URL"),
@@ -776,6 +782,11 @@ class RBIHFImportForm(forms.Form):
         widget=forms.URLInput(attrs={"placeholder": "https://www.rbihf.be/league/team/4460"}),
     )
     team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+    competition_label = forms.CharField(
+        required=False,
+        label=_("Competition label"),
+        help_text=_("Optional. Only needed if this team plays in more than one RBIHF competition (e.g. “Division 1” vs “Cup”) -- keeps re-importing one from ever deleting the other's games."),
+    )
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)

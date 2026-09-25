@@ -130,7 +130,7 @@ from shop.services.notifications import dispatch_order_ready_for_pickup_notifica
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
-from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, sync_production_status
+from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -4085,11 +4085,12 @@ class RBIHFImportView(FeatureRequiredMixin, View):
 
         url = form.cleaned_data["url"]
         team = form.cleaned_data["team"]
+        competition_label = form.cleaned_data["competition_label"]
 
         rbihf_team_id = extract_team_id(url)
         try:
             html = fetch_html(url)
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError as error:
             form.add_error("url", str(error))
             return render(request, "management/rbihf_import_form.html", {"form": form})
@@ -4097,6 +4098,7 @@ class RBIHFImportView(FeatureRequiredMixin, View):
         request.session["rbihf_import_html"] = html
         request.session["rbihf_import_team_id"] = str(team.pk)
         request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
+        request.session["rbihf_import_competition_label"] = competition_label
         return render(request, "management/rbihf_import_preview.html", {"plan": plan})
 
 
@@ -4112,6 +4114,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         html = request.session.pop("rbihf_import_html", None)
         team_id = request.session.pop("rbihf_import_team_id", None)
         rbihf_team_id = request.session.pop("rbihf_import_rbihf_team_id", None)
+        competition_label = request.session.pop("rbihf_import_competition_label", "")
         if not html or not team_id or not rbihf_team_id:
             notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the RBIHF team URL again.')}")
             return redirect("management:rbihf_import")
@@ -4119,7 +4122,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
 
         try:
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError:
             notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched page. Try again.')}")
             return redirect("management:rbihf_import")
@@ -5084,6 +5087,104 @@ class OrderProductionReprintView(ShopManagerRequiredMixin, View):
         response["Content-Disposition"] = 'attachment; filename="order-in-production-list.xlsx"'
         workbook.save(response)
         return response
+
+
+class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
+    """One screen for entering everything that just arrived back from a
+    manufacturer in one go, instead of opening each order individually and
+    clicking "Mark received" line by line -- shop.services.production.
+    production_receiving_summary lists one input per (product, variant)
+    still IN_PRODUCTION, prefilled with nothing (a blank field means
+    "nothing to report for this one yet", not "zero arrived" -- only a
+    field staff actually typed a number into is ever acted on).
+
+    POSTing FIFO-allocates each entered count against that product/variant's
+    own oldest orders first (receive_production) and re-renders this same
+    page with the per-row result (shop.services.production.
+    ProductionReceipt) instead of redirecting, so a shortfall/surplus
+    discrepancy is right there next to the row that produced it rather than
+    a toast easy to miss. A product with any personalized lines still
+    IN_PRODUCTION shows its own count too (never included in expected_quantity
+    or touched by receive_production -- those are always received one at a
+    time, by hand, from the order's own detail page) so staff know not to
+    expect this screen to have cleared it."""
+
+    template_name = "management/order_receive_production.html"
+
+    def get(self, request):
+        return render(request, self.template_name, {"summary": production_receiving_summary()})
+
+    def post(self, request):
+        summary = production_receiving_summary()
+
+        receipts = {}
+        for entry in summary:
+            for row in entry["variants"]:
+                variant = row["variant"]
+                raw = request.POST.get(f"received__{entry['product'].pk}__{variant.pk if variant else 'none'}", "").strip()
+                if not raw:
+                    continue
+                try:
+                    receipts[(entry["product"], variant)] = max(0, int(raw))
+                except ValueError:
+                    notify(request, f"e|{_('Could not read a quantity')}|{_('“%(value)s” is not a whole number -- that row was skipped.') % {'value': raw}}")
+
+        if not receipts:
+            notify(request, f"w|{_('Nothing entered')}|{_('Enter a received quantity for at least one item.')}")
+            return redirect("management:order_receive_production")
+
+        results = receive_production(receipts)
+
+        allocated_total = sum(len(result.allocated_lines) for result in results)
+        discrepancy_count = sum(1 for result in results if result.has_discrepancy)
+        if discrepancy_count:
+            body = ngettext(
+                "%(lines)d line(s) marked received. %(count)d item flagged below needs a closer look.",
+                "%(lines)d line(s) marked received. %(count)d items flagged below need a closer look.",
+                discrepancy_count,
+            ) % {"lines": allocated_total, "count": discrepancy_count}
+            notify(request, f"w|{_('Received, with discrepancies')}|{body}")
+        else:
+            body = ngettext("%(count)d line marked received.", "%(count)d lines marked received.", allocated_total) % {"count": allocated_total}
+            notify(request, f"s|{_('Received')}|{body}")
+
+        return render(request, self.template_name, {"summary": production_receiving_summary(), "results": results})
+
+
+class OrderReadyForPickupView(ShopManagerRequiredMixin, ListView):
+    """Every order whose merchandise is fully back from production but
+    hasn't been marked ready for pickup yet -- the "what can I actually
+    hand over right now" screen, instead of scanning the full order list
+    for the Production column reading "Received" one row at a time.
+    Cancelled orders are never fully-received in the first place (excluded
+    from every production_status computation already), so nothing extra to
+    filter out here. Reuses OrderBulkMarkReadyForPickupView/
+    OrderBulkMarkReadyForPickupForm unchanged for the actual bulk action --
+    this view only narrows *which* orders are offered for it.
+
+    An order that also has personalized lines still IN_PRODUCTION can never
+    actually reach production_status=RECEIVED (sync_production_status
+    requires every merchandise line to be, personalized ones included) --
+    so nothing here needs its own separate personalized-item flag the way
+    the receiving screen does. What still gets flagged is an order that
+    *had* any personalized lines at all (has_personalized_lines, annotated
+    below) -- a reminder of which ones needed the one-at-a-time manual
+    treatment to get here, not a warning that anything's still outstanding."""
+
+    template_name = "management/order_ready_for_pickup.html"
+    context_object_name = "orders"
+    paginate_by = 50
+
+    def get_queryset(self):
+        return (
+            Order.objects.filter(club=self.request.club, production_status=ProductionStatus.RECEIVED, fulfillment_status=Order.FulfillmentStatus.NOT_READY)
+            .select_related("purchaser")
+            .annotate(has_personalized_lines=Exists(OrderLine.objects.filter(order=OuterRef("pk")).exclude(personalization_number="", personalization_name="")))
+            .order_by("created")
+        )
+
+    def get_context_data(self, **kwargs):
+        return super().get_context_data(bulk_ready_for_pickup_form=OrderBulkMarkReadyForPickupForm(), **kwargs)
 
 
 class OrderBulkMarkPaidView(ShopManagerRequiredMixin, View):

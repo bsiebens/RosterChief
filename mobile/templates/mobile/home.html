@@ -89,6 +89,9 @@
                     <div class="p-4">
                         <div class="flex flex-wrap gap-4 font-mono text-xs text-white">
                             <span>{% blocktrans with time=going_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+                            {% if going_attendance.event.gathering %}
+                                <span>{% blocktrans with time=going_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
+                            {% endif %}
                             {% if going_attendance.event.location %}<span>{{ going_attendance.event.location.name }}</span>{% endif %}
                         </div>
                         <div class="mt-3 flex items-center justify-between">

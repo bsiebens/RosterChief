@@ -1422,6 +1422,65 @@ class RBIHFImportPlanTests(EventsTestBase):
 
         self.assertEqual(plan_again.to_delete, [])
 
+    def test_a_different_competitions_fixture_for_the_same_team_is_not_deleted(self):
+        # Two RBIHF pages for the one team (Division 1, Cup) -- importing
+        # "Cup" must not wipe out "Division 1"'s already-imported games just
+        # because they're absent from the Cup page's own listing.
+        division_html = rbihf_sample_html([self.home_fixture_row(game_id="5002")])
+        division_plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, division_html, "Division 1")
+        apply_plan(division_plan, {})
+
+        cup_team_id = "9999"
+        cup_row = self.home_fixture_row(game_id="7001")
+        cup_row["home_id"] = cup_team_id
+        cup_html = rbihf_sample_html([cup_row])
+        cup_plan = build_plan(self.club, self.team, cup_team_id, cup_html, "Cup")
+
+        self.assertEqual(cup_plan.to_delete, [])
+        self.assertEqual(len(cup_plan.to_create), 1)
+
+        apply_plan(cup_plan, {})
+
+        self.assertTrue(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+        division_event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(division_event.external_source_id, RBIHF_TEAM_ID)
+        self.assertEqual(division_event.competition_label, "Division 1")
+        cup_event = Event.objects.get(club=self.club, external_game_id="7001")
+        self.assertEqual(cup_event.external_source_id, cup_team_id)
+        self.assertEqual(cup_event.competition_label, "Cup")
+
+    def test_a_legacy_event_with_no_source_id_is_still_matched_by_game_id_not_duplicated(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+        # Simulate a row imported before external_source_id existed.
+        Event.objects.filter(club=self.club, external_game_id="5002").update(external_source_id="")
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, html, "Division 1")
+
+        self.assertEqual(plan_again.to_create, [])
+        self.assertEqual(len(plan_again.to_update), 1)
+        apply_plan(plan_again, {})
+
+        self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
+        healed = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(healed.external_source_id, RBIHF_TEAM_ID)
+        self.assertEqual(healed.competition_label, "Division 1")
+
+    def test_a_future_fixture_missing_from_a_differently_sourced_competition_is_protected_from_deletion(self):
+        # A known, different source id is never a delete candidate, even when
+        # the other competition's own scrape has moved on to only listing
+        # unrelated games.
+        cup_team_id = "9999"
+        cup_row = self.home_fixture_row(game_id="7001")
+        cup_row["home_id"] = cup_team_id
+        cup_plan = build_plan(self.club, self.team, cup_team_id, rbihf_sample_html([cup_row]), "Cup")
+        apply_plan(cup_plan, {})
+
+        division_plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]), "Division 1")
+
+        self.assertEqual(division_plan_again.to_delete, [])
+
     def test_a_fixture_for_a_different_team_is_not_touched(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         html = rbihf_sample_html([self.home_fixture_row()])
@@ -2420,6 +2479,57 @@ class CalendarGridTests(EventsTestBase):
 
         blocks = grid["days"][0]["blocks"]
         self.assertTrue(all(block["width_pct"] == 100.0 for block in blocks))
+
+    def test_week_grid_block_carries_the_gathering_strips_own_position(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 9, 30))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        span = 24
+        self.assertAlmostEqual(block["gathering_top_pct"], 100 * 9.5 / span, places=2)
+        self.assertAlmostEqual(block["gathering_height_pct"], 100 * 0.5 / span, places=2)
+
+    def test_week_grid_floors_a_very_short_gathering_strips_own_height(self):
+        # A 5-minute gap would otherwise render as an unreadable sliver --
+        # too short even for its own time label.
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 9, 55))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertEqual(block["gathering_height_pct"], 2.0)
+
+    def test_week_grid_omits_the_gathering_strip_with_no_gathering_time(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
+
+    def test_week_grid_omits_the_gathering_strip_crossing_into_the_previous_day(self):
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 0, 15), end=self.at(monday, 1), gathering=self.at(monday - timedelta(days=1), 23, 45))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
+
+    def test_week_grid_omits_the_gathering_strip_when_its_not_actually_earlier(self):
+        # Defensive -- nothing currently stops a single (non-recurring) event's
+        # gathering time from being entered after its own start.
+        monday = date(2026, 8, 17)
+        event = self.make_event(start=self.at(monday, 10), end=self.at(monday, 11), gathering=self.at(monday, 10, 30))
+
+        grid = week_grid([event], monday)
+
+        block = grid["days"][0]["blocks"][0]
+        self.assertNotIn("gathering_top_pct", block)
 
     def test_month_grid_always_spans_full_weeks_of_seven_days(self):
         grid = month_grid([], date(2026, 2, 1))  # Feb 2026 starts on a Sunday

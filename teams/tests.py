@@ -804,6 +804,15 @@ class NumbersServiceTests(TeamsTestCase):
     def test_has_unresolved_conflict_is_false_for_a_single_holder(self):
         self.assertFalse(has_unresolved_conflict([self.member]))
 
+    def test_has_unresolved_conflict_is_false_for_the_same_member_listed_twice(self):
+        # One player on two teams sharing a pool -- not a clash with themselves.
+        self.assertFalse(has_unresolved_conflict([self.member, self.member]))
+
+    def test_has_unresolved_conflict_still_flags_a_real_clash_alongside_a_repeated_member(self):
+        other = Member.objects.create(first_name="No", last_name="Birthday")
+
+        self.assertTrue(has_unresolved_conflict([self.member, self.member, other]))
+
     def test_has_unresolved_conflict_is_false_for_an_age_gap_exempt_pair(self):
         self.member.date_of_birth = datetime.date(2010, 1, 1)
         younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))

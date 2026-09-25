@@ -1,0 +1,120 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Every order whose merchandise is fully back from production but not yet
+    marked ready for pickup (management.views.OrderReadyForPickupView) --
+    the "what can I actually hand over right now" screen, instead of
+    scanning the full order list's own Production column one row at a time.
+    Same bulk-select + "Mark selected ready for pickup" modal shape as
+    order_list.html (reuses OrderBulkMarkReadyForPickupView/-Form
+    unchanged); this view only narrows which orders are offered here.
+
+    Context: orders (paginated, each annotated has_personalized_lines),
+    bulk_ready_for_pickup_form.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Ready for pickup" %}{% endblock panel_title %}
+{% block heading %}{% trans "Ready for pickup" %}{% endblock heading %}
+
+{% block topbar_context %}
+    <span class="badge badge-neutral">{% blocktrans count counter=paginator.count %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}</span>
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:order_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to orders" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="mb-4 text-sm text-muted">{% trans "Every merchandise line on these orders has come back from production -- nothing left to chase, just hand them over. An order flagged below had at least one personalized item that needed individual handling to get here." %}</p>
+
+    <form method="post" id="ready_for_pickup_bulk_form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+        <div class="card overflow-hidden">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4.5 py-3.5">
+                <span class="font-display text-sm font-bold tracking-wide text-muted uppercase">
+                    {% blocktrans count counter=paginator.count %}{{ counter }} order{% plural %}{{ counter }} orders{% endblocktrans %}
+                </span>
+                {% if orders %}
+                    <button class="btn btn-info btn-sm gap-2" type="button" onclick="document.getElementById('bulk_ready_for_pickup_modal').showModal()">{% lucide "bell" size=14 %} {% trans "Mark selected ready for pickup" %}</button>
+                {% endif %}
+            </div>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" class="checkbox" id="select-all-orders"></th>
+                        <th>{% trans "Order" %}</th>
+                        <th>{% trans "Purchaser" %}</th>
+                        <th>{% trans "Payment" %}</th>
+                        <th>{% trans "Placed" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                        <tr>
+                            <td><input type="checkbox" class="checkbox order-row-checkbox" name="order_ids" value="{{ order.pk }}"></td>
+                            <td>
+                                <a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' order.pk %}">{{ order.number }}</a>
+                                {% if order.has_personalized_lines %}
+                                    <span class="ml-1" title="{% trans 'Had a personalized item -- individually handled to get here' %}" aria-label="{% trans 'Had a personalized item' %}">{% lucide "user-pen" size=12 class="inline text-warn-text" %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-semibold">{{ order.purchaser }}</td>
+                            <td>
+                                <span class="badge badge-sm {% if order.payment_status == "paid" %}badge-success{% elif order.payment_status == "partially_paid" %}badge-warning{% elif order.payment_status == "refunded" %}badge-error{% else %}badge-neutral{% endif %}">
+                                    {{ order.get_payment_status_display }}
+                                </span>
+                            </td>
+                            <td class="font-mono text-xs">{{ order.created|date:"Y-m-d" }}</td>
+                            <td class="text-right">
+                                <a class="btn btn-outline btn-sm" href="{% url 'management:order_detail' order.pk %}">{% trans "View" %}</a>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-dim">{% trans "Nothing fully received yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+
+    {% include "management/_pagination.html" %}
+
+    <dialog id="bulk_ready_for_pickup_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Mark selected ready for pickup" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Notifies every selected order's purchaser (app + email) that it's ready to collect. These instructions, if any, go out in every one of those notifications -- leave blank for none." %}</p>
+            <div class="form-control w-full">
+                <label class="label" for="id_ready_pickup_instructions"><span class="label-text">{% trans "Pickup instructions" %}</span></label>
+                <textarea id="id_ready_pickup_instructions" name="pickup_instructions" form="ready_for_pickup_bulk_form" class="textarea textarea-bordered h-28 w-full" rows="3" placeholder="{% trans 'e.g. "ask for it at the clubhouse desk"' %}">{{ bulk_ready_for_pickup_form.pickup_instructions.value|default:"" }}</textarea>
+            </div>
+            <div class="modal-action">
+                <form method="dialog">
+                    <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                </form>
+                <button class="btn btn-info gap-2" type="submit" form="ready_for_pickup_bulk_form" formaction="{% url 'management:order_bulk_mark_ready_for_pickup' %}">{% lucide "bell" size=16 %} {% trans "Notify selected" %}</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
+{% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (() => {
+            const selectAll = document.getElementById("select-all-orders");
+            const rowCheckboxes = document.querySelectorAll(".order-row-checkbox");
+            if (!selectAll) return;
+
+            selectAll.addEventListener("change", () => {
+                rowCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+            });
+        })();
+    </script>
+{% endblock extra_body %}

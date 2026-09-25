@@ -168,7 +168,10 @@ def week_grid(events, week_start: datetime.date) -> dict:
     """``events`` (already club/visibility/season-scoped) laid out across the
     Monday..Sunday week starting ``week_start``. Returns the hour gutter
     bounds plus, per day, a list of blocks each carrying top/height/left/width
-    percentages for absolute positioning against a single shared-height grid."""
+    percentages for absolute positioning against a single shared-height grid.
+    A block for an event with a ``gathering`` time earlier the same day also
+    carries ``gathering_top_pct``/``gathering_height_pct``, for a lightly
+    styled strip the template draws just above the block itself."""
     week_end = week_start + datetime.timedelta(days=6)
     day_start_hour, day_end_hour = DEFAULT_DAY_START_HOUR, DEFAULT_DAY_END_HOUR
     by_day: dict[datetime.date, list] = {week_start + datetime.timedelta(days=i): [] for i in range(7)}
@@ -178,24 +181,40 @@ def week_grid(events, week_start: datetime.date) -> dict:
         start, end = _local_span(event)
         if not (week_start <= start.date() <= week_end):
             continue
-        spans.append((event, start, end))
-        day_start_hour = min(day_start_hour, start.hour)
+        # Only ever drawn (see below) when it lands earlier the same day --
+        # a gathering time crossing midnight into the previous day is a
+        # display edge case not worth the extra grid-widening this would
+        # otherwise need.
+        gathering = timezone.localtime(event.gathering) if event.gathering and event.gathering < event.start and timezone.localtime(event.gathering).date() == start.date() else None
+        spans.append((event, start, end, gathering))
+        day_start_hour = min(day_start_hour, start.hour, gathering.hour if gathering else start.hour)
         end_hour_frac = end.hour + end.minute / 60 + (1 if end.second or end.microsecond else 0)
         day_end_hour = max(day_end_hour, int(end_hour_frac) + (1 if end_hour_frac % 1 else 0))
 
     span_hours = max(day_end_hour - day_start_hour, 1)
-    for event, start, end in spans:
+    for event, start, end, gathering in spans:
         start_frac = max(0.0, (start.hour + start.minute / 60) - day_start_hour)
         end_frac = min(float(span_hours), (end.hour + end.minute / 60) - day_start_hour)
-        by_day[start.date()].append(
-            {
-                "event": event,
-                "start": start,
-                "end": end,
-                "top_pct": round(100 * start_frac / span_hours, 2),
-                "height_pct": max(round(100 * (end_frac - start_frac) / span_hours, 2), MIN_BLOCK_HEIGHT_PCT),
-            }
-        )
+        block = {
+            "event": event,
+            "start": start,
+            "end": end,
+            "top_pct": round(100 * start_frac / span_hours, 2),
+            "height_pct": max(round(100 * (end_frac - start_frac) / span_hours, 2), MIN_BLOCK_HEIGHT_PCT),
+        }
+        if gathering:
+            # A lightly-styled strip sitting directly above the block itself,
+            # from the gathering time to the event's own start -- same
+            # top/height percentage coordinate system as the block, so it
+            # lines up against the same hour gutter with no extra math in
+            # the template.
+            gathering_frac = max(0.0, (gathering.hour + gathering.minute / 60) - day_start_hour)
+            block["gathering_top_pct"] = round(100 * gathering_frac / span_hours, 2)
+            # A smaller floor than the block's own MIN_BLOCK_HEIGHT_PCT -- a
+            # short gathering gap (5-10 minutes) still needs enough room to
+            # show its own time label, not to be independently clickable.
+            block["gathering_height_pct"] = max(round(100 * (start_frac - gathering_frac) / span_hours, 2), 2.0)
+        by_day[start.date()].append(block)
 
     days = []
     for i in range(7):
@@ -216,7 +235,7 @@ def week_grid(events, week_start: datetime.date) -> dict:
         # would default to an empty 00:00 view most weeks. The template scrolls its
         # bounded viewport to just before this hour instead -- None when the week has
         # no events at all, since there's nothing to reveal either way.
-        "first_event_hour": min((start.hour for _event, start, _end in spans), default=None),
+        "first_event_hour": min((start.hour for _event, start, _end, _gathering in spans), default=None),
     }
 
 

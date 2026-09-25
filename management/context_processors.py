@@ -164,6 +164,8 @@ _NAV_SECTIONS = {
     "order_production_export": "order_list",
     "order_production_download": "order_list",
     "order_production_reprint": "order_list",
+    "order_receive_production": "order_list",
+    "order_ready_for_pickup": "order_list",
     "payment_update": "order_list",
     "payment_delete": "order_list",
     "order_add_payment": "order_list",
