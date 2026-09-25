@@ -1422,6 +1422,65 @@ class RBIHFImportPlanTests(EventsTestBase):
 
         self.assertEqual(plan_again.to_delete, [])
 
+    def test_a_different_competitions_fixture_for_the_same_team_is_not_deleted(self):
+        # Two RBIHF pages for the one team (Division 1, Cup) -- importing
+        # "Cup" must not wipe out "Division 1"'s already-imported games just
+        # because they're absent from the Cup page's own listing.
+        division_html = rbihf_sample_html([self.home_fixture_row(game_id="5002")])
+        division_plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, division_html, "Division 1")
+        apply_plan(division_plan, {})
+
+        cup_team_id = "9999"
+        cup_row = self.home_fixture_row(game_id="7001")
+        cup_row["home_id"] = cup_team_id
+        cup_html = rbihf_sample_html([cup_row])
+        cup_plan = build_plan(self.club, self.team, cup_team_id, cup_html, "Cup")
+
+        self.assertEqual(cup_plan.to_delete, [])
+        self.assertEqual(len(cup_plan.to_create), 1)
+
+        apply_plan(cup_plan, {})
+
+        self.assertTrue(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+        division_event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(division_event.external_source_id, RBIHF_TEAM_ID)
+        self.assertEqual(division_event.competition_label, "Division 1")
+        cup_event = Event.objects.get(club=self.club, external_game_id="7001")
+        self.assertEqual(cup_event.external_source_id, cup_team_id)
+        self.assertEqual(cup_event.competition_label, "Cup")
+
+    def test_a_legacy_event_with_no_source_id_is_still_matched_by_game_id_not_duplicated(self):
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {})
+        # Simulate a row imported before external_source_id existed.
+        Event.objects.filter(club=self.club, external_game_id="5002").update(external_source_id="")
+
+        plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, html, "Division 1")
+
+        self.assertEqual(plan_again.to_create, [])
+        self.assertEqual(len(plan_again.to_update), 1)
+        apply_plan(plan_again, {})
+
+        self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
+        healed = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(healed.external_source_id, RBIHF_TEAM_ID)
+        self.assertEqual(healed.competition_label, "Division 1")
+
+    def test_a_future_fixture_missing_from_a_differently_sourced_competition_is_protected_from_deletion(self):
+        # A known, different source id is never a delete candidate, even when
+        # the other competition's own scrape has moved on to only listing
+        # unrelated games.
+        cup_team_id = "9999"
+        cup_row = self.home_fixture_row(game_id="7001")
+        cup_row["home_id"] = cup_team_id
+        cup_plan = build_plan(self.club, self.team, cup_team_id, rbihf_sample_html([cup_row]), "Cup")
+        apply_plan(cup_plan, {})
+
+        division_plan_again = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]), "Division 1")
+
+        self.assertEqual(division_plan_again.to_delete, [])
+
     def test_a_fixture_for_a_different_team_is_not_touched(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         html = rbihf_sample_html([self.home_fixture_row()])

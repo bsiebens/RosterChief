@@ -8869,6 +8869,19 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertIn(self.team, event.teams.all())
 
     @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_the_competition_label_survives_from_form_to_confirm(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "competition_label": "Division 1"})
+
+        response = self.club_post("rbihf_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.competition_label, "Division 1")
+        self.assertEqual(event.external_source_id, "4460")
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_respects_the_chosen_location(self, mock_fetch):
         self.activate_flag()
         location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="1 St", city="Deurne", zip_code="2100", country="BE")

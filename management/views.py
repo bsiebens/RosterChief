@@ -4085,11 +4085,12 @@ class RBIHFImportView(FeatureRequiredMixin, View):
 
         url = form.cleaned_data["url"]
         team = form.cleaned_data["team"]
+        competition_label = form.cleaned_data["competition_label"]
 
         rbihf_team_id = extract_team_id(url)
         try:
             html = fetch_html(url)
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError as error:
             form.add_error("url", str(error))
             return render(request, "management/rbihf_import_form.html", {"form": form})
@@ -4097,6 +4098,7 @@ class RBIHFImportView(FeatureRequiredMixin, View):
         request.session["rbihf_import_html"] = html
         request.session["rbihf_import_team_id"] = str(team.pk)
         request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
+        request.session["rbihf_import_competition_label"] = competition_label
         return render(request, "management/rbihf_import_preview.html", {"plan": plan})
 
 
@@ -4112,6 +4114,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         html = request.session.pop("rbihf_import_html", None)
         team_id = request.session.pop("rbihf_import_team_id", None)
         rbihf_team_id = request.session.pop("rbihf_import_rbihf_team_id", None)
+        competition_label = request.session.pop("rbihf_import_competition_label", "")
         if not html or not team_id or not rbihf_team_id:
             notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the RBIHF team URL again.')}")
             return redirect("management:rbihf_import")
@@ -4119,7 +4122,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
 
         try:
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError:
             notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched page. Try again.')}")
             return redirect("management:rbihf_import")
