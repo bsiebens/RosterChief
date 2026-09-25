@@ -34,7 +34,7 @@
                     "operatingSystem": "Web",
                     "offers": [
                         {"@type": "Offer", "name": "Free demo", "price": "0", "priceCurrency": "EUR"},
-                        {"@type": "Offer", "name": "Club", "price": "500", "priceCurrency": "EUR", "description": "Per season, up to 250 members, excl. 21% VAT"},
+                        {"@type": "Offer", "name": "Club", "priceCurrency": "EUR", "description": "Per season, up to 250 members, excl. 21% VAT"},
                         {"@type": "Offer", "name": "Large club", "priceCurrency": "EUR", "description": "Custom quote for more than 250 members, excl. 21% VAT"}
                     ]
                 }
@@ -292,7 +292,7 @@
                             <div class="mt-1.5 text-[15px] text-on-dark">{% trans "Everything, flat, for the season" %}</div>
                         </div>
                         <div class="flex items-end gap-2">
-                            <span class="font-display text-[56px] leading-[.86] font-extrabold tabular-nums">€ 500</span>
+                            <span class="font-display text-[56px] leading-[.86] font-extrabold tabular-nums">---</span>
                             <span class="pb-2 font-mono text-xs text-on-dark">{% trans "/ season, excl. VAT" %}</span>
                         </div>
                         <div class="font-mono text-xs text-on-dark">{% trans "up to 250 members · billed once per season · excl. 21% VAT" %}</div>
@@ -345,7 +345,7 @@
                     </div>
                     <div class="flex min-w-0 flex-col justify-center gap-4 p-6.5 text-white" style="background: var(--color-ink);">
                         <div class="flex items-end gap-2">
-                            <span class="font-display text-[52px] leading-[.86] font-extrabold tabular-nums">€ 750</span>
+                            <span class="font-display text-[52px] leading-[.86] font-extrabold tabular-nums">---</span>
                             <span class="pb-1.5 font-mono text-xs text-on-dark">{% trans "one-off, from, excl. VAT" %}</span>
                         </div>
                         <div class="font-mono text-xs leading-[1.6] text-on-dark">{% trans "quoted after a look at what you have" %}<br>{% trans "excl. 21% VAT · no monthly fee on top of your plan" %}</div>
