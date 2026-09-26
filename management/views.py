@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
@@ -2472,13 +2473,16 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         pools = NumberPool.objects.filter(club=club).order_by("name")
         pool = self.get_pool(club, pools)
         season = selected_season_from_request(self.request, club)
+        tiles = self.build_tiles(pool, season) if pool is not None and season is not None else []
 
         return super().get_context_data(
             pools=pools,
             pool=pool,
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             season=season,
-            tiles=self.build_tiles(pool, season) if pool is not None and season is not None else [],
+            tiles=tiles,
+            # Per-state totals for the legend -- Counter, so a state no tile is in reads 0.
+            state_counts=Counter(tile["state"] for tile in tiles),
             reservation_form=NumberReservationForm(),
             **kwargs,
         )

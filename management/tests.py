@@ -2095,6 +2095,16 @@ class NumberListViewTests(ManagementTestBase):
         self.assertEqual(tiles[5]["state"], "pending")
         self.assertEqual(tiles[5]["holders"], [f"{self.member} ({self.team.short_name})"])
 
+    def test_the_legend_counts_numbers_per_state(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2)
+
+        response = self.club_get("number_list")
+
+        counts = response.context["state_counts"]
+        self.assertEqual((counts["available"], counts["taken"], counts["reserved"], counts["conflict"]), (3, 1, 1, 0))
+        self.assertContains(response, '<span class="tabular-nums">(3)</span>')
+
     def test_held_by_shows_the_holders_team(self):
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
 
