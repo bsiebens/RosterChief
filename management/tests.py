@@ -7709,44 +7709,43 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_understaffed"], 1)
         self.assertEqual(response.context["kpi_fully_staffed"], 0)
 
-    def test_a_fully_staffed_game_is_counted_even_though_the_list_hides_it_by_default(self):
-        # The list only ever shows understaffed games (unless show_completed
-        # is on), but the KPI itself must still count a fully-staffed game --
-        # it's season-wide, not derived from whatever's currently rendered.
+    def test_a_fully_staffed_game_is_listed_and_counted_by_default(self):
+        # "All games" is the default -- fully staffed games show up in the
+        # list too, and in the KPI.
         game = self.make_game(max_referees=1)
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
+        self.assertEqual(response.context["need_choice"], "all")
         self.assertEqual(response.context["kpi_fully_staffed"], 1)
-        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
-
-    def test_show_completed_reveals_the_fully_staffed_game_in_the_list(self):
-        game = self.make_game(max_referees=1)
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("referee_management", params={"show_completed": "1"})
-
-        self.assertTrue(response.context["show_completed"])
         self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
 
     def test_the_fully_staffed_kpi_is_unaffected_by_the_range_choice(self):
-        # KPIs are season-wide, not bound to the range/need filters -- a
-        # narrow "this week" range must not hide a fully-staffed game from
-        # the count, even with show_completed on (so the only reason it's
-        # out of the rendered list is the date window, not staffing).
+        # KPIs cover every upcoming game left this season, not bound to the
+        # range/need filters -- a narrow "this week" range must not hide a
+        # fully-staffed game from the count.
         today = timezone.localdate()
         beyond_this_week = today + datetime.timedelta(days=14)
         far_away = self.make_game(max_referees=1, start=timezone.make_aware(datetime.datetime.combine(beyond_this_week, datetime.time(10, 0))))
         EventReferee.objects.create(event=far_away, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("referee_management", params={"range": "week", "show_completed": "1"})
+        response = self.club_get("referee_management", params={"range": "week"})
 
         self.assertNotContains(response, reverse("management:event_detail", args=[far_away.pk]))
         self.assertEqual(response.context["kpi_fully_staffed"], 1)
+
+    def test_kpis_ignore_past_games(self):
+        # A past game nobody refereed isn't something left to arrange --
+        # counting those is what made the cards read far above the list.
+        self.make_game(start=timezone.now() - datetime.timedelta(days=2))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_no_referee"], 0)
 
     def test_an_assigned_referee_gets_a_fee_form_for_the_dashboard_modal(self):
         game = self.make_game()
@@ -7897,32 +7896,21 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(list(response.context["games"]), [])
 
     def test_a_fully_staffed_game_is_excluded_from_missing_either_too(self):
-        game = self.make_game(title="Fully staffed")
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        self.setUp_officials()
+        game = self.make_game(title="Fully staffed", team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("referee_management")
+        response = self.club_get("referee_management", params={"need": "both"})
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_counts"]["both"], 0)
         self.assertEqual(list(response.context["games"]), [])
 
-    def test_show_completed_also_raises_the_need_counts(self):
-        game = self.make_game(title="Fully staffed", max_referees=1)
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        self.client.force_login(self.admin_user)
-
-        response = self.club_get("referee_management", params={"show_completed": "1"})
-
-        self.assertEqual(response.context["need_counts"]["referees"], 1)
-        self.assertEqual(list(response.context["games"]), [game])
-
-    def test_officials_fully_staffed_kpi_counts_even_though_hidden_by_default(self):
+    def test_officials_fully_staffed_kpi_counts_it(self):
         self.setUp_officials()
         # federation_team needs officials only (referee_management=FEDERATION),
         # so assigning an official is the only thing standing between "missing"
-        # and "fully staffed" here -- otherwise a still-missing referee would
-        # keep the game in the "both" bucket's list regardless.
+        # and "fully staffed" here.
         game = self.make_game(team=self.federation_team, max_officials=1)
         EventOfficial.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
@@ -7930,7 +7918,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         response = self.club_get("referee_management")
 
         self.assertEqual(response.context["kpi_officials_fully_staffed"], 1)
-        self.assertNotContains(response, reverse("management:event_detail", args=[game.pk]))
+        self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
 
     def test_each_buckets_count_matches_what_it_actually_shows(self):
         self.setUp_officials()
@@ -7941,11 +7929,29 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         # why the two are independent flags.
         self.make_game(title="Needs both")
         self.make_game(title="Needs officials only", team=self.federation_team)
+        staffed = self.make_game(title="Fully staffed", team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=staffed, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["need_counts"], {"referees": 1, "officials": 2, "both": 2})
+        self.assertEqual(response.context["need_counts"], {"all": 3, "referees": 1, "officials": 2, "both": 2})
+        for need, count in response.context["need_counts"].items():
+            self.assertEqual(len(self.club_get("referee_management", params={"need": need}).context["games"]), count)
+
+    def test_need_counts_stay_within_the_selected_range(self):
+        # The range picks the games in view first; the need chips only ever
+        # narrow that set, so none can read higher than "All games".
+        staffed = self.make_game(title="Staffed", max_referees=1)
+        EventReferee.objects.create(event=staffed, member=self.referee, assigned_by=self.admin_member)
+        for day in range(2, 13):
+            self.make_game(title=f"Unstaffed {day}", start=timezone.now() + datetime.timedelta(days=day))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"range": "10"})
+
+        self.assertEqual(response.context["need_counts"]["all"], 10)
+        self.assertEqual(response.context["need_counts"]["referees"], 9)
 
     def test_referees_filter_excludes_an_officials_only_game(self):
         self.setUp_officials()
@@ -7974,7 +7980,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         games = response.context["games"]
         self.assertEqual([game.pk for game in games], [officials_only_game.pk])
 
-    def test_both_is_the_default_and_shows_every_game(self):
+    def test_all_is_the_default_and_shows_every_game(self):
         self.setUp_officials()
         both_game = self.make_game(title="Needs both")
         officials_only_game = self.make_game(title="Needs officials only", team=self.federation_team)
@@ -7982,25 +7988,32 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
         games = response.context["games"]
         self.assertEqual({game.pk for game in games}, {both_game.pk, officials_only_game.pk})
 
-    def test_an_unknown_need_value_falls_back_to_both(self):
+    def test_an_unknown_need_value_falls_back_to_all(self):
         self.setUp_officials()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management", params={"need": "bogus"})
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
 
-    def test_need_officials_falls_back_to_both_when_the_flag_is_off(self):
+    def test_need_officials_falls_back_to_all_when_the_flag_is_off(self):
         # No setUp_officials() here -- the flag stays off for this club.
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management", params={"need": "officials"})
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
+
+    def test_need_referees_still_works_when_the_flag_is_off(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "referees"})
+
+        self.assertEqual(response.context["need_choice"], "referees")
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):
@@ -9491,10 +9504,33 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["signup_pending_count"], 0)
 
-    def test_a_refereed_game_does_not_count(self):
+    def test_a_fully_refereed_game_does_not_count(self):
         referee = Member.objects.create(first_name="Ref", last_name="Eree")
         ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.make_home_game(referee=referee)
+        game = self.make_home_game(referee=referee)
+        game.max_referees = 1
+        game.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 0)
+
+    def test_a_partially_refereed_game_still_counts(self):
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.make_home_game(referee=referee)  # 1 of Event.max_referees' default 2
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 1)
+
+    def test_a_past_game_does_not_count(self):
+        game = self.make_home_game()
+        game.start = timezone.now() - datetime.timedelta(days=2)
+        game.end = None
+        game.save()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
@@ -9535,36 +9571,25 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["games_missing_referees_count"], 1)
 
-    def test_a_fully_staffed_game_does_not_crowd_out_the_next_limit_window(self):
-        # Regression: the badge used to slice to the next `limit` games BEFORE
-        # dropping fully-staffed ones, while RefereeManagementDashboardView's own
-        # kpi_no_referee (for the same default range) filters to understaffed
-        # games first and only then slices. A fully-staffed game chronologically
-        # ahead of the unstaffed ones used to eat a slot in the badge's window
-        # without eating one in the dashboard's, so the two disagreed -- the
-        # inconsistency reported from production.
+    def test_the_badge_matches_the_dashboards_kpis_beyond_the_default_range(self):
+        # Every upcoming game left this season, not just the dashboard's
+        # default "next 10" -- and the same set its KPI cards count, so
+        # "Without a referee" + "Partially staffed" equals the badge.
         team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
         home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        referees = [Member.objects.create(first_name=f"Ref{i}", last_name="Eree") for i in range(2)]
-        for referee in referees:
-            ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-
-        staffed = Event.objects.create(club=self.club, title="Staffed game", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=1))
-        staffed.teams.add(team)
-        for referee in referees:
-            EventReferee.objects.create(event=staffed, member=referee, assigned_by=self.admin_member)
-
-        for day in range(2, 12):
-            event = Event.objects.create(club=self.club, title=f"Unstaffed game {day}", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=day))
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        for day in range(1, 13):
+            event = Event.objects.create(club=self.club, title=f"Game {day}", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=day))
             event.teams.add(team)
-
+        EventReferee.objects.create(event=event, member=referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
         dashboard_response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["games_missing_referees_count"], 10)
-        self.assertEqual(dashboard_response.context["kpi_no_referee"], 10)
+        self.assertEqual(response.context["games_missing_referees_count"], 12)
+        self.assertEqual(dashboard_response.context["kpi_no_referee"] + dashboard_response.context["kpi_understaffed"], 12)
 
     def test_a_non_admin_gets_no_counters_and_no_badge_links(self):
         coach_user = User.objects.create_user(email="coach-badge@example.com", password="pw-secret-123")
