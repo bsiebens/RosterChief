@@ -738,6 +738,10 @@ after now), not just ones that haven't started, so a game already in progress ke
 until its window closes; `GameOut.end` is always populated the same way, and `status` treats
 "started but before its (assumed) end, not flagged `is_live`" as `"live"` too, so a game
 `/games/upcoming/` still lists never turns around and calls itself `"finished"`.
+`GET /games/past/` is its exact mirror for results: the most recent `count` (default 10, max
+50) GAME-kind (no tournaments), non-cancelled, not-`is_live` games with **both** scores filled
+in whose (explicit, defaulted or assumed) end is at or before now, newest first — every row it
+returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
 
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**

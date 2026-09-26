@@ -565,6 +565,108 @@ class GamesApiTests(ApiTestBase):
 
         self.assertIsNone(home_team["logo_url"])
 
+    def make_past_game(self, days_ago=1, **overrides):
+        # A game that meets every "fully completed" condition -- kind GAME, scored,
+        # not live, not cancelled, well past its (auto-defaulted 2h) end.
+        defaults = {"start": timezone.now() - datetime.timedelta(days=days_ago), "score_for": 1, "score_against": 0}
+        defaults.update(overrides)
+        return self.make_game(**defaults)
+
+    def test_past_games_are_listed_as_finished_with_scores(self):
+        self.make_past_game(score_for=4, score_against=3, location=self.home_location)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "finished")
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["home_score"], 4)
+        self.assertEqual(games[0]["away_score"], 3)
+
+    def test_past_games_relabel_scores_for_an_away_game(self):
+        self.make_past_game(score_for=4, score_against=3)
+
+        game = self.api_get("/games/past/").json()[0]
+
+        self.assertEqual(game["home_team"]["name"], "Rivals FC")
+        self.assertEqual(game["home_score"], 3)
+        self.assertEqual(game["away_score"], 4)
+
+    def test_past_games_are_newest_first(self):
+        self.make_past_game(title="Oldest", days_ago=3)
+        newest = self.make_past_game(title="Newest", days_ago=1)
+        middle = self.make_past_game(title="Middle", days_ago=2)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games[:2]], [str(newest.pk), str(middle.pk)])
+
+    def test_past_games_default_count_is_ten(self):
+        for i in range(12):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/").json()), 10)
+
+    def test_past_games_count_is_respected(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=2).json()), 2)
+
+    def test_past_games_count_is_clamped(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=0).json()), 1)
+
+        # Cap is 50, well above the 3 created -- just confirm an oversized
+        # request doesn't error and doesn't somehow exceed what exists.
+        response = self.api_get("/games/past/", count=500)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)
+
+    def test_past_games_exclude_a_game_missing_either_score(self):
+        self.make_past_game(score_for=None, score_against=2)
+        self.make_past_game(score_for=2, score_against=None)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_cancelled_games(self):
+        self.make_past_game(cancelled=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_still_flagged_live(self):
+        self.make_past_game(is_live=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_not_yet_finished(self):
+        # Started 30 minutes ago and already has a score, but the assumed 2h
+        # window means it isn't over yet.
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=30), score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_upcoming_games(self):
+        self.make_game(score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_tournaments_and_other_kinds(self):
+        self.make_past_game(kind=Event.EventKind.TOURNAMENT)
+        self.make_past_game(kind=Event.EventKind.TRAINING)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_another_clubs_games(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_opponent = Opponent.objects.create(club=other_club, name="Someone")
+        Event.objects.create(club=other_club, title="Their game", kind=Event.EventKind.GAME, start=timezone.now() - datetime.timedelta(days=1), opponent=other_opponent, score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
 
 class TenancyAndCorsTests(ApiTestBase):
     def test_the_base_domain_404s(self):
