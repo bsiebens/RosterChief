@@ -2511,7 +2511,7 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
                 # A genuine conflict (issue #6) only ever comes from an admin's
                 # override_conflict on TeamMembershipForm -- is_number_available
                 # already blocks everything else, age-gap-exempt shares included.
-                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
+                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships], min_age_gap_years=pool.min_age_gap_years) else "taken"
                 tiles.append(self.tile(number, state, people=[self.person(membership.member, membership.team) for membership in memberships]))
             elif number in pending_this_season:
                 tiles.append(self.tile(number, "pending", people=pending_this_season[number]))

@@ -16,11 +16,17 @@ class NumberPool(ClubScopedModel):
     within a pool a number belongs to at most one holder at a time, checked
     across every team in the pool, not just one. See teams/services/numbers.py
     for the availability rules themselves; this model only owns the pool's
-    identity and its valid number range."""
+    identity, its valid number range and how far apart in age two players
+    must be to share a number."""
 
     name = models.CharField(_("name"), max_length=255)
     min_number = models.PositiveSmallIntegerField(_("minimum number"))
     max_number = models.PositiveSmallIntegerField(_("maximum number"))
+    min_age_gap_years = models.PositiveSmallIntegerField(
+        _("minimum age gap (years)"),
+        default=5,
+        help_text=_("Two players can share a number in this pool only when born at least this many years apart. Set to 0 to never allow sharing."),
+    )
 
     class Meta:
         verbose_name = _("number pool")

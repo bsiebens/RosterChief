@@ -1641,7 +1641,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         self.assertNotContains(response, "Rival Pool")
 
     def test_creating_a_number_pool(self):
-        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99", "min_age_gap_years": "5"})
 
         pool = NumberPool.objects.get(club=self.club, name="Youth")
         self.assertRedirects(response, reverse("management:number_pool_list"))
@@ -1649,7 +1649,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         self.assertEqual(pool.max_number, 99)
 
     def test_min_number_must_not_exceed_max_number(self):
-        response = self.club_post("number_pool_create", {"name": "Bad", "min_number": "99", "max_number": "1"})
+        response = self.club_post("number_pool_create", {"name": "Bad", "min_number": "99", "max_number": "1", "min_age_gap_years": "5"})
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(NumberPool.objects.filter(club=self.club, name="Bad").exists())
@@ -1658,11 +1658,17 @@ class NumberPoolManagementTests(ManagementTestBase):
     def test_updating_a_number_pool(self):
         pool = NumberPool.objects.create(club=self.club, name="Old name", min_number=1, max_number=50)
 
-        self.club_post("number_pool_update", {"name": "New name", "min_number": "1", "max_number": "60"}, pool.pk)
+        self.club_post("number_pool_update", {"name": "New name", "min_number": "1", "max_number": "60", "min_age_gap_years": "3"}, pool.pk)
 
         pool.refresh_from_db()
         self.assertEqual(pool.name, "New name")
         self.assertEqual(pool.max_number, 60)
+        self.assertEqual(pool.min_age_gap_years, 3)
+
+    def test_a_new_pool_defaults_to_a_five_year_age_gap(self):
+        pool = NumberPool.objects.create(club=self.club, name="Default gap", min_number=1, max_number=50)
+
+        self.assertEqual(pool.min_age_gap_years, 5)
 
     def test_the_list_page_shows_assigned_teams(self):
         pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
@@ -1711,7 +1717,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
         self.client.force_login(coach_user)
 
-        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99", "min_age_gap_years": "5"})
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(NumberPool.objects.filter(club=self.club, name="Youth").exists())
@@ -2032,6 +2038,22 @@ class NumberListViewTests(ManagementTestBase):
         self.member.date_of_birth = datetime.date(2010, 1, 1)
         self.member.save()
         younger_member = Member.objects.create(first_name="Jack", last_name="Roe", date_of_birth=datetime.date(2018, 1, 1))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=younger_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+
+    def test_the_pools_own_age_gap_decides_whether_a_share_is_a_conflict(self):
+        # A 3-year gap is fine once the pool allows it -- the default 5 would flag it.
+        self.pool.min_age_gap_years = 3
+        self.pool.save()
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        younger_member = Member.objects.create(first_name="Jack", last_name="Roe", date_of_birth=datetime.date(2013, 6, 1))
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
         TeamMembership.objects.create(team=other_team, member=younger_member, season=self.season, jersey_number=3)
 
