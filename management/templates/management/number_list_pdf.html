@@ -64,12 +64,12 @@
         </div>
 
         <div class="legend">
-            <span><span class="swatch state-available"></span>{% trans "Available" %}</span>
-            <span><span class="swatch state-taken"></span>{% trans "Taken this season" %}</span>
-            <span><span class="swatch state-conflict"></span>{% trans "Conflict -- assigned to more than one player" %}</span>
-            <span><span class="swatch state-pending"></span>{% trans "Pending (requested, not placed)" %}</span>
-            <span><span class="swatch state-previous"></span>{% trans "Taken last season only" %}</span>
-            <span><span class="swatch state-reserved"></span>{% trans "Reserved" %}</span>
+            <span><span class="swatch state-available"></span>{% trans "Available" %} <span class="tabular-nums">({{ state_counts.available }})</span></span>
+            <span><span class="swatch state-taken"></span>{% trans "Taken this season" %} <span class="tabular-nums">({{ state_counts.taken }})</span></span>
+            <span><span class="swatch state-conflict"></span>{% trans "Conflict -- assigned to more than one player" %} <span class="tabular-nums">({{ state_counts.conflict }})</span></span>
+            <span><span class="swatch state-pending"></span>{% trans "Pending (requested, not placed)" %} <span class="tabular-nums">({{ state_counts.pending }})</span></span>
+            <span><span class="swatch state-previous"></span>{% trans "Taken last season only" %} <span class="tabular-nums">({{ state_counts.previous }})</span></span>
+            <span><span class="swatch state-reserved"></span>{% trans "Reserved" %} <span class="tabular-nums">({{ state_counts.reserved }})</span></span>
         </div>
 
         <table>

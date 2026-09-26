@@ -768,6 +768,37 @@ class NumbersServiceTests(TeamsTestCase):
 
         self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=close_in_age))
 
+    def test_a_pool_with_a_smaller_age_gap_allows_a_closer_share(self):
+        self.pool.min_age_gap_years = 2
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        close_in_age = Member.objects.create(first_name="Close", last_name="Peer", date_of_birth=datetime.date(2012, 1, 1))
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7, for_member=close_in_age))
+
+    def test_a_pool_with_a_larger_age_gap_blocks_a_five_year_share(self):
+        self.pool.min_age_gap_years = 8
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=younger))
+
+    def test_a_zero_age_gap_never_allows_sharing(self):
+        self.pool.min_age_gap_years = 0
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(1980, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        much_younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=much_younger))
+        self.assertTrue(has_unresolved_conflict([self.member, much_younger], min_age_gap_years=0))
+
     def test_a_missing_date_of_birth_is_conservatively_unavailable(self):
         # self.member has no date_of_birth set by default (TeamsTestCase).
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)

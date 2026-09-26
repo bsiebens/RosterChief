@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
@@ -2472,13 +2473,16 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         pools = NumberPool.objects.filter(club=club).order_by("name")
         pool = self.get_pool(club, pools)
         season = selected_season_from_request(self.request, club)
+        tiles = self.build_tiles(pool, season) if pool is not None and season is not None else []
 
         return super().get_context_data(
             pools=pools,
             pool=pool,
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             season=season,
-            tiles=self.build_tiles(pool, season) if pool is not None and season is not None else [],
+            tiles=tiles,
+            # Per-state totals for the legend -- Counter, so a state no tile is in reads 0.
+            state_counts=Counter(tile["state"] for tile in tiles),
             reservation_form=NumberReservationForm(),
             **kwargs,
         )
@@ -2511,7 +2515,7 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
                 # A genuine conflict (issue #6) only ever comes from an admin's
                 # override_conflict on TeamMembershipForm -- is_number_available
                 # already blocks everything else, age-gap-exempt shares included.
-                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
+                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships], min_age_gap_years=pool.min_age_gap_years) else "taken"
                 tiles.append(self.tile(number, state, people=[self.person(membership.member, membership.team) for membership in memberships]))
             elif number in pending_this_season:
                 tiles.append(self.tile(number, "pending", people=pending_this_season[number]))

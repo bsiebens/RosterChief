@@ -8,9 +8,10 @@ registration.models.RegistrationDetails.requested_jersey_number, so a number
 is blocked the moment someone registers for it, paid or not (see
 RegistrationDetails' own docstring on why a request isn't a placement yet).
 
-The one exception -- two different people sharing a number -- is a 5+ year
-age gap, sized in days (5 * 365.25) rather than naively diffing years, so it
-doesn't misfire around a birthday. A missing date_of_birth on either side is
+The one exception -- two different people sharing a number -- is an age gap
+of at least the pool's own NumberPool.min_age_gap_years (5 by default, 0
+turns sharing off entirely), sized in days (years * 365.25) rather than
+naively diffing years, so it doesn't misfire around a birthday. A missing date_of_birth on either side is
 treated conservatively as "not available": the gap can't be verified, so it
 isn't assumed.
 """
@@ -23,7 +24,9 @@ from members.models import Member
 from registration.models import RegistrationDetails
 from teams.models import NumberReservation, TeamMembership
 
-_FIVE_YEARS = datetime.timedelta(days=round(5 * 365.25))
+#: NumberPool.min_age_gap_years' own default -- for has_unresolved_conflict
+#: callers that have no pool at hand.
+DEFAULT_MIN_AGE_GAP_YEARS = 5
 
 
 def _previous_season(season: Season) -> Season | None:
@@ -53,12 +56,12 @@ def numbers_taken(pool, season: Season) -> dict[int, list[Member]]:
     return taken
 
 
-def _age_gap_exempts(holder: Member, for_member: Member | None) -> bool:
-    if for_member is None or holder.pk == for_member.pk:
+def _age_gap_exempts(holder: Member, for_member: Member | None, min_age_gap_years: int) -> bool:
+    if for_member is None or holder.pk == for_member.pk or min_age_gap_years <= 0:
         return False
     if holder.date_of_birth is None or for_member.date_of_birth is None:
         return False
-    return abs(holder.date_of_birth - for_member.date_of_birth) >= _FIVE_YEARS
+    return abs(holder.date_of_birth - for_member.date_of_birth) >= datetime.timedelta(days=round(min_age_gap_years * 365.25))
 
 
 def is_number_available(pool, season: Season, number: int, *, for_member: Member | None = None) -> bool:
@@ -72,12 +75,12 @@ def is_number_available(pool, season: Season, number: int, *, for_member: Member
     for holder in holders:
         if for_member is not None and holder.pk == for_member.pk:
             continue
-        if not _age_gap_exempts(holder, for_member):
+        if not _age_gap_exempts(holder, for_member, pool.min_age_gap_years):
             return False
     return True
 
 
-def has_unresolved_conflict(holders: list[Member]) -> bool:
+def has_unresolved_conflict(holders: list[Member], *, min_age_gap_years: int = DEFAULT_MIN_AGE_GAP_YEARS) -> bool:
     """Whether ``holders`` (everyone currently sharing one number) includes a
     pair the age-gap exception doesn't cover -- the only way that happens is
     an admin's explicit override on TeamMembershipForm (see issue #6): a
@@ -91,7 +94,7 @@ def has_unresolved_conflict(holders: list[Member]) -> bool:
     The same member appearing more than once (on two teams sharing a pool, or
     placed on one and pending on another) is one player, not a clash with
     themselves, so a pair with the same pk is never a conflict."""
-    return any(a.pk != b.pk and not _age_gap_exempts(a, b) for a, b in itertools.combinations(holders, 2))
+    return any(a.pk != b.pk and not _age_gap_exempts(a, b, min_age_gap_years) for a, b in itertools.combinations(holders, 2))
 
 
 def available_numbers(pool, season: Season, *, for_member: Member | None = None) -> list[int]:

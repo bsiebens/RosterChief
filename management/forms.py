@@ -552,7 +552,7 @@ class PositionForm(forms.ModelForm):
 class NumberPoolForm(forms.ModelForm):
     class Meta:
         model = NumberPool
-        fields = ["name", "min_number", "max_number"]
+        fields = ["name", "min_number", "max_number", "min_age_gap_years"]
 
 
 class LocationForm(forms.ModelForm):
