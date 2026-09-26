@@ -2189,6 +2189,87 @@ class NumberListViewTests(ManagementTestBase):
         self.assertTrue(NumberReservation.objects.filter(pk=reservation.pk).exists())
 
 
+class NumberExportPdfTests(ManagementTestBase):
+    """management.views.NumberExportPdfView -- the Numbers page as a PDF,
+    render_pdf mocked out same as MembershipExportPdfTests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=5)
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st", pool=cls.pool)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", date_of_birth=datetime.date(2012, 3, 4))
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_downloads_as_a_pdf(self):
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("number_export_pdf")
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn('filename="numbers-youth-', response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_uses_the_selected_pool(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=10, max_number=12)
+
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("number_export_pdf", params={"pool": str(other_pool.pk)})
+
+        context = renderer.call_args[0][0]
+        self.assertEqual(context["pool"], other_pool)
+        self.assertEqual([tile["number"] for tile in context["tiles"]], [10, 11, 12])
+
+    def test_holders_carry_their_birth_year(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("number_export_pdf")
+
+        tiles = {tile["number"]: tile for tile in renderer.call_args[0][0]["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertEqual(tiles[3]["people"], [{"member": self.member, "team": "1st", "birth_year": 2012}])
+
+    def test_rendered_html_flags_states_and_birth_years(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        other_member = Member.objects.create(first_name="Jack", last_name="Roe")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=other_member, season=self.season, jersey_number=3)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2, note="Retired")
+
+        with mock.patch("management.pdf.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.club_get("number_export_pdf")
+
+        html = response.content.decode()
+        self.assertIn('<tr class="row-conflict">', html)
+        self.assertIn('<span class="tile state-conflict">3</span>', html)
+        self.assertIn('<span class="tile state-reserved">2</span>', html)
+        self.assertIn("Retired", html)
+        self.assertIn("2012", html)
+        self.assertIn(str(other_member), html)
+
+    def test_missing_pdf_libraries_redirect_back_to_the_page(self):
+        with mock.patch("management.views.number_list_pdf", side_effect=PDFExportError("no native libs")):
+            response = self.club_get("number_export_pdf", params={"pool": str(self.pool.pk)})
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}", fetch_redirect_response=False)
+
+    def test_no_pools_redirects_back_to_the_page(self):
+        self.pool.delete()
+
+        response = self.club_get("number_export_pdf")
+
+        self.assertRedirects(response, reverse("management:number_list"), fetch_redirect_response=False)
+
+    def test_page_links_to_the_export_for_the_selected_pool_and_season(self):
+        response = self.club_get("number_list")
+
+        self.assertContains(response, f"{reverse('management:number_export_pdf')}?pool={self.pool.pk}&amp;season={self.season.pk}")
+
+
 class ClubRoleManagementTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):

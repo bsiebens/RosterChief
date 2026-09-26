@@ -88,6 +88,7 @@ urlpatterns = [
     path("teams/<uuid:pk>/photo/<uuid:season_pk>/set/", views.TeamPhotoSetView.as_view(), name="team_photo_set"),
     path("teams/<uuid:pk>/photo/<uuid:season_pk>/delete/", views.TeamPhotoDeleteView.as_view(), name="team_photo_delete"),
     path("numbers/", views.NumberListView.as_view(), name="number_list"),
+    path("numbers/export/", views.NumberExportPdfView.as_view(), name="number_export_pdf"),
     path("numbers/reserve/", views.NumberReservationCreateView.as_view(), name="number_reservation_create"),
     path("numbers/<uuid:pk>/release/", views.NumberReservationReleaseView.as_view(), name="number_reservation_release"),
     path("referees/", views.RefereeListView.as_view(), name="referee_list"),

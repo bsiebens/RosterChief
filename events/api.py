@@ -24,6 +24,9 @@ router = Router(tags=["games"])
 DEFAULT_UPCOMING_COUNT = 10
 MAX_UPCOMING_COUNT = 50
 
+DEFAULT_PAST_COUNT = 10
+MAX_PAST_COUNT = 50
+
 #: /games/upcoming/ covers anything worth putting on a public fixture list --
 #: not just Game, but Tournament too. The other game endpoints (live,
 #: per-team) stay Game-only: is_live/score_for/score_against are genuinely
@@ -141,6 +144,31 @@ def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
         return [_to_game_out(event, request, club) for event in events]
 
     return cached_for_club(club.pk, f"games:upcoming:{count}", compute)
+
+
+@router.get("/games/past/", response=list[GameOut], summary="Past games")
+def list_past_games(request, count: int = DEFAULT_PAST_COUNT):
+    """The most recent `count` fully completed games, club-wide, newest first --
+    Game-only (like /games/live/: scores are game-specific), not cancelled, not
+    flagged live, both scores filled in, and finished by the exact complement of
+    list_upcoming_games' "not finished" filter, so every row here reports
+    status "finished". A finished game with no score entered yet is left out
+    rather than shown as a result without one."""
+    club = require_club(request)
+    count = max(1, min(count, MAX_PAST_COUNT))
+
+    def compute():
+        now = timezone.now()
+        events = (
+            Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False)
+            .filter(Q(end__lte=now) | Q(end__isnull=True, start__lte=now - ASSUMED_EVENT_DURATION))
+            .select_related("opponent", "location")
+            .prefetch_related("teams")
+            .order_by("-start")[:count]
+        )
+        return [_to_game_out(event, request, club) for event in events]
+
+    return cached_for_club(club.pk, f"games:past:{count}", compute)
 
 
 @router.get("/games/live/", response=list[GameOut], summary="Live games")

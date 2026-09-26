@@ -18,7 +18,7 @@ from teams.api import router as teams_router
 api = NinjaAPI(
     title="RosterChief public API",
     version="1.0.0",
-    description="Public, read-only data for a club's own external website: news, team rosters, fixtures, and sponsors.",
+    description="Public, read-only data for a club's own external website: news, team rosters, fixtures, results, and sponsors.",
     urls_namespace="api",
 )
 
