@@ -190,15 +190,6 @@
            extending up under the status bar the way a native app's chrome would. */
     }
 
-    /* The root canvas takes the header's own colour, not bg-paper (body keeps
-       that for the page itself): iOS standalone PWAs paint the status-bar area
-       and any overscroll from the root background, so a light canvas showed
-       as a pale glare fading into the dark header. Member shell only -- the
-       coach shell's body is already bg-ink, the same colour as its header. */
-    .app-shell {
-        background-color: var(--color-navy);
-    }
-
     /* Standard Alpine convention -- hides an x-cloak'd element until Alpine has
        initialized, so an x-show/x-if starting state never flashes unstyled. */
     [x-cloak] {
