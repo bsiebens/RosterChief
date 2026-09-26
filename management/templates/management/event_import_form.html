@@ -1,13 +1,14 @@
 {% extends "management/base.html" %}
 {% load lucide ui i18n %}
 
-{% block heading %}{% trans "Import from RBIHF" %}{% endblock heading %}
+{% comment %}Shared by every external fixture import (RBIHF, DFEL, ...) -- the view passes source_name (e.g. "RBIHF").{% endcomment %}
+{% block heading %}{% blocktrans %}Import from {{ source_name }}{% endblocktrans %}{% endblock heading %}
 
 {% block panel %}
     <div class="card w-full">
         <div class="card-body">
             <p class="text-sm text-muted">
-                {% blocktrans %}Paste the URL of a team's page on the RBIHF website and pick which of
+                {% blocktrans %}Paste the URL of a team's page on the {{ source_name }} website and pick which of
                 your teams it's for. Nothing is created yet: you'll see exactly what will
                 be added, changed, or removed before anything is saved.{% endblocktrans %}
             </p>

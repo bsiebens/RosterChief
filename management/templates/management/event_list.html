@@ -7,6 +7,9 @@
     {% if is_club_admin and rbihf_enabled %}
         <a class="btn btn-outline gap-2" href="{% url 'management:rbihf_import' %}">{% lucide "download" size=16 %} {% trans "Import from RBIHF" %}</a>
     {% endif %}
+    {% if is_club_admin and dfel_enabled %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:dfel_import' %}">{% lucide "download" size=16 %} {% trans "Import from DFEL" %}</a>
+    {% endif %}
     {% if can_create %}
         <a class="btn btn-outline gap-2" href="{% url 'management:event_series_create' %}">{% lucide "repeat" size=16 %} {% trans "New series" %}</a>
         <a class="btn btn-primary gap-2" href="{% url 'management:event_create' %}">{% lucide "plus" size=16 %} {% trans "New event" %}</a>
