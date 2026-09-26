@@ -22,30 +22,34 @@
                     color: #666;
                 }
             }
-            body { font-family: sans-serif; font-size: 9.5pt; color: #111; }
-            h1 { font-size: 18pt; margin: 0 0 2mm; }
-            .muted { color: #666; }
-            .header { display: flex; justify-content: space-between; margin-bottom: 5mm; }
-            .legend { margin-bottom: 6mm; font-size: 8pt; color: #444; }
-            .legend > span { display: inline-block; margin-right: 4mm; white-space: nowrap; }
-            .swatch { display: inline-block; width: 3mm; height: 3mm; border-radius: 0.8mm; vertical-align: -0.4mm; margin-right: 1mm; border: 1px solid #ccc; }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; line-height: 1.35; }
+            h1 { font-size: 18pt; margin: 0 0 1.5mm; }
+            .muted { color: #6b7280; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 4mm; margin-bottom: 5mm; border-bottom: 1px solid #e5e7eb; }
+            .generated { font-size: 8.5pt; text-align: right; }
+            .legend { margin-bottom: 7mm; font-size: 8pt; color: #4b5563; line-height: 2; }
+            .legend > span { display: inline-block; margin-right: 5mm; white-space: nowrap; }
+            .swatch { display: inline-block; width: 3mm; height: 3mm; border-radius: 0.8mm; vertical-align: -0.5mm; margin-right: 1.5mm; border: 1px solid #ccc; }
             table { width: 100%; border-collapse: collapse; }
             thead { display: table-header-group; }
-            tr { page-break-inside: avoid; }
-            th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; border-bottom: 1px solid #999; padding: 2mm 2mm 1mm 0; }
-            td { padding: 1.2mm 2mm 1.2mm 0; border-bottom: 1px solid #eee; vertical-align: top; }
-            td.number { width: 11mm; padding: 0; vertical-align: middle; }
-            .tile { display: block; width: 9mm; padding: 1mm 0; text-align: center; font-weight: bold; border-radius: 1.2mm; color: #fff; border: 1px solid transparent; }
-            .status { width: 30mm; font-size: 8pt; }
+            {% comment %}One <tbody> per number (see below), so a number and all its holders stay together across a page break and share one divider.{% endcomment %}
+            tbody { page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; }
+            th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #6b7280; border-bottom: 1.5px solid #9ca3af; padding: 0 3mm 2mm 0; }
+            td { padding: 2.2mm 3mm 2.2mm 0; vertical-align: middle; }
+            tr.holder-extra td { border-top: 1px dashed #e5e7eb; }
+            td.number { width: 12mm; padding: 1.6mm 3mm 1.6mm 1.5mm; }
+            .tile { display: block; width: 9mm; padding: 1.2mm 0; text-align: center; font-weight: bold; border-radius: 1.5mm; color: #fff; border: 1px solid transparent; }
+            .status { width: 32mm; color: #4b5563; }
+            .team { width: 22mm; }
             .birth-year { width: 20mm; }
-            .note { font-style: italic; color: #444; }
+            .note { font-style: italic; color: #4b5563; }
             {% for state, color in colors.items %}
                 .state-{{ state }} { background: {{ color }}; border-color: {{ color }}; }
             {% endfor %}
-            .tile.state-available { color: #111; border-color: #ccc; }
-            .swatch.state-available { border-color: #ccc; }
-            tr.row-conflict td { background: #fee2e2; }
-            tr.row-conflict td.number { background: none; }
+            .tile.state-available { color: #111; border-color: #d1d5db; }
+            .swatch.state-available { border-color: #d1d5db; }
+            tbody.group-conflict td { background: #fdecec; }
+            tbody.group-conflict .status { color: #991b1b; font-weight: bold; }
         </style>
     </head>
     <body>
@@ -54,7 +58,7 @@
                 <h1>{{ club.name }}</h1>
                 <div class="muted">{% trans "Jersey numbers" %} — {{ pool.name }} — {% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</div>
             </div>
-            <div class="muted">
+            <div class="muted generated">
                 {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
             </div>
         </div>
@@ -78,11 +82,11 @@
                     <th>{% trans "Birth year" %}</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for tile in tiles %}
+            {% for tile in tiles %}
+                <tbody class="group-{{ tile.state }}">
                     {% if tile.people %}
                         {% for person in tile.people %}
-                            <tr class="row-{{ tile.state }}">
+                            <tr{% if not forloop.first %} class="holder-extra"{% endif %}>
                                 {% if forloop.first %}
                                     <td class="number" rowspan="{{ tile.people|length }}"><span class="tile state-{{ tile.state }}">{{ tile.number }}</span></td>
                                     <td class="status" rowspan="{{ tile.people|length }}">
@@ -93,12 +97,12 @@
                                     </td>
                                 {% endif %}
                                 <td>{{ person.member }}</td>
-                                <td>{{ person.team }}</td>
+                                <td class="team">{{ person.team }}</td>
                                 <td class="birth-year">{{ person.birth_year|default:"—" }}</td>
                             </tr>
                         {% endfor %}
                     {% else %}
-                        <tr class="row-{{ tile.state }}">
+                        <tr>
                             <td class="number"><span class="tile state-{{ tile.state }}">{{ tile.number }}</span></td>
                             <td class="status">{% if tile.state == "reserved" %}{% trans "Reserved" %}{% else %}{% trans "Available" %}{% endif %}</td>
                             {% if tile.state == "reserved" %}
@@ -110,8 +114,8 @@
                             {% endif %}
                         </tr>
                     {% endif %}
-                {% endfor %}
-            </tbody>
+                </tbody>
+            {% endfor %}
         </table>
     </body>
 </html>

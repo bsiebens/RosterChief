@@ -2244,7 +2244,7 @@ class NumberExportPdfTests(ManagementTestBase):
             response = self.club_get("number_export_pdf")
 
         html = response.content.decode()
-        self.assertIn('<tr class="row-conflict">', html)
+        self.assertIn('<tbody class="group-conflict">', html)
         self.assertIn('<span class="tile state-conflict">3</span>', html)
         self.assertIn('<span class="tile state-reserved">2</span>', html)
         self.assertIn("Retired", html)
