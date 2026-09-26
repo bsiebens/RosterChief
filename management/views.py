@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.functional import cached_property
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -212,7 +213,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, number_list_colors, number_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -2486,7 +2487,7 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
 
         reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
-        # Kept as memberships (not pre-formatted strings, unlike the previous-season/
+        # Kept as memberships (not pre-formatted people, unlike the previous-season/
         # pending dicts below) until after the conflict check -- has_unresolved_conflict
         # needs the actual Member rows to weigh the age-gap exception, not display text.
         placed_this_season = {}
@@ -2495,31 +2496,66 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         placed_previous_season = {}
         if previous is not None:
             for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
-                placed_previous_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
+                placed_previous_season.setdefault(membership.jersey_number, []).append(self.person(membership.member, membership.team))
         pending_this_season = {}
         for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member", "requested_team"):
-            pending_this_season.setdefault(details.requested_jersey_number, []).append(f"{details.membership.member} ({details.requested_team.short_name or details.requested_team.name})")
+            pending_this_season.setdefault(details.requested_jersey_number, []).append(self.person(details.membership.member, details.requested_team))
 
         tiles = []
         for number in range(pool.min_number, pool.max_number + 1):
             reservation = reservations.get(number)
             if reservation is not None:
-                tiles.append({"number": number, "state": "reserved", "holders": [], "note": reservation.note, "reservation": reservation})
+                tiles.append(self.tile(number, "reserved", note=reservation.note, reservation=reservation))
             elif number in placed_this_season:
                 memberships = placed_this_season[number]
                 # A genuine conflict (issue #6) only ever comes from an admin's
                 # override_conflict on TeamMembershipForm -- is_number_available
                 # already blocks everything else, age-gap-exempt shares included.
                 state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
-                holders = [f"{membership.member} ({membership.team.short_name or membership.team.name})" for membership in memberships]
-                tiles.append({"number": number, "state": state, "holders": holders, "note": "", "reservation": None})
+                tiles.append(self.tile(number, state, people=[self.person(membership.member, membership.team) for membership in memberships]))
             elif number in pending_this_season:
-                tiles.append({"number": number, "state": "pending", "holders": pending_this_season[number], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "pending", people=pending_this_season[number]))
             elif number in placed_previous_season:
-                tiles.append({"number": number, "state": "previous", "holders": placed_previous_season[number], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "previous", people=placed_previous_season[number]))
             else:
-                tiles.append({"number": number, "state": "available", "holders": [], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "available"))
         return tiles
+
+    @staticmethod
+    def person(member, team):
+        """One holder of a number -- structured for the PDF export's own
+        name/team/birth year columns; the page itself only ever shows the
+        flattened ``holders`` strings built from these in tile()."""
+        return {"member": member, "team": team.short_name or team.name, "birth_year": member.date_of_birth.year if member.date_of_birth else None}
+
+    @staticmethod
+    def tile(number, state, *, people=(), note="", reservation=None):
+        people = list(people)
+        holders = [f"{person['member']} ({person['team']})" for person in people]
+        return {"number": number, "state": state, "people": people, "holders": holders, "note": note, "reservation": reservation}
+
+
+class NumberExportPdfView(NumberListView):
+    """The Numbers page as a printable list -- same pool/season selection
+    (whatever query string the page currently has) and the same tile states
+    as NumberListView, one row per holder with their birth year, colour-flagged
+    the same way the page's tiles are. Same shape as MembershipExportPdfView."""
+
+    def get(self, request, *args, **kwargs):
+        context = self.get_context_data(club=request.club, generated_at=timezone.now(), colors=number_list_colors(request.club))
+        if context["pool"] is None or context["season"] is None:
+            notify(request, f"e|{_('PDF unavailable')}|{_('Pick a number pool and season first.')}")
+            return redirect("management:number_list")
+
+        try:
+            pdf = number_list_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect(f"{reverse('management:number_list')}?{request.GET.urlencode()}")
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="numbers-{slugify(context["pool"].name)}-{context["season"].start_date:%Y}.pdf"'
+        return response
 
 
 class NumberReservationCreateView(ClubStaffRequiredMixin, View):

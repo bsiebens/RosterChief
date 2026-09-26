@@ -12,6 +12,12 @@
 {% block heading %}{% trans "Numbers" %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% trans "Jersey numbers across every team sharing a pool." %}</span>{% endblock topbar_context %}
 
+{% block actions %}
+    {% if pool and season %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:number_export_pdf' %}?pool={{ pool.pk }}&amp;season={{ season.pk }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
+    {% endif %}
+{% endblock actions %}
+
 {% block filter_strip %}
     {% if pools %}
         <div class="border-b border-line bg-white px-7 py-3">
