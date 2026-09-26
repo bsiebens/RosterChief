@@ -742,6 +742,8 @@ until its window closes; `GameOut.end` is always populated the same way, and `st
 50) GAME-kind (no tournaments), non-cancelled, not-`is_live` games with **both** scores filled
 in whose (explicit, defaulted or assumed) end is at or before now, newest first — every row it
 returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
+Current season only (explicit `season`, else derived from the start date, same as
+`/teams/{id}/games/`) — never an older season's results; empty when there's no current season.
 
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**

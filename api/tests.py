@@ -660,6 +660,24 @@ class GamesApiTests(ApiTestBase):
 
         self.assertEqual(self.api_get("/games/past/").json(), [])
 
+    def test_past_games_exclude_a_previous_seasons_games(self):
+        # self.season started 30 days ago -- a game from before that is last
+        # season's, whether its season is left blank or set explicitly.
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        self.make_past_game(days_ago=60)
+        self.make_past_game(days_ago=90, season=previous_season)
+        current = self.make_past_game(days_ago=5)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games], [str(current.pk)])
+
+    def test_past_games_is_empty_without_a_current_season(self):
+        self.make_past_game()
+        self.season.delete()
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
     def test_past_games_exclude_another_clubs_games(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
         other_opponent = Opponent.objects.create(club=other_club, name="Someone")
