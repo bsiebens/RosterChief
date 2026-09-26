@@ -92,9 +92,11 @@ from evaluations.services import (
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
+from events.services import dfel_import
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
+from events.services.dfel_import import DFELImportError, fetch_schedule
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
@@ -149,6 +151,7 @@ from .forms import (
     ClubMembershipForm,
     ClubRoleAssignForm,
     ClubSettingsForm,
+    DFELImportForm,
     DiscountForm,
     EvaluationChecklistForm,
     EventForm,
@@ -4074,6 +4077,11 @@ class EventFetchGameInfoView(EventManagerRequiredMixin, View):
         return redirect("management:event_detail", pk=event.pk)
 
 
+RBIHF_IMPORT_CONTEXT = {"source_name": "RBIHF", "import_url_name": "management:rbihf_import", "confirm_url_name": "management:rbihf_import_confirm", "show_game_ids": True}
+# DFEL game ids are UUIDs -- meaningless to staff and far too wide for the table.
+DFEL_IMPORT_CONTEXT = {"source_name": "DFEL", "import_url_name": "management:dfel_import", "confirm_url_name": "management:dfel_import_confirm", "show_game_ids": False}
+
+
 class RBIHFImportView(FeatureRequiredMixin, View):
     """Step 1: paste an RBIHF team page URL, pick which of the club's teams it's
     for. Fetches and parses the page server-side, stashes the raw HTML (not
@@ -4085,12 +4093,12 @@ class RBIHFImportView(FeatureRequiredMixin, View):
     feature_flag = "RBIHF"
 
     def get(self, request):
-        return render(request, "management/rbihf_import_form.html", {"form": RBIHFImportForm(club=request.club)})
+        return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": RBIHFImportForm(club=request.club)})
 
     def post(self, request):
         form = RBIHFImportForm(request.POST, club=request.club)
         if not form.is_valid():
-            return render(request, "management/rbihf_import_form.html", {"form": form})
+            return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": form})
 
         url = form.cleaned_data["url"]
         team = form.cleaned_data["team"]
@@ -4102,13 +4110,13 @@ class RBIHFImportView(FeatureRequiredMixin, View):
             plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError as error:
             form.add_error("url", str(error))
-            return render(request, "management/rbihf_import_form.html", {"form": form})
+            return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": form})
 
         request.session["rbihf_import_html"] = html
         request.session["rbihf_import_team_id"] = str(team.pk)
         request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
         request.session["rbihf_import_competition_label"] = competition_label
-        return render(request, "management/rbihf_import_preview.html", {"plan": plan})
+        return render(request, "management/event_import_preview.html", {**RBIHF_IMPORT_CONTEXT, "plan": plan})
 
 
 class RBIHFImportConfirmView(FeatureRequiredMixin, View):
@@ -4144,6 +4152,81 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
             opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
 
         result = apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+
+        body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
+        notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
+class DFELImportView(FeatureRequiredMixin, View):
+    """Step 1 of the DFEL (Deutsche Fraueneishockey-Liga, via the EHV-NRW
+    league site) fixture import -- the same shape as RBIHFImportView: paste a
+    team URL, pick which of the club's teams it's for, fetch the schedule
+    server-side, stash the raw JSON (not client-trusted parsed data) in the
+    session and render the create/update/delete preview. See
+    events.services.dfel_import."""
+
+    feature_flag = "DFEL"
+
+    def get(self, request):
+        return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": DFELImportForm(club=request.club)})
+
+    def post(self, request):
+        form = DFELImportForm(request.POST, club=request.club)
+        if not form.is_valid():
+            return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": form})
+
+        team = form.cleaned_data["team"]
+        competition_label = form.cleaned_data["competition_label"]
+
+        team_id, division_id = dfel_import.extract_ids(form.cleaned_data["url"])
+        source_id = dfel_import.source_id(team_id, division_id)
+        try:
+            raw_json = fetch_schedule(team_id, division_id)
+            plan = dfel_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except DFELImportError as error:
+            form.add_error("url", str(error))
+            return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": form})
+
+        request.session["dfel_import_json"] = raw_json
+        request.session["dfel_import_team_id"] = str(team.pk)
+        request.session["dfel_import_source_id"] = source_id
+        request.session["dfel_import_competition_label"] = competition_label
+        return render(request, "management/event_import_preview.html", {**DFEL_IMPORT_CONTEXT, "plan": plan})
+
+
+class DFELImportConfirmView(FeatureRequiredMixin, View):
+    """Step 2: re-parses and re-diffs the JSON stashed by DFELImportView
+    against the current DB state and applies it -- see RBIHFImportConfirmView,
+    which this mirrors."""
+
+    feature_flag = "DFEL"
+
+    def post(self, request):
+        raw_json = request.session.pop("dfel_import_json", None)
+        team_id = request.session.pop("dfel_import_team_id", None)
+        source_id = request.session.pop("dfel_import_source_id", None)
+        competition_label = request.session.pop("dfel_import_competition_label", "")
+        if not raw_json or not team_id or not source_id:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the DFEL team URL again.')}")
+            return redirect("management:dfel_import")
+
+        team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+
+        try:
+            plan = dfel_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except DFELImportError:
+            notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched schedule. Try again.')}")
+            return redirect("management:dfel_import")
+
+        locations_by_game_id = {}
+        opponents_by_game_id = {}
+        for planned in [*plan.to_create, *plan.to_update]:
+            game_id = planned.fixture.external_game_id
+            locations_by_game_id[game_id] = request.POST.get(f"location_{game_id}", "")
+            opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
+
+        result = dfel_import.apply_plan(plan, locations_by_game_id, opponents_by_game_id)
 
         body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
         notify(request, f"s|{_('Fixtures imported')}|{body}")

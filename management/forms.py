@@ -11,6 +11,7 @@ from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRe
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
 from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
+from events.services.dfel_import import DFELImportError, extract_ids
 from events.services.officials import officials_enabled_for
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from formbuilder.models import Field as FormBuilderField
@@ -797,6 +798,42 @@ class RBIHFImportForm(forms.Form):
         try:
             extract_team_id(url)
         except RBIHFImportError as error:
+            raise forms.ValidationError(str(error)) from error
+        return url
+
+
+class DFELImportForm(forms.Form):
+    """Step 1 of importing a team's fixtures from the DFEL (hosted on the
+    EHV-NRW league site) -- see events.services.dfel_import. Mirrors
+    RBIHFImportForm: only the URL and which of the club's own teams it
+    applies to; everything else comes from the league's schedule feed.
+
+    The team URL carries both a team id and a division id, and EHV-NRW gives
+    a team a new one each season -- so a new season means pasting a new URL.
+    competition_label tells two imports for the same team apart (e.g. league
+    vs. playoffs), same as for RBIHF."""
+
+    url = forms.CharField(
+        label=_("DFEL team page URL"),
+        help_text=_("E.g. https://ehv-nrw.de/leagues/team/70779/21691/ -- the team's page on ehv-nrw.de (its “Spiele” tab lists the games). Each season has its own team URL."),
+        widget=forms.URLInput(attrs={"placeholder": "https://ehv-nrw.de/leagues/team/70779/21691/"}),
+    )
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+    competition_label = forms.CharField(
+        required=False,
+        label=_("Competition label"),
+        help_text=_("Optional. Only needed if this team plays in more than one DFEL competition (e.g. “League” vs “Playoffs”) -- keeps re-importing one from ever deleting the other's games."),
+    )
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+
+    def clean_url(self):
+        url = self.cleaned_data["url"].strip()
+        try:
+            extract_ids(url)
+        except DFELImportError as error:
             raise forms.ValidationError(str(error)) from error
         return url
 

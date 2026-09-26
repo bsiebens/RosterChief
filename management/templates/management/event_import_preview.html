@@ -1,6 +1,7 @@
 {% extends "management/base.html" %}
 {% load lucide i18n %}
 
+{% comment %}Shared by every external fixture import (RBIHF, DFEL, ...) -- the view passes source_name, import_url_name, confirm_url_name and show_game_ids.{% endcomment %}
 {% block heading %}{% trans "Review import" %}{% endblock heading %}
 
 {% block panel %}
@@ -15,7 +16,7 @@
         </span>
     </div>
 
-    <form method="post" action="{% url 'management:rbihf_import_confirm' %}">
+    <form method="post" action="{% url confirm_url_name %}">
         {% csrf_token %}
 
         <div class="flex flex-col gap-4">
@@ -28,18 +29,18 @@
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>{% trans "#" %}</th>
+                                        {% if show_game_ids %}<th>{% trans "#" %}</th>{% endif %}
                                         <th>{% trans "Start" %}</th>
                                         <th>{% trans "Opponent" %}</th>
-                                        <th>{% trans "RBIHF opponent" %}</th>
+                                        <th>{% blocktrans %}{{ source_name }} opponent{% endblocktrans %}</th>
                                         <th>{% trans "Location" %}</th>
-                                        <th>{% trans "RBIHF venue" %}</th>
+                                        <th>{% blocktrans %}{{ source_name }} venue{% endblocktrans %}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for planned in plan.to_create %}
                                         <tr>
-                                            <td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>
+                                            {% if show_game_ids %}<td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>{% endif %}
                                             <td class="font-mono text-xs">{{ planned.fixture.start|date:"Y-m-d H:i" }}</td>
                                             <td>
                                                 <select name="opponent_{{ planned.fixture.external_game_id }}" class="select w-full">
@@ -77,18 +78,18 @@
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>{% trans "#" %}</th>
+                                        {% if show_game_ids %}<th>{% trans "#" %}</th>{% endif %}
                                         <th>{% trans "Changes" %}</th>
                                         <th>{% trans "Opponent" %}</th>
-                                        <th>{% trans "RBIHF opponent" %}</th>
+                                        <th>{% blocktrans %}{{ source_name }} opponent{% endblocktrans %}</th>
                                         <th>{% trans "Location" %}</th>
-                                        <th>{% trans "RBIHF venue" %}</th>
+                                        <th>{% blocktrans %}{{ source_name }} venue{% endblocktrans %}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for planned in plan.to_update %}
                                         <tr>
-                                            <td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>
+                                            {% if show_game_ids %}<td class="font-mono text-xs">{{ planned.fixture.external_game_id }}</td>{% endif %}
                                             <td>
                                                 {% for field, change in planned.changes.items %}
                                                     <div class="text-xs">
@@ -129,7 +130,7 @@
             <div class="card">
                 <div class="card-body">
                     <h2 class="card-title text-base">{% lucide "trash-2" size=18 %} {% blocktrans count counter=plan.to_delete|length %}{{ counter }} game to delete{% plural %}{{ counter }} games to delete{% endblocktrans %}</h2>
-                    <p class="text-sm text-muted">{% trans "No longer listed on the RBIHF page — only upcoming games are ever removed this way, past results are left alone." %}</p>
+                    <p class="text-sm text-muted">{% blocktrans %}No longer listed on the {{ source_name }} page — only upcoming games are ever removed this way, past results are left alone.{% endblocktrans %}</p>
 
                     {% if plan.to_delete %}
                         <ul class="list-inside list-disc text-sm text-ink">
@@ -147,7 +148,7 @@
         </div>
 
         <div class="card-actions justify-start pt-4">
-            <a class="btn btn-outline gap-2" href="{% url 'management:rbihf_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+            <a class="btn btn-outline gap-2" href="{% url import_url_name %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
             {% if plan.to_create or plan.to_update or plan.to_delete %}
                 <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Confirm import" %}</button>
             {% endif %}

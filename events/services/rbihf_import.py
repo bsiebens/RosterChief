@@ -173,12 +173,20 @@ class ImportPlan:
     scraped_team_name: str
     location_choices: object  # QuerySet[Location], evaluated once for the template
     opponent_choices: object = None  # QuerySet[Opponent], evaluated once for the template
-    rbihf_team_id: str = ""  # stamped onto every create/update as external_source_id
+    rbihf_team_id: str = ""  # stamped onto every create/update as external_source_id (the name predates non-RBIHF imports -- see source_id)
     competition_label: str = ""  # stamped onto every create/update as competition_label
     to_create: list[PlannedCreate] = field(default_factory=list)
     to_update: list[PlannedUpdate] = field(default_factory=list)
     to_delete: list[Event] = field(default_factory=list)
     unchanged_count: int = 0
+    competition: str = "RBIHF"  # Event.competition for every created event, and which existing events are diffed against
+
+    @property
+    def source_id(self) -> str:
+        """Competition-neutral alias for ``rbihf_team_id`` -- whatever the
+        source page's own id is (e.g. DFEL's "team/division"), stamped onto
+        every create/update as ``Event.external_source_id``."""
+        return self.rbihf_team_id
 
 
 def _describe_changes(event, fixture: ScrapedFixture, competition_label: str) -> dict:
@@ -213,6 +221,15 @@ def build_plan(club, team, rbihf_team_id: str, html: str, competition_label: str
     latter -- see the delete loop below. ``competition_label`` is the purely
     cosmetic counterpart (e.g. "Division 1"), stamped the same way."""
     scraped_team_name, fixtures = parse_fixtures(html, rbihf_team_id)
+    return plan_from_fixtures(club, team, competition="RBIHF", source_id=rbihf_team_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
+
+
+def plan_from_fixtures(club, team, *, competition: str, source_id: str, scraped_team_name: str, fixtures: list[ScrapedFixture], competition_label: str = "") -> ImportPlan:
+    """The source-agnostic half of ``build_plan``: diffs already-parsed
+    ``fixtures`` against this club/team's existing ``competition`` events.
+    Shared by every fixture importer (RBIHF here, DFEL in
+    events.services.dfel_import) -- only fetching/parsing differs per source.
+    ``source_id`` plays the role ``rbihf_team_id`` describes in build_plan."""
     location_choices = list(Location.objects.filter(club=club).order_by("name"))
     opponent_choices = list(Opponent.objects.filter(club=club).order_by("name"))
 
@@ -221,9 +238,9 @@ def build_plan(club, team, rbihf_team_id: str, html: str, competition_label: str
     # before external_source_id existed (blank) is still found and updated
     # (which self-heals its external_source_id, see the update loop in
     # apply_plan) instead of being re-created as a duplicate.
-    existing_by_game_id = {event.external_game_id: event for event in Event.objects.filter(club=club, teams=team, competition="RBIHF").exclude(external_game_id="").select_related("opponent", "location")}
+    existing_by_game_id = {event.external_game_id: event for event in Event.objects.filter(club=club, teams=team, competition=competition).exclude(external_game_id="").select_related("opponent", "location")}
 
-    plan = ImportPlan(club=club, team=team, scraped_team_name=scraped_team_name, location_choices=location_choices, opponent_choices=opponent_choices, rbihf_team_id=rbihf_team_id, competition_label=competition_label)
+    plan = ImportPlan(club=club, team=team, scraped_team_name=scraped_team_name, location_choices=location_choices, opponent_choices=opponent_choices, rbihf_team_id=source_id, competition_label=competition_label, competition=competition)
 
     seen_game_ids = set()
     for fixture in fixtures:
@@ -256,7 +273,7 @@ def build_plan(club, team, rbihf_team_id: str, html: str, competition_label: str
         # competition it actually belongs to. A *known, different* source id
         # is never a delete candidate here -- that's specifically the
         # cross-competition case this exists to prevent.
-        if event.external_source_id and event.external_source_id != rbihf_team_id:
+        if event.external_source_id and event.external_source_id != source_id:
             continue
         plan.to_delete.append(event)
 
@@ -312,7 +329,7 @@ def apply_plan(plan: ImportPlan, locations_by_game_id: dict, opponents_by_game_i
                 title=f"{home_side} {_('vs')} {away_side}",
                 kind=Event.EventKind.GAME,
                 start=planned.fixture.start,
-                competition="RBIHF",
+                competition=plan.competition,
                 competition_label=plan.competition_label,
                 external_game_id=planned.fixture.external_game_id,
                 external_source_id=plan.rbihf_team_id,

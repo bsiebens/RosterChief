@@ -29,6 +29,7 @@ from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOu
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
+from events.services.dfel_import import DFELImportError
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
@@ -9145,6 +9146,149 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         self.assertContains(response, "already up to date")
         self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
+
+
+DFEL_SAMPLE_GAME_ID = "3f1b2c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+DFEL_TEAM_URL = "https://ehv-nrw.de/leagues/team/70779/21691/"
+
+
+def dfel_sample_json():
+    """A minimal EHV-NRW schedule response: one upcoming home game. The
+    timestamp is relative to now so the game is always in the future."""
+    start = timezone.now() + datetime.timedelta(days=30)
+    return json.dumps(
+        {
+            "statusId": 1,
+            "statusMsg": "Ok",
+            "data": {
+                "rows": [
+                    {
+                        "id": DFEL_SAMPLE_GAME_ID,
+                        "gameUtcTimestamp": int(start.timestamp() * 1000),
+                        "homeTeamId": 70779,
+                        "homeTeamLongName": "Sharks Woman Mechelen",
+                        "awayTeamId": 70760,
+                        "awayTeamLongName": "EC Hannover Indians",
+                        "homeTeamScore": 0,
+                        "awayTeamScore": 0,
+                        "gameStatus": 0,
+                        "gameHasEnded": False,
+                        "labels": [],
+                        "location": {"longname": "Mechelen - Ice Skating Center", "shortname": "Ice Skating Center", "address": '{"city":"Mechelen"}'},
+                    }
+                ]
+            },
+        }
+    )
+
+
+class DFELImportViewTests(ManagementTestBase):
+    """The Events page's "Import from DFEL" button/flow -- same gating and
+    two-step shape as RBIHFImportViewTests above, behind the "DFEL" waffle
+    Flag. fetch_schedule is mocked; nothing touches the network."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="Sharks Women", short_name="SW")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        # A migration may already seed the "DFEL" flag row -- get_or_create, not create.
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="DFEL")
+        flag.clubs.add(self.club)
+
+    def test_button_shows_for_admin_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "Import from DFEL")
+
+    def test_button_hidden_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertNotContains(response, "Import from DFEL")
+
+    def test_the_import_views_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("dfel_import").status_code, 404)
+        self.assertEqual(self.club_post("dfel_import_confirm", {}).status_code, 404)
+
+    def test_the_form_renders_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("dfel_import")
+
+        self.assertContains(response, "Import from DFEL")
+        self.assertContains(response, "ehv-nrw.de/leagues/team/70779/21691/")
+
+    def test_a_non_dfel_url_is_a_form_error_not_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["form"].is_valid())
+        self.assertIn("url", response.context["form"].errors)
+
+    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    def test_submitting_the_form_shows_a_preview(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "EC Hannover Indians")
+        self.assertContains(response, f'name="opponent_{DFEL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, f'name="location_{DFEL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, reverse("management:dfel_import_confirm"))
+        mock_fetch.assert_called_once_with("70779", "21691")
+
+    @mock.patch("management.views.fetch_schedule", side_effect=DFELImportError("Could not reach the schedule."))
+    def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not reach the schedule.")
+
+    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    def test_confirming_creates_the_event(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "competition_label": "League"})
+
+        response = self.club_post("dfel_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id=DFEL_SAMPLE_GAME_ID)
+        self.assertEqual(event.competition, "DFEL")
+        self.assertEqual(event.external_source_id, "70779/21691")
+        self.assertEqual(event.competition_label, "League")
+        self.assertEqual(event.opponent.name, "EC Hannover Indians")
+        self.assertIn(self.team, event.teams.all())
+
+    def test_confirming_with_nothing_stashed_redirects_with_a_notice(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:dfel_import"))
 
 
 class MemberListKindFilterTests(ManagementTestBase):

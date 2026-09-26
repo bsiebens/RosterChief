@@ -1,10 +1,12 @@
 import itertools
-from datetime import date, datetime, time, timedelta
+import json
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
 from unittest import mock
 
+import requests
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -24,11 +26,13 @@ from notifications.models import Notification
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
+from .competition.hockey import DFEL
 from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
     cancel_occurrence,
     detach_occurrence,
+    dfel_import,
     effective_members,
     generate_occurrences,
     occurrence_datetimes,
@@ -41,6 +45,7 @@ from .services import (
 )
 from .services.attendance import member_attendance_counts
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
+from .services.competitions import CompetitionFetchError, fetch_game_info
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.officials import (
     OfficialAssignmentError,
@@ -1595,6 +1600,311 @@ class RBIHFImportPlanTests(EventsTestBase):
 
         self.assertEqual(result, {"created": 0, "updated": 0, "deleted": 1})
         self.assertFalse(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+
+
+DFEL_TEAM_ID = "70779"
+DFEL_DIVISION_ID = "21691"
+DFEL_SOURCE_ID = "70779/21691"
+DFEL_TEAM_NAME = "Sharks Woman Mechelen"
+DFEL_TEAM_PAGE_HTML = """<html><body><div id="team"></div><script>
+var cfg = JSON.parse('{\\u0022domNode\\u0022: \\u0022#team\\u0022, \\u0022divisionId\\u0022: \\u002221691\\u0022, \\u0022apiKey\\u0022: \\u0022abc123def456\\u0022, \\u0022sport\\u0022: \\u0022icehockey\\u0022}');
+</script></body></html>"""
+
+
+def dfel_row(game_id, *, days=7, home_id=DFEL_TEAM_ID, home_name=DFEL_TEAM_NAME, away_id="70757", away_name="FASS Berlin", home_score=0, away_score=0, status=0, ended=False, city="Dinslaken", longname="Dinslaken - Eishalle"):
+    """One hockeydata Schedule row, trimmed to the fields dfel_import reads --
+    shape confirmed against a live response while designing this feature.
+    ``days`` is relative to today (at a fixed 18:00 UTC, so two calls for the
+    same ``days`` agree to the millisecond), so "upcoming" stays stable
+    whenever this runs."""
+    start = (timezone.now() + timedelta(days=days)).astimezone(UTC).replace(hour=18, minute=0, second=0, microsecond=0)
+    address = json.dumps({"headline1": "Eishalle", "street1": "Some Straße 1", "zipcode": "46535", "city": city, "country": "GER"}) if city is not None else ""
+    return {
+        "id": game_id,
+        "divisionId": int(DFEL_DIVISION_ID),
+        "scheduledGameStart": timezone.localtime(start).strftime("%Y-%m-%dT%H:%M:%S"),
+        "gameUtcTimestamp": int(start.timestamp() * 1000),
+        "homeTeamId": int(home_id),
+        "homeTeamLongName": home_name,
+        "awayTeamId": int(away_id),
+        "awayTeamLongName": away_name,
+        "homeTeamScore": home_score,
+        "awayTeamScore": away_score,
+        "gameStatus": status,
+        "gameHasEnded": ended,
+        "labels": ["LIVE"] if status == 1 else [],
+        "location": {"id": 1, "longname": longname, "shortname": "Eishalle", "address": address},
+        "dateIsToBeDetermined": False,
+    }
+
+
+def dfel_schedule(rows):
+    return json.dumps({"statusId": 1, "statusMsg": "Ok", "data": {"rows": rows}})
+
+
+def dfel_response(text, status_code=200):
+    return mock.Mock(status_code=status_code, text=text)
+
+
+class DFELExtractIdsTests(TestCase):
+    def test_a_team_page_url_yields_team_and_division(self):
+        for url in ["https://ehv-nrw.de/leagues/team/70779/21691/", "https://www.ehv-nrw.de/leagues/team/70779/21691", "  https://ehv-nrw.de/leagues/team/70779/21691/  "]:
+            with self.subTest(url=url):
+                self.assertEqual(dfel_import.extract_ids(url), ("70779", "21691"))
+
+    def test_a_non_matching_url_is_rejected(self):
+        for url in ["https://ehv-nrw.de/leagues/team/70779/", "https://evil.example.com/leagues/team/70779/21691/", "https://www.rbihf.be/league/team/4460", ""]:
+            with self.subTest(url=url), self.assertRaises(dfel_import.DFELImportError):
+                dfel_import.extract_ids(url)
+
+    def test_source_id_joins_team_and_division(self):
+        self.assertEqual(dfel_import.source_id("70779", "21691"), DFEL_SOURCE_ID)
+
+
+class DFELFetchScheduleTests(TestCase):
+    def test_the_api_key_is_read_from_the_escaped_widget_config(self):
+        self.assertEqual(dfel_import.extract_api_key(DFEL_TEAM_PAGE_HTML), "abc123def456")
+
+    def test_the_api_key_is_also_found_with_plain_quotes(self):
+        self.assertEqual(dfel_import.extract_api_key('{"apiKey": "f4b71c87"}'), "f4b71c87")
+
+    def test_a_page_without_an_api_key_is_an_error(self):
+        with self.assertRaises(dfel_import.DFELImportError):
+            dfel_import.extract_api_key("<html></html>")
+
+    def test_fetch_schedule_unwraps_the_jsonp_callback(self):
+        schedule = dfel_schedule([dfel_row("g1")])
+        with mock.patch("events.services.dfel_import.requests.get", side_effect=[dfel_response(DFEL_TEAM_PAGE_HTML), dfel_response(f"rosterchief({schedule});")]) as mock_get:
+            raw_json = dfel_import.fetch_schedule(DFEL_TEAM_ID, DFEL_DIVISION_ID)
+
+        self.assertEqual(json.loads(raw_json), json.loads(schedule))
+        page_call, schedule_call = mock_get.call_args_list
+        self.assertEqual(page_call.args[0], "https://ehv-nrw.de/leagues/team/70779/21691/")
+        self.assertEqual(schedule_call.args[0], dfel_import.SCHEDULE_URL)
+        self.assertEqual(schedule_call.kwargs["params"]["apiKey"], "abc123def456")
+        self.assertEqual(schedule_call.kwargs["params"]["divisionId"], DFEL_DIVISION_ID)
+
+    def test_a_network_error_is_a_dfel_import_error(self):
+        with mock.patch("events.services.dfel_import.requests.get", side_effect=requests.ConnectionError("boom")), self.assertRaises(dfel_import.DFELImportError):
+            dfel_import.fetch_schedule(DFEL_TEAM_ID, DFEL_DIVISION_ID)
+
+    def test_an_http_error_is_a_dfel_import_error(self):
+        with mock.patch("events.services.dfel_import.requests.get", side_effect=[dfel_response(DFEL_TEAM_PAGE_HTML), dfel_response("nope", status_code=500)]), self.assertRaises(dfel_import.DFELImportError):
+            dfel_import.fetch_schedule(DFEL_TEAM_ID, DFEL_DIVISION_ID)
+
+    def test_invalid_json_is_a_dfel_import_error(self):
+        with mock.patch("events.services.dfel_import.requests.get", side_effect=[dfel_response(DFEL_TEAM_PAGE_HTML), dfel_response("rosterchief(<html>oops</html>)")]), self.assertRaises(dfel_import.DFELImportError):
+            dfel_import.fetch_schedule(DFEL_TEAM_ID, DFEL_DIVISION_ID)
+
+    def test_a_non_ok_status_is_a_dfel_import_error(self):
+        body = json.dumps({"statusId": 0, "statusMsg": "Invalid apiKey"})
+        with mock.patch("events.services.dfel_import.requests.get", side_effect=[dfel_response(DFEL_TEAM_PAGE_HTML), dfel_response(f"rosterchief({body})")]):
+            with self.assertRaisesMessage(dfel_import.DFELImportError, "Invalid apiKey"):
+                dfel_import.fetch_schedule(DFEL_TEAM_ID, DFEL_DIVISION_ID)
+
+
+class DFELParseFixturesTests(TestCase):
+    def test_home_and_away_games_are_detected_with_the_right_opponent(self):
+        rows = [dfel_row("home"), dfel_row("away", days=14, home_id="70774", home_name='KEC "Die Haie"', away_id=DFEL_TEAM_ID, away_name=DFEL_TEAM_NAME, city="Köln")]
+        team_name, fixtures = dfel_import.parse_fixtures(dfel_schedule(rows), DFEL_TEAM_ID)
+
+        self.assertEqual(team_name, DFEL_TEAM_NAME)
+        home, away = fixtures
+        self.assertEqual((home.external_game_id, home.is_home, home.opponent_name, home.venue_text), ("home", True, "FASS Berlin", "Dinslaken"))
+        self.assertEqual((away.external_game_id, away.is_home, away.opponent_name, away.venue_text), ("away", False, 'KEC "Die Haie"', "Köln"))
+
+    def test_start_is_an_aware_utc_datetime_from_the_timestamp(self):
+        row = dfel_row("g1")
+        _team_name, [fixture] = dfel_import.parse_fixtures(dfel_schedule([row]), DFEL_TEAM_ID)
+
+        self.assertEqual(fixture.start, datetime.fromtimestamp(row["gameUtcTimestamp"] / 1000, tz=UTC))
+        self.assertEqual(fixture.start.utcoffset(), timedelta(0))
+
+    def test_past_games_are_skipped(self):
+        _team_name, fixtures = dfel_import.parse_fixtures(dfel_schedule([dfel_row("past", days=-3), dfel_row("future")]), DFEL_TEAM_ID)
+
+        self.assertEqual([fixture.external_game_id for fixture in fixtures], ["future"])
+
+    def test_other_teams_games_are_skipped(self):
+        rows = [dfel_row("ours"), dfel_row("theirs", home_id="70774", home_name="KEC", away_id="70757", away_name="FASS Berlin")]
+        _team_name, fixtures = dfel_import.parse_fixtures(dfel_schedule(rows), DFEL_TEAM_ID)
+
+        self.assertEqual([fixture.external_game_id for fixture in fixtures], ["ours"])
+
+    def test_the_venue_falls_back_to_the_location_name_without_an_address(self):
+        _team_name, [fixture] = dfel_import.parse_fixtures(dfel_schedule([dfel_row("g1", city=None, longname="Dinslaken - Eishalle")]), DFEL_TEAM_ID)
+
+        self.assertEqual(fixture.venue_text, "Dinslaken - Eishalle")
+
+    def test_the_team_name_comes_from_a_past_game_when_nothing_is_upcoming(self):
+        team_name, fixtures = dfel_import.parse_fixtures(dfel_schedule([dfel_row("past", days=-3)]), DFEL_TEAM_ID)
+
+        self.assertEqual((team_name, fixtures), (DFEL_TEAM_NAME, []))
+
+    def test_a_team_not_in_the_division_is_an_error(self):
+        with self.assertRaises(dfel_import.DFELImportError):
+            dfel_import.parse_fixtures(dfel_schedule([dfel_row("g1")]), "99999")
+
+    def test_find_game_by_id(self):
+        raw_json = dfel_schedule([dfel_row("a"), dfel_row("b")])
+
+        self.assertEqual(dfel_import.find_game(raw_json, "b")["id"], "b")
+        self.assertIsNone(dfel_import.find_game(raw_json, "zzz"))
+
+
+class DFELImportPlanTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        cls.away_location = Location.objects.create(club=cls.club, name="Eishalle", address="2 St", city="Köln", zip_code="50679", country="DE")
+
+    def away_row(self, game_id="a1", days=10):
+        return dfel_row(game_id, days=days, home_id="70774", home_name="KEC", away_id=DFEL_TEAM_ID, away_name=DFEL_TEAM_NAME, city="köln")
+
+    def test_new_fixtures_are_planned_as_creates_with_suggested_locations(self):
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1"), self.away_row()]))
+
+        self.assertEqual(plan.competition, "DFEL")
+        self.assertEqual(plan.source_id, DFEL_SOURCE_ID)
+        self.assertEqual(plan.scraped_team_name, DFEL_TEAM_NAME)
+        self.assertEqual([(p.fixture.external_game_id, p.suggested_location) for p in plan.to_create], [("h1", self.home_location), ("a1", self.away_location)])
+
+    def test_apply_plan_creates_dfel_events(self):
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1")]), "DFEL2")
+        result = dfel_import.apply_plan(plan, {"h1": str(self.home_location.pk)})
+
+        self.assertEqual(result, {"created": 1, "updated": 0, "deleted": 0})
+        event = Event.objects.get(external_game_id="h1")
+        self.assertEqual((event.competition, event.external_source_id, event.competition_label), ("DFEL", DFEL_SOURCE_ID, "DFEL2"))
+        self.assertEqual(event.kind, Event.EventKind.GAME)
+        self.assertEqual(event.opponent.name, "FASS Berlin")
+        self.assertEqual(event.location, self.home_location)
+        self.assertEqual(list(event.teams.all()), [self.team])
+        self.assertTrue(event.title.startswith("1st "))
+
+    def test_a_reimport_updates_a_moved_game_and_leaves_the_rest_unchanged(self):
+        dfel_import.apply_plan(dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1"), dfel_row("h2", days=21)])), {})
+
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1", days=8), dfel_row("h2", days=21)]))
+
+        self.assertEqual([p.fixture.external_game_id for p in plan.to_update], ["h1"])
+        self.assertIn("start", plan.to_update[0].changes)
+        self.assertEqual(plan.unchanged_count, 1)
+        self.assertEqual(plan.to_create, [])
+
+    def test_a_future_game_no_longer_listed_is_planned_for_deletion(self):
+        dfel_import.apply_plan(dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1"), dfel_row("h2")])), {})
+
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1")]))
+
+        self.assertEqual([event.external_game_id for event in plan.to_delete], ["h2"])
+
+    def test_a_dfel_import_never_deletes_rbihf_events(self):
+        rbihf_event = self.make_event(kind=Event.EventKind.GAME, competition="RBIHF", external_game_id="5002", external_source_id=RBIHF_TEAM_ID)
+        rbihf_event.teams.add(self.team)
+
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1")]))
+
+        self.assertEqual(plan.to_delete, [])
+
+    def test_a_dfel_import_never_deletes_another_divisions_events(self):
+        other_division = dfel_import.source_id(DFEL_TEAM_ID, "99999")
+        dfel_import.apply_plan(dfel_import.build_plan(self.club, self.team, other_division, dfel_schedule([dfel_row("cup1")])), {})
+
+        plan = dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1")]))
+
+        self.assertEqual(plan.to_delete, [])
+        self.assertEqual([p.fixture.external_game_id for p in plan.to_create], ["h1"])
+
+    def test_an_rbihf_import_never_deletes_dfel_events(self):
+        dfel_import.apply_plan(dfel_import.build_plan(self.club, self.team, DFEL_SOURCE_ID, dfel_schedule([dfel_row("h1")])), {})
+
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, rbihf_sample_html([]))
+
+        self.assertEqual(plan.to_delete, [])
+
+
+class DFELUpdateGameInformationTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        cls.competition = Competition.objects.get(name="DFEL")
+
+    def setUp(self):
+        # The flag's per-club membership is cached (features.models) -- same leak concern as PollLiveGameResultsTests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("competition", "DFEL")
+        kwargs.setdefault("external_game_id", "g1")
+        kwargs.setdefault("external_source_id", DFEL_SOURCE_ID)
+        return self.make_event(**kwargs)
+
+    def patch_fetch(self, rows):
+        return mock.patch("events.services.dfel_import.requests.get", side_effect=[dfel_response(DFEL_TEAM_PAGE_HTML), dfel_response(f"rosterchief({dfel_schedule(rows)})")])
+
+    def test_the_seeded_competition_is_flagged_ice_hockey(self):
+        self.assertEqual(self.competition.module, "events.competition.hockey")
+        self.assertEqual(self.competition.sport_type, Club.SportType.ICE_HOCKEY)
+        self.assertEqual(self.competition.flag.name, "DFEL")
+
+    def test_a_home_game_maps_home_score_to_score_for(self):
+        game = self.make_game(location=self.home_location)
+        with self.patch_fetch([dfel_row("g1", days=0, home_score=4, away_score=1, status=1)]):
+            DFEL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (4, 1, True))
+
+    def test_an_away_game_maps_away_score_to_score_for(self):
+        game = self.make_game()
+        with self.patch_fetch([dfel_row("g1", days=0, home_id="70774", away_id=DFEL_TEAM_ID, home_score=4, away_score=1, status=1)]):
+            DFEL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against), (1, 4))
+
+    def test_an_ended_game_is_not_live(self):
+        game = self.make_game(is_live=True)
+        with self.patch_fetch([dfel_row("g1", days=0, home_score=2, away_score=2, status=1, ended=True)]):
+            DFEL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertFalse(game.is_live)
+
+    def test_a_game_missing_from_the_schedule_is_an_error(self):
+        game = self.make_game(external_game_id="gone")
+        with self.patch_fetch([dfel_row("g1")]), self.assertRaises(ValueError):
+            DFEL().update_game_information(game)
+
+    def test_a_missing_source_or_game_id_is_an_error_without_fetching(self):
+        for kwargs in [{"external_source_id": ""}, {"external_source_id": "70779"}, {"external_game_id": ""}]:
+            with self.subTest(**kwargs), mock.patch("events.services.dfel_import.requests.get") as mock_get, self.assertRaises(ValueError):
+                DFEL().update_game_information(self.make_game(**kwargs))
+            mock_get.assert_not_called()
+
+    def test_fetch_game_info_is_gated_on_the_dfel_flag(self):
+        game = self.make_game(location=self.home_location)
+        with mock.patch("events.services.dfel_import.requests.get") as mock_get:
+            self.assertFalse(fetch_game_info(game))
+        mock_get.assert_not_called()
+
+        self.competition.flag.clubs.add(self.club)
+        with self.patch_fetch([dfel_row("g1", days=0, home_score=3, away_score=0, status=1)]):
+            self.assertTrue(fetch_game_info(game))
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (3, 0, True))
+
+    def test_fetch_game_info_reports_a_fetch_failure(self):
+        self.competition.flag.clubs.add(self.club)
+        game = self.make_game(external_game_id="gone")
+        with self.patch_fetch([dfel_row("g1")]), self.assertRaises(CompetitionFetchError):
+            fetch_game_info(game)
 
 
 class EventRefereeModelTests(EventsTestBase):

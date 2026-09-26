@@ -1,8 +1,10 @@
 from urllib.parse import urljoin
 
 import requests
+from django.utils.translation import gettext_lazy as _
 
 from ..models import Event
+from ..services import dfel_import
 from ..services.attendance import resolve_season
 from .base import CompetitionBaseClass
 
@@ -96,3 +98,34 @@ class CEHL(CompetitionBaseClass):
 
         if timeline_req.status_code == 200 or score_req.status_code == 200:
             event.save(update_fields=["is_live", "score_for", "score_against"])
+
+
+class DFEL(CompetitionBaseClass):
+    """German women's ice hockey league (EHV-NRW), via the hockeydata.net
+    schedule -- see events.services.dfel_import. There's no single-game
+    endpoint, so this re-fetches the game's division schedule (from
+    event.external_source_id, "team/division") and picks the game out by
+    its hockeydata uuid (event.external_game_id)."""
+
+    def update_game_information(self, event: Event) -> None:
+        team_id, _sep, division_id = (event.external_source_id or "").partition("/")
+        if not team_id or not division_id:
+            raise ValueError(_("This game has no DFEL team/division source id -- re-import it from the team's EHV-NRW page."))
+        if not event.external_game_id:
+            raise ValueError(_("This game has no DFEL game id."))
+
+        raw_json = dfel_import.fetch_schedule(team_id, division_id)
+        game = dfel_import.find_game(raw_json, event.external_game_id)
+        if game is None:
+            raise ValueError(_("Game %(game_id)s is not in the DFEL schedule any more.") % {"game_id": event.external_game_id})
+
+        event.is_live = game.get("gameStatus") == dfel_import.LIVE_GAME_STATUS and not game.get("gameHasEnded")
+
+        if event.is_home_game:
+            event.score_for = game.get("homeTeamScore")
+            event.score_against = game.get("awayTeamScore")
+        else:
+            event.score_for = game.get("awayTeamScore")
+            event.score_against = game.get("homeTeamScore")
+
+        event.save(update_fields=["is_live", "score_for", "score_against"])
