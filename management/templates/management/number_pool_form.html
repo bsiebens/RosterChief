@@ -15,12 +15,12 @@
             {% endfor %}
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div class="md:col-span-2">{% form_field form.name %}</div>
+                {% form_field form.name %}
+                {% form_field form.min_age_gap_years %}
                 {% form_field form.min_number %}
                 {% form_field form.max_number %}
-                <div class="md:col-span-2">{% form_field form.min_age_gap_years %}</div>
+                <p class="-mt-2 text-xs text-dim md:col-span-2">{% trans "The jersey numbers available to every team in this pool -- a number taken on one team is taken on all of them." %}</p>
             </div>
-            <p class="mt-1 text-xs text-dim">{% trans "Jersey numbers are unique within this range, across every team assigned to this pool -- not just per team." %}</p>
 
             <div class="mt-4 flex gap-2">
                 <a class="btn btn-outline gap-2" href="{% url "management:number_pool_list" %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>

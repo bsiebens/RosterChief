@@ -25,7 +25,7 @@ class NumberPool(ClubScopedModel):
     min_age_gap_years = models.PositiveSmallIntegerField(
         _("minimum age gap (years)"),
         default=5,
-        help_text=_("Two players can share a number in this pool only when born at least this many years apart. Set to 0 to never allow sharing."),
+        help_text=_("Players born at least this many years apart may share a number. 0 = never shared."),
     )
 
     class Meta:
