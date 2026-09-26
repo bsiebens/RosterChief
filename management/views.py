@@ -3680,8 +3680,8 @@ class EventTaskDeleteView(EventManagerRequiredMixin, View):
 
 def _club_games_needing_management(club, lookup, *, upcoming_only=False, season=None):
     """The shared shape behind upcoming_games_needing_referee_management,
-    upcoming_games_needing_official_management, season_games_needing_referee_management
-    and season_games_needing_official_management below -- only which governance
+    upcoming_games_needing_official_management, remaining_season_games_needing_referee_management
+    and remaining_season_games_needing_official_management below -- only which governance
     flag a team must have (`lookup`, e.g.
     {"teams__referee_management": Team.RefereeManagement.CLUB}) and the date
     scoping (from now on, or bounded to a season, or neither) differ between
@@ -3704,15 +3704,9 @@ def _club_games_needing_management(club, lookup, *, upcoming_only=False, season=
 
 
 def upcoming_games_needing_referee_management(club):
-    """Upcoming home games/tournaments a club-arranged referee is needed for.
-
-    The base query behind RefereeManagementDashboardView's own game list, and
-    the nav's Referee management badge (games_missing_referees_count below,
-    used by management.context_processors.sidebar_counters) -- both "next
-    `limit` upcoming" views, unlike season_games_needing_referee_management's
-    whole-season scope, which backs the dashboard's status KPI cards instead
-    (see that function's own docstring for why those two deliberately no
-    longer count from the same set)."""
+    """Upcoming home games/tournaments a club-arranged referee is needed for --
+    the base query behind RefereeManagementDashboardView's own game list
+    (sliced to whatever range is selected there)."""
     return _club_games_needing_management(club, {"teams__referee_management": Team.RefereeManagement.CLUB}, upcoming_only=True)
 
 
@@ -3734,26 +3728,6 @@ def referee_workload_stats(club):
     return list(queryset.values("member__id", "member__first_name", "member__last_name").annotate(games=Count("id"), total_fees=Sum("fee")).order_by("-games", "member__last_name"))
 
 
-def games_missing_referees_count(club, limit=10):
-    """How many of the next `limit` upcoming, understaffed club-managed home
-    games have nobody assigned yet -- via one annotated query rather than the
-    per-game referee_rows/eligible_referees loop the dashboard builds for
-    rendering (which a nav badge has no use for). Deliberately NOT the same
-    scope as RefereeManagementDashboardView's own kpi_no_referee any more --
-    that KPI counts the whole season (see season_games_needing_referee_
-    management), while this badge stays "next `limit` upcoming" on purpose,
-    so a season's worth of backlog doesn't balloon the nav badge.
-
-    Filter to understaffed (referee_count < max_referees) BEFORE slicing to
-    `limit`, not after: the dashboard's own referee_qs does the same, so a
-    fully-staffed game chronologically ahead of an unstaffed one doesn't eat
-    a slot in the "next `limit`" window and silently shrink the badge below
-    what the page itself shows for the same range.
-    """
-    games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
-    return sum(1 for game in games if game.referee_count == 0)
-
-
 def upcoming_games_needing_official_management(club):
     """The officials counterpart to upcoming_games_needing_referee_management
     -- same shape, same reasoning, keyed off Team.official_management
@@ -3761,61 +3735,32 @@ def upcoming_games_needing_official_management(club):
     return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, upcoming_only=True)
 
 
-def games_missing_officials_count(club, limit=10):
-    """The officials counterpart to games_missing_referees_count -- 0 when
-    the "officials" flag is off for this club, same as every other officials
-    entry point (checked here, not just at the view layer, since this feeds
-    the nav badge directly). Filters to understaffed before slicing to
-    `limit`, for the same reason games_missing_referees_count does."""
-    if not officials_enabled_for(club):
-        return 0
-    games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
-    return sum(1 for game in games if game.official_count == 0)
+def remaining_season_games_needing_referee_management(club, season):
+    """Every club-managed home game/tournament needing a referee from now
+    until the end of `season` -- what RefereeManagementDashboardView's status
+    KPI cards and the nav badge (games_missing_referee_or_official_count)
+    both count from, independent of the dashboard's range selector. Upcoming
+    only: a past game nobody refereed isn't something left to arrange, and
+    counting those is what made the cards read far higher than the list."""
+    return _club_games_needing_management(club, {"teams__referee_management": Team.RefereeManagement.CLUB}, upcoming_only=True, season=season)
 
 
-def season_games_needing_referee_management(club, season):
-    """Every club-managed home game/tournament needing a referee within
-    `season`'s date range -- the KPI counterpart to
-    upcoming_games_needing_referee_management: the *whole* season (past and
-    future games both, mirroring referee_workload_stats' own date-range
-    scoping), not "from now on" and not sliced to whatever range/need bucket
-    the dashboard's game list happens to be filtered to. This is what
-    RefereeManagementDashboardView's status KPI cards (missing/understaffed/
-    fully staffed/fees pending) count from, so they read as a stable "state
-    of the season" and don't zero out just because the list below is
-    filtered to hide fully-staffed games.
-
-    Deliberately a wider scope than games_missing_referees_count's nav badge
-    (which stays "next `limit` upcoming" on purpose) -- the two used to count
-    from exactly the same set before this function existed, and no longer
-    do; see that function's own docstring."""
-    return _club_games_needing_management(club, {"teams__referee_management": Team.RefereeManagement.CLUB}, season=season)
+def remaining_season_games_needing_official_management(club, season):
+    """The officials counterpart to remaining_season_games_needing_referee_management."""
+    return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, upcoming_only=True, season=season)
 
 
-def season_games_needing_official_management(club, season):
-    """The officials counterpart to season_games_needing_referee_management."""
-    return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, season=season)
-
-
-def games_missing_referee_or_official_count(club, limit=10):
-    """Distinct games missing a referee or an official (or both), within the
-    next `limit` of each -- the nav badge's own number.
-
-    Deliberately NOT games_missing_referees_count(club, limit) +
-    games_missing_officials_count(club, limit): that naive sum double-counts
-    a game missing both (it's found once by each query), so a club with one
-    game missing only a referee and one game missing both would show 3 in
-    the badge for only 2 actual games -- see management.context_processors.
-    sidebar_counters, and RefereeManagementDashboardView's own kpi_total for
-    the same "count distinct games, not distinct (game, gap) pairs" rule.
-    """
-    referee_games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
-    missing_ids = {game.pk for game in referee_games if game.referee_count == 0}
-
+def games_missing_referee_or_official_count(club):
+    """Distinct upcoming games this season still short a referee or an
+    official (nobody assigned *or* only partially staffed) -- the nav badge's
+    own number. Same set the dashboard's status KPI cards count from, so the
+    badge always equals the distinct games behind "Without a referee" +
+    "Partially staffed" and their officials counterparts, a game short both
+    counted once (a naive sum of the two would count it twice)."""
+    season = current_season(club)
+    missing_ids = set(remaining_season_games_needing_referee_management(club, season).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees")).values_list("pk", flat=True))
     if officials_enabled_for(club):
-        official_games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
-        missing_ids |= {game.pk for game in official_games if game.official_count == 0}
-
+        missing_ids |= set(remaining_season_games_needing_official_management(club, season).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials")).values_list("pk", flat=True))
     return len(missing_ids)
 
 
@@ -3831,33 +3776,32 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
     both anchored on the ISO week so "this week" always means Mon-Sun of the
     current week regardless of what weekday it is today) or a flat count of
     upcoming games -- buttons in the template, not a dropdown, since there
-    are only a handful of sensible choices."""
+    are only a handful of sensible choices. The range picks which games are
+    in view (every club-managed upcoming home game, fully staffed ones
+    included); the `need` chips ("all", the default, or only the games
+    still short a referee/an official/either) then narrow that same set, so
+    each chip's count is always a subset of "All games"."""
 
     template_name = "management/referee_management.html"
     RANGE_CHOICES = ["week", "two_weeks", "10", "25", "50"]
     DEFAULT_RANGE = "10"
-    NEED_CHOICES = ["both", "referees", "officials"]
-    DEFAULT_NEED = "both"
+    NEED_CHOICES = ["all", "both", "referees", "officials"]
+    DEFAULT_NEED = "all"
 
     def get_range(self):
         value = self.request.GET.get("range", self.DEFAULT_RANGE)
         return value if value in self.RANGE_CHOICES else self.DEFAULT_RANGE
 
     def get_need(self, officials_enabled):
-        # "officials" (and any other non-default value) only means anything once
-        # the flag's on for this club -- with it off there's no officials bucket
-        # to switch to, same reasoning every other officials-gated control here
-        # already follows.
-        if not officials_enabled:
-            return self.DEFAULT_NEED
+        # With officials off for this club there's no officials bucket to
+        # switch to, and "either" is just "referees" -- only all/referees remain.
+        choices = self.NEED_CHOICES if officials_enabled else ["all", "referees"]
         value = self.request.GET.get("need", self.DEFAULT_NEED)
-        return value if value in self.NEED_CHOICES else self.DEFAULT_NEED
+        return value if value in choices else self.DEFAULT_NEED
 
     def _apply_range(self, queryset, range_choice):
-        """The same "week/two_weeks -> date filter, else -> next N" window
-        every bucket (the rendered list and each toggle's own count) is
-        restricted to, so a count next to "Referees" always matches exactly
-        what clicking it would show."""
+        """The "week/two_weeks -> date filter, else -> next N" window -- applied once, to
+        every managed upcoming game, before the need chips narrow it down."""
         if range_choice in ("week", "two_weeks"):
             today = timezone.localdate()
             end_of_this_week = today + timedelta(days=6 - today.weekday())
@@ -3867,16 +3811,13 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
 
     def _status_kpis(self, games_qs, related_name, max_field):
         """Shared shape for the referee/official status breakdown -- counts
-        every game in `games_qs` (already season-scoped, see
-        season_games_needing_referee/official_management) into none/some/full,
-        plus how many of those have at least one assignment with no fee set.
-        Not sliced by range, not bucketed by need, not affected by the "show
-        completed" checkbox -- see get_context_data's own comment on why
-        these are deliberately decoupled from the list below.
+        every game in `games_qs` (every upcoming game left this season, see
+        remaining_season_games_needing_referee/official_management) into
+        none/some/full, plus how many of those have at least one assignment
+        with no fee set. Not tied to the range/need selection -- see
+        get_context_data's own comment on why.
 
-        Season-wide rather than range-limited, so (unlike the per-row render
-        loop below, which needs full Event/candidate objects anyway) this
-        stays deliberately light: `values_list` for the breakdown pulls two
+        Kept light on purpose: `values_list` for the breakdown pulls two
         integers per game, no Event or EventReferee/EventOfficial instances
         at all, and fees_pending is one DB-side existence count rather than
         a Python loop over every assignment's fee."""
@@ -3900,48 +3841,25 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
         range_choice = self.get_range()
         officials_enabled = officials_enabled_for(club)
         need_choice = self.get_need(officials_enabled)
-        # Also include already fully-staffed games in the list/badges below --
-        # off by default, since the whole point of this dashboard is "what
-        # still needs doing", but sometimes staff want to double-check or
-        # adjust an already-arranged game without hunting for it on the event
-        # detail page directly.
-        show_completed = self.request.GET.get("show_completed") == "1"
 
-        # Three buckets a game can belong to -- referees-only, officials-only
-        # (empty when the flag's off for this club), or the union of both
-        # (confirmed via AskUserQuestion as the *combined* page's default: a
-        # game needing either belongs in one list, not two separate pages).
-        # The `need` toggle picks which bucket actually renders; all three are
-        # still counted (within the same range) for the toggle's own numbers.
-        #
-        # "Missing" means not yet fully staffed (referee_count < max_referees)
-        # -- zero assigned *or* understaffed, but never a fully-staffed game.
-        # A game with one internal and one external referee (2 rows, the
-        # Event.max_referees default) is fully staffed and must NOT show up
-        # here just because it's still under this club's referee governance --
-        # that governance-only check is upcoming_games_needing_referee_management's
-        # own job, not this toggle's. show_completed lifts that exclusion.
-        referee_qs = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True))
-        if not show_completed:
-            referee_qs = referee_qs.filter(referee_count__lt=F("max_referees"))
-        if officials_enabled:
-            official_qs = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True))
-            if not show_completed:
-                official_qs = official_qs.filter(official_count__lt=F("max_officials"))
-            # Not a queryset `|` union -- referee_qs/official_qs carry different
-            # annotations, so combining them directly by pk avoids relying on
-            # Django's ability to merge mismatched annotation sets.
-            both_ids = set(referee_qs.values_list("pk", flat=True)) | set(official_qs.values_list("pk", flat=True))
-            both_qs = Event.objects.filter(pk__in=both_ids).order_by("start")
-        else:
-            official_qs = Event.objects.none()
-            both_qs = referee_qs
-        buckets = {"referees": referee_qs, "officials": official_qs, "both": both_qs}
+        # Every managed upcoming game (referees, officials, or both governed by
+        # the club) -- not a queryset `|` union, the two querysets carry
+        # different .distinct()/join shapes, so combine by pk instead.
+        referee_managed = upcoming_games_needing_referee_management(club)
+        official_managed = upcoming_games_needing_official_management(club) if officials_enabled else Event.objects.none()
+        managed_ids = set(referee_managed.values_list("pk", flat=True)) | set(official_managed.values_list("pk", flat=True))
+        in_view_ids = list(self._apply_range(Event.objects.filter(pk__in=managed_ids).order_by("start").values_list("pk", flat=True), range_choice))
 
-        need_counts = {key: self._apply_range(bucket, range_choice).count() for key, bucket in buckets.items()}
+        # "Short" means not yet fully staffed (count < max) -- nobody assigned
+        # *or* understaffed. A game with one internal and one external referee
+        # (2 rows, the Event.max_referees default) is fully staffed.
+        short_referee_ids = set(referee_managed.filter(pk__in=in_view_ids).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees")).values_list("pk", flat=True))
+        short_official_ids = set(official_managed.filter(pk__in=in_view_ids).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials")).values_list("pk", flat=True))
+        buckets = {"all": set(in_view_ids), "referees": short_referee_ids, "officials": short_official_ids, "both": short_referee_ids | short_official_ids}
+        need_counts = {key: len(ids) for key, ids in buckets.items()}
 
-        queryset = buckets[need_choice].select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
-        games = list(self._apply_range(queryset, range_choice))
+        queryset = Event.objects.filter(pk__in=buckets[need_choice]).order_by("start").select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
+        games = list(queryset)
 
         for game in games:
             game.needs_referees = needs_referee_management(game)
@@ -3972,14 +3890,13 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
                     candidate.has_conflict = bool(conflicts)
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
 
-        # Season-wide, not range/need/show_completed-bound -- see _status_kpis'
-        # own docstring. These are what actually answer "how is this season's
-        # officiating going", independent of whichever slice of upcoming
-        # games the list above happens to be showing right now.
+        # Every upcoming game left this season, not range/need-bound -- a stable
+        # "what's still ahead" picture that also matches the nav badge
+        # (games_missing_referee_or_official_count counts the same set).
         season = current_season(club)
-        kpi_no_referee, kpi_understaffed, kpi_fully_staffed, kpi_fees_pending = self._status_kpis(season_games_needing_referee_management(club, season), "referees", "max_referees")
+        kpi_no_referee, kpi_understaffed, kpi_fully_staffed, kpi_fees_pending = self._status_kpis(remaining_season_games_needing_referee_management(club, season), "referees", "max_referees")
         if officials_enabled:
-            kpi_no_official, kpi_officials_understaffed, kpi_officials_fully_staffed, kpi_official_fees_pending = self._status_kpis(season_games_needing_official_management(club, season), "officials", "max_officials")
+            kpi_no_official, kpi_officials_understaffed, kpi_officials_fully_staffed, kpi_official_fees_pending = self._status_kpis(remaining_season_games_needing_official_management(club, season), "officials", "max_officials")
         else:
             kpi_no_official = kpi_officials_understaffed = kpi_officials_fully_staffed = kpi_official_fees_pending = 0
 
@@ -3993,7 +3910,6 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             range_choice=range_choice,
             need_choice=need_choice,
             need_counts=need_counts,
-            show_completed=show_completed,
             kpi_total=len(games),
             kpi_no_referee=kpi_no_referee,
             kpi_understaffed=kpi_understaffed,

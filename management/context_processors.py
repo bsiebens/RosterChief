@@ -365,10 +365,10 @@ def news_permissions(request):
 
 def sidebar_counters(request):
     """Small always-visible counts next to nav links that flag a queue
-    waiting on an admin: upcoming club-managed games nobody's down to referee
-    yet (management.views.games_missing_referees_count, the same shape
-    RefereeManagementDashboardView's own kpi_no_referee uses for its default
-    "next 10" range), and registrations awaiting invoice confirmation
+    waiting on an admin: upcoming club-managed games this season still short a
+    referee or an official (management.views.games_missing_referee_or_official_count,
+    the same set RefereeManagementDashboardView's own status KPI cards count
+    from), and registrations awaiting invoice confirmation
     (registration.services.invoicing.registrations_awaiting_confirmation).
 
     The first is gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
@@ -388,15 +388,11 @@ def sidebar_counters(request):
         # Imported here rather than at module level to keep this module's own
         # import graph small -- management.views pulls in most of the app's
         # models/services, none of which any other context processor here needs.
-        from management.views import RefereeManagementDashboardView, games_missing_referee_or_official_count
+        from management.views import games_missing_referee_or_official_count
 
-        # games_missing_referee_or_official_count, not games_missing_referees_count(...)
-        # + games_missing_officials_count(...) -- that naive sum double-counts a
-        # game missing both (see that function's own docstring for why). It's
         # 0 for the officials half whenever that flag is off for this club
-        # (checked inside the combined function itself), so this is just the
-        # referee count, unchanged, for every club that's never turned officials on.
-        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club, limit=int(RefereeManagementDashboardView.DEFAULT_RANGE))
+        # (checked inside the function itself).
+        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club)
 
     if get_club_admin(request):
         from management.views import signup_queue_count
