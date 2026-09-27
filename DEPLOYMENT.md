@@ -1174,7 +1174,9 @@ Binaries in `/usr/local/bin` (the Amazon Linux install above) are **not** on cro
 
    It prints `Public key: age1…`. **Copy that line** — you need it in step 3. The file
    `rosterchief-backup-key.txt` is the private key.
+
 3. Store the private key safely, **not on the production server**:
+
    - in your password manager (paste the whole file as a secure note), **and**
    - one offline copy (USB stick or printed, in a drawer/safe).
 
