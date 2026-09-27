@@ -1232,15 +1232,33 @@ run these with `sudo -i` first.
    on the backup server, put the printed line into `~rosterchief-backup/.ssh/authorized_keys`,
    prefixed so the key can't open a shell:
 
-   The `sftp-server` path differs per distro: `/usr/lib/openssh/sftp-server` on
-   Debian/Ubuntu, `/usr/libexec/openssh/sftp-server` on Amazon Linux/RHEL/Fedora — check which
-   exists with `ls` on the backup server and use that one:
+   The `sftp-server` path differs per distro, and a wrong path shows up later as an `sftp`
+   login that connects and then immediately says **`Connection closed`**. Check which one
+   exists on the backup server:
 
    ```bash
-   # on the backup server (Debian/Ubuntu path shown):
+   ls /usr/libexec/openssh/sftp-server /usr/lib/openssh/sftp-server 2>/dev/null
+   ```
+
+   Then add the key with that path — **Amazon Linux / RHEL / Fedora**:
+
+   ```bash
+   echo 'restrict,command="/usr/libexec/openssh/sftp-server" ssh-ed25519 AAAA…the key… rosterchief backups' \
+     | sudo tee -a ~rosterchief-backup/.ssh/authorized_keys
+   ```
+
+   or **Debian / Ubuntu**:
+
+   ```bash
    echo 'restrict,command="/usr/lib/openssh/sftp-server" ssh-ed25519 AAAA…the key… rosterchief backups' \
      | sudo tee -a ~rosterchief-backup/.ssh/authorized_keys
+   ```
+
+   and in both cases fix ownership and permissions (SSH ignores the file otherwise):
+
+   ```bash
    sudo chown -R rosterchief-backup: ~rosterchief-backup/.ssh
+   sudo chmod 700 ~rosterchief-backup/.ssh
    sudo chmod 600 ~rosterchief-backup/.ssh/authorized_keys
    ```
 
@@ -1253,6 +1271,18 @@ run these with `sudo -i` first.
    # answer "yes" if the fingerprint matches; at the sftp> prompt, `ls` should show
    # "rosterchief", then `bye`. (Plain ssh gets no shell with this key -- that's intended.)
    ```
+
+   Run it **as root** (`sudo -i` first): the key under `/root/.ssh` isn't readable by
+   `ec2-user`/your normal login, and the host key has to land in *root's* `known_hosts`, which is
+   what the nightly backup uses. If it fails:
+
+   - `Identity file … not accessible: Permission denied` → you're not root.
+   - `Permission denied (publickey…)` → the key line in `authorized_keys` doesn't match
+     `/root/.ssh/rosterchief_backup.pub`, or the ownership/permissions above are off.
+   - Connects, then immediately `Connection closed` → the `sftp-server` path in
+     `authorized_keys` doesn't exist on the backup server (see step 4).
+   - The backup server's log says exactly why: `sudo journalctl -u sshd -n 20` (Amazon Linux)
+     or `sudo tail /var/log/auth.log` (Debian/Ubuntu).
 
 6. **Create the rclone remote** called `offsite`:
 
