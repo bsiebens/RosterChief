@@ -1,8 +1,10 @@
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext_lazy
 
 from members.models import Member
+from rosterchief.uploads import DOCUMENT_ACCEPT, document_upload_validators
 from shop.models import ProductVariant
 from teams.models import Team
 
@@ -17,7 +19,7 @@ class RegistrationStatusDocumentForm(forms.Form):
     "just the file" shape as management.forms.RequirementCompletionForm's own
     document field, just required here since the whole POST is the upload."""
 
-    document = forms.FileField(label=_("Document"), required=True)
+    document = forms.FileField(label=_("Document"), required=True, validators=document_upload_validators(), widget=forms.ClearableFileInput(attrs={"accept": DOCUMENT_ACCEPT}))
 
 
 class RegistrationContactForm(forms.Form):
@@ -32,6 +34,10 @@ class RegistrationContactForm(forms.Form):
     contact_last_name = forms.CharField(label=_("Your last name"), max_length=150)
     contact_email = forms.EmailField(label=_("Your email address"), help_text=_("We'll use this to keep you posted on this registration."))
     contact_phone = forms.CharField(label=_("Your phone number"), max_length=50, required=False)
+    #: Honeypot: rendered hidden (register.html), so people never fill it in.
+    #: A non-empty value makes the view skip the submission while still
+    #: responding as if it succeeded -- see registration.views.RegistrationView.post.
+    website = forms.CharField(label=_("Leave this field empty"), required=False, widget=forms.TextInput(attrs={"tabindex": "-1", "autocomplete": "off"}))
 
     def __init__(self, *args, lock_contact_fields=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -166,7 +172,16 @@ class RegistrationEntryRowForm(forms.Form):
         return cleaned
 
 
+#: The most rows (people/registrations) one submission may carry -- on the
+#: public page and on mobile re-registration alike.
+MAX_REGISTRATION_ENTRIES = 10
+
+
 class BaseRegistrationEntryFormSet(forms.BaseFormSet):
+    default_error_messages = {
+        "too_many_forms": ngettext_lazy("You can submit at most %(num)d registration at a time.", "You can submit at most %(num)d registrations at a time.", "num"),
+    }
+
     def __init__(self, *args, club=None, people=None, season=None, team_number_pools=None, member_current_numbers=None, enforce_single_contact=True, **kwargs):
         self.club = club
         self.people = people
@@ -218,7 +233,7 @@ class BaseRegistrationEntryFormSet(forms.BaseFormSet):
             seen_numbers.add(key)
 
 
-RegistrationEntryFormSet = forms.formset_factory(RegistrationEntryRowForm, formset=BaseRegistrationEntryFormSet, extra=1)
+RegistrationEntryFormSet = forms.formset_factory(RegistrationEntryRowForm, formset=BaseRegistrationEntryFormSet, extra=1, max_num=MAX_REGISTRATION_ENTRIES, validate_max=True, absolute_max=MAX_REGISTRATION_ENTRIES)
 
 
 def entries_from_formset(entry_formset):

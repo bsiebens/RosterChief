@@ -456,7 +456,11 @@
                             </label>
 
                             {{ form.plan }}
-                            {{ form.website }}
+                            {# Honeypot (ContactForm.website): hidden from people and assistive tech, left for bots to fill in. #}
+                            <div class="hidden" aria-hidden="true">
+                                <label for="{{ form.website.id_for_label }}">{{ form.website.label }}</label>
+                                {{ form.website }}
+                            </div>
                             {{ form.ts }}
 
                             <button class="btn btn-primary h-[52px] rounded-[10px] text-[17px]" type="submit">{% trans "Send" %}</button>

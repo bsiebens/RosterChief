@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.core import mail
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -543,6 +544,12 @@ class RegistrationViewTests(TestCase):
         cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
         cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B")
 
+    def setUp(self):
+        # Submission throttling (registration.views) counts in the process-wide
+        # cache; start every test from an empty count.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
     def _url(self):
         return reverse("registration:register")
 
@@ -783,6 +790,99 @@ class RegistrationViewTests(TestCase):
         status_path = reverse("registration:status", kwargs={"token": batch.status_token})
         self.assertIn(status_path, sent.body)
 
+    def submit_data(self, **contact_overrides):
+        return self.contact_data(**contact_overrides) | self.formset_management() | self.entry_data() | {"action": "submit"}
+
+    def test_submissions_from_one_ip_are_rate_limited(self):
+        from .views import REGISTRATION_IP_RATE
+
+        for index in range(REGISTRATION_IP_RATE.limit):
+            response = self.client.post(self._url(), self.submit_data(contact_email=f"parent{index}@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.20")
+            self.assertEqual(response.status_code, 302)
+        mail.outbox.clear()
+
+        response = self.client.post(self._url(), self.submit_data(contact_email="another@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.20")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertContains(response, "Too many registrations", status_code=429)
+        self.assertEqual(RegistrationBatch.objects.count(), REGISTRATION_IP_RATE.limit)
+        self.assertFalse(RegistrationBatch.objects.filter(contact_email="another@example.com").exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+        # A different address is unaffected.
+        response = self.client.post(self._url(), self.submit_data(contact_email="elsewhere@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.21")
+        self.assertEqual(response.status_code, 302)
+
+    def test_submissions_for_one_contact_email_are_rate_limited(self):
+        from .views import REGISTRATION_EMAIL_RATE
+
+        for index in range(REGISTRATION_EMAIL_RATE.limit):
+            response = self.client.post(self._url(), self.submit_data(), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR=f"198.51.100.{30 + index}")
+            self.assertEqual(response.status_code, 302)
+        batches = RegistrationBatch.objects.count()
+        mail.outbox.clear()
+
+        # Different IP, same address in a different case.
+        response = self.client.post(self._url(), self.submit_data(contact_email="PAT@Example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="203.0.113.99")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(RegistrationBatch.objects.count(), batches)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_calculating_the_price_is_not_rate_limited(self):
+        from .views import REGISTRATION_IP_RATE
+
+        data = self.contact_data() | self.formset_management() | self.entry_data() | {"action": "preview"}
+        for _index in range(REGISTRATION_IP_RATE.limit + 2):
+            response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(self._url(), self.submit_data(), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_honeypot_field_is_rendered_hidden(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'name="website"')
+        self.assertContains(response, 'tabindex="-1"')
+
+    def test_a_filled_honeypot_pretends_success_but_creates_nothing(self):
+        data = self.submit_data() | {"website": "https://spam.example"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertFalse(Member.objects.filter(first_name="Timmy").exists())
+        self.assertFalse(ClubMembership.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_more_than_the_maximum_number_of_entries_is_rejected(self):
+        from .forms import MAX_REGISTRATION_ENTRIES
+
+        data = self.contact_data() | self.formset_management(MAX_REGISTRATION_ENTRIES + 1) | {"action": "submit"}
+        for index in range(MAX_REGISTRATION_ENTRIES + 1):
+            data |= self.entry_data(index, first_name=f"Kid{index}")
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "at most 10")
+        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertFalse(Member.objects.filter(first_name__startswith="Kid").exists())
+
+    def test_the_maximum_number_of_entries_is_accepted(self):
+        from .forms import MAX_REGISTRATION_ENTRIES
+
+        data = self.contact_data() | self.formset_management(MAX_REGISTRATION_ENTRIES) | {"action": "submit"}
+        for index in range(MAX_REGISTRATION_ENTRIES):
+            data |= self.entry_data(index, first_name=f"Kid{index}")
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Member.objects.filter(first_name__startswith="Kid").count(), MAX_REGISTRATION_ENTRIES)
+
 
 class RegistrationJerseyNumberTests(RegistrationViewTests):
     """The optional jersey-number step (RegistrationEntryRowForm.
@@ -992,6 +1092,31 @@ class RegistrationStatusViewTests(TestCase):
         self.assertTrue(status.is_complete)
         self.assertIsNone(status.completed_by)
         self.assertTrue(status.document.name)
+
+    def test_an_oversized_document_is_refused(self):
+        from rosterchief.uploads import MAX_DOCUMENT_UPLOAD_BYTES
+
+        upload = SimpleUploadedFile("cert.pdf", b"0" * (MAX_DOCUMENT_UPLOAD_BYTES + 1), content_type="application/pdf")
+
+        response = self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "too large")
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=self.membership, requirement=self.requirement, is_complete=True).exists())
+
+    def test_a_document_of_a_disallowed_type_is_refused(self):
+        upload = SimpleUploadedFile("page.html", b"<script>alert(1)</script>", content_type="text/html")
+
+        response = self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "files are not accepted")
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=self.membership, requirement=self.requirement, is_complete=True).exists())
+
+    def test_a_phone_photo_is_accepted(self):
+        upload = SimpleUploadedFile("IMG_0001.HEIC", b"heic-bytes", content_type="image/heic")
+
+        self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.requirement).is_complete)
 
     def test_uploading_for_a_membership_that_predates_the_batch_is_refused(self):
         # A membership this batch only added a request onto (it already

@@ -5,9 +5,12 @@ from django.utils.translation import gettext_lazy as _
 from .models import ContactRequest
 
 #: Anti-spam without a CAPTCHA (see WEBSITE.md, "The contact form must be built
-#: server-side"): the honeypot field below must arrive blank, and this signed,
+#: server-side"): the honeypot field below must arrive blank (the view answers
+#: a filled one with a normal-looking success and drops it), this signed,
 #: timestamped token -- freshly issued on every GET -- must not be older than
-#: an hour, which rules out a cached page or a replayed request.
+#: an hour, which rules out a long-cached page, and marketing.views caps
+#: submissions per client IP, since the token itself can be reused within its
+#: hour.
 TIMESTAMP_SALT = "marketing.contact"
 MAX_AGE_SECONDS = 3600
 
@@ -38,9 +41,9 @@ class ContactForm(forms.Form):
     # see WEBSITE.md item 6. Not shown to the visitor.
     plan = forms.CharField(required=False, widget=forms.HiddenInput)
 
-    # Honeypot: real visitors never see or fill this (hidden off-screen in the
-    # template); a bot filling every field trips it.
-    website = forms.CharField(required=False, widget=forms.HiddenInput)
+    # Honeypot: real visitors never see or fill this (a hidden text input in the
+    # template); a bot filling every field trips it. See marketing.views.home.
+    website = forms.CharField(label=_("Leave this field empty"), required=False, widget=forms.TextInput(attrs={"tabindex": "-1", "autocomplete": "off"}))
 
     ts = forms.CharField(widget=forms.HiddenInput)
 
@@ -53,12 +56,6 @@ class ContactForm(forms.Form):
             component_class = next((cls for widget_type, cls in widget_classes.items() if isinstance(field.widget, widget_type)), "input")
             existing = field.widget.attrs.get("class", "")
             field.widget.attrs["class"] = f"{existing} {component_class}".strip()
-
-    def clean_website(self):
-        value = self.cleaned_data["website"]
-        if value:
-            raise forms.ValidationError(_("Something went wrong. Please try again."))
-        return value
 
     def clean_ts(self):
         value = self.cleaned_data["ts"]

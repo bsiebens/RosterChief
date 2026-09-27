@@ -23,12 +23,19 @@ from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
 from members.models import Member
 from members.views import ClubScopedPublicMixin
+from rosterchief import throttle
+from rosterchief.client_ip import client_ip
 
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
 from .services import PricingError, RegistrationError, price_entries, priced_rows_with_jersey_fields, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
 from .services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals
 from .services.notifications import send_registration_confirmation_email
+
+#: Caps on final "Confirm & submit" POSTs (price calculations aren't counted):
+#: per client IP, and per contact email address (case-insensitive).
+REGISTRATION_IP_RATE = throttle.Rate("registration:ip", limit=5, window=60 * 60)
+REGISTRATION_EMAIL_RATE = throttle.Rate("registration:email", limit=3, window=24 * 60 * 60)
 
 
 class RegistrationView(ClubScopedPublicMixin, View):
@@ -61,7 +68,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
     def render_season_picker(self, request, available_seasons):
         return render(request, self.template_name, {"registration_open": bool(available_seasons), "needs_season_choice": True, "available_seasons": available_seasons})
 
-    def render_page(self, request, season, contact_form, entry_formset, priced_entries=None):
+    def render_page(self, request, season, contact_form, entry_formset, priced_entries=None, status=200):
         return render(
             request,
             self.template_name,
@@ -88,6 +95,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 "variant_registration_kinds": variant_registration_kinds(request.club, season),
                 "team_number_pools": team_number_pools(request.club, season),
             },
+            status=status,
         )
 
     def get(self, request, *args, **kwargs):
@@ -102,6 +110,12 @@ class RegistrationView(ClubScopedPublicMixin, View):
         season, available_seasons = self.get_season(request, data=request.POST)
         if season is None:
             return self.render_season_picker(request, available_seasons)
+
+        # Honeypot (RegistrationContactForm.website): respond exactly as a
+        # successful submission would, without validating or saving anything.
+        if request.POST.get("action") == "submit" and request.POST.get("website"):
+            self.notify_received(request)
+            return redirect("registration:register")
 
         contact_form, entry_formset = self.get_forms(request, season, request.POST)
         if not contact_form.is_valid() or not entry_formset.is_valid():
@@ -126,8 +140,13 @@ class RegistrationView(ClubScopedPublicMixin, View):
 
         member = self.get_contact_member(request)
         contact = dict(contact_form.cleaned_data)
+        contact.pop("website", None)
         if member is not None:
             contact = {"contact_first_name": member.first_name, "contact_last_name": member.last_name, "contact_email": member.contact_email, "contact_phone": contact.get("contact_phone", "")}
+
+        if throttle.check_and_record((REGISTRATION_IP_RATE, client_ip(request) or "unknown"), (REGISTRATION_EMAIL_RATE, (contact.get("contact_email") or "").strip().lower())):
+            contact_form.add_error(None, _("Too many registrations have been submitted recently. Please try again later, or contact the club directly."))
+            return self.render_page(request, season, contact_form, entry_formset, priced_entries=priced_rows, status=429)
 
         try:
             batch = submit_registration(request.club, submitted_by_user=request.user if request.user.is_authenticated else None, entries=entries, **contact)
@@ -136,8 +155,11 @@ class RegistrationView(ClubScopedPublicMixin, View):
             return self.render_page(request, season, contact_form, entry_formset)
 
         send_registration_confirmation_email(batch, request=request)
-        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
+        self.notify_received(request)
         return redirect("registration:status", token=batch.status_token)
+
+    def notify_received(self, request):
+        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
 
 
 class RegistrationStatusView(ClubScopedPublicMixin, View):
@@ -252,7 +274,8 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
             mark_complete(details.membership, requirement, user=None, document=form.cleaned_data["document"], note=_("Uploaded by the registrant via the status page."))
             notify(request, f"s|{_('Document received')}|{_('“%(requirement)s” has been received.') % {'requirement': requirement.name}}")
         else:
-            notify(request, f"e|{_('Upload failed')}|{_('Choose a file to upload.')}")
+            errors = form.errors.get("document") or [_("Choose a file to upload.")]
+            notify(request, f"e|{_('Upload failed')}|{errors[0]}")
 
         return redirect("registration:status", token=batch.status_token)
 
