@@ -76,6 +76,7 @@ from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, Shop
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import ICON_SIZES, get_fallback_icon
+from .services.push import subscription_error
 
 
 class ManifestView(ClubScopedPublicMixin, View):
@@ -144,6 +145,12 @@ class PushSubscribeView(MemberAppMixin, View):
             auth = payload["keys"]["auth"]
         except KeyError, TypeError, ValueError:
             return HttpResponseBadRequest("Malformed subscription payload.")
+
+        # The server later POSTs to this endpoint: only real browser push services,
+        # with well-formed keys (see mobile.services.push.subscription_error).
+        error = subscription_error(endpoint, p256dh, auth)
+        if error:
+            return HttpResponseBadRequest(error)
 
         if PushSubscription.objects.filter(endpoint=endpoint).exclude(member__user=request.user).exists():
             return JsonResponse({"status": "conflict"}, status=409)

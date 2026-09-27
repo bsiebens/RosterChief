@@ -42,6 +42,22 @@ from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
 from .services.push import send_push_to_member
 
+
+def push_keys():
+    """A well-formed (p256dh, auth) pair, as a browser's PushSubscription hands them over."""
+    import base64
+    import os
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    point = ec.generate_private_key(ec.SECP256R1()).public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    encode = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")  # noqa: E731
+    return {"p256dh": encode(point), "auth": encode(os.urandom(16))}
+
+
+FCM_ENDPOINT = "https://fcm.googleapis.com/fcm/send/abc"
+
 User = get_user_model()
 
 ONE_PIXEL_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
@@ -350,37 +366,94 @@ class PushSubscribeViewTests(TestCase):
 
         response = self.client.post(
             reverse("mobile:push_subscribe"),
-            data={"endpoint": "https://push.example.com/abc", "keys": {"p256dh": "key1", "auth": "key2"}},
+            data={"endpoint": FCM_ENDPOINT, "keys": push_keys()},
             content_type="application/json",
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(PushSubscription.objects.filter(member=self.member, endpoint="https://push.example.com/abc").exists())
+        self.assertTrue(PushSubscription.objects.filter(member=self.member, endpoint=FCM_ENDPOINT).exists())
 
     def test_resubscribing_the_same_endpoint_updates_rather_than_duplicates(self):
         self.client.force_login(self.user)
-        PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://push.example.com/abc", p256dh="old", auth="old")
+        PushSubscription.objects.create(club=self.club, member=self.member, endpoint=FCM_ENDPOINT, p256dh="old", auth="old")
+        keys = push_keys()
 
         self.client.post(
             reverse("mobile:push_subscribe"),
-            data={"endpoint": "https://push.example.com/abc", "keys": {"p256dh": "new", "auth": "new"}},
+            data={"endpoint": FCM_ENDPOINT, "keys": keys},
             content_type="application/json",
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
-        self.assertEqual(PushSubscription.objects.filter(endpoint="https://push.example.com/abc").count(), 1)
-        self.assertEqual(PushSubscription.objects.get(endpoint="https://push.example.com/abc").p256dh, "new")
+        self.assertEqual(PushSubscription.objects.filter(endpoint=FCM_ENDPOINT).count(), 1)
+        self.assertEqual(PushSubscription.objects.get(endpoint=FCM_ENDPOINT).p256dh, keys["p256dh"])
 
     def test_anonymous_cannot_subscribe(self):
         response = self.client.post(
             reverse("mobile:push_subscribe"),
-            data={"endpoint": "https://push.example.com/abc", "keys": {"p256dh": "key1", "auth": "key2"}},
+            data={"endpoint": FCM_ENDPOINT, "keys": push_keys()},
             content_type="application/json",
             HTTP_HOST="ajax-united.rosterchief.app",
         )
 
         self.assertEqual(response.status_code, 302)
+
+    def post_subscription(self, endpoint=FCM_ENDPOINT, **keys):
+        self.client.force_login(self.user)
+        return self.client.post(
+            reverse("mobile:push_subscribe"),
+            data={"endpoint": endpoint, "keys": {**push_keys(), **keys}},
+            content_type="application/json",
+            HTTP_HOST="ajax-united.rosterchief.app",
+        )
+
+    def test_every_browser_push_service_is_accepted(self):
+        endpoints = [
+            "https://fcm.googleapis.com/fcm/send/abc",
+            "https://updates.push.services.mozilla.com/wpush/v2/abc",
+            "https://wns2-am3p.notify.windows.com/w/?token=abc",
+            "https://web.push.apple.com/abc",
+        ]
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self.post_subscription(endpoint).status_code, 200)
+
+    def test_an_endpoint_outside_the_push_services_is_refused(self):
+        endpoints = [
+            "http://fcm.googleapis.com/fcm/send/abc",
+            "https://push.example.com/abc",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://localhost/admin/",
+            "https://fcm.googleapis.com.evil.example/abc",
+            "https://evilpush.services.mozilla.com/abc",
+            "https://push.services.mozilla.com/abc",
+            "https://fcm.googleapis.com:8443/abc",
+            "https://user@fcm.googleapis.com/abc",
+            "ftp://fcm.googleapis.com/abc",
+            12345,
+        ]
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self.post_subscription(endpoint).status_code, 400)
+        self.assertFalse(PushSubscription.objects.exists())
+
+    def test_malformed_keys_are_refused(self):
+        import base64
+
+        encode = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")  # noqa: E731
+        cases = {
+            "p256dh not base64": {"p256dh": "not base64!!"},
+            "p256dh too short": {"p256dh": encode(b"\x04" + b"\x01" * 31)},
+            "p256dh compressed": {"p256dh": encode(b"\x02" + b"\x01" * 64)},
+            "p256dh off the curve": {"p256dh": encode(b"\x04" + b"\x01" * 64)},
+            "auth too short": {"auth": encode(b"\x01" * 8)},
+            "auth not a string": {"auth": 16},
+        }
+        for name, keys in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.post_subscription(**keys).status_code, 400)
+        self.assertFalse(PushSubscription.objects.exists())
 
 
 @override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
@@ -434,6 +507,39 @@ class SendPushToMemberTests(TestCase):
             send_push_to_member(self.member, title="Hi", body="There")  # must not raise
 
         self.assertTrue(PushSubscription.objects.filter(pk=self.subscription.pk).exists())
+
+    def test_each_send_has_a_timeout(self):
+        with patch("mobile.services.push.webpush") as mock_webpush:
+            send_push_to_member(self.member, title="Hi", body="There")
+
+        self.assertEqual(mock_webpush.call_args.kwargs["timeout"], 10)
+
+    def test_one_broken_subscription_does_not_abort_the_fan_out(self):
+        # An off-curve p256dh makes pywebpush raise a bare ValueError, not a
+        # WebPushException -- that used to escape _deliver and skip every
+        # remaining subscription.
+        import base64
+
+        broken = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/broken", p256dh=base64.urlsafe_b64encode(b"\x04" + b"\x01" * 64).decode().rstrip("="), auth=push_keys()["auth"])
+        delivered = []
+
+        def fake_webpush(subscription_info, **kwargs):
+            if subscription_info["endpoint"] == broken.endpoint:
+                raise ValueError("Invalid EC key.")
+            delivered.append(subscription_info["endpoint"])
+
+        with patch("mobile.services.push.webpush", side_effect=fake_webpush):
+            send_push_to_member(self.member, title="Hi", body="There")  # must not raise
+
+        self.assertEqual(delivered, [self.subscription.endpoint])
+        self.assertTrue(PushSubscription.objects.filter(pk=broken.pk).exists())
+
+    def test_a_real_off_curve_key_does_not_raise(self):
+        import base64
+
+        PushSubscription.objects.filter(pk=self.subscription.pk).update(p256dh=base64.urlsafe_b64encode(b"\x04" + b"\x01" * 64).decode().rstrip("="), auth=push_keys()["auth"])
+        with override_settings(VAPID_PRIVATE_KEY=base64.urlsafe_b64encode(b"\x01" * 32).decode().rstrip("=")):
+            send_push_to_member(self.member, title="Hi", body="There")  # must not raise
 
 
 class RenderFallbackIconTests(TestCase):
@@ -8174,7 +8280,7 @@ class MemberAppClubTieTests(TestCase):
     def test_a_member_of_another_club_cannot_subscribe_to_its_pushes(self):
         self.client.force_login(self.outsider_user)
 
-        response = self.client.post(reverse("mobile:push_subscribe"), data={"endpoint": "https://push.example.com/x", "keys": {"p256dh": "k", "auth": "a"}}, content_type="application/json", HTTP_HOST=self.HOST_B)
+        response = self.client.post(reverse("mobile:push_subscribe"), data={"endpoint": "https://fcm.googleapis.com/fcm/send/x", "keys": push_keys()}, content_type="application/json", HTTP_HOST=self.HOST_B)
 
         self.assertEqual(response.status_code, 404)
         self.assertFalse(PushSubscription.objects.exists())
@@ -8282,7 +8388,7 @@ class PushSubscriptionOwnershipTests(TestCase):
         ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.other_member = Member.objects.create(first_name="Someone", last_name="Else", user=User.objects.create_user(email="else@example.com", password="pw-secret-123"))
         ClubRole.objects.create(club=cls.club, member=cls.other_member)
-        cls.their_subscription = PushSubscription.objects.create(club=cls.club, member=cls.other_member, endpoint="https://push.example.com/theirs", p256dh="k", auth="a")
+        cls.their_subscription = PushSubscription.objects.create(club=cls.club, member=cls.other_member, endpoint="https://fcm.googleapis.com/fcm/send/theirs", p256dh="k", auth="a")
 
     def _send(self, method, data):
         return getattr(self.client, method)(reverse("mobile:push_subscribe"), data=json.dumps(data), content_type="application/json", HTTP_HOST="ajax-united.rosterchief.app")
@@ -8305,7 +8411,7 @@ class PushSubscriptionOwnershipTests(TestCase):
     def test_cannot_take_over_another_users_endpoint(self):
         self.client.force_login(self.user)
 
-        response = self._send("post", {"endpoint": self.their_subscription.endpoint, "keys": {"p256dh": "evil", "auth": "evil"}})
+        response = self._send("post", {"endpoint": self.their_subscription.endpoint, "keys": push_keys()})
 
         self.assertEqual(response.status_code, 409)
         self.their_subscription.refresh_from_db()

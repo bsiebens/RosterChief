@@ -8,15 +8,73 @@ other way -- notifications importing mobile -- would be the wrong direction:
 notifications has no reason to know a PWA exists.
 """
 
+import base64
+import binascii
 import json
 import logging
+from urllib.parse import urlsplit
 
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
 from .. import models
 
 logger = logging.getLogger(__name__)
+
+#: Seconds before giving up on one push service request -- a slow or hung push
+#: service must not stall the rest of a fan-out (or the request/job running it).
+PUSH_TIMEOUT = 10
+
+#: The browser vendors' push services. The endpoint is client-supplied and the
+#: server POSTs to it, so anything else is refused at subscribe time rather than
+#: letting a subscription point the server at an arbitrary (e.g. internal) URL.
+ALLOWED_PUSH_HOSTS = frozenset({"fcm.googleapis.com", "web.push.apple.com"})
+ALLOWED_PUSH_HOST_SUFFIXES = (".push.services.mozilla.com", ".notify.windows.com")
+
+
+def is_allowed_push_endpoint(endpoint) -> bool:
+    if not isinstance(endpoint, str) or len(endpoint) > 500:
+        return False
+    try:
+        parts = urlsplit(endpoint)
+        port = parts.port
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or parts.username is not None or parts.password is not None or port not in (None, 443):
+        return False
+    return host in ALLOWED_PUSH_HOSTS or any(host.endswith(suffix) and len(host) > len(suffix) for suffix in ALLOWED_PUSH_HOST_SUFFIXES)
+
+
+def _b64url_decode(value) -> bytes | None:
+    if not isinstance(value, str) or not value or len(value) > 255:
+        return None
+    try:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except binascii.Error, ValueError:
+        return None
+
+
+def subscription_error(endpoint, p256dh, auth):
+    """Why a client-supplied subscription can't be stored, or None if it can:
+    an allowlisted HTTPS push-service endpoint, a p256dh that is an uncompressed
+    P-256 public key (65 bytes, 0x04 prefix, on the curve) and a 16-byte auth
+    secret -- what the Push API hands every browser."""
+    if not is_allowed_push_endpoint(endpoint):
+        return _("Unsupported push service endpoint.")
+    key = _b64url_decode(p256dh)
+    if key is None or len(key) != 65 or key[0] != 0x04:
+        return _("Invalid p256dh key.")
+    try:
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), key)
+    except ValueError:
+        return _("Invalid p256dh key.")
+    secret = _b64url_decode(auth)
+    if secret is None or len(secret) != 16:
+        return _("Invalid auth secret.")
+    return None
 
 
 def _deliver(subscription, payload: str, *, label) -> None:
@@ -26,6 +84,7 @@ def _deliver(subscription, payload: str, *, label) -> None:
             data=payload,
             vapid_private_key=settings.VAPID_PRIVATE_KEY,
             vapid_claims={"sub": f"mailto:{settings.VAPID_ADMIN_EMAIL}"},
+            timeout=PUSH_TIMEOUT,
         )
     except WebPushException as exc:
         status = exc.response.status_code if exc.response is not None else None
@@ -36,9 +95,12 @@ def _deliver(subscription, payload: str, *, label) -> None:
             subscription.delete()
         else:
             logger.warning("Push send failed for %s: %s", label, exc)
-    except OSError as exc:
-        # Never fatal -- same reasoning as every other branded send in this app
-        # (see e.g. notifications.services._send_email).
+    except Exception as exc:
+        # Never fatal, whatever went wrong with this one subscription (network
+        # error/timeout, or e.g. a stored key pywebpush rejects with a ValueError) --
+        # the remaining subscriptions in the fan-out still get theirs. Same reasoning
+        # as every other branded send in this app (see e.g.
+        # notifications.services._send_email).
         logger.warning("Push send failed for %s: %s", label, exc)
 
 
