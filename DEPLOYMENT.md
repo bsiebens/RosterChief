@@ -430,6 +430,14 @@ block per site, and wildcards simply work:
 
 	# Applies DNS-01 to every site below.
 	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+
+	# Behind Cloudflare's proxy: trust CF-Connecting-IP only from Cloudflare's own ranges,
+	# so {client_ip} is the visitor. Copy the full, current list from deploy/caddy/Caddyfile
+	# (source: https://www.cloudflare.com/ips/).
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 ...
+		client_ip_headers CF-Connecting-IP
+	}
 }
 
 # --- whatever the box already serves --------------------------------------
@@ -444,7 +452,7 @@ test.rosterchief.app, *.test.rosterchief.app {
 
 	reverse_proxy 127.0.0.1:8001 {
 		header_up X-Forwarded-Proto {scheme}
-		header_up X-Real-IP {remote_host}
+		header_up X-Real-IP {client_ip}
 	}
 }
 ```
