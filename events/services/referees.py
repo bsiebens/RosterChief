@@ -124,7 +124,13 @@ def assign_referee(event, member, *, assigned_by):
     if event.referees.filter(member=member).exists():
         raise RefereeAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
 
-    return EventReferee.objects.create(event=event, member=member, assigned_by=assigned_by)
+    referee = EventReferee.objects.create(event=event, member=member, assigned_by=assigned_by)
+    # An assignment settles the member's invite either way -- a staff pick is
+    # as good as a yes. Without this a directly assigned referee kept showing
+    # as "invited, no response yet", and one never invited had no signup row
+    # at all, so the game never showed up among their own duties in the app.
+    RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    return referee
 
 
 @transaction.atomic

@@ -116,7 +116,12 @@ def assign_official(event, member, *, assigned_by):
     if event.officials.filter(member=member).exists():
         raise OfficialAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
 
-    return EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by)
+    official = EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by)
+    # Same as referees.assign_referee: an assignment settles the member's
+    # invite, so they don't show as "no response yet" and the game appears
+    # among their own duties in the app.
+    OfficialSignup.objects.update_or_create(event=event, member=member, defaults={"status": OfficialSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    return official
 
 
 @transaction.atomic

@@ -2102,6 +2102,24 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.member, self.referee)
         self.assertEqual(assignment.assigned_by, self.alice)
 
+    def test_assign_referee_settles_an_open_invite_as_accepted(self):
+        game = self.make_home_game()
+        RefereeSignup.objects.get_or_create(event=game, member=self.referee)  # usually already invited on creation
+
+        assign_referee(game, self.referee, assigned_by=self.alice)
+
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
+        self.assertIsNotNone(signup.responded_at)
+
+    def test_assign_referee_creates_an_accepted_signup_when_never_invited(self):
+        # So the game shows up among the referee's own duties in the app.
+        game = self.make_home_game()
+
+        assign_referee(game, self.referee, assigned_by=self.alice)
+
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.ACCEPTED)
+
     def test_assign_referee_rejects_an_away_game(self):
         game = self.make_home_game(location=self.away_ground)
 
@@ -2432,6 +2450,14 @@ class OfficialServiceTests(OfficialsTestBase):
 
         self.assertEqual(assignment.event, game)
         self.assertEqual(assignment.member, self.official)
+
+    def test_assign_official_settles_an_open_invite_as_accepted(self):
+        game = self.make_home_game()
+        OfficialSignup.objects.get_or_create(event=game, member=self.official)  # usually already invited on creation
+
+        assign_official(game, self.official, assigned_by=self.alice)
+
+        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.ACCEPTED)
 
     def test_assign_official_rejects_once_at_capacity(self):
         game = self.make_home_game(max_officials=1)
