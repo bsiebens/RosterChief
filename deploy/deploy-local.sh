@@ -26,6 +26,9 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 IMAGE_TAG="${IMAGE_TAG:-main}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/rosterchief}"
+# Every docker compose call below uses this image tag -- pull, migrate and the restart alike.
+export IMAGE_TAG
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -38,7 +41,12 @@ die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # Keys the code refuses to run without -- checked before anything is stopped, backed up or
 # migrated, so a missing one fails here with a clear message instead of halfway through.
 # (Only whether the line has a value; the values themselves are never printed.)
-env_value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+# The value after KEY=, without a trailing " # comment" or surrounding quotes/whitespace (an
+# example file's "KEY=   # how to generate it" line counts as empty, as it is for Django).
+env_value() {
+    sed -n "s/^$2=//p" "$1" | tail -1 \
+        | sed -e 's/[[:space:]]#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'"'"']//' -e 's/["'"'"']$//'
+}
 for key in DJANGO_SECRET_KEY MFA_ENCRYPTION_KEY; do
     [ -n "$(env_value .env.production "$key")" ] \
         || die "$key is missing or empty in .env.production -- see .env.production.example and DEPLOYMENT.md."
@@ -54,25 +62,41 @@ say "Deploying image tag '${IMAGE_TAG}' -- checkout at $(git rev-parse --short H
 # db/redis/caddy are all restart:unless-stopped and should already be up from steady state --
 # this is belt-and-suspenders (e.g. right after a host reboot, or a first deploy) before
 # backup.sh execs into db/web and before the healthz check below relies on caddy being there.
-say "Ensuring db + redis + caddy are up"
-dc up -d --remove-orphans db redis caddy
+# db and redis first. caddy is started with --no-deps: it depends on web, and a plain
+# `up caddy` would recreate web on the new image before the backup and migration below.
+say "Ensuring db + redis are up"
+dc up -d --remove-orphans db redis
 
-if [ "$SKIP_BACKUP" = "1" ]; then
+# The Caddyfile is bind-mounted as a single file, and `git reset` replaces that file, so a
+# running caddy keeps serving the old config. Recreate it only when the config actually changed.
+if [ -n "$(dc ps -q caddy 2>/dev/null)" ] && ! dc exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - deploy/caddy/Caddyfile; then
+    say "Caddyfile changed -- recreating caddy"
+    dc up -d --no-deps --force-recreate caddy
+else
+    say "Ensuring caddy is up"
+    dc up -d --no-deps caddy
+fi
+
+if [ -z "$(dc ps -q --status running web 2>/dev/null)" ]; then
+    # backup.sh reads the uploads out of the running web container. Not running means a first
+    # deploy (nothing to back up yet) or a stopped app -- say so rather than fail.
+    say "web is not running (first deploy?) -- skipping the pre-migration backup"
+elif [ "$SKIP_BACKUP" = "1" ]; then
     say "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
 else
     say "Backing up the database before migrating"
-    COMPOSE="docker compose -f $COMPOSE_FILE" ./deploy/backup.sh /var/backups/rosterchief
+    COMPOSE="docker compose -f $COMPOSE_FILE" ./deploy/backup.sh "$BACKUP_DIR"
 fi
 
 say "Pulling image tag '${IMAGE_TAG}'"
-IMAGE_TAG="$IMAGE_TAG" dc pull web
+dc pull web
 
 say "Running migrations"
 # -T and </dev/null: no TTY and no stdin -- identical by hand and over deploy-prod.sh's SSH.
 dc run --rm -T web python manage.py migrate --noinput </dev/null
 
 say "Restarting web"
-IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps --remove-orphans web
+dc up -d --no-deps --remove-orphans web
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
 for attempt in $(seq 1 20); do

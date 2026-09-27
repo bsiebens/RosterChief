@@ -3,8 +3,8 @@
 #
 #   deploy/restore-check.sh [/var/backups/rosterchief]
 #
-# The only line in the backup cron that proves the others work. A dump you have never
-# restored is a hypothesis, not a backup.
+# The step that proves the backups work: run it regularly (DEPLOYMENT.md, "Backups", step 6).
+# A dump you have never restored is a hypothesis, not a backup.
 #
 # Encrypted dumps (db-*.sql.gz.age, see deploy/backup.sh) need the age private key:
 # BACKUP_AGE_IDENTITY=/path/to/key.txt. That key is meant to live offline, so either run this

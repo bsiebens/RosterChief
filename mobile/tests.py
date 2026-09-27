@@ -469,7 +469,7 @@ class SendPushToMemberTests(TestCase):
     def setUpTestData(cls):
         cls.club = make_club()
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker")
-        cls.subscription = PushSubscription.objects.create(club=cls.club, member=cls.member, endpoint="https://push.example.com/abc", p256dh="key1", auth="key2")
+        cls.subscription = PushSubscription.objects.create(club=cls.club, member=cls.member, endpoint="https://fcm.googleapis.com/fcm/send/abc", p256dh="key1", auth="key2")
 
     @override_settings(VAPID_PRIVATE_KEY="")
     def test_a_noop_without_a_configured_vapid_key(self):
@@ -484,6 +484,17 @@ class SendPushToMemberTests(TestCase):
 
         mock_webpush.assert_called_once()
         self.assertEqual(mock_webpush.call_args.kwargs["subscription_info"], self.subscription.as_subscription_info())
+
+    def test_a_stored_subscription_outside_the_push_services_is_dropped_not_sent_to(self):
+        # Rows saved before subscribe validated endpoints: never contacted, and removed.
+        legacy = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://push.example.com/legacy", p256dh="key1", auth="key2")
+
+        with patch("mobile.services.push.webpush") as mock_webpush:
+            send_push_to_member(self.member, title="Hi", body="There")
+
+        mock_webpush.assert_called_once()
+        self.assertEqual(mock_webpush.call_args.kwargs["subscription_info"], self.subscription.as_subscription_info())
+        self.assertFalse(PushSubscription.objects.filter(pk=legacy.pk).exists())
 
     def test_a_lazily_translated_title_and_body_are_json_serialised_without_raising(self):
         # The exact bug: gettext_lazy() (and the still-lazy result of `_(...) %
@@ -8401,7 +8412,7 @@ class PushSubscriptionOwnershipTests(TestCase):
         self.assertTrue(PushSubscription.objects.filter(pk=self.their_subscription.pk).exists())
 
     def test_can_delete_own_subscription(self):
-        mine = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://push.example.com/mine", p256dh="k", auth="a")
+        mine = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/mine", p256dh="k", auth="a")
         self.client.force_login(self.user)
 
         self._send("delete", {"endpoint": mine.endpoint})

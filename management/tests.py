@@ -5013,7 +5013,7 @@ class NewsManagementTests(ManagementTestBase):
         member_user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
         member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com", user=member_user)
         ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example.com/jamie", p256dh="key1", auth="key2")
+        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://fcm.googleapis.com/fcm/send/jamie", p256dh="key1", auth="key2")
         item = News.objects.create(club=self.club, title="Signed: New Player", body="Body.")
         self.client.force_login(self.editor)
 

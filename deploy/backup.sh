@@ -27,12 +27,12 @@ COMPOSE="${COMPOSE:-docker compose}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 STAMP="$(date +%F-%H%M)"
 
-# VAR from the environment, else from ./.env (the compose env file), else empty. Only reads the
-# one line: .env is never sourced as shell.
+# VAR from the environment, else from an env file in the current directory (default ./.env, the
+# compose env file), else empty. Only reads the one line: env files are never sourced as shell.
 from_env_file() {
-    local name="$1" value="${!1:-}"
-    if [ -z "$value" ] && [ -f .env ]; then
-        value="$(sed -n "s/^${name}=//p" .env | tail -1)"
+    local name="$1" file="${2:-.env}" value="${!1:-}"
+    if [ -z "$value" ] && [ -f "$file" ]; then
+        value="$(sed -n "s/^${name}=//p" "$file" | tail -1 | sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//')"
         value="${value%\"}"; value="${value#\"}"
         value="${value%\'}"; value="${value#\'}"
     fi
@@ -42,13 +42,15 @@ from_env_file() {
 POSTGRES_USER="$(from_env_file POSTGRES_USER)"
 POSTGRES_DB="$(from_env_file POSTGRES_DB)"
 BACKUP_AGE_RECIPIENT="$(from_env_file BACKUP_AGE_RECIPIENT)"
+# Django's own setting lives in .env.production, not .env.
+AWS_STORAGE_BUCKET_NAME="$(from_env_file AWS_STORAGE_BUCKET_NAME .env.production)"
 
 if [ -n "${BACKUP_REMOTE:-}" ] && [ -z "$BACKUP_AGE_RECIPIENT" ]; then
     echo "ERROR: BACKUP_REMOTE is set but BACKUP_AGE_RECIPIENT is not -- refusing to copy unencrypted dumps off the box. See DEPLOYMENT.md, \"Backups\"." >&2
     exit 1
 fi
 if [ -n "$BACKUP_AGE_RECIPIENT" ] && ! command -v age >/dev/null 2>&1; then
-    echo "ERROR: BACKUP_AGE_RECIPIENT is set but the age binary is not installed (apt install age). See DEPLOYMENT.md." >&2
+    echo "ERROR: BACKUP_AGE_RECIPIENT is set but the age binary is not on PATH (cron: set PATH to include /usr/local/bin). See DEPLOYMENT.md, \"Backups\" -> \"Installing the tools\"." >&2
     exit 1
 fi
 

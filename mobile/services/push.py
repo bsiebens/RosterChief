@@ -78,6 +78,11 @@ def subscription_error(endpoint, p256dh, auth):
 
 
 def _deliver(subscription, payload: str, *, label) -> None:
+    if not is_allowed_push_endpoint(subscription.endpoint):
+        # Stored before endpoints were validated on subscribe: never sent to, and removed
+        # so it doesn't linger (the browser re-subscribes with a valid one when it can).
+        subscription.delete()
+        return
     try:
         webpush(
             subscription_info=subscription.as_subscription_info(),
