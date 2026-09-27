@@ -10,8 +10,6 @@ above.
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -20,6 +18,7 @@ from billing.models import Due, Invoice
 from billing.services import BillingError
 from billing.services.reminders import admin_emails
 from rosterchief.mail import send_message
+from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
 
 
 def issue_invoice(due: Due) -> Invoice:
@@ -126,20 +125,18 @@ def invalidate_cached_invoice_pdf(invoice: Invoice) -> None:
     of payments and the current balance/status (see billing/invoice.html),
     so unlike the number and the period's own amount/dates, those two
     genuinely go stale. A no-op when nothing was cached yet."""
-    path = _cache_path(invoice)
-    if default_storage.exists(path):
-        default_storage.delete(path)
+    drop_cached_invoice_pdf(_cache_path(invoice))
 
 
 def invoice_pdf(invoice: Invoice, base_url: str | None = None) -> bytes:
     # Cached to disk, same reasoning/shape as club.services.invoicing.invoice_pdf /
     # shop.services.invoices.render_invoice_pdf -- see those modules' own docstrings.
     cache_path = _cache_path(invoice)
-    if default_storage.exists(cache_path):
-        with default_storage.open(cache_path, "rb") as cached:
-            return cached.read()
+    cached = read_cached_invoice_pdf(cache_path)
+    if cached is not None:
+        return cached
 
     html = render_to_string("billing/invoice.html", {"invoice": invoice, "due": invoice.due, "club": invoice.due.club, "payments": invoice.due.payments.all()})
     pdf_bytes = render_pdf(html)
-    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    write_cached_invoice_pdf(cache_path, pdf_bytes)
     return pdf_bytes

@@ -15,6 +15,7 @@ from django.utils import timezone
 from authentication.models import User
 from club.models import Club, ClubRole
 from members.models import Member
+from rosterchief.storage import invoice_cache_storage, write_cached_invoice_pdf
 
 from .models import DEFAULT_DURATION_MONTHS, DEFAULT_GRACE_DAYS, DEFAULT_RENEWAL_LEAD_DAYS, Due, Invoice, Plan, PlanPrice, Subscription, add_months
 from .services import BillingError
@@ -454,6 +455,32 @@ class InvoicePDFCacheTests(BillingTestBase):
             invoice_pdf(self.invoice)
 
         renderer.assert_not_called()
+
+    def test_the_rendered_pdf_is_never_written_to_public_default_storage(self):
+        # default_storage is served publicly (Caddy /media/, or an unsigned bucket
+        # URL) -- a cached invoice there would be readable by anyone guessing the path.
+        from django.core.files.storage import default_storage
+
+        from billing.services.invoices import _cache_path
+
+        with mock.patch("billing.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        self.assertFalse(default_storage.exists(_cache_path(self.invoice)))
+        self.assertTrue(invoice_cache_storage.exists(_cache_path(self.invoice)))
+        with self.assertRaises(ValueError):
+            invoice_cache_storage.url(_cache_path(self.invoice))
+
+    def test_a_cached_copy_in_private_storage_is_served_without_rerendering(self):
+        from billing.services.invoices import _cache_path
+
+        write_cached_invoice_pdf(_cache_path(self.invoice), b"%PDF-private")
+
+        with mock.patch("billing.services.invoices.render_pdf") as renderer:
+            pdf = invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
+        self.assertEqual(pdf, b"%PDF-private")
 
 
 class InvoiceSendingTests(BillingTestBase):

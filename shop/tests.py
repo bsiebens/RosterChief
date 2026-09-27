@@ -15,6 +15,7 @@ from club.models import Club, ClubMembership, Season
 from club.tenancy import reset_current_club, set_current_club
 from members.models import Member
 from notifications.models import Notification
+from rosterchief.storage import invoice_cache_storage, write_cached_invoice_pdf
 from teams.models import Position, Team
 
 from .admin import ProductAdmin
@@ -1743,3 +1744,29 @@ class InvoicePdfCachingTests(TestCase):
     def test_a_freshly_created_order_has_nothing_cached_to_invalidate(self):
         # pre_save's own pk-less branch -- must not raise on a brand-new Order.
         Order.objects.create(club=self.club, purchaser=self.member, payment_status=Order.PaymentStatus.PENDING, total=Decimal("1"))  # must not raise
+
+    def test_the_rendered_pdf_is_never_written_to_public_default_storage(self):
+        # default_storage is served publicly (Caddy /media/, or an unsigned bucket
+        # URL) -- a cached invoice there would be readable by anyone guessing the path.
+        from django.core.files.storage import default_storage
+
+        from shop.services.invoices import _cache_path
+
+        with patch("shop.services.invoices.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            render_invoice_pdf(self.invoice)
+
+        self.assertFalse(default_storage.exists(_cache_path(self.invoice)))
+        self.assertTrue(invoice_cache_storage.exists(_cache_path(self.invoice)))
+        with self.assertRaises(ValueError):
+            invoice_cache_storage.url(_cache_path(self.invoice))
+
+    def test_a_cached_copy_in_private_storage_is_served_without_rerendering(self):
+        from shop.services.invoices import _cache_path
+
+        write_cached_invoice_pdf(_cache_path(self.invoice), b"%PDF-private")
+
+        with patch("shop.services.invoices.render_pdf") as renderer:
+            pdf = render_invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
+        self.assertEqual(pdf, b"%PDF-private")

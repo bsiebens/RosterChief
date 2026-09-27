@@ -22,6 +22,7 @@ from events.models import Event, Location
 from features.models import JobRun
 from members.models import Family, FamilyMembership, Member
 from registration.models import RegistrationBatch, RegistrationDetails
+from rosterchief.storage import invoice_cache_storage, write_cached_invoice_pdf
 from rosterchief.test_support import enrol_mfa, make_season
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
@@ -2145,6 +2146,32 @@ class InvoicePdfCachingTests(TestCase):
 
         renderer.assert_not_called()
 
+    def test_the_rendered_pdf_is_never_written_to_public_default_storage(self):
+        # default_storage is served publicly (Caddy /media/, or an unsigned bucket
+        # URL) -- a cached invoice there would be readable by anyone guessing the path.
+        from django.core.files.storage import default_storage
+
+        from club.services.invoicing import _cache_path
+
+        with mock.patch("club.services.invoicing.render_pdf", side_effect=lambda html: b"%PDF-fake"):
+            invoice_pdf(self.invoice)
+
+        self.assertFalse(default_storage.exists(_cache_path(self.invoice)))
+        self.assertTrue(invoice_cache_storage.exists(_cache_path(self.invoice)))
+        with self.assertRaises(ValueError):
+            invoice_cache_storage.url(_cache_path(self.invoice))
+
+    def test_a_cached_copy_in_private_storage_is_served_without_rerendering(self):
+        from club.services.invoicing import _cache_path
+
+        write_cached_invoice_pdf(_cache_path(self.invoice), b"%PDF-private")
+
+        with mock.patch("club.services.invoicing.render_pdf") as renderer:
+            pdf = invoice_pdf(self.invoice)
+
+        renderer.assert_not_called()
+        self.assertEqual(pdf, b"%PDF-private")
+
 
 class ResolveDocumentAddressTests(TestCase):
     """club.services.invoicing.resolve_document_address -- the club's own
@@ -3082,3 +3109,46 @@ class SignupPossibleDuplicateHintTests(TestCase):
         self.assertEqual(list(membership.possible_duplicates), [self.known])
         self.assertEqual(membership.link_form.initial.get("member"), self.known.pk)
         self.assertContains(response, "Possible duplicate")
+
+
+class PurgePublicInvoiceCacheCommandTests(TestCase):
+    """purge_public_invoice_cache -- deletes invoice PDFs an earlier release cached
+    in the publicly served default storage, and nothing else."""
+
+    PATHS = [
+        "clubs/ajax-united/dues/invoices/cache/1.pdf",
+        "clubs/ajax-united/shop/invoices/cache/2.pdf",
+        "clubs/other-club/billing/invoices/cache/3.pdf",
+    ]
+    KEEP = "clubs/ajax-united/logos/logo.png"
+
+    def setUp(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+
+        self.storage = default_storage
+        for path in [*self.PATHS, self.KEEP]:
+            default_storage.save(path, ContentFile(b"x"))
+            self.addCleanup(lambda p=path: default_storage.exists(p) and default_storage.delete(p))
+
+    def test_dry_run_deletes_nothing(self):
+        out = StringIO()
+        call_command("purge_public_invoice_cache", "--dry-run", stdout=out)
+
+        for path in self.PATHS:
+            self.assertTrue(self.storage.exists(path))
+        self.assertIn("3", out.getvalue())
+
+    def test_deletes_every_cached_invoice_and_keeps_other_files(self):
+        call_command("purge_public_invoice_cache", stdout=StringIO())
+
+        for path in self.PATHS:
+            self.assertFalse(self.storage.exists(path))
+        self.assertTrue(self.storage.exists(self.KEEP))
+
+    def test_is_idempotent(self):
+        call_command("purge_public_invoice_cache", stdout=StringIO())
+        out = StringIO()
+        call_command("purge_public_invoice_cache", stdout=out)
+
+        self.assertIn("0", out.getvalue())
