@@ -75,6 +75,7 @@ class CoachEvaluationMixin(CoachScopeMixin, LoginRequiredMixin, EvaluationAccess
     access.members_visible_to's own ADMIN branch uses, not a team-scoped one.
     """
 
+    require_staffed_team = False
     active_tab = "coach_squad"
 
     def get_player(self):

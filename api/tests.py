@@ -337,22 +337,56 @@ class TeamsApiTests(ApiTestBase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_a_players_license_comes_from_their_club_membership(self):
+    def test_a_player_entry_does_not_include_a_licence_number(self):
+        # Federation licence numbers are internal membership data, not public roster data.
         alice = Member.objects.create(first_name="Alice", last_name="Ash")
         TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
-        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345")
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345", status=ClubMembership.StatusChoices.ACTIVE)
 
-        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+        response = self.api_get(f"/teams/{self.team.pk}/roster/")
 
-        self.assertEqual(player["license"], "BE-12345")
+        self.assertNotIn("license", response.json()["players"][0]["players"][0])
+        self.assertNotContains(response, "BE-12345")
 
-    def test_a_players_license_is_null_without_a_club_membership(self):
+    def test_a_player_with_an_active_club_membership_is_listed(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_without_a_club_membership_is_still_listed(self):
         alice = Member.objects.create(first_name="Alice", last_name="Ash")
         TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
 
-        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
 
-        self.assertIsNone(player["license"])
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_whose_club_membership_is_pending_or_cancelled_is_left_off(self):
+        # A roster spot can be assigned while the sign-up is still awaiting
+        # approval; the public roster only lists confirmed players.
+        for status in (ClubMembership.StatusChoices.PENDING, ClubMembership.StatusChoices.CANCELLED):
+            with self.subTest(status=status):
+                member = Member.objects.create(first_name=f"Player-{status}", last_name="Ash")
+                TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward)
+                ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=status)
+                cache.clear()
+
+                response = self.api_get(f"/teams/{self.team.pk}/roster/")
+
+                self.assertNotContains(response, f"Player-{status}")
+
+    def test_staff_whose_club_membership_is_pending_is_left_off(self):
+        dana = Member.objects.create(first_name="Dana", last_name="Dean")
+        StaffAssignment.objects.create(team=self.team, member=dana, season=self.season, position=self.coach_position)
+        ClubMembership.objects.create(club=self.club, member=dana, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
+
+        self.assertEqual(staff, [])
 
 
 class GamesApiTests(ApiTestBase):

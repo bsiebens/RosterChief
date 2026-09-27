@@ -82,6 +82,9 @@ def _apply_per_process_test_overrides(*args):
     signature still needs to accept them.
     """
     settings.MEDIA_ROOT = tempfile.mkdtemp(prefix="rosterchief-test-media-")
+    # rosterchief.storage.invoice_cache_storage reads this on every access, so the
+    # cached invoice PDFs land in a throwaway directory too, never the real one.
+    settings.PRIVATE_MEDIA_ROOT = tempfile.mkdtemp(prefix="rosterchief-test-private-media-")
     setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
     settings.VAPID_PRIVATE_KEY = ""
 

@@ -313,6 +313,37 @@ a `FamilyRole` (`parent` / `child` / `guardian` / `other`), `unique_together (fa
 member)`; `Family.guardians` / `Family.children` are role-derived querysets. Powers the
 "parents see their children's data" object-scope (§3.1).
 
+**Global `Member` rules** *(built — supersedes the "tenant-scoped Member" plan above)*. As
+built, `Member` has **no `club` FK**: one person record is shared by every club the person
+belongs to (`user` stays a nullable `OneToOneField`), while `Family`, `ClubMembership`,
+roles, rosters etc. are the club-owned rows about them. Because a club-level action on a
+shared record would reach other clubs, these rules live in `members/services/deletion.py`
+and `members/services/invites.py` and every management path goes through them:
+
+- **Ties outside a club** — `member_has_ties_outside_club(member, club)` is true when the
+  member has a login, or any row owned by another club (membership, role, grant, family
+  row, roster/staff spot, attendance, evaluation, shop record, …).
+- **Person fields are read-only** to a club while that is true: name, date of birth, email,
+  phones, photo and photo consent (`MemberForm(lock_person_fields=True)` disables them and
+  `MemberUpdateView` never saves them). Club-owned data (this season's `ClubMembership`,
+  roles, teams) stays editable. A club also can't grant a login to such a record.
+- **Deletion** — a member is only hard-deleted when the record is the club's alone;
+  otherwise `remove_member_from_club` removes just that club's rows (what deleting would
+  have removed there) and keeps the record. Only a `Family` **of that club** left empty is
+  ever deleted; another club's family is never touched. Cancelling a one-off sign-up uses
+  the stricter `member_is_deletable(member, ignoring=[membership])`.
+- **Linking an existing account needs consent** — staff adding a parent by an email that
+  already has a `User` creates a **`FamilyInvite`** (club-scoped: `family`, `email`,
+  single-use `token` from `secrets.token_urlsafe(32)`, `expires_at` = 14 days,
+  `accepted_at`/`accepted_member`) and emails the link; nothing is linked until that
+  account signs in on the inviting club's host and accepts at `/invite/<token>/`
+  (`members.views.FamilyInviteAcceptView`; the signed-in email must match, case-
+  insensitively). A new email is still created and linked immediately. Staff see the same
+  confirmation either way; pending invites are listed on the family page.
+- **Billing contact** — `RegistrationBatch.contact_member` records the Member the
+  submission resolved; staff billing screens show it (or the typed contact name/email when
+  it's empty) rather than looking a Member up by the typed email.
+
 **`Group`** *(built)* + **`GroupMembership`** — a generic, tenant-scoped, **opaque** named
 collection of members: "all coaches", "all team managers", an ad-hoc committee. Deliberately
 minimal (`name` + a through-membership, same shape as `Family`/`FamilyMembership`) — it
@@ -1436,11 +1467,11 @@ Setup:
 
 - **Hosts:** wildcard `ALLOWED_HOSTS` for the chosen base domain (e.g. `.rosterchief.app`)
   if using subdomain resolution; add `DJANGO_ALLOWED_HOSTS` accordingly.
-- **CSRF:** `CSRF_TRUSTED_ORIGINS` must cover the wildcard scheme+host set
-  (`https://*.rosterchief.app`).
-- **Cookies:** to share login across club subdomains, set `SESSION_COOKIE_DOMAIN` /
-  `CSRF_COOKIE_DOMAIN` to the base domain; otherwise keep per-subdomain sessions
-  (decide with the "cross-club users" question in §7).
+- **CSRF:** `CSRF_USE_SESSIONS = True` — the CSRF secret lives in the (shared) session,
+  not a cookie that a sibling subdomain could overwrite ("cookie tossing"). Every form posts
+  to its own host, so `CSRF_TRUSTED_ORIGINS` needs no `https://*.<base>` wildcard.
+- **Cookies:** login is shared across club subdomains via `SESSION_COOKIE_DOMAIN` set to
+  the base domain (derived from `ROSTERCHIEF_BASE_DOMAIN`); there is no CSRF cookie.
 - **Local dev:** map a wildcard to localhost (e.g. `*.localhost` resolves on most systems,
   or use `dnsmasq`) so subdomain resolution works without editing `/etc/hosts` per club.
 - **Middleware order:** place `ClubTenantMiddleware` after `AuthenticationMiddleware`

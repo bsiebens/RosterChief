@@ -10,6 +10,9 @@ the platform out of itself. Two rules are enforced for every change:
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils.translation import gettext as _
+
+from .accounts import account_for_grant, create_account_for_grant
 
 User = get_user_model()
 
@@ -31,13 +34,13 @@ def check_access_change(actor, user, *, is_staff: bool, is_superuser: bool) -> N
     losing_access = not (is_staff or is_superuser)
 
     if actor.pk == user.pk and losing_access:
-        raise PlatformAdminError("You cannot remove your own platform access.")
+        raise PlatformAdminError(_("You cannot remove your own platform access."))
 
     if actor.pk == user.pk and user.is_superuser and not is_superuser:
-        raise PlatformAdminError("You cannot remove your own superuser rights.")
+        raise PlatformAdminError(_("You cannot remove your own superuser rights."))
 
     if user.is_superuser and not is_superuser and is_last_superuser(user):
-        raise PlatformAdminError("At least one superuser must remain.")
+        raise PlatformAdminError(_("At least one superuser must remain."))
 
 
 @transaction.atomic
@@ -62,12 +65,11 @@ def grant_platform_access(email, *, is_superuser: bool = False):
 
     New accounts get an unusable password — they set one through the password
     reset flow — and, being staff, must enrol a second factor before they can
-    sign in at all.
+    sign in at all. An existing account is only used when it has verified
+    ``email``; otherwise this raises UnverifiedEmailError and changes nothing.
     """
     email = email.lower()
-    user, created = User.objects.get_or_create(email=email, defaults={"is_active": True})
-    if created:
-        user.set_unusable_password()
+    user = account_for_grant(email) or create_account_for_grant(email)
 
     user.is_staff = True
     user.is_superuser = is_superuser

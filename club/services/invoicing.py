@@ -11,8 +11,6 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 from django.conf import settings
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -22,6 +20,7 @@ from club.models import ClubMembership, DuesInvoice
 from club.services.fees import remaining_balance
 from events.models import Location
 from rosterchief.mail import send_message
+from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
 
 
 class DuesInvoicePDFError(Exception):
@@ -194,20 +193,19 @@ def invalidate_cached_invoice_pdf(invoice: DuesInvoice) -> None:
     thing the PDF itself renders differently) and from create_or_resend_invoice
     directly (a resend changes amount/due_date on this same row). A no-op
     when nothing was cached yet."""
-    path = _cache_path(invoice)
-    if default_storage.exists(path):
-        default_storage.delete(path)
+    drop_cached_invoice_pdf(_cache_path(invoice))
 
 
 def invoice_pdf(invoice: DuesInvoice) -> bytes:
     # Cached to disk, same reasoning/shape as shop.services.invoices.
     # render_invoice_pdf -- see that module's own docstring. Never exposed
-    # as a public URL: every read goes through default_storage.open() inside
-    # an authenticated view (DuesInvoicePdfView).
+    # as a public URL: the cache lives in rosterchief.storage's private
+    # invoice_cache_storage, and every read goes through an authenticated
+    # view (DuesInvoicePdfView).
     cache_path = _cache_path(invoice)
-    if default_storage.exists(cache_path):
-        with default_storage.open(cache_path, "rb") as cached:
-            return cached.read()
+    cached = read_cached_invoice_pdf(cache_path)
+    if cached is not None:
+        return cached
 
     # Same header convention as management/event_referee_form_pdf.html: the club's
     # legal name (official_name falls back to the everyday name when unset) and its
@@ -216,5 +214,5 @@ def invoice_pdf(invoice: DuesInvoice) -> bytes:
     document_address = resolve_document_address(invoice.club)
     html = render_to_string("club/dues_invoice_pdf.html", {"club": invoice.club, "invoice": invoice, "membership": invoice.membership, "member": invoice.membership.member, "document_address": document_address})
     pdf_bytes = render_pdf(html)
-    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    write_cached_invoice_pdf(cache_path, pdf_bytes)
     return pdf_bytes

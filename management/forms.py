@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
+from club.validators import LOGO_ACCEPT
 from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
 from events.services.dfel_import import DFELImportError, extract_ids
@@ -18,7 +19,7 @@ from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
-from members.services.family import families_of_club, find_member_by_email
+from members.services.family import families_of_club
 from news.models import News
 from registration.models import RegistrationDetails
 from registration.services.pricing import available_registration_products
@@ -34,11 +35,24 @@ User = get_user_model()
 
 
 class MemberForm(forms.ModelForm):
+    """``lock_person_fields`` -- set by MemberUpdateView when members.services.
+    deletion.member_has_ties_outside_club is true -- disables every field here:
+    they're the person's own details on a record shared with their account or
+    another club. A disabled field ignores whatever is posted for it and keeps
+    the stored value."""
+
     class Meta:
         model = Member
         fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
         labels = {"photo_public_consent": _("Show this photo on the club's public website")}
+
+    def __init__(self, *args, lock_person_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.person_fields_locked = lock_person_fields
+        if lock_person_fields:
+            for field in self.fields.values():
+                field.disabled = True
 
 
 class TeamForm(forms.ModelForm):
@@ -580,6 +594,7 @@ class SponsorForm(forms.ModelForm):
         model = Sponsor
         fields = ["name", "logo", "url", "start_date", "end_date"]
         widgets = {
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
         }
@@ -962,7 +977,7 @@ class FamilyCreateForm(forms.Form):
 
     parent_first_name = forms.CharField(label=_("Parent first name"))
     parent_last_name = forms.CharField(label=_("Parent last name"))
-    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
 
     parent_is_member = forms.BooleanField(
         label=_("Parent is also a member"),
@@ -986,28 +1001,18 @@ class AddChildForm(forms.Form):
 
 class AddParentForm(forms.Form):
     """A family that needs one more parent/guardian registered -- see
-    members.services.family.add_parent_to_family."""
+    members.services.invites.add_or_invite_parent. The name is always
+    required, whether or not the email already has an account, so the form
+    behaves the same either way (an existing account's own name is kept)."""
 
-    email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
-    first_name = forms.CharField(label=_("First name"), required=False)
-    last_name = forms.CharField(label=_("Last name"), required=False)
+    email = forms.EmailField(label=_("Email address"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
+    first_name = forms.CharField(label=_("First name"))
+    last_name = forms.CharField(label=_("Last name"))
     parent_is_member = forms.BooleanField(
         label=_("Also a member"),
         required=False,
         help_text=_("Tick only if this parent belongs to the club in their own right (they play, or hold a membership). Left unticked they are a guardian: they hold the login and can be contacted, but owe no fee and are not counted as a member."),
     )
-
-    def clean(self):
-        cleaned = super().clean()
-        email = cleaned.get("email")
-
-        # Only a brand-new person needs a name; an existing member already has one.
-        if email and find_member_by_email(email) is None:
-            for field in ("first_name", "last_name"):
-                if not cleaned.get(field):
-                    self.add_error(field, _("Required: this email has no account yet."))
-
-        return cleaned
 
 
 class AttachToFamilyForm(forms.Form):
@@ -1026,11 +1031,22 @@ class AttachToFamilyForm(forms.Form):
         self.fields["family"].queryset = queryset
 
 
+#: Upper bound on an uploaded member-import workbook; the template for a whole
+#: club's membership is a small fraction of this.
+MEMBER_IMPORT_MAX_FILE_SIZE = 5 * 1024 * 1024
+
+
 class MemberImportUploadForm(forms.Form):
     """The mass-upload entry point -- one .xlsx file, built from the downloadable
     template. See management.bulk_import.read_member_import_workbook."""
 
     file = forms.FileField(label=_("Excel file"), help_text=_("Use the downloaded template — one row per member."))
+
+    def clean_file(self):
+        upload = self.cleaned_data["file"]
+        if upload.size > MEMBER_IMPORT_MAX_FILE_SIZE:
+            raise forms.ValidationError(_("This file is too large (maximum %(size)d MB).") % {"size": MEMBER_IMPORT_MAX_FILE_SIZE // (1024 * 1024)})
+        return upload
 
 
 class GrantLoginForm(forms.Form):
@@ -1053,9 +1069,21 @@ class ClubMembershipForm(forms.ModelForm):
     money field here -- amount_paid is exclusively written by club.services.fees,
     never hand-edited."""
 
+    #: Approval and money: a club ADMIN's call only. Anyone else managing members
+    #: (MEMBER_ADMIN) sees them read-only, and a disabled field ignores whatever
+    #: value is posted for it, keeping the instance's own.
+    ADMIN_ONLY_FIELDS = ("status", "fee_status", "fee_amount")
+
     class Meta:
         model = ClubMembership
         fields = ["kind", "license", "status", "fee_status", "fee_amount"]
+
+    def __init__(self, *args, can_edit_admin_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not can_edit_admin_fields:
+            for name in self.ADMIN_ONLY_FIELDS:
+                self.fields[name].disabled = True
+                self.fields[name].help_text = _("Only a club admin can change this.")
 
 
 class NewsForm(forms.ModelForm):
@@ -1280,7 +1308,7 @@ class ClubSettingsForm(forms.ModelForm):
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
-            "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }
 

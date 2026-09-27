@@ -380,7 +380,7 @@
 
     {% trans "Add parent" as add_parent_label %}
     {% trans "Add child" as add_child_label %}
-    {% trans "If this email has no account yet, one is created and they set a password via the reset link." as add_parent_blurb %}
+    {% trans "A new person is added straight away and sets a password via the reset link. If this email already has an account, they are emailed an invite and join the family once they accept." as add_parent_blurb %}
     {% blocktrans with short_name=member.get_short_name asvar remove_from_family_label %}Remove {{ short_name }} from family{% endblocktrans %}
     {% trans "Remove from family" as remove_from_family_title %}
     {% trans "Remove" as remove_label %}

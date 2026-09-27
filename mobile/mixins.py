@@ -6,6 +6,7 @@ them) don't each re-derive this.
 """
 
 from django.conf import settings
+from django.contrib.auth.mixins import AccessMixin
 from django.http import Http404
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
@@ -16,8 +17,9 @@ from club.services.access import get_current_season, has_management_access, team
 from controlpanel.messages import notify
 from members.models import FamilyMembership, Member
 from members.services.lookup import get_request_member
-from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
+
+from .access import has_club_tie
 
 
 class DesktopTemplateMixin:
@@ -35,7 +37,46 @@ class DesktopTemplateMixin:
         return desktop_names + names
 
 
-class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
+class MemberAppMixin(AccessMixin):
+    """The gate every signed-in member-app screen (Member mode, Coach mode,
+    Shop, bug reports) builds on: a club subdomain, a signed-in account, and
+    a real tie between that account and this club (mobile.access.has_club_tie).
+
+    A session is valid on every club subdomain, so without the tie check any
+    account from any club could open another club's app. No tie 404s rather
+    than 403s -- the app simply doesn't exist for outsiders. An anonymous
+    visitor is sent to login (``handle_no_permission``), same round trip
+    LoginRequiredMixin gave these views before.
+
+    Subclasses set up their own per-request state in ``prepare_member_app``,
+    which only runs once the gate has passed. mobile/tests.py walks
+    mobile/urls.py and fails for any route that isn't gated by this mixin or
+    explicitly listed as exempt, so a new view can't forget it.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if getattr(request, "club", None) is None:
+            raise Http404("This page belongs to a club.")
+        # Read by club/context_processors.py's branding() -- allauth's login/logout/
+        # password-reset/MFA screens live under /accounts/, not /app/, so a path check
+        # alone can't tell they were reached from the member app rather than the old
+        # public site. Same pattern and same "sticks for the rest of the session"
+        # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
+        # Set before the login redirect on purpose, so the login screen itself gets
+        # the app's skin.
+        request.session["mobile_context"] = True
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        if not has_club_tie(request.user, request.club):
+            raise Http404("No membership in this club.")
+        self.prepare_member_app(request)
+        return super().dispatch(request, *args, **kwargs)
+
+    def prepare_member_app(self, request):
+        """Hook for per-request state; runs after the gate, before the handler."""
+
+
+class PersonScopeMixin(DesktopTemplateMixin, MemberAppMixin):
     """Resolves the signed-in account's own Member record plus every child
     they're a parent/guardian of *in this club*.
 
@@ -54,18 +95,12 @@ class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
     always the right list to filter by regardless of which mode is active.
     """
 
-    def dispatch(self, request, *args, **kwargs):
-        # Read by club/context_processors.py's branding() -- allauth's login/logout/
-        # password-reset/MFA screens live under /accounts/, not /app/, so a path check
-        # alone can't tell they were reached from the member app rather than the old
-        # public site. Same pattern and same "sticks for the rest of the session"
-        # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
-        request.session["mobile_context"] = True
+    def prepare_member_app(self, request):
+        super().prepare_member_app(request)
         self.me = get_request_member(request)
         self.managed_people = self._managed_people(request)
         self.scope_everyone, self.scope_person = self._resolve_scope(request)
         self.people_in_scope = self.managed_people if self.scope_everyone else ([self.scope_person] if self.scope_person else [])
-        return super().dispatch(request, *args, **kwargs)
 
     def _managed_people(self, request):
         if self.me is None:

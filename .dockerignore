@@ -1,13 +1,23 @@
 .git
+.github
 .venv
 node_modules
 staticfiles
 media
+private_media
 db.sqlite3
+# Real env files hold secrets and are passed at runtime (env_file), never baked in.
 .env
+.env.*
+**/.env
+**/.env.*
+!**/.env*.example
 *.pyc
 __pycache__
 .coverage
 .idea
+.DS_Store
+**/.DS_Store
 .ruff_cache
-ARCHITECTURE.pdf
+# Root-level documents only (ARCHITECTURE.pdf, reference forms); no PDF is read at runtime.
+*.pdf

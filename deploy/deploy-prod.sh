@@ -1,138 +1,112 @@
 #!/usr/bin/env bash
-# Deploy production — the real thing: compose.yaml (own Caddy, real TLS), real user data.
+# Deploy production from your own machine -- no need to log into the server.
 #
-#   deploy/deploy-prod.sh                 # deploy main
-#   deploy/deploy-prod.sh --push          # push main first, then deploy
-#   SKIP_BACKUP=1 deploy/deploy-prod.sh   # skip the pre-migration backup (not recommended)
+#   deploy/deploy-prod.sh                        # deploy the latest main (image :main)
+#   deploy/deploy-prod.sh --version v0.7.8       # deploy (or roll back to) an exact release
+#   deploy/deploy-prod.sh --push                 # push local main first, then deploy it
+#   SKIP_BACKUP=1 deploy/deploy-prod.sh          # skip the pre-migration backup (not recommended)
 #
-# Same shape as deploy/deploy-dev.sh — see its own comment for the general design (fetch the
-# pushed branch, pull the image .github/workflows/build-and-push.yml already built, migrate
-# explicitly, restart, wait for healthy) — with what production specifically needs on top:
+# What it does is exactly the manual routine, run for you over one SSH session:
 #
-#   - compose.yaml, not compose.behind-proxy.yaml: production runs its own Caddy/TLS -- and
-#     makes sure `caddy` is actually up before relying on it for the healthz check, since
-#     nothing else here would otherwise ever start it (it doesn't need a code deploy).
-#   - Refuses anything but `main` by default (ALLOW_NON_MAIN=1 to override) — a deploy target
-#     this permanent shouldn't ship a feature branch by accident.
-#   - Backs the database up (deploy/backup.sh) before migrating — a migration is the one step
-#     here that isn't just "restart with new code," so it gets a fresh safety net first.
-#   - Verifies over the public URL (curl https://$BASE_DOMAIN/healthz through Caddy), since
-#     web has no host-published port here to hit directly the way the dev instance does.
+#   1. locally: refuse to deploy code that isn't on GitHub yet (the server pulls from there);
+#   2. on the server: `git fetch`, then check out origin/main (or the release tag) with
+#      `reset --hard` -- a deploy target only receives deploys, it never has work of its own.
+#      Untracked files (.env, .env.production, backups) are never touched by this;
+#   3. on the server: check the env files carry every key the new code requires, *before*
+#      anything is stopped, backed up or migrated;
+#   4. on the server: run deploy/deploy-local.sh from that fresh checkout -- the same script you
+#      would run by hand after logging in (db/redis/caddy up -> backup -> pull image -> migrate
+#      -> restart web -> wait for https://$BASE_DOMAIN/healthz). Running the *checked-out*
+#      copy means the deploy steps always match the code being deployed.
 #
-# No default SSH_HOST/REMOTE_DIR, unlike deploy-dev.sh — guessing wrong here is a much worse
-# mistake than for a throwaway test instance, so this refuses to run until you say exactly
-# where "production" is.
+# The image is the one .github/workflows/build-and-push.yml built: `:main` for the latest main,
+# `:vX.Y.Z` for a release (only main's CI run creates those tags).
 #
-# SSH_KEY_FILE (optional) authenticates with that specific private key instead of whatever
-# ssh-agent/default identity would otherwise be tried — IdentitiesOnly=yes goes with it so a
-# key deliberately named here is the only one offered, not just tried first. See this repo's
-# deploy/.env.deploy.example for where to keep these set rather than typing them every deploy.
+# Where production is comes from SSH_HOST / SSH_USER / REMOTE_DIR (and optionally
+# SSH_KEY_FILE). There are deliberately no defaults -- keep them in a gitignored file:
+#
+#   cp deploy/.env.deploy.example deploy/.env.prod.local
+#   source deploy/.env.prod.local && deploy/deploy-prod.sh
 set -Eeuo pipefail
 
-SSH_HOST="${SSH_HOST:?set SSH_HOST — the production server, e.g. SSH_HOST=1.2.3.4}"
+SSH_HOST="${SSH_HOST:?set SSH_HOST -- the production server, e.g. SSH_HOST=1.2.3.4 (see deploy/.env.deploy.example)}"
 SSH_USER="${SSH_USER:?set SSH_USER}"
 SSH_KEY_FILE="${SSH_KEY_FILE:-}"
 REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/bernard/RosterChief}"
-BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
-# "0", never empty -- an empty positional argument can vanish entirely when ssh reconstructs
-# the remote command line (word-splitting swallows it), leaving $4 unbound on the other end
-# under set -u instead of just empty. A non-empty sentinel survives the trip either way.
+# "0", never empty: an empty argument can vanish when ssh rebuilds the remote command line.
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
+
+say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+VERSION=""
+PUSH=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version) VERSION="${2:?--version needs a tag, e.g. --version v0.7.8}"; shift 2 ;;
+        --push) PUSH=1; shift ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+        *) die "Unknown argument '$1' (see --help)." ;;
+    esac
+done
 
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
 SSH_OPTS=(-o ConnectTimeout=10)
 [ -n "$SSH_KEY_FILE" ] && SSH_OPTS+=(-i "$SSH_KEY_FILE" -o IdentitiesOnly=yes)
 
-say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
-
-if [ "$BRANCH" != "main" ] && [ -z "${ALLOW_NON_MAIN:-}" ]; then
-    die "Refusing to deploy '${BRANCH}' to production — only main ships here. Set ALLOW_NON_MAIN=1 to override."
-fi
-
 # --- preflight, locally -----------------------------------------------------
-# Same reasoning as deploy-dev.sh: the server deploys what's on the git remote, so unpushed
-# commits would silently ship stale code.
-git rev-parse --verify --quiet "origin/${BRANCH}" >/dev/null \
-    || die "origin/${BRANCH} does not exist. Push the branch first, or pass --push."
-
-if [ "${1:-}" = "--push" ]; then
-    say "Pushing ${BRANCH} to origin"
-    git push origin "${BRANCH}"
-elif [ -n "$(git rev-list "origin/${BRANCH}..HEAD" 2>/dev/null)" ]; then
-    die "Local ${BRANCH} is ahead of origin — the server would deploy stale code. Push first, or run with --push."
+git fetch --quiet origin --tags
+if [ -n "$VERSION" ]; then
+    [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--version must look like v1.2.3, got '$VERSION'."
+    [ "$PUSH" = "0" ] || die "--push and --version don't mix: a release is already on GitHub."
+    git rev-parse --verify --quiet "refs/tags/${VERSION}" >/dev/null \
+        || die "Tag ${VERSION} doesn't exist on GitHub. Releases are tagged by CI when a release PR merges into main."
+    GIT_REF="$VERSION"
+    IMAGE_TAG="$VERSION"
+    WHAT="release ${VERSION}"
+else
+    if [ "$PUSH" = "1" ]; then
+        say "Pushing main to origin"
+        git push origin main
+        git fetch --quiet origin
+    elif [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] && [ -n "$(git rev-list origin/main..HEAD 2>/dev/null)" ]; then
+        die "Your local main has commits GitHub doesn't -- the server would deploy without them. Push first, or run with --push."
+    fi
+    GIT_REF="main"
+    IMAGE_TAG="main"
+    WHAT="main ($(git rev-parse --short origin/main): $(git log -1 --pretty=%s origin/main))"
 fi
 
-say "Deploying ${BRANCH} to PRODUCTION (${SSH_TARGET}:${REMOTE_DIR})"
+say "Deploying ${WHAT} to PRODUCTION (${SSH_TARGET}:${REMOTE_DIR}), image :${IMAGE_TAG}"
 
 # --- the work, on the server ------------------------------------------------
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- "${REMOTE_DIR}" "${BRANCH}" "${COMPOSE_FILE}" "${SKIP_BACKUP}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- \
+    "${REMOTE_DIR}" "${GIT_REF}" "${IMAGE_TAG}" "${COMPOSE_FILE}" "${BASE_DOMAIN}" "${SKIP_BACKUP}" <<'REMOTE'
 set -Eeuo pipefail
-REMOTE_DIR="$1"; BRANCH="$2"; COMPOSE_FILE="$3"; SKIP_BACKUP="$4"
+REMOTE_DIR="$1"; GIT_REF="$2"; IMAGE_TAG="$3"; COMPOSE_FILE="$4"; BASE_DOMAIN="$5"; SKIP_BACKUP="$6"
 
 step() { printf '\033[1;34m  ->\033[0m %s\n' "$*"; }
+fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-cd "$REMOTE_DIR" 2>/dev/null || { echo "ERROR: $REMOTE_DIR not found. Clone the repo there first."; exit 1; }
-[ -d .git ] || { echo "ERROR: $REMOTE_DIR is not a git checkout."; exit 1; }
+cd "$REMOTE_DIR" 2>/dev/null || fail "$REMOTE_DIR not found on the server. Clone the repo there first (see DEPLOYMENT.md, First deploy)."
+[ -d .git ] || fail "$REMOTE_DIR is not a git checkout."
 
-[ -f .env.production ] || { echo "ERROR: .env.production missing (Django config). Copy from .env.production.example."; exit 1; }
-[ -f .env ]            || { echo "ERROR: .env missing (compose vars: POSTGRES_PASSWORD, ...). Copy from .env.compose.example."; exit 1; }
-
-dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
-
-# reset --hard, not pull: a deploy target only receives deploys — see deploy-dev.sh.
-step "Fetching ${BRANCH}"
-git fetch --quiet origin
-git checkout --quiet "$BRANCH"
-git reset --hard --quiet "origin/${BRANCH}"
-echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
-
-# db/redis/caddy are all restart:unless-stopped and should already be up from steady state --
-# this is belt-and-suspenders (e.g. right after a host reboot, or a first deploy where caddy
-# was never started -- it doesn't need a code deploy to be brought up, so nothing else in this
-# script would otherwise ever start it) before backup.sh execs into db/web and before the
-# healthz check below relies on caddy actually being there to terminate TLS.
-step "Starting db + redis + caddy"
-# --remove-orphans: cleans up a now-orphaned live_score_poller container left over from
-# before that container was retired in favour of features/scheduler.py's in-process
-# scheduler (see DEPLOYMENT.md's "Scheduled jobs") -- a no-op once a box has deployed since.
-dc up -d --remove-orphans db redis caddy
-
-if [ "$SKIP_BACKUP" = "1" ]; then
-    step "Skipping backup (SKIP_BACKUP=1) -- not recommended before a migration"
+step "Updating the checkout to ${GIT_REF}"
+git fetch --quiet --tags origin
+if [ "$GIT_REF" = "main" ]; then
+    git checkout --quiet main
+    git reset --hard --quiet origin/main
 else
-    step "Backing up the database before migrating"
-    COMPOSE="docker compose -f $COMPOSE_FILE" ./deploy/backup.sh /var/backups/rosterchief
+    git checkout --quiet --detach "refs/tags/${GIT_REF}"
 fi
+echo "     at $(git rev-parse --short HEAD) -- $(git log -1 --pretty=%s)"
 
-step "Pulling image for ${BRANCH}"
-IMAGE_TAG="$BRANCH" dc pull web
-
-step "Running migrations"
-# -T and </dev/null: this whole script IS ssh's stdin (a heredoc) -- see deploy-dev.sh's own
-# comment on why `compose run` needs both or web never restarts.
-dc run --rm -T web python manage.py migrate --noinput </dev/null
-
-step "Restarting web"
-# No worker/beat, and no separate scheduler/poller container either -- every scheduled
-# platform job runs from an in-process APScheduler thread inside web itself (see
-# features/scheduler.py and DEPLOYMENT.md's "Scheduled jobs"), so restarting web is all a
-# deploy needs to cycle it onto the new image.
-IMAGE_TAG="$BRANCH" dc up -d --no-deps --remove-orphans web
+# The rest is exactly the by-hand deploy. </dev/null: this heredoc is ssh's stdin, and nothing
+# below may read from it (docker compose run would otherwise swallow the rest of the script).
+IMAGE_TAG="$IMAGE_TAG" COMPOSE_FILE="$COMPOSE_FILE" BASE_DOMAIN="$BASE_DOMAIN" SKIP_BACKUP="$SKIP_BACKUP" \
+    ./deploy/deploy-local.sh </dev/null
 REMOTE
 
-say "Waiting for https://${BASE_DOMAIN}/healthz"
-for attempt in $(seq 1 20); do
-    if curl -fsS "https://${BASE_DOMAIN}/healthz" >/dev/null 2>&1; then
-        say "Healthy after ${attempt} check(s)."
-        exit 0
-    fi
-    sleep 3
-done
-
-echo "ERROR: health check never passed against https://${BASE_DOMAIN}/healthz" >&2
-echo "Recent web logs:" >&2
-ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "cd ${REMOTE_DIR} && docker compose -f ${COMPOSE_FILE} logs --tail 40 web" >&2
-exit 1
+say "Production is running ${WHAT}."

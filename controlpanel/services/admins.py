@@ -1,12 +1,11 @@
 """Granting and revoking club-admin rights from the platform panel."""
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from club.models import ClubRole
 from members.models import Member
 
-User = get_user_model()
+from .accounts import account_for_grant, create_account_for_grant
 
 
 def find_member_by_email(email):
@@ -20,13 +19,12 @@ def grant_club_admin(club, email, first_name="", last_name=""):
 
     A ClubRole hangs off a Member, and a Member optionally links to a User — so
     an admin who has never existed needs both. The account is created without a
-    usable password; they set one via the password-reset flow.
+    usable password; they set one via the password-reset flow. An existing
+    account is only used when it has verified ``email``; otherwise this raises
+    UnverifiedEmailError and grants nothing.
     """
     email = email.lower()
-    user, created_user = User.objects.get_or_create(email=email, defaults={"is_active": True})
-    if created_user:
-        user.set_unusable_password()
-        user.save(update_fields=["password"])
+    user = account_for_grant(email) or create_account_for_grant(email)
 
     member, _ = Member.objects.get_or_create(
         user=user,

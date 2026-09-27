@@ -5,6 +5,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.db.models import ProtectedError
@@ -522,6 +523,30 @@ class BuildFormTests(FormbuilderTestBase):
 
         self.assertFalse(bound.is_valid())
         self.assertIn("name", bound.errors)
+
+    def make_file_form(self):
+        form = Form.objects.create(club=self.club, title="Upload", slug="upload")
+        Field.objects.create(form=form, key="doc", label="Document", field_type=Field.FieldType.FILE, required=True, order=1)
+        return form
+
+    def test_file_field_accepts_a_pdf(self):
+        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("cert.pdf", b"%PDF-1.4", content_type="application/pdf")})
+
+        self.assertTrue(bound.is_valid(), bound.errors)
+
+    def test_file_field_rejects_an_oversized_file(self):
+        from rosterchief.uploads import MAX_DOCUMENT_UPLOAD_BYTES
+
+        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("cert.pdf", b"0" * (MAX_DOCUMENT_UPLOAD_BYTES + 1), content_type="application/pdf")})
+
+        self.assertFalse(bound.is_valid())
+        self.assertEqual(bound.errors.as_data()["doc"][0].code, "file_too_large")
+
+    def test_file_field_rejects_a_disallowed_type(self):
+        bound = build_form(self.make_file_form(), data={}, files={"doc": SimpleUploadedFile("page.html", b"<html></html>", content_type="text/html")})
+
+        self.assertFalse(bound.is_valid())
+        self.assertEqual(bound.errors.as_data()["doc"][0].code, "invalid_extension")
 
     def test_inactive_fields_are_excluded(self):
         Field.objects.create(form=self.form, key="hidden", label="Hidden", is_active=False, order=9)

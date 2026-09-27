@@ -116,7 +116,12 @@ def assign_official(event, member, *, assigned_by):
     if event.officials.filter(member=member).exists():
         raise OfficialAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
 
-    return EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by)
+    official = EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by)
+    # Same as referees.assign_referee: an assignment settles the member's
+    # invite, so they don't show as "no response yet" and the game appears
+    # among their own duties in the app.
+    OfficialSignup.objects.update_or_create(event=event, member=member, defaults={"status": OfficialSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    return official
 
 
 @transaction.atomic
@@ -186,13 +191,14 @@ def accept_official_signup(signup):
 
 @transaction.atomic
 def decline_official_signup(signup):
-    """Declines `signup`. If they'd already accepted, also removes their
-    self-service EventOfficial row (assigned_by is None -- never touches an
-    admin-made assignment) -- and, in that case only, tells the game's own
+    """Declines `signup`. If they were assigned -- by accepting themselves or
+    by staff (assign_official marks the signup ACCEPTED either way) -- the
+    EventOfficial row goes too, so the assignment and the member's own
+    answer never disagree -- and, in that case only, tells the game's own
     manager(s), same reasoning as decline_referee_signup's own retraction
     notice (deliberately not shared code -- see this module's own
     docstring)."""
-    retracted = EventOfficial.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()[0] > 0
+    retracted = EventOfficial.objects.filter(event=signup.event, member=signup.member).delete()[0] > 0
     signup.status = OfficialSignup.Status.DECLINED
     signup.responded_at = timezone.now()
     signup.save(update_fields=["status", "responded_at"])

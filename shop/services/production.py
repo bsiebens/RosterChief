@@ -91,7 +91,7 @@ def mark_lines_in_production(lines):
         sync_production_status(order)
 
 
-def production_receiving_summary():
+def production_receiving_summary(club):
     """Every (product, variant) combo with at least one non-personalized
     OrderLine currently IN_PRODUCTION, with the total *quantity* expected
     (not line count -- a single line can be several units) -- one row of
@@ -104,8 +104,10 @@ def production_receiving_summary():
     Returns ``[{"product": Product, "variants": [{"variant": ProductVariant
     | None, "expected_quantity": int}, ...], "personalized_count": int}, ...]``,
     products with nothing at all pending (no plain lines and no
-    personalized ones) left out."""
-    merch_in_production = OrderLine.objects.filter(product__product_type=Product.ProductType.MERCHANDISE, production_status=ProductionStatus.IN_PRODUCTION).exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+    personalized ones) left out. Only ``club``'s own lines are counted: both
+    the product and the order have to belong to it."""
+    merch_in_production = OrderLine.objects.filter(product__club=club, order__club=club, product__product_type=Product.ProductType.MERCHANDISE, production_status=ProductionStatus.IN_PRODUCTION)
+    merch_in_production = merch_in_production.exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)
 
     by_product: dict = {}
     for line in merch_in_production.filter(_NOT_PERSONALIZED).select_related("product", "variant"):
@@ -156,7 +158,7 @@ class ProductionReceipt:
 
 
 @transaction.atomic
-def receive_production(receipts: dict) -> list[ProductionReceipt]:
+def receive_production(club, receipts: dict) -> list[ProductionReceipt]:
     """``receipts`` maps ``(product, variant_or_None) -> received_quantity``
     (a physical count staff just entered). For each key, FIFO-allocates
     against every non-personalized OrderLine currently IN_PRODUCTION for
@@ -176,16 +178,20 @@ def receive_production(receipts: dict) -> list[ProductionReceipt]:
     ``_NOT_PERSONALIZED`` docstring) -- they're always received one at a
     time, by hand, via ``mark_line_received``/``OrderLineMarkReceivedView``,
     since only reading the name/number actually printed on a unit says
-    which member it's for."""
+    which member it's for.
+
+    Scoped to ``club``: a key whose product belongs to another club is
+    skipped outright, and only lines whose product *and* order both belong
+    to ``club`` are ever allocated against."""
     results = []
     touched_orders = set()
 
     for (product, variant), received_quantity in receipts.items():
-        if received_quantity is None:
+        if received_quantity is None or product.club_id != club.pk:
             continue
 
         lines = list(
-            OrderLine.objects.filter(product=product, variant=variant, production_status=ProductionStatus.IN_PRODUCTION)
+            OrderLine.objects.filter(product=product, variant=variant, product__club=club, order__club=club, production_status=ProductionStatus.IN_PRODUCTION)
             .filter(_NOT_PERSONALIZED)
             .exclude(order__fulfillment_status=Order.FulfillmentStatus.CANCELLED)
             .select_related("order", "order__purchaser", "variant", "product")

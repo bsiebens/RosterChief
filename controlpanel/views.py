@@ -36,6 +36,7 @@ from features.models import EmailSuppression, JobToggle, Maintenance
 from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
+from .services.accounts import UnverifiedEmailError
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.club_deletion import ClubDeletionBlocked, delete_club, deletion_impact
 from .services.jobs import job_overview, recent_job_runs
@@ -333,7 +334,11 @@ class ClubAdminAddView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, FormV
         return {"pk": self.kwargs["pk"]}
 
     def form_valid(self, form):
-        role = grant_club_admin(self.club, **form.cleaned_data)
+        try:
+            role = grant_club_admin(self.club, **form.cleaned_data)
+        except UnverifiedEmailError as error:
+            notify(self.request, f"e|{_('Admin not added')}|{error}")
+            return redirect("controlpanel:club_detail", pk=self.kwargs["pk"])
         notify(self.request, f"s|Admin added|{role.member} is now an admin of {role.club}. They must set up two-factor authentication before they can sign in.")
         return redirect("controlpanel:club_detail", pk=self.kwargs["pk"])
 
@@ -570,7 +575,11 @@ class PlatformAdminAddView(PlatformSuperuserRequiredMixin, RedirectOnInvalidMixi
     invalid_redirect_url_name = "controlpanel:admins"
 
     def form_valid(self, form):
-        user = grant_platform_access(form.cleaned_data["email"], is_superuser=form.cleaned_data["is_superuser"])
+        try:
+            user = grant_platform_access(form.cleaned_data["email"], is_superuser=form.cleaned_data["is_superuser"])
+        except UnverifiedEmailError as error:
+            notify(self.request, f"e|{_('Access not granted')}|{error}")
+            return redirect("controlpanel:admins")
         notify(self.request, f"s|Platform access granted|{user.email} now has platform access. They must set up two-factor authentication before they can sign in.")
         return redirect("controlpanel:admins")
 

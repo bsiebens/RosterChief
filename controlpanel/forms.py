@@ -6,6 +6,7 @@ from waffle import get_waffle_flag_model
 
 from billing.models import DuePayment, Plan, PlanPrice, Subscription
 from club.models import Club
+from club.validators import LOGO_ACCEPT
 from events.models import Competition, Location
 
 from .services.admins import find_member_by_email
@@ -22,7 +23,7 @@ class ClubForm(forms.ModelForm):
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
-            "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "season_start": forms.DateInput(attrs={"type": "date"}),
         }
 

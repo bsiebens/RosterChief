@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Family, FamilyMembership, Group, GroupMembership, Member
+from .models import Family, FamilyInvite, FamilyMembership, Group, GroupMembership, Member
 
 
 # Register your models here.
@@ -87,3 +87,12 @@ class GroupMembershipAdmin(admin.ModelAdmin):
     list_display = ("group", "member")
     autocomplete_fields = ("group", "member")
     search_fields = ("group__name", "member__first_name", "member__last_name")
+
+
+@admin.register(FamilyInvite)
+class FamilyInviteAdmin(admin.ModelAdmin):
+    list_display = ("email", "family", "club", "expires_at", "accepted_at")
+    list_filter = ("club",)
+    search_fields = ("email",)
+    readonly_fields = ("token", "accepted_at", "accepted_member")
+    raw_id_fields = ("family", "invited_by")

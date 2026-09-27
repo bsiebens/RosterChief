@@ -10,24 +10,32 @@ queue, no separate review gate of this app's own.
 
 from decimal import Decimal
 
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 
-from club.models import OnboardingRequirement
+from club.models import MemberRequirementStatus, OnboardingRequirement
 from club.services.cancellation import cancel_membership
 from club.services.fees import net_balance
 from club.services.onboarding import checklist_for, mark_complete
 from controlpanel.messages import notify
 from members.models import Member
 from members.views import ClubScopedPublicMixin
+from rosterchief import throttle
+from rosterchief.client_ip import client_ip
 
 from .forms import RegistrationContactForm, RegistrationEntryFormSet, RegistrationStatusDocumentForm, entries_from_formset
 from .models import RegistrationBatch, RegistrationDetails
 from .services import PricingError, RegistrationError, price_entries, priced_rows_with_jersey_fields, resolve_chosen_season, resolve_registration_season, submit_registration, team_number_pools, variant_registration_kinds
 from .services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals
 from .services.notifications import send_registration_confirmation_email
+
+#: Caps on final "Confirm & submit" POSTs (price calculations aren't counted):
+#: per client IP, and per contact email address (case-insensitive).
+REGISTRATION_IP_RATE = throttle.Rate("registration:ip", limit=5, window=60 * 60)
+REGISTRATION_EMAIL_RATE = throttle.Rate("registration:email", limit=3, window=24 * 60 * 60)
 
 
 class RegistrationView(ClubScopedPublicMixin, View):
@@ -60,7 +68,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
     def render_season_picker(self, request, available_seasons):
         return render(request, self.template_name, {"registration_open": bool(available_seasons), "needs_season_choice": True, "available_seasons": available_seasons})
 
-    def render_page(self, request, season, contact_form, entry_formset, priced_entries=None):
+    def render_page(self, request, season, contact_form, entry_formset, priced_entries=None, status=200):
         return render(
             request,
             self.template_name,
@@ -87,6 +95,7 @@ class RegistrationView(ClubScopedPublicMixin, View):
                 "variant_registration_kinds": variant_registration_kinds(request.club, season),
                 "team_number_pools": team_number_pools(request.club, season),
             },
+            status=status,
         )
 
     def get(self, request, *args, **kwargs):
@@ -101,6 +110,12 @@ class RegistrationView(ClubScopedPublicMixin, View):
         season, available_seasons = self.get_season(request, data=request.POST)
         if season is None:
             return self.render_season_picker(request, available_seasons)
+
+        # Honeypot (RegistrationContactForm.website): respond exactly as a
+        # successful submission would, without validating or saving anything.
+        if request.POST.get("action") == "submit" and request.POST.get("website"):
+            self.notify_received(request)
+            return redirect("registration:register")
 
         contact_form, entry_formset = self.get_forms(request, season, request.POST)
         if not contact_form.is_valid() or not entry_formset.is_valid():
@@ -125,8 +140,13 @@ class RegistrationView(ClubScopedPublicMixin, View):
 
         member = self.get_contact_member(request)
         contact = dict(contact_form.cleaned_data)
+        contact.pop("website", None)
         if member is not None:
             contact = {"contact_first_name": member.first_name, "contact_last_name": member.last_name, "contact_email": member.contact_email, "contact_phone": contact.get("contact_phone", "")}
+
+        if throttle.check_and_record((REGISTRATION_IP_RATE, client_ip(request) or "unknown"), (REGISTRATION_EMAIL_RATE, (contact.get("contact_email") or "").strip().lower())):
+            contact_form.add_error(None, _("Too many registrations have been submitted recently. Please try again later, or contact the club directly."))
+            return self.render_page(request, season, contact_form, entry_formset, priced_entries=priced_rows, status=429)
 
         try:
             batch = submit_registration(request.club, submitted_by_user=request.user if request.user.is_authenticated else None, entries=entries, **contact)
@@ -135,8 +155,11 @@ class RegistrationView(ClubScopedPublicMixin, View):
             return self.render_page(request, season, contact_form, entry_formset)
 
         send_registration_confirmation_email(batch, request=request)
-        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
+        self.notify_received(request)
         return redirect("registration:status", token=batch.status_token)
+
+    def notify_received(self, request):
+        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
 
 
 class RegistrationStatusView(ClubScopedPublicMixin, View):
@@ -173,6 +196,7 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
         memberships.sort(key=lambda membership: membership.member.get_full_name())
         rows = []
         for membership in memberships:
+            managed_here = membership.created >= batch.created  # see RegistrationDetails.created_membership
             # net_balance, not remaining_balance -- the latter floors at 0,
             # which would fold a genuine credit (a negative per-line price on
             # the Registrations review screen, or an overpayment) into the
@@ -192,6 +216,10 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
                     # stops the template offering it once it's too late for it
                     # to mean anything.
                     "paid": balance is not None and balance <= 0,
+                    # Cancel/upload only for a membership this batch itself
+                    # created -- one that already existed isn't this link's
+                    # to change (see RegistrationDetails.created_membership).
+                    "managed_here": managed_here,
                     "checklist": checklist_for(membership),
                     "upload_form": RegistrationStatusDocumentForm(),
                 }
@@ -230,17 +258,24 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
         # Both must belong to this batch/club -- a tampered POST can't reach
         # another family's membership or another club's requirement through
         # this token.
-        details = RegistrationDetails.objects.filter(batch=batch, membership_id=membership_id).select_related("membership").first()
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=membership_id).select_related("membership", "batch").first()
         requirement = OnboardingRequirement.objects.filter(club=request.club, pk=requirement_id, is_active=True, requires_document=True).first()
-        if details is None or requirement is None:
+        if details is None or requirement is None or not details.created_membership:
             raise Http404
+        # Only an open item can be uploaded against -- never over something
+        # already received/verified or bypassed (the template hides the form
+        # for those too; this is the server-side half of that).
+        if MemberRequirementStatus.objects.filter(membership=details.membership, requirement=requirement).filter(Q(is_complete=True) | Q(is_bypassed=True)).exists():
+            notify(request, f"e|{_('Upload failed')}|{_('This item has already been completed.')}")
+            return redirect("registration:status", token=batch.status_token)
 
         form = RegistrationStatusDocumentForm(request.POST, request.FILES)
         if form.is_valid():
             mark_complete(details.membership, requirement, user=None, document=form.cleaned_data["document"], note=_("Uploaded by the registrant via the status page."))
             notify(request, f"s|{_('Document received')}|{_('“%(requirement)s” has been received.') % {'requirement': requirement.name}}")
         else:
-            notify(request, f"e|{_('Upload failed')}|{_('Choose a file to upload.')}")
+            errors = form.errors.get("document") or [_("Choose a file to upload.")]
+            notify(request, f"e|{_('Upload failed')}|{errors[0]}")
 
         return redirect("registration:status", token=batch.status_token)
 
@@ -273,12 +308,17 @@ class RegistrationCancelView(ClubScopedPublicMixin, View):
     """Withdraws one person's registration from the status page -- same
     token-gated access as everything else there, and the same club.services.
     cancellation.cancel_membership every cancel path (this one, and the
-    Sign-up page's own) goes through."""
+    Sign-up page's own) goes through -- which never deletes a Member with a
+    login or with anything outside this sign-up. Limited to memberships this
+    batch itself created (RegistrationDetails.created_membership)."""
 
     def post(self, request, *args, **kwargs):
         batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
-        details = RegistrationDetails.objects.filter(batch=batch, membership_id=kwargs["membership_pk"]).select_related("membership").first()
-        if details is None:
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=kwargs["membership_pk"]).select_related("membership__member", "batch").first()
+        # A membership that predates this batch (the batch only added a
+        # request onto it) isn't this link's to cancel -- same 404 as one
+        # outside the batch entirely.
+        if details is None or not details.created_membership:
             raise Http404
 
         member_name = str(details.membership.member)

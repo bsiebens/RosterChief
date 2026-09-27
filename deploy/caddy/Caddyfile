@@ -1,5 +1,16 @@
 {
 	email {$ACME_EMAIL}
+
+	# Traffic arrives through Cloudflare's proxy, so the connecting address is a Cloudflare
+	# edge, not the visitor. Only when the connection really comes from Cloudflare's published
+	# ranges (https://www.cloudflare.com/ips/ -- update this list if Cloudflare adds any) is
+	# CF-Connecting-IP trusted; {client_ip} below is then the visitor's address, and for any
+	# other connection it stays the direct peer, so the header can't be spoofed by going
+	# around Cloudflare.
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+	}
 }
 
 # The bare domain (control panel, admin, auth) and every club subdomain, on one certificate.
@@ -10,21 +21,44 @@
 
 	encode zstd gzip
 
+	# Caps every request body before it reaches gunicorn (413 above this): the largest single
+	# upload the app accepts is a 10 MB document (rosterchief/uploads.py), but a news post can
+	# carry several phone photos in one request, so the cap is per request with room for that.
+	# Keep DEPLOYMENT.md's external-Caddy snippet in step with this value.
+	request_body {
+		max_size 64MB
+	}
+
 	# Club logos, served straight off the shared volume — no gunicorn worker involved. Only
 	# matters while storage is local disk; once AWS_STORAGE_BUCKET_NAME is set, club.logo.url
 	# points at the bucket directly and this block simply never matches. A missing file 404s
 	# here exactly as django.views.static.serve would, so there is no need to fall through.
+	#
+	# Uploads are user-supplied content on the application's own origin, so they are served
+	# with no content sniffing and a sandboxing CSP (a file opened directly can't run script
+	# against the site), and SVG is forced to download instead of rendering inline. Mirrors
+	# rosterchief/media.py, which does the same for the Django fallback route.
 	handle_path /media/* {
+		header {
+			X-Content-Type-Options nosniff
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+		}
+		@svg path *.svg *.SVG
+		header @svg Content-Disposition attachment
 		root * /srv/media
 		file_server
 	}
 
 	# X-Forwarded-Proto is what SECURE_PROXY_SSL_HEADER reads. Without it Django believes every
 	# request is plain HTTP: request.is_secure() goes false, WebAuthn disagrees with the browser
-	# about the origin, and the SSL redirect becomes a loop.
+	# about the origin, and the SSL redirect becomes a loop. X-Real-IP replaces any
+	# client-supplied value with the visitor's address as resolved above ({client_ip}, not
+	# {remote_host}, which would be the Cloudflare edge). It is what
+	# ALLAUTH_TRUSTED_CLIENT_IP_HEADER / rosterchief.client_ip read, so login rate limits key
+	# on the real client.
 	reverse_proxy web:8000 {
 		header_up X-Forwarded-Proto {scheme}
-		header_up X-Real-IP {remote_host}
+		header_up X-Real-IP {client_ip}
 	}
 
 	log {

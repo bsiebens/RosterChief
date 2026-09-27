@@ -1,5 +1,9 @@
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
@@ -142,6 +146,50 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.family} - {self.member} ({self.get_role_display()})"
+
+
+def _generate_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _default_invite_expiry():
+    return timezone.now() + FamilyInvite.VALID_FOR
+
+
+class FamilyInvite(ClubScopedModel):
+    """A club's request for an existing account holder to join one of its
+    families as a parent/guardian (members.services.invites). Member is
+    global, so staff typing an email that already has an account never links
+    that person directly: nothing changes until the account holder signs in
+    and accepts. ``token`` is the single-use credential in the emailed link
+    (same secrets.token_urlsafe(32) approach as RegistrationBatch.status_token),
+    only honoured for this club, before ``expires_at``, and for a signed-in
+    user whose email matches ``email``."""
+
+    VALID_FOR = timedelta(days=14)
+
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name="invites", verbose_name=_("family"))
+    email = models.EmailField(_("email"))
+    first_name = models.CharField(_("first name"), max_length=150, blank=True)
+    last_name = models.CharField(_("last name"), max_length=150, blank=True)
+    parent_is_member = models.BooleanField(_("also a member"), default=False)
+    token = models.CharField(_("token"), max_length=64, unique=True, editable=False, default=_generate_invite_token)
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("invited by"))
+    expires_at = models.DateTimeField(_("expires at"), default=_default_invite_expiry)
+    accepted_at = models.DateTimeField(_("accepted at"), null=True, blank=True)
+    accepted_member = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("accepted by"))
+
+    class Meta:
+        verbose_name = _("family invite")
+        verbose_name_plural = _("family invites")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.email} -> {self.family}"
+
+    @property
+    def is_pending(self):
+        return self.accepted_at is None and self.expires_at > timezone.now()
 
 
 class Group(ClubScopedModel):

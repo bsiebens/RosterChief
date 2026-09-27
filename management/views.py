@@ -65,7 +65,7 @@ from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
-from club.services.signup_linking import link_to_existing_member
+from club.services.signup_linking import link_to_existing_member, possible_duplicates
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
@@ -110,7 +110,9 @@ from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
 from formbuilder.services.reporting import form_report
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
+from members.services.deletion import member_has_ties_outside_club, remove_member_from_club
+from members.services.family import add_child_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, get_or_create_login_user, grant_login
+from members.services.invites import account_exists, add_or_invite_parent, pending_invites, register_family_or_invite
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
 from notifications.models import Notification
@@ -128,6 +130,7 @@ from registration.services.invoicing import (
 from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
 from registration.services.pricing import team_number_pools, variant_prices
 from rosterchief.request_cache import cached_on_request
+from rosterchief.spreadsheet import safe_row
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -924,7 +927,7 @@ class MemberImportView(MemberAdminRequiredMixin, View):
             return render(request, "management/member_import.html", {"form": form})
 
         request.session["member_import_rows"] = rows
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         return render(
             request,
             "management/member_import_preview.html",
@@ -950,7 +953,7 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
             notify(request, f"w|{_('Nothing to import')}|{_('Upload a file first.')}")
             return redirect("management:member_import")
 
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         season = current_season(request.club)
 
         created = 0
@@ -962,11 +965,12 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
                     continue
 
                 family_role = result["family_role"]
-                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email:
+                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email and not account_exists(member.email):
                     # Give the parent/guardian a login before saving, same as
-                    # registering a family by hand -- get_or_create_login_user
-                    # reuses an existing account for that email rather than
-                    # risking a duplicate.
+                    # registering a family by hand. An email that already has an
+                    # account is left as a plain contact address on this new,
+                    # login-less record: an import never binds a row to someone
+                    # else's existing account.
                     member.user, _unused = get_or_create_login_user(member.email)
 
                 member.save()
@@ -1043,7 +1047,13 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     """Not a generic UpdateView: this page owns two forms on one submit -- the
     member's own fields, and (when they're actually rostered this season) their
     ClubMembership's license/status/fee status. A Member has no club of its own
-    without one, so this is the only place to see or change it."""
+    without one, so this is the only place to see or change it. Status and the
+    fee fields stay read-only for a MEMBER_ADMIN (see ClubMembershipForm).
+
+    The person's own details are read-only here when the record isn't this
+    club's alone (a login, or ties to another club -- members.services.
+    deletion.member_has_ties_outside_club): the form disables them, and they
+    are never saved. The club's own membership row stays editable."""
 
     template_name = "management/member_form.html"
 
@@ -1062,17 +1072,18 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     def get(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        membership_form = ClubMembershipForm(instance=membership) if membership else None
-        return self.render_form(member, MemberForm(instance=member), membership_form)
+        membership_form = ClubMembershipForm(instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
+        return self.render_form(member, MemberForm(instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club)), membership_form)
 
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        form = MemberForm(request.POST, request.FILES, instance=member)
-        membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
+        form = MemberForm(request.POST, request.FILES, instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club))
+        membership_form = ClubMembershipForm(request.POST, instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):
-            form.save()
+            if not form.person_fields_locked:
+                form.save()
             if membership_form is not None:
                 membership_form.save()
             notify(request, f"s|{_('Member updated')}|{_('“%(member)s” updated.') % {'member': member}}")
@@ -1239,6 +1250,10 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
             # Already has one -- the row's button shouldn't have been there at all;
             # a direct POST replay (e.g. a resubmitted form) is the only way here.
             notify(self.request, f"w|{_('Already has a login')}|{_('“%(member)s” can already sign in.') % {'member': member}}")
+        elif member_has_ties_outside_club(member, self.request.club):
+            # A login decides who controls a shared person record, so one club
+            # can't hand it out on its own (same rule as MemberUpdateView).
+            notify(self.request, f"e|{_('Could not grant a login')}|{_('“%(member)s” is also known to another club, so a login cannot be set up from here.') % {'member': member}}")
         else:
             grant_login(member, form.cleaned_data["email"])
             notify(self.request, f"s|{_('Login granted')}|{_('“%(member)s” can now sign in.') % {'member': member}}")
@@ -1248,7 +1263,7 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
 class MemberDetachFromFamilyView(MemberAdminRequiredMixin, View):
     def post(self, request, pk, family_pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
-        family = get_object_or_404(Family, pk=family_pk, memberships__member=member)
+        family = get_object_or_404(families_of_club(request.club), pk=family_pk, memberships__member=member)
         # detach_from_family may delete `family` itself (left empty) -- str() it first,
         # since Family.__str__ queries self.memberships, which needs a pk to still exist.
         family_name = str(family)
@@ -1288,13 +1303,26 @@ class FamilyMembershipRoleUpdateView(MemberAdminRequiredMixin, View):
 
 
 class MemberDeleteView(MemberAdminRequiredMixin, View):
+    """Member is global: the record is only deleted when it is this club's
+    alone (members.services.deletion.member_has_ties_outside_club). Otherwise
+    only this club's rows about the person are removed
+    (remove_member_from_club) and the record itself stays. Either way the only
+    families that can be cleaned up are this club's, once left empty."""
+
     def post(self, request, pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         name = str(member)
+
+        if member_has_ties_outside_club(member, request.club):
+            remove_member_from_club(member, request.club)
+            body = _("“%(member)s” has been removed from the club.") % {"member": name}
+            notify(request, f"w|{_('Member removed')}|{body}")
+            return redirect("management:member_list")
+
         # FamilyMembership cascades away with the member -- note which families
         # they were in before that happens, so an emptied one can be cleaned up
         # after, same as detach_from_family does.
-        family_ids = list(Family.objects.filter(memberships__member=member).values_list("pk", flat=True))
+        family_ids = list(families_of_club(request.club).filter(memberships__member=member).values_list("pk", flat=True))
 
         try:
             member.delete()
@@ -2017,7 +2045,8 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
 
 class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     """One new family in one go: a parent (who gets a login) and a child (who
-    doesn't) -- see members.services.family.register_family."""
+    doesn't) -- see members.services.invites.register_family_or_invite: a
+    parent email that already has an account is invited, not linked."""
 
     form_class = FamilyCreateForm
     template_name = "management/family_form.html"
@@ -2025,9 +2054,11 @@ class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     def form_valid(self, form):
         cd = form.cleaned_data
         season = current_season(self.request.club)
-        self.family = register_family(
+        self.family = register_family_or_invite(
             self.request.club,
             season,
+            invited_by=self.request.user,
+            request=self.request,
             parent_email=cd["parent_email"],
             parent_first_name=cd["parent_first_name"],
             parent_last_name=cd["parent_last_name"],
@@ -2077,6 +2108,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
             family_role_choices=FamilyMembership.FamilyRole.choices,
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
+            pending_invites=pending_invites(self.object),
             **kwargs,
         )
 
@@ -2103,7 +2135,11 @@ class FamilyAddChildView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormV
 
 class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add parent" modal on the family overview / member
-    detail pages -- a family that needs one more parent/guardian registered."""
+    detail pages -- a family that needs one more parent/guardian registered.
+
+    A new email is added straight away; an email that already has an account is
+    only invited (members.services.invites.add_or_invite_parent). The
+    confirmation reads the same either way."""
 
     form_class = AddParentForm
     http_method_names = ["post"]
@@ -2114,9 +2150,12 @@ class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, Form
 
     def form_valid(self, form):
         family = get_object_or_404(families_of_club(self.request.club), pk=self.kwargs["pk"])
-        parent = add_parent_to_family(self.request.club, current_season(self.request.club), family, **form.cleaned_data)
-        body = _("“%(parent)s” added to %(family)s.") % {"parent": parent, "family": family}
-        notify(self.request, f"s|{_('Parent registered')}|{body}")
+        email = form.cleaned_data["email"]
+        # Named before the add, so the message doesn't differ by whose surname joined.
+        family_name = str(family)
+        add_or_invite_parent(self.request.club, current_season(self.request.club), family, invited_by=self.request.user, request=self.request, **form.cleaned_data)
+        body = _("%(email)s has been added to %(family)s, or emailed an invite to join it if they already have an account.") % {"email": email, "family": family_name}
+        notify(self.request, f"s|{_('Parent added')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
 
 
@@ -5204,10 +5243,10 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
     template_name = "management/order_receive_production.html"
 
     def get(self, request):
-        return render(request, self.template_name, {"summary": production_receiving_summary()})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club)})
 
     def post(self, request):
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(request.club)
 
         receipts = {}
         for entry in summary:
@@ -5225,7 +5264,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             notify(request, f"w|{_('Nothing entered')}|{_('Enter a received quantity for at least one item.')}")
             return redirect("management:order_receive_production")
 
-        results = receive_production(receipts)
+        results = receive_production(request.club, receipts)
 
         allocated_total = sum(len(result.allocated_lines) for result in results)
         discrepancy_count = sum(1 for result in results if result.has_discrepancy)
@@ -5240,7 +5279,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             body = ngettext("%(count)d line marked received.", "%(count)d lines marked received.", allocated_total) % {"count": allocated_total}
             notify(request, f"s|{_('Received')}|{body}")
 
-        return render(request, self.template_name, {"summary": production_receiving_summary(), "results": results})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club), "results": results})
 
 
 class OrderReadyForPickupView(ShopManagerRequiredMixin, ListView):
@@ -5868,10 +5907,12 @@ class RegistrationInvoiceDetailView(ClubAdminRequiredMixin, View):
     template_name = "management/registration_invoice_detail.html"
 
     def get(self, request, pk):
-        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season"), pk=pk)
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season", "contact_member"), pk=pk)
         entries = active_batch_entries(batch)
         subtotal, discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
-        contact = find_member_by_email(batch.contact_email)
+        # The Member the submission itself resolved -- never re-derived from
+        # the typed email. None: the template shows the typed contact only.
+        contact = batch.contact_member
         memberships = {}
         for entry in entries:
             memberships.setdefault(entry.membership_id, entry.membership)
@@ -6067,7 +6108,7 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
         grouping batch_invoice_pdf's own document uses. A still-unconfirmed
         registration has no place here at all; it's on the review queue
         instead, until staff has actually reviewed and sent it."""
-        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).order_by("-invoice_sent_at")
+        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).select_related("contact_member").order_by("-invoice_sent_at")
         if search:
             batches = (
                 batches.filter(contact_first_name__icontains=search)
@@ -6078,13 +6119,6 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
 
         rows = []
         for batch in batches:
-            contact = find_member_by_email(batch.contact_email)
-            if contact is None:
-                # The login account behind the contact email has since gone
-                # missing (changed/removed) -- billed_to has to be a real
-                # Member (the template links straight to its own detail
-                # page), so this row can't be shown rather than 500ing.
-                continue
             entries = active_batch_entries(batch)
             if not entries:
                 # Everyone in it has since been cancelled -- nothing left
@@ -6102,7 +6136,10 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
                     "kind": "registration",
                     "kind_label": _("Registration"),
                     "number": batch.invoice_number,
-                    "billed_to": contact,
+                    # The Member the submission resolved; when that's gone, the
+                    # row still shows, with the typed contact and no link.
+                    "billed_to": batch.contact_member,
+                    "billed_to_name": f"{batch.contact_first_name} {batch.contact_last_name}".strip() or batch.contact_email,
                     "amount": total,
                     "date": batch.invoice_sent_at.date(),
                     "status_label": status_label,
@@ -6407,14 +6444,18 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = f'attachment; filename="{send.form.slug}-responses.csv"'
         writer = csv.writer(response)
-        writer.writerow([_("Submitted"), _("Member"), *[column.label for column in report.columns]])
+        # safe_row: labels and answers are free text typed by users (anonymous
+        # respondents included) -- never let a spreadsheet run one as a formula.
+        writer.writerow(safe_row([_("Submitted"), _("Member"), *[column.label for column in report.columns]]))
         for row in report.rows:
             writer.writerow(
-                [
-                    timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
-                    str(row.submission.member) if row.submission.member else "",
-                    *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
-                ]
+                safe_row(
+                    [
+                        timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
+                        str(row.submission.member) if row.submission.member else "",
+                        *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
+                    ]
+                )
             )
         return response
 
@@ -7104,12 +7145,17 @@ class MemberRequirementIncompleteView(MemberAdminRequiredMixin, View):
 
 
 class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
-    """Streams a checklist document (see MemberRequirementStatus.document) to any
-    signed-in staff -- same visibility as the rest of a member's profile. The file
-    itself lives on rosterchief.storage.private_storage, which has no public URL at
-    all; this view is the only way to read one."""
+    """Streams a checklist document (see MemberRequirementStatus.document) to staff
+    who may see that member -- the same members_visible_to rule MemberDetailView
+    applies, plus anyone who may manage members (who can already mark the item
+    complete/incomplete). Anyone else gets a 404, not a 403, so the view doesn't
+    confirm the member exists. The file itself lives on
+    rosterchief.storage.private_storage, which has no public URL at all; this view
+    is the only way to read one."""
 
     def get(self, request, pk, requirement_pk):
+        if not can_manage_members(request.user, request.club) and not members_visible_to(request.user, request.club, include_guardians=True).filter(pk=pk).exists():
+            raise Http404("No such member.")
         membership = _current_membership_or_404(request, pk)
         status = get_object_or_404(MemberRequirementStatus.objects.filter(membership=membership, requirement_id=requirement_pk))
 
@@ -7202,7 +7248,11 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
                 membership.teams_registered = teams.filter(Q(roster__member_id=membership.member_id, roster__season=season) | Q(staff_assignments__member_id=membership.member_id, staff_assignments__season=season)).distinct()
                 membership.requested_team_ids = {details.requested_team_id for details in membership.registration_details.all() if details.requested_team_id}
                 membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
-                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member)
+                # A fresh sign-up is never matched to an existing member
+                # automatically (registration.services.submission) -- this is
+                # where staff sees the likely match, preselected in the picker.
+                membership.possible_duplicates = list(possible_duplicates(membership.member, club))
+                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member, initial={"member": membership.possible_duplicates[0].pk} if membership.possible_duplicates else None)
                 membership.is_clean = is_signup_clean(membership)
                 membership.is_oldest_pending = membership.pk == oldest_pending_id
             # Already-ACTIVE *and* clean (paid, checklist fully resolved) memberships
