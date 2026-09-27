@@ -1467,11 +1467,11 @@ Setup:
 
 - **Hosts:** wildcard `ALLOWED_HOSTS` for the chosen base domain (e.g. `.rosterchief.app`)
   if using subdomain resolution; add `DJANGO_ALLOWED_HOSTS` accordingly.
-- **CSRF:** `CSRF_TRUSTED_ORIGINS` must cover the wildcard scheme+host set
-  (`https://*.rosterchief.app`).
-- **Cookies:** to share login across club subdomains, set `SESSION_COOKIE_DOMAIN` /
-  `CSRF_COOKIE_DOMAIN` to the base domain; otherwise keep per-subdomain sessions
-  (decide with the "cross-club users" question in §7).
+- **CSRF:** `CSRF_USE_SESSIONS = True` — the CSRF secret lives in the (shared) session,
+  not a cookie that a sibling subdomain could overwrite ("cookie tossing"). Every form posts
+  to its own host, so `CSRF_TRUSTED_ORIGINS` needs no `https://*.<base>` wildcard.
+- **Cookies:** login is shared across club subdomains via `SESSION_COOKIE_DOMAIN` set to
+  the base domain (derived from `ROSTERCHIEF_BASE_DOMAIN`); there is no CSRF cookie.
 - **Local dev:** map a wildcard to localhost (e.g. `*.localhost` resolves on most systems,
   or use `dnsmasq`) so subdomain resolution works without editing `/etc/hosts` per club.
 - **Middleware order:** place `ClubTenantMiddleware` after `AuthenticationMiddleware`

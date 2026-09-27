@@ -31,6 +31,18 @@ class RosterChiefMFAAdapter(DefaultMFAAdapter):
             "name": settings.MFA_WEBAUTHN_RP_NAME,
         }
 
+    # TOTP secrets and recovery-code seeds are stored encrypted (see authentication/crypto.py);
+    # allauth.mfa routes every read/write of them through these two hooks.
+    def encrypt(self, text: str) -> str:
+        from .crypto import encrypt
+
+        return encrypt(text)
+
+    def decrypt(self, encrypted_text: str) -> str:
+        from .crypto import decrypt
+
+        return decrypt(encrypted_text)
+
 
 class RosterChiefAccountAdapter(DefaultAccountAdapter):
     """Same email-rendering steps as allauth's own DefaultAccountAdapter.send_mail

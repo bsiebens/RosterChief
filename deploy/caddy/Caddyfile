@@ -21,6 +21,14 @@
 
 	encode zstd gzip
 
+	# Caps every request body before it reaches gunicorn (413 above this): the largest single
+	# upload the app accepts is a 10 MB document (rosterchief/uploads.py), but a news post can
+	# carry several phone photos in one request, so the cap is per request with room for that.
+	# Keep DEPLOYMENT.md's external-Caddy snippet in step with this value.
+	request_body {
+		max_size 64MB
+	}
+
 	# Club logos, served straight off the shared volume — no gunicorn worker involved. Only
 	# matters while storage is local disk; once AWS_STORAGE_BUCKET_NAME is set, club.logo.url
 	# points at the bucket directly and this block simply never matches. A missing file 404s

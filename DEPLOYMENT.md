@@ -153,6 +153,11 @@ cd /home/bernard/RosterChief
 cp .env.compose.example .env                 # read by docker compose
 cp .env.production.example .env.production   # read by Django
 python -c "import secrets; print(secrets.token_urlsafe(64))"   # -> DJANGO_SECRET_KEY
+python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+                                             # -> MFA_ENCRYPTION_KEY (see "Two-factor secrets")
+openssl rand -hex 32                         # -> POSTGRES_PASSWORD, and again -> APP_DB_PASSWORD
+                                             #    (the same value goes into DJANGO_DATABASE_URL;
+                                             #    see "Database roles")
 
 # 2. Pull and start
 # The image is built on GitHub Actions (.github/workflows/build-and-push.yml), not here --
@@ -263,6 +268,123 @@ docker compose up -d --no-deps web
 ```
 
 (`deploy/deploy-prod.sh` does exactly this, plus a backup first — see "Deploying updates".)
+
+## Database roles
+
+The app does not connect as the Postgres superuser. Two roles:
+
+| Role | Set by | Used by |
+|---|---|---|
+| `POSTGRES_USER` (default `rosterchief`) — superuser | `.env` | the image's first-boot init, `deploy/backup.sh`, `deploy/restore-check.sh` (all via `docker compose exec db`, over the container's local socket) |
+| `APP_DB_USER` (default `rosterchief_app`) — `NOSUPERUSER NOCREATEDB NOCREATEROLE` | `.env` (`APP_DB_USER`/`APP_DB_PASSWORD`) | `web` and every `manage.py` one-off, through `DJANGO_DATABASE_URL` in `.env.production` |
+
+The app role **owns** the database and its `public` schema, so `migrate` can create and alter
+tables; what it cannot do is anything outside that database — read other databases, create
+roles, `COPY ... PROGRAM`, load extensions or files from the server. A SQL injection or a
+leaked `DJANGO_DATABASE_URL` stays inside the app's own data.
+
+### On a fresh volume
+
+`deploy/postgres/10-app-role.sh` is mounted into `/docker-entrypoint-initdb.d`, so the first
+`docker compose up -d db` on an empty `pgdata` volume creates the app role for you. Set
+`APP_DB_USER`/`APP_DB_PASSWORD` in `.env` **before** that first start, and point
+`DJANGO_DATABASE_URL` at the same user/password. The init script never runs again on an
+existing volume — changing those variables later does nothing to the database.
+
+### Converting an existing database
+
+A database created before this existed is owned, table by table, by the superuser. Convert it
+once (a few seconds; take a backup first). Generate a password without URL-special characters
+so it can go into `DJANGO_DATABASE_URL` as-is:
+
+```bash
+cd /home/bernard/RosterChief
+deploy/backup.sh /var/backups/rosterchief
+APP_PW="$(openssl rand -hex 32)"; echo "$APP_PW"     # keep it for the two env files below
+
+docker compose exec -T db psql -v ON_ERROR_STOP=1 -U rosterchief -d rosterchief \
+  -v app_password="$APP_PW" <<'SQL'
+BEGIN;
+CREATE ROLE rosterchief_app LOGIN PASSWORD :'app_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER DATABASE rosterchief OWNER TO rosterchief_app;
+ALTER SCHEMA public OWNER TO rosterchief_app;
+-- REASSIGN OWNED BY does not work here (the bootstrap superuser also owns system objects),
+-- so hand over the app's own relations one by one: tables/views first, which takes their
+-- identity/serial sequences along; then any sequence still left.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+             AND pg_get_userbyid(c.relowner) <> 'rosterchief_app'
+  LOOP
+    EXECUTE format(CASE r.relkind WHEN 'v' THEN 'ALTER VIEW public.%I OWNER TO rosterchief_app'
+                                  WHEN 'm' THEN 'ALTER MATERIALIZED VIEW public.%I OWNER TO rosterchief_app'
+                                  WHEN 'f' THEN 'ALTER FOREIGN TABLE public.%I OWNER TO rosterchief_app'
+                                  ELSE 'ALTER TABLE public.%I OWNER TO rosterchief_app' END, r.relname);
+  END LOOP;
+  FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relkind = 'S'
+             AND pg_get_userbyid(c.relowner) <> 'rosterchief_app'
+  LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO rosterchief_app', r.relname);
+  END LOOP;
+END $$;
+REVOKE ALL ON DATABASE rosterchief FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE rosterchief TO rosterchief_app;
+COMMIT;
+
+-- Should print zero rows:
+SELECT c.relname, c.relkind, pg_get_userbyid(c.relowner) AS owner
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND pg_get_userbyid(c.relowner) <> 'rosterchief_app';
+SQL
+```
+
+(Using a non-default `POSTGRES_USER`/`POSTGRES_DB`/`APP_DB_USER`? Substitute them for
+`rosterchief`/`rosterchief`/`rosterchief_app` throughout.) Then switch the app over:
+
+```bash
+# .env            -> APP_DB_USER=rosterchief_app  APP_DB_PASSWORD=<APP_PW>
+#                    (only documents it for a future fresh volume; the role already exists)
+# .env.production -> DJANGO_DATABASE_URL=postgres://rosterchief_app:<APP_PW>@db:5432/rosterchief
+docker compose up -d --no-deps --force-recreate web     # env_file changes need a recreate
+docker compose run --rm web python manage.py migrate    # "No migrations to apply." -- as the app role
+curl -fsS https://rosterchief.app/healthz
+```
+
+Nothing changes for backups: `deploy/backup.sh` and `deploy/restore-check.sh` keep running
+`pg_dump`/`psql` as `POSTGRES_USER` inside the `db` container (local socket, no password). The
+dump records the app role as owner, so restoring it needs that role to exist — it does on this
+server; on a brand-new one, bring `db` up with the same `APP_DB_*` first. To roll back, point
+`DJANGO_DATABASE_URL` at the superuser again; the superuser can still read everything.
+
+## Two-factor secrets (`MFA_ENCRYPTION_KEY`)
+
+TOTP secrets and recovery-code seeds are stored Fernet-encrypted (`authentication/crypto.py`),
+under `MFA_ENCRYPTION_KEY` in `.env.production`. Passkeys hold no secret server-side and are
+unaffected.
+
+- **Required outside `DJANGO_DEBUG=True`.** Without it the `authentication.E001` system check
+  fails `migrate` and `check` — which stops `deploy/deploy-prod.sh` before `web` restarts — and
+  any TOTP sign-in would error. Local dev and the test suite derive a throwaway key from
+  `DJANGO_SECRET_KEY` and need nothing.
+- **Generate:** `python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`
+  (or `Fernet.generate_key()` from `cryptography`).
+- **Back it up separately from the database** (e.g. in the password manager next to the
+  backup key below). Lose it and every TOTP user is locked out of their authenticator *and*
+  their recovery codes; a staff account then needs its authenticators deleted in the admin
+  and re-enrolled. It sits next to the ciphertext in no backup, which is the point.
+- **Rotate:** put the new key first, the old one after it, comma-separated
+  (`MFA_ENCRYPTION_KEY=new,old`). New writes use the first; both decrypt. Old values only get
+  re-encrypted when a user re-enrols, so keep the old key in the list.
+
+**Upgrading an existing deployment:** add `MFA_ENCRYPTION_KEY` to `.env.production` *before*
+deploying the release that introduces it. Migration `authentication.0006_encrypt_mfa_secrets`
+then encrypts the existing plaintext secrets in place (idempotent; reversible with
+`migrate authentication 0005`). Values not yet encrypted are still read correctly, so there is
+no window where sign-in breaks.
 
 ## Scheduled jobs
 
@@ -450,6 +572,11 @@ existing-thing.example.com {
 test.rosterchief.app, *.test.rosterchief.app {
 	encode zstd gzip
 
+	# Same per-request body cap as deploy/caddy/Caddyfile -- keep the two in step.
+	request_body {
+		max_size 64MB
+	}
+
 	reverse_proxy 127.0.0.1:8001 {
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {client_ip}
@@ -480,6 +607,9 @@ existing-thing.example.com {
 
 test.rosterchief.app, *.test.rosterchief.app {
 	import cf {env.CF_TOKEN_ROSTERCHIEF}
+	request_body {
+		max_size 64MB
+	}
 	reverse_proxy 127.0.0.1:8001 {
 		header_up X-Forwarded-Proto {scheme}
 	}
@@ -511,7 +641,9 @@ test.rosterchief.app, *.test.rosterchief.app {
    Then `systemctl daemon-reload && systemctl restart caddy`.
 
 5. **`header_up X-Forwarded-Proto` is not optional**, exactly as in the bundled Caddyfile:
-   without it Django believes the request behind the proxy is plain HTTP.
+   without it Django believes the request behind the proxy is plain HTTP. Keep the
+   `request_body { max_size … }` cap too: it rejects oversized uploads (413) before they tie up
+   a gunicorn worker. The bundled Caddyfile explains the value.
 
 6. **Give the test instance its own subdomain tree** and set
    `ROSTERCHIEF_BASE_DOMAIN=test.rosterchief.app`. That variable drives tenant resolution,
@@ -665,7 +797,9 @@ application code and dependencies (all secrets are `.env`/`.env.production`, nev
 `deploy/backup.sh` dumps the database, tars the public uploads while they are still on local
 disk and the private uploads (always local), prunes anything older than `KEEP_DAYS`, and — if
 you set `BACKUP_REMOTE` — copies the lot off the box with rclone. Everything it writes is
-owner-only (`umask 077`, backup directory `chmod 700`).
+owner-only (`umask 077`, backup directory `chmod 700`), and with `BACKUP_AGE_RECIPIENT` set
+every archive is encrypted with [age](https://age-encryption.org) (see "Encrypted backups"
+below) — **required** whenever `BACKUP_REMOTE` is set.
 
 ```bash
 deploy/backup.sh /var/backups/rosterchief
@@ -679,10 +813,12 @@ Schedule it as root on the host (single server; on several, run it on the databa
 
 ```cron
 # Nightly at 02:30, before the billing and event jobs.
+# BACKUP_AGE_RECIPIENT is read from .env in the checkout (or set it on this line).
 30 2 * * *  cd /srv/rosterchief && BACKUP_REMOTE=b2:rosterchief-backups KEEP_DAYS=14 deploy/backup.sh /var/backups/rosterchief
 
 # Weekly restore rehearsal into a throwaway database. This is the only line here that proves
-# the others work.
+# the others work. Only while backups are NOT encrypted -- see "Encrypted backups" for how to
+# rehearse once they are (the private key is not on this server).
 0 4 * * 0   cd /srv/rosterchief && deploy/restore-check.sh
 ```
 
@@ -697,12 +833,59 @@ Backblaze, a second box).
 **Once uploads move to S3** (`AWS_STORAGE_BUCKET_NAME`), the script skips the media tarball:
 the bucket's own versioning is the backup. Turn versioning on when you create it.
 
+### Encrypted backups
+
+The dumps hold members' personal data and the private uploads (medical certificates, …). With
+`BACKUP_AGE_RECIPIENT` set, `deploy/backup.sh` encrypts each archive to `*.age` with
+`age -r <recipient>` and deletes the plaintext; only `*.age` files are copied to
+`BACKUP_REMOTE`, and the script refuses to run at all with `BACKUP_REMOTE` but no recipient.
+The server only ever holds the **public** key, so a stolen backup bucket — or the server
+itself — does not yield readable backups.
+
+1. **Install age** on the host that runs the backup (it runs on the host, not in a
+   container): `apt install age` (Debian 12+/Ubuntu 22.04+), `brew install age` on a Mac, or a
+   release binary from https://github.com/FiloSottile/age/releases.
+2. **Make the key pair offline**, on your own machine, not the server:
+
+   ```bash
+   age-keygen -o rosterchief-backup-key.txt
+   # Public key: age1...        <- the recipient
+   ```
+
+   Keep `rosterchief-backup-key.txt` off the server: a password manager entry plus an offline
+   copy (USB stick / paper in a safe). Without it the backups are unrecoverable; with it
+   anyone can read them. The `MFA_ENCRYPTION_KEY` belongs next to it.
+3. **Configure the server:** add `BACKUP_AGE_RECIPIENT=age1...` to `.env` (the compose env
+   file in the checkout — `deploy/backup.sh` reads it from there, so cron and
+   `deploy/deploy-prod.sh`'s pre-migration backup both encrypt). Run `deploy/backup.sh` once
+   by hand and check you get `db-….sql.gz.age`. Earlier plaintext archives are pruned by
+   `KEEP_DAYS` as usual (delete them sooner by hand if you like); they are never uploaded.
+4. **Restore rehearsal:** the weekly `restore-check.sh` cron line cannot decrypt without the
+   key, so drop it and rehearse by hand (monthly is fine) where the key lives — e.g. on your
+   own machine, with a checkout of this repo and a scratch database:
+
+   ```bash
+   rclone copy b2:rosterchief-backups/ ./restore-test --include 'db-*.age' --max-age 2d
+   docker compose -f compose.behind-proxy.yaml up -d db    # any Postgres with the app role
+   COMPOSE="docker compose -f compose.behind-proxy.yaml" \
+     BACKUP_AGE_IDENTITY=~/rosterchief-backup-key.txt deploy/restore-check.sh ./restore-test
+   ```
+
 ### Restoring
 
 ```bash
+# Encrypted (the usual case) -- the private key has to be brought to wherever you restore:
+age -d -i rosterchief-backup-key.txt /var/backups/rosterchief/db-2026-07-14-0230.sql.gz.age \
+  | gunzip -c | docker compose exec -T db psql -U rosterchief rosterchief
+# Uploads the same way: age -d -i key.txt media-….tar.gz.age | docker compose exec -T web tar -xz -C /app
+
+# Unencrypted
 gunzip -c /var/backups/rosterchief/db-2026-07-14-0230.sql.gz \
   | docker compose exec -T db psql -U rosterchief rosterchief
 ```
+
+Restore as `POSTGRES_USER` (the superuser); the dump reassigns every object to the app role
+(see "Database roles"), which must therefore exist first.
 
 The dump is taken with `--clean --if-exists`, so it drops and recreates rather than colliding
 with what is there. Rehearse it once, now, against a scratch database — not the first time you

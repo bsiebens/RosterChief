@@ -79,6 +79,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rosterchief}
       POSTGRES_USER: ${POSTGRES_USER:-rosterchief}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a database password}
+      # POSTGRES_USER is the superuser: only the first-boot init and deploy/backup.sh use it.
+      # The app connects as APP_DB_USER (DJANGO_DATABASE_URL in .env.production), created on a
+      # fresh volume by deploy/postgres/10-app-role.sh -- see DEPLOYMENT.md's "Database roles".
+      APP_DB_USER: ${APP_DB_USER:-rosterchief_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
     # shared_buffers/max_connections default to 128MB / 100 — sized for a much bigger database
     # than this app's (DEPLOYMENT.md: ~0.2GB after 5 years). 20 connections is comfortably above
     # 2 gunicorn workers x 4 threads plus the odd `manage.py` one-off; trimmed both for the box,
@@ -86,6 +91,7 @@ services:
     command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20"]
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/10-app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rosterchief}"]
       interval: 10s

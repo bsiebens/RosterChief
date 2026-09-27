@@ -802,3 +802,134 @@ class VerifyExistingAccountEmailsMigrationTests(TestCase):
         self.run_migration()
 
         self.assertEqual(EmailAddress.objects.filter(user=user).count(), 1)
+
+
+class MfaSecretEncryptionTests(TestCase):
+    """authentication/crypto.py via RosterChiefMFAAdapter.encrypt/decrypt: TOTP
+    secrets and recovery-code seeds are stored Fernet-encrypted, legacy plaintext
+    values keep working, and TOTP sign-in still verifies codes end to end."""
+
+    SECRET = "JBSWY3DPEHPK3PXP"
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def current_code(self, secret=SECRET):
+        from allauth.mfa.totp.internal.auth import format_hotp_value, hotp_value, yield_hotp_counters_from_time
+
+        counters = list(yield_hotp_counters_from_time())
+        return format_hotp_value(hotp_value(secret, counters[len(counters) // 2]))
+
+    def test_round_trip_and_prefix(self):
+        from . import crypto
+
+        stored = RosterChiefMFAAdapter().encrypt(self.SECRET)
+
+        self.assertTrue(stored.startswith("fernet:"))
+        self.assertNotIn(self.SECRET, stored)
+        self.assertEqual(RosterChiefMFAAdapter().decrypt(stored), self.SECRET)
+        self.assertTrue(crypto.is_encrypted(stored))
+
+    def test_legacy_plaintext_is_returned_unchanged(self):
+        self.assertEqual(RosterChiefMFAAdapter().decrypt(self.SECRET), self.SECRET)
+
+    def test_a_missing_key_is_a_configuration_error(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from .checks import mfa_encryption_key_check
+
+        with override_settings(MFA_ENCRYPTION_KEY=""):
+            with self.assertRaises(ImproperlyConfigured):
+                RosterChiefMFAAdapter().encrypt(self.SECRET)
+            self.assertEqual([error.id for error in mfa_encryption_key_check(None)], ["authentication.E001"])
+        self.assertEqual(mfa_encryption_key_check(None), [])
+
+    def test_rotated_keys_still_decrypt(self):
+        from cryptography.fernet import Fernet
+
+        old_key, new_key = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+        with override_settings(MFA_ENCRYPTION_KEY=old_key):
+            stored = RosterChiefMFAAdapter().encrypt(self.SECRET)
+        with override_settings(MFA_ENCRYPTION_KEY=f"{new_key},{old_key}"):
+            self.assertEqual(RosterChiefMFAAdapter().decrypt(stored), self.SECRET)
+
+    def test_totp_activation_stores_the_secret_encrypted(self):
+        from allauth.mfa.totp.internal.auth import TOTP
+
+        user = User.objects.create_user(email="member@example.com", password="x")
+        totp = TOTP.activate(user, self.SECRET)
+
+        stored = Authenticator.objects.get(pk=totp.instance.pk).data["secret"]
+        self.assertTrue(stored.startswith("fernet:"))
+        self.assertTrue(TOTP(Authenticator.objects.get(pk=totp.instance.pk)).validate_code(self.current_code()))
+
+    def test_recovery_codes_seed_is_encrypted_and_codes_still_work(self):
+        user = User.objects.create_user(email="member@example.com", password="x")
+        codes = RecoveryCodes.activate(user)
+        instance = Authenticator.objects.get(pk=codes.instance.pk)
+
+        self.assertTrue(instance.data["seed"].startswith("fernet:"))
+        unused = RecoveryCodes(instance).get_unused_codes()
+        self.assertEqual(len(unused), 10)
+        self.assertTrue(RecoveryCodes(instance).validate_code(unused[0]))
+
+    def sign_in_with_totp(self, stored_secret):
+        user = verified_user("member@example.com", "pw-secret-123")
+        Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": stored_secret})
+        response = self.client.post(reverse("account_login"), {"login": "member@example.com", "password": "pw-secret-123"})
+        self.assertRedirects(response, reverse("mfa_authenticate"), fetch_redirect_response=False)
+        self.client.post(reverse("mfa_authenticate"), {"code": self.current_code()})
+        return "_auth_user_id" in self.client.session
+
+    def test_sign_in_with_an_encrypted_totp_secret(self):
+        self.assertTrue(self.sign_in_with_totp(RosterChiefMFAAdapter().encrypt(self.SECRET)))
+
+    def test_sign_in_with_a_legacy_plaintext_totp_secret(self):
+        self.assertTrue(self.sign_in_with_totp(self.SECRET))
+
+
+class EncryptMfaSecretsMigrationTests(TestCase):
+    """authentication/migrations/0006_encrypt_mfa_secrets encrypts existing
+    plaintext secrets, skips already-encrypted ones, and reverses cleanly."""
+
+    def setUp(self):
+        from django.apps import apps
+
+        self.apps = apps
+        self.module = importlib.import_module("authentication.migrations.0006_encrypt_mfa_secrets")
+        user = User.objects.create_user(email="member@example.com", password="x")
+        self.totp = Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        self.codes = Authenticator.objects.create(user=user, type=Authenticator.Type.RECOVERY_CODES, data={"seed": "abc123", "used_mask": 3, "migrated_codes": ["11111111", "22222222"]})
+
+    def test_encrypts_plaintext_secrets(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.codes.refresh_from_db()
+        self.assertTrue(self.totp.data["secret"].startswith("fernet:"))
+        self.assertTrue(self.codes.data["seed"].startswith("fernet:"))
+        self.assertTrue(all(code.startswith("fernet:") for code in self.codes.data["migrated_codes"]))
+        self.assertEqual(self.codes.data["used_mask"], 3)
+        adapter = RosterChiefMFAAdapter()
+        self.assertEqual(adapter.decrypt(self.totp.data["secret"]), "JBSWY3DPEHPK3PXP")
+        self.assertEqual([adapter.decrypt(code) for code in self.codes.data["migrated_codes"]], ["11111111", "22222222"])
+
+    def test_is_idempotent(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+        self.totp.refresh_from_db()
+        first = self.totp.data["secret"]
+
+        self.module.encrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.assertEqual(self.totp.data["secret"], first)
+
+    def test_reverse_decrypts(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+        self.module.decrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.codes.refresh_from_db()
+        self.assertEqual(self.totp.data["secret"], "JBSWY3DPEHPK3PXP")
+        self.assertEqual(self.codes.data["seed"], "abc123")

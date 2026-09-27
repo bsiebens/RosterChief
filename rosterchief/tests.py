@@ -392,3 +392,47 @@ class ServeMediaTests(SimpleTestCase):
 
         self.assertEqual(response["Content-Disposition"], "attachment")
         self.assertIn("sandbox", response["Content-Security-Policy"])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", ".rosterchief.app", "testserver"], CSRF_TRUSTED_ORIGINS=[])
+class CsrfCookieTossingTests(TestCase):
+    """The CSRF secret is kept in the session (CSRF_USE_SESSIONS), so a csrftoken
+    cookie planted from a sibling subdomain ("cookie tossing") can't be paired
+    with a known form token to forge a POST."""
+
+    def setUp(self):
+        from django.test import Client
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client = Client(enforce_csrf_checks=True)
+
+    def test_the_csrf_secret_is_stored_in_the_session(self):
+        from django.conf import settings
+
+        self.assertTrue(settings.CSRF_USE_SESSIONS)
+
+    def test_a_tossed_csrf_cookie_does_not_validate_a_post(self):
+        token = "a" * 32
+        self.client.cookies["csrftoken"] = token
+
+        response = self.client.post(reverse("account_login"), {"login": "x@example.com", "password": "x", "csrfmiddlewaretoken": token})
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_token_from_the_rendered_form_still_validates(self):
+        page = self.client.get(reverse("account_login"))
+        token = page.context["csrf_token"]
+
+        response = self.client.post(reverse("account_login"), {"login": "x@example.com", "password": "x", "csrfmiddlewaretoken": str(token)})
+
+        self.assertNotEqual(response.status_code, 403)
+        self.assertNotIn("csrftoken", response.cookies)
+
+    def test_a_post_from_a_sibling_subdomain_origin_is_rejected(self):
+        page = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
+        token = str(page.context["csrf_token"])
+
+        response = self.client.post(reverse("account_login"), {"login": "x@example.com", "password": "x", "csrfmiddlewaretoken": token}, HTTP_HOST="ajax-united.rosterchief.app", HTTP_ORIGIN="http://evil.rosterchief.app")
+
+        self.assertEqual(response.status_code, 403)

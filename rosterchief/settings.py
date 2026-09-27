@@ -10,6 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import base64
+import hashlib
+import sys
 import tomllib
 from importlib.util import find_spec
 from pathlib import Path
@@ -214,6 +217,20 @@ MFA_WEBAUTHN_RP_NAME = config("ROSTERCHIEF_RP_NAME", default="RosterChief")
 # Where RequireMFAMiddleware sends privileged users who haven't enrolled yet.
 MFA_ENROLMENT_URL_NAME = "mfa_index"
 
+# TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
+# under this key -- generate one with
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Comma-separate several keys to rotate: the first encrypts, all of them decrypt. Losing the
+# key locks every TOTP user out of their authenticator (recovery codes too), so back it up
+# separately from the database. Required outside DEBUG/tests -- the authentication.E001 system
+# check fails `migrate`/`check` without it. DEBUG and the test runner derive a stable throwaway
+# key from SECRET_KEY so local dev and CI need no extra setup. Not enforced here at import time
+# on purpose: the image build runs collectstatic/compilemessages with DEBUG off and no key.
+TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
+MFA_ENCRYPTION_KEY = config("MFA_ENCRYPTION_KEY", default="")
+if not MFA_ENCRYPTION_KEY and (DEBUG or TESTING):
+    MFA_ENCRYPTION_KEY = base64.urlsafe_b64encode(hashlib.sha256(b"rosterchief-dev-mfa-key:" + SECRET_KEY.encode()).digest()).decode()
+
 
 # Sessions are shared across club subdomains: log in once and you're authenticated
 # on every club (matching the one-passkey-everywhere model). Tenancy still scopes
@@ -222,7 +239,14 @@ MFA_ENROLMENT_URL_NAME = "mfa_index"
 SHARED_COOKIE_DOMAIN = f".{ROSTERCHIEF_BASE_DOMAIN}" if ROSTERCHIEF_BASE_DOMAIN and ROSTERCHIEF_BASE_DOMAIN != "localhost" else None
 
 SESSION_COOKIE_DOMAIN = config("DJANGO_SESSION_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
-CSRF_COOKIE_DOMAIN = config("DJANGO_CSRF_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
+
+# The CSRF secret lives in the (server-side) session, not in a csrftoken cookie. A cookie --
+# whether scoped to the parent domain or host-only -- can be overwritten from any sibling
+# subdomain ("cookie tossing"), which would let a page on one subdomain plant a token it knows
+# and then forge POSTs to another. Nothing reads the cookie client-side: templates and
+# static/js/mobile-app.js take the token from {{ csrf_token }}. Every form posts to its own
+# host, so the Origin check needs no cross-subdomain trusted origins either.
+CSRF_USE_SESSIONS = True
 
 TEMPLATES = [
     {
