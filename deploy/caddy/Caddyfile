@@ -14,14 +14,27 @@
 	# matters while storage is local disk; once AWS_STORAGE_BUCKET_NAME is set, club.logo.url
 	# points at the bucket directly and this block simply never matches. A missing file 404s
 	# here exactly as django.views.static.serve would, so there is no need to fall through.
+	#
+	# Uploads are user-supplied content on the application's own origin, so they are served
+	# with no content sniffing and a sandboxing CSP (a file opened directly can't run script
+	# against the site), and SVG is forced to download instead of rendering inline. Mirrors
+	# rosterchief/media.py, which does the same for the Django fallback route.
 	handle_path /media/* {
+		header {
+			X-Content-Type-Options nosniff
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+		}
+		@svg path *.svg *.SVG
+		header @svg Content-Disposition attachment
 		root * /srv/media
 		file_server
 	}
 
 	# X-Forwarded-Proto is what SECURE_PROXY_SSL_HEADER reads. Without it Django believes every
 	# request is plain HTTP: request.is_secure() goes false, WebAuthn disagrees with the browser
-	# about the origin, and the SSL redirect becomes a loop.
+	# about the origin, and the SSL redirect becomes a loop. X-Real-IP replaces any
+	# client-supplied value and is what ALLAUTH_TRUSTED_CLIENT_IP_HEADER / rosterchief.client_ip
+	# read, so login rate limits key on the real client and not on this proxy.
 	reverse_proxy web:8000 {
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {remote_host}

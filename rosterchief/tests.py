@@ -1,4 +1,6 @@
 import importlib
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 import requests
@@ -7,13 +9,14 @@ from django.core.cache import cache
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import connection
 from django.db.utils import OperationalError
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.urls import Resolver404, clear_url_caches, resolve, reverse
 
 from features.models import EmailSuppression
 
 from . import urls
 from .mail import ResendEmailBackend, send_message
+from .media import serve_media
 
 
 class BrowserReloadUrlTests(SimpleTestCase):
@@ -361,3 +364,31 @@ class PerfLoggingTemplateTimingTests(SimpleTestCase):
         # a leaked depth counter here would corrupt every later render in the same
         # request, silently dropping or double-counting its time.
         self.assertEqual(_state.template_depth, 0)
+
+
+class ServeMediaTests(SimpleTestCase):
+    """rosterchief.media.serve_media -- the Django fallback for /media/* adds the
+    same hardening headers as the Caddy media block."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        (root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (root / "logo.svg").write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+
+    def _get(self, path):
+        return serve_media(RequestFactory().get(f"/media/{path}"), path, document_root=self.tmp.name)
+
+    def test_every_file_gets_nosniff_and_a_sandboxing_csp(self):
+        response = self._get("logo.png")
+
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertIn("sandbox", response["Content-Security-Policy"])
+        self.assertFalse(response.get("Content-Disposition", "").startswith("attachment"))
+
+    def test_svg_is_served_as_an_attachment(self):
+        response = self._get("logo.svg")
+
+        self.assertEqual(response["Content-Disposition"], "attachment")
+        self.assertIn("sandbox", response["Content-Security-Policy"])

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator, RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, UniqueConstraint
 from django.utils import timezone
@@ -12,6 +12,8 @@ from django.utils.translation import gettext_lazy as _
 from members.models import Member
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
 from rosterchief.storage import get_private_storage
+
+from .validators import LOGO_EXTENSIONS, NewUploadExtensionValidator
 
 
 class ClubManager(models.Manager):
@@ -74,9 +76,10 @@ class Club(UUIDModel):
         _("logo"),
         upload_to=club_logo_path,
         blank=True,
-        # A plain FileField, not ImageField: Pillow (which ImageField validates through)
-        # cannot read SVGs, and club crests are commonly vector logos.
-        validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
+        # A plain FileField, not ImageField: SVG logos uploaded before raster-only uploads
+        # were enforced still exist and must keep saving, and Pillow can't read those.
+        # New uploads are raster-only (see club.validators).
+        validators=[NewUploadExtensionValidator(allowed_extensions=LOGO_EXTENSIONS)],
         help_text=_("Shown on the club's own pages. Without one, the club's initials are used."),
     )
     event_background = models.ImageField(
@@ -235,10 +238,8 @@ class Sponsor(ClubScopedModel):
         _("logo"),
         upload_to=sponsor_logo_path,
         blank=True,
-        # A plain FileField, not ImageField: same reasoning as Club.logo -- a
-        # sponsor's own logo is just as commonly a vector file, and ImageField's
-        # Pillow validation can't read those.
-        validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg", "gif", "webp", "svg"])],
+        # A plain FileField, not ImageField: same reasoning as Club.logo.
+        validators=[NewUploadExtensionValidator(allowed_extensions=LOGO_EXTENSIONS)],
     )
     # Not user-editable: recomputed from the logo file itself on every save, same reasoning
     # NewsPhoto/TeamPhoto don't need this -- FileField (not ImageField) means Django never

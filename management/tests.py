@@ -14272,3 +14272,81 @@ class BugListViewTests(ManagementTestBase):
         self.assertIn("1.4.2", content)
         # Only the fixed report renders a fix date -- the open one must not.
         self.assertEqual(content.count("Fixed on"), 1)
+
+
+class LogoUploadFormatTests(ManagementTestBase):
+    """Club and sponsor logos accept raster formats only for new uploads; a
+    logo already stored in another format (e.g. SVG) keeps saving through
+    unrelated edits."""
+
+    SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def svg_file(self):
+        return SimpleUploadedFile("logo.svg", self.SVG, content_type="image/svg+xml")
+
+    def club_settings_data(self, **overrides):
+        data = {"name": "Ajax United", "legal_name": "", "contact_email": "", "website": "", "primary_color": "", "secondary_color": ""}
+        data.update(overrides)
+        return data
+
+    def sponsor_data(self, **overrides):
+        data = {"name": "Acme Corp", "url": "", "start_date": "2026-01-01", "end_date": ""}
+        data.update(overrides)
+        return data
+
+    def test_club_settings_rejects_an_svg_logo(self):
+        response = self.club_post("club_settings", self.club_settings_data(logo=self.svg_file()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("logo", response.context["form"].errors)
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.logo)
+
+    def test_club_settings_accepts_a_png_logo(self):
+        response = self.club_post("club_settings", self.club_settings_data(logo=make_image_file("logo.png")))
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertTrue(self.club.logo.name.endswith(".png"))
+
+    def test_club_settings_logo_input_does_not_offer_svg(self):
+        response = self.club_get("club_settings")
+
+        self.assertNotContains(response, "image/svg+xml")
+
+    def test_club_with_an_existing_svg_logo_can_still_save_other_fields(self):
+        self.club.logo = self.svg_file()
+        self.club.save()
+
+        response = self.club_post("club_settings", self.club_settings_data(primary_color="#123456"))
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.primary_color, "#123456")
+        self.assertTrue(self.club.logo.name.endswith(".svg"))
+
+    def test_sponsor_form_rejects_an_svg_logo(self):
+        response = self.club_post("sponsor_create", self.sponsor_data(logo=self.svg_file()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("logo", response.context["form"].errors)
+        self.assertFalse(Sponsor.objects.filter(club=self.club).exists())
+
+    def test_sponsor_form_accepts_a_png_logo(self):
+        response = self.club_post("sponsor_create", self.sponsor_data(logo=make_image_file("logo.png")))
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        self.assertTrue(Sponsor.objects.get(club=self.club).logo.name.endswith(".png"))
+
+    def test_sponsor_with_an_existing_svg_logo_can_still_be_renamed(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1), logo=self.svg_file())
+
+        response = self.club_post("sponsor_update", self.sponsor_data(name="Acme Renamed"), sponsor.pk)
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        sponsor.refresh_from_db()
+        self.assertEqual(sponsor.name, "Acme Renamed")
+        self.assertTrue(sponsor.logo.name.endswith(".svg"))

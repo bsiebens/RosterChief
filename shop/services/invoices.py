@@ -35,6 +35,7 @@ from club.services.invoicing import resolve_document_address
 
 from ..models import Invoice
 
+# "svg" stays for logos stored before new uploads became raster-only (club.validators).
 _LOGO_MIMETYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 
 

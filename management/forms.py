@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
+from club.validators import LOGO_ACCEPT
 from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
 from events.services.dfel_import import DFELImportError, extract_ids
@@ -580,6 +581,7 @@ class SponsorForm(forms.ModelForm):
         model = Sponsor
         fields = ["name", "logo", "url", "start_date", "end_date"]
         widgets = {
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
         }
@@ -1280,7 +1282,7 @@ class ClubSettingsForm(forms.ModelForm):
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
-            "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }
 

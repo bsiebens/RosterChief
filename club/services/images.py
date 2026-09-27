@@ -1,12 +1,12 @@
 """Dimensions for uploads that aren't Django ImageFields.
 
 Logos (Club.logo, Sponsor.logo) are plain FileFields, not ImageFields --
-Pillow can't validate SVGs, and crests/sponsor logos are commonly vector
-files -- so there's no automatic width_field/height_field the way there
-would be on an ImageField. This fills that gap: Pillow for raster formats,
-a bounded regex read of the root <svg> tag for vector ones (not a full XML
-parse -- this reads untrusted uploads, and a parser is exposed to entity
-expansion attacks a plain attribute read never is).
+SVG logos stored before new uploads became raster-only still exist, and
+Pillow can't read those -- so there's no automatic width_field/height_field
+the way there would be on an ImageField. This fills that gap: Pillow for
+raster formats, a bounded regex read of the root <svg> tag for the remaining
+vector ones (not a full XML parse -- this reads untrusted uploads, and a
+parser is exposed to entity expansion attacks a plain attribute read never is).
 """
 
 import re
