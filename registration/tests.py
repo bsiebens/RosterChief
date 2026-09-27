@@ -1584,3 +1584,76 @@ class BackfillContactMemberMigrationTests(TestCase):
         self.assertEqual(email_batch.contact_member, by_email)
         self.assertEqual(submitted_batch.contact_member, submitter)
         self.assertIsNone(unmatched_batch.contact_member)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationCancelPaidTests(TestCase):
+    """registration:cancel refuses a registration anything has been paid
+    toward (registration.views.cancellation_locked) -- the status page hides
+    the button then, and the POST itself is refused too."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("120.00"))
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+    def _cancel(self):
+        return self.client.post(reverse("registration:cancel", kwargs={"token": self.batch.status_token, "membership_pk": self.membership.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _status(self):
+        return self.client.get(reverse("registration:status", kwargs={"token": self.batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_a_fully_paid_registration_cannot_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+        record_payment(self.membership, amount=Decimal("120.00"))
+
+        response = self._cancel()
+
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": self.batch.status_token}), fetch_redirect_response=False)
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_a_partly_paid_registration_cannot_be_cancelled(self):
+        # Refunds are a staff action -- any payment at all locks the self-service cancel.
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self._cancel()
+
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.assertTrue(ClubMembership.objects.filter(pk=self.membership.pk, status=ClubMembership.StatusChoices.PENDING).exists())
+
+    def test_the_status_page_hides_cancel_once_something_was_paid(self):
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self.assertNotContains(self._status(), "Cancel registration")
+
+    def test_an_unpaid_registration_can_still_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+
+        self.assertContains(self._status(), "Cancel registration")
+        self._cancel()
+
+        self.assertFalse(Member.objects.filter(pk=self.child.pk).exists())
+
+
+class RegistrationRenderPdfUrlFetcherTests(TestCase):
+    """registration.services.invoicing.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from registration.services.invoicing import render_pdf as _render_pdf
+        from rosterchief.pdf import safe_url_fetcher
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)

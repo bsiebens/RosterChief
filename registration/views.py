@@ -211,11 +211,11 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
                     "membership": membership,
                     "balance": balance,
                     "credit": -balance if balance is not None and balance < 0 else None,
-                    # Once nothing's still owed, "Cancel registration" no longer
-                    # makes sense here -- the fee's already settled, so this
-                    # stops the template offering it once it's too late for it
-                    # to mean anything.
-                    "paid": balance is not None and balance <= 0,
+                    # Once anything's been paid (or nothing's still owed on a
+                    # sent invoice), "Cancel registration" is no longer offered
+                    # -- the same cancellation_locked() check
+                    # RegistrationCancelView enforces server-side.
+                    "paid": cancellation_locked(membership, invoice_ready),
                     # Cancel/upload only for a membership this batch itself
                     # created -- one that already existed isn't this link's
                     # to change (see RegistrationDetails.created_membership).
@@ -304,13 +304,29 @@ class RegistrationInvoiceView(ClubScopedPublicMixin, View):
         return response
 
 
+def cancellation_locked(membership, invoice_ready):
+    """Whether the status page's own "Cancel registration" is off the table
+    for ``membership``: once any payment has been recorded against it, or
+    once its invoice has gone out and nothing is left owed (the balance is
+    settled). Undoing a paid registration means a refund, which is a staff
+    action on the management side, not something a status link can trigger.
+    Shared by the status page (to hide the button) and RegistrationCancelView
+    (to refuse the POST), so the two can't disagree."""
+    if membership.amount_paid > 0:
+        return True
+    return invoice_ready and net_balance(membership) <= 0
+
+
 class RegistrationCancelView(ClubScopedPublicMixin, View):
     """Withdraws one person's registration from the status page -- same
     token-gated access as everything else there, and the same club.services.
     cancellation.cancel_membership every cancel path (this one, and the
     Sign-up page's own) goes through -- which never deletes a Member with a
     login or with anything outside this sign-up. Limited to memberships this
-    batch itself created (RegistrationDetails.created_membership)."""
+    batch itself created (RegistrationDetails.created_membership), and refused
+    once anything has been paid toward it (cancellation_locked) -- the
+    status page hides the button then, and this enforces the same rule for
+    a POST that doesn't go through that page."""
 
     def post(self, request, *args, **kwargs):
         batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
@@ -322,6 +338,12 @@ class RegistrationCancelView(ClubScopedPublicMixin, View):
             raise Http404
 
         member_name = str(details.membership.member)
+        if cancellation_locked(details.membership, batch.invoice_sent_at is not None):
+            title = _("Registration not cancelled")
+            body = _("A payment has already been made toward the registration for “%(member)s”, so it can't be cancelled here. Please contact the club.") % {"member": member_name}
+            notify(request, f"e|{title}|{body}")
+            return redirect("registration:status", token=batch.status_token)
+
         cancel_membership(details.membership)
 
         notify(request, f"w|{_('Registration cancelled')}|{_('The registration for “%(member)s” has been cancelled.') % {'member': member_name}}")
