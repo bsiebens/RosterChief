@@ -4811,7 +4811,7 @@ class NewsManagementTests(ManagementTestBase):
         editor_member = Member.objects.create(user=cls.editor, first_name="Eve", last_name="Editor")
         ClubMembership.objects.create(club=cls.club, member=editor_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
         ClubRole.objects.filter(club=cls.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
-        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
+        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; a non-management StaffAssignment doesn't.
 
     def test_list_is_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
@@ -6432,7 +6432,9 @@ class EventManagementTests(ManagementTestBase):
         self.assertContains(response, 'aria-label="Friendly"')
 
     def test_the_week_calendar_shows_a_gathering_strip_before_the_block(self):
-        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), gathering=timezone.now() - datetime.timedelta(minutes=30))
+        # Noon today, not "now": just after Monday 00:00, now minus 30 minutes is last week.
+        start = timezone.localtime().replace(hour=12, minute=0, second=0, microsecond=0)
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=start, gathering=start - datetime.timedelta(minutes=30))
         game.teams.add(self.own_team)
         self.client.force_login(self.own_team_coach)
 
