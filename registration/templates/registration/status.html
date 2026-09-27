@@ -45,7 +45,7 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="flex flex-wrap items-center gap-2.5">
                         <h2 class="card-title">{{ row.membership.member.get_full_name }}</h2>
-                        {% if row.membership.status != "cancelled" and not row.paid %}
+                        {% if row.managed_here and row.membership.status != "cancelled" and not row.paid %}
                             <button type="button" class="btn btn-ghost btn-xs gap-1 text-club" onclick="document.getElementById('{{ row.membership.pk|dom_id:"cancel_modal" }}').showModal()">{% lucide "x-circle" size=13 %} {% trans "Cancel registration" %}</button>
                         {% endif %}
                     </div>
@@ -88,7 +88,7 @@
                                         <span class="badge badge-warning">{% trans "Open" %}</span>
                                     {% endif %}
                                 </div>
-                                {% if requirement.requires_document and not status.is_complete and not status.is_bypassed %}
+                                {% if row.managed_here and requirement.requires_document and not status.is_complete and not status.is_bypassed %}
                                     <form method="post" action="{% url 'registration:status' batch.status_token %}" enctype="multipart/form-data" class="mt-3 flex flex-wrap items-center gap-2">
                                         {% csrf_token %}
                                         <input type="hidden" name="membership" value="{{ row.membership.pk }}">
@@ -111,7 +111,7 @@
 
     {% trans "Cancel registration" as confirm_cancel_label %}
     {% for row in membership_rows %}
-        {% if row.membership.status != "cancelled" and not row.paid %}
+        {% if row.managed_here and row.membership.status != "cancelled" and not row.paid %}
             {% blocktrans asvar cancel_body with name=row.membership.member %}Cancel the registration for {{ name }}? This cannot be undone.{% endblocktrans %}
             {% url 'registration:cancel' batch.status_token row.membership.pk as cancel_url %}
             {% include "controlpanel/_confirm_modal.html" with modal_id=row.membership.pk|dom_id:"cancel_modal" title=confirm_cancel_label body=cancel_body action_url=cancel_url submit_label=confirm_cancel_label submit_icon="x-circle" %}

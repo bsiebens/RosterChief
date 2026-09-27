@@ -14,11 +14,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, Season
+from club.models import Club, ClubMembership, ClubRole, Season
 from members.admin import FamilyAdmin
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services import MemberImportResult
+from members.services.deletion import member_is_deletable
 from members.services.family import claim_label_for, family_contacts
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 
 class MemberModelTests(TestCase):
@@ -857,3 +859,102 @@ class ClaimLabelForTests(TestCase):
         FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
 
         self.assertEqual(claim_label_for(member, self.club), "Siebens family")
+
+
+class MemberIsDeletableTests(TestCase):
+    """members.services.deletion.member_is_deletable -- the one rule every
+    hard-delete of a Member (cancelling a sign-up, merging away a duplicate)
+    goes through: Member is global, so a row with anything outside the
+    memberships being removed is never deleted."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.season = Season.objects.create(club=cls.club, start_date=date(2026, 8, 1), end_date=date(2027, 5, 31))
+        cls.other_season = Season.objects.create(club=cls.other_club, start_date=date(2026, 8, 1), end_date=date(2027, 5, 31))
+
+    def make_signup(self, **member_kwargs):
+        member = Member.objects.create(first_name="New", last_name="Kid", **member_kwargs)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        return member, membership
+
+    def test_a_member_with_nothing_but_the_ignored_membership_is_deletable(self):
+        member, membership = self.make_signup()
+
+        self.assertTrue(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_member_is_not_deletable_while_the_membership_is_not_ignored(self):
+        member, _membership = self.make_signup()
+
+        self.assertFalse(member_is_deletable(member))
+
+    def test_a_member_with_a_login_is_never_deletable(self):
+        user = User.objects.create_user(email="kid@example.com", password="pw-secret-123")
+        member, membership = self.make_signup(user=user)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_membership_in_another_club_keeps_the_member(self):
+        member, membership = self.make_signup()
+        ClubMembership.objects.create(club=self.other_club, member=member, season=self.other_season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_an_elevated_role_keeps_the_member(self):
+        member, membership = self.make_signup()
+        ClubRole.objects.create(club=self.other_club, member=member, role=ClubRole.Roles.ADMIN)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_the_implicit_member_role_of_the_ignored_club_does_not_count(self):
+        member, membership = self.make_signup()
+        membership.status = ClubMembership.StatusChoices.ACTIVE
+        membership.save()  # club/signals.py grants the implicit MEMBER role
+
+        self.assertTrue(ClubRole.objects.filter(club=self.club, member=member, role=ClubRole.Roles.MEMBER).exists())
+        self.assertTrue(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_family_in_another_club_keeps_the_member(self):
+        member, membership = self.make_signup()
+        FamilyMembership.objects.create(family=Family.objects.create(club=self.other_club), member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_child_row_in_this_clubs_family_does_not_keep_the_member(self):
+        member, membership = self.make_signup()
+        family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=family, member=Member.objects.create(first_name="Pat", last_name="Parent"), role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertTrue(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_parent_other_family_members_depend_on_is_kept(self):
+        member, membership = self.make_signup()
+        family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=Member.objects.create(first_name="Timmy", last_name="Kid"), role=FamilyMembership.FamilyRole.CHILD)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_roster_spot_in_another_club_keeps_the_member(self):
+        member, membership = self.make_signup()
+        team = Team.objects.create(club=self.other_club, name="U10", short_name="U10")
+        TeamMembership.objects.create(team=team, member=member, season=self.other_season)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_roster_spot_for_the_ignored_season_does_not_keep_the_member(self):
+        member, membership = self.make_signup()
+        team = Team.objects.create(club=self.club, name="U10", short_name="U10")
+        TeamMembership.objects.create(team=team, member=member, season=self.season)
+
+        self.assertTrue(member_is_deletable(member, ignoring=[membership]))
+
+    def test_a_staff_assignment_in_another_club_keeps_the_member(self):
+        member, membership = self.make_signup()
+        team = Team.objects.create(club=self.other_club, name="U10", short_name="U10")
+        position = Position.objects.create(club=self.other_club, name="Coach", short_name="CO", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=member, season=self.other_season, position=position)
+
+        self.assertFalse(member_is_deletable(member, ignoring=[membership]))

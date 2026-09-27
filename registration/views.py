@@ -10,12 +10,13 @@ queue, no separate review gate of this app's own.
 
 from decimal import Decimal
 
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 
-from club.models import OnboardingRequirement
+from club.models import MemberRequirementStatus, OnboardingRequirement
 from club.services.cancellation import cancel_membership
 from club.services.fees import net_balance
 from club.services.onboarding import checklist_for, mark_complete
@@ -173,6 +174,7 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
         memberships.sort(key=lambda membership: membership.member.get_full_name())
         rows = []
         for membership in memberships:
+            managed_here = membership.created >= batch.created  # see RegistrationDetails.created_membership
             # net_balance, not remaining_balance -- the latter floors at 0,
             # which would fold a genuine credit (a negative per-line price on
             # the Registrations review screen, or an overpayment) into the
@@ -192,6 +194,10 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
                     # stops the template offering it once it's too late for it
                     # to mean anything.
                     "paid": balance is not None and balance <= 0,
+                    # Cancel/upload only for a membership this batch itself
+                    # created -- one that already existed isn't this link's
+                    # to change (see RegistrationDetails.created_membership).
+                    "managed_here": managed_here,
                     "checklist": checklist_for(membership),
                     "upload_form": RegistrationStatusDocumentForm(),
                 }
@@ -230,10 +236,16 @@ class RegistrationStatusView(ClubScopedPublicMixin, View):
         # Both must belong to this batch/club -- a tampered POST can't reach
         # another family's membership or another club's requirement through
         # this token.
-        details = RegistrationDetails.objects.filter(batch=batch, membership_id=membership_id).select_related("membership").first()
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=membership_id).select_related("membership", "batch").first()
         requirement = OnboardingRequirement.objects.filter(club=request.club, pk=requirement_id, is_active=True, requires_document=True).first()
-        if details is None or requirement is None:
+        if details is None or requirement is None or not details.created_membership:
             raise Http404
+        # Only an open item can be uploaded against -- never over something
+        # already received/verified or bypassed (the template hides the form
+        # for those too; this is the server-side half of that).
+        if MemberRequirementStatus.objects.filter(membership=details.membership, requirement=requirement).filter(Q(is_complete=True) | Q(is_bypassed=True)).exists():
+            notify(request, f"e|{_('Upload failed')}|{_('This item has already been completed.')}")
+            return redirect("registration:status", token=batch.status_token)
 
         form = RegistrationStatusDocumentForm(request.POST, request.FILES)
         if form.is_valid():
@@ -273,12 +285,17 @@ class RegistrationCancelView(ClubScopedPublicMixin, View):
     """Withdraws one person's registration from the status page -- same
     token-gated access as everything else there, and the same club.services.
     cancellation.cancel_membership every cancel path (this one, and the
-    Sign-up page's own) goes through."""
+    Sign-up page's own) goes through -- which never deletes a Member with a
+    login or with anything outside this sign-up. Limited to memberships this
+    batch itself created (RegistrationDetails.created_membership)."""
 
     def post(self, request, *args, **kwargs):
         batch = get_object_or_404(RegistrationBatch, club=request.club, status_token=kwargs["token"])
-        details = RegistrationDetails.objects.filter(batch=batch, membership_id=kwargs["membership_pk"]).select_related("membership").first()
-        if details is None:
+        details = RegistrationDetails.objects.filter(batch=batch, membership_id=kwargs["membership_pk"]).select_related("membership__member", "batch").first()
+        # A membership that predates this batch (the batch only added a
+        # request onto it) isn't this link's to cancel -- same 404 as one
+        # outside the batch entirely.
+        if details is None or not details.created_membership:
             raise Http404
 
         member_name = str(details.membership.member)

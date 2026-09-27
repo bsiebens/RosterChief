@@ -65,7 +65,7 @@ from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
-from club.services.signup_linking import link_to_existing_member
+from club.services.signup_linking import link_to_existing_member, possible_duplicates
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
@@ -7202,7 +7202,11 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
                 membership.teams_registered = teams.filter(Q(roster__member_id=membership.member_id, roster__season=season) | Q(staff_assignments__member_id=membership.member_id, staff_assignments__season=season)).distinct()
                 membership.requested_team_ids = {details.requested_team_id for details in membership.registration_details.all() if details.requested_team_id}
                 membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
-                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member)
+                # A fresh sign-up is never matched to an existing member
+                # automatically (registration.services.submission) -- this is
+                # where staff sees the likely match, preselected in the picker.
+                membership.possible_duplicates = list(possible_duplicates(membership.member, club))
+                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member, initial={"member": membership.possible_duplicates[0].pk} if membership.possible_duplicates else None)
                 membership.is_clean = is_signup_clean(membership)
                 membership.is_oldest_pending = membership.pk == oldest_pending_id
             # Already-ACTIVE *and* clean (paid, checklist fully resolved) memberships

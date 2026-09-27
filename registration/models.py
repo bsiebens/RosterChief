@@ -182,3 +182,15 @@ class RegistrationDetails(UUIDModel):
 
     def __str__(self):
         return f"{self.membership} ({self.get_entry_kind_display()})"
+
+    @property
+    def created_membership(self):
+        """Whether this entry's batch is what created ``membership``, as
+        opposed to adding a request onto one that already existed (a second
+        team for someone already signed up this season). submit_registration
+        creates the batch before any of its memberships, so a membership the
+        batch created is never older than the batch -- one that predates it
+        was there already. Only a membership the batch created may be
+        cancelled or have documents uploaded from the batch's own status
+        page (registration.views)."""
+        return self.membership.created >= self.batch.created

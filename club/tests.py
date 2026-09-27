@@ -61,7 +61,7 @@ from .services.onboarding import (
     open_requirements_blocking,
 )
 from .services.seasons import _initial_season_start, _season_end, generate_seasons, resync_seasons
-from .services.signup_linking import link_to_existing_member
+from .services.signup_linking import link_to_existing_member, possible_duplicates
 from .tenancy import (
     ClubTenantMiddleware,
     get_current_club,
@@ -2891,6 +2891,44 @@ class CancellationTests(TestCase):
 
         self.assertTrue(TeamMembership.objects.filter(pk=team_membership.pk).exists())
 
+    def test_cancelling_never_deletes_a_member_with_a_login(self):
+        user = get_user_model().objects.create_user(email="login@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Has", last_name="Login")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        deleted = cancel_membership(membership)
+
+        self.assertFalse(deleted)
+        self.assertTrue(Member.objects.filter(pk=member.pk, user=user).exists())
+        self.assertFalse(ClubMembership.objects.filter(pk=membership.pk, status=ClubMembership.StatusChoices.PENDING).exists())
+
+    def test_cancelling_never_deletes_a_member_of_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        member = Member.objects.create(first_name="Two", last_name="Clubs")
+        other_membership = ClubMembership.objects.create(club=other_club, member=member, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        deleted = cancel_membership(membership)
+
+        self.assertFalse(deleted)
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+        self.assertTrue(ClubMembership.objects.filter(pk=other_membership.pk).exists())
+        self.assertTrue(ClubRole.objects.filter(club=other_club, member=member).exists())
+        # This club's own sign-up is gone -- nothing of it is left behind here.
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exclude(status=ClubMembership.StatusChoices.CANCELLED).exists())
+
+    def test_cancelling_never_deletes_a_member_with_a_role_in_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        member = Member.objects.create(first_name="Other", last_name="Admin")
+        ClubRole.objects.create(club=other_club, member=member, role=ClubRole.Roles.ADMIN)
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        cancel_membership(membership)
+
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+        self.assertTrue(ClubRole.objects.filter(club=other_club, member=member, role=ClubRole.Roles.ADMIN).exists())
+
 
 class SignupLinkingTests(TestCase):
     """club.services.signup_linking.link_to_existing_member."""
@@ -2950,3 +2988,93 @@ class SignupLinkingTests(TestCase):
 
         roster_entry.refresh_from_db()
         self.assertEqual(roster_entry.member, real)
+
+    def test_a_duplicate_with_a_login_is_never_deleted(self):
+        real = Member.objects.create(first_name="Timmy", last_name="Tester")
+        user = get_user_model().objects.create_user(email="dup-login@example.com", password="pw-secret-123")
+        duplicate = Member.objects.create(user=user, first_name="Timmy", last_name="Tester")
+        membership = ClubMembership.objects.create(club=self.club, member=duplicate, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        link_to_existing_member(membership, real)
+
+        self.assertTrue(Member.objects.filter(pk=duplicate.pk).exists())
+
+
+class PossibleDuplicatesTests(TestCase):
+    """club.services.signup_linking.possible_duplicates -- the Sign-up
+    queue's hint that a fresh sign-up may be someone this club already
+    knows."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.season = make_season(cls.club)
+        cls.previous_season = make_season(cls.club, start_year=2025)
+
+    def make_known_member(self, club=None, **kwargs):
+        club = club or self.club
+        member = Member.objects.create(**kwargs)
+        season = self.previous_season if club == self.club else make_season(club, start_year=2025)
+        ClubMembership.objects.create(club=club, member=member, season=season, status=ClubMembership.StatusChoices.LAPSED)
+        return member
+
+    def test_matches_an_existing_member_by_login_email(self):
+        user = get_user_model().objects.create_user(email="pat@example.com", password="pw-secret-123")
+        known = self.make_known_member(user=user, first_name="Pat", last_name="Parent")
+        fresh = Member.objects.create(first_name="Someone", last_name="Else", email="PAT@example.com")
+
+        self.assertEqual(list(possible_duplicates(fresh, self.club)), [known])
+
+    def test_matches_an_existing_member_by_name_and_date_of_birth(self):
+        known = self.make_known_member(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
+        fresh = Member.objects.create(first_name="timmy", last_name="TESTER", date_of_birth=datetime.date(2016, 5, 1))
+
+        self.assertEqual(list(possible_duplicates(fresh, self.club)), [known])
+
+    def test_never_suggests_a_member_of_another_club_only(self):
+        self.make_known_member(club=self.other_club, email="pat@example.com", first_name="Pat", last_name="Parent")
+        fresh = Member.objects.create(first_name="Pat", last_name="Parent", email="pat@example.com")
+
+        self.assertEqual(list(possible_duplicates(fresh, self.club)), [])
+
+    def test_nothing_to_match_on_suggests_nothing(self):
+        self.make_known_member(first_name="Timmy", last_name="Tester")
+        fresh = Member.objects.create(first_name="Timmy", last_name="Tester")
+
+        self.assertEqual(list(possible_duplicates(fresh, self.club)), [])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class SignupPossibleDuplicateHintTests(TestCase):
+    """The Sign-up page surfaces possible_duplicates to staff and
+    preselects the first one in its existing "Link" picker."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        previous_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=400), end_date=today - datetime.timedelta(days=31))
+        cls.admin_user = get_user_model().objects.create_user(email="admin@example.com", password="pw-secret-123")
+        admin_member = Member.objects.create(user=cls.admin_user, first_name="Ada", last_name="Admin")
+        ClubMembership.objects.create(club=cls.club, member=admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=admin_member).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.admin_user)
+
+        known_user = get_user_model().objects.create_user(email="pat@example.com", password="pw-secret-123")
+        cls.known = Member.objects.create(user=known_user, first_name="Pat", last_name="Known")
+        ClubMembership.objects.create(club=cls.club, member=cls.known, season=previous_season, status=ClubMembership.StatusChoices.LAPSED)
+        cls.fresh = Member.objects.create(first_name="Pat", last_name="Fresh", email="pat@example.com")
+        ClubMembership.objects.create(club=cls.club, member=cls.fresh, season=cls.season, status=ClubMembership.StatusChoices.PENDING)
+
+    def test_the_sign_up_page_flags_a_possible_duplicate(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("management:signup_list"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        membership = next(membership for membership in response.context["memberships"] if membership.member_id == self.fresh.pk)
+        self.assertEqual(list(membership.possible_duplicates), [self.known])
+        self.assertEqual(membership.link_form.initial.get("member"), self.known.pk)
+        self.assertContains(response, "Possible duplicate")

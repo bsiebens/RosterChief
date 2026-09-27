@@ -3474,7 +3474,9 @@ class ReRegisterViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:me"))
         membership = ClubMembership.objects.get(club=self.club, member=self.child, season=self.season)
         self.assertEqual(membership.fee_amount, Decimal("160.00"))
-        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        # An already-active membership stays active -- the extra, still-unpaid
+        # fee is what brings it back to staff's attention, not a status flip.
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.ACTIVE)
         self.assertEqual(membership.registration_details.count(), 2)
 
     def test_a_new_family_member_can_be_added_via_the_extra_row(self):

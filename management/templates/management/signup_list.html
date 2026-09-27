@@ -209,6 +209,9 @@
                     {% if membership.status != "cancelled" %}
                         <div>
                             <div class="mb-2.5 font-display text-xs font-bold tracking-[.14em] text-muted uppercase">{% trans "Duplicate?" %}</div>
+                            {% if membership.possible_duplicates %}
+                                <p class="mb-2 text-xs text-muted">{% trans "Possible duplicate of:" %} {% for candidate in membership.possible_duplicates %}{{ candidate.get_full_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                            {% endif %}
                             <form method="post" action="{% url 'management:signup_link_to_member' membership.member.pk %}" class="flex items-end gap-2">
                                 {% csrf_token %}
                                 <div class="flex-1">
