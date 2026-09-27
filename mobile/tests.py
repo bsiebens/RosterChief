@@ -104,6 +104,27 @@ class MobileShellTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "image/png")
 
+    def test_icon_rejects_sizes_the_manifest_does_not_reference(self):
+        with patch("mobile.services.icons.Image.new") as image_new:
+            response = self._get("icon", size=60000)
+
+        self.assertEqual(response.status_code, 404)
+        image_new.assert_not_called()
+
+    def test_icon_serves_both_manifest_sizes(self):
+        for size in (192, 512):
+            with self.subTest(size=size):
+                self.assertEqual(self._get("icon", size=size).status_code, 200)
+
+    def test_fallback_icon_is_rendered_once_then_served_from_cache(self):
+        cache.clear()
+        with patch("mobile.services.icons.render_fallback_icon", return_value=b"\x89PNG-cached") as render:
+            first = self._get("icon", size=192)
+            second = self._get("icon", size=192)
+
+        self.assertEqual(render.call_count, 1)
+        self.assertEqual(first.content, second.content)
+
     def test_service_worker_is_served_at_the_app_scope(self):
         response = self.client.get("/app/sw.js", HTTP_HOST="ajax-united.rosterchief.app")
 

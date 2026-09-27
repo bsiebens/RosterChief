@@ -75,7 +75,7 @@ from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_d
 from .mixins import DesktopTemplateMixin, PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
-from .services.icons import render_fallback_icon
+from .services.icons import ICON_SIZES, get_fallback_icon
 
 
 class ManifestView(ClubScopedPublicMixin, View):
@@ -103,10 +103,12 @@ class ManifestView(ClubScopedPublicMixin, View):
 
 class AppIconView(ClubScopedPublicMixin, View):
     def get(self, request, size):
+        if size not in ICON_SIZES:
+            raise Http404
         club = request.club
         if club.logo:
             return HttpResponseRedirect(club.logo.url)
-        return HttpResponse(render_fallback_icon(club, size=size), content_type="image/png")
+        return HttpResponse(get_fallback_icon(club, size=size), content_type="image/png")
 
 
 class ServiceWorkerView(View):
