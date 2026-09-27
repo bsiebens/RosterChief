@@ -1434,7 +1434,7 @@ class ProductionReceivingTests(TestCase):
         self.make_line(quantity=2, variant=self.variant)
         self.make_line(quantity=3, variant=self.variant)
 
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(self.club)
 
         self.assertEqual(len(summary), 1)
         self.assertEqual(summary[0]["product"], self.product)
@@ -1445,7 +1445,7 @@ class ProductionReceivingTests(TestCase):
         self.make_line(production_status=ProductionStatus.PENDING, variant=self.variant)
         self.make_line(production_status=ProductionStatus.RECEIVED, variant=self.variant)
 
-        self.assertEqual(production_receiving_summary(), [])
+        self.assertEqual(production_receiving_summary(self.club), [])
 
     def test_summary_excludes_cancelled_orders(self):
         cancelled = self.make_order()
@@ -1453,14 +1453,14 @@ class ProductionReceivingTests(TestCase):
         cancelled.save(update_fields=["fulfillment_status"])
         self.make_line(order=cancelled, variant=self.variant)
 
-        self.assertEqual(production_receiving_summary(), [])
+        self.assertEqual(production_receiving_summary(self.club), [])
 
     def test_summary_counts_personalized_lines_separately_from_expected_quantity(self):
         self.make_line(quantity=2, variant=self.variant)
         self.make_line(personalization_name="Sam", variant=self.variant)
         self.make_line(personalization_number="7", variant=self.variant)
 
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(self.club)
 
         self.assertEqual(summary[0]["variants"], [{"variant": self.variant, "expected_quantity": 2}])
         self.assertEqual(summary[0]["personalized_count"], 2)
@@ -1468,7 +1468,7 @@ class ProductionReceivingTests(TestCase):
     def test_summary_reports_a_product_with_only_personalized_lines(self):
         self.make_line(personalization_name="Sam", variant=self.variant)
 
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(self.club)
 
         self.assertEqual(summary[0]["variants"], [])
         self.assertEqual(summary[0]["personalized_count"], 1)
@@ -1477,7 +1477,7 @@ class ProductionReceivingTests(TestCase):
         older = self.make_line(order=self.make_order(days_ago=2), quantity=2, variant=self.variant)
         newer = self.make_line(order=self.make_order(days_ago=1), quantity=2, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): 2})
+        results = receive_production(self.club, {(self.product, self.variant): 2})
 
         older.refresh_from_db()
         newer.refresh_from_db()
@@ -1490,7 +1490,7 @@ class ProductionReceivingTests(TestCase):
         first = self.make_line(order=self.make_order(days_ago=2), quantity=20, variant=self.variant)
         second = self.make_line(order=self.make_order(days_ago=1), quantity=10, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): 25})  # covers `first` fully, not enough left for `second`
+        results = receive_production(self.club, {(self.product, self.variant): 25})  # covers `first` fully, not enough left for `second`
 
         first.refresh_from_db()
         second.refresh_from_db()
@@ -1506,7 +1506,7 @@ class ProductionReceivingTests(TestCase):
     def test_receive_reports_an_unexplained_surplus_but_still_allocates_everything_owed(self):
         line = self.make_line(quantity=5, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): 8})
+        results = receive_production(self.club, {(self.product, self.variant): 8})
 
         line.refresh_from_db()
         self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
@@ -1518,14 +1518,14 @@ class ProductionReceivingTests(TestCase):
     def test_receive_an_exact_match_has_no_discrepancy(self):
         self.make_line(quantity=4, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): 4})
+        results = receive_production(self.club, {(self.product, self.variant): 4})
 
         self.assertFalse(results[0].has_discrepancy)
 
     def test_receive_never_touches_a_personalized_line(self):
         personalized = self.make_line(personalization_name="Sam", quantity=1, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): 1})
+        results = receive_production(self.club, {(self.product, self.variant): 1})
 
         personalized.refresh_from_db()
         self.assertEqual(personalized.production_status, ProductionStatus.IN_PRODUCTION)
@@ -1536,7 +1536,7 @@ class ProductionReceivingTests(TestCase):
         order = self.make_order()
         line = self.make_line(order=order, quantity=1, variant=self.variant)
 
-        receive_production({(self.product, self.variant): 1})
+        receive_production(self.club, {(self.product, self.variant): 1})
 
         order.refresh_from_db()
         self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
@@ -1545,11 +1545,53 @@ class ProductionReceivingTests(TestCase):
     def test_receive_ignores_a_none_entry(self):
         line = self.make_line(quantity=1, variant=self.variant)
 
-        results = receive_production({(self.product, self.variant): None})
+        results = receive_production(self.club, {(self.product, self.variant): None})
 
         line.refresh_from_db()
         self.assertEqual(line.production_status, ProductionStatus.IN_PRODUCTION)
         self.assertEqual(results, [])
+
+    def make_other_club_line(self, **kwargs):
+        other_club, _ = Club.objects.get_or_create(slug="rival-fc", defaults={"name": "Rival FC"})
+        other_product, _ = Product.objects.get_or_create(club=other_club, name="Away Jersey", defaults={"price": Decimal("25.00"), "product_type": Product.ProductType.MERCHANDISE})
+        other_variant, _ = ProductVariant.objects.get_or_create(product=other_product, name="Large")
+        other_order = Order.objects.create(club=other_club, purchaser=self.member, total=Decimal("25.00"))
+        return self.make_line(order=other_order, product=other_product, variant=other_variant, **kwargs)
+
+    def test_summary_only_lists_the_given_clubs_lines(self):
+        self.make_line(quantity=2, variant=self.variant)
+        self.make_other_club_line(quantity=4)
+        self.make_other_club_line(personalization_name="Sam")
+
+        summary = production_receiving_summary(self.club)
+
+        self.assertEqual([entry["product"] for entry in summary], [self.product])
+        self.assertEqual(summary[0]["variants"], [{"variant": self.variant, "expected_quantity": 2}])
+
+    def test_receive_never_touches_another_clubs_lines_even_for_its_own_product_key(self):
+        other_line = self.make_other_club_line(quantity=1)
+
+        results = receive_production(self.club, {(other_line.product, other_line.variant): 1})
+
+        other_line.refresh_from_db()
+        self.assertEqual(other_line.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(results, [])
+
+    def test_receive_ignores_another_clubs_order_lines_for_this_clubs_product(self):
+        # A line whose order belongs to a different club than its product: neither
+        # club's receiving screen should be able to act on it.
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        stray_order = Order.objects.create(club=other_club, purchaser=self.member, total=Decimal("25.00"))
+        stray = self.make_line(order=stray_order, quantity=1, variant=self.variant)
+        own = self.make_line(order=self.make_order(days_ago=1), quantity=1, variant=self.variant)
+
+        results = receive_production(self.club, {(self.product, self.variant): 1})
+
+        stray.refresh_from_db()
+        own.refresh_from_db()
+        self.assertEqual(stray.production_status, ProductionStatus.IN_PRODUCTION)
+        self.assertEqual(own.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(results[0].expected_quantity, 1)
 
 
 class OrderKPIsTests(TestCase):

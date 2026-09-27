@@ -12810,6 +12810,31 @@ class OrderReceiveProductionTests(ShopTestBase):
 
         self.assertEqual(response.status_code, 403)
 
+    def make_other_club_line(self):
+        other_club = Club.objects.create(name="Rival Receive FC", slug="rival-receive-fc")
+        other_product = Product.objects.create(club=other_club, name="Rival Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        other_variant = ProductVariant.objects.create(product=other_product, name="Large")
+        other_order = Order.objects.create(club=other_club, purchaser=self.purchaser, total=Decimal("25.00"))
+        return self.make_line(order=other_order, product=other_product, variant=other_variant, quantity=2)
+
+    def test_another_clubs_in_production_lines_are_not_listed(self):
+        self.make_other_club_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_receive_production")
+
+        self.assertEqual(response.context["summary"], [])
+
+    def test_a_crafted_key_for_another_clubs_product_is_ignored(self):
+        other_line = self.make_other_club_line()
+        self.make_line(quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_receive_production", {self.field_name(): "1", f"received__{other_line.product.pk}__{other_line.variant.pk}": "2"})
+
+        other_line.refresh_from_db()
+        self.assertEqual(other_line.production_status, ProductionStatus.IN_PRODUCTION)
+
 
 class OrderReadyForPickupTests(ShopTestBase):
     """OrderReadyForPickupView -- the "what can I hand over right now"

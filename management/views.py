@@ -5204,10 +5204,10 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
     template_name = "management/order_receive_production.html"
 
     def get(self, request):
-        return render(request, self.template_name, {"summary": production_receiving_summary()})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club)})
 
     def post(self, request):
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(request.club)
 
         receipts = {}
         for entry in summary:
@@ -5225,7 +5225,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             notify(request, f"w|{_('Nothing entered')}|{_('Enter a received quantity for at least one item.')}")
             return redirect("management:order_receive_production")
 
-        results = receive_production(receipts)
+        results = receive_production(request.club, receipts)
 
         allocated_total = sum(len(result.allocated_lines) for result in results)
         discrepancy_count = sum(1 for result in results if result.has_discrepancy)
@@ -5240,7 +5240,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             body = ngettext("%(count)d line marked received.", "%(count)d lines marked received.", allocated_total) % {"count": allocated_total}
             notify(request, f"s|{_('Received')}|{body}")
 
-        return render(request, self.template_name, {"summary": production_receiving_summary(), "results": results})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club), "results": results})
 
 
 class OrderReadyForPickupView(ShopManagerRequiredMixin, ListView):
