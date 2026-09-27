@@ -6,7 +6,7 @@ from django.utils.translation import gettext as _
 
 from formbuilder.models import Answer, Submission
 
-from .audience import effective_members
+from .audience import addressed_to
 from .form_factory import build_form
 
 
@@ -57,7 +57,7 @@ def _check_open(send, member, when):
     # anonymous (login_required=False) submission has no member to resolve
     # membership for, and is already only reachable however the form's own
     # link was shared.
-    if member is not None and not effective_members(send).filter(pk=member.pk).exists():
+    if member is not None and not addressed_to(send, member):
         raise FormSubmissionError(_("This form isn't addressed to you."))
 
 

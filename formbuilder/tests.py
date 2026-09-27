@@ -21,6 +21,7 @@ from teams.models import Team, TeamMembership
 from .models import Answer, Field, Form, FormSend, Submission
 from .services import (
     FormSubmissionError,
+    addressed_to,
     build_form,
     build_form_class,
     effective_members,
@@ -258,6 +259,24 @@ class FormSendAudienceTests(FormbuilderTestBase):
         self.send.excluded_members.add(self.member)
 
         self.assertNotIn(self.member, effective_members(self.fresh_send()))
+
+    def test_addressed_to_a_single_member(self):
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+
+        self.assertTrue(addressed_to(self.send, self.member))
+        self.assertFalse(addressed_to(self.send, outsider))
+
+    def test_addressed_to_any_of_several_members(self):
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+
+        self.assertTrue(addressed_to(self.send, [outsider, self.member]))
+        self.assertFalse(addressed_to(self.send, [outsider]))
+        self.assertFalse(addressed_to(self.send, []))
+
+    def test_addressed_to_respects_exclusions(self):
+        self.send.excluded_members.add(self.member)
+
+        self.assertFalse(addressed_to(self.fresh_send(), self.member))
 
     def test_members_not_yet_submitted_excludes_anyone_with_an_existing_submission(self):
         Submission.objects.create(send=self.send, member=self.member)

@@ -41,7 +41,7 @@ from events.services.officials import OfficialAssignmentError, accept_official_s
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, build_form, form_status_rows_for, is_send_open, submit_form
+from formbuilder.services import FormSubmissionError, addressed_to, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.services.family import claim_label_for
 from members.views import ClubScopedPublicMixin
@@ -1035,10 +1035,15 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     Home "Forms to complete" card, the Me page's Forms section, or a form
     notification's own link (mobile.views._notification_source_link).
 
-    GET always renders (even once closed/already submitted -- the club_wide/
-    audience/window checks all live in formbuilder.services.submission.
-    submit_form, run for real on POST, not duplicated here as a second,
-    read-only copy that could drift from it); a rejected POST re-renders the
+    Only reachable for a send addressed to the viewer or someone they manage
+    (formbuilder.services.audience.addressed_to -- the same audience check
+    submit_form runs, and the same person-scope the Forms list shows rows
+    for); anyone else gets a 404, so a send's questions aren't readable by
+    any member of the club who guesses its URL. Beyond that, GET always
+    renders (even once closed/already submitted -- the window/quota checks
+    live in formbuilder.services.submission.submit_form, run for real on
+    POST, not duplicated here as a second, read-only copy that could drift
+    from it); a rejected POST re-renders the
     same screen with the service layer's own field-level errors attached,
     the same "translate a service exception into notify() + stay on the
     screen" idiom ShopCheckoutView uses for CheckoutError, except re-render
@@ -1049,7 +1054,10 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "me"
 
     def get_send(self):
-        return get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
+        send = get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
+        if not addressed_to(send, self.managed_people):
+            raise Http404("Form not addressed to you.")
+        return send
 
     def get(self, request, *args, **kwargs):
         send = self.get_send()
@@ -1763,6 +1771,12 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
 
 
+#: Upper bound on one cart line's quantity -- adding more (or incrementing
+#: past it) clamps to this rather than erroring, well inside CartItem.
+#: quantity's PositiveSmallIntegerField range.
+MAX_CART_QUANTITY = 99
+
+
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     """Photo/description/price, a variant picker (when the product has any --
     see ProductVariant's own docstring for why it's one free-text label, not
@@ -1791,7 +1805,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return self.render_to_response(self.get_context_data(product=product, variants=variants))
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(screen_title=kwargs["product"].name, **kwargs)
+        return super().get_context_data(screen_title=kwargs["product"].name, max_quantity=MAX_CART_QUANTITY, **kwargs)
 
     def post(self, request, *args, **kwargs):
         product = self._product()
@@ -1799,9 +1813,10 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("No member record for this account."))
 
         try:
-            quantity = max(1, int(request.POST.get("quantity", 1)))
-        except ValueError:
+            quantity = int(request.POST.get("quantity", 1))
+        except TypeError, ValueError:
             quantity = 1
+        quantity = min(max(1, quantity), MAX_CART_QUANTITY)
 
         variant = None
         variant_id = request.POST.get("variant")
@@ -1838,7 +1853,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             defaults={"quantity": quantity, "unit_price": unit_price},
         )
         if not item_created:
-            item.quantity += quantity
+            item.quantity = min(item.quantity + quantity, MAX_CART_QUANTITY)
             item.save(update_fields=["quantity"])
 
         title = _("Added to cart")
@@ -1891,8 +1906,9 @@ class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
         action = request.POST.get("action")
 
         if action == "increment":
-            item.quantity += 1
-            item.save(update_fields=["quantity"])
+            if item.quantity < MAX_CART_QUANTITY:
+                item.quantity += 1
+                item.save(update_fields=["quantity"])
         elif action == "decrement":
             if item.quantity > 1:
                 item.quantity -= 1

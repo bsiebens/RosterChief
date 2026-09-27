@@ -7110,6 +7110,34 @@ class ShopProductDetailViewTests(TestCase):
         self.assertIsNone(item.beneficiary)
         self.assertEqual(item.unit_price, self.product.price)
 
+    def test_an_oversized_quantity_is_clamped_to_the_cart_maximum(self):
+        # Well past PositiveSmallIntegerField's range -- used to overflow on save.
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "99999999"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.quantity, MAX_CART_QUANTITY)
+
+    def test_a_non_numeric_quantity_falls_back_to_one(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(self._url(), {"quantity": "lots"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.quantity, 1)
+
+    def test_adding_to_an_existing_line_never_exceeds_the_cart_maximum(self):
+        self.client.force_login(self.user)
+        self.client.post(self._url(), {"quantity": "60"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.client.post(self._url(), {"quantity": "60"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        [item] = CartItem.objects.all()
+        self.assertEqual(item.quantity, MAX_CART_QUANTITY)
+
     def test_personalization_is_saved_when_the_product_allows_it(self):
         self.product.personalization_enabled = True
         self.product.save(update_fields=["personalization_enabled"])
@@ -7296,6 +7324,15 @@ class ShopCartItemUpdateViewTests(TestCase):
 
         self.item.refresh_from_db()
         self.assertEqual(self.item.quantity, 3)
+
+    def test_increment_stops_at_the_cart_maximum(self):
+        self.item.quantity = MAX_CART_QUANTITY
+        self.item.save(update_fields=["quantity"])
+
+        self._post("increment")
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.quantity, MAX_CART_QUANTITY)
 
     def test_decrement(self):
         self._post("decrement")
@@ -7841,10 +7878,10 @@ class FormFillViewTests(TestCase):
 
         self.assertEqual(response.content.decode().count("This field is required."), 1)
 
-    def test_an_audience_rejection_still_shows_as_a_banner_not_a_field_error(self):
+    def test_a_window_rejection_still_shows_as_a_banner_not_a_field_error(self):
         # No Field to attach this one to -- unlike a missing-required-field
         # rejection, this is the one case still surfaced by hand.
-        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)  # nobody invited
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True, is_active=False)
         self.client.force_login(self.user)
 
         response = self.client.post(self._url(send), {"name": "Jane"}, HTTP_HOST="ajax-united.rosterchief.app")
@@ -7858,8 +7895,49 @@ class FormFillViewTests(TestCase):
 
         response = self.client.post(self._url(send), {"name": "Jane"}, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(Submission.objects.exists())
+
+    def test_a_member_outside_the_audience_cannot_view_the_questions(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)  # nobody invited
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(send), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_excluded_member_cannot_view_the_questions(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
+        send.excluded_members.add(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(send), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_invited_member_can_view_the_questions(self):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
+        send.invited_members.add(self.member)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(send), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Name")
+
+    def test_a_parent_can_view_a_form_addressed_to_their_child(self):
+        # Same person-scope the Forms list builds its rows (and links) from.
+        family = Family.objects.create(club=self.club, name="Bakker")
+        child = Member.objects.create(first_name="Mila", last_name="Bakker")
+        ClubMembership.objects.create(club=self.club, member=child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        FamilyMembership.objects.create(family=family, member=self.member, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=child, role=FamilyMembership.FamilyRole.CHILD)
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False)
+        send.invited_members.add(child)
+        self.client.force_login(self.user)
+
+        response = self.client.get(self._url(send), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, "Name")
 
     def test_tapping_a_form_notification_redirects_here(self):
         send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)

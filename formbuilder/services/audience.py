@@ -49,6 +49,20 @@ def effective_members(send):
     return Member.objects.filter(id__in=member_ids)
 
 
+def addressed_to(send, members):
+    """Whether ``send``'s audience includes ``members`` -- one Member, or an
+    iterable of them (any one of them counts, e.g. a parent's own record
+    plus their managed children). The single check both submitting
+    (submission._check_open) and viewing a send (mobile's FormFillView)
+    go through, so who may see a form and who may answer it can't drift."""
+    if isinstance(members, Member):
+        members = [members]
+    member_ids = [member.pk for member in members if member is not None]
+    if not member_ids:
+        return False
+    return effective_members(send).filter(pk__in=member_ids).exists()
+
+
 def members_not_yet_submitted(send):
     """``effective_members(send)`` minus anyone with an existing Submission --
     "who still needs to do this", the shared query behind the mobile home

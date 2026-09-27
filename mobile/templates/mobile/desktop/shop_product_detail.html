@@ -67,7 +67,7 @@
                         {% lucide "minus" size=16 %}
                     </button>
                     <span class="w-6 text-center font-display text-lg font-extrabold text-ink" x-text="qty"></span>
-                    <button type="button" class="btn-square btn-outline btn" @click="qty += 1" aria-label="{% trans "Increase quantity" %}">
+                    <button type="button" class="btn-square btn-outline btn" @click="qty = Math.min({{ max_quantity }}, qty + 1)" aria-label="{% trans "Increase quantity" %}">
                         {% lucide "plus" size=16 %}
                     </button>
                 </div>
