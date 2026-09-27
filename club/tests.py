@@ -3152,3 +3152,21 @@ class PurgePublicInvoiceCacheCommandTests(TestCase):
         call_command("purge_public_invoice_cache", stdout=out)
 
         self.assertIn("0", out.getvalue())
+
+
+class DuesRenderPdfUrlFetcherTests(TestCase):
+    """club.services.invoicing.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from club.services.invoicing import render_pdf as _render_pdf
+        from rosterchief.pdf import safe_url_fetcher
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)

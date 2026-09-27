@@ -18,6 +18,7 @@ from billing.models import Due, Invoice
 from billing.services import BillingError
 from billing.services.reminders import admin_emails
 from rosterchief.mail import send_message
+from rosterchief.pdf import safe_url_fetcher
 from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
 
 
@@ -110,7 +111,7 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise BillingError("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).") from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
 
 
 def _cache_path(invoice: Invoice) -> str:

@@ -1770,3 +1770,68 @@ class InvoicePdfCachingTests(TestCase):
 
         renderer.assert_not_called()
         self.assertEqual(pdf, b"%PDF-private")
+
+
+class ShopRenderPdfUrlFetcherTests(TestCase):
+    """shop.services.invoices.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from rosterchief.pdf import safe_url_fetcher
+        from shop.services.invoices import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+
+
+class SafeUrlFetcherTests(TestCase):
+    """rosterchief.pdf.safe_url_fetcher -- the WeasyPrint url_fetcher every PDF uses."""
+
+    def test_non_data_urls_are_refused(self):
+        from rosterchief.pdf import safe_url_fetcher
+
+        for url in ["file:///etc/passwd", "FILE:///etc/hosts", "http://169.254.169.254/latest/meta-data/", "https://example.com/logo.png", "ftp://example.com/x", "/etc/passwd", "logo.png"]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                safe_url_fetcher(url)
+
+    def test_data_urls_are_resolved(self):
+        try:
+            import weasyprint  # noqa: F401
+        except ImportError, OSError:
+            self.skipTest("WeasyPrint's native libraries are not available")
+
+        from rosterchief.pdf import safe_url_fetcher
+
+        response = safe_url_fetcher("data:text/plain;base64,aGVsbG8=")
+        try:
+            self.assertEqual(response.read(), b"hello")
+        finally:
+            response.close()
+
+    def test_a_refused_resource_is_skipped_not_fatal(self):
+        # A real render: a file: image is dropped with a warning, the PDF still comes out.
+        try:
+            from weasyprint import HTML
+        except ImportError, OSError:
+            self.skipTest("WeasyPrint's native libraries are not available")
+
+        from rosterchief.pdf import safe_url_fetcher
+
+        # A plain function, not a Mock: WeasyPrint reads an optional `_fail_on_errors`
+        # attribute off the fetcher, which a Mock would answer with a truthy value.
+        fetched = []
+
+        def spy(url, *args, **kwargs):
+            fetched.append(url)
+            return safe_url_fetcher(url, *args, **kwargs)
+
+        pdf = HTML(string='<p>hi</p><img src="file:///etc/hosts"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">', url_fetcher=spy).write_pdf()
+
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertIn("file:///etc/hosts", fetched)

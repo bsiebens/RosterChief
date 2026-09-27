@@ -1163,3 +1163,21 @@ class PlanDeletionTests(BillingTestBase):
 
         self.assertTrue(Subscription.objects.filter(club=self.club).exists())
         self.assertFalse(self.plan.is_deleted)
+
+
+class BillingRenderPdfUrlFetcherTests(TestCase):
+    """billing.services.invoices.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from billing.services.invoices import render_pdf as _render_pdf
+        from rosterchief.pdf import safe_url_fetcher
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)

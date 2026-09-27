@@ -11,6 +11,8 @@ real benefit.
 
 from django.template.loader import render_to_string
 
+from rosterchief.pdf import safe_url_fetcher
+
 #: Referee form defaults, used whenever a club hasn't set its own colours (see
 #: club.models.Club.primary_color/secondary_color) -- picked to match the
 #: app's own daisyUI theme accent/secondary so an unbranded club's form still
@@ -87,7 +89,7 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise PDFExportError("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).") from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
 
 
 def membership_list_pdf(context: dict) -> bytes:

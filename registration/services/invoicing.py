@@ -54,6 +54,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from club.services.fees import early_payment_offer, remaining_balance, sync_fee_status
 from club.services.invoicing import resolve_document_address
+from rosterchief.pdf import safe_url_fetcher
 
 from ..models import RegistrationBatch, RegistrationDetails
 
@@ -68,7 +69,7 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise RegistrationInvoicePDFError(_("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).")) from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
 
 
 def active_batch_entries(batch):
