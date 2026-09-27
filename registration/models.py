@@ -51,6 +51,13 @@ class RegistrationBatch(ClubScopedModel):
     contact_last_name = models.CharField(_("contact last name"), max_length=150)
     contact_email = models.EmailField(_("contact email"))
     contact_phone = models.CharField(_("contact phone"), max_length=50, blank=True)
+    #: The Member the submission resolved as the person filling in the form
+    #: (registration.services.submission._resolve_contact_member) -- what staff
+    #: billing screens show as "billed to", rather than re-deriving it from the
+    #: typed contact_email, which can name someone else or nobody at all.
+    #: None when that Member has since been removed; screens then fall back to
+    #: the typed contact name/email.
+    contact_member = models.ForeignKey("members.Member", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("contact member"))
 
     subtotal = models.DecimalField(_("subtotal"), max_digits=10, decimal_places=2, default=0)
     discount_amount = models.DecimalField(

@@ -1,0 +1,40 @@
+{% extends "registration/_base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    members.views.FamilyInviteAcceptView -- the link a family invite email
+    hands out (members.services.invites). Family details are only shown to the
+    signed-in account the invite was sent to; every other case shows `problem`.
+{% endcomment %}
+
+{% block page_title %}{% trans "Family invite" %}{% endblock page_title %}
+
+{% block brand_href %}/{% endblock brand_href %}
+
+{% block content %}
+    <div class="card card-body">
+        <h1 class="font-display text-3xl font-extrabold text-ink uppercase">{% trans "Family invite" %}</h1>
+
+        {% if problem %}
+            <div class="alert alert-error mt-2" role="alert">
+                {% lucide "circle-x" size=18 %}
+                <span>{{ problem }}</span>
+            </div>
+        {% elif accepted %}
+            <div class="alert alert-success mt-2" role="status">
+                {% lucide "circle-check" size=18 %}
+                <span>{% blocktrans with family=invite.family club=club.name %}You are now part of the {{ family }} family at {{ club }}.{% endblocktrans %}</span>
+            </div>
+            <div class="mt-2">
+                <a class="btn btn-primary gap-2" href="/">{% lucide "arrow-right" size=16 %} {% trans "Continue" %}</a>
+            </div>
+        {% else %}
+            <p class="text-sm text-ink">{% blocktrans with family=invite.family club=club.name %}{{ club }} has invited you to join the {{ family }} family as a parent or guardian.{% endblocktrans %}</p>
+            <p class="text-sm text-muted">{% trans "Accepting links your account to this family at this club. Nothing is shared until you accept." %}</p>
+            <form class="mt-2" method="post">
+                {% csrf_token %}
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Accept invite" %}</button>
+            </form>
+        {% endif %}
+    </div>
+{% endblock content %}

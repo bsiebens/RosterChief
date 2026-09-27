@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import openpyxl
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core import mail
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -44,7 +45,7 @@ from management.pdf import PDFExportError, _tint_with_white, referee_form_colors
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from management.shop_export import build_production_export, stash_production_export
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.models import Family, FamilyInvite, FamilyMembership, Group, GroupMembership, Member
 from news.models import News, NewsPhoto
 from news.services import _notify_editors_of_pending_review_by_id, _send_and_mark_notified
 from notifications.models import Notification
@@ -2396,9 +2397,10 @@ class FamilyManagementTests(ManagementTestBase):
         self.assertTrue(ClubMembership.objects.filter(club=self.club, member=parent, season=self.season).exists())
         self.assertTrue(ClubMembership.objects.filter(club=self.club, member=child, season=self.season).exists())
 
-    def test_reusing_an_existing_login_by_email(self):
-        # A parent who's already a Member elsewhere (an existing login) must be
-        # reused, not duplicated, when registered onto a second family.
+    def test_an_existing_login_is_invited_not_linked_or_duplicated(self):
+        # A parent who already has an account is never linked by staff typing
+        # their email (members.services.invites): the family is created with
+        # the child, and the parent gets an invite -- no duplicate either.
         existing_user = User.objects.create_user(email="existing@example.com", password="pw-secret-123")
         existing_member = Member.objects.create(user=existing_user, first_name="Existing", last_name="Parent")
 
@@ -2415,7 +2417,9 @@ class FamilyManagementTests(ManagementTestBase):
 
         self.assertEqual(Member.objects.filter(user=existing_user).count(), 1)
         family = Family.objects.get(memberships__member__first_name="New")
-        self.assertIn(existing_member, family.guardians)
+        self.assertNotIn(existing_member, family.guardians)
+        self.assertTrue(FamilyInvite.objects.filter(family=family, email="existing@example.com", accepted_at__isnull=True).exists())
+        self.assertEqual([message.to for message in mail.outbox], [["existing@example.com"]])
 
     def make_existing_family(self):
         # A family only counts as "of this club" once at least one of its members
@@ -14375,3 +14379,300 @@ class LogoUploadFormatTests(ManagementTestBase):
         sponsor.refresh_from_db()
         self.assertEqual(sponsor.name, "Acme Renamed")
         self.assertTrue(sponsor.logo.name.endswith(".svg"))
+
+
+class GlobalMemberBoundaryTests(ManagementTestBase):
+    """Member is global: a club's staff can't pull in, rewrite, or delete a
+    person record that also belongs to an account holder or another club (see
+    members.services.deletion.member_has_ties_outside_club and
+    members.services.invites)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.rival = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.rival_season = make_season(cls.rival)
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def make_family(self, club=None, season=None):
+        club = club or self.club
+        family = Family.objects.create(club=club)
+        kid = Member.objects.create(first_name="First", last_name="Kid")
+        FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=club, member=kid, season=season or self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return family
+
+    def shared_member(self):
+        """Someone on both clubs' books, in a family at each."""
+        member = Member.objects.create(first_name="Sam", last_name="Shared", email="sam@example.com", date_of_birth=datetime.date(1990, 1, 1))
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=self.rival, member=member, season=self.rival_season, status=ClubMembership.StatusChoices.ACTIVE)
+        return member
+
+    def messages_of(self, response):
+        return [(message.extra_tags, message.message) for message in get_messages(response.wsgi_request)]
+
+    # --- Adding a parent by email -------------------------------------------------
+
+    def test_an_existing_accounts_email_sends_an_invite_instead_of_linking(self):
+        user = User.objects.create_user(email="Other.Parent@example.com", password="pw-secret-123")
+        other = Member.objects.create(user=user, first_name="Other", last_name="Parent", phone="+32470000001")
+        ClubMembership.objects.create(club=self.rival, member=other, season=self.rival_season, status=ClubMembership.StatusChoices.ACTIVE)
+        family = self.make_family()
+
+        response = self.club_post("family_add_parent", {"email": "other.parent@example.com", "first_name": "Typed", "last_name": "Name"}, family.pk)
+
+        self.assertRedirects(response, reverse("management:family_detail", args=[family.pk]))
+        self.assertFalse(FamilyMembership.objects.filter(member=other).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=other).exists())
+        invite = FamilyInvite.objects.get(family=family)
+        self.assertEqual(invite.club, self.club)
+        self.assertEqual(invite.email, "other.parent@example.com")
+        self.assertIsNone(invite.accepted_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["other.parent@example.com"])
+        self.assertIn(reverse("members:family_invite_accept", args=[invite.token]), mail.outbox[0].body)
+        other.refresh_from_db()
+        self.assertEqual((other.first_name, other.last_name), ("Other", "Parent"))
+
+    def test_the_confirmation_reads_the_same_for_a_new_and_an_existing_email(self):
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+
+        existing = self.messages_of(self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "Kim", "last_name": "Known"}, family.pk))
+        new = self.messages_of(self.club_post("family_add_parent", {"email": "fresh@example.com", "first_name": "Fay", "last_name": "Fresh"}, family.pk))
+
+        # Unfollowed redirects leave the first message queued, so compare the last of each.
+        self.assertEqual(existing[-1][0], new[-1][0])
+        self.assertEqual(existing[-1][1].replace("known@example.com", "EMAIL"), new[-1][1].replace("fresh@example.com", "EMAIL"))
+
+    def test_a_new_email_is_still_created_and_linked_immediately(self):
+        family = self.make_family()
+
+        self.club_post("family_add_parent", {"email": "brand.new@example.com", "first_name": "Bea", "last_name": "New"}, family.pk)
+
+        parent = Member.objects.get(user__email="brand.new@example.com")
+        self.assertIn(parent, family.guardians)
+        self.assertTrue(ClubMembership.objects.filter(club=self.club, member=parent, season=self.season).exists())
+        self.assertFalse(FamilyInvite.objects.exists())
+
+    def test_the_name_is_required_even_for_an_existing_account(self):
+        # Uniform form behaviour: whether an email has an account never
+        # changes what the form asks for.
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+
+        self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "", "last_name": ""}, family.pk)
+        self.club_post("family_add_parent", {"email": "unknown@example.com", "first_name": "", "last_name": ""}, family.pk)
+
+        self.assertFalse(FamilyInvite.objects.exists())
+        self.assertFalse(User.objects.filter(email="unknown@example.com").exists())
+
+    def test_family_page_lists_pending_invites(self):
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+        self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "Kim", "last_name": "Known"}, family.pk)
+
+        response = self.club_get("family_detail", family.pk)
+
+        self.assertContains(response, "Pending invites")
+        self.assertContains(response, "known@example.com")
+
+    def test_family_create_with_an_existing_accounts_email_invites_the_parent(self):
+        user = User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        known = Member.objects.create(user=user, first_name="Kim", last_name="Known")
+
+        self.club_post("family_create", {"parent_first_name": "Kim", "parent_last_name": "Known", "parent_email": "known@example.com", "child_first_name": "New", "child_last_name": "Kid"})
+
+        family = Family.objects.get(memberships__member__first_name="New")
+        self.assertEqual(family.club, self.club)
+        self.assertFalse(FamilyMembership.objects.filter(member=known).exists())
+        self.assertTrue(FamilyInvite.objects.filter(family=family, email="known@example.com").exists())
+
+    def test_member_import_never_binds_a_row_to_an_existing_account(self):
+        user = User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        known = Member.objects.create(user=user, first_name="Kim", last_name="Known")
+        upload = make_import_workbook([["Imported", "Parent", "", "known@example.com", "", "", "", "", "", "Known family", "parent"]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        imported = Member.objects.get(first_name="Imported")
+        self.assertIsNone(imported.user_id)
+        self.assertEqual(imported.email, "known@example.com")
+        self.assertFalse(FamilyMembership.objects.filter(member=known).exists())
+
+    # --- Editing person fields -------------------------------------------------------
+
+    def update_payload(self, **overrides):
+        payload = {
+            "first_name": "Hacked",
+            "last_name": "Name",
+            "email": "attacker@example.com",
+            "date_of_birth": "2001-02-03",
+            "phone": "+32470999999",
+            "kind": ClubMembership.Kind.MEMBER,
+            "license": "BE-1234",
+            "status": ClubMembership.StatusChoices.ACTIVE,
+            "fee_status": ClubMembership.FeeStatus.PAID,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_person_fields_of_a_member_shared_with_another_club_are_read_only(self):
+        member = self.shared_member()
+
+        response = self.club_post("member_update", self.update_payload(), member.pk)
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[member.pk]))
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.last_name, member.email, member.date_of_birth, member.phone), ("Sam", "Shared", "sam@example.com", datetime.date(1990, 1, 1), None))
+        membership = ClubMembership.objects.get(club=self.club, member=member, season=self.season)
+        self.assertEqual(membership.license, "BE-1234")
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PAID)
+
+    def test_person_fields_of_a_member_with_a_login_are_read_only(self):
+        user = User.objects.create_user(email="login@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Lou", last_name="Login", email="lou@example.com")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_update", self.update_payload(), member.pk)
+
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.last_name, member.email), ("Lou", "Login", "lou@example.com"))
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=member).license, "BE-1234")
+
+    def test_the_edit_page_explains_and_disables_locked_fields(self):
+        member = self.shared_member()
+
+        response = self.club_get("member_update", member.pk)
+
+        self.assertTrue(response.context["form"].fields["email"].disabled)
+        self.assertContains(response, "can't be changed here")
+
+    def test_a_member_only_this_club_knows_is_still_editable(self):
+        member = Member.objects.create(first_name="Only", last_name="Here")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_update", self.update_payload(email="only@example.com"), member.pk)
+
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.email), ("Hacked", "only@example.com"))
+
+    def test_granting_a_login_to_a_member_shared_with_another_club_is_refused(self):
+        member = self.shared_member()
+
+        self.club_post("member_grant_login", {"email": "someone.new@example.com"}, member.pk)
+
+        member.refresh_from_db()
+        self.assertIsNone(member.user_id)
+        self.assertFalse(User.objects.filter(email="someone.new@example.com").exists())
+
+    # --- Deleting -------------------------------------------------------------------
+
+    def test_deleting_a_shared_member_only_removes_this_clubs_rows(self):
+        member = self.shared_member()
+        own_family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=own_family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        team = Team.objects.create(club=self.club, name="Ours", short_name="O")
+        rival_team = Team.objects.create(club=self.rival, name="Theirs", short_name="T")
+        TeamMembership.objects.create(team=team, member=member, season=self.season)
+        TeamMembership.objects.create(team=rival_team, member=member, season=self.rival_season)
+        ClubRole.objects.filter(club=self.club, member=member).update(role=ClubRole.Roles.EDITOR)
+
+        response = self.club_post("member_delete", {}, member.pk)
+
+        self.assertRedirects(response, reverse("management:member_list"))
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exists())
+        self.assertFalse(ClubRole.objects.filter(club=self.club, member=member).exists())
+        self.assertFalse(TeamMembership.objects.filter(team=team, member=member).exists())
+        # This club's family, left empty, is cleaned up; the other club's is untouched.
+        self.assertFalse(Family.objects.filter(pk=own_family.pk).exists())
+        self.assertTrue(FamilyMembership.objects.filter(family=rival_family, member=member).exists())
+        self.assertTrue(ClubMembership.objects.filter(club=self.rival, member=member).exists())
+        self.assertTrue(TeamMembership.objects.filter(team=rival_team, member=member).exists())
+
+    def test_deleting_never_removes_another_clubs_emptied_family(self):
+        # The member is the only one in a rival family: deleting them here must
+        # neither delete them nor that family.
+        member = self.shared_member()
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.club_post("member_delete", {}, member.pk)
+
+        self.assertTrue(Family.objects.filter(pk=rival_family.pk).exists())
+        self.assertTrue(FamilyMembership.objects.filter(family=rival_family, member=member).exists())
+
+    def test_deleting_a_member_with_a_login_keeps_the_record(self):
+        user = User.objects.create_user(email="login@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Lou", last_name="Login")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_delete", {}, member.pk)
+
+        self.assertTrue(Member.objects.filter(pk=member.pk, user=user).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exists())
+
+    def test_detaching_from_another_clubs_family_is_not_possible(self):
+        member = self.shared_member()
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        response = self.club_post("member_detach_family", {}, member.pk, rival_family.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Family.objects.filter(pk=rival_family.pk).exists())
+
+
+class RegistrationBilledToTests(ShopTestBase):
+    """Staff billing screens show the Member the registration itself resolved
+    (RegistrationBatch.contact_member), never one looked up by typed email, and
+    never drop a registration row."""
+
+    def make_confirmed_batch(self, contact_email="reg-parent@example.com"):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("80.00"))
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=Decimal("80.00"))
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        batch = submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email=contact_email, entries=entries)
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        return batch
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_an_anonymous_registration_typing_someone_elses_email_is_billed_to_its_own_contact(self):
+        victim_user = User.objects.create_user(email="victim@example.com", password="pw-secret-123")
+        victim = Member.objects.create(user=victim_user, first_name="Vic", last_name="Victim")
+        ClubMembership.objects.create(club=self.club, member=victim, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        batch = self.make_confirmed_batch(contact_email="victim@example.com")
+
+        self.assertNotEqual(batch.contact_member, victim)
+        detail = self.club_get("registration_invoice_detail", batch.pk)
+        self.assertEqual(detail.context["contact"], batch.contact_member)
+        listing = self.club_get("invoice_list")
+        row = next(row for row in listing.context["invoices"] if row["number"] == batch.invoice_number)
+        self.assertEqual(row["billed_to"], batch.contact_member)
+        self.assertNotContains(listing, "Vic Victim")
+
+    def test_a_registration_whose_contact_member_is_gone_is_still_listed(self):
+        batch = self.make_confirmed_batch()
+        RegistrationBatch.objects.filter(pk=batch.pk).update(contact_member=None)
+
+        listing = self.club_get("invoice_list")
+        detail = self.club_get("registration_invoice_detail", batch.pk)
+
+        self.assertContains(listing, batch.invoice_number)
+        self.assertContains(listing, "Reg Parent")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIsNone(detail.context["contact"])
+        self.assertContains(detail, "reg-parent@example.com")

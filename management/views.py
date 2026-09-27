@@ -110,7 +110,9 @@ from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
 from formbuilder.services.reporting import form_report
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
+from members.services.deletion import member_has_ties_outside_club, remove_member_from_club
+from members.services.family import add_child_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, get_or_create_login_user, grant_login
+from members.services.invites import account_exists, add_or_invite_parent, pending_invites, register_family_or_invite
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
 from notifications.models import Notification
@@ -962,11 +964,12 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
                     continue
 
                 family_role = result["family_role"]
-                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email:
+                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email and not account_exists(member.email):
                     # Give the parent/guardian a login before saving, same as
-                    # registering a family by hand -- get_or_create_login_user
-                    # reuses an existing account for that email rather than
-                    # risking a duplicate.
+                    # registering a family by hand. An email that already has an
+                    # account is left as a plain contact address on this new,
+                    # login-less record: an import never binds a row to someone
+                    # else's existing account.
                     member.user, _unused = get_or_create_login_user(member.email)
 
                 member.save()
@@ -1043,7 +1046,12 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     """Not a generic UpdateView: this page owns two forms on one submit -- the
     member's own fields, and (when they're actually rostered this season) their
     ClubMembership's license/status/fee status. A Member has no club of its own
-    without one, so this is the only place to see or change it."""
+    without one, so this is the only place to see or change it.
+
+    The person's own details are read-only here when the record isn't this
+    club's alone (a login, or ties to another club -- members.services.
+    deletion.member_has_ties_outside_club): the form disables them, and they
+    are never saved. The club's own membership row stays editable."""
 
     template_name = "management/member_form.html"
 
@@ -1063,16 +1071,17 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
         member = self.get_member()
         membership = self.get_membership(member)
         membership_form = ClubMembershipForm(instance=membership) if membership else None
-        return self.render_form(member, MemberForm(instance=member), membership_form)
+        return self.render_form(member, MemberForm(instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club)), membership_form)
 
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        form = MemberForm(request.POST, request.FILES, instance=member)
+        form = MemberForm(request.POST, request.FILES, instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club))
         membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):
-            form.save()
+            if not form.person_fields_locked:
+                form.save()
             if membership_form is not None:
                 membership_form.save()
             notify(request, f"s|{_('Member updated')}|{_('“%(member)s” updated.') % {'member': member}}")
@@ -1239,6 +1248,10 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
             # Already has one -- the row's button shouldn't have been there at all;
             # a direct POST replay (e.g. a resubmitted form) is the only way here.
             notify(self.request, f"w|{_('Already has a login')}|{_('“%(member)s” can already sign in.') % {'member': member}}")
+        elif member_has_ties_outside_club(member, self.request.club):
+            # A login decides who controls a shared person record, so one club
+            # can't hand it out on its own (same rule as MemberUpdateView).
+            notify(self.request, f"e|{_('Could not grant a login')}|{_('“%(member)s” is also known to another club, so a login cannot be set up from here.') % {'member': member}}")
         else:
             grant_login(member, form.cleaned_data["email"])
             notify(self.request, f"s|{_('Login granted')}|{_('“%(member)s” can now sign in.') % {'member': member}}")
@@ -1248,7 +1261,7 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
 class MemberDetachFromFamilyView(MemberAdminRequiredMixin, View):
     def post(self, request, pk, family_pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
-        family = get_object_or_404(Family, pk=family_pk, memberships__member=member)
+        family = get_object_or_404(families_of_club(request.club), pk=family_pk, memberships__member=member)
         # detach_from_family may delete `family` itself (left empty) -- str() it first,
         # since Family.__str__ queries self.memberships, which needs a pk to still exist.
         family_name = str(family)
@@ -1288,13 +1301,26 @@ class FamilyMembershipRoleUpdateView(MemberAdminRequiredMixin, View):
 
 
 class MemberDeleteView(MemberAdminRequiredMixin, View):
+    """Member is global: the record is only deleted when it is this club's
+    alone (members.services.deletion.member_has_ties_outside_club). Otherwise
+    only this club's rows about the person are removed
+    (remove_member_from_club) and the record itself stays. Either way the only
+    families that can be cleaned up are this club's, once left empty."""
+
     def post(self, request, pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         name = str(member)
+
+        if member_has_ties_outside_club(member, request.club):
+            remove_member_from_club(member, request.club)
+            body = _("“%(member)s” has been removed from the club.") % {"member": name}
+            notify(request, f"w|{_('Member removed')}|{body}")
+            return redirect("management:member_list")
+
         # FamilyMembership cascades away with the member -- note which families
         # they were in before that happens, so an emptied one can be cleaned up
         # after, same as detach_from_family does.
-        family_ids = list(Family.objects.filter(memberships__member=member).values_list("pk", flat=True))
+        family_ids = list(families_of_club(request.club).filter(memberships__member=member).values_list("pk", flat=True))
 
         try:
             member.delete()
@@ -2017,7 +2043,8 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
 
 class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     """One new family in one go: a parent (who gets a login) and a child (who
-    doesn't) -- see members.services.family.register_family."""
+    doesn't) -- see members.services.invites.register_family_or_invite: a
+    parent email that already has an account is invited, not linked."""
 
     form_class = FamilyCreateForm
     template_name = "management/family_form.html"
@@ -2025,9 +2052,11 @@ class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     def form_valid(self, form):
         cd = form.cleaned_data
         season = current_season(self.request.club)
-        self.family = register_family(
+        self.family = register_family_or_invite(
             self.request.club,
             season,
+            invited_by=self.request.user,
+            request=self.request,
             parent_email=cd["parent_email"],
             parent_first_name=cd["parent_first_name"],
             parent_last_name=cd["parent_last_name"],
@@ -2077,6 +2106,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
             family_role_choices=FamilyMembership.FamilyRole.choices,
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
+            pending_invites=pending_invites(self.object),
             **kwargs,
         )
 
@@ -2103,7 +2133,11 @@ class FamilyAddChildView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormV
 
 class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add parent" modal on the family overview / member
-    detail pages -- a family that needs one more parent/guardian registered."""
+    detail pages -- a family that needs one more parent/guardian registered.
+
+    A new email is added straight away; an email that already has an account is
+    only invited (members.services.invites.add_or_invite_parent). The
+    confirmation reads the same either way."""
 
     form_class = AddParentForm
     http_method_names = ["post"]
@@ -2114,9 +2148,12 @@ class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, Form
 
     def form_valid(self, form):
         family = get_object_or_404(families_of_club(self.request.club), pk=self.kwargs["pk"])
-        parent = add_parent_to_family(self.request.club, current_season(self.request.club), family, **form.cleaned_data)
-        body = _("“%(parent)s” added to %(family)s.") % {"parent": parent, "family": family}
-        notify(self.request, f"s|{_('Parent registered')}|{body}")
+        email = form.cleaned_data["email"]
+        # Named before the add, so the message doesn't differ by whose surname joined.
+        family_name = str(family)
+        add_or_invite_parent(self.request.club, current_season(self.request.club), family, invited_by=self.request.user, request=self.request, **form.cleaned_data)
+        body = _("%(email)s has been added to %(family)s, or emailed an invite to join it if they already have an account.") % {"email": email, "family": family_name}
+        notify(self.request, f"s|{_('Parent added')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
 
 
@@ -5868,10 +5905,12 @@ class RegistrationInvoiceDetailView(ClubAdminRequiredMixin, View):
     template_name = "management/registration_invoice_detail.html"
 
     def get(self, request, pk):
-        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season"), pk=pk)
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season", "contact_member"), pk=pk)
         entries = active_batch_entries(batch)
         subtotal, discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
-        contact = find_member_by_email(batch.contact_email)
+        # The Member the submission itself resolved -- never re-derived from
+        # the typed email. None: the template shows the typed contact only.
+        contact = batch.contact_member
         memberships = {}
         for entry in entries:
             memberships.setdefault(entry.membership_id, entry.membership)
@@ -6067,7 +6106,7 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
         grouping batch_invoice_pdf's own document uses. A still-unconfirmed
         registration has no place here at all; it's on the review queue
         instead, until staff has actually reviewed and sent it."""
-        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).order_by("-invoice_sent_at")
+        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).select_related("contact_member").order_by("-invoice_sent_at")
         if search:
             batches = (
                 batches.filter(contact_first_name__icontains=search)
@@ -6078,13 +6117,6 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
 
         rows = []
         for batch in batches:
-            contact = find_member_by_email(batch.contact_email)
-            if contact is None:
-                # The login account behind the contact email has since gone
-                # missing (changed/removed) -- billed_to has to be a real
-                # Member (the template links straight to its own detail
-                # page), so this row can't be shown rather than 500ing.
-                continue
             entries = active_batch_entries(batch)
             if not entries:
                 # Everyone in it has since been cancelled -- nothing left
@@ -6102,7 +6134,10 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
                     "kind": "registration",
                     "kind_label": _("Registration"),
                     "number": batch.invoice_number,
-                    "billed_to": contact,
+                    # The Member the submission resolved; when that's gone, the
+                    # row still shows, with the typed contact and no link.
+                    "billed_to": batch.contact_member,
+                    "billed_to_name": f"{batch.contact_first_name} {batch.contact_last_name}".strip() or batch.contact_email,
                     "amount": total,
                     "date": batch.invoice_sent_at.date(),
                     "status_label": status_label,

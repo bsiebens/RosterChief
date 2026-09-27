@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
+from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from django.contrib.admin.sites import AdminSite
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -10,15 +11,16 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.db.models import SET_NULL
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from authentication.models import User
 from club.models import Club, ClubMembership, ClubRole, Season
 from members.admin import FamilyAdmin
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.models import Family, FamilyInvite, FamilyMembership, Group, GroupMembership, Member
 from members.services import MemberImportResult
-from members.services.deletion import member_is_deletable
+from members.services.deletion import member_has_ties_outside_club, member_is_deletable, remove_member_from_club
 from members.services.family import claim_label_for, family_contacts
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
@@ -958,3 +960,194 @@ class MemberIsDeletableTests(TestCase):
         StaffAssignment.objects.create(team=team, member=member, season=self.other_season, position=position)
 
         self.assertFalse(member_is_deletable(member, ignoring=[membership]))
+
+
+class MemberTiesOutsideClubTests(TestCase):
+    """members.services.deletion.member_has_ties_outside_club /
+    remove_member_from_club -- what one club may do to a global Member."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.season = Season.objects.create(club=cls.club, start_date=date(2026, 8, 1), end_date=date(2027, 5, 31))
+        cls.other_season = Season.objects.create(club=cls.other_club, start_date=date(2026, 8, 1), end_date=date(2027, 5, 31))
+
+    def make_member(self, **kwargs):
+        member = Member.objects.create(first_name="Pat", last_name="Person", **kwargs)
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season)
+        return member
+
+    def test_a_member_known_only_to_this_club_has_no_ties_outside_it(self):
+        member = self.make_member()
+        family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=family, member=member)
+
+        self.assertFalse(member_has_ties_outside_club(member, self.club))
+
+    def test_a_login_is_a_tie(self):
+        user = User.objects.create_user(email="pat@example.com", password="x")
+
+        self.assertTrue(member_has_ties_outside_club(self.make_member(user=user), self.club))
+
+    def test_rows_in_another_club_are_ties(self):
+        cases = {
+            "membership": lambda member: ClubMembership.objects.create(club=self.other_club, member=member, season=self.other_season),
+            "role": lambda member: ClubRole.objects.create(club=self.other_club, member=member, role=ClubRole.Roles.EDITOR),
+            "family": lambda member: FamilyMembership.objects.create(family=Family.objects.create(club=self.other_club), member=member),
+            "team": lambda member: TeamMembership.objects.create(team=Team.objects.create(club=self.other_club, name="T", short_name="T"), member=member, season=self.other_season),
+        }
+        for label, make_tie in cases.items():
+            with self.subTest(label):
+                member = self.make_member()
+                make_tie(member)
+                self.assertTrue(member_has_ties_outside_club(member, self.club))
+
+    def test_every_cascading_member_relation_is_accounted_for(self):
+        # A new club-owned relation on Member must be added to deletion.py's
+        # lists, or removing someone from a club would silently miss it.
+        from members.services import deletion
+
+        known = {accessor for accessor, _lookup in (*deletion._CLUB_RELATIONS, *deletion._SHOP_RELATIONS, *deletion._CLUB_AUDIENCES)}
+        for relation in Member._meta.related_objects:
+            if relation.on_delete is SET_NULL:
+                continue
+            with self.subTest(relation.get_accessor_name()):
+                self.assertIn(relation.get_accessor_name(), known)
+
+    def test_remove_member_from_club_leaves_other_clubs_alone(self):
+        member = self.make_member()
+        ClubMembership.objects.create(club=self.other_club, member=member, season=self.other_season)
+        own_family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=own_family, member=member)
+        other_family = Family.objects.create(club=self.other_club)
+        FamilyMembership.objects.create(family=other_family, member=member)
+
+        remove_member_from_club(member, self.club)
+
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exists())
+        self.assertFalse(Family.objects.filter(pk=own_family.pk).exists())
+        self.assertTrue(ClubMembership.objects.filter(club=self.other_club, member=member).exists())
+        self.assertTrue(FamilyMembership.objects.filter(family=other_family, member=member).exists())
+
+    def test_remove_member_from_club_keeps_a_family_others_still_belong_to(self):
+        member = self.make_member()
+        family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=family, member=member)
+        kid = Member.objects.create(first_name="Kid", last_name="Person")
+        FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+
+        remove_member_from_club(member, self.club)
+
+        self.assertTrue(Family.objects.filter(pk=family.pk).exists())
+        self.assertEqual(list(family.memberships.values_list("member", flat=True)), [kid.pk])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
+class FamilyInviteAcceptTests(TestCase):
+    """members.views.FamilyInviteAcceptView / members.services.invites: only
+    the invited account, signed in, on the inviting club, once, before expiry."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        cls.family = Family.objects.create(club=cls.club)
+        cls.kid = Member.objects.create(first_name="Kid", last_name="Invitee")
+        FamilyMembership.objects.create(family=cls.family, member=cls.kid, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=cls.club, member=cls.kid, season=cls.season)
+        cls.user = User.objects.create_user(email="Invited@Example.com", password="pw-secret-123")
+        EmailAddress.objects.create(user=cls.user, email=cls.user.email, verified=True, primary=True)
+        cls.member = Member.objects.create(user=cls.user, first_name="Ivy", last_name="Invited")
+        cls.stranger = User.objects.create_user(email="stranger@example.com", password="pw-secret-123")
+
+    def make_invite(self, **kwargs):
+        kwargs.setdefault("club", self.club)
+        kwargs.setdefault("family", self.family)
+        kwargs.setdefault("email", "invited@example.com")
+        return FamilyInvite.objects.create(**kwargs)
+
+    def url(self, invite):
+        return reverse("members:family_invite_accept", args=[invite.token])
+
+    def test_an_unconfirmed_address_cannot_accept(self):
+        EmailAddress.objects.filter(user=self.user).update(verified=False)
+        invite = self.make_invite()
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(FamilyMembership.objects.filter(family=self.family, member=self.member).exists())
+        invite.refresh_from_db()
+        self.assertIsNone(invite.accepted_at)
+
+    def test_the_invited_account_accepts_and_is_linked(self):
+        invite = self.make_invite()
+        self.client.force_login(self.user)
+
+        page = self.client.get(self.url(invite), HTTP_HOST=self.HOST)
+        response = self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertContains(page, "Accept invite")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(FamilyMembership.objects.filter(family=self.family, member=self.member, role=FamilyMembership.FamilyRole.PARENT).exists())
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=self.member, season=self.season).kind, ClubMembership.Kind.GUARDIAN)
+        invite.refresh_from_db()
+        self.assertIsNotNone(invite.accepted_at)
+        self.assertEqual(invite.accepted_member, self.member)
+
+    def test_an_invite_is_single_use(self):
+        invite = self.make_invite()
+        self.client.force_login(self.user)
+        self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        response = self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "already been used", status_code=400)
+
+    def test_another_account_is_refused_and_sees_no_family_details(self):
+        invite = self.make_invite()
+        self.client.force_login(self.stranger)
+
+        page = self.client.get(self.url(invite), HTTP_HOST=self.HOST)
+        response = self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertNotContains(page, "Invitee")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Member.objects.filter(user=self.stranger).exists())
+        self.assertFalse(FamilyMembership.objects.filter(family=self.family).exclude(member=self.kid).exists())
+        invite.refresh_from_db()
+        self.assertIsNone(invite.accepted_at)
+
+    def test_an_expired_invite_is_refused(self):
+        invite = self.make_invite(expires_at=timezone.now() - timedelta(minutes=1))
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, "expired", status_code=400)
+        self.assertFalse(FamilyMembership.objects.filter(member=self.member).exists())
+
+    def test_an_invite_only_works_on_the_club_that_sent_it(self):
+        invite = self.make_invite()
+        self.client.force_login(self.user)
+
+        response = self.client.post(self.url(invite), HTTP_HOST="rival-fc.rosterchief.app")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(FamilyMembership.objects.filter(member=self.member).exists())
+
+    def test_signing_in_is_required(self):
+        invite = self.make_invite()
+
+        response = self.client.get(self.url(invite), HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("login", response["Location"])

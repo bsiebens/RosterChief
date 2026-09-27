@@ -1,0 +1,1 @@
+{% load i18n %}{% blocktrans with club=invite.club.name %}You're invited to join a family at {{ club }}{% endblocktrans %}

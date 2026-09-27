@@ -1390,3 +1390,72 @@ class RegistrationInvoiceViewTests(TestCase):
         with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
             second = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
         self.assertIn("BE00 0000 0000 0000", second.content.decode())
+
+
+class RegistrationContactMemberTests(TestCase):
+    """RegistrationBatch.contact_member records the Member the submission
+    itself resolved -- what staff billing screens show as "billed to"."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("80.00"))
+        cls.variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("80.00"))
+
+    def entries(self):
+        return [EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.variant)]
+
+    def test_an_anonymous_submission_records_its_own_fresh_contact(self):
+        existing = Member.objects.create(user=User.objects.create_user(email="pat@example.com", password="x"), first_name="Real", last_name="Pat")
+
+        batch = submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=self.entries())
+
+        self.assertIsNotNone(batch.contact_member)
+        self.assertNotEqual(batch.contact_member, existing)
+        self.assertEqual(batch.contact_member.first_name, "Pat")
+
+    def test_a_signed_in_submission_records_the_submitters_member(self):
+        user = User.objects.create_user(email="signed.in@example.com", password="x")
+        member = Member.objects.create(user=user, first_name="Signed", last_name="In")
+
+        batch = submit_registration(self.club, contact_first_name="Signed", contact_last_name="In", contact_email="typed@example.com", entries=self.entries(), submitted_by_user=user)
+
+        self.assertEqual(batch.contact_member, member)
+
+
+class BackfillContactMemberMigrationTests(TestCase):
+    """registration.migrations.0010_backfill_registrationbatch_contact_member,
+    run directly against the live app registry (data-only)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+
+    def batch(self, **kwargs):
+        kwargs.setdefault("contact_email", "nobody@example.com")
+        return RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Reg", contact_last_name="Parent", **kwargs)
+
+    def run_migration(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        import_module("registration.migrations.0010_backfill_registrationbatch_contact_member").backfill_contact_member(apps, None)
+
+    def test_backfills_from_the_login_email_and_the_submitter(self):
+        by_email = Member.objects.create(user=User.objects.create_user(email="parent@example.com", password="x"), first_name="By", last_name="Email")
+        submitter_user = User.objects.create_user(email="submitter@example.com", password="x")
+        submitter = Member.objects.create(user=submitter_user, first_name="Sub", last_name="Mitter")
+        email_batch = self.batch(contact_email="PARENT@example.com")
+        submitted_batch = self.batch(contact_email="parent@example.com", submitted_by_user=submitter_user)
+        unmatched_batch = self.batch()
+
+        self.run_migration()
+
+        for batch in (email_batch, submitted_batch, unmatched_batch):
+            batch.refresh_from_db()
+        self.assertEqual(email_batch.contact_member, by_email)
+        self.assertEqual(submitted_batch.contact_member, submitter)
+        self.assertIsNone(unmatched_batch.contact_member)

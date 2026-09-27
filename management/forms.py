@@ -19,7 +19,7 @@ from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
-from members.services.family import families_of_club, find_member_by_email
+from members.services.family import families_of_club
 from news.models import News
 from registration.models import RegistrationDetails
 from registration.services.pricing import available_registration_products
@@ -35,11 +35,24 @@ User = get_user_model()
 
 
 class MemberForm(forms.ModelForm):
+    """``lock_person_fields`` -- set by MemberUpdateView when members.services.
+    deletion.member_has_ties_outside_club is true -- disables every field here:
+    they're the person's own details on a record shared with their account or
+    another club. A disabled field ignores whatever is posted for it and keeps
+    the stored value."""
+
     class Meta:
         model = Member
         fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
         labels = {"photo_public_consent": _("Show this photo on the club's public website")}
+
+    def __init__(self, *args, lock_person_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.person_fields_locked = lock_person_fields
+        if lock_person_fields:
+            for field in self.fields.values():
+                field.disabled = True
 
 
 class TeamForm(forms.ModelForm):
@@ -964,7 +977,7 @@ class FamilyCreateForm(forms.Form):
 
     parent_first_name = forms.CharField(label=_("Parent first name"))
     parent_last_name = forms.CharField(label=_("Parent last name"))
-    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
 
     parent_is_member = forms.BooleanField(
         label=_("Parent is also a member"),
@@ -988,28 +1001,18 @@ class AddChildForm(forms.Form):
 
 class AddParentForm(forms.Form):
     """A family that needs one more parent/guardian registered -- see
-    members.services.family.add_parent_to_family."""
+    members.services.invites.add_or_invite_parent. The name is always
+    required, whether or not the email already has an account, so the form
+    behaves the same either way (an existing account's own name is kept)."""
 
-    email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
-    first_name = forms.CharField(label=_("First name"), required=False)
-    last_name = forms.CharField(label=_("Last name"), required=False)
+    email = forms.EmailField(label=_("Email address"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
+    first_name = forms.CharField(label=_("First name"))
+    last_name = forms.CharField(label=_("Last name"))
     parent_is_member = forms.BooleanField(
         label=_("Also a member"),
         required=False,
         help_text=_("Tick only if this parent belongs to the club in their own right (they play, or hold a membership). Left unticked they are a guardian: they hold the login and can be contacted, but owe no fee and are not counted as a member."),
     )
-
-    def clean(self):
-        cleaned = super().clean()
-        email = cleaned.get("email")
-
-        # Only a brand-new person needs a name; an existing member already has one.
-        if email and find_member_by_email(email) is None:
-            for field in ("first_name", "last_name"):
-                if not cleaned.get(field):
-                    self.add_error(field, _("Required: this email has no account yet."))
-
-        return cleaned
 
 
 class AttachToFamilyForm(forms.Form):

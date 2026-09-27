@@ -147,6 +147,7 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
         contact_last_name=contact_last_name,
         contact_email=contact_email,
         contact_phone=contact_phone.strip(),
+        contact_member=parent,
     )
 
     subtotal = Decimal("0")
