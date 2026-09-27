@@ -32,6 +32,7 @@ from news.models import News, NewsPhoto
 from notifications.models import Notification
 from registration.models import RegistrationBatch, RegistrationDetails
 from rosterchief.test_support import make_club as _make_club
+from rosterchief.test_support import start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Cart, CartItem, Discount, Order, OrderLine, Product, ProductCategory, ProductionStatus, ProductVariant, Voucher
 from shop.services.checkout import place_order
 from shop.services.invoices import create_invoice_for_order
@@ -41,6 +42,18 @@ from .coach_views import CoachTodayView
 from .models import CalendarFeedToken, PushSubscription
 from .services.icons import render_fallback_icon
 from .services.push import send_push_to_member
+from .views import MAX_CART_QUANTITY
+
+
+def setUpModule():
+    # ShopManager/EvaluationManager grants and management-position staff
+    # assignments require MFA (authentication.middleware); the fixtures here
+    # model staff who have already enrolled.
+    start_auto_mfa_enrolment()
+
+
+def tearDownModule():
+    stop_auto_mfa_enrolment()
 
 
 def push_keys():

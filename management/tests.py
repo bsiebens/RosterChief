@@ -54,7 +54,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import EntryInput, submit_registration
 from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
-from rosterchief.test_support import enrol_mfa
+from rosterchief.test_support import enrol_mfa, start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
@@ -64,6 +64,17 @@ from teams.services import eligible_roster_members
 User = get_user_model()
 
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def setUpModule():
+    # ShopManager/EvaluationManager grants and management-position staff
+    # assignments require MFA (authentication.middleware); the fixtures here
+    # model staff who have already enrolled.
+    start_auto_mfa_enrolment()
+
+
+def tearDownModule():
+    stop_auto_mfa_enrolment()
 
 
 def make_import_workbook(rows):
