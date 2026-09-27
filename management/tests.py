@@ -99,6 +99,14 @@ def make_season(club):
     return Season.objects.create(club=club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
 
 
+def _midweek_noon():
+    """Wednesday 12:00 (local time) of the current week -- for tests whose
+    "this week" / "next week" logic must not depend on when the suite runs."""
+    today = timezone.localdate()
+    wednesday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(days=2)
+    return timezone.make_aware(datetime.datetime.combine(wednesday, datetime.time(12, 0)))
+
+
 @override_settings(
     ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
     ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"],
@@ -6572,7 +6580,12 @@ class EventManagementTests(ManagementTestBase):
 
     def test_the_list_groups_into_this_week_next_week_and_month_dividers(self):
         # Mirrors mobile.views.CalendarView's own This week/Next week/by-month
-        # agenda grouping -- see EventListView._list_groups.
+        # agenda grouping -- see EventListView._list_groups. Run at a fixed
+        # mid-week moment: late on a Sunday, "a few minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_list_groups()
+
+    def _check_list_groups(self):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
         this_week_event_start = timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0)))
         if this_week_event_start <= timezone.now():
@@ -7765,6 +7778,11 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["range_choice"], "25")
 
     def test_the_week_range_excludes_a_game_beyond_this_week(self):
+        # Fixed mid-week moment: late on a Sunday, "5 minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_week_range()
+
+    def _check_week_range(self):
         today = timezone.localdate()
         end_of_this_week = today + datetime.timedelta(days=6 - today.weekday())
         game_this_week = self.make_game(start=timezone.now() + datetime.timedelta(minutes=5))
