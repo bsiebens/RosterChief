@@ -2305,14 +2305,18 @@ class RefereeSignupServiceTests(EventsTestBase):
 
         self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
 
-    def test_decline_never_removes_an_admin_made_assignment_for_the_same_member(self):
+    def test_decline_after_a_staff_assignment_removes_it_too(self):
+        # A staff pick settles the invite as accepted (assign_referee), so a
+        # later "no" from the member has to undo it -- otherwise they'd stay
+        # assigned while their own answer says they can't make it.
         game = self.make_home_game()
+        assign_referee(game, self.referee, assigned_by=self.alice)
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.alice)
 
         decline_referee_signup(signup)
 
-        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee, assigned_by=self.alice).exists())
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
+        self.assertEqual(RefereeSignup.objects.get(pk=signup.pk).status, RefereeSignup.Status.DECLINED)
 
     def test_decline_after_accepting_notifies_the_teams_managers(self):
         game = self.make_home_game()
@@ -2546,6 +2550,16 @@ class OfficialSignupServiceTests(OfficialsTestBase):
         decline_official_signup(signup)
 
         self.assertFalse(EventOfficial.objects.filter(event=game, member=self.official).exists())
+
+    def test_decline_after_a_staff_assignment_removes_it_too(self):
+        game = self.make_home_game()
+        assign_official(game, self.official, assigned_by=self.alice)
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+
+        decline_official_signup(signup)
+
+        self.assertFalse(EventOfficial.objects.filter(event=game, member=self.official).exists())
+        self.assertEqual(OfficialSignup.objects.get(pk=signup.pk).status, OfficialSignup.Status.DECLINED)
 
     def test_decline_after_accepting_notifies_the_teams_managers(self):
         game = self.make_home_game()

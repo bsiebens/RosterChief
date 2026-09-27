@@ -203,16 +203,15 @@ def accept_referee_signup(signup):
 
 @transaction.atomic
 def decline_referee_signup(signup):
-    """Declines `signup`. If they'd already accepted, also removes their
-    self-service EventReferee row (assigned_by is None -- never touches an
-    admin-made assignment for the same member/event, though assign_referee's
-    own "already assigned" guard makes that pairing impossible anyway) so
-    the desktop screen stops counting someone who's since said they can't
-    make it after all -- and, in that case only, tells the game's own
-    manager(s) (management position, same audience as lineup.notify_dropout):
-    unlike declining an invite nobody was counting on yet, retracting an
-    acceptance leaves a hole someone now has to fill."""
-    retracted = EventReferee.objects.filter(event=signup.event, member=signup.member, assigned_by__isnull=True).delete()[0] > 0
+    """Declines `signup`. If they were assigned -- by accepting themselves or
+    by staff (assign_referee marks the signup ACCEPTED either way) -- the
+    EventReferee row goes too, so the assignment and the member's own answer
+    never disagree and the desktop screen stops counting someone who can't
+    make it. In that case only, the game's own manager(s) are told
+    (management position, same audience as lineup.notify_dropout): unlike
+    declining an invite nobody was counting on yet, dropping out of an
+    assignment leaves a hole someone now has to fill."""
+    retracted = EventReferee.objects.filter(event=signup.event, member=signup.member).delete()[0] > 0
     signup.status = RefereeSignup.Status.DECLINED
     signup.responded_at = timezone.now()
     signup.save(update_fields=["status", "responded_at"])
