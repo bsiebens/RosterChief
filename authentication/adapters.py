@@ -52,6 +52,15 @@ class RosterChiefAccountAdapter(DefaultAccountAdapter):
         message = self.render_mail(template_prefix, email, ctx)
         send_message(message, exempt=(template_prefix == self.PASSWORD_RESET_TEMPLATE_PREFIX))
 
+    def get_client_ip(self, request):
+        """The proxy-supplied client address (ALLAUTH_TRUSTED_CLIENT_IP_HEADER),
+        falling back to REMOTE_ADDR when the request didn't come through the
+        proxy -- allauth's own lookup raises PermissionDenied when the header is
+        absent, which would lock out runserver and the test client."""
+        from rosterchief.client_ip import client_ip
+
+        return client_ip(request) or super().get_client_ip(request)
+
 
 def webauthn_rp_id() -> str:
     """The registrable parent domain that passkeys are bound to.

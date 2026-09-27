@@ -13,6 +13,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
+from rosterchief.client_ip import client_ip
 from rosterchief.mail import send_message
 
 from .forms import ContactForm, fresh_timestamp_token
@@ -57,7 +58,7 @@ def _save_and_notify(request, form: ContactForm) -> None:
         role=data["role"],
         message=data["message"],
         plan_interest=data["plan"],
-        ip=request.META.get("REMOTE_ADDR"),
+        ip=client_ip(request),
         user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
     )
 

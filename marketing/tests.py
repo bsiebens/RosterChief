@@ -53,6 +53,27 @@ class MarketingHomeViewTests(TestCase):
         self.assertIn("Sharks Mechelen", sent.subject)
         self.assertEqual(sent.reply_to, ["bernard@example.com"])
 
+    def test_contact_request_records_the_proxy_supplied_client_ip(self):
+        data = {**VALID_DATA, "ts": fresh_timestamp_token()}
+
+        self.client.post(reverse("root"), data, HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="172.18.0.5")
+
+        self.assertEqual(ContactRequest.objects.get().ip, "203.0.113.7")
+
+    def test_contact_request_falls_back_to_remote_addr_without_the_proxy_header(self):
+        data = {**VALID_DATA, "ts": fresh_timestamp_token()}
+
+        self.client.post(reverse("root"), data, REMOTE_ADDR="198.51.100.9")
+
+        self.assertEqual(ContactRequest.objects.get().ip, "198.51.100.9")
+
+    def test_a_malformed_proxy_header_falls_back_to_remote_addr(self):
+        data = {**VALID_DATA, "ts": fresh_timestamp_token()}
+
+        self.client.post(reverse("root"), data, HTTP_X_REAL_IP="not-an-ip", REMOTE_ADDR="198.51.100.9")
+
+        self.assertEqual(ContactRequest.objects.get().ip, "198.51.100.9")
+
     def test_plan_interest_is_recorded_and_named_in_the_notification(self):
         data = {**VALID_DATA, "ts": fresh_timestamp_token(), "plan": "club"}
 

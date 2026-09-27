@@ -180,6 +180,12 @@ ACCOUNT_EMAIL_VERIFICATION = "none"
 # switch (features.models.EmailSuppression), exempt only for password reset.
 ACCOUNT_ADAPTER = "authentication.adapters.RosterChiefAccountAdapter"
 
+# Caddy sets X-Real-IP to the connecting address on every proxied request (see
+# deploy/caddy/Caddyfile), so REMOTE_ADDR is always the proxy. allauth's rate limits
+# key on this header instead; rosterchief.client_ip reads the same setting and falls
+# back to REMOTE_ADDR for requests that did not come through the proxy.
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"
+
 
 # Two-factor authentication (allauth.mfa)
 

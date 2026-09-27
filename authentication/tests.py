@@ -633,3 +633,18 @@ class MfaButtonIconTests(TestCase):
 
         self.assertContains(response, "otp otp-lg")
         self.assertNotContains(response, '<span class="label-text">Code</span>')
+
+
+class AccountAdapterClientIPTests(TestCase):
+    """allauth's rate limits key on RosterChiefAccountAdapter.get_client_ip:
+    the proxy-supplied X-Real-IP, not the proxy's own REMOTE_ADDR."""
+
+    def test_uses_the_proxy_supplied_client_ip(self):
+        request = RequestFactory().get("/", HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="172.18.0.5")
+
+        self.assertEqual(RosterChiefAccountAdapter(request).get_client_ip(request), "203.0.113.7")
+
+    def test_falls_back_to_remote_addr_without_the_header(self):
+        request = RequestFactory().get("/", REMOTE_ADDR="198.51.100.9")
+
+        self.assertEqual(RosterChiefAccountAdapter(request).get_client_ip(request), "198.51.100.9")
