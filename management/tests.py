@@ -1,3 +1,4 @@
+import csv
 import datetime
 import json
 import os
@@ -4541,6 +4542,35 @@ class MemberBulkImportTests(ManagementTestBase):
 
         self.assertRedirects(response, reverse("management:member_import"))
         self.assertEqual(Member.objects.filter(last_name="Kid").count(), 0)
+
+    def test_an_admin_import_honours_the_status_and_fee_status_columns(self):
+        upload = make_import_workbook([["Imp", "Admin", "", "imported.admin@example.com", "", "", "", ClubMembership.StatusChoices.LAPSED, ClubMembership.FeeStatus.PAID]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        membership = ClubMembership.objects.get(club=self.club, member__email="imported.admin@example.com")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.LAPSED)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PAID)
+
+    def test_a_file_with_too_many_rows_is_rejected(self):
+        upload = make_import_workbook([[f"Row{index}", "Bulk", "", "", "", "", "", "", ""] for index in range(4)])
+
+        with mock.patch("management.bulk_import.MAX_IMPORT_ROWS", 3):
+            response = self.club_post("member_import", {"file": upload})
+
+        self.assertTemplateUsed(response, "management/member_import.html")
+        self.assertIn("file", response.context["form"].errors)
+        self.assertNotIn("member_import_rows", self.client.session)
+
+    def test_an_oversized_file_is_rejected(self):
+        upload = make_import_workbook([["Jamie", "Kid", "", "", "", "", "", "", ""]])
+
+        with mock.patch("management.forms.MEMBER_IMPORT_MAX_FILE_SIZE", 10):
+            response = self.club_post("member_import", {"file": upload})
+
+        self.assertTemplateUsed(response, "management/member_import.html")
+        self.assertIn("file", response.context["form"].errors)
 
     def test_confirm_is_admin_only(self):
         coach_user = self.make_non_admin_staff()
@@ -10126,6 +10156,34 @@ class MemberRequirementChecklistTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_a_coach_who_cannot_see_the_member_cannot_download_the_document(self):
+        self.upload_certificate()
+        team = Team.objects.create(club=self.club, name="U10 other")
+        coach_position = Position.objects.create(club=self.club, name="Other Coach", staff_position=True, management_position=True)
+        coach = User.objects.create_user(email="coach-other-doc@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach, first_name="Other", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        enrol_mfa(coach)
+        self.client.force_login(coach)
+
+        response = self.club_get("member_requirement_document", self.member.pk, self.requirement.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_member_admin_can_download_the_document(self):
+        self.upload_certificate()
+        member_admin_user = User.objects.create_user(email="memberadmin-doc@example.com", password="pw-secret-123")
+        member_admin_member = Member.objects.create(user=member_admin_user, first_name="Mia", last_name="Docs")
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_get("member_requirement_document", self.member.pk, self.requirement.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 fake")
+
     def test_the_document_is_never_reachable_through_the_public_media_url(self):
         # The whole point of a separate, private storage (rosterchief/storage.py):
         # nothing here ever gets a /media/ URL at all.
@@ -10713,6 +10771,46 @@ class MemberAdminAccessTests(ManagementTestBase):
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)
+
+    def test_cannot_change_fee_or_approval_fields_from_the_member_page(self):
+        member = Member.objects.create(first_name="Fee", last_name="Target")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
+        # members_visible_to only shows a non-admin the rosters they staff, so tie
+        # the member to a team this MEMBER_ADMIN is on staff of.
+        team = Team.objects.create(club=self.club, name="U9 fee")
+        StaffAssignment.objects.create(team=team, member=Member.objects.get(user=self.member_admin_user), season=self.season, position=Position.objects.create(club=self.club, name="Fee Coach", staff_position=True))
+        TeamMembership.objects.create(team=team, member=member, season=self.season, position=Position.objects.create(club=self.club, name="Fee Player"), jersey_number=4)
+
+        response = self.club_post(
+            "member_update",
+            {
+                "first_name": "Fee",
+                "last_name": "Target",
+                "kind": ClubMembership.Kind.MEMBER,
+                "license": "BE-1",
+                "status": ClubMembership.StatusChoices.ACTIVE,
+                "fee_status": ClubMembership.FeeStatus.PAID,
+                "fee_amount": "0.00",
+            },
+            member.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[member.pk]), fetch_redirect_response=False)
+        membership.refresh_from_db()
+        self.assertEqual(membership.license, "BE-1")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.UNPAID)
+        self.assertEqual(membership.fee_amount, Decimal("150.00"))
+
+    def test_an_import_ignores_the_status_and_fee_status_columns(self):
+        upload = make_import_workbook([["Imp", "Orted", "", "imported.ma@example.com", "", "", "", ClubMembership.StatusChoices.LAPSED, ClubMembership.FeeStatus.PAID]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        membership = ClubMembership.objects.get(club=self.club, member__email="imported.ma@example.com")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.UNPAID)
 
 
 class VolunteerListTests(ManagementTestBase):
@@ -12674,6 +12772,19 @@ class OrderProductionReprintTests(ShopTestBase):
         rows = list(workbook.active.iter_rows(values_only=True))
         self.assertIn((line.order.number, "Orderer", "Olly", None, None, None, 1), rows)
 
+    def test_the_export_neutralises_spreadsheet_formulas(self):
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION, personalization_name='=HYPERLINK("http://evil.example","x")', personalization_number="+1")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        sheet = openpyxl.load_workbook(BytesIO(response.content)).active
+        number_cell, name_cell = sheet.cell(row=2, column=5), sheet.cell(row=2, column=6)
+        self.assertEqual(name_cell.value, '\'=HYPERLINK("http://evil.example","x")')
+        self.assertEqual(name_cell.data_type, "s")
+        self.assertEqual(number_cell.value, "'+1")
+        self.assertEqual(sheet.cell(row=2, column=7).value, 1)
+
     def test_does_not_mark_anything(self):
         line = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
         self.client.force_login(self.make_shop_manager())
@@ -14238,6 +14349,20 @@ class FormManagementTests(ManagementTestBase):
         self.assertEqual(response["Content-Type"], "text/csv")
         content = response.content.decode()
         self.assertIn("Jane", content)
+
+    def test_responses_export_neutralises_spreadsheet_formulas(self):
+        form_obj = self.make_form()
+        field = FormBuilderField.objects.create(form=form_obj, key="name", label="=cmd|' /C calc'!A0", order=1)
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        submission = Submission.objects.create(send=send, member=None)
+        Answer.objects.create(submission=submission, field=field, value='=HYPERLINK("http://evil.example","x")')
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("formsend_responses_export", form_obj.pk, send.pk)
+
+        rows = list(csv.reader(response.content.decode().splitlines()))
+        self.assertEqual(rows[0][2], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][2], '\'=HYPERLINK("http://evil.example","x")')
 
 
 class BugListViewTests(ManagementTestBase):

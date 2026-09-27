@@ -1031,11 +1031,22 @@ class AttachToFamilyForm(forms.Form):
         self.fields["family"].queryset = queryset
 
 
+#: Upper bound on an uploaded member-import workbook; the template for a whole
+#: club's membership is a small fraction of this.
+MEMBER_IMPORT_MAX_FILE_SIZE = 5 * 1024 * 1024
+
+
 class MemberImportUploadForm(forms.Form):
     """The mass-upload entry point -- one .xlsx file, built from the downloadable
     template. See management.bulk_import.read_member_import_workbook."""
 
     file = forms.FileField(label=_("Excel file"), help_text=_("Use the downloaded template — one row per member."))
+
+    def clean_file(self):
+        upload = self.cleaned_data["file"]
+        if upload.size > MEMBER_IMPORT_MAX_FILE_SIZE:
+            raise forms.ValidationError(_("This file is too large (maximum %(size)d MB).") % {"size": MEMBER_IMPORT_MAX_FILE_SIZE // (1024 * 1024)})
+        return upload
 
 
 class GrantLoginForm(forms.Form):
@@ -1058,9 +1069,21 @@ class ClubMembershipForm(forms.ModelForm):
     money field here -- amount_paid is exclusively written by club.services.fees,
     never hand-edited."""
 
+    #: Approval and money: a club ADMIN's call only. Anyone else managing members
+    #: (MEMBER_ADMIN) sees them read-only, and a disabled field ignores whatever
+    #: value is posted for it, keeping the instance's own.
+    ADMIN_ONLY_FIELDS = ("status", "fee_status", "fee_amount")
+
     class Meta:
         model = ClubMembership
         fields = ["kind", "license", "status", "fee_status", "fee_amount"]
+
+    def __init__(self, *args, can_edit_admin_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not can_edit_admin_fields:
+            for name in self.ADMIN_ONLY_FIELDS:
+                self.fields[name].disabled = True
+                self.fields[name].help_text = _("Only a club admin can change this.")
 
 
 class NewsForm(forms.ModelForm):

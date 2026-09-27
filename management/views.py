@@ -130,6 +130,7 @@ from registration.services.invoicing import (
 from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
 from registration.services.pricing import team_number_pools, variant_prices
 from rosterchief.request_cache import cached_on_request
+from rosterchief.spreadsheet import safe_row
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
@@ -926,7 +927,7 @@ class MemberImportView(MemberAdminRequiredMixin, View):
             return render(request, "management/member_import.html", {"form": form})
 
         request.session["member_import_rows"] = rows
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         return render(
             request,
             "management/member_import_preview.html",
@@ -952,7 +953,7 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
             notify(request, f"w|{_('Nothing to import')}|{_('Upload a file first.')}")
             return redirect("management:member_import")
 
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         season = current_season(request.club)
 
         created = 0
@@ -1046,7 +1047,8 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     """Not a generic UpdateView: this page owns two forms on one submit -- the
     member's own fields, and (when they're actually rostered this season) their
     ClubMembership's license/status/fee status. A Member has no club of its own
-    without one, so this is the only place to see or change it.
+    without one, so this is the only place to see or change it. Status and the
+    fee fields stay read-only for a MEMBER_ADMIN (see ClubMembershipForm).
 
     The person's own details are read-only here when the record isn't this
     club's alone (a login, or ties to another club -- members.services.
@@ -1070,14 +1072,14 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     def get(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        membership_form = ClubMembershipForm(instance=membership) if membership else None
+        membership_form = ClubMembershipForm(instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
         return self.render_form(member, MemberForm(instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club)), membership_form)
 
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
         form = MemberForm(request.POST, request.FILES, instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club))
-        membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
+        membership_form = ClubMembershipForm(request.POST, instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):
             if not form.person_fields_locked:
@@ -6442,14 +6444,18 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = f'attachment; filename="{send.form.slug}-responses.csv"'
         writer = csv.writer(response)
-        writer.writerow([_("Submitted"), _("Member"), *[column.label for column in report.columns]])
+        # safe_row: labels and answers are free text typed by users (anonymous
+        # respondents included) -- never let a spreadsheet run one as a formula.
+        writer.writerow(safe_row([_("Submitted"), _("Member"), *[column.label for column in report.columns]]))
         for row in report.rows:
             writer.writerow(
-                [
-                    timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
-                    str(row.submission.member) if row.submission.member else "",
-                    *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
-                ]
+                safe_row(
+                    [
+                        timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
+                        str(row.submission.member) if row.submission.member else "",
+                        *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
+                    ]
+                )
             )
         return response
 
@@ -7139,12 +7145,17 @@ class MemberRequirementIncompleteView(MemberAdminRequiredMixin, View):
 
 
 class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
-    """Streams a checklist document (see MemberRequirementStatus.document) to any
-    signed-in staff -- same visibility as the rest of a member's profile. The file
-    itself lives on rosterchief.storage.private_storage, which has no public URL at
-    all; this view is the only way to read one."""
+    """Streams a checklist document (see MemberRequirementStatus.document) to staff
+    who may see that member -- the same members_visible_to rule MemberDetailView
+    applies, plus anyone who may manage members (who can already mark the item
+    complete/incomplete). Anyone else gets a 404, not a 403, so the view doesn't
+    confirm the member exists. The file itself lives on
+    rosterchief.storage.private_storage, which has no public URL at all; this view
+    is the only way to read one."""
 
     def get(self, request, pk, requirement_pk):
+        if not can_manage_members(request.user, request.club) and not members_visible_to(request.user, request.club, include_guardians=True).filter(pk=pk).exists():
+            raise Http404("No such member.")
         membership = _current_membership_or_404(request, pk)
         status = get_object_or_404(MemberRequirementStatus.objects.filter(membership=membership, requirement_id=requirement_pk))
 
