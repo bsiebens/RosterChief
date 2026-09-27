@@ -5,10 +5,13 @@ pill), switching which team is "active" rather than aggregating across
 several people the way Member mode's person switcher does.
 """
 
+from django.http import Http404
+
 from club.services.access import get_current_season, teams_managed_by, teams_staffed_by
 from members.services.lookup import get_request_member
-from members.views import ClubScopedPublicMixin
 from teams.models import StaffAssignment
+
+from .mixins import MemberAppMixin
 
 #: Session key remembering which team was last active, so navigating between
 #: coach screens (or leaving and coming back) doesn't reset the picker to
@@ -16,7 +19,7 @@ from teams.models import StaffAssignment
 ACTIVE_TEAM_SESSION_KEY = "coach_active_team_id"
 
 
-class CoachScopeMixin(ClubScopedPublicMixin):
+class CoachScopeMixin(MemberAppMixin):
     """Resolves the signed-in account's Coach-mode standing: which teams
     they're on the staff of at all (``staffed_teams`` -- visibility, any
     position, see club.services.access.teams_staffed_by), which of those
@@ -24,11 +27,11 @@ class CoachScopeMixin(ClubScopedPublicMixin):
     current season, teams_managed_by), and which one is currently "active"
     (the team-picker pill on C1's header).
 
-    Every Coach view still needs its own ``LoginRequiredMixin`` (kept
-    separate, same as PersonScopeMixin, so a view composes whichever other
-    mixins it needs on top). Nothing here 404s when ``staffed_teams`` is
-    empty -- each screen renders its own "not staffing a team yet" empty
-    state instead, same judgment call as HomeView's "No one to show yet".
+    Built on MemberAppMixin (login + a tie to this club), and on top of
+    that Coach mode 404s outright when ``staffed_teams`` is empty: an
+    account that isn't on any team's staff this season has no Coach mode
+    at all -- the Coach/Member switcher (has_coach_access) never offers it
+    either.
 
     Actions gated on ``can_manage_active_team`` are hidden in templates, not
     disabled -- a coach on staff but without a management position (e.g. a
@@ -41,19 +44,22 @@ class CoachScopeMixin(ClubScopedPublicMixin):
     staffed team is one the account holder actually coaches.
     """
 
-    def dispatch(self, request, *args, **kwargs):
-        # Same mobile_context session flag as mobile/mixins.py's PersonScopeMixin --
-        # see that mixin's own comment for why it's needed. Coach mode sets it too so
-        # a coach reaching /accounts/logout/ from the Coach shell also gets the app's
-        # chrome, not the old public site's.
-        request.session["mobile_context"] = True
+    #: Coach mode proper only exists for team staff. The evaluations screens
+    #: (coach_evaluation_views.py) turn this off: their own gate is the
+    #: club-wide can_manage_evaluations grant, which a technical director holds
+    #: without staffing any team.
+    require_staffed_team = True
+
+    def prepare_member_app(self, request):
+        super().prepare_member_app(request)
         self.me = get_request_member(request)
-        self.staffed_teams = list(teams_staffed_by(request.user, request.club)) if request.user.is_authenticated else []
-        self.managed_teams = list(teams_managed_by(request.user, request.club)) if request.user.is_authenticated else []
+        self.staffed_teams = list(teams_staffed_by(request.user, request.club))
+        if self.require_staffed_team and not self.staffed_teams:
+            raise Http404("Not on the staff of a team in this club.")
+        self.managed_teams = list(teams_managed_by(request.user, request.club))
         self.active_team = self._resolve_active_team(request)
         self.can_manage_active_team = self.active_team is not None and self.active_team in self.managed_teams
         self.active_team_role = self._resolve_active_team_role(request)
-        return super().dispatch(request, *args, **kwargs)
 
     def _resolve_active_team_role(self, request):
         if self.me is None or self.active_team is None:

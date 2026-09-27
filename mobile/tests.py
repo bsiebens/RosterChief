@@ -18,7 +18,7 @@ from pywebpush import WebPushException
 from waffle import get_waffle_flag_model
 
 from bugs.models import BugNote, BugReport
-from club.models import Club, ClubMembership, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, Sponsor
 from evaluations.models import EvaluationChecklist, PlayerEvaluation
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
@@ -342,6 +342,8 @@ class PushSubscribeViewTests(TestCase):
         cls.club = make_club()
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
 
     def test_subscribing_creates_a_push_subscription_row(self):
         self.client.force_login(self.user)
@@ -886,15 +888,14 @@ class HomeViewTests(TestCase):
         self.assertContains(response, "No news yet.")
         self.assertContains(response, 'href="/app/news/"')
 
-    def test_empty_account_gets_a_graceful_empty_state(self):
+    def test_empty_account_404s(self):
+        # No Member, so no tie to the club (mobile.access.has_club_tie).
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
 
         response = self._get("home")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.context["scope_person"])
-        self.assertContains(response, "No one to show yet")
+        self.assertEqual(response.status_code, 404)
 
     def test_sponsors_shows_only_active_ones(self):
         today = timezone.localdate()
@@ -918,15 +919,17 @@ class HomeViewTests(TestCase):
         self.assertEqual(list(response.context["sponsors"]), [])
         self.assertNotContains(response, "Sponsors")
 
-    def test_sponsors_still_show_for_a_brand_new_account_with_no_managed_people(self):
+    def test_sponsors_still_show_for_a_brand_new_pending_registrant(self):
         today = timezone.localdate()
         Sponsor.objects.create(club=self.club, name="Active Co", start_date=today - datetime.timedelta(days=10))
-        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
-        self.client.force_login(bare_user)
+        new_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        new_member = Member.objects.create(first_name="Nina", last_name="New", user=new_user)
+        ClubMembership.objects.create(club=self.club, member=new_member, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        self.client.force_login(new_user)
 
         response = self._get("home")
 
-        self.assertContains(response, "No one to show yet")
+        self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Active Co")
 
     def add_child(self, first_name="Noor"):
@@ -1034,13 +1037,27 @@ class EventDetailRsvpTests(TestCase):
         self.attendance.refresh_from_db()
         self.assertEqual(self.attendance.status, Attendance.AttendanceStatus.PRESENT)
 
-    def test_posting_absent_creates_attendance_when_none_existed(self):
+    def test_posting_for_an_uninvited_event_404s_and_creates_nothing(self):
+        # Invitations are the Attendance rows sync_event_attendances creates --
+        # an RSVP only ever updates one, never invites itself.
         other_event = Event.objects.create(club=self.club, title="Away game", start=timezone.now() + datetime.timedelta(days=8))
         self.client.force_login(self.user)
 
-        self._post(other_event, {"status": "absent", "note": "Sick"})
+        response = self._post(other_event, {"status": "absent", "note": "Sick"})
 
-        self.assertEqual(Attendance.objects.get(event=other_event, member=self.member).status, Attendance.AttendanceStatus.ABSENT)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Attendance.objects.filter(event=other_event, member=self.member).exists())
+
+    def test_changes_are_refused_once_the_event_has_started(self):
+        started = Event.objects.create(club=self.club, title="Kick-off", start=timezone.now() - datetime.timedelta(minutes=5))
+        attendance = Attendance.objects.create(event=started, member=self.member, status=Attendance.AttendanceStatus.PRESENT)
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:event_detail", kwargs={"pk": started.pk}), data={"status": "absent", "note": "Sick"}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "Too late to reply")
+        attendance.refresh_from_db()
+        self.assertEqual(attendance.status, Attendance.AttendanceStatus.PRESENT)
 
     def test_cannot_rsvp_for_a_member_who_isnt_managed(self):
         stranger = Member.objects.create(first_name="Someone", last_name="Else")
@@ -1282,12 +1299,12 @@ class EventDetailDropoutTests(TestCase):
         attendance = Attendance.objects.get(event=self.event, member=self.member)
         self.assertEqual(attendance.status, Attendance.AttendanceStatus.PRESENT)
 
-    def test_dropout_is_rejected_when_there_is_no_attendance_row_at_all(self):
+    def test_dropout_404s_when_there_is_no_attendance_row_at_all(self):
         self.client.force_login(self.user)
 
         response = self._post({"status": "dropout", "note": "Twisted an ankle"})
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1436,14 +1453,13 @@ class CalendarViewTests(TestCase):
         self.assertEqual(self._events_in_context(response), {event})
         self.assertEqual(response.context["kind_filter"], "")
 
-    def test_no_managed_people_shows_a_graceful_empty_state(self):
+    def test_an_account_without_a_member_404s(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No one to show yet")
+        self.assertEqual(response.status_code, 404)
 
     def test_past_events_are_excluded(self):
         past = self.make_event(title="Past practice", start=timezone.now() - datetime.timedelta(days=1))
@@ -2262,14 +2278,13 @@ class NotificationsViewTests(TestCase):
         redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
         self.assertRedirects(redirect_response, reverse("mobile:event_detail", kwargs={"pk": event.pk}), fetch_redirect_response=False)
 
-    def test_empty_account_gets_a_graceful_empty_state(self):
+    def test_empty_account_404s(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No one to show yet")
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -2282,6 +2297,8 @@ class NewsListViewTests(TestCase):
         cls.club = make_club()
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
 
     def _get(self, **params):
         url = reverse("mobile:news_list")
@@ -2756,15 +2773,13 @@ class MeViewTests(TestCase):
         self.assertContains(response, "Physio")
         self.assertContains(response, reverse("mobile:coach_today") + "?team=" + str(team.pk))
 
-    def test_empty_account_gets_a_graceful_empty_state(self):
+    def test_empty_account_404s(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "No one to show yet")
-        self.assertNotContains(response, "Coach mode")
+        self.assertEqual(response.status_code, 404)
 
     def test_payments_row_links_to_the_payments_screen(self):
         self.client.force_login(self.user)
@@ -3779,6 +3794,8 @@ class CalendarFeedSettingsViewTests(TestCase):
         cls.club = make_club()
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
 
     def _get(self):
         return self.client.get(reverse("mobile:calendar_feed_settings"), HTTP_HOST="ajax-united.rosterchief.app")
@@ -3838,14 +3855,16 @@ class CoachTodayViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_no_staff_assignment_shows_a_graceful_empty_state(self):
-        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
-        self.client.force_login(bare_user)
+    def test_no_staff_assignment_404s(self):
+        # A club member who isn't on any team's staff this season has no Coach mode.
+        plain_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        plain_member = Member.objects.create(first_name="Pim", last_name="Plain", user=plain_user)
+        ClubRole.objects.create(club=self.club, member=plain_member)
+        self.client.force_login(plain_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Not staffing a team yet")
+        self.assertEqual(response.status_code, 404)
 
     def test_shows_the_active_team_and_squad_count(self):
         other_member = Member.objects.create(first_name="Anna", last_name="Player")
@@ -4207,14 +4226,16 @@ class CoachSquadViewTests(TestCase):
 
         self.assertContains(response, reverse("mobile:coach_add_staff"))
 
-    def test_no_staff_assignment_shows_a_graceful_empty_state(self):
-        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
-        self.client.force_login(bare_user)
+    def test_no_staff_assignment_404s(self):
+        # A club member who isn't on any team's staff this season has no Coach mode.
+        plain_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        plain_member = Member.objects.create(first_name="Pim", last_name="Plain", user=plain_user)
+        ClubRole.objects.create(club=self.club, member=plain_member)
+        self.client.force_login(plain_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Not staffing a team yet")
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -4717,14 +4738,16 @@ class CoachScheduleViewTests(TestCase):
         self.assertEqual(response.context["next_week"], [])
         self.assertEqual(response.context["later_months"], [])
 
-    def test_no_staff_assignment_shows_a_graceful_empty_state(self):
-        bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
-        self.client.force_login(bare_user)
+    def test_no_staff_assignment_404s(self):
+        # A club member who isn't on any team's staff this season has no Coach mode.
+        plain_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
+        plain_member = Member.objects.create(first_name="Pim", last_name="Plain", user=plain_user)
+        ClubRole.objects.create(club=self.club, member=plain_member)
+        self.client.force_login(plain_user)
 
         response = self._get()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Not staffing a team yet")
+        self.assertEqual(response.status_code, 404)
 
     def test_events_are_grouped_into_this_week_next_week_and_month_dividers(self):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
@@ -6762,7 +6785,8 @@ class ShopTabVisibilityTests(TestCase):
     def _login(self, **club_kwargs):
         club = make_club(**club_kwargs)
         user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
-        Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=user)
+        member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=user)
+        ClubRole.objects.create(club=club, member=member)
         self.client.force_login(user)
         return club
 
@@ -6814,6 +6838,8 @@ class ShopHomeViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
 
     def _get(self):
         return self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app")
@@ -6911,6 +6937,8 @@ class ShopProductDetailViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
     def _url(self):
@@ -7068,6 +7096,8 @@ class ShopCartViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
     def _get(self, **params):
@@ -7119,6 +7149,8 @@ class ShopCartItemUpdateViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
     def setUp(self):
@@ -7175,6 +7207,8 @@ class ShopCheckoutViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
 
     def _checkout(self, **data):
@@ -7234,6 +7268,8 @@ class ShopOrdersViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
 
     def _get(self):
         return self.client.get(reverse("mobile:shop_orders"), HTTP_HOST="ajax-united.rosterchief.app")
@@ -7296,6 +7332,8 @@ class ShopOrderDetailViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
         cls.order = Order.objects.create(club=cls.club, purchaser=cls.member, total=Decimal("25.00"))
         OrderLine.objects.create(order=cls.order, product=cls.product, quantity=1, unit_price=cls.product.price, line_total=cls.product.price)
@@ -7350,6 +7388,8 @@ class ShopInvoiceViewTests(TestCase):
         cls.club = make_club(shop_open=True)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        # The member app needs a tie to the club (mobile.access.has_club_tie).
+        ClubRole.objects.create(club=cls.club, member=cls.member)
         cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
         cart = Cart.objects.create(club=cls.club, user=cls.user)
         CartItem.objects.create(cart=cart, product=cls.product, quantity=1, unit_price=cls.product.price)
@@ -8023,14 +8063,251 @@ class BugListViewTests(TestCase):
 
         self.assertContains(response, "No bugs reported yet.")
 
-    def test_no_linked_member_shows_a_friendly_message_and_hides_the_form(self):
+    def test_no_linked_member_404s(self):
+        # An account with no Member has no tie to the club (mobile.access.has_club_tie).
         user_without_member = User.objects.create_user(email="noone@example.com", password="pw-secret-123")
         self.client.force_login(user_without_member)
 
         response = self._get()
 
+        self.assertEqual(response.status_code, 404)
+
+
+#: Routes deliberately reachable without a tie to the club: the PWA shell's
+#: own plumbing (fetched by the browser before/independently of login) and the
+#: token-authenticated calendar feed (a calendar app can't log in; the feed
+#: only ever lists the token owner's own invitations).
+MEMBER_APP_EXEMPT_URL_NAMES = {"manifest", "service_worker", "icon", "calendar_feed"}
+
+
+def _dummy_kwargs(pattern):
+    converters = {"uuid": "3f1c0c9e-1111-4222-8333-944455566677", "int": 192, "slug": "some-slug", "str": "some-token"}
+    return {name: converters[type(converter).__name__.removesuffix("Converter").lower()] for name, converter in pattern.pattern.converters.items()}
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
+class MemberAppClubTieTests(TestCase):
+    """The member app is only there for accounts with a real tie to the club
+    (mobile.access.has_club_tie) -- a session is valid on every subdomain, so
+    a member of one club must not be able to open another club's /app/."""
+
+    HOST_A = "ajax-united.rosterchief.app"
+    HOST_B = "other-club.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        today = timezone.localdate()
+        cls.club_a = make_club()
+        cls.club_b = make_club(name="Other Club", slug="other-club", shop_open=True)
+        cls.season_a = Season.objects.create(club=cls.club_a, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.season_b = Season.objects.create(club=cls.club_b, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+
+        # Belongs to club A only.
+        cls.outsider_user = User.objects.create_user(email="outsider@example.com", password="pw-secret-123")
+        cls.outsider = Member.objects.create(first_name="Olaf", last_name="Outsider", user=cls.outsider_user)
+        ClubMembership.objects.create(club=cls.club_a, member=cls.outsider, season=cls.season_a, status=ClubMembership.StatusChoices.ACTIVE)
+
+        # Club B content an outsider must not reach.
+        cls.b_member = Member.objects.create(first_name="Bea", last_name="Bmember")
+        ClubMembership.objects.create(club=cls.club_b, member=cls.b_member, season=cls.season_b, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.b_event = Event.objects.create(club=cls.club_b, title="B training", start=timezone.now() + datetime.timedelta(days=3))
+        cls.b_task = EventTask.objects.create(event=cls.b_event, title="Bring fruit", needed_quantity=2)
+        cls.b_news = News.objects.create(club=cls.club_b, title="Internal B news", body="Body.", status=News.Status.PUBLISHED, published_at=timezone.now() - datetime.timedelta(days=1))
+        cls.b_form = FormBuilderForm.objects.create(club=cls.club_b, title="B survey")
+        cls.b_send = FormSend.objects.create(club=cls.club_b, form=cls.b_form, club_wide=True)
+
+    def _get(self, url, host=None):
+        return self.client.get(url, HTTP_HOST=host or self.HOST_B)
+
+    def test_every_non_exempt_route_is_gated_by_member_app_mixin(self):
+        from . import urls as mobile_urls
+        from .mixins import MemberAppMixin
+
+        for pattern in mobile_urls.urlpatterns:
+            if pattern.name in MEMBER_APP_EXEMPT_URL_NAMES:
+                continue
+            with self.subTest(route=pattern.name):
+                self.assertTrue(issubclass(pattern.callback.view_class, MemberAppMixin), f"{pattern.name} isn't gated by MemberAppMixin")
+
+    def test_every_non_exempt_route_404s_for_a_signed_in_member_of_another_club(self):
+        from . import urls as mobile_urls
+
+        self.client.force_login(self.outsider_user)
+        for pattern in mobile_urls.urlpatterns:
+            if pattern.name in MEMBER_APP_EXEMPT_URL_NAMES:
+                continue
+            url = reverse(f"mobile:{pattern.name}", kwargs=_dummy_kwargs(pattern))
+            with self.subTest(route=pattern.name, method="GET"):
+                self.assertEqual(self.client.get(url, HTTP_HOST=self.HOST_B).status_code, 404)
+            with self.subTest(route=pattern.name, method="POST"):
+                self.assertEqual(self.client.post(url, HTTP_HOST=self.HOST_B).status_code, 404)
+
+    def test_the_same_account_still_reaches_its_own_club(self):
+        self.client.force_login(self.outsider_user)
+
+        self.assertEqual(self._get(reverse("mobile:home"), host=self.HOST_A).status_code, 200)
+
+    def test_a_member_of_another_club_gets_404_on_the_real_screens(self):
+        self.client.force_login(self.outsider_user)
+        urls = {
+            "home": reverse("mobile:home"),
+            "news_list": reverse("mobile:news_list"),
+            "news_detail": reverse("mobile:news_detail", kwargs={"slug": self.b_news.slug}),
+            "event_detail": reverse("mobile:event_detail", kwargs={"pk": self.b_event.pk}),
+            "form_fill": reverse("mobile:form_fill", kwargs={"pk": self.b_send.pk}),
+            "shop_home": reverse("mobile:shop_home"),
+            "bug_list": reverse("mobile:bug_list"),
+            "coach_today": reverse("mobile:coach_today"),
+        }
+        for name, url in urls.items():
+            with self.subTest(screen=name):
+                self.assertEqual(self._get(url).status_code, 404)
+
+    def test_a_member_of_another_club_cannot_claim_a_task(self):
+        self.client.force_login(self.outsider_user)
+
+        response = self.client.post(reverse("mobile:event_task_respond", kwargs={"task_id": self.b_task.pk}), data={"response": "claim"}, HTTP_HOST=self.HOST_B)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EventTaskClaim.objects.filter(task=self.b_task).exists())
+
+    def test_a_member_of_another_club_cannot_subscribe_to_its_pushes(self):
+        self.client.force_login(self.outsider_user)
+
+        response = self.client.post(reverse("mobile:push_subscribe"), data={"endpoint": "https://push.example.com/x", "keys": {"p256dh": "k", "auth": "a"}}, content_type="application/json", HTTP_HOST=self.HOST_B)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(PushSubscription.objects.exists())
+
+    def test_anonymous_is_still_sent_to_login(self):
+        response = self._get(reverse("mobile:news_list"))
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_signed_in_account_without_a_member_404s(self):
+        self.client.force_login(User.objects.create_user(email="fresh@example.com", password="pw-secret-123"))
+
+        self.assertEqual(self._get(reverse("mobile:home")).status_code, 404)
+
+    def test_a_parent_whose_only_tie_is_a_childs_membership_is_allowed(self):
+        parent_user = User.objects.create_user(email="parent-b@example.com", password="pw-secret-123")
+        parent = Member.objects.create(first_name="Paul", last_name="Parent", user=parent_user)
+        family = Family.objects.create(club=self.club_b, name="Bmember")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=self.b_member, role=FamilyMembership.FamilyRole.CHILD)
+        self.client.force_login(parent_user)
+
+        response = self._get(reverse("mobile:home"))
+
         self.assertEqual(response.status_code, 200)
-        # Not a bare "<form" check -- base.html's own announcement pop-up (templates/
-        # _announcement_popup.html) always renders a <form method="dialog">, unrelated
-        # to this page's own report-a-bug form.
-        self.assertNotContains(response, '<form method="post"')
+        self.assertIn(self.b_member, response.context["managed_people"])
+
+    def test_a_family_in_another_club_is_no_tie_here(self):
+        # The same parent/child pair, but the family belongs to club A -- the
+        # child's club B membership alone doesn't make the parent club B's.
+        parent_user = User.objects.create_user(email="parent-a@example.com", password="pw-secret-123")
+        parent = Member.objects.create(first_name="Paula", last_name="Parent", user=parent_user)
+        family = Family.objects.create(club=self.club_a, name="Bmember")
+        FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=self.b_member, role=FamilyMembership.FamilyRole.CHILD)
+        self.client.force_login(parent_user)
+
+        self.assertEqual(self._get(reverse("mobile:home")).status_code, 404)
+
+    def test_a_pending_new_registrant_is_allowed(self):
+        new_user = User.objects.create_user(email="new-b@example.com", password="pw-secret-123")
+        new_member = Member.objects.create(first_name="Nina", last_name="New", user=new_user)
+        ClubMembership.objects.create(club=self.club_b, member=new_member, season=self.season_b, status=ClubMembership.StatusChoices.PENDING)
+        self.client.force_login(new_user)
+
+        self.assertEqual(self._get(reverse("mobile:home")).status_code, 200)
+
+    def test_a_cancelled_membership_alone_is_no_tie(self):
+        gone_user = User.objects.create_user(email="gone-b@example.com", password="pw-secret-123")
+        gone = Member.objects.create(first_name="Gus", last_name="Gone", user=gone_user)
+        ClubMembership.objects.create(club=self.club_b, member=gone, season=self.season_b, status=ClubMembership.StatusChoices.CANCELLED)
+        self.client.force_login(gone_user)
+
+        self.assertEqual(self._get(reverse("mobile:home")).status_code, 404)
+
+    def test_a_club_role_or_staff_assignment_is_a_tie(self):
+        role_user = User.objects.create_user(email="editor-b@example.com", password="pw-secret-123")
+        # MEMBER, not an elevated role -- those also trigger the MFA requirement,
+        # which would redirect before the app is reached.
+        ClubRole.objects.create(club=self.club_b, member=Member.objects.create(first_name="Eddie", last_name="Roleholder", user=role_user), role=ClubRole.Roles.MEMBER)
+        coach_user = User.objects.create_user(email="coach-b@example.com", password="pw-secret-123")
+        coach = Member.objects.create(first_name="Cora", last_name="Coach", user=coach_user)
+        team = Team.objects.create(club=self.club_b, name="U16", short_name="U16")
+        position = Position.objects.create(club=self.club_b, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach, season=self.season_b, position=position)
+
+        for user in (role_user, coach_user):
+            with self.subTest(user=user.email):
+                self.client.force_login(user)
+                self.assertEqual(self._get(reverse("mobile:home")).status_code, 200)
+
+    def test_coach_mode_404s_for_a_tied_member_without_staffed_teams(self):
+        member_user = User.objects.create_user(email="plain-b@example.com", password="pw-secret-123")
+        member = Member.objects.create(first_name="Pia", last_name="Plain", user=member_user)
+        ClubMembership.objects.create(club=self.club_b, member=member, season=self.season_b, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(member_user)
+
+        self.assertEqual(self._get(reverse("mobile:home")).status_code, 200)
+        for name in ("coach_today", "coach_squad", "coach_schedule"):
+            with self.subTest(screen=name):
+                self.assertEqual(self._get(reverse(f"mobile:{name}")).status_code, 404)
+
+    def test_bug_list_only_shows_this_clubs_reports(self):
+        ClubRole.objects.create(club=self.club_b, member=self.outsider)
+        BugReport.objects.create(club=self.club_a, reported_by=self.outsider, title="Seen in A", description="x")
+        BugReport.objects.create(club=self.club_b, reported_by=self.outsider, title="Seen in B", description="x")
+        self.client.force_login(self.outsider_user)
+
+        response = self._get(reverse("mobile:bug_list"))
+
+        self.assertContains(response, "Seen in B")
+        self.assertNotContains(response, "Seen in A")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class PushSubscriptionOwnershipTests(TestCase):
+    """Deleting or re-registering a push endpoint only ever touches the
+    signed-in account's own rows."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="me@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Me", last_name="Myself", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+        cls.other_member = Member.objects.create(first_name="Someone", last_name="Else", user=User.objects.create_user(email="else@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=cls.club, member=cls.other_member)
+        cls.their_subscription = PushSubscription.objects.create(club=cls.club, member=cls.other_member, endpoint="https://push.example.com/theirs", p256dh="k", auth="a")
+
+    def _send(self, method, data):
+        return getattr(self.client, method)(reverse("mobile:push_subscribe"), data=json.dumps(data), content_type="application/json", HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_cannot_delete_another_users_subscription(self):
+        self.client.force_login(self.user)
+
+        self._send("delete", {"endpoint": self.their_subscription.endpoint})
+
+        self.assertTrue(PushSubscription.objects.filter(pk=self.their_subscription.pk).exists())
+
+    def test_can_delete_own_subscription(self):
+        mine = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://push.example.com/mine", p256dh="k", auth="a")
+        self.client.force_login(self.user)
+
+        self._send("delete", {"endpoint": mine.endpoint})
+
+        self.assertFalse(PushSubscription.objects.filter(pk=mine.pk).exists())
+
+    def test_cannot_take_over_another_users_endpoint(self):
+        self.client.force_login(self.user)
+
+        response = self._send("post", {"endpoint": self.their_subscription.endpoint, "keys": {"p256dh": "evil", "auth": "evil"}})
+
+        self.assertEqual(response.status_code, 409)
+        self.their_subscription.refresh_from_db()
+        self.assertEqual(self.their_subscription.member, self.other_member)
+        self.assertEqual(self.their_subscription.p256dh, "k")

@@ -72,7 +72,7 @@ from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
-from .mixins import DesktopTemplateMixin, PersonScopeMixin, ShopScopeMixin
+from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import ICON_SIZES, get_fallback_icon
@@ -121,11 +121,16 @@ class ServiceWorkerView(View):
         return HttpResponse(render_to_string("mobile/sw.js", {}), content_type="application/javascript")
 
 
-class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
+class PushSubscribeView(MemberAppMixin, View):
     """Called by mobile/static/mobile/app.js once the browser hands back a
     PushSubscription. Keyed on endpoint (globally unique per browser
     registration, see PushSubscription's own docstring): re-subscribing the
-    same browser updates its row instead of creating a duplicate."""
+    same browser updates its row instead of creating a duplicate.
+
+    Only ever touches the signed-in account's own rows: an endpoint already
+    registered to someone else is neither reassigned nor deleted from here
+    (409 / no-op), so knowing another browser's endpoint can't redirect or
+    silence that person's notifications."""
 
     def post(self, request):
         member = Member.objects.filter(user=request.user).first()
@@ -140,8 +145,12 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
         except KeyError, TypeError, ValueError:
             return HttpResponseBadRequest("Malformed subscription payload.")
 
+        if PushSubscription.objects.filter(endpoint=endpoint).exclude(member__user=request.user).exists():
+            return JsonResponse({"status": "conflict"}, status=409)
+
         PushSubscription.objects.update_or_create(
             endpoint=endpoint,
+            member__user=request.user,
             defaults={
                 "club": request.club,
                 "member": member,
@@ -157,7 +166,7 @@ class PushSubscribeView(LoginRequiredMixin, ClubScopedPublicMixin, View):
             endpoint = json.loads(request.body)["endpoint"]
         except KeyError, TypeError, ValueError:
             return HttpResponseBadRequest("Malformed unsubscribe payload.")
-        PushSubscription.objects.filter(endpoint=endpoint).delete()
+        PushSubscription.objects.filter(endpoint=endpoint, member__user=request.user).delete()
         return JsonResponse({"status": "ok"})
 
 
@@ -755,10 +764,20 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("You can't RSVP for that person."))
 
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
-        existing = Attendance.objects.filter(event=event, member=member).first()
+        # Only an invited person can answer: invitations are the Attendance rows
+        # events.services.attendance.sync_event_attendances creates, so an RSVP
+        # updates that row and never creates one for an event the person
+        # wasn't invited to.
+        existing = get_object_or_404(Attendance, event=event, member=member)
+
+        if event.start <= timezone.now():
+            title = _("Too late to reply")
+            body = _("“%(title)s” has already started, so answers can no longer be changed.") % {"title": event.title}
+            notify(request, f"e|{title}|{body}")
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
 
         if is_dropout:
-            if existing is None or existing.status != Attendance.AttendanceStatus.SELECTED:
+            if existing.status != Attendance.AttendanceStatus.SELECTED:
                 return HttpResponseBadRequest(_("You're not in the published line-up for this event."))
         # Mirrors the read-only treatment Home's hero and this same screen's own
         # "Your answers" card already show once the deadline has passed (see
@@ -793,7 +812,9 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             note = request.POST.get("note", "").strip()
 
         final_status = Attendance.AttendanceStatus.ABSENT if is_dropout else status
-        Attendance.objects.update_or_create(event=event, member=member, defaults={"status": final_status, "note": note})
+        existing.status = final_status
+        existing.note = note
+        existing.save(update_fields=["status", "note", "modified"])
         if is_dropout:
             notify_dropout(event, member, note)
 
@@ -1599,7 +1620,7 @@ BUG_STATUS_PILL_CLASSES = {
 }
 
 
-class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
+class BugListView(DesktopTemplateMixin, MemberAppMixin, TemplateView):
     """ "Report a bug" row on the Me screen (mobile/templates/mobile/me.html) --
     files into the standalone ``bugs`` app (bugs.services.file_report), which
     already handles admin notification, so this view is just a form + the
@@ -1620,9 +1641,9 @@ class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Report a bug")
     active_tab = "me"
 
-    def dispatch(self, request, *args, **kwargs):
-        self.me = Member.objects.filter(user=request.user).first() if request.user.is_authenticated else None
-        return super().dispatch(request, *args, **kwargs)
+    def prepare_member_app(self, request):
+        super().prepare_member_app(request)
+        self.me = Member.objects.filter(user=request.user).first()
 
     def _build_form(self, data=None):
         form = BugReportForm(data)
@@ -1649,7 +1670,7 @@ class BugListView(DesktopTemplateMixin, LoginRequiredMixin, TemplateView):
         return self.render_to_response(self.get_context_data(form=form))
 
     def get_context_data(self, **kwargs):
-        bugs = BugReport.objects.filter(reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
+        bugs = BugReport.objects.filter(club=self.request.club, reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
         rows = [{"bug": bug, "pill_class": BUG_STATUS_PILL_CLASSES.get(bug.status, "pill-neutral")} for bug in bugs]
         unread_notification_count = 0
         if self.me is not None:
