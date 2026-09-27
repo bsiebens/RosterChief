@@ -5,8 +5,7 @@
 #
 # `web` carries both `image:` and `build: .`: normal deploys pull the prebuilt image GitHub
 # Actions already pushed (.github/workflows/build-and-push.yml) rather than building here --
-# see DEPLOYMENT.md's "Sizing the server" for why building on a small box is the thing that
-# OOMs it. `build: .` stays so `docker compose build` still works if you ever need to build
+# building the image on a small box runs it out of memory. `build: .` stays so `docker compose build` still works if you ever need to build
 # locally. IMAGE_TAG picks the version: `:<branch>` (the default, "latest for this branch")
 # or `:<branch>-<short-sha>` to pin/roll back to an exact build -- see DEPLOYMENT.md's
 # "Deploying a specific version".
