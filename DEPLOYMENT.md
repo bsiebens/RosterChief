@@ -654,9 +654,10 @@ application code and dependencies (all secrets are `.env`/`.env.production`, nev
 
 ## Automated backups
 
-`deploy/backup.sh` dumps the database, tars the uploads while they are still on local disk,
-prunes anything older than `KEEP_DAYS`, and — if you set `BACKUP_REMOTE` — copies the lot off
-the box with rclone.
+`deploy/backup.sh` dumps the database, tars the public uploads while they are still on local
+disk and the private uploads (always local), prunes anything older than `KEEP_DAYS`, and — if
+you set `BACKUP_REMOTE` — copies the lot off the box with rclone. Everything it writes is
+owner-only (`umask 077`, backup directory `chmod 700`).
 
 ```bash
 deploy/backup.sh /var/backups/rosterchief

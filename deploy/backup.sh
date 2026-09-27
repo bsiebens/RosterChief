@@ -8,12 +8,17 @@
 # believe you have backups.
 set -Eeuo pipefail
 
+# Dumps hold personal data (members, families, private uploads): everything this script
+# creates is readable by the owning user only.
+umask 077
+
 DEST="${1:-/var/backups/rosterchief}"
 COMPOSE="${COMPOSE:-docker compose}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 STAMP="$(date +%F-%H%M)"
 
 mkdir -p "$DEST"
+chmod 700 "$DEST"
 
 # --- database ---------------------------------------------------------------
 # Written to a temporary name and moved into place only on success: a truncated dump that
@@ -35,9 +40,16 @@ if [ -z "${AWS_STORAGE_BUCKET_NAME:-}" ]; then
     mv "$MEDIA_OUT.part" "$MEDIA_OUT"
 fi
 
+# Private uploads (e.g. medical certificates, see rosterchief/storage.py) are always on local
+# disk, whatever AWS_STORAGE_BUCKET_NAME says, so they are backed up unconditionally.
+PRIVATE_OUT="$DEST/private-media-$STAMP.tar.gz"
+$COMPOSE exec -T web tar -cz -C /app private_media | cat > "$PRIVATE_OUT.part"
+mv "$PRIVATE_OUT.part" "$PRIVATE_OUT"
+
 # --- retention --------------------------------------------------------------
 find "$DEST" -name 'db-*.sql.gz' -mtime "+$KEEP_DAYS" -delete
 find "$DEST" -name 'media-*.tar.gz' -mtime "+$KEEP_DAYS" -delete
+find "$DEST" -name 'private-media-*.tar.gz' -mtime "+$KEEP_DAYS" -delete
 find "$DEST" -name '*.part' -mtime +1 -delete
 
 echo "$(date -Iseconds) backup ok: $(basename "$DB_OUT") ($(du -h "$DB_OUT" | cut -f1))"
