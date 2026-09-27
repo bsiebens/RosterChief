@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Deploy production FROM the server itself -- no SSH indirection. For when you're already
-# logged in and want to run the deploy directly, instead of deploy-prod.sh's ssh-from-your-Mac
-# model. Run it from the repo root.
+# Deploy production FROM the server itself. deploy/deploy-prod.sh runs exactly this script over
+# SSH from your own machine (after updating the checkout), so the two can never drift apart;
+# run it by hand only when you're logged in anyway. Run it from the repo root.
 #
 #   deploy/deploy-local.sh                          # deploy IMAGE_TAG=main (the default)
 #   IMAGE_TAG=main-a1b2c3d deploy/deploy-local.sh    # pin/roll back to an exact build
@@ -35,9 +35,21 @@ die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 [ -f .env.production ]  || die ".env.production missing (Django config). Copy from .env.production.example."
 [ -f .env ]             || die ".env missing (compose vars: POSTGRES_PASSWORD, ...). Copy from .env.compose.example."
 
+# Keys the code refuses to run without -- checked before anything is stopped, backed up or
+# migrated, so a missing one fails here with a clear message instead of halfway through.
+# (Only whether the line has a value; the values themselves are never printed.)
+env_value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+for key in DJANGO_SECRET_KEY MFA_ENCRYPTION_KEY; do
+    [ -n "$(env_value .env.production "$key")" ] \
+        || die "$key is missing or empty in .env.production -- see .env.production.example and DEPLOYMENT.md."
+done
+if [ -z "$(env_value .env BACKUP_AGE_RECIPIENT)" ] && [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
+    say "Note: BACKUP_AGE_RECIPIENT is not set in .env -- the pre-migration backup will be unencrypted (see DEPLOYMENT.md, Backups)."
+fi
+
 dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
-say "Deploying image tag '${IMAGE_TAG}' — checkout at $(git rev-parse --short HEAD) ($(git log -1 --pretty=%s))"
+say "Deploying image tag '${IMAGE_TAG}' -- checkout at $(git rev-parse --short HEAD) ($(git log -1 --pretty=%s))"
 
 # db/redis/caddy are all restart:unless-stopped and should already be up from steady state --
 # this is belt-and-suspenders (e.g. right after a host reboot, or a first deploy) before
@@ -56,7 +68,8 @@ say "Pulling image tag '${IMAGE_TAG}'"
 IMAGE_TAG="$IMAGE_TAG" dc pull web
 
 say "Running migrations"
-dc run --rm web python manage.py migrate --noinput
+# -T and </dev/null: no TTY and no stdin -- identical by hand and over deploy-prod.sh's SSH.
+dc run --rm -T web python manage.py migrate --noinput </dev/null
 
 say "Restarting web"
 IMAGE_TAG="$IMAGE_TAG" dc up -d --no-deps --remove-orphans web

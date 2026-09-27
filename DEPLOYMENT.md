@@ -180,50 +180,68 @@ https and break the suite anywhere `DEBUG` is unset.
 
 ### Deploying updates
 
-Once the first deploy above is done, `deploy/deploy-prod.sh` does the rest — same one-SSH-
-session design as `deploy/deploy-dev.sh` (see "Deploying with one command" below), tuned for a
-deploy target this permanent:
+Deploys run **from your own machine**; you never have to log into the server for them.
+`deploy/deploy-prod.sh` opens one SSH session and does exactly what you would do by hand:
+update the server's checkout, then run the server's own `deploy/deploy-local.sh` from it.
+
+**One-time setup on your machine:**
 
 ```bash
-SSH_HOST=<server> SSH_USER=<user> REMOTE_DIR=/home/bernard/RosterChief deploy/deploy-prod.sh
-deploy/deploy-prod.sh --push        # push main first, then deploy
+cp deploy/.env.deploy.example deploy/.env.prod.local    # gitignored, never committed
+# fill in SSH_HOST, SSH_USER, REMOTE_DIR (e.g. /home/bernard/RosterChief), optionally SSH_KEY_FILE
 ```
 
-Unlike the dev script, this one has no default host (guessing wrong here is a real mistake, not
-a rebuild), refuses anything but `main` unless you set `ALLOW_NON_MAIN=1`, and runs
-`deploy/backup.sh` before migrating (skip with `SKIP_BACKUP=1`, not recommended).
+Check that `ssh <user>@<host>` works without a password prompt (key-based login), and that the
+SSH user can run `docker` on the server.
 
-`SSH_HOST`/`SSH_USER`/`REMOTE_DIR` (and the optional `SSH_KEY_FILE`, to authenticate with a
-specific private key instead of your default SSH identity) are easiest set once per target
-rather than typed on every deploy:
+**Every deploy:**
 
 ```bash
-cp deploy/.env.deploy.example deploy/.env.prod.local   # gitignored, never committed
-# fill it in, then:
-source deploy/.env.prod.local && deploy/deploy-prod.sh
+source deploy/.env.prod.local
+
+deploy/deploy-prod.sh                      # the latest main (image :main)
+deploy/deploy-prod.sh --version v0.7.8     # an exact release (image :v0.7.8) -- also how you roll back
+deploy/deploy-prod.sh --push               # push your local main first, then deploy it
+SKIP_BACKUP=1 deploy/deploy-prod.sh        # skip the pre-migration backup (not recommended)
 ```
 
-`deploy/deploy-dev.sh` reads the same four variables (`SSH_HOST`/`SSH_USER` there already
-default to the dev box, so only set what differs — e.g. a `deploy/.env.dev.local` with just
-`SSH_KEY_FILE` if the dev box needs a different key than your default).
+What happens, in order:
 
-#### Deploying from inside the server itself
+1. **On your machine:** it refuses to deploy commits that aren't on GitHub yet (the server
+   pulls from GitHub), and for `--version` checks the release tag exists.
+2. **On the server:** `git fetch`, then `reset --hard` to `origin/main` (or checks out the
+   release tag). Untracked files — `.env`, `.env.production`, backups — are never touched.
+3. **On the server, `deploy/deploy-local.sh`:**
+   - checks `.env.production` has every required key (`DJANGO_SECRET_KEY`,
+     `MFA_ENCRYPTION_KEY`) **before** touching anything;
+   - makes sure `db`, `redis` and `caddy` are up;
+   - backs up the database (`deploy/backup.sh`, encrypted if `BACKUP_AGE_RECIPIENT` is set);
+   - pulls the image, runs migrations, restarts `web`;
+   - waits until `https://rosterchief.app/healthz` answers, and prints the recent `web` logs
+     if it never does (the script then exits non-zero).
 
-`deploy/deploy-local.sh` is the same deploy, minus the SSH indirection — for when you're
-already logged into the server (or scripting the deploy some other way that isn't "from my
-Mac"). Run it from the repo root, **after** you've updated the checkout yourself
-(`git fetch origin && git checkout main && git reset --hard origin/main`) — this script only
-handles the docker/app side:
+If anything fails, the script stops at that step and says why; `web` keeps running the old
+version until the restart step.
+
+**Rolling back:** `deploy/deploy-prod.sh --version v0.7.7` puts the previous release's code and
+image back. Migrations are *not* reversed automatically: if the release you are leaving added a
+migration the older code can't live with, restore the pre-deploy backup instead (see
+"Backups → Restoring").
+
+#### Deploying while logged into the server
+
+`deploy/deploy-local.sh` is the same deploy without the SSH part — `deploy-prod.sh` runs this
+very script. Update the checkout yourself first, then run it from the repo root:
 
 ```bash
+git fetch origin && git checkout main && git reset --hard origin/main
 deploy/deploy-local.sh                          # pulls and deploys :main
-IMAGE_TAG=main-a1b2c3d deploy/deploy-local.sh    # pin/roll back to an exact build
-SKIP_BACKUP=1 deploy/deploy-local.sh             # not recommended
+IMAGE_TAG=v0.7.8 deploy/deploy-local.sh         # an exact release (check out that tag first)
+SKIP_BACKUP=1 deploy/deploy-local.sh            # not recommended
 ```
 
-It brings `db`/`redis`/`caddy` up first if they aren't already — `caddy` doesn't need a code
-deploy to run, so nothing else in either deploy script would otherwise ever start it, which is
-exactly what left it down (and `/healthz` unreachable) after this server's first deploy.
+`deploy/deploy-dev.sh` (the test server) reads the same `SSH_HOST`/`SSH_USER`/`REMOTE_DIR`/
+`SSH_KEY_FILE` variables — keep a separate `deploy/.env.dev.local` for it.
 
 ### Keep DJANGO_DEBUG=False, even on the test server
 
@@ -792,119 +810,283 @@ Making the package public instead (its own visibility setting under the repo's P
 on GitHub) skips this entirely — reasonable here since the image contains no secrets, only
 application code and dependencies (all secrets are `.env`/`.env.production`, never baked in).
 
-## Automated backups
+## Backups
 
-`deploy/backup.sh` dumps the database, tars the public uploads while they are still on local
-disk and the private uploads (always local), prunes anything older than `KEEP_DAYS`, and — if
-you set `BACKUP_REMOTE` — copies the lot off the box with rclone. Everything it writes is
-owner-only (`umask 077`, backup directory `chmod 700`), and with `BACKUP_AGE_RECIPIENT` set
-every archive is encrypted with [age](https://age-encryption.org) (see "Encrypted backups"
-below) — **required** whenever `BACKUP_REMOTE` is set.
+Everything that carries state is backed up by one script, `deploy/backup.sh`, run nightly by
+cron on the production server:
+
+| What | File |
+|---|---|
+| The database | `db-<date>.sql.gz.age` |
+| Public uploads (logos, photos) — only while they're on local disk | `media-<date>.tar.gz.age` |
+| Private uploads (onboarding documents, medical certificates) | `private-media-<date>.tar.gz.age` |
+
+Each file is **encrypted** on the server with [age](https://age-encryption.org) before it is
+stored or copied anywhere. The server only has the *public* key: it can encrypt, but nobody who
+gets hold of the server or the backup location can read the backups. The *private* key, which
+decrypts them, lives only with you.
+
+The files are kept for 14 days on the server (`/var/backups/rosterchief`) and — the part that
+actually protects you — copied every night to a **second server over SSH**, where they are kept
+for 60 days. A backup on the same disk as the database survives a bad migration, not a dead
+server.
+
+Setting it up is a one-time job across three machines — your computer, the production server
+and the backup server. Do the steps in order.
+
+### Installing the tools
+
+`age` (encryption) and `rclone` (the upload) are needed on the **production server**; `age` also
+on **your own computer**. The backup server only needs a working SSH server.
+
+**Debian / Ubuntu** (Debian 12+, Ubuntu 22.04+):
 
 ```bash
-deploy/backup.sh /var/backups/rosterchief
+sudo apt install age rclone
 ```
 
-It writes to a `.part` file and only moves it into place once `gzip -t` says the archive is
-readable and non-empty. A truncated dump that *looks* like a backup is the failure mode worth
-engineering against, because you only discover it on the day you need it.
+**Amazon Linux 2023** (and Amazon Linux 2) — neither is packaged, so install the official
+release binaries. Use `arm64` instead of `amd64` on Graviton (`t4g`, `m7g`, …) instances; check
+with `uname -m` (`aarch64` = arm64, `x86_64` = amd64):
 
-Schedule it as root on the host (single server; on several, run it on the database node):
+```bash
+ARCH=amd64          # or arm64
+AGE_VERSION=v1.3.2  # latest from https://github.com/FiloSottile/age/releases
 
-```cron
-# Nightly at 02:30, before the billing and event jobs.
-# BACKUP_AGE_RECIPIENT is read from .env in the checkout (or set it on this line).
-30 2 * * *  cd /srv/rosterchief && BACKUP_REMOTE=b2:rosterchief-backups KEEP_DAYS=14 deploy/backup.sh /var/backups/rosterchief
+curl -fsSL -o /tmp/age.tar.gz \
+  "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-${ARCH}.tar.gz"
+tar -xzf /tmp/age.tar.gz -C /tmp
+sudo install -m 0755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+rm -rf /tmp/age /tmp/age.tar.gz
 
-# Weekly restore rehearsal into a throwaway database. This is the only line here that proves
-# the others work. Only while backups are NOT encrypted -- see "Encrypted backups" for how to
-# rehearse once they are (the private key is not on this server).
-0 4 * * 0   cd /srv/rosterchief && deploy/restore-check.sh
+sudo dnf install -y "https://downloads.rclone.org/rclone-current-linux-${ARCH}.rpm"
+
+age --version && rclone version | head -1      # both should print a version
 ```
 
-Cron mails you on non-zero exit, and the script uses `set -Eeuo pipefail` so it *does* exit
-non-zero. A backup script that fails quietly is worse than none, because you will believe you
-have backups.
+Amazon Linux 2023 also ships **without cron**. Install and start it before step 5:
 
-**Offsite matters more than frequency.** A dump sitting on the same disk as the database
-survives a bad migration but not the server. `BACKUP_REMOTE` takes any rclone remote (S3,
-Backblaze, a second box).
+```bash
+sudo dnf install -y cronie
+sudo systemctl enable --now crond
+```
 
-**Once uploads move to S3** (`AWS_STORAGE_BUCKET_NAME`), the script skips the media tarball:
-the bucket's own versioning is the backup. Turn versioning on when you create it.
+**macOS** (your own computer): `brew install age` (and `brew install rclone` if you want it).
 
-### Encrypted backups
+Binaries in `/usr/local/bin` (the Amazon Linux install above) are **not** on cron's default
+`PATH` — the crontab in step 5 sets `PATH` for exactly that reason; keep that line.
 
-The dumps hold members' personal data and the private uploads (medical certificates, …). With
-`BACKUP_AGE_RECIPIENT` set, `deploy/backup.sh` encrypts each archive to `*.age` with
-`age -r <recipient>` and deletes the plaintext; only `*.age` files are copied to
-`BACKUP_REMOTE`, and the script refuses to run at all with `BACKUP_REMOTE` but no recipient.
-The server only ever holds the **public** key, so a stolen backup bucket — or the server
-itself — does not yield readable backups.
+### Step 1 — On your own computer: create the backup key
 
-1. **Install age** on the host that runs the backup (it runs on the host, not in a
-   container): `apt install age` (Debian 12+/Ubuntu 22.04+), `brew install age` on a Mac, or a
-   release binary from https://github.com/FiloSottile/age/releases.
-2. **Make the key pair offline**, on your own machine, not the server:
+1. Install age (see "Installing the tools" above).
+2. Create the key pair:
 
    ```bash
    age-keygen -o rosterchief-backup-key.txt
-   # Public key: age1...        <- the recipient
    ```
 
-   Keep `rosterchief-backup-key.txt` off the server: a password manager entry plus an offline
-   copy (USB stick / paper in a safe). Without it the backups are unrecoverable; with it
-   anyone can read them. The `MFA_ENCRYPTION_KEY` belongs next to it.
-3. **Configure the server:** add `BACKUP_AGE_RECIPIENT=age1...` to `.env` (the compose env
-   file in the checkout — `deploy/backup.sh` reads it from there, so cron and
-   `deploy/deploy-prod.sh`'s pre-migration backup both encrypt). Run `deploy/backup.sh` once
-   by hand and check you get `db-….sql.gz.age`. Earlier plaintext archives are pruned by
-   `KEEP_DAYS` as usual (delete them sooner by hand if you like); they are never uploaded.
-4. **Restore rehearsal:** the weekly `restore-check.sh` cron line cannot decrypt without the
-   key, so drop it and rehearse by hand (monthly is fine) where the key lives — e.g. on your
-   own machine, with a checkout of this repo and a scratch database:
+   It prints `Public key: age1…`. **Copy that line** — you need it in step 3. The file
+   `rosterchief-backup-key.txt` is the private key.
+3. Store the private key safely, **not on the production server**:
+   - in your password manager (paste the whole file as a secure note), **and**
+   - one offline copy (USB stick or printed, in a drawer/safe).
+
+   Lose it and the backups can never be opened. Anyone who has it can read them. Store the
+   production `MFA_ENCRYPTION_KEY` next to it — you need both to rebuild the server.
+
+### Step 2 — On the backup server: an account that only receives files
+
+The backup server can be any machine you can reach over SSH (a small VPS, a NAS, a box at
+home). Log into it and create a dedicated account:
+
+```bash
+sudo useradd --create-home rosterchief-backup     # no password: key login only
+sudo -u rosterchief-backup mkdir -p ~rosterchief-backup/.ssh ~rosterchief-backup/rosterchief
+sudo chmod 700 ~rosterchief-backup/.ssh
+```
+
+(`useradd` exists on every distro, Amazon Linux included; the account gets no password, so it
+can only be reached with the SSH key added below.)
+
+Leave this session open; you'll paste a key into it in step 3.
+
+### Step 3 — On the production server: age, rclone, SSH key, config
+
+Log into the production server. The backup runs as **root** (it needs Docker), so run these
+with `sudo -i` first.
+
+1. **Install the tools:** `age` and `rclone` — see "Installing the tools" above (Amazon
+   Linux needs the release binaries and `cronie`).
+
+2. **Tell the backup which key to encrypt to.** Add the public key from step 1 to the compose
+   `.env` in the checkout (the same file that holds `POSTGRES_PASSWORD`):
 
    ```bash
-   rclone copy b2:rosterchief-backups/ ./restore-test --include 'db-*.age' --max-age 2d
-   docker compose -f compose.behind-proxy.yaml up -d db    # any Postgres with the app role
-   COMPOSE="docker compose -f compose.behind-proxy.yaml" \
-     BACKUP_AGE_IDENTITY=~/rosterchief-backup-key.txt deploy/restore-check.sh ./restore-test
+   cd /home/bernard/RosterChief
+   echo 'BACKUP_AGE_RECIPIENT=age1…your public key…' >> .env
    ```
 
-### Restoring
+3. **Make an SSH key for the backup upload** (no passphrase: cron has to use it unattended):
+
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "rosterchief backups" -f /root/.ssh/rosterchief_backup
+   cat /root/.ssh/rosterchief_backup.pub
+   ```
+
+4. **Allow that key on the backup server — for file transfer only.** In the step-2 session
+   on the backup server, put the printed line into `~rosterchief-backup/.ssh/authorized_keys`,
+   prefixed so the key can't open a shell:
+
+   The `sftp-server` path differs per distro: `/usr/lib/openssh/sftp-server` on
+   Debian/Ubuntu, `/usr/libexec/openssh/sftp-server` on Amazon Linux/RHEL/Fedora — check which
+   exists with `ls` on the backup server and use that one:
+
+   ```bash
+   # on the backup server (Debian/Ubuntu path shown):
+   echo 'restrict,command="/usr/lib/openssh/sftp-server" ssh-ed25519 AAAA…the key… rosterchief backups' \
+     | sudo tee -a ~rosterchief-backup/.ssh/authorized_keys
+   sudo chown -R rosterchief-backup: ~rosterchief-backup/.ssh
+   sudo chmod 600 ~rosterchief-backup/.ssh/authorized_keys
+   ```
+
+5. **Trust the backup server's host key** (back on the production server, as root). Compare the
+   fingerprint it shows with the one the backup server reports
+   (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there) before answering `yes`:
+
+   ```bash
+   ssh -i /root/.ssh/rosterchief_backup rosterchief-backup@<backup-host>
+   # answer "yes" if the fingerprint matches; the login itself then closes (no shell -- that's intended)
+   ```
+
+6. **Create the rclone remote** called `offsite`:
+
+   ```bash
+   rclone config create offsite sftp \
+     host <backup-host> user rosterchief-backup \
+     key_file /root/.ssh/rosterchief_backup \
+     known_hosts_file /root/.ssh/known_hosts \
+     shell_type none
+   rclone lsd offsite:          # should list the "rosterchief" folder
+   ```
+
+   (`shell_type none` because the key may only do file transfer; add `port <n>` if SSH on the
+   backup server isn't on 22.)
+
+### Step 4 — Test it once by hand
+
+Still as root on the production server:
 
 ```bash
-# Encrypted (the usual case) -- the private key has to be brought to wherever you restore:
+cd /home/bernard/RosterChief
+BACKUP_REMOTE=offsite:rosterchief deploy/backup.sh /var/backups/rosterchief
+ls -l /var/backups/rosterchief            # db-…sql.gz.age etc. -- only .age files are new
+rclone ls offsite:rosterchief             # the same files on the backup server
+```
+
+The script prints `backup ok: …` and `copied to offsite:rosterchief`. If it stops with an
+error, nothing half-written is left behind — fix what it says and run it again.
+
+### Step 5 — Schedule it
+
+`crontab -e` as root on the production server:
+
+```cron
+MAILTO=you@example.com
+# cron's default PATH lacks /usr/local/bin (where age lives on Amazon Linux) -- keep this line.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Nightly at 02:30: dump, encrypt, keep 14 days here, copy offsite, keep 60 days there.
+30 2 * * *  cd /home/bernard/RosterChief && BACKUP_REMOTE=offsite:rosterchief deploy/backup.sh /var/backups/rosterchief
+```
+
+`MAILTO` only works if the server can send mail (a local MTA such as `postfix`/`msmtp`); if it
+can't, at least check `/var/backups/rosterchief` for fresh files after the first night, or
+append `>> /var/log/rosterchief-backup.log 2>&1` to the line and check that log.
+
+Knobs, all optional on that line: `KEEP_DAYS=14` (on the server), `REMOTE_KEEP_DAYS=60` (on the
+backup server; `0` keeps everything forever). Cron mails `MAILTO` whenever the script fails,
+and it fails loudly on purpose: a backup that fails quietly is worse than none.
+
+Remove the old weekly `deploy/restore-check.sh` cron line if you have one: the server can no
+longer decrypt the backups (by design), so the restore test moves to your own computer (next
+step).
+
+Every deploy also takes a backup first (`deploy/deploy-prod.sh` → `deploy-local.sh`); it's
+encrypted the same way and stays on the server for 14 days, but isn't copied offsite — the
+nightly run does that.
+
+### Step 6 — Prove a backup restores (monthly, on your own computer)
+
+A backup you've never restored is a hope, not a backup. On your own computer, with a checkout
+of this repo and Docker:
+
+**Once:** let your computer download from the backup server. Add your own public key
+(`cat ~/.ssh/id_ed25519.pub`) to the backup account exactly like the server's key in step 3.4 —
+same `restrict,command=…` prefix, appended with `tee -a` — so it can fetch files but not log in.
+
+**Each time:**
+
+```bash
+# 1. fetch last night's database dump from the backup server
+mkdir -p restore-test
+sftp rosterchief-backup@<backup-host> <<'SFTP'
+ls -lt rosterchief
+SFTP
+#    note the newest db-….sql.gz.age name, then:
+sftp rosterchief-backup@<backup-host>:rosterchief/db-2026-07-14-0230.sql.gz.age restore-test/
+
+# 2. start a throwaway local Postgres and restore into it
+docker compose -f compose.behind-proxy.yaml up -d db
+COMPOSE="docker compose -f compose.behind-proxy.yaml" \
+  BACKUP_AGE_IDENTITY=~/rosterchief-backup-key.txt deploy/restore-check.sh ./restore-test
+```
+
+It prints `restore ok: … -> N clubs, M users`. Delete `restore-test/` afterwards — it holds
+personal data.
+
+### Restoring for real
+
+The private key has to come to the machine you restore on — bring it for the restore and
+remove it afterwards. On the production server, from the checkout:
+
+```bash
+# 1. stop the app so nothing writes during the restore
+docker compose stop web
+
+# 2. the database (as the Postgres superuser; the dump recreates everything)
 age -d -i rosterchief-backup-key.txt /var/backups/rosterchief/db-2026-07-14-0230.sql.gz.age \
   | gunzip -c | docker compose exec -T db psql -U rosterchief rosterchief
-# Uploads the same way: age -d -i key.txt media-….tar.gz.age | docker compose exec -T web tar -xz -C /app
 
-# Unencrypted
-gunzip -c /var/backups/rosterchief/db-2026-07-14-0230.sql.gz \
-  | docker compose exec -T db psql -U rosterchief rosterchief
+# 3. uploads, if you lost them too
+age -d -i rosterchief-backup-key.txt /var/backups/rosterchief/media-2026-07-14-0230.tar.gz.age \
+  | docker compose exec -T web tar -xz -C /app
+age -d -i rosterchief-backup-key.txt /var/backups/rosterchief/private-media-2026-07-14-0230.tar.gz.age \
+  | docker compose exec -T web tar -xz -C /app
+
+# 4. start again, and remove the key from the server
+docker compose up -d web
+shred -u rosterchief-backup-key.txt
 ```
 
-Restore as `POSTGRES_USER` (the superuser); the dump reassigns every object to the app role
-(see "Database roles"), which must therefore exist first.
+If the server itself is gone, fetch the files from the backup server first
+(`scp`/`rclone copy offsite:rosterchief ./`), set up a new server as in "First deploy", then
+restore as above. The dump is taken with `--clean --if-exists`, so it replaces whatever is in
+the database; restore as the superuser (`POSTGRES_USER`) — the application role (see
+"Database roles") must already exist.
 
-The dump is taken with `--clean --if-exists`, so it drops and recreates rather than colliding
-with what is there. Rehearse it once, now, against a scratch database — not the first time you
-need it.
+Once uploads move to S3 (`AWS_STORAGE_BUCKET_NAME`), the public-uploads archive is skipped: the
+bucket's own versioning is their backup — turn versioning on when you create the bucket.
+Private uploads always stay on local disk and are always in the backup.
 
-## Backups (manual)
+### What lives where
 
-Two things carry state: Postgres and the uploads.
-
-```bash
-# Database
-docker compose exec -T db pg_dump -U rosterchief rosterchief | gzip > rosterchief-$(date +%F).sql.gz
-
-# Uploads — until they are on S3, in which case the bucket's own versioning is the backup.
-docker compose cp web:/app/media ./media-backup
-```
-
-Restore is `gunzip -c dump.sql.gz | docker compose exec -T db psql -U rosterchief rosterchief`.
-Test it once, now, rather than the first time you need it.
+| Item | Where |
+|---|---|
+| age **public** key (`BACKUP_AGE_RECIPIENT`) | production server, `.env` in the checkout |
+| age **private** key | your password manager + one offline copy. Never on a server except during a restore |
+| `MFA_ENCRYPTION_KEY` | production `.env.production` + next to the age private key |
+| Upload SSH key (`/root/.ssh/rosterchief_backup`) | production server only; allowed on the backup server for file transfer only |
+| Backups, 14 days | production server, `/var/backups/rosterchief` (root-only) |
+| Backups, 60 days | backup server, `~rosterchief-backup/rosterchief` |
 
 ## Sizing the server
 
@@ -1161,4 +1343,4 @@ is exported for the duration of that script regardless of what `.env` says).
 Migrations are the exception: they don't roll back with the image. Prefer additive migrations
 (add a column, deploy, backfill, then stop writing the old one) so that yesterday's image
 still runs against today's schema. If a migration genuinely needs undoing, restore from the
-backup `deploy-prod.sh` took immediately before it ran (see "Automated backups").
+backup `deploy-prod.sh` took immediately before it ran (see "Backups").
