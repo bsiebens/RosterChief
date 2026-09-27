@@ -35,7 +35,6 @@ class PlayerOut(Schema):
     jersey_number: int | None
     is_captain: bool
     is_alternate_captain: bool
-    license: str | None
     photo_url: str | None
 
 
@@ -71,7 +70,14 @@ def _photo_url(member, request) -> str | None:
     return request.build_absolute_uri(member.public_photo.url) if member.public_photo else None
 
 
-def _to_player_out(membership, license_by_member_id, request) -> PlayerOut:
+#: A roster spot can exist before the season's ClubMembership is approved
+#: (placement from the Sign-up page) or after it was cancelled; the public
+#: roster only lists people whose membership isn't in one of these states.
+#: Members with no ClubMembership row for the season are still listed.
+HIDDEN_MEMBERSHIP_STATUSES = (ClubMembership.StatusChoices.PENDING, ClubMembership.StatusChoices.CANCELLED)
+
+
+def _to_player_out(membership, request) -> PlayerOut:
     return PlayerOut(
         id=membership.member_id,
         first_name=membership.member.first_name,
@@ -79,7 +85,6 @@ def _to_player_out(membership, license_by_member_id, request) -> PlayerOut:
         jersey_number=membership.jersey_number,
         is_captain=membership.is_captain,
         is_alternate_captain=membership.is_alternate_captain,
-        license=license_by_member_id.get(membership.member_id) or None,
         photo_url=_photo_url(membership.member, request),
     )
 
@@ -100,19 +105,21 @@ def build_roster(team, request) -> RosterOut:
     # SignupTeamPlacementForm) has no position yet -- those trail every real
     # position group instead of sorting first (NULL's default position varies by
     # database backend otherwise).
-    memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by(F("position__ordering").asc(nulls_last=True), F("position__name").asc(nulls_last=True), "jersey_number")
-    assignments = team.staff_assignments.filter(season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name")
-
-    # A player's license lives on their club-wide ClubMembership for the season, not on
-    # TeamMembership -- one query for all of them rather than one per player.
-    license_by_member_id = dict(ClubMembership.objects.filter(club=team.club, season=season).values_list("member_id", "license"))
+    hidden_member_ids = ClubMembership.objects.filter(club=team.club, season=season, status__in=HIDDEN_MEMBERSHIP_STATUSES).values("member_id")
+    memberships = (
+        TeamMembership.objects.filter(team=team, season=season)
+        .exclude(member_id__in=hidden_member_ids)
+        .select_related("member", "position")
+        .order_by(F("position__ordering").asc(nulls_last=True), F("position__name").asc(nulls_last=True), "jersey_number")
+    )
+    assignments = team.staff_assignments.filter(season=season).exclude(member_id__in=hidden_member_ids).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name")
 
     # groupby only groups consecutive runs -- relies on the queryset already
     # being ordered by position first, which it is. A member placed with no
     # position yet (position_id is None -- see the nulls_last comment above)
     # groups together under an empty "" label rather than crashing on
     # m.position.name; it's the caller's job to label that group, not this API's.
-    players = [PositionGroupOut(position=position_name or "", players=[_to_player_out(m, license_by_member_id, request) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)]
+    players = [PositionGroupOut(position=position_name or "", players=[_to_player_out(m, request) for m in members]) for position_name, members in groupby(memberships, key=lambda m: m.position.name if m.position_id else None)]
     staff = [StaffMemberOut(id=assignment.member_id, first_name=assignment.member.first_name, last_name=assignment.member.last_name, position=assignment.position.name, photo_url=_photo_url(assignment.member, request)) for assignment in assignments]
 
     return RosterOut(team=_to_team_out(team, request, photo=photo), season=season.name, players=players, staff=staff)
