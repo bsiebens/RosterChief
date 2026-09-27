@@ -6769,7 +6769,14 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
         action = request.POST.get("action", "note")
         since_raw = request.POST.get("since", "")
         player_pk = request.POST.get("player_pk")
-        player = get_object_or_404(Member, pk=player_pk) if player_pk else None
+        # Only a player this checklist actually covers (the same population
+        # the walkthrough steps through) -- never an arbitrary Member pk,
+        # which could belong to another club entirely.
+        player = None
+        if player_pk:
+            player = next((candidate for candidate in checklist_players(self.checklist) if str(candidate.pk) == player_pk), None)
+            if player is None:
+                raise Http404
         author = Member.objects.filter(user=request.user).first()
 
         if action == "start_session":
@@ -6783,6 +6790,9 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
                 end_session(session)
                 notify(request, f"s|{_('Meeting ended')}|{_('Download the outcomes PDF from the button above.')}")
             return self._redirect(player=player, since_raw=since_raw)
+
+        if action in ("outcome", "note") and player is None:
+            raise Http404
 
         if action == "outcome":
             session = active_session(self.checklist)

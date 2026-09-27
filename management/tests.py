@@ -8865,6 +8865,63 @@ class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
         self.assertEqual(EvaluationSession.objects.filter(checklist=checklist).count(), 1)
 
 
+class EvaluationWalkthroughPlayerScopeTests(EvaluationManagementTestBase):
+    """The walkthrough's POST only acts on (and names) a player the checklist
+    actually covers -- management.views.EvaluationWalkthroughView resolves
+    player_pk from checklist_players, never from Member at large."""
+
+    def _evaluated_checklist(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        return checklist
+
+    def test_a_note_about_a_member_of_another_club_404s(self):
+        checklist = self._evaluated_checklist()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+        ClubRole.objects.create(club=other_club, member=outsider)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(outsider.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=outsider).exists())
+
+    def test_a_note_about_a_club_member_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        unevaluated = Member.objects.create(first_name="Nora", last_name="Notevaluated")
+        ClubMembership.objects.create(club=self.club, member=unevaluated, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(unevaluated.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=unevaluated).exists())
+
+    def test_an_outcome_for_a_player_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+
+        response = self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(outsider.pk), "decision": "Promote"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationOutcome.objects.filter(player=outsider).exists())
+
+    def test_a_malformed_player_pk_404s(self):
+        checklist = self._evaluated_checklist()
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": "not-a-uuid", "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_note_about_a_player_on_the_checklist_is_still_saved(self):
+        checklist = self._evaluated_checklist()
+
+        self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "Fine"}, checklist.slug)
+
+        self.assertTrue(EvaluationNote.objects.filter(checklist=checklist, player=self.player, note="Fine").exists())
+
+
 class EvaluationSessionOutcomesPdfTests(EvaluationManagementTestBase):
     def setUp(self):
         super().setUp()
