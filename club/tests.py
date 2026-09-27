@@ -1428,6 +1428,10 @@ class ManagementBrandingTests(TestCase):
         # (and whatever allauth chains after it -- passkeys, recovery codes) is a
         # *different* path under /accounts/, reached only via a redirect chain, not
         # by revisiting root().
+        from allauth.account.models import EmailAddress
+
+        # Signing in requires a confirmed address (ACCOUNT_EMAIL_VERIFICATION = "mandatory").
+        EmailAddress.objects.create(user=self.staff_user, email="staff@example.com", verified=True, primary=True)
         self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app", HTTP_USER_AGENT=RootViewTests.DESKTOP_UA)
 
         response = self.client.post(f"{reverse('account_login')}?next=/", {"login": "staff@example.com", "password": "pw-secret-123"}, HTTP_HOST="ajax-united.rosterchief.app")

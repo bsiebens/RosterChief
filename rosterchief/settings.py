@@ -174,7 +174,13 @@ LOGIN_REDIRECT_URL = "/"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_EMAIL_VERIFICATION = "none"
+# An address has to be verified before it can be used to sign in, and a new
+# address only replaces the current one once its confirmation link is followed
+# (CHANGE_EMAIL keeps at most the current address plus one pending change).
+# Staff grants (controlpanel.services) bind to an existing account only through
+# a verified address, so an unverified one must never become the account email.
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_CHANGE_EMAIL = True
 
 # Routes allauth's own mail through the control panel's "pause automated email"
 # switch (features.models.EmailSuppression), exempt only for password reset.

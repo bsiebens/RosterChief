@@ -14,7 +14,7 @@ mail (password reset, MFA/passkey notices, ...) through the same
 rosterchief.mail.send_message choke point the rest of the app's automated email
 already uses, so the control panel's "pause automated email" switch
 (features.models.EmailSuppression) covers allauth's mail too -- except password
-reset, which stays exempt.
+reset and email confirmation, which stay exempt (both are needed to sign in).
 """
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -36,12 +36,18 @@ class RosterChiefAccountAdapter(DefaultAccountAdapter):
     """Same email-rendering steps as allauth's own DefaultAccountAdapter.send_mail
     -- there's no smaller seam to hook, since the stock method renders *and* sends
     in one call -- but the final send goes through rosterchief.mail.send_message
-    instead of ``message.send()`` directly, exempted only for password reset:
-    that has to keep working while the platform-wide switch is on, or there'd be
-    no way back in for someone who forgot their password during the very window
+    instead of ``message.send()`` directly, exempted only for password reset and
+    email confirmation: those have to keep working while the platform-wide switch
+    is on, or there'd be no way in for someone who forgot their password (or
+    whose address still needs confirming before sign-in) during the very window
     the switch is meant to cover, short of a database flip."""
 
     PASSWORD_RESET_TEMPLATE_PREFIX = "account/email/password_reset_key"
+
+    #: Mail someone needs in order to get into their account at all -- the
+    #: password reset link, and (with ACCOUNT_EMAIL_VERIFICATION = "mandatory")
+    #: the address confirmation link that sign-in waits on.
+    EXEMPT_TEMPLATE_PREFIXES = frozenset({PASSWORD_RESET_TEMPLATE_PREFIX, "account/email/email_confirmation", "account/email/email_confirmation_signup"})
 
     def send_mail(self, template_prefix, email, context):
         from rosterchief.mail import send_message
@@ -50,7 +56,7 @@ class RosterChiefAccountAdapter(DefaultAccountAdapter):
         ctx = {"request": request, "email": email, "current_site": get_current_site(request)}
         ctx.update(context)
         message = self.render_mail(template_prefix, email, ctx)
-        send_message(message, exempt=(template_prefix == self.PASSWORD_RESET_TEMPLATE_PREFIX))
+        send_message(message, exempt=(template_prefix in self.EXEMPT_TEMPLATE_PREFIXES))
 
     def get_client_ip(self, request):
         """The proxy-supplied client address (ALLAUTH_TRUSTED_CLIENT_IP_HEADER),

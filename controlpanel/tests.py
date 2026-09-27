@@ -3,6 +3,7 @@ import pathlib
 from decimal import Decimal
 from unittest import mock
 
+from allauth.account.models import EmailAddress
 from django import forms
 from django.conf import settings
 from django.contrib import messages
@@ -32,6 +33,7 @@ from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .messages import LEVELS, notify
+from .services.accounts import UnverifiedEmailError
 from .services.admins import grant_club_admin
 from .services.platform_admins import PlatformAdminError, is_last_superuser, set_platform_access
 from .services.statistics import (
@@ -353,6 +355,7 @@ class ClubAdminManagementTests(ControlPanelTestBase):
 
     def test_an_existing_member_is_promoted_rather_than_duplicated(self):
         user = User.objects.create_user(email="existing@example.com", password="pw-secret-123")
+        EmailAddress.objects.create(user=user, email="existing@example.com", verified=True, primary=True)
         member = Member.objects.create(user=user, first_name="Ex", last_name="Isting")
         ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.MEMBER)
 
@@ -364,9 +367,44 @@ class ClubAdminManagementTests(ControlPanelTestBase):
 
     def test_granting_twice_is_idempotent(self):
         self.add_admin(email="ada@example.com", first_name="Ada", last_name="Min")
+        # The invitee confirms their address (first sign-in) before the second grant.
+        EmailAddress.objects.create(user=User.objects.get(email="ada@example.com"), email="ada@example.com", verified=True, primary=True)
         self.add_admin(email="ada@example.com", first_name="Ada", last_name="Min")
 
         self.assertEqual(ClubRole.objects.filter(club=self.club).count(), 1)
+
+    def test_an_existing_account_whose_address_is_unverified_is_refused(self):
+        # The account holds the address, but nobody has proven they receive mail
+        # there -- the grant must not land on it.
+        user = User.objects.create_user(email="coach@club.example", password="pw-secret-123")
+        EmailAddress.objects.create(user=user, email="coach@club.example", verified=False, primary=True)
+        Member.objects.create(user=user, first_name="Co", last_name="Ach")
+
+        response = self.client.post(reverse("controlpanel:club_admin_add", args=[self.club.pk]), {"email": "coach@club.example", "first_name": "Co", "last_name": "Ach"}, follow=True)
+
+        self.assertRedirects(response, reverse("controlpanel:club_detail", args=[self.club.pk]))
+        self.assertFalse(ClubRole.objects.filter(club=self.club).exists())
+        self.assertContains(response, "not been confirmed")
+
+    def test_an_existing_account_without_any_email_record_is_refused(self):
+        user = User.objects.create_user(email="coach@club.example", password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Co", last_name="Ach")
+
+        with self.assertRaises(UnverifiedEmailError):
+            grant_club_admin(self.club, "Coach@Club.example")
+
+        self.assertFalse(ClubRole.objects.filter(club=self.club).exists())
+
+    def test_a_verified_secondary_address_elsewhere_does_not_count(self):
+        # Verification is per address: a verified row for some other address on
+        # the same account proves nothing about the one being granted.
+        user = User.objects.create_user(email="coach@club.example", password="pw-secret-123")
+        EmailAddress.objects.create(user=user, email="someone-else@example.com", verified=True, primary=False)
+        EmailAddress.objects.create(user=user, email="coach@club.example", verified=False, primary=True)
+        Member.objects.create(user=user, first_name="Co", last_name="Ach")
+
+        with self.assertRaises(UnverifiedEmailError):
+            grant_club_admin(self.club, "coach@club.example")
 
     def test_remove_admin(self):
         role = grant_club_admin(self.club, "ada@example.com", "Ada", "Min")
@@ -760,6 +798,27 @@ class PlatformAdminTests(TestCase):
         self.assertTrue(user.is_staff)
         self.assertFalse(user.is_superuser)
         self.assertFalse(user.has_usable_password())  # set via password reset
+
+    def test_grant_access_to_an_existing_verified_account(self):
+        user = User.objects.create_user(email="helper@example.com", password="pw-secret-123")
+        EmailAddress.objects.create(user=user, email="helper@example.com", verified=True, primary=True)
+
+        self.client.post(reverse("controlpanel:admin_add"), {"email": "Helper@Example.com"})
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_staff)
+        self.assertEqual(User.objects.filter(email__iexact="helper@example.com").count(), 1)
+
+    def test_grant_access_to_an_existing_unverified_account_is_refused(self):
+        user = User.objects.create_user(email="helper@example.com", password="pw-secret-123")
+        EmailAddress.objects.create(user=user, email="helper@example.com", verified=False, primary=True)
+
+        response = self.client.post(reverse("controlpanel:admin_add"), {"email": "helper@example.com", "is_superuser": "1"}, follow=True)
+
+        user.refresh_from_db()
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertContains(response, "not been confirmed")
 
     def test_grant_superuser(self):
         self.client.post(reverse("controlpanel:admin_add"), {"email": "boss@example.com", "is_superuser": "1"})
