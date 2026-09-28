@@ -26,6 +26,11 @@ keeps growing -- worth re-measuring (`time manage.py test` vs. `time manage.py t
 Pass ``--parallel=1`` to force serial output -- e.g. reproducing a failure with a clean,
 non-interleaved traceback, or ``--pdb`` (incompatible with real parallelism).
 
+``--shard=I/N`` runs only the I-th of N slices of the suite (1-based), split by test
+class so a class's ``setUpTestData`` still runs once. CI uses it to spread the suite
+over several jobs; every class lands in exactly one slice, decided by a stable hash of
+its dotted name, so the N slices together are the whole suite.
+
 ``--keepdb`` does nothing for local runs: the sqlite test database is in-memory and
 cannot survive the process. It only pays off against a real PostgreSQL
 ``DJANGO_DATABASE_URL``, where it skips the migrate step between runs.
@@ -33,9 +38,11 @@ cannot survive the process. It only pays off against a real PostgreSQL
 
 import logging
 import tempfile
+import unittest
+import zlib
 
 from django.conf import settings
-from django.test.runner import DiscoverRunner, ParallelTestSuite
+from django.test.runner import DiscoverRunner, ParallelTestSuite, iter_test_cases
 from django.test.signals import setting_changed
 
 #: Django's default hasher is PBKDF2 with ~1.2M iterations -- deliberately slow, which is
@@ -149,6 +156,27 @@ class RosterChiefTestRunner(DiscoverRunner):
             if action.dest == "parallel":
                 action.default = "auto"
                 break
+        parser.add_argument("--shard", metavar="I/N", help="Run only slice I of N (1-based), split by test class. Used by CI to spread the suite over jobs.")
+
+    def __init__(self, *args, shard=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shard = None
+        if shard:
+            index, _sep, total = shard.partition("/")
+            index, total = int(index), int(total)
+            if not 1 <= index <= total:
+                raise ValueError(f"--shard must be I/N with 1 <= I <= N, got {shard!r}")
+            self.shard = (index - 1, total)
+
+    def load_tests_for_label(self, label, discover_kwargs):
+        tests = super().load_tests_for_label(label, discover_kwargs)
+        if self.shard is None:
+            return tests
+        index, total = self.shard
+        # Filtered per class, before Django partitions the suite over --parallel workers.
+        # Load failures (_FailedTest) are kept in every slice so a broken module fails
+        # every shard instead of silently vanishing from all but one.
+        return unittest.TestSuite(test for test in iter_test_cases(tests) if isinstance(test, unittest.loader._FailedTest) or zlib.crc32(f"{type(test).__module__}.{type(test).__qualname__}".encode()) % total == index)
 
     def setup_test_environment(self, **kwargs):
         settings.PASSWORD_HASHERS = TEST_PASSWORD_HASHERS
@@ -168,5 +196,11 @@ class RosterChiefTestRunner(DiscoverRunner):
         # burying the actual test output. No test asserts on these records. Silenced on
         # the live logger rather than via LOGGING, which was already applied at startup.
         logging.getLogger("django.request").setLevel(logging.CRITICAL + 1)
+        # Every rendered PDF logs WeasyPrint's seven progress steps and a few dozen lines
+        # of fontTools subsetting at INFO, plus a "Using fontTools instead of HarfBuzz"
+        # WARNING -- tens of thousands of lines per CI run that no test looks at. Errors
+        # still come through.
+        for noisy in ("weasyprint", "fontTools"):
+            logging.getLogger(noisy).setLevel(logging.ERROR)
 
         super().setup_test_environment(**kwargs)

@@ -42,16 +42,23 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    # Every push and every PR -- this is the required status check on both `main` and
-    # `development` (see DEPLOYMENT.md/deploy/configure-branch-protection.sh).
+  test-shard:
+    # The suite, split over four jobs by test class (manage.py test --shard=I/N, see
+    # rosterchief/test_runner.py). A hosted runner only has a couple of cores, so one job
+    # took ~5 minutes; four in parallel each pay the ~30s setup/migrate once and run a
+    # quarter of the tests. Lint runs once, in the first shard.
+    name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Installs `uv` itself and provisions the exact Python this project requires
       # (pyproject.toml's requires-python) -- no separate actions/setup-python step needed.
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
@@ -59,13 +66,27 @@ jobs:
       # guarantee a production build gets from the committed lockfile.
       - run: uv sync --frozen
 
-      - run: uv run ruff check .
+      - if: matrix.shard == 1
+        run: uv run ruff check .
 
-      - run: uv run python manage.py test
+      - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
           # value, never used for anything real, exists only so Django will start.
           DJANGO_SECRET_KEY: ci-test-not-a-secret
+
+  test:
+    # Every push and every PR -- this is the required status check on both `main` and
+    # `development` (see DEPLOYMENT.md/deploy/configure-branch-protection.sh), and what
+    # `build` waits on. It only gathers the shards into one result, so branch protection
+    # and `needs: test` don't have to know how many shards there are. `always()` so a
+    # failed shard turns this red rather than skipped -- a skipped required check counts
+    # as passing.
+    needs: test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test-shard.result }}" = success
 
   audit:
     # Known-vulnerability scan of the production dependencies, on every push and PR. Separate
@@ -74,9 +95,9 @@ jobs:
     # specific advisory (with a reason) in .github/pip-audit-ignore.txt rather than ignoring it.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       # The exact versions in uv.lock, production group only (dev tooling never ships in the
       # image). Git-sourced packages (django-lucide) are not on PyPI, so no advisory database
@@ -114,7 +135,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
@@ -237,7 +258,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # `git rev-parse`/`git tag` below need real history and tags, not the default shallow clone
 
@@ -277,7 +298,7 @@ jobs:
     # of the same name would take precedence if they're ever moved there.
     environment: dev
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # deploy-dev.sh's own preflight checks `origin/<branch>` locally -- a shallow,
           # single-commit checkout still has that ref, so the default depth is fine.
