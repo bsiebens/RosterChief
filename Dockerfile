@@ -9,7 +9,7 @@
 # --- 1. the stylesheet -------------------------------------------------------
 # Tailwind is a build-time concern: the CSS it emits is committed, but building it here means
 # the image never depends on someone having remembered to run `npm run build`.
-FROM node:22.23.3-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS css
+FROM node:26.10.0-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS css
 
 WORKDIR /build
 COPY package.json package-lock.json ./
