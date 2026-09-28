@@ -43,10 +43,10 @@ class AnswerInline(admin.TabularInline):
 
 @admin.register(Submission)
 class SubmissionAdmin(admin.ModelAdmin):
-    list_display = ["send", "member", "submitted_at"]
+    list_display = ["send", "member", "submitted_by", "submitted_at"]
     list_filter = ["send__form"]
     search_fields = ["send__form__title", "member__first_name", "member__last_name"]
-    raw_id_fields = ["send", "member"]
+    raw_id_fields = ["send", "member", "submitted_by"]
     readonly_fields = ["submitted_at"]
     inlines = [AnswerInline]
 

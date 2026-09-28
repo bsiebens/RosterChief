@@ -35,7 +35,7 @@ def form_report(send):
     summaries = {column.id: {} for column in columns if column.field_type in CHOICE_TYPES}
 
     rows = []
-    submissions = send.submissions.select_related("member").prefetch_related("answers")
+    submissions = send.submissions.select_related("member", "submitted_by").prefetch_related("answers")
     for submission in submissions:
         values = {answer.field_id: answer.value for answer in submission.answers.all()}
         rows.append(ReportRow(submission=submission, values=values))

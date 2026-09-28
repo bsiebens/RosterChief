@@ -161,7 +161,12 @@ class FormSend(ClubScopedModel):
 
 class Submission(UUIDModel):
     send = models.ForeignKey(FormSend, on_delete=models.CASCADE, related_name="submissions", verbose_name=_("send"))
+    #: Who the response is *for* -- the audience member it counts against.
     member = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="submissions", verbose_name=_("member"), blank=True, null=True)
+    #: Who actually filled it in -- the member themselves, or a parent/guardian
+    #: answering on a child's behalf (mobile.views.FormFillView). Blank for an
+    #: anonymous public-link response and for rows from before this existed.
+    submitted_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="submissions_made", verbose_name=_("submitted by"), blank=True, null=True)
     submitted_at = models.DateTimeField(_("submitted at"), auto_now_add=True)
 
     class Meta:
@@ -171,6 +176,14 @@ class Submission(UUIDModel):
 
     def __str__(self):
         return f"{self.send.form} - {self.member}"
+
+    @property
+    def submitted_on_behalf_by(self):
+        """The submitter when someone other than ``member`` filled this in
+        (a parent for their child), else ``None``."""
+        if self.submitted_by_id is not None and self.submitted_by_id != self.member_id:
+            return self.submitted_by
+        return None
 
 
 class Answer(UUIDModel):

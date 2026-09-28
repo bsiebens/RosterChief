@@ -41,7 +41,7 @@ from events.services.officials import OfficialAssignmentError, accept_official_s
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, addressed_to, build_form, form_status_rows_for, is_send_open, submit_form
+from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.services.family import claim_label_for
 from members.views import ClubScopedPublicMixin
@@ -1036,7 +1036,7 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     notification's own link (mobile.views._notification_source_link).
 
     Only reachable for a send addressed to the viewer or someone they manage
-    (formbuilder.services.audience.addressed_to -- the same audience check
+    (formbuilder.services.audience.addressed_people -- the same audience check
     submit_form runs, and the same person-scope the Forms list shows rows
     for); anyone else gets a 404, so a send's questions aren't readable by
     any member of the club who guesses its URL. Beyond that, GET always
@@ -1047,7 +1047,15 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     same screen with the service layer's own field-level errors attached,
     the same "translate a service exception into notify() + stay on the
     screen" idiom ShopCheckoutView uses for CheckoutError, except re-render
-    instead of redirect so those field errors are actually visible."""
+    instead of redirect so those field errors are actually visible.
+
+    A parent/guardian fills a form in *for* one addressed person
+    (``for_member``): ``?for=<member id>`` picks who, and must be one of
+    self.managed_people the send is addressed to (anything else 404s).
+    Without it, the viewer's own response is the default when they're
+    addressed themselves, otherwise the first addressed child. The
+    submission is recorded for that person, with the viewer as
+    submitted_by -- so audience and per-member limits are the child's."""
 
     template_name = "mobile/form_fill.html"
     screen_title = _("Form")
@@ -1055,9 +1063,22 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_send(self):
         send = get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
-        if not addressed_to(send, self.managed_people):
+        self.addressed_people = addressed_people(send, self.managed_people)
+        if not self.addressed_people:
             raise Http404("Form not addressed to you.")
+        self.for_member = self._resolve_for_member()
         return send
+
+    def _resolve_for_member(self):
+        requested_id = self.request.GET.get("for")
+        if requested_id:
+            for person in self.addressed_people:
+                if str(person.pk) == requested_id:
+                    return person
+            raise Http404("Form not addressed to that person.")
+        if self.me in self.addressed_people:
+            return self.me
+        return self.addressed_people[0]
 
     def get(self, request, *args, **kwargs):
         send = self.get_send()
@@ -1066,7 +1087,7 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def post(self, request, *args, **kwargs):
         send = self.get_send()
         try:
-            submit_form(send, self.me, request.POST, files=request.FILES)
+            submit_form(send, self.for_member, request.POST, files=request.FILES, submitted_by=self.me)
         except FormSubmissionError as error:
             # Re-run the same validation Django's own full_clean() already did
             # once inside submit_form, rather than manually replaying
@@ -1091,7 +1112,14 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:home"))
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(screen_title=kwargs["send"].form.title, **kwargs)
+        return super().get_context_data(
+            screen_title=kwargs["send"].form.title,
+            for_member=self.for_member,
+            # Named whenever it isn't just the viewer's own, only possible, response.
+            show_for_member=self.for_member != self.me or len(self.addressed_people) > 1,
+            fill_for_others=[person for person in self.addressed_people if person != self.for_member],
+            **kwargs,
+        )
 
 
 class FormResponseView(PersonScopeMixin, LoginRequiredMixin, TemplateView):

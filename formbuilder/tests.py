@@ -384,10 +384,21 @@ class SubmitFormTests(FormbuilderTestBase):
         with self.assertRaises(FormSubmissionError):
             submit_form(self.fresh_send(), None, {"name": "Jane"})
 
-    def test_anonymous_submission_allowed_when_login_not_required(self):
-        submission = submit_form(self.send, None, {"name": "Jane"})
+    def test_anonymous_submission_allowed_on_a_public_send_when_login_not_required(self):
+        self.send.is_public = True
+        self.send.save()
+
+        submission = submit_form(self.fresh_send(), None, {"name": "Jane"})
 
         self.assertIsNone(submission.member)
+
+    def test_anonymous_submission_to_a_non_public_send_is_rejected(self):
+        # Only a send explicitly opted into a public link can be answered
+        # without a member -- otherwise per-member limits and the audience
+        # check would simply not apply.
+        with self.assertRaises(FormSubmissionError):
+            submit_form(self.send, None, {"name": "Jane"})
+        self.assertFalse(Submission.objects.exists())
 
     def test_not_open_yet_is_rejected(self):
         self.send.opens_at = timezone.now() + timedelta(days=1)
@@ -483,9 +494,10 @@ class SubmitFormTests(FormbuilderTestBase):
             submit_form(self.fresh_send(), self.member, {"name": "Jane"})
 
     def test_anonymous_submission_skips_the_audience_check(self):
-        # member=None has no audience to check against -- not raised, even
-        # though nobody was ever added to this send's audience for it.
-        empty_send = FormSend.objects.create(club=self.club, form=self.form)
+        # member=None on a public send has no audience to check against --
+        # not raised, even though nobody was ever added to this send's
+        # audience for it.
+        empty_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
 
         submission = submit_form(empty_send, None, {"name": "Jane"})
 
@@ -893,3 +905,128 @@ class PublicFormFillViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Submission.objects.exists())
         self.assertTrue(response.context["form"].errors)
+
+
+class SubmitOnBehalfTests(FormbuilderTestBase):
+    """submit_form(..., submitted_by=...) -- a parent/guardian answering a
+    send for the member it's about. The submission belongs to that member
+    (audience + per-member limit are theirs); submitted_by records who
+    actually filled it in."""
+
+    def setUp(self):
+        self.parent = Member.objects.create(first_name="Paul", last_name="Doe")
+
+    def test_submission_is_recorded_for_the_member_with_the_submitter(self):
+        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+
+        self.assertEqual(submission.member, self.member)
+        self.assertEqual(submission.submitted_by, self.parent)
+
+    def test_submitter_defaults_to_the_member_themselves(self):
+        submission = submit_form(self.send, self.member, {"name": "Jane"})
+
+        self.assertEqual(submission.submitted_by, self.member)
+
+    def test_the_per_member_limit_counts_the_member_not_the_submitter(self):
+        self.send.max_submissions_per_user = 1
+        self.send.save()
+        other_child = Member.objects.create(first_name="Kid", last_name="Doe")
+        self.send.invited_members.add(other_child)
+        send = self.fresh_send()
+
+        submit_form(send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+        # A second child of the same parent still has their own allowance.
+        submit_form(send, other_child, {"name": "Kid"}, submitted_by=self.parent)
+        with self.assertRaises(FormSubmissionError):
+            submit_form(send, self.member, {"name": "Jane again"}, submitted_by=self.parent)
+
+        self.assertEqual(Submission.objects.filter(member=self.member).count(), 1)
+
+    def test_the_audience_check_applies_to_the_member_not_the_submitter(self):
+        # The parent isn't in the audience; the member being answered for is.
+        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+        self.assertIsNotNone(submission)
+
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+        self.send.invited_members.add(self.parent)
+        with self.assertRaises(FormSubmissionError):
+            submit_form(self.fresh_send(), outsider, {"name": "Out"}, submitted_by=self.parent)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class PublicFormAbuseTests(TestCase):
+    """formbuilder:fill -- the public link stays anonymous-fillable, but is
+    capped per client IP per send and carries a honeypot field."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.form = Form.objects.create(club=cls.club, title="Volunteer interest", login_required=False)
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, is_public=True)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _url(self, send=None):
+        return reverse("formbuilder:fill", args=[(send or self.send).public_token])
+
+    def test_submissions_beyond_the_per_ip_limit_get_429_and_save_nothing(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+            self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(Submission.objects.filter(send=self.send).count(), PUBLIC_FORM_IP_RATE.limit)
+        self.assertContains(response, "Too many responses", status_code=429)
+
+    def test_the_limit_is_per_ip(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.8")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_limit_is_per_send(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        other_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(other_send), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_invalid_posts_do_not_use_up_the_allowance(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": ""}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Submission.objects.filter(send=self.send).exists())
+
+    def test_honeypot_submission_looks_successful_but_saves_nothing(self):
+        response = self.client.post(self._url(), {"name": "Jane", "contact.website": "http://spam.example"}, HTTP_HOST=self.HOST)
+
+        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_the_page_renders_the_honeypot_hidden(self):
+        response = self.client.get(self._url(), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, 'name="contact.website"')
+        self.assertContains(response, 'class="hidden" aria-hidden="true"')

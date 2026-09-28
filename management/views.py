@@ -6446,13 +6446,16 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
         writer = csv.writer(response)
         # safe_row: labels and answers are free text typed by users (anonymous
         # respondents included) -- never let a spreadsheet run one as a formula.
-        writer.writerow(safe_row([_("Submitted"), _("Member"), *[column.label for column in report.columns]]))
+        # "Submitted by" is only filled in when someone else (a parent) answered for the member.
+        writer.writerow(safe_row([_("Submitted"), _("Member"), _("Submitted by"), *[column.label for column in report.columns]]))
         for row in report.rows:
+            on_behalf_by = row.submission.submitted_on_behalf_by
             writer.writerow(
                 safe_row(
                     [
                         timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
                         str(row.submission.member) if row.submission.member else "",
+                        str(on_behalf_by) if on_behalf_by else "",
                         *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
                     ]
                 )

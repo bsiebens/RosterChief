@@ -964,7 +964,8 @@ Field(UUIDModel)                      # a form's field definition (club implied 
 
 Submission(UUIDModel)                 # container only — no answer data on it
   form         FK Form (CASCADE, related_name="submissions")
-  member       FK Member (SET_NULL, null)   # set when submitter is logged in
+  member       FK Member (SET_NULL, null)   # who the response is FOR (audience + per-member limit); null = anonymous public-link response
+  submitted_by FK Member (SET_NULL, null)   # who filled it in: the member, or a parent/guardian answering for a child
   submitted_at DateTimeField
   Meta: ordering = ["-submitted_at"]
 

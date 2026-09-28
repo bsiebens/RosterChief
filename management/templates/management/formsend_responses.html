@@ -76,7 +76,12 @@
                 {% for row in rows %}
                     <tr>
                         <td class="font-mono text-xs">{{ row.submission.submitted_at|date:"d M Y H:i" }}</td>
-                        <td>{{ row.submission.member|default:"—" }}</td>
+                        <td>
+                            {{ row.submission.member|default:"—" }}
+                            {% if row.submission.submitted_on_behalf_by %}
+                                <div class="text-xs text-dim">{% blocktrans with name=row.submission.submitted_on_behalf_by %}Filled in by {{ name }}{% endblocktrans %}</div>
+                            {% endif %}
+                        </td>
                         {% for cell in row.cells %}
                             <td class="text-sm">{{ cell|default:"—" }}</td>
                         {% endfor %}

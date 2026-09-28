@@ -32,7 +32,7 @@
                         <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
                     </a>
                 {% else %}
-                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}">
+                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}?for={{ row.member.pk }}">
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">
                                 {{ row.send.form.title }}
