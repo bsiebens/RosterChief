@@ -194,9 +194,15 @@ jobs:
       # just for this one check.
       - name: Smoke test the built image
         run: |
+          # Same lockdown as compose.yaml's web service (read-only root, tmpfs /tmp, no
+          # capabilities), so this proves the hardened container starts. No database service
+          # here: SQLite in /tmp -- the app code in /app is read-only to the app user.
           docker run -d --name smoke -p 8000:8000 \
+            --read-only --tmpfs /tmp:size=256m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
             -e DJANGO_SECRET_KEY=ci-smoke-not-a-secret \
             -e DJANGO_ALLOWED_HOSTS='*' \
+            -e DJANGO_DATABASE_URL=sqlite:////tmp/smoke.sqlite3 \
             rosterchief:smoke-test
           for attempt in $(seq 1 20); do
             if curl -fsS http://localhost:8000/healthz; then
