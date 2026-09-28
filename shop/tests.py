@@ -1779,19 +1779,19 @@ class ShopRenderPdfUrlFetcherTests(TestCase):
         import sys
         from unittest import mock as _mock
 
-        from rosterchief.pdf import safe_url_fetcher
         from shop.services.invoices import render_pdf as _render_pdf
 
         weasyprint = _mock.MagicMock()
         weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
-        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("shop.services.invoices.pdf_url_fetcher", return_value=fetcher):
             self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
 
-        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
 
 
 class SafeUrlFetcherTests(TestCase):
-    """rosterchief.pdf.safe_url_fetcher -- the WeasyPrint url_fetcher every PDF uses."""
+    """rosterchief.pdf -- the data:-only URL rule and the WeasyPrint fetcher every PDF uses."""
 
     def test_non_data_urls_are_refused(self):
         from rosterchief.pdf import safe_url_fetcher
@@ -1800,41 +1800,59 @@ class SafeUrlFetcherTests(TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 safe_url_fetcher(url)
 
-    def test_data_urls_are_resolved(self):
+    def test_data_urls_pass_the_rule(self):
+        from rosterchief.pdf import safe_url_fetcher
+
+        self.assertIsNone(safe_url_fetcher("data:text/plain;base64,aGVsbG8="))
+
+    def _native_or_skip(self):
         try:
             import weasyprint  # noqa: F401
         except ImportError, OSError:
             self.skipTest("WeasyPrint's native libraries are not available")
 
-        from rosterchief.pdf import safe_url_fetcher
+    def test_the_fetcher_resolves_data_urls(self):
+        self._native_or_skip()
+        from rosterchief.pdf import pdf_url_fetcher
 
-        response = safe_url_fetcher("data:text/plain;base64,aGVsbG8=")
+        response = pdf_url_fetcher().fetch("data:text/plain;base64,aGVsbG8=")
         try:
             self.assertEqual(response.read(), b"hello")
         finally:
             response.close()
 
+    def test_the_fetcher_refuses_file_and_http(self):
+        self._native_or_skip()
+        from rosterchief.pdf import pdf_url_fetcher
+
+        fetcher = pdf_url_fetcher()
+        for url in ["file:///etc/hosts", "http://169.254.169.254/", "https://example.com/x.png"]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                fetcher.fetch(url)
+
     def test_a_refused_resource_is_skipped_not_fatal(self):
-        # A real render: a file: image is dropped with a warning, the PDF still comes out.
-        try:
-            from weasyprint import HTML
-        except ImportError, OSError:
-            self.skipTest("WeasyPrint's native libraries are not available")
+        # A real render: the file: image is dropped with a warning, the PDF still comes out.
+        self._native_or_skip()
+        from weasyprint import HTML
 
-        from rosterchief.pdf import safe_url_fetcher
+        from rosterchief.pdf import pdf_url_fetcher
 
-        # A plain function, not a Mock: WeasyPrint reads an optional `_fail_on_errors`
-        # attribute off the fetcher, which a Mock would answer with a truthy value.
-        fetched = []
+        fetcher = pdf_url_fetcher()
+        refused = []
+        original_fetch = fetcher.fetch
 
-        def spy(url, *args, **kwargs):
-            fetched.append(url)
-            return safe_url_fetcher(url, *args, **kwargs)
+        def spy(url, headers=None):
+            try:
+                return original_fetch(url, headers)
+            except ValueError:
+                refused.append(url)
+                raise
 
-        pdf = HTML(string='<p>hi</p><img src="file:///etc/hosts"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">', url_fetcher=spy).write_pdf()
+        fetcher.fetch = spy
+        pdf = HTML(string='<p>hi</p><img src="file:///etc/hosts"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">', url_fetcher=fetcher).write_pdf()
 
         self.assertTrue(pdf.startswith(b"%PDF"))
-        self.assertIn("file:///etc/hosts", fetched)
+        self.assertEqual(refused, ["file:///etc/hosts"])
 
 
 class _PlaceOrderTestBase(TestCase):

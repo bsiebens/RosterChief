@@ -1649,14 +1649,14 @@ class RegistrationRenderPdfUrlFetcherTests(TestCase):
         from unittest import mock as _mock
 
         from registration.services.invoicing import render_pdf as _render_pdf
-        from rosterchief.pdf import safe_url_fetcher
 
         weasyprint = _mock.MagicMock()
         weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
-        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("registration.services.invoicing.pdf_url_fetcher", return_value=fetcher):
             self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
 
-        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
 
 
 class RegistrationInvoiceNumberingTests(TestCase):

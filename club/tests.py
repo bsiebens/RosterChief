@@ -3162,11 +3162,63 @@ class DuesRenderPdfUrlFetcherTests(TestCase):
         from unittest import mock as _mock
 
         from club.services.invoicing import render_pdf as _render_pdf
-        from rosterchief.pdf import safe_url_fetcher
 
         weasyprint = _mock.MagicMock()
         weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
-        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}):
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("club.services.invoicing.pdf_url_fetcher", return_value=fetcher):
             self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
 
-        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", ".rosterchief.app", "testserver"])
+class FeatureFlagLoginOrderTests(TestCase):
+    """An anonymous visitor to a feature-gated management section is sent to
+    login whether or not the feature is on for the club -- a 404 for "off"
+    next to a login redirect for "on" would tell anyone which features a
+    club has."""
+
+    GATED_URL_NAMES = ["management:form_list", "management:product_list", "management:official_list", "management:evaluation_checklist_list"]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _get(self, name):
+        return self.client.get(reverse(name), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_anonymous_is_sent_to_login_when_the_feature_is_off(self):
+        for name in self.GATED_URL_NAMES:
+            with self.subTest(name=name):
+                response = self._get(name)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(reverse("account_login"), response["Location"])
+
+    def test_anonymous_gets_the_same_redirect_when_the_feature_is_on(self):
+        from waffle import get_waffle_flag_model
+
+        for flag_name in ["formbuilder", "shop", "officials", "evaluations"]:
+            get_waffle_flag_model().objects.get_or_create(name=flag_name)[0].clubs.add(self.club)
+
+        for name in self.GATED_URL_NAMES:
+            with self.subTest(name=name):
+                response = self._get(name)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(reverse("account_login"), response["Location"])
+
+    def test_a_signed_in_member_still_gets_404_for_a_disabled_feature(self):
+        user = get_user_model().objects.create_user(email="player@example.com", password="pw-secret-123")
+        member = Member.objects.create(first_name="Pat", last_name="Player", user=user)
+        ClubRole.objects.create(club=self.club, member=member)
+        self.client.force_login(user)
+
+        self.assertEqual(self._get("management:form_list").status_code, 404)

@@ -23,18 +23,32 @@ ALLOWED_URL_SCHEMES = frozenset({"data"})
 
 
 def safe_url_fetcher(url, *args, **kwargs):
-    """WeasyPrint ``url_fetcher`` that only resolves ``data:`` URLs.
+    """Raise ``ValueError`` unless ``url`` is a ``data:`` URL.
 
-    Raises ``ValueError`` for every other scheme (``file``, ``http``, ``https``,
-    relative URLs, ...); WeasyPrint turns that into a skipped resource rather than a
-    failed render.
+    The scheme rule on its own, without WeasyPrint -- pdf_url_fetcher() below applies
+    it to every resource a render asks for.
     """
     scheme = urlsplit(url).scheme.lower()
     if scheme not in ALLOWED_URL_SCHEMES:
         raise ValueError(f"Refusing to fetch non-data URL in PDF rendering: {scheme or 'relative'}:")
 
+
+def pdf_url_fetcher():
+    """A WeasyPrint ``URLFetcher`` that only resolves ``data:`` URLs.
+
+    WeasyPrint (70+) expects a URLFetcher instance: it reads its ``_fail_on_errors``
+    flag and wants its own response type back. Refused URLs raise ``ValueError``,
+    which WeasyPrint turns into a warning and a skipped resource (fail_on_errors is
+    off), never a failed render. ``allowed_protocols`` is WeasyPrint's own second
+    check; redirects are off. Built on each call (cheap) rather than cached, and
+    WeasyPrint is imported lazily, so importing this module never needs the native
+    libraries.
+    """
     from weasyprint import URLFetcher
 
-    # allowed_protocols is a second check inside WeasyPrint itself; redirects can't
-    # apply to data: URLs, but are switched off so no future scheme change can follow one.
-    return URLFetcher(allowed_protocols=ALLOWED_URL_SCHEMES, allow_redirects=False).fetch(url)
+    class DataOnlyURLFetcher(URLFetcher):
+        def fetch(self, url, headers=None):
+            safe_url_fetcher(url)
+            return super().fetch(url, headers)
+
+    return DataOnlyURLFetcher(allowed_protocols=ALLOWED_URL_SCHEMES, allow_redirects=False, fail_on_errors=False)

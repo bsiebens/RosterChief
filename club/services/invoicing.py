@@ -20,7 +20,7 @@ from club.models import ClubMembership, DuesInvoice
 from club.services.fees import remaining_balance
 from events.models import Location
 from rosterchief.mail import send_message
-from rosterchief.pdf import safe_url_fetcher
+from rosterchief.pdf import pdf_url_fetcher
 from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
 
 
@@ -162,7 +162,7 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise DuesInvoicePDFError(_("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).")) from error
 
-    return HTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
+    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()
 
 
 def resolve_document_address(club):
