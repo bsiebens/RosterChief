@@ -73,6 +73,11 @@ class FeatureFlagMixin:
     forms -- needs more than one.
 
     Subclasses set ``feature_flag`` to the Flag's name, e.g. ``"shop"``.
+
+    An anonymous visitor is sent to login before the flag is consulted, the
+    same as for an enabled feature -- otherwise the 404-vs-login difference
+    would tell anyone which features a club has switched on. Once signed in,
+    a disabled feature 404s for everyone, whatever their role.
     """
 
     feature_flag: str = ""
@@ -80,6 +85,8 @@ class FeatureFlagMixin:
     def dispatch(self, request, *args, **kwargs):
         club = getattr(request, "club", None)
         if club is not None and not flag_is_active(request, self.feature_flag):
+            if not request.user.is_authenticated:
+                return self.handle_no_permission()
             raise Http404(f"The “{self.feature_flag}” feature isn't enabled for this club.")
         return super().dispatch(request, *args, **kwargs)
 

@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import json
 from decimal import Decimal
 from unittest import mock
@@ -9,7 +10,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
@@ -251,6 +252,7 @@ class DesktopTemplateSelectionTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.season = Season.objects.create(club=cls.club, start_date=timezone.localdate() - datetime.timedelta(days=30), end_date=timezone.localdate() + datetime.timedelta(days=300))
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
@@ -3777,10 +3779,10 @@ class CalendarFeedViewTests(TestCase):
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
         ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season)
-        cls.token = CalendarFeedToken.objects.create(user=cls.user)
+        cls.raw_token = CalendarFeedToken.issue(cls.user)
 
     def _get(self, token=None, host="ajax-united.rosterchief.app"):
-        return self.client.get(f"/app/calendar/{token or self.token.token}.ics", HTTP_HOST=host)
+        return self.client.get(f"/app/calendar/{token or self.raw_token}.ics", HTTP_HOST=host)
 
     def test_no_login_required(self):
         event = Event.objects.create(club=self.club, title="Practice", start=timezone.now() + datetime.timedelta(days=1))
@@ -3935,25 +3937,42 @@ class CalendarFeedSettingsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_creates_a_token_on_first_visit_and_shows_its_url(self):
+    def test_a_first_visit_offers_to_create_a_link_without_creating_one(self):
         self.client.force_login(self.user)
 
         response = self._get()
 
-        token = CalendarFeedToken.objects.get(user=self.user)
-        self.assertContains(response, f"{token.token}.ics")
-        self.assertContains(response, "webcal://")
+        self.assertFalse(CalendarFeedToken.objects.filter(user=self.user).exists())
+        self.assertContains(response, "Create my calendar link")
+        self.assertNotContains(response, "webcal://")
 
-    def test_reset_issues_a_new_token_invalidating_the_old_one(self):
+    def test_creating_a_link_shows_its_url_once(self):
         self.client.force_login(self.user)
-        old_token = CalendarFeedToken.objects.create(user=self.user)
-        old_value = old_token.token
 
         response = self.client.post(reverse("mobile:calendar_feed_settings"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertRedirects(response, reverse("mobile:calendar_feed_settings"), fetch_redirect_response=False)
-        old_token.refresh_from_db()
-        self.assertNotEqual(old_token.token, old_value)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "webcal://")
+        self.assertIn("no-store", response["Cache-Control"])
+        feed_url = response.context["feed_url"]
+        raw_token = feed_url.rsplit("/", 1)[-1].removesuffix(".ics")
+        self.assertEqual(CalendarFeedToken.find(raw_token).user, self.user)
+
+        # A later visit no longer has the raw token to show.
+        response = self._get()
+        self.assertNotContains(response, raw_token)
+        self.assertNotContains(response, "webcal://")
+        self.assertContains(response, "Get a new calendar link")
+
+    def test_reset_issues_a_new_token_invalidating_the_old_one(self):
+        self.client.force_login(self.user)
+        old_raw = CalendarFeedToken.issue(self.user)
+
+        response = self.client.post(reverse("mobile:calendar_feed_settings"), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(CalendarFeedToken.find(old_raw))
+        self.assertEqual(CalendarFeedToken.objects.filter(user=self.user).count(), 1)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -6914,6 +6933,7 @@ class ShopTabVisibilityTests(TestCase):
 
     def _login(self, **club_kwargs):
         club = make_club(**club_kwargs)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(club)
         user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=user)
         ClubRole.objects.create(club=club, member=member)
@@ -6966,6 +6986,7 @@ class ShopHomeViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7065,6 +7086,7 @@ class ShopProductDetailViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7252,6 +7274,7 @@ class ShopCartViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7305,6 +7328,7 @@ class ShopCartItemUpdateViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7372,6 +7396,7 @@ class ShopCheckoutViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7433,6 +7458,7 @@ class ShopOrdersViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7497,6 +7523,7 @@ class ShopOrderDetailViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -7553,6 +7580,7 @@ class ShopInvoiceViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.club = make_club(shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         # The member app needs a tie to the club (mobile.access.has_club_tie).
@@ -8307,6 +8335,7 @@ class MemberAppClubTieTests(TestCase):
         today = timezone.localdate()
         cls.club_a = make_club()
         cls.club_b = make_club(name="Other Club", slug="other-club", shop_open=True)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club_b)
         cls.season_a = Season.objects.create(club=cls.club_a, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
         cls.season_b = Season.objects.create(club=cls.club_b, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
 
@@ -8741,3 +8770,154 @@ class FormFillOnBehalfTests(TestCase):
         response = self.client.get(reverse("mobile:home"), HTTP_HOST=self.HOST)
 
         self.assertContains(response, self._url(send, self.child))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopFeatureFlagTests(TestCase):
+    """The member shop is a licensed feature: without the club's "shop" waffle
+    flag it doesn't exist (404, no tab), whatever Club.shop_open says --
+    shop_open stays the club's own open/closed switch on top of that. Either
+    way an anonymous visitor is sent to login first and learns nothing."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club(shop_open=True)
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _get(self, name):
+        return self.client.get(reverse(name), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _license(self):
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(self.club)
+
+    def test_open_shop_404s_without_the_feature_flag(self):
+        self.client.force_login(self.user)
+
+        for name in ["mobile:shop_home", "mobile:shop_cart", "mobile:shop_orders"]:
+            with self.subTest(name=name):
+                self.assertEqual(self._get(name).status_code, 404)
+
+    def test_shop_tab_hidden_without_the_feature_flag(self):
+        self.client.force_login(self.user)
+
+        response = self._get("mobile:home")
+
+        self.assertNotContains(response, reverse("mobile:shop_home"))
+
+    def test_open_shop_is_reachable_with_the_feature_flag(self):
+        self._license()
+        self.client.force_login(self.user)
+
+        self.assertEqual(self._get("mobile:shop_home").status_code, 200)
+        self.assertContains(self._get("mobile:home"), reverse("mobile:shop_home"))
+
+    def test_closed_shop_with_the_flag_still_redirects_home(self):
+        self._license()
+        self.club.shop_open = False
+        self.club.save(update_fields=["shop_open"])
+        self.client.force_login(self.user)
+
+        self.assertRedirects(self._get("mobile:shop_home"), reverse("mobile:home"))
+
+    def test_anonymous_is_sent_to_login_whatever_the_shop_state(self):
+        for licensed, shop_open in [(False, True), (True, True), (True, False)]:
+            with self.subTest(licensed=licensed, shop_open=shop_open):
+                if licensed:
+                    self._license()
+                self.club.shop_open = shop_open
+                self.club.save(update_fields=["shop_open"])
+
+                response = self._get("mobile:shop_home")
+
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(reverse("account_login"), response["Location"])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
+class CalendarFeedTokenHashingTests(TestCase):
+    """Only a SHA-256 of a feed token is stored; the raw token lives only in the
+    URL handed to the user."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def _feed(self, raw_token, host="ajax-united.rosterchief.app"):
+        return self.client.get(reverse("mobile:calendar_feed", kwargs={"token": raw_token}), HTTP_HOST=host)
+
+    def test_the_database_holds_no_raw_token(self):
+        raw_token = CalendarFeedToken.issue(self.user)
+
+        feed_token = CalendarFeedToken.objects.get(user=self.user)
+        self.assertEqual(feed_token.token_hash, hashlib.sha256(raw_token.encode()).hexdigest())
+        stored = {field.attname: getattr(feed_token, field.attname) for field in CalendarFeedToken._meta.concrete_fields}
+        self.assertNotIn(raw_token, [str(value) for value in stored.values()])
+
+    def test_the_feed_is_served_for_the_raw_token_only(self):
+        raw_token = CalendarFeedToken.issue(self.user)
+        token_hash = CalendarFeedToken.objects.get(user=self.user).token_hash
+
+        self.assertEqual(self._feed(raw_token).status_code, 200)
+        # The stored hash is not itself a working token.
+        self.assertEqual(self._feed(token_hash).status_code, 404)
+
+    def test_regenerating_invalidates_the_old_link(self):
+        old_raw = CalendarFeedToken.issue(self.user)
+        new_raw = CalendarFeedToken.issue(self.user)
+
+        self.assertEqual(self._feed(old_raw).status_code, 404)
+        self.assertEqual(self._feed(new_raw).status_code, 200)
+
+    def test_the_feed_stays_club_scoped_to_the_host(self):
+        raw_token = CalendarFeedToken.issue(self.user)
+
+        self.assertEqual(self._feed(raw_token, host="rosterchief.app").status_code, 404)
+
+
+class CalendarFeedTokenMigrationTests(TransactionTestCase):
+    """mobile 0003-0005 replace the stored raw token with its hash in place, so
+    a feed URL someone subscribed to before the change keeps working."""
+
+    def setUp(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connection)
+        leaf_authentication = [key for key in executor.loader.graph.leaf_nodes() if key[0] == "authentication"]
+        self.addCleanup(self._migrate_to_latest)
+        executor.migrate([("mobile", "0002_calendarfeedtoken"), *leaf_authentication])
+        old_apps = executor.loader.project_state([("mobile", "0002_calendarfeedtoken"), *leaf_authentication]).apps
+
+        OldUser = old_apps.get_model("authentication", "User")
+        OldToken = old_apps.get_model("mobile", "CalendarFeedToken")
+        user = OldUser.objects.create(email="legacy@example.com", password="!")
+        OldToken.objects.create(user_id=user.pk, token="legacy-raw-token-value")
+        self.user_pk = user.pk
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("mobile", "0005_calendarfeedtoken_drop_raw_token")])
+
+    def _migrate_to_latest(self):
+        from django.core.management import call_command
+
+        call_command("migrate", verbosity=0)
+
+    def test_an_existing_token_is_hashed_and_still_resolves(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        new_apps = MigrationExecutor(connection).loader.project_state([("mobile", "0005_calendarfeedtoken_drop_raw_token")]).apps
+        NewToken = new_apps.get_model("mobile", "CalendarFeedToken")
+        row = NewToken.objects.get(user_id=self.user_pk)
+
+        self.assertEqual(row.token_hash, hashlib.sha256(b"legacy-raw-token-value").hexdigest())
+        self.assertNotIn("token", [field.name for field in NewToken._meta.fields])

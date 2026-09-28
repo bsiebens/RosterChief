@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 
 from django.conf import settings
@@ -45,10 +46,21 @@ class PushSubscription(ClubScopedModel):
         return {"endpoint": self.endpoint, "keys": {"p256dh": self.p256dh, "auth": self.auth}}
 
 
+def hash_feed_token(raw_token: str) -> str:
+    """The SHA-256 hex digest a feed token is stored and looked up by."""
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
 class CalendarFeedToken(UUIDModel):
     """The secret key one account's combined iCal subscription feed
     (mobile.views.CalendarFeedView) is served under -- one per account, every
     managed person's events combined into it (see that view's own docstring).
+
+    Only a SHA-256 hash of the token is stored: the feed URL is a bearer
+    credential, so a copy of the database must not be enough to read anyone's
+    calendar. The raw token exists only in the URL handed to the user once,
+    right after ``issue()`` creates or replaces it; the feed view hashes the
+    token it is given and looks that up.
 
     Not club-scoped, unlike PushSubscription: ``User`` is the one global
     model in this platform (CLAUDE.md), and the same token works under
@@ -59,7 +71,7 @@ class CalendarFeedToken(UUIDModel):
     """
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_feed_token", verbose_name=_("user"))
-    token = models.CharField(_("token"), max_length=64, unique=True, editable=False, default=_generate_feed_token)
+    token_hash = models.CharField(_("token hash"), max_length=64, unique=True, editable=False)
 
     class Meta:
         verbose_name = _("calendar feed token")
@@ -68,8 +80,16 @@ class CalendarFeedToken(UUIDModel):
     def __str__(self):
         return f"Calendar feed — {self.user}"
 
-    def regenerate(self) -> None:
-        """Invalidates the old URL immediately -- e.g. a shared/leaked link
-        someone wants to revoke (mobile.views.CalendarFeedSettingsView)."""
-        self.token = _generate_feed_token()
-        self.save(update_fields=["token", "modified"])
+    @classmethod
+    def issue(cls, user) -> str:
+        """Create or replace ``user``'s token and return the raw value -- the
+        only time it is available. Replacing one invalidates the old URL
+        immediately (e.g. a shared or leaked link someone wants to revoke)."""
+        raw_token = _generate_feed_token()
+        cls.objects.update_or_create(user=user, defaults={"token_hash": hash_feed_token(raw_token)})
+        return raw_token
+
+    @classmethod
+    def find(cls, raw_token: str):
+        """The token row ``raw_token`` belongs to, or ``None``."""
+        return cls.objects.select_related("user").filter(token_hash=hash_feed_token(raw_token)).first()

@@ -1,5 +1,6 @@
 """Validate and persist a submission against a FormSend's fields and rules."""
 
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -42,8 +43,34 @@ def submit_form(send, member, data, *, files=None, when=None, submitted_by=None)
     cleaned = _clean_answers(send.form, data, files)
 
     submission = Submission.objects.create(send=send, member=member, submitted_by=submitted_by or member)
-    Answer.objects.bulk_create([Answer(submission=submission, field=field, value=value) for field, value in cleaned])
+    answers = []
+    try:
+        for field, value in cleaned:
+            answer = Answer(submission=submission, field=field)
+            if field.field_type == field.FieldType.FILE:
+                if not isinstance(value, UploadedFile):
+                    # ClearableFileInput's "clear" box yields False, never a file.
+                    continue
+                _attach_file(answer, value)
+            else:
+                answer.value = value
+            answers.append(answer)
+        Answer.objects.bulk_create(answers)
+    except Exception:
+        # The rows roll back with the transaction; files already written don't.
+        for answer in answers:
+            if answer.file:
+                answer.file.delete(save=False)
+        raise
     return submission
+
+
+def _attach_file(answer, upload):
+    """Write ``upload`` to private storage (Answer.file's upload_to decides the
+    path) and keep only its metadata in ``value`` -- a JSONField can't hold
+    the file itself."""
+    answer.value = {"name": upload.name, "size": upload.size, "content_type": upload.content_type or ""}
+    answer.file.save(upload.name, upload, save=False)
 
 
 def _check_open(send, member, when):

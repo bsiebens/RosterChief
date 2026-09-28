@@ -7,14 +7,18 @@ on every request, so a flag resolves with a plain ``flag_is_active(request, "sho
 — no call site has to know about clubs.
 
 Everything waffle already offers (``everyone`` / ``percent`` / ``staff`` /
-``superusers`` / per-user / per-group) keeps working untouched.
+``superusers`` / per-user / per-group) keeps working, with one exception: on a
+club subdomain a per-user or per-group grant is ignored. ``User`` (and Django's
+auth ``Group``) are global, so such a grant carries no club -- honouring it there
+would switch the feature on in every club that user belongs to, including ones
+that don't have it. Target clubs through ``clubs`` instead.
 """
 
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from waffle.models import CACHE_EMPTY, AbstractUserFlag
+from waffle.models import CACHE_EMPTY, AbstractBaseFlag, AbstractUserFlag
 from waffle.utils import get_cache, keyfmt
 
 from rosterchief.base import UUIDModel
@@ -74,6 +78,17 @@ class Flag(AbstractUserFlag):
                 return True
 
         return super().is_active(request, read_only=read_only)
+
+    def _is_active_for_user(self, request):
+        if getattr(request, "club", None) is None:
+            return super()._is_active_for_user(request)
+        user = getattr(request, "user", None)
+        if not user:
+            return False
+        # On a club host: only the platform-wide user dimensions (authenticated /
+        # staff / superusers), never the per-user or per-group M2Ms -- see the
+        # module docstring.
+        return AbstractBaseFlag.is_active_for_user(self, user)
 
     def is_active_for_club(self, club) -> bool:
         """Explicit check for code that holds a club but no request."""

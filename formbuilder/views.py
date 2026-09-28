@@ -1,14 +1,19 @@
+from django.contrib.auth.views import redirect_to_login
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.cache import patch_vary_headers
 from django.utils.translation import gettext_lazy as _
 from django.views import View
+from waffle import flag_is_active
 
+from club.services.access import can_manage_forms
 from controlpanel.messages import notify
 from members.models import Member
 from members.views import ClubScopedPublicMixin
 from rosterchief import throttle
 from rosterchief.client_ip import client_ip
 
-from .models import FormSend
+from .models import Answer, FormSend
 from .services.form_factory import build_form
 from .services.submission import FormSubmissionError, submit_form
 
@@ -86,3 +91,43 @@ class PublicFormFillView(ClubScopedPublicMixin, View):
     def submitted(self, request, send):
         notify(request, f"s|{_('Submitted')}|{_('Thanks -- your response has been recorded.')}")
         return redirect("formbuilder:fill", token=send.public_token)
+
+
+def can_download_answer_file(request, answer) -> bool:
+    """Whoever may see this response: the club's form managers -- the same
+    gate as the management Responses page (club.mixins.FormManagerRequiredMixin:
+    the "formbuilder" feature on for this club, plus can_manage_forms) -- or
+    the signed-in person who filled it in, or the member it was filled in for."""
+    user = request.user
+    submission = answer.submission
+    if flag_is_active(request, "formbuilder") and can_manage_forms(user, request.club):
+        return True
+    own_members = {member for member in (submission.submitted_by, submission.member) if member is not None}
+    return any(member.user_id == user.pk for member in own_members)
+
+
+class AnswerFileView(View):
+    """Streams a FILE answer's upload from private storage. Club-scoped (the
+    answer must belong to a send of this host's club), and only for
+    can_download_answer_file; anyone else gets a 404 that doesn't confirm the
+    answer exists. Always an attachment, never rendered inline."""
+
+    def get(self, request, pk):
+        if getattr(request, "club", None) is None:
+            raise Http404("No club on this request.")
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.get_full_path())
+        answer = get_object_or_404(Answer.objects.select_related("submission__member", "submission__submitted_by").filter(submission__send__club=request.club), pk=pk)
+        if not answer.file or not can_download_answer_file(request, answer):
+            raise Http404("No such file.")
+        try:
+            handle = answer.file.open("rb")
+        except FileNotFoundError as error:
+            raise Http404("No such file.") from error
+
+        response = FileResponse(handle, as_attachment=True, filename=answer.file_name, content_type="application/octet-stream")
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        patch_vary_headers(response, ["Cookie"])
+        return response

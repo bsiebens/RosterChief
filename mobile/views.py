@@ -18,6 +18,7 @@ from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.cache import add_never_cache_headers
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from django.views import View
@@ -73,7 +74,7 @@ from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
-from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin
+from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import ICON_SIZES, get_fallback_icon
@@ -186,7 +187,9 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
     token covers every club the account belongs to."""
 
     def get(self, request, token):
-        feed_token = get_object_or_404(CalendarFeedToken.objects.select_related("user"), token=token)
+        feed_token = CalendarFeedToken.find(token)
+        if feed_token is None:
+            raise Http404("No such calendar feed.")
         me = Member.objects.filter(user=feed_token.user).first()
         people = []
         if me is not None:
@@ -208,26 +211,35 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
 
 class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M5's "Calendar sync" row -- the webcal://.../https:// subscription
-    links for this account's combined feed, plus a reset action that
-    immediately invalidates the old URL (e.g. a link shared/leaked by
-    accident)."""
+    links for this account's combined feed.
+
+    Only a hash of the feed token is stored (see CalendarFeedToken), so the
+    full URL can be shown exactly once: in the response to the POST that
+    creates or replaces it. A plain visit only says whether a link exists;
+    getting it again means replacing it, which immediately invalidates the
+    old URL (also how a shared/leaked link is revoked)."""
 
     template_name = "mobile/calendar_feed_settings.html"
     screen_title = _("Calendar sync")
     active_tab = "me"
 
     def get_context_data(self, **kwargs):
-        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=self.request.user)
-        feed_url = self.request.build_absolute_uri(reverse("mobile:calendar_feed", kwargs={"token": feed_token.token}))
-        return super().get_context_data(feed_url=feed_url, webcal_url=feed_url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1), **kwargs)
+        kwargs.setdefault("has_feed", CalendarFeedToken.objects.filter(user=self.request.user).exists())
+        return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
-        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=request.user)
-        feed_token.regenerate()
-        title = _("Calendar link reset")
-        body = _("Your old calendar link no longer works. Re-subscribe using the new one below.")
-        notify(request, f"s|{title}|{body}")
-        return HttpResponseRedirect(reverse("mobile:calendar_feed_settings"))
+        replaced = CalendarFeedToken.objects.filter(user=request.user).exists()
+        raw_token = CalendarFeedToken.issue(request.user)
+        if replaced:
+            title = _("Calendar link reset")
+            body = _("Your old calendar link no longer works. Re-subscribe using the new one below.")
+            notify(request, f"s|{title}|{body}")
+        feed_url = request.build_absolute_uri(reverse("mobile:calendar_feed", kwargs={"token": raw_token}))
+        webcal_url = feed_url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1)
+        response = self.render_to_response(self.get_context_data(has_feed=True, feed_url=feed_url, webcal_url=webcal_url))
+        # The one response that carries the raw token: keep it out of every cache.
+        add_never_cache_headers(response)
+        return response
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1735,7 +1747,7 @@ class BugListView(DesktopTemplateMixin, MemberAppMixin, TemplateView):
             unread_notification_count=unread_notification_count,
             season=get_current_season(self.request),
             vapid_public_key=settings.VAPID_PUBLIC_KEY,
-            shop_open=self.request.club.shop_open,
+            shop_open=shop_enabled(self.request),
             **kwargs,
         )
 

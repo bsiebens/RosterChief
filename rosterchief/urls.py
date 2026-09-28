@@ -5,6 +5,9 @@ redirected to the allauth login, so Django staff go through the same MFA
 challenge as everyone else — Django's own admin login form knows nothing about
 second factors. ``RequireMFAMiddleware`` then blocks any staff user who has not
 enrolled.
+
+Both admin routes answer on the base domain only (``rosterchief.admin_host``): on
+a club subdomain they 404 like any path that doesn't exist there.
 """
 
 import re
@@ -18,14 +21,15 @@ from announcements.views import PendingAnnouncementView
 from api.urls import api
 from club.views import root, signup_closed
 
+from .admin_host import base_domain_only, base_domain_only_urls
 from .health import healthz
 from .media import serve_media
 
 urlpatterns = [
     # No auth and no tenant: the proxy and the load balancer must reach it on any host.
     path("healthz", healthz, name="healthz"),
-    path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
-    path("admin/", admin.site.urls),
+    path("admin/login/", base_domain_only(RedirectView.as_view(pattern_name="account_login", query_string=True)), name="admin_login_redirect"),
+    path("admin/", base_domain_only_urls(admin.site.urls)),
     # Before allauth's own urls so it wins the match: self-registration is closed.
     # Accounts are created by an admin or by the family-registration form -- a
     # club has no reason to let a stranger create one.

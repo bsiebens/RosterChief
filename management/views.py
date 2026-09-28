@@ -108,7 +108,7 @@ from formbuilder.models import FormSend
 from formbuilder.services.audience import effective_members as form_effective_members
 from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
-from formbuilder.services.reporting import form_report
+from formbuilder.services.reporting import display_value, form_report
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services.deletion import member_has_ties_outside_club, remove_member_from_club
 from members.services.family import add_child_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, get_or_create_login_user, grant_login
@@ -6421,7 +6421,8 @@ class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
         # each row carries its cells in the same column order.
         report = form_report(send)
         columns = [{"field": column, "summary": sorted(report.summaries[column.id].items()) if column.id in report.summaries else None} for column in report.columns]
-        rows = [{"submission": row.submission, "cells": [row.values.get(column.id) for column in report.columns]} for row in report.rows]
+        # A FILE answer's cell carries its Answer too, for the download link.
+        rows = [{"submission": row.submission, "cells": [{"value": row.values.get(column.id), "file_answer": row.files.get(column.id)} for column in report.columns]} for row in report.rows]
         return super().get_context_data(
             audience_count=audience_count,
             submission_count=submission_count,
@@ -6468,11 +6469,8 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
 
 
 def _format_answer_value(value):
-    if value is None:
-        return ""
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    return str(value)
+    # A file answer exports its original file name, never its storage path.
+    return display_value(value)
 
 
 class EvaluationChecklistMixin:

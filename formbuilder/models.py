@@ -1,19 +1,41 @@
 import secrets
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import UniqueConstraint
+from django.utils.text import get_valid_filename
 from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
 from members.models import Group, Member
 from rosterchief.base import ClubScopedModel, UUIDModel, unique_slugify, validate_club_scope
+from rosterchief.storage import get_private_storage
 from teams.models import Team
 
 
 def _generate_public_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+#: Longest original file name kept in a stored path (the extension survives).
+_MAX_STORED_NAME = 100
+
+
+def answer_file_path(answer, filename):
+    """``formbuilder/<send id>/<submission id>/<random>-<safe file name>`` in
+    private storage. The random prefix keeps two uploads with the same name
+    apart and makes the path unguessable; the original name is kept (made safe
+    for a filesystem) only so a downloaded file is recognisable."""
+    try:
+        safe_name = get_valid_filename(filename)
+    except SuspiciousFileOperation:  # a name like "." or "" has nothing usable left
+        safe_name = "file"
+    if len(safe_name) > _MAX_STORED_NAME:
+        stem, dot, extension = safe_name.rpartition(".")
+        safe_name = f"{stem[: _MAX_STORED_NAME - len(extension) - 1]}.{extension}" if dot and len(extension) < 10 else safe_name[:_MAX_STORED_NAME]
+    submission = answer.submission
+    return f"formbuilder/{submission.send_id}/{submission.pk}/{secrets.token_hex(8)}-{safe_name}"
 
 
 class Form(ClubScopedModel):
@@ -193,6 +215,11 @@ class Answer(UUIDModel):
     #: a Decimal (forms.DecimalField, see formbuilder.services.form_factory),
     #: which the stdlib json.JSONEncoder can't serialize at all.
     value = models.JSONField(_("value"), blank=True, null=True, encoder=DjangoJSONEncoder)
+    #: A FILE field's upload, in private storage -- read only through
+    #: formbuilder.views.AnswerFileView. ``value`` then holds the upload's
+    #: metadata ({"name", "size", "content_type"}), so reporting and the CSV
+    #: export show the original file name, never the storage path.
+    file = models.FileField(_("file"), storage=get_private_storage, upload_to=answer_file_path, max_length=255, blank=True)
 
     class Meta:
         verbose_name = _("answer")
@@ -208,3 +235,10 @@ class Answer(UUIDModel):
     def clean(self):
         if self.field_id and self.submission_id and self.field.form_id != self.submission.send.form_id:
             raise ValidationError({"field": _("Must belong to the same form as the submission's send.")})
+
+    @property
+    def file_name(self) -> str:
+        """The name the submitter's file had, for display and downloads."""
+        if isinstance(self.value, dict) and self.value.get("name"):
+            return str(self.value["name"])
+        return self.file.name.rsplit("/", 1)[-1] if self.file else ""

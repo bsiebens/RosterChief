@@ -9,6 +9,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
+from waffle import get_waffle_flag_model
 
 from authentication.models import User
 from club.models import Club, ClubMembership, Season
@@ -2169,6 +2170,7 @@ class ShopCartRepricingAndThrottleViewTests(TestCase):
         from rosterchief.test_support import make_club
 
         cls.club = make_club(shop_open=True, secondary_color="#e4002b")
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(cls.club)
         cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
         cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
         ClubRole.objects.create(club=cls.club, member=cls.member)

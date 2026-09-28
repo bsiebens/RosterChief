@@ -375,6 +375,8 @@ class Command(MaintenanceAwareCommand):
         # walk through the mobile checkout flow live, not just see a closed sign.
         club.shop_open = True
         club.save(update_fields=["shop_open"])
+        # The member shop also needs the feature licensed for the club.
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(club)
 
         product = Product.objects.create(club=club, name="Club Hoodie", product_type=Product.ProductType.MERCHANDISE, price=Decimal("45.00"), season=season, is_active=True, is_public=True)
         order = Order.objects.create(club=club, purchaser=purchaser, total=Decimal("45.00"))

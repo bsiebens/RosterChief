@@ -1030,3 +1030,175 @@ class PublicFormAbuseTests(TestCase):
 
         self.assertContains(response, 'name="contact.website"')
         self.assertContains(response, 'class="hidden" aria-hidden="true"')
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
+class FileAnswerTests(TestCase):
+    """FILE fields: the upload is stored in private storage (never under
+    MEDIA_ROOT), the Answer records its metadata, and only the form's managers
+    and the submitter can download it."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        from waffle import get_waffle_flag_model
+
+        from club.models import ClubRole
+        from rosterchief.test_support import enrol_mfa
+
+        User = get_user_model()
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        get_waffle_flag_model().objects.get_or_create(name="formbuilder")[0].clubs.add(cls.club)
+
+        cls.form = Form.objects.create(club=cls.club, title="Medical", login_required=False)
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.doc = Field.objects.create(form=cls.form, key="doc", label="Certificate", field_type=Field.FieldType.FILE, required=True, order=2)
+        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, club_wide=True, is_public=True)
+
+        cls.user = User.objects.create_user(email="player@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="player@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        cls.admin_user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+        cls.admin_member = Member.objects.create(first_name="Ada", last_name="Admin", user=cls.admin_user)
+        ClubMembership.objects.create(club=cls.club, member=cls.admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.admin_member).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.admin_user)
+
+        cls.outsider_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        outsider = Member.objects.create(first_name="Olga", last_name="Other", email="other@example.com", user=cls.outsider_user)
+        ClubMembership.objects.create(club=cls.club, member=outsider, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _upload(self, name="cert.pdf", content=b"%PDF-1.4 medical"):
+        return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+    def _file_answer(self):
+        return Answer.objects.get(field=self.doc)
+
+    def _download(self, answer, host=HOST):
+        return self.client.get(reverse("formbuilder:answer_file", args=[answer.pk]), HTTP_HOST=host)
+
+    def test_member_app_submission_with_a_file_is_stored_privately(self):
+        from django.conf import settings
+
+        from rosterchief.storage import private_storage
+
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        answer = self._file_answer()
+        self.assertEqual(answer.value["name"], "cert.pdf")
+        self.assertEqual(answer.value["size"], len(b"%PDF-1.4 medical"))
+        self.assertEqual(answer.value["content_type"], "application/pdf")
+        self.assertTrue(answer.file.name.startswith(f"formbuilder/{self.send.pk}/{answer.submission_id}/"))
+        self.assertTrue(answer.file.name.endswith("-cert.pdf"))
+        self.assertIs(answer.file.storage, private_storage)
+        self.assertTrue(private_storage.exists(answer.file.name))
+        self.assertTrue(answer.file.path.startswith(str(settings.PRIVATE_MEDIA_ROOT)))
+
+    def test_public_form_submission_with_a_file_is_recorded(self):
+        response = self.client.post(reverse("formbuilder:fill", args=[self.send.public_token]), {"name": "Anon", "doc": self._upload("scan.png", b"\x89PNG fake")}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        answer = self._file_answer()
+        self.assertIsNone(answer.submission.member)
+        self.assertEqual(answer.value["name"], "scan.png")
+        with answer.file.open("rb") as stored:
+            self.assertEqual(stored.read(), b"\x89PNG fake")
+
+    def test_a_hostile_file_name_is_made_safe(self):
+        self.client.force_login(self.user)
+
+        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload('my "cert" <x>.pdf')}, HTTP_HOST=self.HOST)
+
+        stored_name = self._file_answer().file.name.rsplit("/", 1)[-1]
+        self.assertNotIn('"', stored_name)
+        self.assertNotIn("<", stored_name)
+        self.assertNotIn(" ", stored_name)
+
+    def _submit_as_member(self):
+        self.client.force_login(self.user)
+        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
+        self.client.logout()
+        return self._file_answer()
+
+    def test_the_forms_manager_can_download_it(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        response = self._download(answer)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 medical")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn("cert.pdf", response["Content-Disposition"])
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_the_submitter_can_download_it(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.user)
+
+        self.assertEqual(self._download(answer).status_code, 200)
+
+    def test_another_club_member_gets_404(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.outsider_user)
+
+        self.assertEqual(self._download(answer).status_code, 404)
+
+    def test_the_manager_gets_404_on_another_clubs_host(self):
+        Club.objects.create(name="Rival FC", slug="rival-fc")
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self._download(answer, host="rival-fc.rosterchief.app").status_code, 404)
+
+    def test_the_manager_gets_404_with_the_forms_feature_off(self):
+        from waffle import get_waffle_flag_model
+
+        answer = self._submit_as_member()
+        get_waffle_flag_model().objects.get(name="formbuilder").clubs.remove(self.club)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self._download(answer).status_code, 404)
+
+    def test_anonymous_is_sent_to_login(self):
+        answer = self._submit_as_member()
+
+        response = self._download(answer)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("account_login"), response["Location"])
+
+    def test_responses_page_links_the_download_and_csv_exports_the_name(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        page = self.client.get(reverse("management:formsend_responses", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
+        export = self.client.get(reverse("management:formsend_responses_export", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
+
+        self.assertContains(page, reverse("formbuilder:answer_file", args=[answer.pk]))
+        self.assertContains(page, "cert.pdf")
+        csv_text = export.content.decode()
+        self.assertIn("cert.pdf", csv_text)
+        self.assertNotIn(answer.file.name, csv_text)
+        self.assertNotIn("content_type", csv_text)
+
+    def test_deleting_the_submission_removes_the_stored_file(self):
+        from rosterchief.storage import private_storage
+
+        answer = self._submit_as_member()
+        stored_name = answer.file.name
+
+        answer.submission.delete()
+
+        self.assertFalse(private_storage.exists(stored_name))

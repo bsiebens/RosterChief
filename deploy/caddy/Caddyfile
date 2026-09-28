@@ -29,6 +29,14 @@
 		max_size 64MB
 	}
 
+	# Django's admin belongs to the base domain only. The app already 404s it on a club
+	# subdomain (rosterchief/admin_host.py); this answers the same way at the edge.
+	@admin_on_club_host {
+		path /admin /admin/*
+		not host {$ROSTERCHIEF_BASE_DOMAIN}
+	}
+	respond @admin_on_club_host 404
+
 	# Club logos, served straight off the shared volume — no gunicorn worker involved. Only
 	# matters while storage is local disk; once AWS_STORAGE_BUCKET_NAME is set, club.logo.url
 	# points at the bucket directly and this block simply never matches. A missing file 404s
