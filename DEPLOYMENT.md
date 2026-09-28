@@ -614,6 +614,11 @@ No server-side steps: 0.7.10 changes only CI and tests (Node 24 action versions,
 sharded over four jobs, a Postgres-only test fix). Deploy it the usual way. If 0.7.9's steps
 above aren't done yet on a server, do those first.
 
+### Upgrade notes: 0.7.11
+
+No server-side steps. 0.7.11 adds the `import_member_photos` command for attaching member
+photos in bulk; see "Bulk-importing member photos" below. Deploy it the usual way.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
