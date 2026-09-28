@@ -7,25 +7,25 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "defusedxml>=0.7.1",
     "dj-database-url>=3.1.2",
-    "django>=6.0.6",
+    "django>=6.1.1",
     "django-allauth[mfa]>=65.18.0",
-    "django-countries>=9.0.0",
+    "django-countries>=9.1.0",
     "django-lucide",
     "django-ninja>=1.6.2",
     "django-phonenumber-field[phonenumbers]>=8.4.0",
     "django-redis>=7.0.0",
     "django-storages[s3]>=1.14.6",
     "django-waffle>=5.0.0",
-    "gunicorn>=26.0.0",
+    "gunicorn>=26.2.0",
     "icalendar>=6.1.0",
     "markdown>=3.10.3",
-    "nh3>=0.3.6",
+    "nh3>=0.3.7",
     "openpyxl>=3.1.5",
     "pillow>=12.3.0",
     "psycopg[binary]>=3.3.4",
     "python-dateutil>=2.9.0.post0",
     "python-decouple>=3.8",
-    "pywebpush>=2.0.3",
+    "pywebpush>=2.5.0",
     "qrcode>=8.2",
     "requests>=2.34.2",
     "weasyprint>=69.0",
@@ -34,9 +34,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "coverage>=7.15.0",
+    "coverage>=7.16.1",
     "django-browser-reload>=1.21.0",
-    "ruff>=0.15.17",
+    "ruff>=0.16.9",
 ]
 
 [tool.ruff]
