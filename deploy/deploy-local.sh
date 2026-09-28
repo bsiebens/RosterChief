@@ -95,6 +95,12 @@ say "Running migrations"
 # -T and </dev/null: no TTY and no stdin -- identical by hand and over deploy-prod.sh's SSH.
 dc run --rm -T web python manage.py migrate --noinput </dev/null
 
+say "Running deployment checks"
+# The new image against this server's real .env.production: blocks on errors (e.g. a
+# placeholder DJANGO_SECRET_KEY, rosterchief.E001) so the old web keeps serving, but only
+# reports warnings -- CI already runs the same checks at --fail-level WARNING.
+dc run --rm -T web python manage.py check --deploy --fail-level ERROR </dev/null
+
 say "Restarting web"
 dc up -d --no-deps --remove-orphans web
 
