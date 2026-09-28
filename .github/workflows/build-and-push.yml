@@ -141,7 +141,7 @@ jobs:
       # deploy-prod.sh should actually be pointed at for a real release, not a floating
       # branch tag (`enable=` skips this line entirely off main, where steps.version never ran).
       - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
