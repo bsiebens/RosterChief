@@ -9,7 +9,9 @@
 # Encrypted dumps (db-*.sql.gz.age, see deploy/backup.sh) need the age private key:
 # BACKUP_AGE_IDENTITY=/path/to/key.txt. That key is meant to live offline, so either run this
 # where the key is (with a copy of the dump and a scratch Postgres), or plug the key in for the
-# rehearsal and remove it afterwards -- see DEPLOYMENT.md's "Backups", step 6.
+# rehearsal and remove it afterwards -- see DEPLOYMENT.md's "Backups", step 6. The offsite copies
+# live in the backup server's root-only archive (/var/lib/rosterchief-backups/archive); fetch one
+# with your admin login there into a directory and point this script at that directory.
 set -Eeuo pipefail
 
 DEST="${1:-/var/backups/rosterchief}"

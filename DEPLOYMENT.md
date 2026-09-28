@@ -492,6 +492,122 @@ docker compose exec web python manage.py migrate authentication 0005   # on the 
 deploy/deploy-prod.sh --version v0.7.7                                  # from your machine
 ```
 
+### Upgrade notes: 0.7.9
+
+One-off steps for the release after 0.7.8. If 0.7.8's steps above aren't done yet on a server,
+do those first. Delete this list once 0.7.9 is live everywhere.
+
+**Before pushing to `development`** (the test server's auto-deploy — its CI job fails until
+these are done):
+
+- **Pin the test server's SSH host key** for CI (the deploy job no longer trusts it on first
+  use). From a machine you trust, with the exact host name stored in the `DEV_SSH_HOST` secret:
+
+  ```bash
+  ssh-keyscan -t ed25519 <DEV_SSH_HOST> > dev_known_hosts
+  ssh-keygen -lf dev_known_hosts                # fingerprint as seen over the network
+  ```
+
+  On the test server itself (console or an already-trusted session), check it matches:
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. Then store it:
+  `gh secret set DEV_SSH_KNOWN_HOSTS --repo bsiebens/RosterChief < dev_known_hosts`.
+  (Non-standard SSH port: `ssh-keyscan -p <port> …`.) The job now runs in a GitHub
+  Environment called `dev`; you can add protection rules to it under Settings → Environments.
+- **Strong `DJANGO_SECRET_KEY` on both servers.** `migrate`/`check` now refuse (system check
+  `rosterchief.E001`) a key shorter than 50 characters, one with few distinct characters, or one
+  containing placeholder words (`change`, `example`, `insecure`, …). If yours fails, generate a
+  new one (`python3 -c "import secrets; print(secrets.token_urlsafe(64))"`) — changing it signs
+  everyone out once.
+
+**Before deploying to production:**
+
+- **Shop licence flag.** The member shop now also needs the club's `shop` feature flag (the
+  management side already did). Check on the control panel's Features page that every club with
+  its shop open has `shop` switched on — otherwise its members' shop disappears.
+- **Caddy is rebuilt from pinned versions** (`deploy/caddy/Dockerfile` now pins Caddy 2.11.4 and
+  the Cloudflare plugin v0.2.4 by digest). The deploy recreates `caddy` when the Caddyfile
+  changes but doesn't rebuild the image, so after the deploy run once:
+  `docker compose build caddy && docker compose up -d --force-recreate caddy`.
+
+**What changes at runtime** (no action, but know it):
+
+- **Containers are locked down:** `web` runs with a read-only filesystem (only the two media
+  volumes and an in-memory `/tmp` are writable), no Linux capabilities and no privilege
+  escalation; `caddy` keeps only the right to bind ports 80/443; `db` and `redis` keep only what
+  their start-up needs. Anything a command writes outside the volumes or `/tmp` now fails with
+  "Read-only file system" — intended. In a debug shell, write scratch files to `/tmp` (256 MB,
+  gone when the container stops).
+- **Base images are pinned by digest** (Python, Node, uv, Caddy, Postgres 17.11, Redis 7.4.11).
+  Minor updates no longer arrive by themselves on `docker compose pull`; Dependabot opens PRs for
+  them weekly (also for GitHub Actions, Python and npm packages).
+- **`/admin/` only answers on `rosterchief.app`**, never on a club's subdomain (404 there, in
+  both Caddy and Django).
+- **Calendar sync links:** existing subscriptions keep working, but the link is no longer shown
+  again — members who lost theirs use "Get a new calendar link" (which stops the old one).
+- **Form file uploads work** (they failed before) and are stored privately under
+  `private_media/formbuilder/`, so they're in the nightly `private-media-…` backup.
+- **Deploys stop on configuration errors:** after migrating, `deploy-local.sh` runs
+  `check --deploy --fail-level ERROR` before restarting `web`.
+- **Dependency audit in CI:** a new `audit` job checks Python and npm packages for known
+  vulnerabilities on every push; accepted advisories go in `.github/pip-audit-ignore.txt`.
+
+
+**After deploying** (on the production server, from the checkout; do 1 on the test server too,
+with `docker compose -f compose.behind-proxy.yaml`):
+
+1. **Member photos are private now.** Migration `members.0012_move_member_photos_to_private_storage`
+   has moved every member's current photo from public storage into private storage (the
+   `private_media` volume) and deleted the public copy — on S3 setups that means from the
+   bucket onto the volume. Photos a member replaced earlier aren't referenced by any row, so the
+   migration can't know them; delete those leftovers — list first, then delete:
+
+   ```bash
+   docker compose exec web python manage.py purge_public_member_photos --dry-run
+   docker compose exec web python manage.py purge_public_member_photos
+   ```
+
+   It only touches `members/` in public storage. A photo the migration couldn't find in either
+   place is logged (`Member photo … not found in either storage`) and its row left as is — check
+   the migrate output in the deploy log. From now on photos are in the nightly
+   `private-media-…` backup, so that archive grows by their size. With S3 versioning on, the
+   bucket keeps noncurrent versions of the deleted photos until its lifecycle rule expires
+   them; they aren't reachable through the public URLs.
+
+2. **Shop discounts: nothing to run.** Migration `shop.0031_backfill_applied_discount_amount`
+   fills in the euro amount each applied discount took off its order. Existing order totals are
+   deliberately left as they are, even where the new rule (a percentage stays a percentage when
+   lines change) would give a slightly different figure; when staff re-save a line of such an
+   order, its discounts and total are recomputed and agree again.
+
+3. **Backups become append-only** (`deploy/backup.sh` and the backup server, see "Backups" for
+   the why and every command). Do this *after* the deploy, in one sitting: once the key line
+   carries the `-P` list, the old `backup.sh` (renames, remote pruning) can't upload any more,
+   and the new one expects the `incoming` folder.
+
+   a. **Backup server** (your admin login): create `incoming`, make `.ssh` and
+      `authorized_keys` root-owned, create the archive directory and install the archive job —
+      "Backups", step 2. Replace the upload key's line in `authorized_keys` with the one with
+      `-P …` from step 3.4. If you added your own computer's key to the account for restores
+      (the old step 6), remove it: restores now use your admin login.
+
+   b. Move the backups already there into the archive, once (they keep their dates, so pruning
+      carries on where it was):
+
+      ```bash
+      sudo sh -c 'mv ~rosterchief-backup/rosterchief/*.age /var/lib/rosterchief-backups/archive/ && chown root:root /var/lib/rosterchief-backups/archive/*'
+      ```
+
+   c. `sudo crontab -e` on the backup server: the archive line from step 5.
+
+   d. **Production server**, as root: `rclone config update offsite set_modtime false`, and in
+      root's crontab change `BACKUP_REMOTE=offsite:rosterchief` to
+      `BACKUP_REMOTE=offsite:rosterchief/incoming` and drop any `REMOTE_KEEP_DAYS=…` (retention
+      is `ARCHIVE_KEEP_DAYS` on the backup server now).
+
+   e. Test as in step 4 (the `sftp` check from step 3.5 too: `rmdir` must be refused). The first
+      run has no `.offsite-sent` yet, so it uploads every `.age` file still on the server — the
+      archive job drops the ones it already has (identical re-uploads) and archives the rest.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
@@ -1104,8 +1220,8 @@ root's cron on the production server — and before every deploy, as the deploy 
 | What | File |
 |---|---|
 | The database | `db-<date>.sql.gz.age` |
-| Public uploads (logos, photos) — only while they're on local disk | `media-<date>.tar.gz.age` |
-| Private uploads (onboarding documents, medical certificates) | `private-media-<date>.tar.gz.age` |
+| Public uploads (logos, images) — only while they're on local disk | `media-<date>.tar.gz.age` |
+| Private uploads (member photos, onboarding documents, medical certificates) | `private-media-<date>.tar.gz.age` |
 
 Each file is **encrypted** on the server with [age](https://age-encryption.org) before it is
 stored or copied anywhere. The server only has the *public* key: it can encrypt, but nobody who
@@ -1117,19 +1233,42 @@ decrypts them, lives only with you.
 a **second server over SSH**, where they are kept for 60 days. A backup on the same disk as
 the database survives a bad migration, not a dead server.
 
+**The offsite copy is append-only from production's side.** Whoever breaks into the production
+server gets its upload key too, and a key that can delete backups lets them wipe those as well
+before they encrypt or delete the live data. So:
+
+1. Production uploads into one folder on the backup server, `~rosterchief-backup/rosterchief/incoming`
+   (`BACKUP_REMOTE=offsite:rosterchief/incoming`), with a key whose `sftp-server` refuses to
+   remove, rename or change any file — it can only create files and write to them.
+2. Every 15 minutes a root job on the backup server (`deploy/backup-server/archive-incoming.sh`)
+   copies each finished upload into `/var/lib/rosterchief-backups/archive` — root-only; the
+   upload account can't even list it — and deletes it from `incoming`. Pruning after 60 days
+   happens there too, not from production.
+3. Restores fetch from that archive with your own admin login on the backup server, never with
+   the upload key.
+
+The one thing a stolen upload key can still do is overwrite a file in `incoming` in the few
+minutes before it is archived (open-for-writing can't be denied without denying uploads), or
+fill the disk. The archive itself is out of its reach.
+
 Setting it up is a one-time job across three machines — your computer, the production server
 and the backup server. Do the steps in order.
 
 ### Installing the tools
 
 `age` (encryption) and `rclone` (the upload) are needed on the **production server**; `age` also
-on **your own computer**. The backup server only needs a working SSH server.
+on **your own computer**. The backup server needs a working SSH server, `cron` and `flock`
+(util-linux, on every Linux).
 
 **Debian / Ubuntu** (Debian 12+, Ubuntu 22.04+):
 
 ```bash
 sudo apt install age rclone
 ```
+
+(Debian 12's `rclone` is 1.60, which has no `--inplace` flag and doesn't need one — it already
+writes uploads straight to their final name. `backup.sh` checks the version and adds the flag
+from 1.63 on.)
 
 **Amazon Linux 2023** (and Amazon Linux 2) — neither is packaged, so install the official
 release binaries. Use `arm64` instead of `amd64` on Graviton (`t4g`, `m7g`, …) instances; check
@@ -1150,7 +1289,8 @@ sudo dnf install -y "https://downloads.rclone.org/rclone-current-linux-${ARCH}.r
 age --version && rclone version | head -1      # both should print a version
 ```
 
-Amazon Linux 2023 also ships **without cron**. Install and start it before step 5:
+Amazon Linux 2023 also ships **without cron** — on the production server *and* on a backup
+server that runs Amazon Linux. Install and start it before step 5:
 
 ```bash
 sudo dnf install -y cronie
@@ -1182,19 +1322,57 @@ Binaries in `/usr/local/bin` (the Amazon Linux install above) are **not** on cro
    Lose it and the backups can never be opened. Anyone who has it can read them. Store the
    production `MFA_ENCRYPTION_KEY` next to it — you need both to rebuild the server.
 
-### Step 2 — On the backup server: an account that only receives files
+### Step 2 — On the backup server: an upload account and a root-only archive
 
-The backup server can be any machine you can reach over SSH (a small VPS, a NAS, a box at
-home). Log into it and create a dedicated account:
+The backup server can be any Linux machine you can reach over SSH (a small VPS, a NAS, a box at
+home) where **you have your own login with `sudo`** — that login, not the upload account, is
+how you'll get backups back out. Log into it.
 
-```bash
-sudo useradd --create-home rosterchief-backup     # no password: key login only
-sudo -u rosterchief-backup mkdir -p ~rosterchief-backup/.ssh ~rosterchief-backup/rosterchief
-sudo chmod 700 ~rosterchief-backup/.ssh
-```
+1. **The upload account.** It receives files into `incoming` and nothing else:
 
-(`useradd` exists on every distro, Amazon Linux included; the account gets no password, so it
-can only be reached with the SSH key added below.)
+   ```bash
+   sudo useradd --create-home rosterchief-backup     # no password: key login only
+   sudo -u rosterchief-backup mkdir -p ~rosterchief-backup/rosterchief/incoming
+   # .ssh belongs to root: the account can write files, and must not be able to rewrite its
+   # own authorized_keys (which would drop the restrictions from step 3.4)
+   sudo mkdir -p ~rosterchief-backup/.ssh
+   sudo touch ~rosterchief-backup/.ssh/authorized_keys
+   sudo chown root:root ~rosterchief-backup/.ssh ~rosterchief-backup/.ssh/authorized_keys
+   sudo chmod 755 ~rosterchief-backup/.ssh
+   sudo chmod 644 ~rosterchief-backup/.ssh/authorized_keys
+   ```
+
+   (`useradd` exists on every distro, Amazon Linux included; the account gets no password, so
+   it can only be reached with the SSH key added in step 3. sshd accepts an `authorized_keys`
+   owned by root as well as by the account.)
+
+2. **The archive**, owned by root and closed to everyone else:
+
+   ```bash
+   sudo install -d -m 700 -o root -g root /var/lib/rosterchief-backups /var/lib/rosterchief-backups/archive
+   ```
+
+3. **The archive job.** The backup server doesn't need a checkout of the repo; copy the one
+   script over from yours, then install it root-only:
+
+   ```bash
+   # on your own computer, from the checkout
+   scp deploy/backup-server/archive-incoming.sh <you>@<backup-host>:
+   # on the backup server
+   sudo install -m 700 -o root -g root ~/archive-incoming.sh /usr/local/sbin/rosterchief-archive-incoming
+   rm ~/archive-incoming.sh
+   sudo MIN_AGE_MINUTES=0 /usr/local/sbin/rosterchief-archive-incoming && echo ok   # nothing to do yet: prints "ok"
+   ```
+
+   What it does, per run: every `*.age` file in `incoming` that hasn't been written to for 10
+   minutes and starts with age's header (`age-encryption.org/v1`) is copied into the archive as
+   a new root-owned file, compared with the original, and only then deleted from `incoming`. A
+   file with the same name already in the archive is never overwritten — an identical re-upload
+   is dropped, a different one is kept beside it as `<name>.dup-<time>.age` with a warning.
+   Anything named `*.age` that isn't an age file goes to `/var/lib/rosterchief-backups/rejected`
+   with a warning. Archived (and rejected) files older than `ARCHIVE_KEEP_DAYS` (60) are
+   deleted. All settings are environment variables, documented at the top of the script. The
+   cron line comes in step 5.
 
 Leave this session open; you'll paste a key into it in step 3.
 
@@ -1228,9 +1406,24 @@ run these with `sudo -i` first.
    cat /root/.ssh/rosterchief_backup.pub
    ```
 
-4. **Allow that key on the backup server — for file transfer only.** In the step-2 session
+4. **Allow that key on the backup server — for uploading files only.** In the step-2 session
    on the backup server, put the printed line into `~rosterchief-backup/.ssh/authorized_keys`,
-   prefixed so the key can't open a shell:
+   prefixed so the key can't open a shell (`restrict`), can only talk SFTP
+   (`command="…sftp-server"`), and can't remove, rename or change files (`-P`, the list of SFTP
+   requests `sftp-server` refuses):
+
+   | Denied | So the key can't… |
+   |---|---|
+   | `remove`, `rmdir` | delete files or folders |
+   | `rename`, `posix-rename` | rename a backup away, or rename over one |
+   | `setstat`, `fsetstat`, `lsetstat` | truncate a file, change its permissions or its timestamps (which would make the archive job take a half-written file, or pruning delete a fresh one) |
+   | `symlink`, `hardlink` | plant links that point elsewhere |
+   | `copy-data` | copy one file over another server-side |
+
+   Everything else — `open`, `write`, `read`, `stat`, `mkdir`, listing — still works, which is
+   all an upload needs. Those names are what `sftp-server -Q requests` prints; `-P` has been in
+   OpenSSH since 6.5 (Amazon Linux 2023 ships 8.7, Debian 12 ships 9.2). A name your version
+   doesn't know (`copy-data` is new in 9.0) is simply never matched — harmless.
 
    The `sftp-server` path differs per distro, and a wrong path shows up later as an `sftp`
    login that connects and then immediately says **`Connection closed`**. Check which one
@@ -1243,33 +1436,31 @@ run these with `sudo -i` first.
    Then add the key with that path — **Amazon Linux / RHEL / Fedora**:
 
    ```bash
-   echo 'restrict,command="/usr/libexec/openssh/sftp-server" ssh-ed25519 AAAA…the key… rosterchief backups' \
+   echo 'restrict,command="/usr/libexec/openssh/sftp-server -P remove,rmdir,rename,posix-rename,setstat,fsetstat,lsetstat,symlink,hardlink,copy-data" ssh-ed25519 AAAA…the key… rosterchief backups' \
      | sudo tee -a ~rosterchief-backup/.ssh/authorized_keys
    ```
 
    or **Debian / Ubuntu**:
 
    ```bash
-   echo 'restrict,command="/usr/lib/openssh/sftp-server" ssh-ed25519 AAAA…the key… rosterchief backups' \
+   echo 'restrict,command="/usr/lib/openssh/sftp-server -P remove,rmdir,rename,posix-rename,setstat,fsetstat,lsetstat,symlink,hardlink,copy-data" ssh-ed25519 AAAA…the key… rosterchief backups' \
      | sudo tee -a ~rosterchief-backup/.ssh/authorized_keys
    ```
 
-   and in both cases fix ownership and permissions (SSH ignores the file otherwise):
+   The file stays root-owned, mode 644, as set up in step 2 (SSH ignores it if the account or
+   anyone else can write to it). No other key belongs in this file.
 
-   ```bash
-   sudo chown -R rosterchief-backup: ~rosterchief-backup/.ssh
-   sudo chmod 700 ~rosterchief-backup/.ssh
-   sudo chmod 600 ~rosterchief-backup/.ssh/authorized_keys
-   ```
-
-5. **Trust the backup server's host key** (back on the production server, as root). Compare the
-   fingerprint it shows with the one the backup server reports
+5. **Trust the backup server's host key, and check the key's limits** (back on the production
+   server, as root). Compare the fingerprint it shows with the one the backup server reports
    (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there) before answering `yes`:
 
    ```bash
    sftp -i /root/.ssh/rosterchief_backup rosterchief-backup@<backup-host>
-   # answer "yes" if the fingerprint matches; at the sftp> prompt, `ls` should show
-   # "rosterchief", then `bye`. (Plain ssh gets no shell with this key -- that's intended.)
+   # answer "yes" if the fingerprint matches. At the sftp> prompt:
+   #   ls rosterchief          -> shows "incoming"
+   #   rmdir rosterchief/incoming   -> must say "Permission denied"  (the -P list works)
+   #   bye
+   # (Plain ssh gets no shell with this key -- that's intended.)
    ```
 
    Run it **as root** (`sudo -i` first): the key under `/root/.ssh` isn't readable by
@@ -1278,11 +1469,15 @@ run these with `sudo -i` first.
 
    - `Identity file … not accessible: Permission denied` → you're not root.
    - `Permission denied (publickey…)` → the key line in `authorized_keys` doesn't match
-     `/root/.ssh/rosterchief_backup.pub`, or the ownership/permissions above are off.
+     `/root/.ssh/rosterchief_backup.pub`, or the ownership/permissions from step 2 are off
+     (`authorized_keys` and `.ssh` must not be writable by anyone but their owner).
    - Connects, then immediately `Connection closed` → the `sftp-server` path in
      `authorized_keys` doesn't exist on the backup server (see step 4).
+   - `rmdir` **succeeds** → the `-P …` part is missing from the key line: fix it (and recreate
+     `incoming` as in step 2).
    - The backup server's log says exactly why: `sudo journalctl -u sshd -n 20` (Amazon Linux)
-     or `sudo tail /var/log/auth.log` (Debian/Ubuntu).
+     or `sudo tail /var/log/auth.log` (Debian/Ubuntu). With `-l VERBOSE` added after `sftp-server` in
+     the key line, every refused request is logged there too (`Refusing denylisted … request`).
 
 6. **Create the rclone remote** called `offsite`:
 
@@ -1291,12 +1486,13 @@ run these with `sudo -i` first.
      host <backup-host> user rosterchief-backup \
      key_file /root/.ssh/rosterchief_backup \
      known_hosts_file /root/.ssh/known_hosts \
-     shell_type none
-   rclone lsd offsite:          # should list the "rosterchief" folder
+     shell_type none set_modtime false
+   rclone lsd offsite:rosterchief          # should list the "incoming" folder
    ```
 
-   (`shell_type none` because the key may only do file transfer; add `port <n>` if SSH on the
-   backup server isn't on 22.)
+   `shell_type none` because the key may only do file transfer; `set_modtime false` because
+   setting a file's time is one of the denied requests (so a hand-run `rclone copy` works too);
+   add `port <n>` if SSH on the backup server isn't on 22.
 
 ### Step 4 — Test it once by hand
 
@@ -1304,42 +1500,90 @@ Still as root on the production server:
 
 ```bash
 cd /home/bernard/RosterChief
-BACKUP_REMOTE=offsite:rosterchief deploy/backup.sh /var/backups/rosterchief
-ls -l /var/backups/rosterchief            # db-…sql.gz.age etc. -- only .age files are new
-rclone ls offsite:rosterchief             # the same files on the backup server
+BACKUP_REMOTE=offsite:rosterchief/incoming deploy/backup.sh /var/backups/rosterchief
+ls -l /var/backups/rosterchief                 # db-…sql.gz.age etc. -- only .age files are new
+rclone ls offsite:rosterchief/incoming         # the same files on the backup server
+rclone deletefile offsite:rosterchief/incoming/<one of them>   # must fail: "permission denied"
 ```
 
-The script prints `backup ok: …` and `copied to offsite:rosterchief`. If it stops with an
-error, fix what it says and run it again: every file is written under a `.part` name and only
-renamed once complete, so a half-written file never looks like a backup (leftover `.part`
-files are removed by a later run after a day). One exception: if `age` itself fails, the
-unencrypted archive it was encrypting stays in `/var/backups/rosterchief` — delete it. Only
-`*.age` files are ever copied offsite.
+The script prints `backup ok: …` and `copied N file(s) to offsite:rosterchief/incoming`. If it
+stops with an error, fix what it says and run it again: every file is written under a `.part`
+name and only renamed once complete, so a half-written file never looks like a backup
+(leftover `.part` files are removed by a later run after a day). One exception: if `age` itself
+fails, the unencrypted archive it was encrypting stays in `/var/backups/rosterchief` — delete
+it. Only `*.age` files are ever copied offsite.
 
-### Step 5 — Schedule it
+Which files have gone offsite is recorded in `/var/backups/rosterchief/.offsite-sent` — the
+backup server's `incoming` empties itself, so rclone can't tell by looking there. Each run
+sends only the `*.age` files not on that list: a night the upload fails is made up the next
+night, and the backup a deploy takes goes out with the next nightly run. Delete the file to
+send everything still on the server again (the archive job drops identical re-uploads).
 
-`crontab -e` as root on the production server:
+Then on the backup server, archive them right away instead of waiting 10 minutes:
+
+```bash
+sudo MIN_AGE_MINUTES=0 /usr/local/sbin/rosterchief-archive-incoming
+sudo ls -l /var/lib/rosterchief-backups/archive    # the files are here, owned by root
+sudo ls -l ~rosterchief-backup/rosterchief/incoming   # ...and gone from here
+```
+
+If an upload fails:
+
+- `Update Create failed: permission denied` → `incoming` doesn't exist or isn't owned by
+  `rosterchief-backup`, or `BACKUP_REMOTE` points somewhere else (it must end in
+  `/incoming`; the script says so when it doesn't).
+- `Rename failed: permission denied`, and a `<name>.<hash>.partial` file left in `incoming` →
+  rclone was run without `--inplace` (from 1.63 on it uploads to a temporary name and renames
+  it by default). `backup.sh` adds the flag itself; add it when you run rclone by hand. The
+  archive job removes the stray `.partial` after a day.
+- `SetModTime failed: permission denied` → the remote lacks `set_modtime false`:
+  `rclone config update offsite set_modtime false` (`backup.sh` also passes
+  `--sftp-set-modtime=false`).
+- `Failed to delete … permission denied` from `rclone delete` → working as intended. Nothing on
+  the production server deletes offsite backups any more.
+
+### Step 5 — Schedule it (on both servers)
+
+`crontab -e` as root on the **production server**:
 
 ```cron
 MAILTO=you@example.com
 # cron's default PATH lacks /usr/local/bin (where age lives on Amazon Linux) -- keep this line.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Nightly at 02:30: dump, encrypt, keep 14 days here, copy offsite, keep 60 days there.
-30 2 * * *  cd /home/bernard/RosterChief && BACKUP_REMOTE=offsite:rosterchief deploy/backup.sh /var/backups/rosterchief
+# Nightly at 02:30: dump, encrypt, keep 14 days here, upload anything not yet sent.
+30 2 * * *  cd /home/bernard/RosterChief && BACKUP_REMOTE=offsite:rosterchief/incoming deploy/backup.sh /var/backups/rosterchief
+```
+
+`sudo crontab -e` on the **backup server** (install `cronie` first on Amazon Linux):
+
+```cron
+MAILTO=you@example.com
+# Every 15 minutes: archive finished uploads out of the upload account's reach, prune after 60 days.
+# Routine lines go to the log; warnings and errors also to stderr, so cron mails only those.
+*/15 * * * *  ARCHIVE_LOG=/var/log/rosterchief-archive.log /usr/local/sbin/rosterchief-archive-incoming
 ```
 
 `MAILTO` only works if the server can send mail (a local MTA such as `postfix`/`msmtp`); if it
 can't, at least check `/var/backups/rosterchief` for fresh files after the first night, or
-append `>> /var/log/rosterchief-backup.log 2>&1` to the line and check that log.
+append `>> /var/log/rosterchief-backup.log 2>&1` to the production line and check that log —
+and on the backup server, check `/var/log/rosterchief-archive.log` and
+`sudo ls -lt /var/lib/rosterchief-backups/archive | head`.
 
-Knobs, all optional on that line: `KEEP_DAYS=14` (on the server; it is also the age limit for
-what gets copied), `REMOTE_KEEP_DAYS=60` (on the backup server; `0` keeps everything forever).
-`BACKUP_REMOTE` itself is only read from the environment, so it stays on the cron line;
-`BACKUP_AGE_RECIPIENT`, `POSTGRES_USER` and `POSTGRES_DB` come from the environment or else from
-`.env` in the current directory — hence the `cd`. Cron mails `MAILTO` whenever the script fails,
-and it fails loudly on purpose: a backup that fails quietly is worse than none. With
-`BACKUP_REMOTE` set and no `BACKUP_AGE_RECIPIENT`, it refuses to run at all rather than copy
-plaintext dumps off the box.
+Knobs, all optional:
+
+- production line: `KEEP_DAYS=14` (on the server; files older than that are deleted locally).
+  `BACKUP_REMOTE` itself is only read from the environment, so it stays on the cron line;
+  `BACKUP_AGE_RECIPIENT`, `POSTGRES_USER` and `POSTGRES_DB` come from the environment or else
+  from `.env` in the current directory — hence the `cd`. `REMOTE_KEEP_DAYS` is gone: the
+  production server can't delete offsite files, and the script prints a note if it's still set.
+- backup-server line: `ARCHIVE_KEEP_DAYS=60` (`0` keeps everything forever),
+  `MIN_AGE_MINUTES=10` (how long an upload must sit untouched before it's taken).
+
+Cron mails `MAILTO` whenever a script fails, and both fail loudly on purpose: a backup that
+fails quietly is worse than none. With `BACKUP_REMOTE` set and no `BACKUP_AGE_RECIPIENT`,
+`backup.sh` refuses to run at all rather than copy plaintext dumps off the box. The archive job
+exits non-zero (so: a mail) for a rejected or conflicting upload — look at it; on a quiet night
+nothing but the production backup should ever land in `incoming`.
 
 Remove the old weekly `deploy/restore-check.sh` cron line if you have one: the server can no
 longer decrypt the backups (by design), so the restore test moves to your own computer (next
@@ -1352,20 +1596,19 @@ offsite by the deploy itself — the next nightly run copies it along with its o
 ### Step 6 — Prove a backup restores (monthly, on your own computer)
 
 A backup you've never restored is a hope, not a backup. On your own computer, with a checkout
-of this repo and Docker:
-
-**Once:** let your computer download from the backup server. Add your own public key
-(`cat ~/.ssh/id_ed25519.pub`) to the backup account exactly like the server's key in step 3.4 —
-same `restrict,command=…` prefix, appended with `tee -a` — so it can fetch files but not log in.
+of this repo and Docker. The backups come from the **archive** on the backup server, fetched
+with your own admin login there (`<you>@<backup-host>`, the account with `sudo` from step 2) —
+the upload account can't see the archive, and no key other than production's belongs on it.
 
 **Each time:**
 
 ```bash
-# 1. fetch last night's database dump from the backup server
+# 1. fetch last night's database dump from the backup server's archive
 mkdir -p restore-test
-echo 'ls -lt rosterchief' | sftp -b - rosterchief-backup@<backup-host>
+ssh <you>@<backup-host> 'sudo ls -lt /var/lib/rosterchief-backups/archive | head'
 #    note the newest db-….sql.gz.age name, then:
-echo 'get rosterchief/db-2026-07-14-0230.sql.gz.age restore-test/' | sftp -b - rosterchief-backup@<backup-host>
+ssh <you>@<backup-host> 'sudo cat /var/lib/rosterchief-backups/archive/db-2026-07-14-0230.sql.gz.age' \
+  > restore-test/db-2026-07-14-0230.sql.gz.age
 
 # 2. start a throwaway local Postgres (its own env file, so your dev .env is left alone;
 #    compose also insists that .env.production exists, even empty) and restore into it
@@ -1379,6 +1622,16 @@ COMPOSE="docker compose -f compose.behind-proxy.yaml --env-file restore-test/com
 # 3. clean up: the database, the dump and the key file all hold (access to) personal data
 docker compose -f compose.behind-proxy.yaml --env-file restore-test/compose.env down -v
 rm -rf restore-test && rm ~/rosterchief-backup-key.txt
+```
+
+If `sudo` on the backup server asks for a password, the one-line `ssh … 'sudo …'` commands
+can't answer it. Use `ssh -t` for the listing, and fetch in three steps instead (the file is
+encrypted, so a moment in your home directory there is fine):
+
+```bash
+ssh -t <you>@<backup-host> 'sudo install -m 600 -o "$USER" /var/lib/rosterchief-backups/archive/db-2026-07-14-0230.sql.gz.age ~/'
+scp <you>@<backup-host>:db-2026-07-14-0230.sql.gz.age restore-test/
+ssh <you>@<backup-host> 'rm ~/db-2026-07-14-0230.sql.gz.age'
 ```
 
 It prints `restore ok: … -> N clubs, M users`, or `restore check FAILED` / an error and a
@@ -1411,13 +1664,24 @@ docker compose up -d web
 shred -u rosterchief-backup-key.txt
 ```
 
-If the server itself is gone, set up a new server as in "First deploy" (with the
-`MFA_ENCRYPTION_KEY` from your password manager — a new key can't read the restored TOTP
-secrets), fetch the files from the backup server (`sftp` as in step 6, or `rclone copy
-offsite:rosterchief /var/backups/rosterchief` once rclone is set up again), then restore as
-above. The dump is taken with `--clean --if-exists`, so it replaces whatever is in
-the database; restore as the superuser (`POSTGRES_USER`) — the application role (see
-"Database roles") must already exist.
+If the server itself is gone — or you don't trust what's on it any more — set up a new server
+as in "First deploy" (with the `MFA_ENCRYPTION_KEY` from your password manager — a new key
+can't read the restored TOTP secrets), then fetch one night's files from the backup server's
+archive with your admin login, as in step 6, and put them on the new server:
+
+```bash
+# on your own computer: the three files with the same <date>
+for f in db-2026-07-14-0230.sql.gz.age media-2026-07-14-0230.tar.gz.age private-media-2026-07-14-0230.tar.gz.age; do
+  ssh <you>@<backup-host> "sudo cat /var/lib/rosterchief-backups/archive/$f" > "$f"
+done
+scp ./*-2026-07-14-0230.*.age <user>@<new-server>:/var/backups/rosterchief/
+```
+
+(`media-…` only exists while public uploads are on local disk.) Then restore as above. The
+dump is taken with `--clean --if-exists`, so it replaces whatever is in the database; restore
+as the superuser (`POSTGRES_USER`) — the application role (see "Database roles") must already
+exist. After a break-in, also make a **new** upload key (step 3.3–3.6) and replace the old line
+in the backup server's `authorized_keys`: the old key left with the old server.
 
 Once uploads move to S3 (`AWS_STORAGE_BUCKET_NAME`), the bucket's own versioning is their
 backup — turn versioning on when you create the bucket. `backup.sh` reads
@@ -1432,9 +1696,12 @@ are always in the backup.
 | age **public** key (`BACKUP_AGE_RECIPIENT`) | production server, `.env` in the checkout |
 | age **private** key | your password manager + one offline copy. Never on a server except during a restore |
 | `MFA_ENCRYPTION_KEY` | production `.env.production` + next to the age private key |
-| Upload SSH key (`/root/.ssh/rosterchief_backup`) | production server only; allowed on the backup server for file transfer only |
-| Backups, 14 days | production server, `/var/backups/rosterchief` (owner-only: the deploy user's directory, root's nightly files) |
-| Backups, 60 days | backup server, `~rosterchief-backup/rosterchief` |
+| Upload SSH key (`/root/.ssh/rosterchief_backup`) | production server only; on the backup server it may only create and write files (`sftp-server -P …`), never remove, rename or change them |
+| Backups, 14 days | production server, `/var/backups/rosterchief` (owner-only: the deploy user's directory, root's nightly files); `.offsite-sent` there lists what has been uploaded |
+| Uploads in transit, minutes | backup server, `~rosterchief-backup/rosterchief/incoming` |
+| Backups, 60 days | backup server, `/var/lib/rosterchief-backups/archive` — root only; reached with your own admin login and `sudo`, never with the upload key |
+| Uploads that weren't age files | backup server, `/var/lib/rosterchief-backups/rejected` (root only, pruned like the archive) |
+| Archive job | backup server, `/usr/local/sbin/rosterchief-archive-incoming` (from `deploy/backup-server/archive-incoming.sh`), root's crontab, log in `/var/log/rosterchief-archive.log` |
 
 ## Going multi-server
 
