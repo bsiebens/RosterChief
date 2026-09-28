@@ -6,6 +6,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from django import forms
+from django.apps import apps as django_apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -8886,6 +8887,13 @@ class CalendarFeedTokenHashingTests(TestCase):
 class CalendarFeedTokenMigrationTests(TransactionTestCase):
     """mobile 0003-0005 replace the stored raw token with its hash in place, so
     a feed URL someone subscribed to before the change keeps working."""
+
+    # Every app, i.e. no restriction -- but setting it at all is what makes the teardown
+    # flush TRUNCATE ... CASCADE. Without it PostgreSQL refuses to truncate
+    # authentication_user while waffle_flag_users still references it (SQLite's
+    # DELETE-based flush never noticed). The registry is ready by the time a test module
+    # is imported.
+    available_apps = [app_config.name for app_config in django_apps.get_app_configs()]
 
     def setUp(self):
         from django.db import connection
