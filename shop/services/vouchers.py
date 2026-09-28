@@ -11,27 +11,31 @@ from django.db import transaction
 from django.utils.translation import gettext as _
 
 from ..models import Payment, VoucherConsumption
-from .payments import PaymentError
+from .payments import PaymentError, lock_voucher
 
 
 @transaction.atomic
 def record_manual_consumption(voucher, *, amount: Decimal, note: str, recorded_by=None) -> VoucherConsumption:
     if amount <= 0:
         raise PaymentError(_("The amount must be greater than zero."))
-    if amount > voucher.available_amount:
-        raise PaymentError(_("Only €%(amount)s is available on that voucher.") % {"amount": voucher.available_amount})
+    locked = lock_voucher(voucher)
+    if amount > locked.available_amount:
+        raise PaymentError(_("Only €%(amount)s is available on that voucher.") % {"amount": locked.available_amount})
 
     consumption = VoucherConsumption.objects.create(voucher=voucher, amount=amount, note=note, recorded_by=recorded_by)
-    voucher.consumed_amount += amount
-    voucher.save(update_fields=["consumed_amount"])
+    locked.consumed_amount += amount
+    locked.save(update_fields=["consumed_amount"])
+    voucher.consumed_amount = locked.consumed_amount
     return consumption
 
 
 @transaction.atomic
 def delete_manual_consumption(consumption: VoucherConsumption) -> None:
     voucher = consumption.voucher
-    voucher.consumed_amount = max(voucher.consumed_amount - consumption.amount, Decimal("0"))
-    voucher.save(update_fields=["consumed_amount"])
+    locked = lock_voucher(voucher)
+    locked.consumed_amount = max(locked.consumed_amount - consumption.amount, Decimal("0"))
+    locked.save(update_fields=["consumed_amount"])
+    voucher.consumed_amount = locked.consumed_amount
     consumption.delete()
 
 

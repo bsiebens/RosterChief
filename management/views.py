@@ -135,6 +135,7 @@ from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, P
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
+from shop.services.payments import delete_payment as delete_shop_payment
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
@@ -1343,7 +1344,7 @@ class MemberDeleteView(MemberAdminRequiredMixin, View):
 
 
 class TeamListView(ClubStaffRequiredMixin, ListView):
-    """ADMIN sees every team; everyone else (coach, manager, other staff) only
+    """ADMIN/MEMBER_ADMIN see every team; everyone else (coach, manager, other staff) only
     the teams they're staffed on this season -- same visibility rule as
     ``members_visible_to``, not the narrower management-only ``teams_managed_by``."""
 
@@ -1353,7 +1354,7 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
 
     def get_queryset(self):
         club = self.request.club
-        teams = Team.objects.filter(club=club) if is_club_admin(self.request.user, club) else teams_staffed_by(self.request.user, club)
+        teams = Team.objects.filter(club=club) if can_manage_members(self.request.user, club) else teams_staffed_by(self.request.user, club)
         search = self.request.GET.get("q", "").strip()
         if search:
             teams = teams.filter(name__icontains=search)
@@ -1437,7 +1438,13 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
     context_object_name = "team"
 
     def get_queryset(self):
-        return Team.objects.filter(club=self.request.club)
+        # Same visibility rule as TeamListView: club/member admins see every
+        # team, other staff only the teams they're on the staff of this
+        # season. Anything else is a 404, not just hidden from the list.
+        user, club = self.request.user, self.request.club
+        if can_manage_members(user, club):
+            return Team.objects.filter(club=club)
+        return teams_staffed_by(user, club)
 
     def get_context_data(self, **kwargs):
         club = self.request.club
@@ -4889,7 +4896,11 @@ class DiscountListView(ShopManagerRequiredMixin, ListView):
     context_object_name = "discounts"
 
     def get_queryset(self):
-        return Discount.objects.filter(club=self.request.club)
+        # use_count: orders that used the code and weren't cancelled -- the
+        # same count Discount.max_uses is enforced against (shop.services.
+        # checkout.discount_uses).
+        uses = Count("applied_discounts", filter=~Q(applied_discounts__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED))
+        return Discount.objects.filter(club=self.request.club).annotate(use_count=uses)
 
 
 class DiscountCreateView(ShopManagerRequiredMixin, CreateView):
@@ -5530,14 +5541,7 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
     def post(self, request, order_pk, pk):
         payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk).select_related("voucher"), pk=pk)
         order = payment.order
-        voucher = payment.voucher
-        amount = payment.amount
-        was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
-        payment.delete()
-
-        if voucher is not None and was_confirmed:
-            voucher.consumed_amount = max(Decimal("0"), voucher.consumed_amount - amount)
-            voucher.save(update_fields=["consumed_amount"])
+        delete_shop_payment(payment)
 
         reverted_to_pending = False
         if order.payment_status != Order.PaymentStatus.REFUNDED:

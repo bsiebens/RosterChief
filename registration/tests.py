@@ -1657,3 +1657,63 @@ class RegistrationRenderPdfUrlFetcherTests(TestCase):
             self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
 
         weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+
+
+class RegistrationInvoiceNumberingTests(TestCase):
+    """confirm_invoice allocates REG-<year>-<seq> numbers: unique per club
+    (DB constraint + retry on collision), and a second confirm of an
+    already-confirmed batch (double submit, or a stale instance from a
+    concurrent request) never re-numbers it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+
+    def make_batch(self):
+        return RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+
+    def test_numbers_are_sequential_per_club(self):
+        from .services.invoicing import confirm_invoice
+
+        first, second = self.make_batch(), self.make_batch()
+        confirm_invoice(first, due_in_days=14)
+        confirm_invoice(second, due_in_days=14)
+
+        year = timezone.now().year
+        self.assertEqual(first.invoice_number, f"REG-{year}-00001")
+        self.assertEqual(second.invoice_number, f"REG-{year}-00002")
+
+    def test_the_database_refuses_a_duplicate_number_in_one_club(self):
+        from django.db import IntegrityError, transaction
+
+        RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+
+    def test_a_collision_is_retried_with_a_fresh_number(self):
+        from .services.invoicing import confirm_invoice
+
+        taken = self.make_batch()
+        RegistrationBatch.objects.filter(pk=taken.pk).update(invoice_number="REG-2999-00001")
+        batch = self.make_batch()
+
+        with mock.patch.object(RegistrationBatch, "generate_invoice_number", side_effect=["REG-2999-00001", "REG-2999-00002"]):
+            confirm_invoice(batch, due_in_days=14)
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.invoice_number, "REG-2999-00002")
+
+    def test_confirming_a_stale_instance_again_keeps_the_first_number(self):
+        from .services.invoicing import confirm_invoice
+
+        batch = self.make_batch()
+        stale = RegistrationBatch.objects.get(pk=batch.pk)
+        confirm_invoice(batch, due_in_days=14)
+
+        confirm_invoice(stale, due_in_days=30)
+
+        batch.refresh_from_db()
+        self.assertEqual(stale.invoice_number, batch.invoice_number)
+        self.assertTrue(batch.invoice_number.endswith("-00001"))
+        self.assertFalse(RegistrationBatch.objects.filter(invoice_number__endswith="-00002").exists())

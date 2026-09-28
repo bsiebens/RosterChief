@@ -64,8 +64,9 @@ from registration.services import (
 )
 from registration.services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
+from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
-from shop.services.checkout import CheckoutError, find_discount, place_order
+from shop.services.checkout import CheckoutError, find_discount, place_order, reprice_cart_items
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
@@ -1898,6 +1899,12 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     through to ShopCheckoutView as a hidden field; place_order is the only
     place a code is actually redeemed, so it re-validates it itself rather
     than trusting this screen's own preview.
+
+    Every line is re-priced from its current product/variant on each render
+    (shop.services.checkout.reprice_cart_items), so the cart always shows
+    what checkout will actually charge; lines that can't be ordered any more
+    are flagged for the member to remove. A wrong code here counts towards
+    the same per-member/per-IP throttle as one at checkout.
     """
 
     template_name = "mobile/shop_cart.html"
@@ -1906,22 +1913,25 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
-        items = list(cart.items.select_related("product", "variant", "beneficiary").order_by("created")) if cart is not None else []
+        items = list(cart.items.select_related("cart", "product", "variant", "beneficiary").order_by("created")) if cart is not None else []
+        unavailable, repriced = reprice_cart_items(items)
+        unavailable_ids = {item.pk for item in unavailable}
         for item in items:
             item.line_total = item.unit_price * item.quantity
+            item.unavailable = item.pk in unavailable_ids
 
         code = self.request.GET.get("code", "").strip()
         discount = None
         discount_error = None
         if code and cart is not None:
             try:
-                discount = find_discount(self.request.club, code)
+                discount = find_discount(self.request.club, code, member=self.me, ip=client_ip(self.request))
             except CheckoutError as error:
                 discount_error = str(error)
 
         totals = cart_totals(cart, discount) if cart is not None else {"subtotal": Decimal("0"), "discount_amount": Decimal("0"), "total": Decimal("0")}
 
-        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, **kwargs)
+        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, has_unavailable=bool(unavailable), prices_changed=bool(repriced), **kwargs)
 
 
 class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
@@ -1964,7 +1974,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
             return HttpResponseRedirect(reverse("mobile:shop_cart"))
 
         try:
-            order = place_order(cart, purchaser=self.me, discount_code=request.POST.get("discount_code", ""))
+            order = place_order(cart, purchaser=self.me, discount_code=request.POST.get("discount_code", ""), ip=client_ip(request))
         except CheckoutError as error:
             notify(request, f"e|{_('Could not place order')}|{error}")
             return HttpResponseRedirect(reverse("mobile:shop_cart"))

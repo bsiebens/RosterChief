@@ -738,12 +738,12 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
 
-    def test_a_different_teams_coach_can_still_view_the_team(self):
+    def test_a_different_teams_coach_cannot_open_the_team(self):
         self.client.force_login(self.other_team_coach)
 
         response = self.club_get("team_detail", self.team.pk)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
 
     def test_admin_can_add_a_player_to_any_team(self):
         self.client.force_login(self.admin_user)
@@ -14443,8 +14443,27 @@ class FormManagementTests(ManagementTestBase):
         response = self.club_get("formsend_responses_export", form_obj.pk, send.pk)
 
         rows = list(csv.reader(response.content.decode().splitlines()))
-        self.assertEqual(rows[0][2], "'=cmd|' /C calc'!A0")
-        self.assertEqual(rows[1][2], '\'=HYPERLINK("http://evil.example","x")')
+        self.assertEqual(rows[0][3], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][3], '\'=HYPERLINK("http://evil.example","x")')
+
+    def test_responses_name_the_parent_who_filled_in_for_a_child(self):
+        form_obj = self.make_form()
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        child = Member.objects.create(first_name="Mila", last_name="Bakker")
+        parent = Member.objects.create(first_name="Lars", last_name="Bakker")
+        Submission.objects.create(send=send, member=child, submitted_by=parent)
+        own = Member.objects.create(first_name="Jane", last_name="Doe")
+        Submission.objects.create(send=send, member=own, submitted_by=own)
+        self.client.force_login(self.admin_user)
+
+        rows = list(csv.reader(self.club_get("formsend_responses_export", form_obj.pk, send.pk).content.decode().splitlines()))
+        page = self.club_get("formsend_responses", form_obj.pk, send.pk)
+
+        self.assertEqual(rows[0][1:3], ["Member", "Submitted by"])
+        by_member = {row[1]: row[2] for row in rows[1:]}
+        self.assertEqual(by_member, {"Mila Bakker": "Lars Bakker", "Jane Doe": ""})
+        self.assertContains(page, "Filled in by Lars Bakker")
+        self.assertNotContains(page, "Filled in by Jane Doe")
 
 
 class BugListViewTests(ManagementTestBase):
@@ -14901,3 +14920,116 @@ class ManagementRenderPdfUrlFetcherTests(TestCase):
             self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
 
         weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=safe_url_fetcher)
+
+
+class TeamDetailScopingTests(ManagementTestBase):
+    """Team pages for non-admin staff are limited to the teams they're on the
+    staff of this season; club admins and member admins see every team."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team_a = Team.objects.create(club=cls.club, name="Scoped A", short_name="SA")
+        cls.team_b = Team.objects.create(club=cls.club, name="Scoped B", short_name="SB")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        cls.physio_position = Position.objects.create(club=cls.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+
+        cls.coach_user = User.objects.create_user(email="scoped-coach@example.com", password="pw-secret-123")
+        cls.coach_member = Member.objects.create(user=cls.coach_user, first_name="Cora", last_name="Coach")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.coach_member, season=cls.season, position=cls.coach_position)
+
+        cls.physio_user = User.objects.create_user(email="scoped-physio@example.com", password="pw-secret-123")
+        cls.physio_member = Member.objects.create(user=cls.physio_user, first_name="Pia", last_name="Physio")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.physio_member, season=cls.season, position=cls.physio_position)
+
+        cls.member_admin_user = User.objects.create_user(email="scoped-member-admin@example.com", password="pw-secret-123")
+        cls.member_admin_member = Member.objects.create(user=cls.member_admin_user, first_name="Mia", last_name="Memberadmin")
+        ClubMembership.objects.create(club=cls.club, member=cls.member_admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(cls.member_admin_user)
+
+    def test_coach_opens_their_own_team(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+
+    def test_coach_of_team_a_gets_404_on_team_b(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_non_managing_staff_opens_their_own_team_but_not_another(self):
+        self.client.force_login(self.physio_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_last_seasons_coach_gets_404(self):
+        past_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=40))
+        StaffAssignment.objects.create(team=self.team_b, member=self.coach_member, season=past_season, position=self.coach_position)
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_admin_opens_any_team(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+    def test_member_admin_opens_any_team(self):
+        self.client.force_login(self.member_admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+
+class DiscountLimitManagementTests(ShopTestBase):
+    """The discount-code form/list carry the validity window, total use cap
+    and once-per-member switch (shop.services.checkout enforces them)."""
+
+    def test_a_shop_manager_can_set_the_limits(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {
+            "name": "Summer sale",
+            "description": "",
+            "code": "summer10",
+            "discount_type": DiscountType.PERCENTAGE,
+            "discount_amount": "10",
+            "is_active": "on",
+            "valid_from": "2026-06-01",
+            "valid_until": "2026-08-31",
+            "max_uses": "50",
+            "once_per_member": "on",
+        }
+
+        self.club_post("discount_create", data)
+
+        discount = Discount.objects.get(club=self.club)
+        self.assertEqual(discount.valid_from, datetime.date(2026, 6, 1))
+        self.assertEqual(discount.valid_until, datetime.date(2026, 8, 31))
+        self.assertEqual(discount.max_uses, 50)
+        self.assertTrue(discount.once_per_member)
+
+    def test_the_window_cannot_end_before_it_starts(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Backwards", "description": "", "code": "BACK", "discount_type": DiscountType.FIXED_AMOUNT, "discount_amount": "5", "valid_from": "2026-08-31", "valid_until": "2026-06-01"}
+
+        response = self.club_post("discount_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Discount.objects.exists())
+
+    def test_the_list_shows_uses_not_counting_cancelled_orders(self):
+        from shop.models import AppliedDiscount
+
+        discount = Discount.objects.create(club=self.club, name="Capped", code="CAP", discount_amount=Decimal("5"), max_uses=3)
+        member = Member.objects.create(first_name="Buyer", last_name="One")
+        for status in (Order.FulfillmentStatus.NOT_READY, Order.FulfillmentStatus.CANCELLED):
+            order = Order.objects.create(club=self.club, purchaser=member, total=Decimal("20.00"), fulfillment_status=status)
+            AppliedDiscount.objects.create(order=order, discount=discount, discount_amount=Decimal("5"), amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("discount_list")
+
+        [listed] = response.context["discounts"]
+        self.assertEqual(listed.use_count, 1)
+        self.assertContains(response, "1 of 3")

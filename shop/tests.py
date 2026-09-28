@@ -1275,14 +1275,14 @@ class OrderTotalServiceTests(TestCase):
     def test_subtracts_applied_discounts(self):
         OrderLine.objects.create(order=self.order, product=self.product, quantity=2, unit_price=Decimal("25.00"), line_total=Decimal("50.00"))
         discount = Discount.objects.create(club=self.club, name="Ten off", code="TEN10")
-        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_amount=Decimal("10.00"))
+        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("10.00"))
 
         self.assertEqual(order_total(self.order), Decimal("40.00"))
 
     def test_never_goes_negative(self):
         OrderLine.objects.create(order=self.order, product=self.product, quantity=1, unit_price=Decimal("5.00"), line_total=Decimal("5.00"))
         discount = Discount.objects.create(club=self.club, name="Big discount", code="BIG")
-        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_amount=Decimal("999.00"))
+        AppliedDiscount.objects.create(order=self.order, discount=discount, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("999.00"))
 
         self.assertEqual(order_total(self.order), Decimal("0"))
 
@@ -1835,3 +1835,371 @@ class SafeUrlFetcherTests(TestCase):
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertIn("file:///etc/hosts", fetched)
+
+
+class _PlaceOrderTestBase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united", shop_open=True)
+        cls.user = User.objects.create_user(email="buyer@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="buyer@example.com", user=cls.user)
+        cls.other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        cls.other_member = Member.objects.create(first_name="John", last_name="Roe", email="other@example.com", user=cls.other_user)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+        patcher = patch("shop.services.checkout.dispatch_order_placed_notification")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_cart(self, quantity=2, user=None, product=None, variant=None, unit_price=None):
+        cart, _created = Cart.objects.get_or_create(club=self.club, user=user or self.user, status=Cart.CartStatus.OPEN)
+        product = product or self.product
+        price = unit_price if unit_price is not None else (variant.effective_price if variant is not None else product.price)
+        CartItem.objects.create(cart=cart, product=product, variant=variant, quantity=quantity, unit_price=price)
+        return cart
+
+
+class PercentageDiscountAfterStaffEditTests(_PlaceOrderTestBase):
+    """A percentage discount must stay a percentage once it's on an order --
+    re-deriving the order total after a staff edit to one of its lines used
+    to subtract the stored *rate* (10) as if it were euros."""
+
+    def test_the_applied_discount_stores_the_euro_amount_actually_deducted(self):
+        Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("10"))
+        order = place_order(self.make_cart(quantity=2), purchaser=self.member, discount_code="TEN10")  # 50.00
+
+        [applied] = order.applied_discounts.all()
+        self.assertEqual(applied.amount, Decimal("5.00"))
+        self.assertEqual(applied.discount_type, DiscountType.PERCENTAGE)
+        self.assertEqual(applied.discount_amount, Decimal("10"))
+
+    def test_order_total_after_a_line_edit_keeps_the_percentage(self):
+        Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("10"))
+        order = place_order(self.make_cart(quantity=2), purchaser=self.member, discount_code="TEN10")
+        self.assertEqual(order_total(order), Decimal("45.00"))  # unchanged order re-derives to what was charged
+
+        [line] = order.order_items.all()
+        line.quantity = 3
+        line.line_total = line.unit_price * 3  # 75.00
+        line.save()
+
+        self.assertEqual(order_total(order), Decimal("67.50"))  # 75.00 - 10%, not 75.00 - €10
+        [applied] = order.applied_discounts.all()
+        self.assertEqual(applied.amount, Decimal("7.50"))
+
+    def test_a_fixed_discount_stays_fixed_after_a_line_edit(self):
+        Discount.objects.create(club=self.club, name="Five off", code="FIVE", discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("5"))
+        order = place_order(self.make_cart(quantity=2), purchaser=self.member, discount_code="FIVE")
+        [line] = order.order_items.all()
+        line.quantity = 3
+        line.line_total = Decimal("75.00")
+        line.save()
+
+        self.assertEqual(order_total(order), Decimal("70.00"))
+
+
+class DiscountCodeLimitTests(_PlaceOrderTestBase):
+    """Validity window, total use cap, one use per member, and wrong-code
+    throttling -- enforced on preview (find_discount) and again at placement."""
+
+    def make_discount(self, **kwargs):
+        defaults = {"club": self.club, "name": "Ten off", "code": "TEN10", "discount_type": DiscountType.FIXED_AMOUNT, "discount_amount": Decimal("10")}
+        defaults.update(kwargs)
+        return Discount.objects.create(**defaults)
+
+    def assert_generic_invalid(self, **kwargs):
+        with self.assertRaisesMessage(CheckoutError, "This code isn't valid."):
+            find_discount(self.club, "TEN10", member=self.member, **kwargs)
+
+    def test_unknown_code_gets_the_generic_message(self):
+        with self.assertRaisesMessage(CheckoutError, "This code isn't valid."):
+            find_discount(self.club, "NOPE", member=self.member)
+
+    def test_not_yet_valid(self):
+        self.make_discount(valid_from=timezone.localdate() + timedelta(days=1))
+        self.assert_generic_invalid()
+
+    def test_expired(self):
+        self.make_discount(valid_until=timezone.localdate() - timedelta(days=1))
+        self.assert_generic_invalid()
+
+    def test_valid_on_its_first_and_last_day(self):
+        today = timezone.localdate()
+        discount = self.make_discount(valid_from=today, valid_until=today)
+        self.assertEqual(find_discount(self.club, "ten10", member=self.member), discount)
+
+    def test_used_up(self):
+        self.make_discount(max_uses=1)
+        place_order(self.make_cart(user=self.other_user), purchaser=self.other_member, discount_code="TEN10")
+
+        self.assert_generic_invalid()
+
+    def test_a_cancelled_order_gives_its_use_back(self):
+        self.make_discount(max_uses=1)
+        order = place_order(self.make_cart(user=self.other_user), purchaser=self.other_member, discount_code="TEN10")
+        order.fulfillment_status = Order.FulfillmentStatus.CANCELLED
+        order.save(update_fields=["fulfillment_status"])
+
+        self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.member))
+
+    def test_one_use_per_member(self):
+        self.make_discount()
+        place_order(self.make_cart(), purchaser=self.member, discount_code="TEN10")
+
+        with self.assertRaisesMessage(CheckoutError, "You've already used this code."):
+            find_discount(self.club, "TEN10", member=self.member)
+        # Someone else can still use it.
+        self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.other_member))
+
+    def test_a_code_allowing_repeat_use_by_the_same_member(self):
+        self.make_discount(once_per_member=False)
+        place_order(self.make_cart(), purchaser=self.member, discount_code="TEN10")
+
+        self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.member))
+
+    def test_placement_rechecks_the_cap_even_after_a_valid_preview(self):
+        # Two members both preview a one-use code, then both place their order.
+        self.make_discount(max_uses=1)
+        first = self.make_cart(user=self.other_user)
+        second = self.make_cart()
+        self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.member))
+
+        place_order(first, purchaser=self.other_member, discount_code="TEN10")
+        with self.assertRaisesMessage(CheckoutError, "This code isn't valid."):
+            place_order(second, purchaser=self.member, discount_code="TEN10")
+        self.assertEqual(Order.objects.count(), 1)
+
+    def test_placement_rechecks_one_use_per_member(self):
+        self.make_discount()
+        place_order(self.make_cart(), purchaser=self.member, discount_code="TEN10")
+
+        with self.assertRaises(CheckoutError):
+            place_order(self.make_cart(), purchaser=self.member, discount_code="TEN10")
+
+    def test_wrong_codes_are_throttled_per_member(self):
+        self.make_discount()
+        for attempt in range(10):
+            with self.assertRaisesMessage(CheckoutError, "This code isn't valid."):
+                find_discount(self.club, f"WRONG{attempt}", member=self.member, ip=f"10.0.0.{attempt}")
+
+        # Even the right code is refused while the member is locked out...
+        with self.assertRaisesMessage(CheckoutError, "Too many wrong codes"):
+            find_discount(self.club, "TEN10", member=self.member, ip="10.0.1.1")
+        # ...but another member isn't.
+        self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.other_member, ip="10.0.1.1"))
+
+    def test_wrong_codes_are_throttled_per_ip(self):
+        self.make_discount()
+        for attempt in range(10):
+            member = self.member if attempt % 2 else self.other_member
+            with self.assertRaises(CheckoutError):
+                find_discount(self.club, f"WRONG{attempt}", member=member, ip="10.0.0.1")
+
+        with self.assertRaisesMessage(CheckoutError, "Too many wrong codes"):
+            find_discount(self.club, "TEN10", member=Member.objects.create(first_name="New", last_name="Person"), ip="10.0.0.1")
+
+    def test_right_codes_are_not_counted_as_wrong_attempts(self):
+        self.make_discount(once_per_member=False)
+        for _attempt in range(15):
+            self.assertIsNotNone(find_discount(self.club, "TEN10", member=self.member, ip="10.0.0.1"))
+
+
+class PlaceOrderRepricingTests(_PlaceOrderTestBase):
+    """A cart line keeps the price it was added at -- place_order re-prices
+    every line from the current product/variant and refuses lines that can no
+    longer be bought."""
+
+    def test_a_changed_price_is_refreshed_and_the_member_asked_to_confirm(self):
+        cart = self.make_cart(quantity=2)
+        self.product.price = Decimal("30.00")
+        self.product.save(update_fields=["price"])
+
+        with self.assertRaisesMessage(CheckoutError, "price"):
+            place_order(cart, purchaser=self.member)
+        self.assertFalse(Order.objects.exists())
+        self.assertEqual(cart.items.get().unit_price, Decimal("30.00"))
+
+        # Placing again (now at the shown price) goes through at the new price.
+        order = place_order(cart, purchaser=self.member)
+        self.assertEqual(order.total, Decimal("60.00"))
+        self.assertEqual(order.order_items.get().unit_price, Decimal("30.00"))
+
+    def test_a_variant_price_change_is_picked_up(self):
+        variant = ProductVariant.objects.create(product=self.product, name="XL", price=Decimal("28.00"))
+        cart = self.make_cart(quantity=1, variant=variant)
+        variant.price = None  # back to the product's own price
+        variant.save(update_fields=["price"])
+
+        with self.assertRaises(CheckoutError):
+            place_order(cart, purchaser=self.member)
+        self.assertEqual(place_order(cart, purchaser=self.member).total, Decimal("25.00"))
+
+    def assert_refused(self, cart):
+        with self.assertRaisesMessage(CheckoutError, "no longer available"):
+            place_order(cart, purchaser=self.member)
+        self.assertFalse(Order.objects.exists())
+        cart.refresh_from_db()
+        self.assertEqual(cart.status, Cart.CartStatus.OPEN)
+
+    def test_an_inactive_product_is_refused(self):
+        cart = self.make_cart()
+        Product.objects.filter(pk=self.product.pk).update(is_active=False)
+        self.assert_refused(cart)
+
+    def test_a_product_taken_out_of_the_shop_is_refused(self):
+        cart = self.make_cart()
+        Product.objects.filter(pk=self.product.pk).update(is_public=False)
+        self.assert_refused(cart)
+
+    def test_a_membership_product_is_refused(self):
+        cart = self.make_cart()
+        Product.objects.filter(pk=self.product.pk).update(product_type=Product.ProductType.MEMBERSHIP)
+        self.assert_refused(cart)
+
+    def test_an_inactive_variant_is_refused(self):
+        variant = ProductVariant.objects.create(product=self.product, name="XL")
+        cart = self.make_cart(variant=variant)
+        ProductVariant.objects.filter(pk=variant.pk).update(is_active=False)
+        self.assert_refused(cart)
+
+    def test_an_already_checked_out_cart_cannot_be_ordered_twice(self):
+        cart = self.make_cart()
+        stale = Cart.objects.get(pk=cart.pk)
+        place_order(cart, purchaser=self.member)
+
+        with self.assertRaises(CheckoutError):
+            place_order(stale, purchaser=self.member)
+        self.assertEqual(Order.objects.count(), 1)
+
+
+class VoucherConcurrencyTests(TestCase):
+    """record_payment/record_manual_consumption lock the voucher row and
+    re-check its balance inside the transaction -- a stale in-memory voucher
+    (what a second, concurrent request or a double submit holds) must not be
+    able to spend the same balance twice. True parallelism isn't reproducible
+    on SQLite; these prove the re-read-under-lock logic deterministically."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe")
+
+    def setUp(self):
+        self.voucher = Voucher.objects.create(club=self.club, amount=Decimal("30.00"), expiry_date=timezone.localdate() + timedelta(days=1))
+        self.order_a = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("30.00"))
+        self.order_b = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("30.00"))
+
+    def test_a_stale_voucher_instance_cannot_overspend_through_record_payment(self):
+        first, second = Voucher.objects.get(pk=self.voucher.pk), Voucher.objects.get(pk=self.voucher.pk)
+        record_payment(self.order_a, amount=Decimal("30.00"), method=Payment.PaymentMethod.VOUCHER, voucher=first)
+
+        with self.assertRaises(PaymentError):
+            record_payment(self.order_b, amount=Decimal("30.00"), method=Payment.PaymentMethod.VOUCHER, voucher=second)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("30.00"))
+        self.assertEqual(Payment.objects.filter(voucher=self.voucher).count(), 1)
+
+    def test_partial_payments_through_stale_instances_add_up(self):
+        first, second = Voucher.objects.get(pk=self.voucher.pk), Voucher.objects.get(pk=self.voucher.pk)
+        record_payment(self.order_a, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=first)
+        record_payment(self.order_b, amount=Decimal("15.00"), method=Payment.PaymentMethod.VOUCHER, voucher=second)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("25.00"))
+        self.assertEqual(second.consumed_amount, Decimal("25.00"))
+
+    def test_a_stale_voucher_instance_cannot_overspend_through_manual_consumption(self):
+        from .services.vouchers import record_manual_consumption
+
+        first, second = Voucher.objects.get(pk=self.voucher.pk), Voucher.objects.get(pk=self.voucher.pk)
+        record_manual_consumption(first, amount=Decimal("20.00"), note="cash")
+
+        with self.assertRaises(PaymentError):
+            record_manual_consumption(second, amount=Decimal("20.00"), note="cash again")
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("20.00"))
+
+    def test_deleting_a_voucher_payment_restores_onto_the_current_balance(self):
+        from .services.payments import delete_payment
+
+        stale = Voucher.objects.get(pk=self.voucher.pk)
+        payment = record_payment(self.order_a, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=stale)
+        loaded_before = Payment.objects.select_related("voucher").get(pk=payment.pk)  # voucher shows 10.00 consumed
+        record_payment(self.order_b, amount=Decimal("5.00"), method=Payment.PaymentMethod.VOUCHER, voucher=Voucher.objects.get(pk=self.voucher.pk))
+
+        delete_payment(loaded_before)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("5.00"))
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class ShopCartRepricingAndThrottleViewTests(TestCase):
+    """mobile.views.ShopCartView/ShopCheckoutView on top of the checkout
+    service: current prices on the cart, withdrawn items flagged, and wrong
+    codes throttled per client IP."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from club.models import ClubRole
+        from rosterchief.test_support import make_club
+
+        cls.club = make_club(shop_open=True, secondary_color="#e4002b")
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+        cls.product = Product.objects.create(club=cls.club, name="Home Jersey", price=Decimal("25.00"))
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.cart = Cart.objects.create(club=self.club, user=self.user)
+        self.item = CartItem.objects.create(cart=self.cart, product=self.product, quantity=2, unit_price=Decimal("20.00"))
+        self.client.force_login(self.user)
+
+    def get_cart(self, **params):
+        from django.urls import reverse
+
+        return self.client.get(reverse("mobile:shop_cart"), params, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_the_cart_shows_the_current_price(self):
+        response = self.get_cart()
+
+        self.assertEqual(response.context["totals"]["subtotal"], Decimal("50.00"))
+        self.assertTrue(response.context["prices_changed"])
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.unit_price, Decimal("25.00"))
+
+    def test_a_withdrawn_product_is_flagged(self):
+        Product.objects.filter(pk=self.product.pk).update(is_active=False)
+
+        response = self.get_cart()
+
+        self.assertTrue(response.context["has_unavailable"])
+        self.assertContains(response, "No longer available")
+
+    def test_checkout_with_a_changed_price_goes_back_to_the_cart(self):
+        from django.urls import reverse
+
+        response = self.client.post(reverse("mobile:shop_checkout"), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:shop_cart"), fetch_redirect_response=False)
+        self.assertFalse(Order.objects.exists())
+
+    def test_wrong_codes_are_throttled_per_ip(self):
+        Discount.objects.create(club=self.club, name="Ten off", code="TEN10", discount_amount=Decimal("10"))
+        for attempt in range(10):
+            self.assertEqual(self.get_cart(code=f"WRONG{attempt}").context["discount_error"], "This code isn't valid.")
+
+        response = self.get_cart(code="TEN10")
+
+        self.assertIn("Too many wrong codes", response.context["discount_error"])
+        self.assertIsNone(response.context["discount"])

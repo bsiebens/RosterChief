@@ -25,9 +25,21 @@ def order_total(order) -> Decimal:
     the same subtotal-minus-discount shape cart_totals uses at checkout, but
     read back from what's actually on the order rather than a live cart.
     Used after a staff edit to an existing OrderLine (management.views.
-    OrderLineUpdateView) changes what the order is actually worth."""
+    OrderLineUpdateView) changes what the order is actually worth.
+
+    Each AppliedDiscount is re-evaluated from its own snapshot
+    (discount_type + discount_amount) against the new lines total -- a
+    percentage stays a percentage, a fixed amount stays that many euros --
+    and its stored ``amount`` (the euros actually deducted) is updated to
+    match, so the order's discount rows and its total never disagree."""
     lines_total = order.order_items.aggregate(total=Sum("line_total"))["total"] or Decimal("0")
-    discount_total = order.applied_discounts.aggregate(total=Sum("discount_amount"))["total"] or Decimal("0")
+    discount_total = Decimal("0")
+    for applied in order.applied_discounts.all():
+        amount = discount_amount_for(lines_total, applied)
+        if applied.amount != amount:
+            applied.amount = amount
+            applied.save(update_fields=["amount"])
+        discount_total += amount
     return max(Decimal("0"), lines_total - discount_total)
 
 
@@ -41,7 +53,7 @@ def discount_amount_for(subtotal: Decimal, discount) -> Decimal:
         amount = (subtotal * discount.discount_amount / Decimal("100")).quantize(_CENTS, rounding=ROUND_HALF_UP)
     else:
         amount = discount.discount_amount
-    return min(amount, subtotal)
+    return max(Decimal("0"), min(amount, subtotal))
 
 
 def cart_totals(cart, discount=None) -> dict:

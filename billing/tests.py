@@ -321,6 +321,16 @@ class InvoiceTests(BillingTestBase):
         self.assertEqual(first.number, f"INV-{year}-00001")
         self.assertEqual(second.number, f"INV-{year}-00002")
 
+    def test_a_number_collision_is_retried_with_a_fresh_number(self):
+        # Two invoices allocated in the same instant compute the same next number; the
+        # unique constraint refuses the second and it retries rather than erroring.
+        taken = self.bill(start=self.today).invoice
+        other_club = Club.objects.create(name="Feyenoord")
+        with mock.patch.object(Invoice, "next_number", side_effect=[taken.number, "INV-2999-00001"]):
+            second = open_period(other_club, plan=self.plan).invoice
+
+        self.assertEqual(second.number, "INV-2999-00001")
+
     def test_re_issuing_does_not_burn_a_number(self):
         # A gap in an invoice series is a question you do not want to have to answer.
         due = self.bill()

@@ -8519,3 +8519,225 @@ class PushSubscriptionOwnershipTests(TestCase):
         self.their_subscription.refresh_from_db()
         self.assertEqual(self.their_subscription.member, self.other_member)
         self.assertEqual(self.their_subscription.p256dh, "k")
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class CoachRosterSeasonScopingTests(TestCase):
+    """Coach roster screens only reach the current season's rows of the team
+    the coach staffs -- a past-season row (with its phone numbers) is a 404."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.past_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=400), end_date=today - datetime.timedelta(days=40))
+        cls.user = User.objects.create_user(email="scoped-coach@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Sam", last_name="Coach", user=cls.user)
+        cls.team = Team.objects.create(club=cls.club, name="U16", short_name="U16")
+        cls.other_team = Team.objects.create(club=cls.club, name="U18", short_name="U18")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=cls.team, member=cls.member, season=cls.season, position=cls.coach_position)
+
+        cls.player = Member.objects.create(first_name="Old", last_name="Player", phone="+32471234567", emergency_phone="+32477654321")
+        cls.current_row = TeamMembership.objects.create(team=cls.team, member=Member.objects.create(first_name="New", last_name="Player"), season=cls.season)
+        cls.past_row = TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.past_season)
+        cls.other_team_row = TeamMembership.objects.create(team=cls.other_team, member=cls.player, season=cls.season)
+
+    def _get(self, row):
+        return self.client.get(reverse("mobile:coach_roster_member", kwargs={"membership_pk": row.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_current_season_row_opens(self):
+        self.client.force_login(self.user)
+
+        self.assertEqual(self._get(self.current_row).status_code, 200)
+
+    def test_past_season_row_is_404(self):
+        self.client.force_login(self.user)
+
+        response = self._get(self.past_row)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertNotContains(response, "+32477654321", status_code=404)
+
+    def test_past_season_row_cannot_be_edited(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_roster_member", kwargs={"membership_pk": self.past_row.pk}), {"jersey_number": "5"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_other_teams_row_is_404(self):
+        self.client.force_login(self.user)
+
+        self.assertEqual(self._get(self.other_team_row).status_code, 404)
+
+    def test_past_season_row_cannot_be_removed(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:coach_roster_remove", kwargs={"membership_pk": self.past_row.pk}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(TeamMembership.objects.filter(pk=self.past_row.pk).exists())
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class FormFillOnBehalfTests(TestCase):
+    """mobile.views.FormFillView -- a parent/guardian fills in a form sent to
+    their child for that child (?for=<member id>), recorded against the
+    child with the parent as submitted_by."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+        cls.parent = Member.objects.create(first_name="Lars", last_name="Bakker", email="parent@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.parent, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        family = Family.objects.create(club=cls.club, name="Bakker")
+        FamilyMembership.objects.create(family=family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        cls.child = Member.objects.create(first_name="Mila", last_name="Bakker")
+        cls.other_child = Member.objects.create(first_name="Noor", last_name="Bakker")
+        for kid in (cls.child, cls.other_child):
+            ClubMembership.objects.create(club=cls.club, member=kid, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+            FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+        cls.stranger = Member.objects.create(first_name="Otto", last_name="Other")
+        ClubMembership.objects.create(club=cls.club, member=cls.stranger, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        cls.form = FormBuilderForm.objects.create(club=cls.club, title="Medical info")
+        cls.name_field = FormBuilderField.objects.create(form=cls.form, key="name", label="Name", field_type=FormBuilderField.FieldType.TEXT, required=True, order=1)
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _url(self, send, for_member=None):
+        url = reverse("mobile:form_fill", kwargs={"pk": send.pk})
+        return f"{url}?for={for_member.pk}" if for_member is not None else url
+
+    def _send_to(self, *members, **kwargs):
+        send = FormSend.objects.create(club=self.club, form=self.form, club_wide=False, **kwargs)
+        send.invited_members.add(*members)
+        return send
+
+    def test_a_form_sent_only_to_the_child_is_submitted_for_the_child(self):
+        send = self._send_to(self.child)
+
+        response = self.client.post(self._url(send), {"name": "Mila"}, HTTP_HOST=self.HOST)
+
+        self.assertRedirects(response, reverse("mobile:home"))
+        submission = Submission.objects.get(send=send)
+        self.assertEqual(submission.member, self.child)
+        self.assertEqual(submission.submitted_by, self.parent)
+
+    def test_the_page_says_who_it_is_being_filled_in_for(self):
+        send = self._send_to(self.child)
+
+        response = self.client.get(self._url(send), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, "Filling in for")
+        self.assertContains(response, "Mila Bakker")
+        self.assertEqual(response.context["for_member"], self.child)
+
+    def test_explicit_for_picks_the_child_when_parent_and_child_are_both_addressed(self):
+        send = self._send_to(self.parent, self.child)
+
+        response = self.client.post(self._url(send, self.child), {"name": "Mila"}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        submission = Submission.objects.get(send=send)
+        self.assertEqual(submission.member, self.child)
+        self.assertEqual(submission.submitted_by, self.parent)
+
+    def test_without_for_the_parents_own_response_is_the_default(self):
+        send = self._send_to(self.parent, self.child)
+
+        self.client.post(self._url(send), {"name": "Lars"}, HTTP_HOST=self.HOST)
+
+        submission = Submission.objects.get(send=send)
+        self.assertEqual(submission.member, self.parent)
+        self.assertEqual(submission.submitted_by, self.parent)
+
+    def test_the_page_offers_the_other_addressed_people(self):
+        send = self._send_to(self.parent, self.child)
+
+        response = self.client.get(self._url(send), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, self._url(send, self.child))
+        self.assertNotContains(response, self._url(send, self.other_child))
+
+    def test_for_a_child_not_in_the_audience_404s(self):
+        send = self._send_to(self.child)
+
+        get_response = self.client.get(self._url(send, self.other_child), HTTP_HOST=self.HOST)
+        post_response = self.client.post(self._url(send, self.other_child), {"name": "Noor"}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(get_response.status_code, 404)
+        self.assertEqual(post_response.status_code, 404)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_for_someone_who_is_not_my_child_404s_even_if_addressed(self):
+        send = self._send_to(self.child, self.stranger)
+
+        get_response = self.client.get(self._url(send, self.stranger), HTTP_HOST=self.HOST)
+        post_response = self.client.post(self._url(send, self.stranger), {"name": "Otto"}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(get_response.status_code, 404)
+        self.assertEqual(post_response.status_code, 404)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_a_malformed_for_404s(self):
+        send = self._send_to(self.child)
+
+        response = self.client.get(f"{reverse('mobile:form_fill', kwargs={'pk': send.pk})}?for=not-a-uuid", HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_per_member_limit_applies_per_child(self):
+        send = self._send_to(self.child, self.other_child, max_submissions_per_user=1)
+
+        self.client.post(self._url(send, self.child), {"name": "Mila"}, HTTP_HOST=self.HOST)
+        self.client.post(self._url(send, self.other_child), {"name": "Noor"}, HTTP_HOST=self.HOST)
+        response = self.client.post(self._url(send, self.child), {"name": "Mila again"}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Submission.objects.filter(send=send, member=self.child).count(), 1)
+        self.assertEqual(Submission.objects.filter(send=send, member=self.other_child).count(), 1)
+
+    def test_a_members_own_form_still_works(self):
+        send = self._send_to(self.parent)
+
+        response = self.client.post(self._url(send), {"name": "Lars"}, HTTP_HOST=self.HOST)
+
+        self.assertRedirects(response, reverse("mobile:home"))
+        submission = Submission.objects.get(send=send)
+        self.assertEqual(submission.member, self.parent)
+
+    def test_forms_list_links_each_pending_row_to_fill_for_that_person(self):
+        send = self._send_to(self.parent, self.child)
+
+        response = self.client.get(reverse("mobile:forms_list"), HTTP_HOST=self.HOST)
+
+        rows = [row for row in response.context["forms_status"] if row["send"] == send]
+        self.assertEqual({row["member"] for row in rows}, {self.parent, self.child})
+        self.assertContains(response, self._url(send, self.parent))
+        self.assertContains(response, self._url(send, self.child))
+
+    def test_forms_list_shows_the_childs_completed_row_once_filled_in_for_them(self):
+        send = self._send_to(self.parent, self.child)
+        self.client.post(self._url(send, self.child), {"name": "Mila"}, HTTP_HOST=self.HOST)
+
+        response = self.client.get(reverse("mobile:forms_list"), HTTP_HOST=self.HOST)
+
+        rows = {row["member"]: row for row in response.context["forms_status"] if row["send"] == send}
+        self.assertIsNotNone(rows[self.child]["submitted_at"])
+        self.assertIsNone(rows[self.parent]["submitted_at"])
+        self.assertContains(response, self._url(send, self.parent))
+
+    def test_home_card_links_to_fill_for_the_rows_person(self):
+        send = self._send_to(self.child)
+
+        response = self.client.get(reverse("mobile:home"), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, self._url(send, self.child))
