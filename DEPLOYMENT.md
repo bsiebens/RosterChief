@@ -608,6 +608,12 @@ with `docker compose -f compose.behind-proxy.yaml`):
       run has no `.offsite-sent` yet, so it uploads every `.age` file still on the server — the
       archive job drops the ones it already has (identical re-uploads) and archives the rest.
 
+### Upgrade notes: 0.7.10
+
+No server-side steps: 0.7.10 changes only CI and tests (Node 24 action versions, the suite
+sharded over four jobs, a Postgres-only test fix). Deploy it the usual way. If 0.7.9's steps
+above aren't done yet on a server, do those first.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
@@ -1149,8 +1155,10 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
 
 **Nothing reaches the registry untested.** The same workflow runs jobs in order:
 
-1. `test` — `ruff check` + the full suite (`uv run python manage.py test`). Runs on every push
-   *and* every pull request, against any branch.
+1. `test` — `ruff check` + the full suite. Runs on every push *and* every pull request, against
+   any branch. The suite is split over four parallel `test (N/4)` jobs
+   (`uv run python manage.py test --shard=N/4`, split by test class); `test` itself only gathers
+   their results, so it stays the one check name branch protection and `build` wait on.
 2. `build` — only on a push to `development` or `main`, and only once `test` has passed
    (`needs: test`). Builds the image once locally (not pushed yet), boots it, and curls its own
    `/healthz` before building-and-pushing the real, published tags — catching a broken
