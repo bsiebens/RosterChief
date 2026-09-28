@@ -10127,15 +10127,9 @@ class MemberRequirementChecklistTests(ManagementTestBase):
     """Marking a member's checklist items done/undone from their own page, and
     downloading whatever document was attached -- management:member_requirement_*.
 
-    Uploads land on rosterchief.storage.private_storage's real, configured location
-    (PRIVATE_MEDIA_ROOT) rather than a tempdir substituted via override_settings: that
-    storage is a module-level singleton built once at process start (see
-    rosterchief/storage.py), and Django's override_settings machinery only reloads
-    django.core.files.storage.storages/default_storage on a STORAGES change -- it has
-    no way to know about a hand-built FileSystemStorage instance a model field
-    happens to hold a reference to, so overriding the setting here would silently do
-    nothing and this class would look green while actually writing outside a tempdir
-    it thinks it's using. Each uploading test cleans up after itself instead, the
+    Uploads land on rosterchief.storage.private_storage, which re-reads
+    PRIVATE_MEDIA_ROOT on every access -- the test runner points that at a
+    throwaway directory. Each uploading test still cleans up after itself, the
     same way FeePayment/Club-logo-style tests elsewhere in this suite do.
     """
 

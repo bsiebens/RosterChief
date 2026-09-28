@@ -1,16 +1,22 @@
 """Shared plumbing for public, club-scoped pages outside the management app,
-plus the one routed page this app owns: accepting a family invite
-(members.services.invites). ClubScopedPublicMixin is also used by
+plus the pages this app routes itself: accepting a family invite
+(members.services.invites) and serving a member's private photo. ClubScopedPublicMixin is also used by
 registration, formbuilder, and mobile for their own public-facing pages.
 """
 
+import mimetypes
+
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import Http404
-from django.shortcuts import render
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404, render
+from django.utils.cache import patch_vary_headers
 from django.views import View
 
-from .models import FamilyInvite
+from rosterchief.media import MEDIA_CSP
+
+from .models import FamilyInvite, Member
 from .services.invites import InviteError, accept_family_invite, invite_problem
+from .services.photos import can_view_member_photo
 
 
 class ClubScopedPublicMixin:
@@ -48,3 +54,30 @@ class FamilyInviteAcceptView(ClubScopedPublicMixin, LoginRequiredMixin, View):
             except InviteError as error:
                 problem = str(error)
         return render(request, self.template_name, {"club": request.club, "invite": invite if problem is None else None, "problem": problem, "accepted": problem is None}, status=200 if problem is None else 400)
+
+
+class MemberPhotoView(View):
+    """Streams ``Member.photo`` from private storage to whoever
+    members.services.photos.can_view_member_photo allows -- staff authority is
+    taken from ``request.club`` (so it only counts on that club's own host),
+    while the member themselves and their parents/guardians are allowed on any
+    host. Everyone else gets a 404, which doesn't confirm the member exists."""
+
+    def get(self, request, pk):
+        member = get_object_or_404(Member, pk=pk)
+        if not member.photo or not can_view_member_photo(request.user, member, getattr(request, "club", None)):
+            raise Http404("No such photo.")
+        try:
+            photo = member.photo.open("rb")
+        except FileNotFoundError as error:
+            raise Http404("No such photo.") from error
+
+        content_type = mimetypes.guess_type(member.photo.name)[0] or "application/octet-stream"
+        if not content_type.startswith("image/") or content_type == "image/svg+xml":
+            content_type = "application/octet-stream"
+        response = FileResponse(photo, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=3600"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = MEDIA_CSP
+        patch_vary_headers(response, ["Cookie"])
+        return response

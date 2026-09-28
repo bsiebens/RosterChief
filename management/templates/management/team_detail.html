@@ -230,7 +230,7 @@
                         <div class="avatar {% if not assignment.member.photo %}avatar-placeholder{% endif %}">
                             <div class="h-8 w-8 {% if assignment.position.management_position and not assignment.member.photo %}bg-club{% endif %}">
                                 {% if assignment.member.photo %}
-                                    <img src="{{ assignment.member.photo.url }}" alt="" class="h-full w-full object-cover">
+                                    <img src="{{ assignment.member.photo_url }}" alt="" class="h-full w-full object-cover">
                                 {% else %}
                                     <span class="text-xs {% if assignment.position.management_position %}text-club-content{% endif %}">{{ assignment.member.first_name|slice:":1" }}{{ assignment.member.last_name|slice:":1" }}</span>
                                 {% endif %}

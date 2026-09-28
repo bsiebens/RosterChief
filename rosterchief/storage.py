@@ -8,9 +8,10 @@ regardless of what a Django view's own permission check says).
 `PRIVATE_MEDIA_ROOT` is a completely separate directory, on a separate Docker volume
 (see compose.yaml) that only the `web` container mounts -- Caddy never sees it. The
 only way to read a file stored here is through an authenticated Django view that
-streams it explicitly (see management.views.MemberRequirementDocumentView, the one
-current upload use: MemberRequirementStatus.document, e.g. an uploaded medical certificate),
-and the rendered-invoice PDF cache (InvoiceCacheStorage below).
+streams it explicitly: management.views.MemberRequirementDocumentView for
+MemberRequirementStatus.document (e.g. an uploaded medical certificate),
+members.views.MemberPhotoView for Member.photo, and the authorised invoice
+download views for the rendered-invoice PDF cache (InvoiceCacheStorage below).
 
 Deliberately local disk only, not S3, regardless of AWS_STORAGE_BUCKET_NAME -- unlike
 the default storage's public/private split (which follows whether a bucket is
@@ -40,7 +41,23 @@ class PrivateStorage(FileSystemStorage):
         raise ValueError("PrivateStorage has no URL -- read a file through an authenticated view instead, e.g. management.views.MemberRequirementDocumentView.")
 
 
-private_storage = PrivateStorage(location=str(settings.PRIVATE_MEDIA_ROOT))
+class SettingsPrivateStorage(PrivateStorage):
+    """PrivateStorage rooted at ``settings.PRIVATE_MEDIA_ROOT``, re-read on every
+    access instead of baked in at import time -- the same approach as
+    InvoiceCacheStorage below, so a test run's throwaway PRIVATE_MEDIA_ROOT (see
+    rosterchief/test_runner.py) is honoured by every private upload, not only the
+    invoice cache."""
+
+    @property
+    def base_location(self):
+        return str(settings.PRIVATE_MEDIA_ROOT)
+
+    @property
+    def location(self):
+        return os.path.abspath(self.base_location)
+
+
+private_storage = SettingsPrivateStorage()
 
 
 def get_private_storage() -> PrivateStorage:

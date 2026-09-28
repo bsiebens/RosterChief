@@ -1151,3 +1151,250 @@ class FamilyInviteAcceptTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("login", response["Location"])
+
+
+MEMBER_PHOTO_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
+class MemberPhotoAccessTests(TestCase):
+    """Member.photo lives in private storage and is only readable through
+    members:photo -- staff who may see the member (on that club's host), the
+    member themselves and their parents/guardians (any host). Teammates,
+    other clubs and strangers get a 404."""
+
+    CLUB_HOST = "ajax-united.rosterchief.app"
+    OTHER_HOST = "rival-fc.rosterchief.app"
+    BASE_HOST = "rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        from rosterchief.test_support import enrol_mfa
+
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        cls.other_season = Season.objects.create(club=cls.other_club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        cls.team = Team.objects.create(club=cls.club, name="U12", short_name="U12")
+        cls.player_position = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+
+        def person(email, first_name, **kwargs):
+            user = User.objects.create_user(email=email, password="pw-secret-123")
+            return user, Member.objects.create(user=user, first_name=first_name, last_name="Tester", **kwargs)
+
+        cls.kid_user, cls.kid = person("kid@example.com", "Kid")
+        ClubMembership.objects.create(club=cls.club, member=cls.kid, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=cls.team, member=cls.kid, season=cls.season, position=cls.player_position)
+
+        cls.teammate_user, cls.teammate = person("teammate@example.com", "Teammate")
+        ClubMembership.objects.create(club=cls.club, member=cls.teammate, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=cls.team, member=cls.teammate, season=cls.season, position=cls.player_position)
+
+        cls.coach_user, cls.coach = person("coach@example.com", "Coach")
+        StaffAssignment.objects.create(team=cls.team, member=cls.coach, season=cls.season, position=cls.coach_position)
+        enrol_mfa(cls.coach_user)
+
+        cls.parent_user, cls.parent = person("parent@example.com", "Parent")
+        family = Family.objects.create(club=cls.club)
+        FamilyMembership.objects.create(family=family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=cls.kid, role=FamilyMembership.FamilyRole.CHILD)
+
+        cls.sibling_user, cls.sibling = person("sibling@example.com", "Sibling")
+        FamilyMembership.objects.create(family=family, member=cls.sibling, role=FamilyMembership.FamilyRole.CHILD)
+
+        cls.admin_user, cls.admin = person("admin@example.com", "Admin")
+        ClubMembership.objects.create(club=cls.club, member=cls.admin, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.admin).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.admin_user)
+
+        cls.member_admin_user, cls.member_admin = person("member-admin@example.com", "Memberadmin")
+        ClubMembership.objects.create(club=cls.club, member=cls.member_admin, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.member_admin).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(cls.member_admin_user)
+
+        cls.other_admin_user, cls.other_admin = person("other-admin@example.com", "Otheradmin")
+        ClubMembership.objects.create(club=cls.other_club, member=cls.other_admin, season=cls.other_season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.other_club, member=cls.other_admin).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.other_admin_user)
+
+        cls.stranger_user, cls.stranger = person("stranger@example.com", "Stranger")
+
+    def setUp(self):
+        self.kid.photo.save("kid.png", SimpleUploadedFile("kid.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+        self.addCleanup(self.kid.photo.delete, save=False)
+
+    def fetch(self, user=None, host=CLUB_HOST, member=None):
+        if user is not None:
+            self.client.force_login(user)
+        return self.client.get(reverse("members:photo", args=[(member or self.kid).pk]), HTTP_HOST=host)
+
+    # --- storage ---
+
+    def test_the_photo_is_stored_privately(self):
+        from django.core.files.storage import default_storage
+
+        from rosterchief.storage import PrivateStorage
+
+        self.assertIsInstance(self.kid.photo.storage, PrivateStorage)
+        self.assertTrue(self.kid.photo.storage.exists(self.kid.photo.name))
+        self.assertFalse(default_storage.exists(self.kid.photo.name))
+
+    def test_photo_url_points_at_the_authorising_view(self):
+        self.assertTrue(self.kid.photo_url.startswith(reverse("members:photo", args=[self.kid.pk])))
+        self.assertEqual(self.kid.photo.url, self.kid.photo_url)
+        self.assertNotIn("/media/", self.kid.photo_url)
+
+    def test_photo_url_is_none_without_a_photo(self):
+        self.assertIsNone(self.teammate.photo_url)
+
+    # --- allowed ---
+
+    def test_coach_of_the_members_team_can_see_it(self):
+        response = self.fetch(self.coach_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertIn("private", response["Cache-Control"])
+        self.assertEqual(b"".join(response.streaming_content), MEMBER_PHOTO_PNG)
+
+    def test_club_admin_can_see_it(self):
+        self.assertEqual(self.fetch(self.admin_user).status_code, 200)
+
+    def test_member_admin_can_see_it(self):
+        self.assertEqual(self.fetch(self.member_admin_user).status_code, 200)
+
+    def test_the_member_themselves_can_see_it_on_any_host(self):
+        self.assertEqual(self.fetch(self.kid_user, host=self.CLUB_HOST).status_code, 200)
+        self.assertEqual(self.fetch(self.kid_user, host=self.BASE_HOST).status_code, 200)
+
+    def test_a_parent_can_see_it_on_any_host(self):
+        self.assertEqual(self.fetch(self.parent_user, host=self.CLUB_HOST).status_code, 200)
+        self.assertEqual(self.fetch(self.parent_user, host=self.BASE_HOST).status_code, 200)
+        self.assertEqual(self.fetch(self.parent_user, host=self.OTHER_HOST).status_code, 200)
+
+    def test_anyone_can_see_it_once_public_consent_is_given(self):
+        Member.objects.filter(pk=self.kid.pk).update(photo_public_consent=True)
+
+        self.assertEqual(self.fetch(None, host=self.BASE_HOST).status_code, 200)
+
+    # --- denied ---
+
+    def test_anonymous_gets_404(self):
+        self.assertEqual(self.fetch(None).status_code, 404)
+
+    def test_a_stranger_gets_404(self):
+        self.assertEqual(self.fetch(self.stranger_user).status_code, 404)
+
+    def test_a_teammate_gets_404(self):
+        self.assertEqual(self.fetch(self.teammate_user).status_code, 404)
+
+    def test_a_sibling_gets_404(self):
+        self.assertEqual(self.fetch(self.sibling_user).status_code, 404)
+
+    def test_another_clubs_admin_gets_404(self):
+        self.assertEqual(self.fetch(self.other_admin_user, host=self.OTHER_HOST).status_code, 404)
+
+    def test_staff_authority_needs_that_clubs_host(self):
+        self.assertEqual(self.fetch(self.coach_user, host=self.BASE_HOST).status_code, 404)
+        self.assertEqual(self.fetch(self.admin_user, host=self.OTHER_HOST).status_code, 404)
+
+    def test_a_member_admin_cannot_reach_a_member_outside_the_club(self):
+        self.stranger.photo.save("stranger.png", SimpleUploadedFile("stranger.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+        self.addCleanup(self.stranger.photo.delete, save=False)
+
+        self.assertEqual(self.fetch(self.member_admin_user, member=self.stranger).status_code, 404)
+
+    def test_no_photo_is_404_even_for_the_member(self):
+        self.assertEqual(self.fetch(self.teammate_user, member=self.teammate).status_code, 404)
+
+    # --- templates ---
+
+    def test_avatars_render_the_view_url(self):
+        from django.template.loader import render_to_string
+
+        for template in ("mobile/_avatar.html", "management/_avatar.html"):
+            with self.subTest(template=template):
+                html = render_to_string(template, {"person": self.kid})
+                self.assertIn(self.kid.photo_url.replace("&", "&amp;"), html)
+                self.assertNotIn("/media/", html)
+
+    def test_member_edit_forms_render_with_a_private_photo(self):
+        from management.forms import MemberForm
+        from mobile.forms import MemberProfileForm
+
+        for form_class in (MemberForm, MemberProfileForm):
+            with self.subTest(form=form_class.__name__):
+                html = str(form_class(instance=self.kid)["photo"])
+                self.assertIn(reverse("members:photo", args=[self.kid.pk]), html)
+
+
+class MovePhotosToPrivateStorageMigrationTests(TestCase):
+    """members/migrations/0012: copies each Member.photo from the default
+    (public) storage into private storage under the same name, then deletes
+    the public copy. Safe to run twice; a missing source file is skipped."""
+
+    def run_migration(self):
+        import importlib
+
+        from django.apps import apps
+
+        module = importlib.import_module("members.migrations.0012_move_member_photos_to_private_storage")
+        module.move_photos_to_private_storage(apps, None)
+
+    def test_moves_a_public_file_into_private_storage(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+
+        from rosterchief.storage import private_storage
+
+        member = Member.objects.create(first_name="Old", last_name="Upload")
+        name = default_storage.save(f"members/{member.pk}/old.png", ContentFile(MEMBER_PHOTO_PNG))
+        Member.objects.filter(pk=member.pk).update(photo=name)
+        self.addCleanup(private_storage.delete, name)
+
+        self.run_migration()
+        self.run_migration()
+
+        member.refresh_from_db()
+        self.assertEqual(member.photo.name, name)
+        self.assertTrue(private_storage.exists(name))
+        self.assertFalse(default_storage.exists(name))
+        with private_storage.open(name, "rb") as moved:
+            self.assertEqual(moved.read(), MEMBER_PHOTO_PNG)
+
+    def test_a_missing_source_file_is_skipped(self):
+        member = Member.objects.create(first_name="Lost", last_name="File")
+        Member.objects.filter(pk=member.pk).update(photo=f"members/{member.pk}/gone.png")
+
+        self.run_migration()
+
+        member.refresh_from_db()
+        self.assertEqual(member.photo.name, f"members/{member.pk}/gone.png")
+
+
+class PurgePublicMemberPhotosCommandTests(TestCase):
+    def test_deletes_everything_under_members_in_default_storage_only(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+
+        stale = default_storage.save("members/some-id/old.png", ContentFile(MEMBER_PHOTO_PNG))
+        unrelated = default_storage.save("clubs/ajax-united/logo.png", ContentFile(MEMBER_PHOTO_PNG))
+        self.addCleanup(default_storage.delete, unrelated)
+
+        call_command("purge_public_member_photos", "--dry-run", stdout=StringIO())
+        self.assertTrue(default_storage.exists(stale))
+
+        call_command("purge_public_member_photos", stdout=StringIO())
+
+        self.assertFalse(default_storage.exists(stale))
+        self.assertTrue(default_storage.exists(unrelated))
+
+    def test_nothing_to_purge(self):
+        out = StringIO()
+
+        with override_settings(MEDIA_ROOT=tempfile.mkdtemp()):
+            call_command("purge_public_member_photos", stdout=out)
+
+        self.assertIn("0 file(s)", out.getvalue())
