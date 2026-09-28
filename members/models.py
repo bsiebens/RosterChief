@@ -1,13 +1,17 @@
+import hashlib
 import secrets
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.db.models.fields.files import ImageFieldFile
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
 from rosterchief.base import ClubScopedModel, UUIDModel
+from rosterchief.storage import get_private_storage
 
 
 def member_photo_path(instance, filename):
@@ -16,6 +20,23 @@ def member_photo_path(instance, filename):
     # belongs to), so there's no single club to scope the path by. Same
     # "stable id, not a name/slug" reasoning as news_photo_path/team_photo_path.
     return f"members/{instance.pk}/{filename}"
+
+
+class MemberPhotoFieldFile(ImageFieldFile):
+    """A member photo lives in private storage, which has no URL of its own
+    (rosterchief.storage.PrivateStorage). ``.url`` answers with the authorising
+    view instead (``Member.photo_url``), so anything that still asks a photo for
+    its URL -- a ClearableFileInput's "Currently:" link, the public roster API --
+    gets a link that goes through the access check rather than an exception."""
+
+    @property
+    def url(self):
+        self._require_file()
+        return self.instance.photo_url
+
+
+class MemberPhotoField(models.ImageField):
+    attr_class = MemberPhotoFieldFile
 
 
 class Family(ClubScopedModel):
@@ -66,11 +87,13 @@ class Member(UUIDModel):
     phone = PhoneNumberField(_("phone number"), null=True, blank=True)
     emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
-    photo = models.ImageField(_("photo"), upload_to=member_photo_path, blank=True)
-    #: Gates only the *public* surfaces (a club's public website/API roster) --
-    #: someone already inside the club (coach roster, staff lists, the app's
-    #: own "People I manage" rows) sees the photo regardless, same as they
-    #: already see this member's name. Off by default: a photo uploaded for
+    #: Private storage: readable only through members.views.MemberPhotoView,
+    #: which applies members.services.photos.can_view_member_photo.
+    photo = MemberPhotoField(_("photo"), upload_to=member_photo_path, storage=get_private_storage, blank=True)
+    #: Gates the *public* surfaces (a club's public website/API roster): once
+    #: on, members.views.MemberPhotoView serves the photo to anyone. Without
+    #: it, only staff who may see this member, the member themselves and their
+    #: parents/guardians can (members.services.photos). Off by default: a photo uploaded for
     #: in-app use (e.g. a parent picking their own kid out of a roster list)
     #: shouldn't become world-visible without a separate, explicit opt-in --
     #: this matters most for underage players.
@@ -90,6 +113,16 @@ class Member(UUIDModel):
 
     def get_short_name(self):
         return self.first_name
+
+    @property
+    def photo_url(self):
+        """The authorising view's URL for this member's photo, or None without
+        one. The ``v`` parameter changes whenever the stored file does, so a
+        browser's private cache never shows a replaced photo."""
+        if not self.photo:
+            return None
+        version = hashlib.sha256(self.photo.name.encode()).hexdigest()[:12]
+        return f"{reverse('members:photo', args=[self.pk])}?v={version}"
 
     @property
     def public_photo(self):

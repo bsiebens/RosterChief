@@ -155,7 +155,7 @@
                     <div class="text-sm text-ink">
                         {{ applied.discount }}
                         &mdash;
-                        {% if applied.discount_type == "percentage" %}{{ applied.discount_amount }}%{% else %}&euro; {{ applied.discount_amount }}{% endif %}
+                        &minus;&euro; {{ applied.amount }}{% if applied.discount_type == "percentage" %} ({{ applied.discount_amount|floatformat:"-2" }}%){% endif %}
                     </div>
                 {% endfor %}
             </div>

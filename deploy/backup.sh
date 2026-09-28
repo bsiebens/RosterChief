@@ -3,8 +3,9 @@
 #
 #   deploy/backup.sh /var/backups/rosterchief
 #
-# Step-by-step setup (encryption key, offsite copy to a server over SSH, cron, restore test):
-# DEPLOYMENT.md, "Backups".
+# Step-by-step setup (encryption key, append-only offsite copy to a server over SSH, cron,
+# restore test): DEPLOYMENT.md, "Backups". The backup server's half is
+# deploy/backup-server/archive-incoming.sh.
 #
 # Runs from cron (see DEPLOYMENT.md). Exits non-zero on any failure, so cron mails you —
 # a backup script that fails quietly is worse than no backup script, because you will
@@ -115,14 +116,56 @@ echo "$(date -Iseconds) backup ok: $(basename "$DB_OUT") ($(du -h "$DB_OUT" | cu
 # encrypted *.age files are copied (BACKUP_AGE_RECIPIENT is required above for this); any
 # plaintext archives left from before encryption was turned on stay local.
 #
-# rclone copy never deletes anything on the remote, so the offsite copy keeps its own, longer
-# retention: REMOTE_KEEP_DAYS (default 60; 0 keeps everything forever) prunes *.age files older
-# than that from BACKUP_REMOTE after each successful upload.
+# The offsite copy is append-only from here: BACKUP_REMOTE points at the backup server's
+# incoming/ folder, the upload key may create files there but not remove, rename or change
+# them (sftp-server -P, see DEPLOYMENT.md), and a root job on the backup server
+# (deploy/backup-server/archive-incoming.sh) moves each finished upload out of this server's
+# reach. So whoever takes over this server can't delete or overwrite the offsite backups -- and
+# this script can't prune them either: retention lives on the backup server (ARCHIVE_KEEP_DAYS).
+#
+# Because uploads disappear from incoming/, rclone can't tell what it sent before by looking at
+# the remote. $DEST/.offsite-sent records every file uploaded successfully; each run uploads
+# only the *.age files not on that list (so a failed night is retried the next night, and a
+# pre-deploy backup goes out with the next nightly run). A file re-sent after a partial failure
+# is harmless: the archive job drops identical re-uploads.
+#
+# Upload flags, all so that nothing but "create and write" is needed on the server:
+#   --inplace                 write straight to the final name. By default rclone >= 1.63
+#                             uploads to <name>.<hash>.partial and renames it, and rename is
+#                             denied. Older rclone has no such flag and already writes in place.
+#   --sftp-set-modtime=false  don't set the file's mtime afterwards (setstat, denied).
+#   --no-check-dest           don't compare with the remote; just upload the listed files.
+if [ -n "${REMOTE_KEEP_DAYS:-}" ]; then
+    echo "NOTE: REMOTE_KEEP_DAYS is ignored now -- this server can no longer delete offsite backups (by design). Retention is ARCHIVE_KEEP_DAYS on the backup server; remove REMOTE_KEEP_DAYS from the cron line. See DEPLOYMENT.md, \"Backups\"." >&2
+fi
 if [ -n "${BACKUP_REMOTE:-}" ]; then
-    rclone copy "$DEST" "$BACKUP_REMOTE" --max-age "${KEEP_DAYS}d" --include '*.age'
-    echo "$(date -Iseconds) copied to $BACKUP_REMOTE"
-    REMOTE_KEEP_DAYS="${REMOTE_KEEP_DAYS:-60}"
-    if [ "$REMOTE_KEEP_DAYS" != "0" ]; then
-        rclone delete "$BACKUP_REMOTE" --min-age "${REMOTE_KEEP_DAYS}d" --include '*.age'
+    case "${BACKUP_REMOTE%/}" in
+        */incoming) ;;
+        *) echo "NOTE: BACKUP_REMOTE=$BACKUP_REMOTE does not end in /incoming; the backup server only archives what lands in its incoming folder (e.g. offsite:rosterchief/incoming). See DEPLOYMENT.md, \"Backups\"." >&2 ;;
+    esac
+
+    RCLONE_FLAGS=(--no-check-dest --sftp-set-modtime=false)
+    read -r RCLONE_MAJOR RCLONE_MINOR < <(rclone version | sed -n '1s/^rclone v\([0-9]*\)\.\([0-9]*\).*/\1 \2/p') || true
+    if [ "${RCLONE_MAJOR:-0}" -gt 1 ] || { [ "${RCLONE_MAJOR:-0}" -eq 1 ] && [ "${RCLONE_MINOR:-0}" -ge 63 ]; }; then
+        RCLONE_FLAGS+=(--inplace)
     fi
+
+    SENT="$DEST/.offsite-sent"
+    PENDING="$DEST/.offsite-pending"
+    LOCAL_AGE="$DEST/.offsite-local"
+    touch "$SENT"
+    find "$DEST" -mindepth 1 -maxdepth 1 -type f -name '*.age' ! -name '.*' -exec basename {} \; | sort > "$LOCAL_AGE"
+    sort -u "$SENT" | comm -23 "$LOCAL_AGE" - > "$PENDING"
+
+    if [ -s "$PENDING" ]; then
+        rclone copy "$DEST" "$BACKUP_REMOTE" --files-from "$PENDING" "${RCLONE_FLAGS[@]}"
+        cat "$PENDING" >> "$SENT"
+        echo "$(date -Iseconds) copied $(wc -l < "$PENDING" | tr -d ' ') file(s) to $BACKUP_REMOTE"
+    else
+        echo "$(date -Iseconds) nothing new to copy to $BACKUP_REMOTE"
+    fi
+    # Forget files that local retention has removed, so the list stays short.
+    sort -u "$SENT" | comm -12 - "$LOCAL_AGE" > "$SENT.new"
+    mv "$SENT.new" "$SENT"
+    rm -f "$PENDING" "$LOCAL_AGE"
 fi

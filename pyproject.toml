@@ -1,10 +1,11 @@
 [project]
 name = "rosterchief"
-version = "0.7.8"
+version = "0.7.9"
 requires-python = ">=3.14"
 dependencies = [
     "apscheduler>=3.11.3",
     "beautifulsoup4>=4.15.0",
+    "defusedxml>=0.7.1",
     "dj-database-url>=3.1.2",
     "django>=6.0.6",
     "django-allauth[mfa]>=65.18.0",

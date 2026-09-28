@@ -5,6 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, Season
@@ -581,7 +582,7 @@ class RosterApiTests(TeamsTestCase):
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn("photo.jpg", roster.players[0].players[0].photo_url)
+        self.assertIn(reverse("members:photo", args=[member.pk]), roster.players[0].players[0].photo_url)
 
     def test_a_staff_members_photo_follows_the_same_consent_gate(self):
         coach = Member.objects.create(first_name="Cam", last_name="Coach", photo=SimpleUploadedFile("coach.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
@@ -589,7 +590,7 @@ class RosterApiTests(TeamsTestCase):
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn("coach.jpg", roster.staff[0].photo_url)
+        self.assertIn(reverse("members:photo", args=[coach.pk]), roster.staff[0].photo_url)
 
 
 class NumberPoolModelTests(TeamsTestCase):

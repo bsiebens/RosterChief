@@ -1,6 +1,7 @@
 import importlib
 import re
 import uuid
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
@@ -18,12 +19,14 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from club.models import Club, ClubRole
+from club.models import Club, ClubRole, EvaluationManager, Season, ShopManager
 from controlpanel.services.admins import grant_club_admin
 from features.models import EmailSuppression
 from members.models import Member
 from rosterchief.test_support import enrol_mfa
+from teams.models import Position, StaffAssignment, Team
 
 from .adapters import RosterChiefAccountAdapter, RosterChiefMFAAdapter, webauthn_rp_id
 from .middleware import RequireMFAMiddleware, mfa_required_for
@@ -195,6 +198,45 @@ class MFARequirementTests(TestCase):
     def test_user_without_any_role_does_not_need_mfa(self):
         self.assertFalse(mfa_required_for(self.make_user("nobody@example.com")))
 
+    def test_shop_manager_must_have_mfa(self):
+        user = self.with_role(self.make_user("shop@example.com"), ClubRole.Roles.MEMBER)
+        ShopManager.objects.create(club=self.club, member=user.member)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_evaluation_manager_must_have_mfa(self):
+        user = self.with_role(self.make_user("eval@example.com"), ClubRole.Roles.MEMBER)
+        EvaluationManager.objects.create(club=self.club, member=user.member)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def make_assignment(self, user, *, management_position, season_offset_days=0):
+        today = timezone.localdate()
+        start = today + timedelta(days=season_offset_days)
+        season = Season.objects.create(club=self.club, start_date=start - timedelta(days=30), end_date=start + timedelta(days=30))
+        team = Team.objects.create(club=self.club, name=f"T{season_offset_days}{management_position}")
+        position = Position.objects.create(club=self.club, name=f"P{season_offset_days}{management_position}", staff_position=True, management_position=management_position)
+        member = Member.objects.create(user=user, first_name="Coach", last_name="Manager")
+        StaffAssignment.objects.create(team=team, member=member, season=season, position=position)
+
+    def test_current_season_coach_manager_must_have_mfa(self):
+        user = self.make_user("coach-manager@example.com")
+        self.make_assignment(user, management_position=True)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_staff_without_a_management_position_does_not_need_mfa(self):
+        user = self.make_user("assistant@example.com")
+        self.make_assignment(user, management_position=False)
+
+        self.assertFalse(mfa_required_for(user))
+
+    def test_coach_manager_of_a_past_season_does_not_need_mfa(self):
+        user = self.make_user("former-coach@example.com")
+        self.make_assignment(user, management_position=True, season_offset_days=-400)
+
+        self.assertFalse(mfa_required_for(user))
+
 
 class RequireMFAMiddlewareTests(TestCase):
     def setUp(self):
@@ -234,6 +276,25 @@ class RequireMFAMiddlewareTests(TestCase):
         enrol_mfa(staff)
 
         self.assertEqual(self.dispatch(staff).content, b"ok")
+
+    def test_shop_manager_without_mfa_is_sent_to_enrolment(self):
+        club = Club.objects.create(name="Shop Club", slug="shop-club")
+        user = User.objects.create_user(email="shopkeeper@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Shop", last_name="Keeper")
+        ShopManager.objects.create(club=club, member=member)
+
+        response = self.dispatch(user)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mfa_index"))
+
+    def test_plain_member_passes_through(self):
+        club = Club.objects.create(name="Plain Club", slug="plain-club")
+        user = User.objects.create_user(email="plain-member@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Plain", last_name="Member")
+        ClubRole.objects.create(club=club, member=member, role=ClubRole.Roles.MEMBER)
+
+        self.assertEqual(self.dispatch(user).content, b"ok")
 
 
 class AdminLoginRoutingTests(TestCase):

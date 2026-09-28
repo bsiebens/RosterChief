@@ -21,7 +21,7 @@ from django.views.generic import TemplateView, View
 from waffle import flag_is_active
 
 from club.models import ClubMembership, Season
-from club.services.access import can_add_news, can_manage_evaluations, current_season
+from club.services.access import can_add_news, can_manage_evaluations, current_season, get_current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, EventTask, Lineup, LineupSelection, Location, Opponent
 from events.services import detach_occurrence, generate_occurrences, propagate_series
@@ -1362,7 +1362,9 @@ class CoachRosterMemberView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     def get_membership(self):
         if self.active_team is None:
             raise Http404
-        return get_object_or_404(TeamMembership.objects.filter(team=self.active_team).select_related("member", "position"), pk=self.kwargs["membership_pk"])
+        # Current season only: a past season's row of the same team (with its
+        # phone numbers) is outside what the coach's current staff role covers.
+        return get_object_or_404(TeamMembership.objects.filter(team=self.active_team, season=get_current_season(self.request)).select_related("member", "position"), pk=self.kwargs["membership_pk"])
 
     def build_form(self, membership, data=None):
         return CoachRosterEditForm(data, instance=membership, club=self.request.club, team=self.active_team, season=membership.season)
@@ -1406,7 +1408,7 @@ class CoachRosterRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        membership = get_object_or_404(TeamMembership.objects.filter(team=self.active_team), pk=kwargs["membership_pk"])
+        membership = get_object_or_404(TeamMembership.objects.filter(team=self.active_team, season=get_current_season(request)), pk=kwargs["membership_pk"])
         member = membership.member
         membership.delete()
 
@@ -1427,7 +1429,7 @@ class CoachStaffRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        assignment = get_object_or_404(StaffAssignment.objects.filter(team=self.active_team), pk=kwargs["assignment_pk"])
+        assignment = get_object_or_404(StaffAssignment.objects.filter(team=self.active_team, season=get_current_season(request)), pk=kwargs["assignment_pk"])
         if self.me is not None and assignment.member_id == self.me.pk:
             return HttpResponseForbidden()
 

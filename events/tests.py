@@ -3311,3 +3311,42 @@ class BackfillGameTitlesMigrationTests(TestCase):
 
         event.refresh_from_db()
         self.assertEqual(event.title, "Practice")
+
+
+class HockeyCompetitionRequestTimeoutTests(EventsTestBase):
+    """RBIHF/CEHL live-score lookups must bound their HTTP calls, and a timeout
+    has to come back out of fetch_game_info as an ordinary CompetitionFetchError."""
+
+    def setUp(self):
+        # Flag membership is cached per club (features.models) -- keep it from leaking between tests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable(self, name):
+        competition = Competition.objects.get(name=name)
+        if competition.flag is None:
+            competition.flag = get_waffle_flag_model().objects.create(name=f"{name}-timeout-test")
+            competition.save(update_fields=["flag"])
+        competition.flag.clubs.add(self.club)
+
+    def make_game(self, competition):
+        return self.make_event(kind=Event.EventKind.GAME, competition=competition, external_game_id="1234")
+
+    def test_every_request_passes_a_timeout(self):
+        for name in ["RBIHF", "CEHL"]:
+            with self.subTest(competition=name):
+                self.enable(name)
+                response = mock.Mock(status_code=500)
+                with mock.patch("events.competition.hockey.requests.get", return_value=response) as mock_get:
+                    fetch_game_info(self.make_game(name))
+                self.assertTrue(mock_get.call_args_list)
+                for call in mock_get.call_args_list:
+                    self.assertEqual(call.kwargs.get("timeout"), dfel_import.REQUEST_TIMEOUT_SECONDS)
+
+    def test_a_timeout_surfaces_as_a_competition_fetch_error(self):
+        for name in ["RBIHF", "CEHL"]:
+            with self.subTest(competition=name):
+                self.enable(name)
+                game = self.make_game(name)
+                with mock.patch("events.competition.hockey.requests.get", side_effect=requests.Timeout("read timed out")), self.assertRaises(CompetitionFetchError):
+                    fetch_game_info(game)

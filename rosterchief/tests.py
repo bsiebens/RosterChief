@@ -436,3 +436,120 @@ class CsrfCookieTossingTests(TestCase):
         response = self.client.post(reverse("account_login"), {"login": "x@example.com", "password": "x", "csrfmiddlewaretoken": token}, HTTP_HOST="ajax-united.rosterchief.app", HTTP_ORIGIN="http://evil.rosterchief.app")
 
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", ".rosterchief.app", "testserver"])
+class AdminBaseDomainOnlyTests(TestCase):
+    """Django's admin manages every club at once, so it only answers on the base
+    domain; on any club subdomain (known or not) it is a plain 404."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from rosterchief.test_support import make_club
+
+        make_club()
+
+    def test_admin_login_404s_on_a_club_host(self):
+        response = self.client.get("/admin/login/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_index_404s_on_a_club_host(self):
+        response = self.client.get("/admin/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_model_page_404s_on_a_club_host(self):
+        response = self.client.get("/admin/authentication/user/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_404s_on_an_unknown_subdomain(self):
+        response = self.client.get("/admin/", HTTP_HOST="no-such-club.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_404s_for_a_signed_in_superuser_on_a_club_host(self):
+        from django.contrib.auth import get_user_model
+
+        from rosterchief.test_support import enrol_mfa
+
+        user = get_user_model().objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(user)
+        self.client.force_login(user)
+
+        response = self.client.get("/admin/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_login_redirects_on_the_base_domain(self):
+        response = self.client.get("/admin/login/", HTTP_HOST="rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_admin_index_redirects_to_login_on_the_base_domain(self):
+        response = self.client.get("/admin/", HTTP_HOST="rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login/", response["Location"])
+
+    def test_admin_index_is_served_to_a_superuser_on_the_base_domain(self):
+        from django.contrib.auth import get_user_model
+
+        from rosterchief.test_support import enrol_mfa
+
+        user = get_user_model().objects.create_superuser(email="root@example.com", password="pw-secret-123")
+        enrol_mfa(user)
+        self.client.force_login(user)
+
+        response = self.client.get("/admin/", HTTP_HOST="rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+
+
+class SecretKeySystemCheckTests(SimpleTestCase):
+    """rosterchief.E001: with DEBUG off, `check`/`migrate` refuse a placeholder SECRET_KEY."""
+
+    STRONG_KEY = "k3J9vQ2xLr8TzWm4Pq7Yb1Nc6Hd0Fs5Ga-_Ue2Xo9Ri4Vt7Lp3Sw8Mz1Qy6Bn0Cj"
+
+    def run_check(self, **overrides):
+        from .checks import secret_key_check
+
+        settings = {"DEBUG": False, "TESTING": False, "SECRET_KEY": self.STRONG_KEY, **overrides}
+        with override_settings(**settings):
+            return secret_key_check(None)
+
+    def test_a_strong_key_passes(self):
+        self.assertEqual(self.run_check(), [])
+
+    def test_weak_keys_are_errors(self):
+        weak = {
+            "empty": "",
+            "short": "a-perfectly-random-but-short-key",
+            "few unique characters": "ab" * 40,
+            "build placeholder": "build-only-not-a-secret" + "x" * 40,
+            "changeme": "CHANGEME-" + self.STRONG_KEY,
+            "django-insecure prefix": "django-insecure-" + self.STRONG_KEY,
+        }
+        for label, key in weak.items():
+            with self.subTest(label):
+                errors = self.run_check(SECRET_KEY=key)
+                self.assertEqual([error.id for error in errors], ["rosterchief.E001"])
+
+    def test_skipped_when_debug_is_on(self):
+        self.assertEqual(self.run_check(DEBUG=True, SECRET_KEY="dev"), [])
+
+    def test_skipped_under_the_test_runner(self):
+        self.assertEqual(self.run_check(TESTING=True, SECRET_KEY="ci-test-not-a-secret"), [])
+
+    def test_registered_with_the_check_framework(self):
+        from django.core import checks
+
+        from .checks import secret_key_check
+
+        self.assertIn(secret_key_check, checks.registry.registry.get_checks())
+
+    def test_hsts_preload_warning_is_the_only_silenced_check(self):
+        from django.conf import settings
+
+        self.assertEqual(settings.SILENCED_SYSTEM_CHECKS, ["security.W021"])

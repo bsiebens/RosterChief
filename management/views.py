@@ -108,7 +108,7 @@ from formbuilder.models import FormSend
 from formbuilder.services.audience import effective_members as form_effective_members
 from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
-from formbuilder.services.reporting import form_report
+from formbuilder.services.reporting import display_value, form_report
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
 from members.services.deletion import member_has_ties_outside_club, remove_member_from_club
 from members.services.family import add_child_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, get_or_create_login_user, grant_login
@@ -135,6 +135,7 @@ from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, P
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
+from shop.services.payments import delete_payment as delete_shop_payment
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
@@ -1343,7 +1344,7 @@ class MemberDeleteView(MemberAdminRequiredMixin, View):
 
 
 class TeamListView(ClubStaffRequiredMixin, ListView):
-    """ADMIN sees every team; everyone else (coach, manager, other staff) only
+    """ADMIN/MEMBER_ADMIN see every team; everyone else (coach, manager, other staff) only
     the teams they're staffed on this season -- same visibility rule as
     ``members_visible_to``, not the narrower management-only ``teams_managed_by``."""
 
@@ -1353,7 +1354,7 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
 
     def get_queryset(self):
         club = self.request.club
-        teams = Team.objects.filter(club=club) if is_club_admin(self.request.user, club) else teams_staffed_by(self.request.user, club)
+        teams = Team.objects.filter(club=club) if can_manage_members(self.request.user, club) else teams_staffed_by(self.request.user, club)
         search = self.request.GET.get("q", "").strip()
         if search:
             teams = teams.filter(name__icontains=search)
@@ -1437,7 +1438,13 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
     context_object_name = "team"
 
     def get_queryset(self):
-        return Team.objects.filter(club=self.request.club)
+        # Same visibility rule as TeamListView: club/member admins see every
+        # team, other staff only the teams they're on the staff of this
+        # season. Anything else is a 404, not just hidden from the list.
+        user, club = self.request.user, self.request.club
+        if can_manage_members(user, club):
+            return Team.objects.filter(club=club)
+        return teams_staffed_by(user, club)
 
     def get_context_data(self, **kwargs):
         club = self.request.club
@@ -4889,7 +4896,11 @@ class DiscountListView(ShopManagerRequiredMixin, ListView):
     context_object_name = "discounts"
 
     def get_queryset(self):
-        return Discount.objects.filter(club=self.request.club)
+        # use_count: orders that used the code and weren't cancelled -- the
+        # same count Discount.max_uses is enforced against (shop.services.
+        # checkout.discount_uses).
+        uses = Count("applied_discounts", filter=~Q(applied_discounts__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED))
+        return Discount.objects.filter(club=self.request.club).annotate(use_count=uses)
 
 
 class DiscountCreateView(ShopManagerRequiredMixin, CreateView):
@@ -5530,14 +5541,7 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
     def post(self, request, order_pk, pk):
         payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk).select_related("voucher"), pk=pk)
         order = payment.order
-        voucher = payment.voucher
-        amount = payment.amount
-        was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
-        payment.delete()
-
-        if voucher is not None and was_confirmed:
-            voucher.consumed_amount = max(Decimal("0"), voucher.consumed_amount - amount)
-            voucher.save(update_fields=["consumed_amount"])
+        delete_shop_payment(payment)
 
         reverted_to_pending = False
         if order.payment_status != Order.PaymentStatus.REFUNDED:
@@ -6417,7 +6421,8 @@ class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
         # each row carries its cells in the same column order.
         report = form_report(send)
         columns = [{"field": column, "summary": sorted(report.summaries[column.id].items()) if column.id in report.summaries else None} for column in report.columns]
-        rows = [{"submission": row.submission, "cells": [row.values.get(column.id) for column in report.columns]} for row in report.rows]
+        # A FILE answer's cell carries its Answer too, for the download link.
+        rows = [{"submission": row.submission, "cells": [{"value": row.values.get(column.id), "file_answer": row.files.get(column.id)} for column in report.columns]} for row in report.rows]
         return super().get_context_data(
             audience_count=audience_count,
             submission_count=submission_count,
@@ -6446,13 +6451,16 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
         writer = csv.writer(response)
         # safe_row: labels and answers are free text typed by users (anonymous
         # respondents included) -- never let a spreadsheet run one as a formula.
-        writer.writerow(safe_row([_("Submitted"), _("Member"), *[column.label for column in report.columns]]))
+        # "Submitted by" is only filled in when someone else (a parent) answered for the member.
+        writer.writerow(safe_row([_("Submitted"), _("Member"), _("Submitted by"), *[column.label for column in report.columns]]))
         for row in report.rows:
+            on_behalf_by = row.submission.submitted_on_behalf_by
             writer.writerow(
                 safe_row(
                     [
                         timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
                         str(row.submission.member) if row.submission.member else "",
+                        str(on_behalf_by) if on_behalf_by else "",
                         *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
                     ]
                 )
@@ -6461,11 +6469,8 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
 
 
 def _format_answer_value(value):
-    if value is None:
-        return ""
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    return str(value)
+    # A file answer exports its original file name, never its storage path.
+    return display_value(value)
 
 
 class EvaluationChecklistMixin:
@@ -6769,7 +6774,14 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
         action = request.POST.get("action", "note")
         since_raw = request.POST.get("since", "")
         player_pk = request.POST.get("player_pk")
-        player = get_object_or_404(Member, pk=player_pk) if player_pk else None
+        # Only a player this checklist actually covers (the same population
+        # the walkthrough steps through) -- never an arbitrary Member pk,
+        # which could belong to another club entirely.
+        player = None
+        if player_pk:
+            player = next((candidate for candidate in checklist_players(self.checklist) if str(candidate.pk) == player_pk), None)
+            if player is None:
+                raise Http404
         author = Member.objects.filter(user=request.user).first()
 
         if action == "start_session":
@@ -6783,6 +6795,9 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
                 end_session(session)
                 notify(request, f"s|{_('Meeting ended')}|{_('Download the outcomes PDF from the button above.')}")
             return self._redirect(player=player, since_raw=since_raw)
+
+        if action in ("outcome", "note") and player is None:
+            raise Http404
 
         if action == "outcome":
             session = active_session(self.checklist)

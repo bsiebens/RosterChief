@@ -13,7 +13,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import Order, Payment
+from ..models import Order, Payment, Voucher
 
 
 class PaymentError(Exception):
@@ -49,12 +49,28 @@ def sync_payment_status(order):
         order.save(update_fields=["payment_status"])
 
 
+def lock_voucher(voucher) -> Voucher:
+    """Re-reads ``voucher`` under a row lock (the caller must be inside a
+    transaction) and copies the fresh balance back onto the caller's own
+    instance. Every writer of Voucher.consumed_amount goes through this, so
+    two concurrent requests (or a double submit) holding the same stale
+    voucher can't both spend its balance -- the second one waits for the
+    first to commit, then sees what's actually left."""
+    locked = Voucher.objects.select_for_update().get(pk=voucher.pk)
+    voucher.consumed_amount = locked.consumed_amount
+    voucher.amount = locked.amount
+    voucher.is_active = locked.is_active
+    voucher.expiry_date = locked.expiry_date
+    return locked
+
+
 @transaction.atomic
 def record_payment(order, *, amount: Decimal, method: str, reference: str = "", voucher=None) -> Payment:
     """Creates a Payment and settles it against the order -- and, when paying
     by voucher, deducts from that voucher's own balance in the same
     transaction, so a Payment can never exist without the voucher backing it
-    actually being reserved.
+    actually being reserved. The voucher's balance is checked under a row
+    lock (lock_voucher), not off the possibly stale instance passed in.
     """
     if amount <= 0:
         raise PaymentError(_("The amount must be greater than zero."))
@@ -64,18 +80,38 @@ def record_payment(order, *, amount: Decimal, method: str, reference: str = "", 
             raise PaymentError(_("A voucher is required for this payment method."))
         if voucher.club_id != order.club_id:
             raise PaymentError(_("That voucher doesn't belong to this club."))
-        if not voucher.is_usable:
+        locked = lock_voucher(voucher)
+        if not locked.is_usable:
             raise PaymentError(_("That voucher is expired, inactive, or fully used."))
-        if amount > voucher.available_amount:
-            raise PaymentError(_("Only €%(amount)s is available on that voucher.") % {"amount": voucher.available_amount})
+        if amount > locked.available_amount:
+            raise PaymentError(_("Only €%(amount)s is available on that voucher.") % {"amount": locked.available_amount})
     elif voucher is not None:
         raise PaymentError(_("A voucher can only be used with the voucher payment method."))
 
     payment = Payment.objects.create(order=order, amount=amount, method=method, status=Payment.PaymentStatus.CONFIRMED, reference=reference, paid_at=timezone.now(), voucher=voucher)
 
     if voucher is not None:
-        voucher.consumed_amount += amount
-        voucher.save(update_fields=["consumed_amount"])
+        locked.consumed_amount += amount
+        locked.save(update_fields=["consumed_amount"])
+        voucher.consumed_amount = locked.consumed_amount
 
     sync_payment_status(order)
     return payment
+
+
+@transaction.atomic
+def delete_payment(payment) -> None:
+    """Deletes ``payment``; a confirmed voucher payment gives its amount back
+    to the voucher, onto the voucher's *current* balance (read under a row
+    lock), not whatever was loaded alongside the payment. Leaves the order's
+    payment_status to the caller (see PaymentDeleteView)."""
+    voucher = payment.voucher
+    was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
+    amount = payment.amount
+    payment.delete()
+
+    if voucher is not None and was_confirmed:
+        locked = lock_voucher(voucher)
+        locked.consumed_amount = max(Decimal("0"), locked.consumed_amount - amount)
+        locked.save(update_fields=["consumed_amount"])
+        voucher.consumed_amount = locked.consumed_amount

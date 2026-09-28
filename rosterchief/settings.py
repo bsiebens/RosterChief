@@ -44,7 +44,9 @@ ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", cast=Csv(), default="")
 # The loopback is always allowed, and it must be: the container's own healthcheck and the
 # deploy probe hit /healthz over 127.0.0.1/localhost, before any proxy has supplied a real
 # Host header. Without this they get a 400 and the container is marked unhealthy forever.
-# It widens nothing — gunicorn binds to the loopback only; the proxy owns the public domains.
+# It widens nothing: gunicorn binds 0.0.0.0:8000 inside the container (see the Dockerfile's CMD),
+# but compose publishes that port only to the host's loopback or the internal Docker network, so
+# the only public entry point is the proxy, which owns the public domains and sets a real Host.
 ALLOWED_HOSTS += [host for host in ("localhost", "127.0.0.1") if host not in ALLOWED_HOSTS]
 
 INTERNAL_IPS = config("DJANGO_INTERNAL_IPS", cast=Csv(), default="127.0.0.1")
@@ -102,6 +104,9 @@ INSTALLED_APPS = [
     "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
+    # The project package itself, registered only for its system checks (rosterchief/checks.py):
+    # no models, templates or static files live here.
+    "rosterchief.apps.RosterchiefConfig",
 ]
 
 # Feature flags (django-waffle). The Flag model is swappable, like AUTH_USER_MODEL:
@@ -304,6 +309,9 @@ DATABASES = {
 # a page like the control panel dashboard that fires 15-20+ queries pays that setup cost
 # on each one. Harmless for the SQLite dev default (no real connection to persist).
 DATABASES["default"]["CONN_MAX_AGE"] = config("DJANGO_DB_CONN_MAX_AGE", default=60, cast=int)
+# Check a reused connection is still alive before using it: after a database restart the
+# workers' persistent connections are dead, and without this they error until CONN_MAX_AGE runs out.
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 
 # Request-level performance tracing (rosterchief/perf_logging.py, rosterchief/middleware.py)
@@ -425,6 +433,12 @@ SECURE_HSTS_SECONDS = config("DJANGO_SECURE_HSTS_SECONDS", default=0, cast=int)
 # Every club is a subdomain, so HSTS must cover them all or it protects only the bare domain.
 SECURE_HSTS_INCLUDE_SUBDOMAINS = config("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True, cast=bool)
 SECURE_HSTS_PRELOAD = config("DJANGO_SECURE_HSTS_PRELOAD", default=False, cast=bool)
+
+# security.W021 ("SECURE_HSTS_PRELOAD is not True") is the only `check --deploy` warning this
+# configuration raises on purpose: preload-list submission is a near-irreversible commitment for
+# the base domain and every subdomain, so it stays an explicit operator decision. Silencing it
+# keeps `check --deploy --fail-level WARNING` (CI) usable for catching every other warning.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
 
 
 # Logging

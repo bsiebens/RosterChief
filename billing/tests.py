@@ -321,6 +321,16 @@ class InvoiceTests(BillingTestBase):
         self.assertEqual(first.number, f"INV-{year}-00001")
         self.assertEqual(second.number, f"INV-{year}-00002")
 
+    def test_a_number_collision_is_retried_with_a_fresh_number(self):
+        # Two invoices allocated in the same instant compute the same next number; the
+        # unique constraint refuses the second and it retries rather than erroring.
+        taken = self.bill(start=self.today).invoice
+        other_club = Club.objects.create(name="Feyenoord")
+        with mock.patch.object(Invoice, "next_number", side_effect=[taken.number, "INV-2999-00001"]):
+            second = open_period(other_club, plan=self.plan).invoice
+
+        self.assertEqual(second.number, "INV-2999-00001")
+
     def test_re_issuing_does_not_burn_a_number(self):
         # A gap in an invoice series is a question you do not want to have to answer.
         due = self.bill()
@@ -1163,3 +1173,21 @@ class PlanDeletionTests(BillingTestBase):
 
         self.assertTrue(Subscription.objects.filter(club=self.club).exists())
         self.assertFalse(self.plan.is_deleted)
+
+
+class BillingRenderPdfUrlFetcherTests(TestCase):
+    """billing.services.invoices.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from billing.services.invoices import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("billing.services.invoices.pdf_url_fetcher", return_value=fetcher):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)

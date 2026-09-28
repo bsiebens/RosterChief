@@ -54,7 +54,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import EntryInput, submit_registration
 from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
-from rosterchief.test_support import enrol_mfa
+from rosterchief.test_support import enrol_mfa, start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
@@ -64,6 +64,17 @@ from teams.services import eligible_roster_members
 User = get_user_model()
 
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def setUpModule():
+    # ShopManager/EvaluationManager grants and management-position staff
+    # assignments require MFA (authentication.middleware); the fixtures here
+    # model staff who have already enrolled.
+    start_auto_mfa_enrolment()
+
+
+def tearDownModule():
+    stop_auto_mfa_enrolment()
 
 
 def make_import_workbook(rows):
@@ -86,6 +97,14 @@ def make_season(club):
     # Season.covering(club, timezone.localdate()), not just any season row.
     today = timezone.localdate()
     return Season.objects.create(club=club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+
+
+def _midweek_noon():
+    """Wednesday 12:00 (local time) of the current week -- for tests whose
+    "this week" / "next week" logic must not depend on when the suite runs."""
+    today = timezone.localdate()
+    wednesday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(days=2)
+    return timezone.make_aware(datetime.datetime.combine(wednesday, datetime.time(12, 0)))
 
 
 @override_settings(
@@ -719,12 +738,12 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
 
-    def test_a_different_teams_coach_can_still_view_the_team(self):
+    def test_a_different_teams_coach_cannot_open_the_team(self):
         self.client.force_login(self.other_team_coach)
 
         response = self.club_get("team_detail", self.team.pk)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
 
     def test_admin_can_add_a_player_to_any_team(self):
         self.client.force_login(self.admin_user)
@@ -4800,7 +4819,7 @@ class NewsManagementTests(ManagementTestBase):
         editor_member = Member.objects.create(user=cls.editor, first_name="Eve", last_name="Editor")
         ClubMembership.objects.create(club=cls.club, member=editor_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
         ClubRole.objects.filter(club=cls.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
-        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
+        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; a non-management StaffAssignment doesn't.
 
     def test_list_is_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
@@ -6421,7 +6440,9 @@ class EventManagementTests(ManagementTestBase):
         self.assertContains(response, 'aria-label="Friendly"')
 
     def test_the_week_calendar_shows_a_gathering_strip_before_the_block(self):
-        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), gathering=timezone.now() - datetime.timedelta(minutes=30))
+        # Noon today, not "now": just after Monday 00:00, now minus 30 minutes is last week.
+        start = timezone.localtime().replace(hour=12, minute=0, second=0, microsecond=0)
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=start, gathering=start - datetime.timedelta(minutes=30))
         game.teams.add(self.own_team)
         self.client.force_login(self.own_team_coach)
 
@@ -6559,7 +6580,12 @@ class EventManagementTests(ManagementTestBase):
 
     def test_the_list_groups_into_this_week_next_week_and_month_dividers(self):
         # Mirrors mobile.views.CalendarView's own This week/Next week/by-month
-        # agenda grouping -- see EventListView._list_groups.
+        # agenda grouping -- see EventListView._list_groups. Run at a fixed
+        # mid-week moment: late on a Sunday, "a few minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_list_groups()
+
+    def _check_list_groups(self):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
         this_week_event_start = timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0)))
         if this_week_event_start <= timezone.now():
@@ -7752,6 +7778,11 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["range_choice"], "25")
 
     def test_the_week_range_excludes_a_game_beyond_this_week(self):
+        # Fixed mid-week moment: late on a Sunday, "5 minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_week_range()
+
+    def _check_week_range(self):
         today = timezone.localdate()
         end_of_this_week = today + datetime.timedelta(days=6 - today.weekday())
         game_this_week = self.make_game(start=timezone.now() + datetime.timedelta(minutes=5))
@@ -8852,6 +8883,63 @@ class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
         self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
 
         self.assertEqual(EvaluationSession.objects.filter(checklist=checklist).count(), 1)
+
+
+class EvaluationWalkthroughPlayerScopeTests(EvaluationManagementTestBase):
+    """The walkthrough's POST only acts on (and names) a player the checklist
+    actually covers -- management.views.EvaluationWalkthroughView resolves
+    player_pk from checklist_players, never from Member at large."""
+
+    def _evaluated_checklist(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        return checklist
+
+    def test_a_note_about_a_member_of_another_club_404s(self):
+        checklist = self._evaluated_checklist()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+        ClubRole.objects.create(club=other_club, member=outsider)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(outsider.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=outsider).exists())
+
+    def test_a_note_about_a_club_member_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        unevaluated = Member.objects.create(first_name="Nora", last_name="Notevaluated")
+        ClubMembership.objects.create(club=self.club, member=unevaluated, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(unevaluated.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=unevaluated).exists())
+
+    def test_an_outcome_for_a_player_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+
+        response = self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(outsider.pk), "decision": "Promote"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationOutcome.objects.filter(player=outsider).exists())
+
+    def test_a_malformed_player_pk_404s(self):
+        checklist = self._evaluated_checklist()
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": "not-a-uuid", "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_note_about_a_player_on_the_checklist_is_still_saved(self):
+        checklist = self._evaluated_checklist()
+
+        self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "Fine"}, checklist.slug)
+
+        self.assertTrue(EvaluationNote.objects.filter(checklist=checklist, player=self.player, note="Fine").exists())
 
 
 class EvaluationSessionOutcomesPdfTests(EvaluationManagementTestBase):
@@ -10039,15 +10127,9 @@ class MemberRequirementChecklistTests(ManagementTestBase):
     """Marking a member's checklist items done/undone from their own page, and
     downloading whatever document was attached -- management:member_requirement_*.
 
-    Uploads land on rosterchief.storage.private_storage's real, configured location
-    (PRIVATE_MEDIA_ROOT) rather than a tempdir substituted via override_settings: that
-    storage is a module-level singleton built once at process start (see
-    rosterchief/storage.py), and Django's override_settings machinery only reloads
-    django.core.files.storage.storages/default_storage on a STORAGES change -- it has
-    no way to know about a hand-built FileSystemStorage instance a model field
-    happens to hold a reference to, so overriding the setting here would silently do
-    nothing and this class would look green while actually writing outside a tempdir
-    it thinks it's using. Each uploading test cleans up after itself instead, the
+    Uploads land on rosterchief.storage.private_storage, which re-reads
+    PRIVATE_MEDIA_ROOT on every access -- the test runner points that at a
+    throwaway directory. Each uploading test still cleans up after itself, the
     same way FeePayment/Club-logo-style tests elsewhere in this suite do.
     """
 
@@ -14361,8 +14443,27 @@ class FormManagementTests(ManagementTestBase):
         response = self.club_get("formsend_responses_export", form_obj.pk, send.pk)
 
         rows = list(csv.reader(response.content.decode().splitlines()))
-        self.assertEqual(rows[0][2], "'=cmd|' /C calc'!A0")
-        self.assertEqual(rows[1][2], '\'=HYPERLINK("http://evil.example","x")')
+        self.assertEqual(rows[0][3], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][3], '\'=HYPERLINK("http://evil.example","x")')
+
+    def test_responses_name_the_parent_who_filled_in_for_a_child(self):
+        form_obj = self.make_form()
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        child = Member.objects.create(first_name="Mila", last_name="Bakker")
+        parent = Member.objects.create(first_name="Lars", last_name="Bakker")
+        Submission.objects.create(send=send, member=child, submitted_by=parent)
+        own = Member.objects.create(first_name="Jane", last_name="Doe")
+        Submission.objects.create(send=send, member=own, submitted_by=own)
+        self.client.force_login(self.admin_user)
+
+        rows = list(csv.reader(self.club_get("formsend_responses_export", form_obj.pk, send.pk).content.decode().splitlines()))
+        page = self.club_get("formsend_responses", form_obj.pk, send.pk)
+
+        self.assertEqual(rows[0][1:3], ["Member", "Submitted by"])
+        by_member = {row[1]: row[2] for row in rows[1:]}
+        self.assertEqual(by_member, {"Mila Bakker": "Lars Bakker", "Jane Doe": ""})
+        self.assertContains(page, "Filled in by Lars Bakker")
+        self.assertNotContains(page, "Filled in by Jane Doe")
 
 
 class BugListViewTests(ManagementTestBase):
@@ -14801,3 +14902,134 @@ class RegistrationBilledToTests(ShopTestBase):
         self.assertEqual(detail.status_code, 200)
         self.assertIsNone(detail.context["contact"])
         self.assertContains(detail, "reg-parent@example.com")
+
+
+class ManagementRenderPdfUrlFetcherTests(TestCase):
+    """management.pdf.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from management.pdf import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("management.pdf.pdf_url_fetcher", return_value=fetcher):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
+
+
+class TeamDetailScopingTests(ManagementTestBase):
+    """Team pages for non-admin staff are limited to the teams they're on the
+    staff of this season; club admins and member admins see every team."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team_a = Team.objects.create(club=cls.club, name="Scoped A", short_name="SA")
+        cls.team_b = Team.objects.create(club=cls.club, name="Scoped B", short_name="SB")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        cls.physio_position = Position.objects.create(club=cls.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+
+        cls.coach_user = User.objects.create_user(email="scoped-coach@example.com", password="pw-secret-123")
+        cls.coach_member = Member.objects.create(user=cls.coach_user, first_name="Cora", last_name="Coach")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.coach_member, season=cls.season, position=cls.coach_position)
+
+        cls.physio_user = User.objects.create_user(email="scoped-physio@example.com", password="pw-secret-123")
+        cls.physio_member = Member.objects.create(user=cls.physio_user, first_name="Pia", last_name="Physio")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.physio_member, season=cls.season, position=cls.physio_position)
+
+        cls.member_admin_user = User.objects.create_user(email="scoped-member-admin@example.com", password="pw-secret-123")
+        cls.member_admin_member = Member.objects.create(user=cls.member_admin_user, first_name="Mia", last_name="Memberadmin")
+        ClubMembership.objects.create(club=cls.club, member=cls.member_admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(cls.member_admin_user)
+
+    def test_coach_opens_their_own_team(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+
+    def test_coach_of_team_a_gets_404_on_team_b(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_non_managing_staff_opens_their_own_team_but_not_another(self):
+        self.client.force_login(self.physio_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_last_seasons_coach_gets_404(self):
+        past_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=40))
+        StaffAssignment.objects.create(team=self.team_b, member=self.coach_member, season=past_season, position=self.coach_position)
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_admin_opens_any_team(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+    def test_member_admin_opens_any_team(self):
+        self.client.force_login(self.member_admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+
+class DiscountLimitManagementTests(ShopTestBase):
+    """The discount-code form/list carry the validity window, total use cap
+    and once-per-member switch (shop.services.checkout enforces them)."""
+
+    def test_a_shop_manager_can_set_the_limits(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {
+            "name": "Summer sale",
+            "description": "",
+            "code": "summer10",
+            "discount_type": DiscountType.PERCENTAGE,
+            "discount_amount": "10",
+            "is_active": "on",
+            "valid_from": "2026-06-01",
+            "valid_until": "2026-08-31",
+            "max_uses": "50",
+            "once_per_member": "on",
+        }
+
+        self.club_post("discount_create", data)
+
+        discount = Discount.objects.get(club=self.club)
+        self.assertEqual(discount.valid_from, datetime.date(2026, 6, 1))
+        self.assertEqual(discount.valid_until, datetime.date(2026, 8, 31))
+        self.assertEqual(discount.max_uses, 50)
+        self.assertTrue(discount.once_per_member)
+
+    def test_the_window_cannot_end_before_it_starts(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Backwards", "description": "", "code": "BACK", "discount_type": DiscountType.FIXED_AMOUNT, "discount_amount": "5", "valid_from": "2026-08-31", "valid_until": "2026-06-01"}
+
+        response = self.club_post("discount_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Discount.objects.exists())
+
+    def test_the_list_shows_uses_not_counting_cancelled_orders(self):
+        from shop.models import AppliedDiscount
+
+        discount = Discount.objects.create(club=self.club, name="Capped", code="CAP", discount_amount=Decimal("5"), max_uses=3)
+        member = Member.objects.create(first_name="Buyer", last_name="One")
+        for status in (Order.FulfillmentStatus.NOT_READY, Order.FulfillmentStatus.CANCELLED):
+            order = Order.objects.create(club=self.club, purchaser=member, total=Decimal("20.00"), fulfillment_status=status)
+            AppliedDiscount.objects.create(order=order, discount=discount, discount_amount=Decimal("5"), amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("discount_list")
+
+        [listed] = response.context["discounts"]
+        self.assertEqual(listed.use_count, 1)
+        self.assertContains(response, "1 of 3")

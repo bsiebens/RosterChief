@@ -33,6 +33,16 @@
         </div>
 
         <div class="card mb-4 card-body">
+            <h2 class="card-title">{% trans "Limits" %}</h2>
+            <div class="grid grid-cols-2 gap-4">
+                {% form_field form.valid_from %}
+                {% form_field form.valid_until %}
+                {% form_field form.max_uses %}
+                {% form_field form.once_per_member show_as_toggle=True %}
+            </div>
+        </div>
+
+        <div class="card mb-4 card-body">
             <h2 class="card-title">{% trans "Description" %}</h2>
             {% form_field form.description textarea_height="h-28" show_label=False %}
         </div>

@@ -21,6 +21,7 @@ from teams.models import Team, TeamMembership
 from .models import Answer, Field, Form, FormSend, Submission
 from .services import (
     FormSubmissionError,
+    addressed_to,
     build_form,
     build_form_class,
     effective_members,
@@ -259,6 +260,24 @@ class FormSendAudienceTests(FormbuilderTestBase):
 
         self.assertNotIn(self.member, effective_members(self.fresh_send()))
 
+    def test_addressed_to_a_single_member(self):
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+
+        self.assertTrue(addressed_to(self.send, self.member))
+        self.assertFalse(addressed_to(self.send, outsider))
+
+    def test_addressed_to_any_of_several_members(self):
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+
+        self.assertTrue(addressed_to(self.send, [outsider, self.member]))
+        self.assertFalse(addressed_to(self.send, [outsider]))
+        self.assertFalse(addressed_to(self.send, []))
+
+    def test_addressed_to_respects_exclusions(self):
+        self.send.excluded_members.add(self.member)
+
+        self.assertFalse(addressed_to(self.fresh_send(), self.member))
+
     def test_members_not_yet_submitted_excludes_anyone_with_an_existing_submission(self):
         Submission.objects.create(send=self.send, member=self.member)
 
@@ -365,10 +384,21 @@ class SubmitFormTests(FormbuilderTestBase):
         with self.assertRaises(FormSubmissionError):
             submit_form(self.fresh_send(), None, {"name": "Jane"})
 
-    def test_anonymous_submission_allowed_when_login_not_required(self):
-        submission = submit_form(self.send, None, {"name": "Jane"})
+    def test_anonymous_submission_allowed_on_a_public_send_when_login_not_required(self):
+        self.send.is_public = True
+        self.send.save()
+
+        submission = submit_form(self.fresh_send(), None, {"name": "Jane"})
 
         self.assertIsNone(submission.member)
+
+    def test_anonymous_submission_to_a_non_public_send_is_rejected(self):
+        # Only a send explicitly opted into a public link can be answered
+        # without a member -- otherwise per-member limits and the audience
+        # check would simply not apply.
+        with self.assertRaises(FormSubmissionError):
+            submit_form(self.send, None, {"name": "Jane"})
+        self.assertFalse(Submission.objects.exists())
 
     def test_not_open_yet_is_rejected(self):
         self.send.opens_at = timezone.now() + timedelta(days=1)
@@ -464,9 +494,10 @@ class SubmitFormTests(FormbuilderTestBase):
             submit_form(self.fresh_send(), self.member, {"name": "Jane"})
 
     def test_anonymous_submission_skips_the_audience_check(self):
-        # member=None has no audience to check against -- not raised, even
-        # though nobody was ever added to this send's audience for it.
-        empty_send = FormSend.objects.create(club=self.club, form=self.form)
+        # member=None on a public send has no audience to check against --
+        # not raised, even though nobody was ever added to this send's
+        # audience for it.
+        empty_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
 
         submission = submit_form(empty_send, None, {"name": "Jane"})
 
@@ -874,3 +905,300 @@ class PublicFormFillViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Submission.objects.exists())
         self.assertTrue(response.context["form"].errors)
+
+
+class SubmitOnBehalfTests(FormbuilderTestBase):
+    """submit_form(..., submitted_by=...) -- a parent/guardian answering a
+    send for the member it's about. The submission belongs to that member
+    (audience + per-member limit are theirs); submitted_by records who
+    actually filled it in."""
+
+    def setUp(self):
+        self.parent = Member.objects.create(first_name="Paul", last_name="Doe")
+
+    def test_submission_is_recorded_for_the_member_with_the_submitter(self):
+        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+
+        self.assertEqual(submission.member, self.member)
+        self.assertEqual(submission.submitted_by, self.parent)
+
+    def test_submitter_defaults_to_the_member_themselves(self):
+        submission = submit_form(self.send, self.member, {"name": "Jane"})
+
+        self.assertEqual(submission.submitted_by, self.member)
+
+    def test_the_per_member_limit_counts_the_member_not_the_submitter(self):
+        self.send.max_submissions_per_user = 1
+        self.send.save()
+        other_child = Member.objects.create(first_name="Kid", last_name="Doe")
+        self.send.invited_members.add(other_child)
+        send = self.fresh_send()
+
+        submit_form(send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+        # A second child of the same parent still has their own allowance.
+        submit_form(send, other_child, {"name": "Kid"}, submitted_by=self.parent)
+        with self.assertRaises(FormSubmissionError):
+            submit_form(send, self.member, {"name": "Jane again"}, submitted_by=self.parent)
+
+        self.assertEqual(Submission.objects.filter(member=self.member).count(), 1)
+
+    def test_the_audience_check_applies_to_the_member_not_the_submitter(self):
+        # The parent isn't in the audience; the member being answered for is.
+        submission = submit_form(self.send, self.member, {"name": "Jane"}, submitted_by=self.parent)
+        self.assertIsNotNone(submission)
+
+        outsider = Member.objects.create(first_name="Out", last_name="Sider")
+        self.send.invited_members.add(self.parent)
+        with self.assertRaises(FormSubmissionError):
+            submit_form(self.fresh_send(), outsider, {"name": "Out"}, submitted_by=self.parent)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class PublicFormAbuseTests(TestCase):
+    """formbuilder:fill -- the public link stays anonymous-fillable, but is
+    capped per client IP per send and carries a honeypot field."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.form = Form.objects.create(club=cls.club, title="Volunteer interest", login_required=False)
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, is_public=True)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _url(self, send=None):
+        return reverse("formbuilder:fill", args=[(send or self.send).public_token])
+
+    def test_submissions_beyond_the_per_ip_limit_get_429_and_save_nothing(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+            self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(Submission.objects.filter(send=self.send).count(), PUBLIC_FORM_IP_RATE.limit)
+        self.assertContains(response, "Too many responses", status_code=429)
+
+    def test_the_limit_is_per_ip(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.8")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_limit_is_per_send(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        other_send = FormSend.objects.create(club=self.club, form=self.form, is_public=True)
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(other_send), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_invalid_posts_do_not_use_up_the_allowance(self):
+        from .views import PUBLIC_FORM_IP_RATE
+
+        for _ in range(PUBLIC_FORM_IP_RATE.limit):
+            self.client.post(self._url(), {"name": ""}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        response = self.client.post(self._url(), {"name": "Jane"}, HTTP_HOST=self.HOST, REMOTE_ADDR="203.0.113.7")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Submission.objects.filter(send=self.send).exists())
+
+    def test_honeypot_submission_looks_successful_but_saves_nothing(self):
+        response = self.client.post(self._url(), {"name": "Jane", "contact.website": "http://spam.example"}, HTTP_HOST=self.HOST)
+
+        self.assertRedirects(response, self._url(), fetch_redirect_response=False)
+        self.assertFalse(Submission.objects.exists())
+
+    def test_the_page_renders_the_honeypot_hidden(self):
+        response = self.client.get(self._url(), HTTP_HOST=self.HOST)
+
+        self.assertContains(response, 'name="contact.website"')
+        self.assertContains(response, 'class="hidden" aria-hidden="true"')
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
+class FileAnswerTests(TestCase):
+    """FILE fields: the upload is stored in private storage (never under
+    MEDIA_ROOT), the Answer records its metadata, and only the form's managers
+    and the submitter can download it."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        from waffle import get_waffle_flag_model
+
+        from club.models import ClubRole
+        from rosterchief.test_support import enrol_mfa
+
+        User = get_user_model()
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
+        get_waffle_flag_model().objects.get_or_create(name="formbuilder")[0].clubs.add(cls.club)
+
+        cls.form = Form.objects.create(club=cls.club, title="Medical", login_required=False)
+        cls.name = Field.objects.create(form=cls.form, key="name", label="Name", field_type=Field.FieldType.TEXT, required=True, order=1)
+        cls.doc = Field.objects.create(form=cls.form, key="doc", label="Certificate", field_type=Field.FieldType.FILE, required=True, order=2)
+        cls.send = FormSend.objects.create(club=cls.club, form=cls.form, club_wide=True, is_public=True)
+
+        cls.user = User.objects.create_user(email="player@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lars", last_name="Bakker", email="player@example.com", user=cls.user)
+        ClubMembership.objects.create(club=cls.club, member=cls.member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        cls.admin_user = User.objects.create_user(email="admin@example.com", password="pw-secret-123")
+        cls.admin_member = Member.objects.create(first_name="Ada", last_name="Admin", user=cls.admin_user)
+        ClubMembership.objects.create(club=cls.club, member=cls.admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.admin_member).update(role=ClubRole.Roles.ADMIN)
+        enrol_mfa(cls.admin_user)
+
+        cls.outsider_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
+        outsider = Member.objects.create(first_name="Olga", last_name="Other", email="other@example.com", user=cls.outsider_user)
+        ClubMembership.objects.create(club=cls.club, member=outsider, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _upload(self, name="cert.pdf", content=b"%PDF-1.4 medical"):
+        return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+    def _file_answer(self):
+        return Answer.objects.get(field=self.doc)
+
+    def _download(self, answer, host=HOST):
+        return self.client.get(reverse("formbuilder:answer_file", args=[answer.pk]), HTTP_HOST=host)
+
+    def test_member_app_submission_with_a_file_is_stored_privately(self):
+        from django.conf import settings
+
+        from rosterchief.storage import private_storage
+
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        answer = self._file_answer()
+        self.assertEqual(answer.value["name"], "cert.pdf")
+        self.assertEqual(answer.value["size"], len(b"%PDF-1.4 medical"))
+        self.assertEqual(answer.value["content_type"], "application/pdf")
+        self.assertTrue(answer.file.name.startswith(f"formbuilder/{self.send.pk}/{answer.submission_id}/"))
+        self.assertTrue(answer.file.name.endswith("-cert.pdf"))
+        self.assertIs(answer.file.storage, private_storage)
+        self.assertTrue(private_storage.exists(answer.file.name))
+        self.assertTrue(answer.file.path.startswith(str(settings.PRIVATE_MEDIA_ROOT)))
+
+    def test_public_form_submission_with_a_file_is_recorded(self):
+        response = self.client.post(reverse("formbuilder:fill", args=[self.send.public_token]), {"name": "Anon", "doc": self._upload("scan.png", b"\x89PNG fake")}, HTTP_HOST=self.HOST)
+
+        self.assertEqual(response.status_code, 302)
+        answer = self._file_answer()
+        self.assertIsNone(answer.submission.member)
+        self.assertEqual(answer.value["name"], "scan.png")
+        with answer.file.open("rb") as stored:
+            self.assertEqual(stored.read(), b"\x89PNG fake")
+
+    def test_a_hostile_file_name_is_made_safe(self):
+        self.client.force_login(self.user)
+
+        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload('my "cert" <x>.pdf')}, HTTP_HOST=self.HOST)
+
+        stored_name = self._file_answer().file.name.rsplit("/", 1)[-1]
+        self.assertNotIn('"', stored_name)
+        self.assertNotIn("<", stored_name)
+        self.assertNotIn(" ", stored_name)
+
+    def _submit_as_member(self):
+        self.client.force_login(self.user)
+        self.client.post(reverse("mobile:form_fill", kwargs={"pk": self.send.pk}), {"name": "Lars", "doc": self._upload()}, HTTP_HOST=self.HOST)
+        self.client.logout()
+        return self._file_answer()
+
+    def test_the_forms_manager_can_download_it(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        response = self._download(answer)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 medical")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn("cert.pdf", response["Content-Disposition"])
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_the_submitter_can_download_it(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.user)
+
+        self.assertEqual(self._download(answer).status_code, 200)
+
+    def test_another_club_member_gets_404(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.outsider_user)
+
+        self.assertEqual(self._download(answer).status_code, 404)
+
+    def test_the_manager_gets_404_on_another_clubs_host(self):
+        Club.objects.create(name="Rival FC", slug="rival-fc")
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self._download(answer, host="rival-fc.rosterchief.app").status_code, 404)
+
+    def test_the_manager_gets_404_with_the_forms_feature_off(self):
+        from waffle import get_waffle_flag_model
+
+        answer = self._submit_as_member()
+        get_waffle_flag_model().objects.get(name="formbuilder").clubs.remove(self.club)
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self._download(answer).status_code, 404)
+
+    def test_anonymous_is_sent_to_login(self):
+        answer = self._submit_as_member()
+
+        response = self._download(answer)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("account_login"), response["Location"])
+
+    def test_responses_page_links_the_download_and_csv_exports_the_name(self):
+        answer = self._submit_as_member()
+        self.client.force_login(self.admin_user)
+
+        page = self.client.get(reverse("management:formsend_responses", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
+        export = self.client.get(reverse("management:formsend_responses_export", args=[self.form.pk, self.send.pk]), HTTP_HOST=self.HOST)
+
+        self.assertContains(page, reverse("formbuilder:answer_file", args=[answer.pk]))
+        self.assertContains(page, "cert.pdf")
+        csv_text = export.content.decode()
+        self.assertIn("cert.pdf", csv_text)
+        self.assertNotIn(answer.file.name, csv_text)
+        self.assertNotIn("content_type", csv_text)
+
+    def test_deleting_the_submission_removes_the_stored_file(self):
+        from rosterchief.storage import private_storage
+
+        answer = self._submit_as_member()
+        stored_name = answer.file.name
+
+        answer.submission.delete()
+
+        self.assertFalse(private_storage.exists(stored_name))

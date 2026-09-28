@@ -10,7 +10,7 @@
 <span class="avatar {% if not person.photo %}avatar-placeholder{% endif %} shrink-0">
     <div class="{{ size_class|default:"h-8 w-8" }} rounded-full {{ text_class|default:"text-xs" }}">
         {% if person.photo %}
-            <img src="{{ person.photo.url }}" alt="" class="h-full w-full object-cover">
+            <img src="{{ person.photo_url }}" alt="" class="h-full w-full object-cover">
         {% else %}
             {{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}
         {% endif %}

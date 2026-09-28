@@ -9,6 +9,20 @@
     <form id="form-fill-form" method="post" enctype="multipart/form-data" class="mx-auto flex w-full max-w-[640px] flex-col gap-4" hx-boost="false">
         {% csrf_token %}
 
+        {% if show_for_member %}
+            <div class="card p-4.5 text-sm text-ink">
+                {% blocktrans with name=for_member.get_full_name %}Filling in for <strong>{{ name }}</strong>{% endblocktrans %}
+                {% if fill_for_others %}
+                    <div class="mt-1 text-xs text-muted">
+                        {% trans "Fill in for someone else:" %}
+                        {% for person in fill_for_others %}
+                            <a class="link link-hover font-semibold" href="{% url "mobile:form_fill" send.pk %}?for={{ person.pk }}">{{ person.get_full_name }}</a>{% if not forloop.last %},{% endif %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
         {% if send.form.description %}
             <p class="text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
         {% endif %}

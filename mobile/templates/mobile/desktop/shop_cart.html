@@ -3,12 +3,18 @@
 
 {% block content %}
     {% if items %}
+        {% if has_unavailable %}
+            <p class="mx-auto mb-4 w-full max-w-[900px] text-sm font-medium text-club-dark">{% trans "Some items are no longer available. Remove them to place your order." %}</p>
+        {% elif prices_changed %}
+            <p class="mx-auto mb-4 w-full max-w-[900px] text-sm font-medium text-club-dark">{% trans "Some prices have changed since you added them to your cart. The total below is up to date." %}</p>
+        {% endif %}
         <div class="mx-auto grid w-full max-w-[900px] grid-cols-1 gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
             <div class="card overflow-hidden">
                 {% for item in items %}
                     <div class="flex items-center gap-3.5 border-b border-rule p-4.5 last:border-b-0">
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">{{ item.product.name }}{% if item.variant %} &middot; {{ item.variant.name }}{% endif %}</div>
+                            {% if item.unavailable %}<div class="text-xs font-medium text-club-dark">{% trans "No longer available" %}</div>{% endif %}
                             <div class="text-xs text-muted">
                                 {% if item.beneficiary %}{% blocktrans with name=item.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% if item.personalization_number or item.personalization_name %}{% if item.personalization_number %}#{{ item.personalization_number }} {% endif %}{{ item.personalization_name }} &middot; {% endif %}{% blocktrans with amount=item.unit_price|floatformat:2 %}&euro; {{ amount }} each{% endblocktrans %}
                             </div>

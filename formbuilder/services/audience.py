@@ -49,6 +49,28 @@ def effective_members(send):
     return Member.objects.filter(id__in=member_ids)
 
 
+def addressed_to(send, members):
+    """Whether ``send``'s audience includes ``members`` -- one Member, or an
+    iterable of them (any one of them counts, e.g. a parent's own record
+    plus their managed children). The single check both submitting
+    (submission._check_open) and viewing a send (mobile's FormFillView)
+    go through, so who may see a form and who may answer it can't drift."""
+    return bool(addressed_people(send, members))
+
+
+def addressed_people(send, members):
+    """The subset of ``members`` (one Member or an iterable) that ``send`` is
+    addressed to, in the order given -- e.g. which of a parent's own record
+    and their managed children a form can be filled in for."""
+    if isinstance(members, Member):
+        members = [members]
+    members = [member for member in members if member is not None]
+    if not members:
+        return []
+    audience_ids = set(effective_members(send).filter(pk__in=[member.pk for member in members]).values_list("pk", flat=True))
+    return [member for member in members if member.pk in audience_ids]
+
+
 def members_not_yet_submitted(send):
     """``effective_members(send)`` minus anyone with an existing Submission --
     "who still needs to do this", the shared query behind the mobile home

@@ -1576,7 +1576,11 @@ ProductRegistrantDiscountTierFormSet = forms.formset_factory(ProductRegistrantDi
 class DiscountForm(forms.ModelForm):
     class Meta:
         model = Discount
-        fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active"]
+        fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active", "valid_from", "valid_until", "max_uses", "once_per_member"]
+        widgets = {
+            "valid_from": forms.DateInput(attrs={"type": "date"}),
+            "valid_until": forms.DateInput(attrs={"type": "date"}),
+        }
 
 
 #: Voucher deliberately excluded from both forms below -- settling an order

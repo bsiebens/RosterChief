@@ -13,7 +13,7 @@ from dateutil import relativedelta
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -374,9 +374,21 @@ class Invoice(UUIDModel):
         return self.sent_at is None and self.due.amount != ZERO
 
     def save(self, *args, **kwargs):
-        if not self.number:
+        if self.number:
+            return super().save(*args, **kwargs)
+
+        # Two invoices issued in the same instant compute the same next number; the
+        # unique constraint refuses the second one, which retries with a fresh number
+        # (same shape as the shop's and club dues' own numbering).
+        for attempt in range(5):
             self.number = self.next_number(self.issued_at.year)
-        super().save(*args, **kwargs)
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                self.number = ""
+                if attempt == 4:
+                    raise
 
     @classmethod
     def next_number(cls, year: int) -> str:

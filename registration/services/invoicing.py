@@ -54,6 +54,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from club.services.fees import early_payment_offer, remaining_balance, sync_fee_status
 from club.services.invoicing import resolve_document_address
+from rosterchief.pdf import pdf_url_fetcher
 
 from ..models import RegistrationBatch, RegistrationDetails
 
@@ -68,7 +69,7 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise RegistrationInvoicePDFError(_("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).")) from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()
 
 
 def active_batch_entries(batch):
@@ -271,11 +272,21 @@ def confirm_invoice(batch, *, due_in_days):
     an invoice". Pure state mutation, no email -- see registration.services.
     notifications.confirm_and_send_invoice for the one entry point that does
     both (it lives there, not here, so this module never has to import the
-    notifications module that itself needs batch_invoice_pdf from here)."""
+    notifications module that itself needs batch_invoice_pdf from here).
+
+    The batch row is locked first: a batch that's already been confirmed
+    (a double submit, or a concurrent request holding a stale instance)
+    keeps the number it already has instead of being re-numbered."""
     for attempt in range(5):
-        batch.invoice_number = batch.generate_invoice_number()
         try:
             with transaction.atomic():
+                current = RegistrationBatch.objects.select_for_update().only("invoice_number", "invoice_sent_at", "invoice_due_date").get(pk=batch.pk)
+                if current.invoice_number:
+                    batch.invoice_number = current.invoice_number
+                    batch.invoice_sent_at = current.invoice_sent_at
+                    batch.invoice_due_date = current.invoice_due_date
+                    return
+                batch.invoice_number = batch.generate_invoice_number()
                 batch.invoice_sent_at = timezone.now()
                 batch.invoice_due_date = timezone.localdate() + timedelta(days=due_in_days)
                 batch.save(update_fields=["invoice_number", "invoice_sent_at", "invoice_due_date"])

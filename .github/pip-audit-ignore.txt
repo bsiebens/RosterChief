@@ -1,0 +1,5 @@
+# Advisories accepted for the `audit` job in .github/workflows/build-and-push.yml.
+# One advisory ID per line (the PYSEC-/GHSA-/CVE- ID pip-audit prints), followed by a comment
+# saying why it's accepted and when to revisit it, e.g.
+#   GHSA-xxxx-xxxx-xxxx  # only reachable via X, which we don't use; revisit on next upgrade
+# Blank lines and lines starting with # are ignored.

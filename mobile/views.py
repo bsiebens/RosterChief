@@ -18,6 +18,7 @@ from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.cache import add_never_cache_headers
 from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from django.views import View
@@ -41,7 +42,7 @@ from events.services.officials import OfficialAssignmentError, accept_official_s
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, build_form, form_status_rows_for, is_send_open, submit_form
+from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.services.family import claim_label_for
 from members.views import ClubScopedPublicMixin
@@ -64,15 +65,16 @@ from registration.services import (
 )
 from registration.services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
+from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
-from shop.services.checkout import CheckoutError, find_discount, place_order
+from shop.services.checkout import CheckoutError, find_discount, place_order, reprice_cart_items
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
-from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin
+from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.icons import ICON_SIZES, get_fallback_icon
@@ -185,7 +187,9 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
     token covers every club the account belongs to."""
 
     def get(self, request, token):
-        feed_token = get_object_or_404(CalendarFeedToken.objects.select_related("user"), token=token)
+        feed_token = CalendarFeedToken.find(token)
+        if feed_token is None:
+            raise Http404("No such calendar feed.")
         me = Member.objects.filter(user=feed_token.user).first()
         people = []
         if me is not None:
@@ -207,26 +211,35 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
 
 class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M5's "Calendar sync" row -- the webcal://.../https:// subscription
-    links for this account's combined feed, plus a reset action that
-    immediately invalidates the old URL (e.g. a link shared/leaked by
-    accident)."""
+    links for this account's combined feed.
+
+    Only a hash of the feed token is stored (see CalendarFeedToken), so the
+    full URL can be shown exactly once: in the response to the POST that
+    creates or replaces it. A plain visit only says whether a link exists;
+    getting it again means replacing it, which immediately invalidates the
+    old URL (also how a shared/leaked link is revoked)."""
 
     template_name = "mobile/calendar_feed_settings.html"
     screen_title = _("Calendar sync")
     active_tab = "me"
 
     def get_context_data(self, **kwargs):
-        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=self.request.user)
-        feed_url = self.request.build_absolute_uri(reverse("mobile:calendar_feed", kwargs={"token": feed_token.token}))
-        return super().get_context_data(feed_url=feed_url, webcal_url=feed_url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1), **kwargs)
+        kwargs.setdefault("has_feed", CalendarFeedToken.objects.filter(user=self.request.user).exists())
+        return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
-        feed_token, _created = CalendarFeedToken.objects.get_or_create(user=request.user)
-        feed_token.regenerate()
-        title = _("Calendar link reset")
-        body = _("Your old calendar link no longer works. Re-subscribe using the new one below.")
-        notify(request, f"s|{title}|{body}")
-        return HttpResponseRedirect(reverse("mobile:calendar_feed_settings"))
+        replaced = CalendarFeedToken.objects.filter(user=request.user).exists()
+        raw_token = CalendarFeedToken.issue(request.user)
+        if replaced:
+            title = _("Calendar link reset")
+            body = _("Your old calendar link no longer works. Re-subscribe using the new one below.")
+            notify(request, f"s|{title}|{body}")
+        feed_url = request.build_absolute_uri(reverse("mobile:calendar_feed", kwargs={"token": raw_token}))
+        webcal_url = feed_url.replace("https://", "webcal://", 1).replace("http://", "webcal://", 1)
+        response = self.render_to_response(self.get_context_data(has_feed=True, feed_url=feed_url, webcal_url=webcal_url))
+        # The one response that carries the raw token: keep it out of every cache.
+        add_never_cache_headers(response)
+        return response
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1035,21 +1048,50 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     Home "Forms to complete" card, the Me page's Forms section, or a form
     notification's own link (mobile.views._notification_source_link).
 
-    GET always renders (even once closed/already submitted -- the club_wide/
-    audience/window checks all live in formbuilder.services.submission.
-    submit_form, run for real on POST, not duplicated here as a second,
-    read-only copy that could drift from it); a rejected POST re-renders the
+    Only reachable for a send addressed to the viewer or someone they manage
+    (formbuilder.services.audience.addressed_people -- the same audience check
+    submit_form runs, and the same person-scope the Forms list shows rows
+    for); anyone else gets a 404, so a send's questions aren't readable by
+    any member of the club who guesses its URL. Beyond that, GET always
+    renders (even once closed/already submitted -- the window/quota checks
+    live in formbuilder.services.submission.submit_form, run for real on
+    POST, not duplicated here as a second, read-only copy that could drift
+    from it); a rejected POST re-renders the
     same screen with the service layer's own field-level errors attached,
     the same "translate a service exception into notify() + stay on the
     screen" idiom ShopCheckoutView uses for CheckoutError, except re-render
-    instead of redirect so those field errors are actually visible."""
+    instead of redirect so those field errors are actually visible.
+
+    A parent/guardian fills a form in *for* one addressed person
+    (``for_member``): ``?for=<member id>`` picks who, and must be one of
+    self.managed_people the send is addressed to (anything else 404s).
+    Without it, the viewer's own response is the default when they're
+    addressed themselves, otherwise the first addressed child. The
+    submission is recorded for that person, with the viewer as
+    submitted_by -- so audience and per-member limits are the child's."""
 
     template_name = "mobile/form_fill.html"
     screen_title = _("Form")
     active_tab = "me"
 
     def get_send(self):
-        return get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
+        send = get_object_or_404(FormSend.objects.select_related("form").filter(club=self.request.club), pk=self.kwargs["pk"])
+        self.addressed_people = addressed_people(send, self.managed_people)
+        if not self.addressed_people:
+            raise Http404("Form not addressed to you.")
+        self.for_member = self._resolve_for_member()
+        return send
+
+    def _resolve_for_member(self):
+        requested_id = self.request.GET.get("for")
+        if requested_id:
+            for person in self.addressed_people:
+                if str(person.pk) == requested_id:
+                    return person
+            raise Http404("Form not addressed to that person.")
+        if self.me in self.addressed_people:
+            return self.me
+        return self.addressed_people[0]
 
     def get(self, request, *args, **kwargs):
         send = self.get_send()
@@ -1058,7 +1100,7 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def post(self, request, *args, **kwargs):
         send = self.get_send()
         try:
-            submit_form(send, self.me, request.POST, files=request.FILES)
+            submit_form(send, self.for_member, request.POST, files=request.FILES, submitted_by=self.me)
         except FormSubmissionError as error:
             # Re-run the same validation Django's own full_clean() already did
             # once inside submit_form, rather than manually replaying
@@ -1083,7 +1125,14 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:home"))
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(screen_title=kwargs["send"].form.title, **kwargs)
+        return super().get_context_data(
+            screen_title=kwargs["send"].form.title,
+            for_member=self.for_member,
+            # Named whenever it isn't just the viewer's own, only possible, response.
+            show_for_member=self.for_member != self.me or len(self.addressed_people) > 1,
+            fill_for_others=[person for person in self.addressed_people if person != self.for_member],
+            **kwargs,
+        )
 
 
 class FormResponseView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1698,7 +1747,7 @@ class BugListView(DesktopTemplateMixin, MemberAppMixin, TemplateView):
             unread_notification_count=unread_notification_count,
             season=get_current_season(self.request),
             vapid_public_key=settings.VAPID_PUBLIC_KEY,
-            shop_open=self.request.club.shop_open,
+            shop_open=shop_enabled(self.request),
             **kwargs,
         )
 
@@ -1763,6 +1812,12 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
 
 
+#: Upper bound on one cart line's quantity -- adding more (or incrementing
+#: past it) clamps to this rather than erroring, well inside CartItem.
+#: quantity's PositiveSmallIntegerField range.
+MAX_CART_QUANTITY = 99
+
+
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     """Photo/description/price, a variant picker (when the product has any --
     see ProductVariant's own docstring for why it's one free-text label, not
@@ -1791,7 +1846,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return self.render_to_response(self.get_context_data(product=product, variants=variants))
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(screen_title=kwargs["product"].name, **kwargs)
+        return super().get_context_data(screen_title=kwargs["product"].name, max_quantity=MAX_CART_QUANTITY, **kwargs)
 
     def post(self, request, *args, **kwargs):
         product = self._product()
@@ -1799,9 +1854,10 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("No member record for this account."))
 
         try:
-            quantity = max(1, int(request.POST.get("quantity", 1)))
-        except ValueError:
+            quantity = int(request.POST.get("quantity", 1))
+        except TypeError, ValueError:
             quantity = 1
+        quantity = min(max(1, quantity), MAX_CART_QUANTITY)
 
         variant = None
         variant_id = request.POST.get("variant")
@@ -1838,7 +1894,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             defaults={"quantity": quantity, "unit_price": unit_price},
         )
         if not item_created:
-            item.quantity += quantity
+            item.quantity = min(item.quantity + quantity, MAX_CART_QUANTITY)
             item.save(update_fields=["quantity"])
 
         title = _("Added to cart")
@@ -1855,6 +1911,12 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     through to ShopCheckoutView as a hidden field; place_order is the only
     place a code is actually redeemed, so it re-validates it itself rather
     than trusting this screen's own preview.
+
+    Every line is re-priced from its current product/variant on each render
+    (shop.services.checkout.reprice_cart_items), so the cart always shows
+    what checkout will actually charge; lines that can't be ordered any more
+    are flagged for the member to remove. A wrong code here counts towards
+    the same per-member/per-IP throttle as one at checkout.
     """
 
     template_name = "mobile/shop_cart.html"
@@ -1863,22 +1925,25 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
-        items = list(cart.items.select_related("product", "variant", "beneficiary").order_by("created")) if cart is not None else []
+        items = list(cart.items.select_related("cart", "product", "variant", "beneficiary").order_by("created")) if cart is not None else []
+        unavailable, repriced = reprice_cart_items(items)
+        unavailable_ids = {item.pk for item in unavailable}
         for item in items:
             item.line_total = item.unit_price * item.quantity
+            item.unavailable = item.pk in unavailable_ids
 
         code = self.request.GET.get("code", "").strip()
         discount = None
         discount_error = None
         if code and cart is not None:
             try:
-                discount = find_discount(self.request.club, code)
+                discount = find_discount(self.request.club, code, member=self.me, ip=client_ip(self.request))
             except CheckoutError as error:
                 discount_error = str(error)
 
         totals = cart_totals(cart, discount) if cart is not None else {"subtotal": Decimal("0"), "discount_amount": Decimal("0"), "total": Decimal("0")}
 
-        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, **kwargs)
+        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, has_unavailable=bool(unavailable), prices_changed=bool(repriced), **kwargs)
 
 
 class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
@@ -1891,8 +1956,9 @@ class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
         action = request.POST.get("action")
 
         if action == "increment":
-            item.quantity += 1
-            item.save(update_fields=["quantity"])
+            if item.quantity < MAX_CART_QUANTITY:
+                item.quantity += 1
+                item.save(update_fields=["quantity"])
         elif action == "decrement":
             if item.quantity > 1:
                 item.quantity -= 1
@@ -1920,7 +1986,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
             return HttpResponseRedirect(reverse("mobile:shop_cart"))
 
         try:
-            order = place_order(cart, purchaser=self.me, discount_code=request.POST.get("discount_code", ""))
+            order = place_order(cart, purchaser=self.me, discount_code=request.POST.get("discount_code", ""), ip=client_ip(request))
         except CheckoutError as error:
             notify(request, f"e|{_('Could not place order')}|{error}")
             return HttpResponseRedirect(reverse("mobile:shop_cart"))

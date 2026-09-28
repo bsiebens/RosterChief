@@ -20,6 +20,8 @@
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Code" %}</th>
                     <th>{% trans "Amount" %}</th>
+                    <th>{% trans "Valid" %}</th>
+                    <th>{% trans "Uses" %}</th>
                     <th>{% trans "Status" %}</th>
                     <th></th>
                 </tr>
@@ -31,6 +33,20 @@
                         <td class="font-mono text-xs">{{ discount.code }}</td>
                         <td class="font-mono text-xs tabular-nums">
                             {% if discount.discount_type == "percentage" %}{{ discount.discount_amount }}%{% else %}&euro; {{ discount.discount_amount }}{% endif %}
+                        </td>
+                        <td class="text-xs tabular-nums">
+                            {% if discount.valid_from and discount.valid_until %}
+                                {% blocktrans with start=discount.valid_from|date:"SHORT_DATE_FORMAT" end=discount.valid_until|date:"SHORT_DATE_FORMAT" %}{{ start }} – {{ end }}{% endblocktrans %}
+                            {% elif discount.valid_from %}
+                                {% blocktrans with start=discount.valid_from|date:"SHORT_DATE_FORMAT" %}From {{ start }}{% endblocktrans %}
+                            {% elif discount.valid_until %}
+                                {% blocktrans with end=discount.valid_until|date:"SHORT_DATE_FORMAT" %}Until {{ end }}{% endblocktrans %}
+                            {% else %}
+                                <span class="text-dim">{% trans "Always" %}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-xs tabular-nums">
+                            {% if discount.max_uses is not None %}{% blocktrans with used=discount.use_count max=discount.max_uses %}{{ used }} of {{ max }}{% endblocktrans %}{% else %}{{ discount.use_count }}{% endif %}{% if discount.once_per_member %}<div class="text-dim">{% trans "Once per member" %}</div>{% endif %}
                         </td>
                         <td>
                             <span class="badge badge-sm {% if discount.is_active %}badge-success{% else %}badge-neutral{% endif %}">
@@ -53,7 +69,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="5" class="text-center text-dim">{% trans "No discounts yet." %}</td>
+                        <td colspan="7" class="text-center text-dim">{% trans "No discounts yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

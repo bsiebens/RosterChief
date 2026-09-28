@@ -36,7 +36,7 @@ class RBIHF(CompetitionBaseClass):
             "X-Requested-With": "XMLHttpRequest",
         }
 
-        req = requests.get(self.url, params=payload, headers=headers)
+        req = requests.get(self.url, params=payload, headers=headers, timeout=dfel_import.REQUEST_TIMEOUT_SECONDS)
 
         if req.status_code == 200:
             game_data = req.json()
@@ -79,8 +79,8 @@ class CEHL(CompetitionBaseClass):
             "X-Requested-With": "XMLHttpRequest",
         }
 
-        timeline_req = requests.get(timeline_url, params=payload, headers=headers)
-        score_req = requests.get(score_url, params=payload, headers=headers)
+        timeline_req = requests.get(timeline_url, params=payload, headers=headers, timeout=dfel_import.REQUEST_TIMEOUT_SECONDS)
+        score_req = requests.get(score_url, params=payload, headers=headers, timeout=dfel_import.REQUEST_TIMEOUT_SECONDS)
 
         if timeline_req.status_code == 200:
             event.is_live = timeline_req.json()["live"] == 1

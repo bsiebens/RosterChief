@@ -1584,3 +1584,136 @@ class BackfillContactMemberMigrationTests(TestCase):
         self.assertEqual(email_batch.contact_member, by_email)
         self.assertEqual(submitted_batch.contact_member, submitter)
         self.assertIsNone(unmatched_batch.contact_member)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationCancelPaidTests(TestCase):
+    """registration:cancel refuses a registration anything has been paid
+    toward (registration.views.cancellation_locked) -- the status page hides
+    the button then, and the POST itself is refused too."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("120.00"))
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+    def _cancel(self):
+        return self.client.post(reverse("registration:cancel", kwargs={"token": self.batch.status_token, "membership_pk": self.membership.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _status(self):
+        return self.client.get(reverse("registration:status", kwargs={"token": self.batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_a_fully_paid_registration_cannot_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+        record_payment(self.membership, amount=Decimal("120.00"))
+
+        response = self._cancel()
+
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": self.batch.status_token}), fetch_redirect_response=False)
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_a_partly_paid_registration_cannot_be_cancelled(self):
+        # Refunds are a staff action -- any payment at all locks the self-service cancel.
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self._cancel()
+
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.assertTrue(ClubMembership.objects.filter(pk=self.membership.pk, status=ClubMembership.StatusChoices.PENDING).exists())
+
+    def test_the_status_page_hides_cancel_once_something_was_paid(self):
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self.assertNotContains(self._status(), "Cancel registration")
+
+    def test_an_unpaid_registration_can_still_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+
+        self.assertContains(self._status(), "Cancel registration")
+        self._cancel()
+
+        self.assertFalse(Member.objects.filter(pk=self.child.pk).exists())
+
+
+class RegistrationRenderPdfUrlFetcherTests(TestCase):
+    """registration.services.invoicing.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from registration.services.invoicing import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("registration.services.invoicing.pdf_url_fetcher", return_value=fetcher):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
+
+
+class RegistrationInvoiceNumberingTests(TestCase):
+    """confirm_invoice allocates REG-<year>-<seq> numbers: unique per club
+    (DB constraint + retry on collision), and a second confirm of an
+    already-confirmed batch (double submit, or a stale instance from a
+    concurrent request) never re-numbers it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+
+    def make_batch(self):
+        return RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+
+    def test_numbers_are_sequential_per_club(self):
+        from .services.invoicing import confirm_invoice
+
+        first, second = self.make_batch(), self.make_batch()
+        confirm_invoice(first, due_in_days=14)
+        confirm_invoice(second, due_in_days=14)
+
+        year = timezone.now().year
+        self.assertEqual(first.invoice_number, f"REG-{year}-00001")
+        self.assertEqual(second.invoice_number, f"REG-{year}-00002")
+
+    def test_the_database_refuses_a_duplicate_number_in_one_club(self):
+        from django.db import IntegrityError, transaction
+
+        RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+
+    def test_a_collision_is_retried_with_a_fresh_number(self):
+        from .services.invoicing import confirm_invoice
+
+        taken = self.make_batch()
+        RegistrationBatch.objects.filter(pk=taken.pk).update(invoice_number="REG-2999-00001")
+        batch = self.make_batch()
+
+        with mock.patch.object(RegistrationBatch, "generate_invoice_number", side_effect=["REG-2999-00001", "REG-2999-00002"]):
+            confirm_invoice(batch, due_in_days=14)
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.invoice_number, "REG-2999-00002")
+
+    def test_confirming_a_stale_instance_again_keeps_the_first_number(self):
+        from .services.invoicing import confirm_invoice
+
+        batch = self.make_batch()
+        stale = RegistrationBatch.objects.get(pk=batch.pk)
+        confirm_invoice(batch, due_in_days=14)
+
+        confirm_invoice(stale, due_in_days=30)
+
+        batch.refresh_from_db()
+        self.assertEqual(stale.invoice_number, batch.invoice_number)
+        self.assertTrue(batch.invoice_number.endswith("-00001"))
+        self.assertFalse(RegistrationBatch.objects.filter(invoice_number__endswith="-00002").exists())
