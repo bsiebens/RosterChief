@@ -55,9 +55,10 @@ urlpatterns = [
     # The native-app API itself (appapi): account endpoints on the base domain, club endpoints
     # on each club's host -- each endpoint enforces its own plane (appapi/auth.py).
     path("api/app/v1/", app_api.urls),
-    # Developer docs for the app APIs (docs/app-api/*.md), base domain only.
-    path("api/docs/", base_domain_only(docs_page), name="app_api_docs"),
-    path("api/docs/<slug:page>/", base_domain_only(docs_page), name="app_api_docs_page"),
+    # Developer docs for the app APIs (docs/app-api/*.md). Served on the base domain; a club
+    # host redirects there (appapi.docs.docs_page).
+    path("api/docs/", docs_page, name="app_api_docs"),
+    path("api/docs/<slug:page>/", docs_page, name="app_api_docs_page"),
     # Shared by management/base.html and mobile/base.html's own poll-on-load script --
     # not nested under either app's urls.py, since both surfaces hit this one verbatim.
     path("announcements/pending/", PendingAnnouncementView.as_view(), name="announcement_pending"),

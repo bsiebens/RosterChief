@@ -12,9 +12,11 @@ from pathlib import Path
 import markdown
 from django.conf import settings
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+
+from rosterchief.admin_host import is_tenant_host
 
 DOCS_DIR = Path(settings.BASE_DIR) / "docs" / "app-api"
 
@@ -34,9 +36,21 @@ def _render(filename: str) -> str:
     return markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
 
 
+def _base_domain_url(request) -> str:
+    """This URL on the base domain (same scheme and port): the docs belong to the platform,
+    not to a club, but a developer is often on a club host when they go looking."""
+    host, _colon, port = request.get_host().partition(":")
+    base = settings.ROSTERCHIEF_BASE_DOMAIN or host
+    # The port the client used (in the Host header), not the one the server listens on.
+    suffix = f":{port}" if port and port not in ("80", "443") else ""
+    return f"{request.scheme}://{base}{suffix}{request.get_full_path()}"
+
+
 def docs_page(request, page=""):
     if page not in PAGES:
         raise Http404("No such page.")
+    if is_tenant_host(request):
+        return redirect(_base_domain_url(request))
     filename, title = PAGES[page]
     html = _render(filename) if not settings.DEBUG else _render.__wrapped__(filename)
     nav = [{"href": "/api/docs/" + (slug + "/" if slug else ""), "title": nav_title, "current": slug == page} for slug, (_file, nav_title) in PAGES.items()]

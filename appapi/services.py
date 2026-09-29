@@ -31,9 +31,10 @@ def club_features(club: Club) -> dict:
 def club_host(request, club: Club) -> str:
     """``<slug>.<base domain>`` with the request's own port (dev servers), or, with no base
     domain configured, the slug in front of the request's host."""
-    base = settings.ROSTERCHIEF_BASE_DOMAIN or request.get_host().partition(":")[0]
-    port = request.get_port()
-    suffix = "" if port in ("80", "443", None) else f":{port}"
+    host, _colon, port = request.get_host().partition(":")
+    base = settings.ROSTERCHIEF_BASE_DOMAIN or host
+    # The port the client used (in the Host header), not the one the server listens on.
+    suffix = f":{port}" if port and port not in ("80", "443") else ""
     return f"{club.slug}.{base}{suffix}"
 
 

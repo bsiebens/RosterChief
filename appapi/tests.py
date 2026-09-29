@@ -476,10 +476,11 @@ class DocsTests(TestCase):
             self.assertEqual(response.status_code, 200, path)
         self.assertContains(self.client.get("/api/docs/ios/", HTTP_HOST=BASE), "Signing in")
 
-    def test_unknown_page_and_club_host_404(self):
+    def test_unknown_page_404_and_club_host_redirects(self):
         make_club()
         self.assertEqual(self.client.get("/api/docs/secrets/", HTTP_HOST=BASE).status_code, 404)
-        self.assertEqual(self.client.get("/api/docs/", HTTP_HOST=CLUB_HOST).status_code, 404)
+        redirect = self.client.get("/api/docs/ios/", HTTP_HOST=CLUB_HOST)
+        self.assertRedirects(redirect, f"http://{BASE}/api/docs/ios/", fetch_redirect_response=False)
 
     def test_both_specs_are_served(self):
         app_spec = self.client.get("/api/app/v1/openapi.json", HTTP_HOST=BASE)
@@ -521,3 +522,18 @@ class SnsCredentialsTests(TestCase):
         with patch("boto3.client") as client:
             SnsGateway()
         client.assert_called_once_with("sns", region_name=None)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="localhost", ALLOWED_HOSTS=["localhost", ".localhost"])
+class DevServerHostTests(TestCase):
+    """On a dev server the port lives in the Host header (localhost:8000)."""
+
+    def test_docs_redirect_and_club_urls_keep_the_port(self):
+        from .services import club_api_base_url
+
+        club = make_club()
+        redirect = self.client.get("/api/docs/", HTTP_HOST="ajax-united.localhost:8000")
+        self.assertEqual(redirect["Location"], "http://localhost:8000/api/docs/")
+
+        request = RequestFactory().get("/", HTTP_HOST="localhost:8000")
+        self.assertEqual(club_api_base_url(request, club), "http://ajax-united.localhost:8000/api/app/v1")
