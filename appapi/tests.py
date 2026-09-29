@@ -537,3 +537,24 @@ class DevServerHostTests(TestCase):
 
         request = RequestFactory().get("/", HTTP_HOST="localhost:8000")
         self.assertEqual(club_api_base_url(request, club), "http://ajax-united.localhost:8000/api/app/v1")
+
+
+@override_settings(**HOSTS)
+class ClubColorsTests(AppApiTestCase):
+    def test_defaults_when_the_club_set_none(self):
+        item = self.api("get", "/clubs", token=self.login()).json()["items"][0]
+        self.assertEqual(
+            {key: item[key] for key in ("primary_color", "primary_content_color", "secondary_color", "secondary_content_color")},
+            {"primary_color": "#101e36", "primary_content_color": "#ffffff", "secondary_color": "#e4002b", "secondary_content_color": "#ffffff"},
+        )
+
+    def test_club_colours_with_readable_text(self):
+        Club.objects.filter(pk=self.club.pk).update(primary_color="#1e40af", secondary_color="#fde047")
+        token = self.login()
+
+        item = self.api("get", "/clubs", token=token).json()["items"][0]
+        club = self.api("get", "/context", token=token, host=CLUB_HOST).json()["club"]
+
+        self.assertEqual((item["primary_color"], item["primary_content_color"]), ("#1e40af", "#ffffff"))
+        self.assertEqual((item["secondary_color"], item["secondary_content_color"]), ("#fde047", "#000000"))
+        self.assertEqual({key: club[key] for key in item if key.endswith("color")}, {key: item[key] for key in item if key.endswith("color")})

@@ -62,8 +62,7 @@ def clubs(request):
                 "name": club.name,
                 "api_base_url": services.club_api_base_url(request, club),
                 "logo_url": services.logo_url(request, club),
-                "primary_color": club.primary_color or None,
-                "secondary_color": club.secondary_color or None,
+                **services.club_colors(club),
                 "relationship": services.relationship(request.user, member, club),
                 "features": services.club_features(club),
             }

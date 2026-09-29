@@ -70,8 +70,10 @@ class ClubOut(Schema):
     name: str
     api_base_url: str = Field(description="Base URL for this club's resource endpoints, e.g. `https://hc-example.rosterchief.app/api/app/v1`.")
     logo_url: str | None
-    primary_color: str | None
-    secondary_color: str | None
+    primary_color: str = Field(description="Hex, e.g. `#1e40af`: headers and the navigation bar. The club's own colour, or the app default when it set none.")
+    primary_content_color: str = Field(description="`#000000` or `#ffffff`: text and icons on `primary_color`.")
+    secondary_color: str = Field(description="Hex: buttons, active tabs and highlights. The club's own colour, or the app default.")
+    secondary_content_color: str = Field(description="`#000000` or `#ffffff`: text on `secondary_color`.")
     relationship: list[str] = Field(
         description="How the account relates to the club: `member` (plays or is signed up), `guardian`"
         " (acts for children), `coach` (staffs a team this season), `staff` (club admin, editor or member admin). More values may appear: ignore unknown ones."
@@ -130,8 +132,10 @@ class ClubRefOut(Schema):
     slug: str
     name: str
     logo_url: str | None
-    primary_color: str | None
-    secondary_color: str | None
+    primary_color: str = Field(description="As in `/clubs`: never null.")
+    primary_content_color: str
+    secondary_color: str
+    secondary_content_color: str
 
 
 class ContextOut(Schema):

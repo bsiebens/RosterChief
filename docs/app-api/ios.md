@@ -138,7 +138,9 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 {"items": [{
   "id": "…", "slug": "hc-example", "name": "HC Example",
   "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
-  "logo_url": "https://…", "primary_color": "#1e40af", "secondary_color": null,
+  "logo_url": "https://…",
+  "primary_color": "#1e40af", "primary_content_color": "#ffffff",
+  "secondary_color": "#e4002b", "secondary_content_color": "#ffffff",
   "relationship": ["guardian", "coach"],
   "features": {"shop": true, "shop_open": false, "forms": true, "officials": false, "evaluations": false}
 }]}
@@ -148,7 +150,11 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
   (staffs a team this season), `staff` (club admin, editor or member admin). Ignore values you
   don't know; more may come.
 * Exactly one club: open it. More: show a picker and remember the choice.
-* Use `api_base_url` for every club call. Theme the club with `primary_color` and `logo_url`.
+* Use `api_base_url` for every club call.
+* Theme the club like the web app does: `primary_color` for the header and navigation bar,
+  `secondary_color` for buttons, the active tab and highlights, and the matching
+  `*_content_color` (black or white) for text on each. The colours are never null: a club
+  without its own gets the app defaults. Show `logo_url`, or the club's initials without one.
 * Hide tabs whose feature is off. The server 404s them anyway.
 * Push notifications carry `club_slug`: switch to that club before opening the target.
 

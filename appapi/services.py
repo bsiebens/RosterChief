@@ -42,6 +42,25 @@ def club_api_base_url(request, club: Club) -> str:
     return f"{request.scheme}://{club_host(request, club)}/api/app/v1"
 
 
+#: The member web app's own fallbacks when a club set no colour (assets/mobile.css:
+#: --color-navy / --color-club), so the native app themes a club exactly like the PWA.
+DEFAULT_PRIMARY_COLOR = "#101e36"
+DEFAULT_SECONDARY_COLOR = "#e4002b"
+
+
+def club_colors(club: Club) -> dict:
+    """The colours in effect for ``club`` -- its own, else the app defaults -- plus a
+    readable text colour (black or white, Club._content_color_for) for each."""
+    primary = club.primary_color or DEFAULT_PRIMARY_COLOR
+    secondary = club.secondary_color or DEFAULT_SECONDARY_COLOR
+    return {
+        "primary_color": primary,
+        "primary_content_color": Club._content_color_for(primary),
+        "secondary_color": secondary,
+        "secondary_content_color": Club._content_color_for(secondary),
+    }
+
+
 def logo_url(request, club: Club) -> str | None:
     if not club.logo:
         return None

@@ -777,15 +777,14 @@
             "type": "string"
           },
           "primary_color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Primary Color"
+            "description": "Hex, e.g. `#1e40af`: headers and the navigation bar. The club's own colour, or the app default when it set none.",
+            "title": "Primary Color",
+            "type": "string"
+          },
+          "primary_content_color": {
+            "description": "`#000000` or `#ffffff`: text and icons on `primary_color`.",
+            "title": "Primary Content Color",
+            "type": "string"
           },
           "relationship": {
             "description": "How the account relates to the club: `member` (plays or is signed up), `guardian` (acts for children), `coach` (staffs a team this season), `staff` (club admin, editor or member admin). More values may appear: ignore unknown ones.",
@@ -796,15 +795,14 @@
             "type": "array"
           },
           "secondary_color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Secondary Color"
+            "description": "Hex: buttons, active tabs and highlights. The club's own colour, or the app default.",
+            "title": "Secondary Color",
+            "type": "string"
+          },
+          "secondary_content_color": {
+            "description": "`#000000` or `#ffffff`: text on `secondary_color`.",
+            "title": "Secondary Content Color",
+            "type": "string"
           },
           "slug": {
             "title": "Slug",
@@ -818,7 +816,9 @@
           "api_base_url",
           "logo_url",
           "primary_color",
+          "primary_content_color",
           "secondary_color",
+          "secondary_content_color",
           "relationship",
           "features"
         ],
@@ -848,26 +848,21 @@
             "type": "string"
           },
           "primary_color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Primary Color"
+            "description": "As in `/clubs`: never null.",
+            "title": "Primary Color",
+            "type": "string"
+          },
+          "primary_content_color": {
+            "title": "Primary Content Color",
+            "type": "string"
           },
           "secondary_color": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Secondary Color"
+            "title": "Secondary Color",
+            "type": "string"
+          },
+          "secondary_content_color": {
+            "title": "Secondary Content Color",
+            "type": "string"
           },
           "slug": {
             "title": "Slug",
@@ -880,7 +875,9 @@
           "name",
           "logo_url",
           "primary_color",
-          "secondary_color"
+          "primary_content_color",
+          "secondary_color",
+          "secondary_content_color"
         ],
         "title": "ClubRefOut",
         "type": "object"
