@@ -3547,6 +3547,25 @@ class ReRegisterViewTests(TestCase):
 
         self.assertRedirects(response, reverse("mobile:me"))
         self.assertEqual(RegistrationBatch.objects.count(), 1)
+        # Each person is registered as themselves: the child's "Include this person"
+        # (is_contact) must not turn their row into a second registration of the parent.
+        self.assertEqual(sorted(RegistrationDetails.objects.values_list("membership__member__first_name", flat=True)), ["Lars", "Noor"])
+        self.assertTrue(ClubMembership.objects.filter(member=self.child, season=self.season).exists())
+
+    def test_registering_only_a_child_registers_the_child_and_keeps_the_parent_a_guardian(self):
+        self.client.force_login(self.user)
+        data = self.formset_management(2)
+        data["entries-0-existing_member"] = str(self.member.pk)
+        data["entries-1-existing_member"] = str(self.child.pk)
+        data["entries-1-is_contact"] = "on"
+        data["entries-1-product_variant"] = str(self.u10.pk)
+        data["action"] = "submit"
+
+        self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        detail = RegistrationDetails.objects.get()
+        self.assertEqual(detail.membership.member, self.child)
+        self.assertEqual(detail.membership.fee_amount, Decimal("80.00"))
 
     def test_an_unchecked_managed_person_is_not_required_to_fill_anything_in(self):
         # existing_member is set for every managed person's row regardless of
