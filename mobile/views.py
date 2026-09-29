@@ -65,7 +65,7 @@ from registration.services import (
     team_number_pools,
     variant_registration_kinds,
 )
-from registration.services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals, membership_ids_awaiting_confirmation
+from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
 from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
@@ -81,6 +81,7 @@ from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
 from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
+from .services.payments import payments_overview
 from .services.push import subscription_error
 
 
@@ -876,52 +877,8 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "me"
 
     def get_context_data(self, **kwargs):
-        season = current_season(self.request.club)
-        # Holds back a balance nobody's reviewed yet -- see
-        # registration.services.invoicing.membership_ids_awaiting_confirmation's
-        # own docstring. Filtered before the grouping below, so nothing's
-        # wasted decorating a row about to be dropped.
-        awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
-        # include_zero=True: a sibling already settled (or priced at 0/net
-        # negative after a credit) still has to show its own line items in a
-        # combined registration receipt below -- see open_dues_rows' own
-        # docstring on why the usual "still owed" filter would otherwise
-        # silently drop them from both the member list and the itemised
-        # breakdown. A standalone (non-registration) membership has no group
-        # total to reconcile against, so it's filtered back down to
-        # balance > 0 below, same as before -- nothing gained by showing an
-        # already-settled person their own €0 card on its own.
-        dues_rows = [row for row in open_dues_rows(self.request.club, self.managed_people, season, include_zero=True) if row["membership"].pk not in awaiting_confirmation]
-
-        registration_groups = {}
-        standalone_rows = []
-        for row in dues_rows:
-            entries = list(row["membership"].registration_details.select_related("product_variant__product", "requested_team", "batch"))
-            row["entries"] = entries
-            # Almost always one -- a membership only ever spans more than one
-            # registration batch if this person was registered twice in the
-            # same season (e.g. a second team added on afterwards), see
-            # registration.services.submission's own docstring. Only a
-            # *confirmed* batch groups this row -- an unconfirmed one can't
-            # exist here at all (already filtered above via
-            # membership_ids_awaiting_confirmation).
-            batch = next((entry.batch for entry in entries if entry.batch.invoice_sent_at is not None), None)
-            if batch is None:
-                if row["balance"] > 0:
-                    standalone_rows.append(row)
-                continue
-            group = registration_groups.setdefault(batch.pk, {"batch": batch, "rows": [], "total_balance": Decimal("0")})
-            group["rows"].append(row)
-            group["total_balance"] += row["balance"]
-
-        display_rows = [{"kind": "standalone", "row": row} for row in standalone_rows]
-        for group in registration_groups.values():
-            entries = active_batch_entries(group["batch"])
-            _subtotal, _discount_amount, total = batch_totals(entries, group["batch"].manual_discount_amount)
-            group["early_payment"] = batch_early_payment_offer(group["batch"], entries, total)
-            group["member_names"] = ", ".join(row["membership"].member.first_name for row in group["rows"])
-            display_rows.append({"kind": "registration", "group": group})
-
+        # Grouping and filtering live in mobile.services.payments, shared with the app API.
+        display_rows = payments_overview(self.request.club, self.managed_people)
         return super().get_context_data(display_rows=display_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
 
 

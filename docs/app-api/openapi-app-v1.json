@@ -44,6 +44,40 @@
         "title": "AnswerOut",
         "type": "object"
       },
+      "AnswerValueOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As stored: string, number as string, `YYYY-MM-DD`, bool, list of strings, or for files `{name, size, content_type}`. Null when left blank.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "value"
+        ],
+        "title": "AnswerValueOut",
+        "type": "object"
+      },
       "AppVersions": {
         "properties": {
           "android": {
@@ -109,6 +143,155 @@
           "requirements"
         ],
         "title": "BlockedOut",
+        "type": "object"
+      },
+      "BugNoteOut": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "created"
+        ],
+        "title": "BugNoteOut",
+        "type": "object"
+      },
+      "BugReportIn": {
+        "properties": {
+          "description": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description"
+        ],
+        "title": "BugReportIn",
+        "type": "object"
+      },
+      "BugReportListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BugReportOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BugReportListOut",
+        "type": "object"
+      },
+      "BugReportOut": {
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "fixed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only once `fixed`.",
+            "title": "Fixed Version"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Replies from the RosterChief team.",
+            "items": {
+              "$ref": "#/components/schemas/BugNoteOut"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "description": "`submitted`, `in_progress`, `fixed`, `wont_fix`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "created",
+          "fixed_version",
+          "notes"
+        ],
+        "title": "BugReportOut",
+        "type": "object"
+      },
+      "CalendarFeedOut": {
+        "properties": {
+          "feed_url": {
+            "description": "https URL of the .ics feed, for the family's events in every club. Treat it like a password.",
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "webcal_url": {
+            "description": "The same as `webcal://`: open it to subscribe in the Calendar app.",
+            "title": "Webcal Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feed_url",
+          "webcal_url"
+        ],
+        "title": "CalendarFeedOut",
+        "type": "object"
+      },
+      "CalendarFeedStateOut": {
+        "properties": {
+          "has_feed": {
+            "description": "A subscription link exists. It can't be shown again: create a new one to see it.",
+            "title": "Has Feed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "has_feed"
+        ],
+        "title": "CalendarFeedStateOut",
         "type": "object"
       },
       "CalendarItemOut": {
@@ -542,6 +725,80 @@
         "title": "DeviceOut",
         "type": "object"
       },
+      "DuesLineOut": {
+        "properties": {
+          "discount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multi-registrant discount on this line."
+          },
+          "label": {
+            "description": "What this line pays for (product and option, or the kind of registration), localised.",
+            "title": "Label",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          }
+        },
+        "required": [
+          "label",
+          "team",
+          "price",
+          "discount"
+        ],
+        "title": "DuesLineOut",
+        "type": "object"
+      },
+      "DuesMemberOut": {
+        "properties": {
+          "balance": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/DuesLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "membership_id": {
+            "format": "uuid",
+            "title": "Membership Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "membership_id",
+          "balance",
+          "lines"
+        ],
+        "title": "DuesMemberOut",
+        "type": "object"
+      },
       "DuesOut": {
         "properties": {
           "balance": {
@@ -593,6 +850,29 @@
           "early_payment_total"
         ],
         "title": "DuesOut",
+        "type": "object"
+      },
+      "EarlyPaymentOut": {
+        "properties": {
+          "deadline": {
+            "format": "date",
+            "title": "Deadline",
+            "type": "string"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What to pay by the deadline instead of `total_balance`."
+          }
+        },
+        "required": [
+          "deadline",
+          "discount",
+          "total"
+        ],
+        "title": "EarlyPaymentOut",
         "type": "object"
       },
       "ErrorDetail": {
@@ -880,6 +1160,275 @@
           "is_live"
         ],
         "title": "EventOut",
+        "type": "object"
+      },
+      "FormAudienceOut": {
+        "properties": {
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "submissions": {
+            "description": "Responses already given for this person.",
+            "title": "Submissions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "member_id",
+          "submissions"
+        ],
+        "title": "FormAudienceOut",
+        "type": "object"
+      },
+      "FormFieldOut": {
+        "properties": {
+          "help_text": {
+            "title": "Help Text",
+            "type": "string"
+          },
+          "key": {
+            "description": "The answer's key when submitting.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "options": {
+            "description": "For `choice` / `multichoice`.",
+            "items": {
+              "$ref": "#/components/schemas/FormOptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "section": {
+            "description": "Heading to group fields under; empty for none.",
+            "title": "Section",
+            "type": "string"
+          },
+          "type": {
+            "description": "`text`, `textarea`, `number`, `email`, `date`, `choice`, `multichoice`, `checkbox`, `file`. Ignore a form with a type you don't know (open it on the website).",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "required",
+          "help_text",
+          "section",
+          "options"
+        ],
+        "title": "FormFieldOut",
+        "type": "object"
+      },
+      "FormListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FormRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FormListOut",
+        "type": "object"
+      },
+      "FormOptionOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "FormOptionOut",
+        "type": "object"
+      },
+      "FormOut": {
+        "properties": {
+          "addressed": {
+            "description": "The managed people this form is for; submit as one of them.",
+            "items": {
+              "$ref": "#/components/schemas/FormAudienceOut"
+            },
+            "title": "Addressed",
+            "type": "array"
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FormFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "file_accept": {
+            "description": "Accepted file types for `file` fields (extensions and MIME types).",
+            "title": "File Accept",
+            "type": "string"
+          },
+          "is_open": {
+            "title": "Is Open",
+            "type": "boolean"
+          },
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_submissions_per_user": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Submissions Per User"
+          },
+          "opens_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opens At"
+          },
+          "send_id": {
+            "format": "uuid",
+            "title": "Send Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "send_id",
+          "title",
+          "description",
+          "opens_at",
+          "closes_at",
+          "is_open",
+          "max_submissions_per_user",
+          "addressed",
+          "fields",
+          "file_accept",
+          "max_file_bytes"
+        ],
+        "title": "FormOut",
+        "type": "object"
+      },
+      "FormRowOut": {
+        "properties": {
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "is_open": {
+            "title": "Is Open",
+            "type": "boolean"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "send_id": {
+            "format": "uuid",
+            "title": "Send Id",
+            "type": "string"
+          },
+          "submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest response, readable with GET /forms/submissions/{id}.",
+            "title": "Submission Id"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "send_id",
+          "title",
+          "member_id",
+          "is_open",
+          "closes_at",
+          "submitted_at",
+          "submission_id"
+        ],
+        "title": "FormRowOut",
         "type": "object"
       },
       "FormToCompleteOut": {
@@ -1687,6 +2236,108 @@
         "title": "OpenTaskOut",
         "type": "object"
       },
+      "PaymentItemOut": {
+        "properties": {
+          "due_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "early_payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EarlyPaymentOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "description": "`registration` (one invoice covering several people) or `membership` (one person's dues).",
+            "title": "Kind",
+            "type": "string"
+          },
+          "manual_discount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manual_discount_note": {
+            "title": "Manual Discount Note",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/DuesMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "registration_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `registration`: the invoice is at `/payments/registrations/{registration_id}/invoice.pdf`.",
+            "title": "Registration Id"
+          },
+          "total_balance": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "kind",
+          "registration_id",
+          "due_date",
+          "total_balance",
+          "members",
+          "manual_discount",
+          "manual_discount_note",
+          "early_payment"
+        ],
+        "title": "PaymentItemOut",
+        "type": "object"
+      },
+      "PaymentsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "payment_instructions": {
+            "description": "How to pay (bank account, reference), written by the club. Plain text. There's no in-app payment.",
+            "title": "Payment Instructions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_instructions",
+          "items"
+        ],
+        "title": "PaymentsOut",
+        "type": "object"
+      },
       "PermissionsOut": {
         "properties": {
           "can_add_news": {
@@ -2111,6 +2762,51 @@
         "title": "SquadSummaryOut",
         "type": "object"
       },
+      "SubmissionOut": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/AnswerValueOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "send_id": {
+            "format": "uuid",
+            "title": "Send Id",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "send_id",
+          "title",
+          "member_id",
+          "submitted_at",
+          "answers"
+        ],
+        "title": "SubmissionOut",
+        "type": "object"
+      },
       "TaskOut": {
         "properties": {
           "claimed_by": {
@@ -2269,6 +2965,140 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/app/v1/bug-reports": {
+      "get": {
+        "description": "Reports this account filed in this club, newest first, with the team's replies.",
+        "operationId": "appapi_routers_support_bug_reports",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BugReportListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "My bug reports",
+        "tags": [
+          "support"
+        ]
+      },
+      "post": {
+        "description": "Filed as the account's own person (never on behalf of a child).",
+        "operationId": "appapi_routers_support_report_bug",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BugReportIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BugReportOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Report a bug",
+        "tags": [
+          "support"
+        ]
+      }
+    },
     "/api/app/v1/calendar": {
       "get": {
         "description": "Invitations, referee/official sign-ups (open or accepted) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. Cancelled events\nare left out. Fetch the next window by passing the previous `to` as `from`.",
@@ -2409,6 +3239,119 @@
         "summary": "Agenda",
         "tags": [
           "member"
+        ]
+      }
+    },
+    "/api/app/v1/calendar-feed": {
+      "get": {
+        "operationId": "appapi_routers_support_calendar_feed_state",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedStateOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Calendar subscription state",
+        "tags": [
+          "support"
+        ]
+      },
+      "post": {
+        "description": "Returns the subscription URL, the only time it's ever shown (only a hash is\nstored). Calling it again replaces the link: the old URL stops working at once,\nwhich is also how a leaked link is revoked. One link covers every club.",
+        "operationId": "appapi_routers_support_calendar_feed_issue",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Create or replace the calendar link",
+        "tags": [
+          "support"
         ]
       }
     },
@@ -3199,6 +4142,332 @@
         ]
       }
     },
+    "/api/app/v1/forms": {
+      "get": {
+        "description": "Every form any managed person is (or was) asked to fill in, one row per person,\nnewest first; `submitted_at` is null while still to do.",
+        "operationId": "appapi_routers_forms_forms",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Forms for the family",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/app/v1/forms/submissions/{submission_id}": {
+      "get": {
+        "description": "Read-only, for a managed person's own response. Every field of the form is listed;\n`value` is null where it was left blank.",
+        "operationId": "appapi_routers_forms_submission_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "submission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Submission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A submitted response",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/app/v1/forms/{send_id}": {
+      "get": {
+        "description": "The fields to render. Always readable while addressed to the family, even when\nclosed (`is_open` false): submitting then answers `409 form_unavailable`.",
+        "operationId": "appapi_routers_forms_form_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "send_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Send Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One form, to fill in",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
+    "/api/app/v1/forms/{send_id}/submit": {
+      "post": {
+        "description": "Submit for one of the form's `addressed` people. Send an `Idempotency-Key`: a\nrepeated request returns the first response instead of a second submission.\n`422` carries `fields` per field `key`; `409 form_unavailable` means closed, not yet\nopen, or the maximum number of responses was reached.",
+        "operationId": "appapi_routers_forms_submit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "send_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Send Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "answers": {
+                    "description": "Field `key` → value: string, number, `YYYY-MM-DD`, bool, or a list of option values for `multichoice`.",
+                    "type": "object"
+                  },
+                  "member_id": {
+                    "description": "Who the response is for (one of the form's `addressed` people).",
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "member_id",
+                  "answers"
+                ],
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "Only needed for forms with `file` fields: one part per field `key` (repeat a key for `multichoice`, `true`/`on` for a checkbox), files as file parts.",
+                "properties": {
+                  "member_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "member_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Submit a form",
+        "tags": [
+          "forms"
+        ]
+      }
+    },
     "/api/app/v1/home": {
       "get": {
         "description": "Everything the Home screen shows, capped the way the web app caps it: the next\nunanswered invitation, the next event someone is going to, other open asks, free\ntask slots, open dues, the latest news and forms still to fill in.",
@@ -3490,6 +4759,72 @@
       }
     },
     "/api/app/v1/members/{member_id}/photo": {
+      "delete": {
+        "operationId": "appapi_routers_people_delete_photo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove the photo",
+        "tags": [
+          "people"
+        ]
+      },
       "get": {
         "description": "The same rule as the website: the member, their parents/guardians, staff who may\nsee them, or anyone when the photo is public. Anyone else gets `404`.",
         "operationId": "appapi_routers_people_photo",
@@ -3549,6 +4884,107 @@
           }
         ],
         "summary": "A member's photo",
+        "tags": [
+          "people"
+        ]
+      },
+      "post": {
+        "description": "Replaces the managed person's photo. Returns the profile with the new `photo_url`.\nThe photo stays private (family and club staff) unless `photo_public_consent` is on.",
+        "operationId": "appapi_routers_people_upload_photo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "photo": {
+                    "description": "JPEG, PNG or WebP (HEIC: convert to JPEG first), at most 10 MB.",
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "photo_public_consent": {
+                    "description": "Optional: also set whether it may appear on the club's public website.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "photo"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Upload a photo",
         "tags": [
           "people"
         ]
@@ -4119,6 +5555,139 @@
         "summary": "Mark one read",
         "tags": [
           "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/payments": {
+      "get": {
+        "description": "Open balances of every managed person. People covered by one registration share one\nitem (one invoice, one early-payment offer).",
+        "operationId": "appapi_routers_payments_payments",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Payments & dues",
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/app/v1/payments/registrations/{registration_id}/invoice.pdf": {
+      "get": {
+        "description": "Only for a registration covering a managed person, once the club has confirmed it.",
+        "operationId": "appapi_routers_payments_registration_invoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "registration_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Registration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "The invoice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Registration invoice (PDF)",
+        "tags": [
+          "payments"
         ]
       }
     }

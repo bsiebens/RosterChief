@@ -436,3 +436,145 @@ class ProfilePatchIn(Schema):
     phone: str | None = Field(None, max_length=32, description="Any format; stored as E.164. Empty string clears it.")
     emergency_phone: str | None = Field(None, max_length=32)
     photo_public_consent: bool | None = None
+
+
+# --- payments (phase 3) ----------------------------------------------------------------
+
+
+class DuesLineOut(Schema):
+    label: str = Field(description="What this line pays for (product and option, or the kind of registration), localised.")
+    team: str | None
+    price: Money
+    discount: Money | None = Field(description="Multi-registrant discount on this line.")
+
+
+class DuesMemberOut(Schema):
+    member_id: uuid.UUID
+    membership_id: uuid.UUID
+    balance: Money
+    lines: list[DuesLineOut]
+
+
+class EarlyPaymentOut(Schema):
+    deadline: datetime.date
+    discount: Money
+    total: Money = Field(description="What to pay by the deadline instead of `total_balance`.")
+
+
+class PaymentItemOut(Schema):
+    kind: str = Field(description="`registration` (one invoice covering several people) or `membership` (one person's dues).")
+    registration_id: uuid.UUID | None = Field(description="For `registration`: the invoice is at `/payments/registrations/{registration_id}/invoice.pdf`.")
+    due_date: datetime.date | None
+    total_balance: Money
+    members: list[DuesMemberOut]
+    manual_discount: Money | None
+    manual_discount_note: str
+    early_payment: EarlyPaymentOut | None
+
+
+class PaymentsOut(Schema):
+    payment_instructions: str = Field(description="How to pay (bank account, reference), written by the club. Plain text. There's no in-app payment.")
+    items: list[PaymentItemOut]
+
+
+# --- forms -----------------------------------------------------------------------------
+
+
+class FormRowOut(Schema):
+    send_id: uuid.UUID
+    title: str
+    member_id: uuid.UUID
+    is_open: bool
+    closes_at: datetime.datetime | None
+    submitted_at: datetime.datetime | None
+    submission_id: uuid.UUID | None = Field(description="The latest response, readable with GET /forms/submissions/{id}.")
+
+
+class FormListOut(Schema):
+    items: list[FormRowOut]
+
+
+class FormOptionOut(Schema):
+    value: str
+    label: str
+
+
+class FormFieldOut(Schema):
+    key: str = Field(description="The answer's key when submitting.")
+    label: str
+    type: str = Field(description="`text`, `textarea`, `number`, `email`, `date`, `choice`, `multichoice`, `checkbox`, `file`. Ignore a form with a type you don't know (open it on the website).")
+    required: bool
+    help_text: str
+    section: str = Field(description="Heading to group fields under; empty for none.")
+    options: list[FormOptionOut] = Field(description="For `choice` / `multichoice`.")
+
+
+class FormAudienceOut(Schema):
+    member_id: uuid.UUID
+    submissions: int = Field(description="Responses already given for this person.")
+
+
+class FormOut(Schema):
+    send_id: uuid.UUID
+    title: str
+    description: str
+    opens_at: datetime.datetime | None
+    closes_at: datetime.datetime | None
+    is_open: bool
+    max_submissions_per_user: int | None
+    addressed: list[FormAudienceOut] = Field(description="The managed people this form is for; submit as one of them.")
+    fields: list[FormFieldOut]
+    file_accept: str = Field(description="Accepted file types for `file` fields (extensions and MIME types).")
+    max_file_bytes: int
+
+
+class AnswerValueOut(Schema):
+    key: str
+    label: str
+    type: str
+    value: object | None = Field(description="As stored: string, number as string, `YYYY-MM-DD`, bool, list of strings, or for files `{name, size, content_type}`. Null when left blank.")
+
+
+class SubmissionOut(Schema):
+    id: uuid.UUID
+    send_id: uuid.UUID
+    title: str
+    member_id: uuid.UUID
+    submitted_at: datetime.datetime
+    answers: list[AnswerValueOut]
+
+
+# --- support & calendar feed -----------------------------------------------------------
+
+
+class BugNoteOut(Schema):
+    body: str
+    created: datetime.datetime
+
+
+class BugReportOut(Schema):
+    id: uuid.UUID
+    title: str
+    description: str
+    status: str = Field(description="`submitted`, `in_progress`, `fixed`, `wont_fix`.")
+    created: datetime.datetime
+    fixed_version: str | None = Field(description="Only once `fixed`.")
+    notes: list[BugNoteOut] = Field(description="Replies from the RosterChief team.")
+
+
+class BugReportListOut(Schema):
+    items: list[BugReportOut]
+
+
+class BugReportIn(Schema):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=10000)
+
+
+class CalendarFeedStateOut(Schema):
+    has_feed: bool = Field(description="A subscription link exists. It can't be shown again: create a new one to see it.")
+
+
+class CalendarFeedOut(Schema):
+    feed_url: str = Field(description="https URL of the .ics feed, for the family's events in every club. Treat it like a password.")
+    webcal_url: str = Field(description="The same as `webcal://`: open it to subscribe in the Calendar app.")

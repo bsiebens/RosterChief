@@ -27,6 +27,8 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 409 | `not_in_lineup` | `dropout` from someone who isn't selected: refresh the event. |
 | 409 | `signup_unavailable` | A referee/official invite can't be accepted (e.g. all slots taken). The invite stays open. |
 | 409 | `task_unavailable` | The task is full, or this account already has a slot. Refresh the event. |
+| 409 | `form_unavailable` | The form is closed, not open yet, or the maximum number of responses was reached. |
+| 409 | `pdf_unavailable` | The invoice PDF can't be made right now: show `message`, try later. |
 | 409 | `conflict` and other specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
 | 422 | `validation_error` | Show `fields` next to the inputs. |
 | 422 | `note_required` | `absent`/`dropout` without a reason: ask for one (`fields.note`). |

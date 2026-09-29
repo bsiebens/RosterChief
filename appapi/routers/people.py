@@ -7,6 +7,7 @@ import uuid
 
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
 from ninja import Router
 
 from club.models import ClubMembership
@@ -16,6 +17,7 @@ from members.models import FamilyMembership, Member
 from members.services.photos import can_view_member_photo
 from mobile.forms import MemberProfileForm
 from rosterchief.media import MEDIA_CSP
+from rosterchief.uploads import MAX_DOCUMENT_UPLOAD_BYTES
 from teams.models import TeamMembership
 
 from ..errors import ApiError
@@ -26,8 +28,6 @@ from ..scope import club_scope
 router = Router(tags=["people"])
 
 ERRORS = {401: ErrorOut, 403: ErrorOut, 404: ErrorOut}
-#: Fields MemberProfileForm edits that the JSON API does too (the photo has its own upload, phase 3).
-EDITABLE = ("first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo_public_consent")
 
 
 def _profile(request, club, member: Member) -> dict:
@@ -104,13 +104,65 @@ def update_profile(request, member_id: uuid.UUID, payload: ProfilePatchIn):
             data[field] = value.isoformat() if value else ""
         else:
             data[field] = value or ""
-    form = MemberProfileForm(data, instance=member)
+    return _save_profile_form(request, scope, member, data)
+
+
+def _save_profile_form(request, scope, member, data, files=None):
+    form = MemberProfileForm(data, files, instance=member)
     if not form.is_valid():
-        fields = {name: [str(message) for message in messages] for name, messages in form.errors.items() if name in EDITABLE or name == "__all__"}
-        raise ApiError(422, "validation_error", fields=fields or {"__all__": [str(message) for messages in form.errors.values() for message in messages]})
+        fields = {name: [str(message) for message in messages] for name, messages in form.errors.items()}
+        raise ApiError(422, "validation_error", fields=fields)
     form.save()
     member.refresh_from_db()
     return _profile(request, scope.club, member)
+
+
+PHOTO_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["photo"],
+                    "properties": {
+                        "photo": {"type": "string", "format": "binary", "description": "JPEG, PNG or WebP (HEIC: convert to JPEG first), at most 10 MB."},
+                        "photo_public_consent": {"type": "boolean", "description": "Optional: also set whether it may appear on the club's public website."},
+                    },
+                }
+            }
+        },
+    }
+}
+
+
+@router.post("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS, 422: ErrorOut}, summary="Upload a photo", openapi_extra=PHOTO_BODY)
+def upload_photo(request, member_id: uuid.UUID):
+    """Replaces the managed person's photo. Returns the profile with the new `photo_url`.
+    The photo stays private (family and club staff) unless `photo_public_consent` is on."""
+    scope = club_scope(request)
+    member = scope.person(member_id)
+    upload = request.FILES.get("photo")
+    if upload is None:
+        raise ApiError(422, "validation_error", fields={"photo": [_("Choose a photo to upload.")]})
+    if upload.size > MAX_DOCUMENT_UPLOAD_BYTES:
+        raise ApiError(422, "validation_error", fields={"photo": [_("The photo is larger than 10 MB.")]})
+    data = _form_data(member)
+    consent = request.POST.get("photo_public_consent")
+    if consent is not None:
+        data.pop("photo_public_consent", None)
+        if consent.lower() in ("true", "1", "on", "yes"):
+            data["photo_public_consent"] = "on"
+    return _save_profile_form(request, scope, member, data, {"photo": upload})
+
+
+@router.delete("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS}, summary="Remove the photo")
+def delete_photo(request, member_id: uuid.UUID):
+    scope = club_scope(request)
+    member = scope.person(member_id)
+    data = _form_data(member)
+    data["photo-clear"] = "on"
+    return _save_profile_form(request, scope, member, data)
 
 
 @router.get("/members/{member_id}/photo", response={200: None, **ERRORS}, summary="A member's photo", openapi_extra={"responses": {200: {"description": "The image.", "content": {"image/*": {}}}}})

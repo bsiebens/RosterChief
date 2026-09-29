@@ -312,7 +312,63 @@ club requirements. `PATCH /members/{id}` with only the fields that change (`firs
 
 `photo_url` (and `GET /members/{id}/photo`) needs the Bearer token, so load it with your own
 `URLRequest` (not `AsyncImage`). The URL changes when the photo does, so cache it by URL.
-Uploading a photo comes in a later release.
+
+**New photo:** `POST /members/{id}/photo` as `multipart/form-data` with a `photo` part (JPEG,
+PNG or WebP, at most 10 MB; convert HEIC from the camera to JPEG and downscale to ~1600 px
+first) and optionally `photo_public_consent=true|false`. `DELETE /members/{id}/photo` removes
+it. Both return the updated profile.
+
+### Payments & dues
+
+`GET /payments`: what the family still owes and the club's `payment_instructions` (plain text:
+bank account, reference). There's **no in-app payment**; show the instructions and the amount.
+Each item is either a `registration` (one invoice for several people, with the PDF at
+`GET /payments/registrations/{registration_id}/invoice.pdf`) or one person's `membership`
+dues. `early_payment`, when present, is the smaller `total` to pay by its `deadline`. Open the
+PDF with Quick Look or share it; it needs the Bearer token, so download it yourself.
+
+### Forms
+
+`GET /forms` lists every form the family was asked to fill in (one row per person; done when
+`submitted_at` is set). `GET /forms/{send_id}` gives the fields to render:
+
+| `type` | Control | Value to send |
+|---|---|---|
+| `text`, `email` | text field | string |
+| `textarea` | multi-line text | string |
+| `number` | decimal keypad | string or number |
+| `date` | date picker | `"YYYY-MM-DD"` |
+| `choice` | single choice from `options` | the option's `value` |
+| `multichoice` | several from `options` | list of `value`s |
+| `checkbox` | toggle | `true` / `false` |
+| `file` | document or photo picker (`file_accept`, ≤ `max_file_bytes`) | a file part (multipart only) |
+
+Group fields under their `section`. If a form has a `type` the app doesn't know, open the form
+on the website instead.
+
+**Submit** with `POST /forms/{send_id}/submit` and an `Idempotency-Key` header, for one of the
+form's `addressed` people:
+
+* no file fields: JSON `{"member_id": "…", "answers": {"allergies": "None", "size": "M"}}`;
+* with a file field: `multipart/form-data` with a `member_id` part, one part per field `key`
+  (repeat the key for each `multichoice` value), and the files.
+
+`201` returns the stored response. `422` has messages per field `key` in `fields`;
+`409 form_unavailable` means the form is closed, not open yet, or already answered as many times
+as allowed. `GET /forms/submissions/{id}` shows a submitted response.
+
+### Calendar subscription
+
+`POST /calendar-feed` returns `webcal_url`: open it with `UIApplication.shared.open` and iOS
+offers to subscribe. It covers the family's events in every club. The link is shown **only in
+that response**; `GET /calendar-feed` just says whether one exists. Calling `POST` again makes a
+new link and the old one stops working (use it as "reset link" when one leaked).
+
+### Bug reports
+
+`POST /bug-reports` `{"title": "…", "description": "…"}` files a report as the signed-in person;
+`GET /bug-reports` lists them with the RosterChief team's replies (`notes`) and `status`. Add the
+app version and iOS version to the description yourself.
 
 ## 9. Other rules
 

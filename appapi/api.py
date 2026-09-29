@@ -11,9 +11,12 @@ from .auth import app_auth
 from .errors import install_handlers
 from .routers.account import router as account_router
 from .routers.club import router as club_router
+from .routers.forms import router as forms_router
 from .routers.inbox import router as inbox_router
 from .routers.member import router as member_router
+from .routers.payments import router as payments_router
 from .routers.people import router as people_router
+from .routers.support import router as support_router
 
 DESCRIPTION = """
 The API the RosterChief native apps are built on. Read the developer guide first:
@@ -45,3 +48,6 @@ app_api.add_router("/", club_router)
 app_api.add_router("/", member_router)
 app_api.add_router("/", inbox_router)
 app_api.add_router("/", people_router)
+app_api.add_router("/", payments_router)
+app_api.add_router("/", forms_router)
+app_api.add_router("/", support_router)
