@@ -16,6 +16,7 @@ from .routers.inbox import router as inbox_router
 from .routers.member import router as member_router
 from .routers.payments import router as payments_router
 from .routers.people import router as people_router
+from .routers.shop import router as shop_router
 from .routers.support import router as support_router
 
 DESCRIPTION = """
@@ -51,3 +52,4 @@ app_api.add_router("/", people_router)
 app_api.add_router("/", payments_router)
 app_api.add_router("/", forms_router)
 app_api.add_router("/", support_router)
+app_api.add_router("/", shop_router)

@@ -357,6 +357,26 @@ form's `addressed` people:
 `409 form_unavailable` means the form is closed, not open yet, or already answered as many times
 as allowed. `GET /forms/submissions/{id}` shows a submitted response.
 
+### Shop
+
+Only when `/clubs` → `features.shop` is on; hide the tab while `shop_open` is off (the
+catalogue, cart and checkout then answer `409 shop_closed`, but orders stay readable).
+
+* `GET /shop/products`: products and categories. A product with `variants` needs one picked
+  (`M`, `L`, …); `personalization_enabled` offers a number and name to print.
+* `POST /shop/cart/items` `{"product_id", "variant_id", "quantity", "beneficiary_id",
+  "personalization_number", "personalization_name"}` adds to the cart and returns the whole
+  cart. `beneficiary_id` is the managed person it's for; show a person picker when there's
+  more than one. Send an `Idempotency-Key`.
+* `GET /shop/cart?code=SUMMER10`: the cart re-priced to what checkout will charge, with a
+  preview of a discount code (`discount` or `discount_error`). Lines with `unavailable: true`
+  must be removed first; when `prices_changed` is true, tell the user.
+* `PATCH /shop/cart/items/{id}` `{"quantity": 3}` (0 removes), `DELETE /shop/cart/items/{id}`.
+* `POST /shop/orders` `{"discount_code": "…"}` with an `Idempotency-Key` places the order. It's
+  **paid at the club on pickup**, never in the app. `409 checkout_failed` carries the reason
+  in `message`.
+* `GET /shop/orders` (paged), `GET /shop/orders/{id}` and `GET /shop/orders/{id}/invoice.pdf`.
+
 ### Calendar subscription
 
 `POST /calendar-feed` returns `webcal_url`: open it with `UIApplication.shared.open` and iOS

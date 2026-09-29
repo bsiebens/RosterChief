@@ -421,7 +421,7 @@ class UnknownIdTests(ClubApiTestCase):
     id with the 404 envelope -- walked from the route table, so a new endpoint is
     covered without anyone remembering to add a test."""
 
-    BODIES = {"rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"}, "respond": {"response": "decline"}, "{member_id}": {}}
+    BODIES = {"rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"}, "respond": {"response": "decline"}, "{member_id}": {}, "{item_id}": {"quantity": 1}}
 
     def test_unknown_ids_are_404_everywhere(self):
         import re

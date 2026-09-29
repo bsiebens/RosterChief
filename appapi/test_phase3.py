@@ -190,3 +190,79 @@ class SupportTests(ClubApiTestCase):
         self.assertEqual(feed.status_code, 200)
         old = self.client.get(first["feed_url"].replace("http://ajax-united.rosterchief.app", ""), HTTP_HOST=CLUB_HOST)
         self.assertEqual(old.status_code, 404)
+
+
+class ShopTests(ClubApiTestCase):
+    def setUp(self):
+        super().setUp()
+        from waffle import get_waffle_flag_model
+
+        from shop.models import Product, ProductVariant
+
+        # The "order placed" email runs on a background thread; not what these tests are about.
+        background = patch("shop.services.notifications.run_in_background")
+        background.start()
+        self.addCleanup(background.stop)
+        get_waffle_flag_model().objects.get_or_create(name="shop")[0].clubs.add(self.club)
+        type(self.club).objects.filter(pk=self.club.pk).update(shop_open=True)
+        self.jersey = Product.objects.create(club=self.club, name="Home Jersey", slug="home-jersey", price=Decimal("25.00"), personalization_enabled=True)
+        self.medium = ProductVariant.objects.create(product=self.jersey, name="M", price=Decimal("27.50"))
+        Product.objects.create(club=self.club, name="Season fee", slug="season-fee", price=Decimal("150"), product_type=Product.ProductType.MEMBERSHIP)
+
+    def add(self, **data):
+        return self.send("post", "/shop/cart/items", {"product_id": str(self.jersey.pk), **data})
+
+    def test_catalogue_leaves_out_membership_products(self):
+        items = self.get("/shop/products").json()["items"]
+        self.assertEqual([item["slug"] for item in items], ["home-jersey"])
+        self.assertEqual(items[0]["variants"], [{"id": str(self.medium.pk), "name": "M", "price": {"amount": "27.50", "currency": "EUR"}}])
+        self.assertError(self.get("/shop/products/season-fee"), 404, "not_found")
+
+    def test_cart_and_checkout(self):
+        added = self.add(variant_id=str(self.medium.pk), quantity=2, beneficiary_id=str(self.child.pk), personalization_number="7")
+        self.assertEqual(added.status_code, 201, added.content)
+        line = added.json()["items"][0]
+        self.assertEqual((line["quantity"], line["line_total"]["amount"], line["beneficiary_id"], line["personalization_number"]), (2, "55.00", str(self.child.pk), "7"))
+
+        self.assertEqual(self.send("patch", f"/shop/cart/items/{line['id']}", {"quantity": 1}).json()["total"]["amount"], "27.50")
+
+        order = self.send(
+            "post",
+            "/shop/orders",
+            {},
+        ).json()
+        self.assertEqual((order["total"]["amount"], order["payment_status"], order["status"]), ("27.50", "pending", "not_ready"))
+        self.assertEqual(order["lines"][0]["variant_name"], "M")
+        self.assertEqual(self.get("/shop/cart").json()["items"], [])
+        self.assertEqual([item["number"] for item in self.get("/shop/orders").json()["items"]], [order["number"]])
+
+    def test_checkout_is_idempotent(self):
+        self.add()
+        first = self.api("post", "/shop/orders", token=self.token, host=CLUB_HOST, data={}, HTTP_IDEMPOTENCY_KEY="tap-1")
+        second = self.api("post", "/shop/orders", token=self.token, host=CLUB_HOST, data={}, HTTP_IDEMPOTENCY_KEY="tap-1")
+        self.assertEqual(first.json()["id"], second.json()["id"])
+
+    def test_empty_cart_and_bad_input(self):
+        self.assertError(self.send("post", "/shop/orders", {}), 409, "checkout_failed")
+        self.assertError(self.add(variant_id=str(self.jersey.pk)), 422, "validation_error")
+        self.assertError(self.add(beneficiary_id=str(self.stranger().pk)), 404, "not_found")
+
+    def test_closed_and_unlicensed(self):
+        self.add()
+        order = self.send("post", "/shop/orders", {}).json()
+        type(self.club).objects.filter(pk=self.club.pk).update(shop_open=False)
+
+        self.assertError(self.get("/shop/products"), 409, "shop_closed")
+        self.assertError(self.get("/shop/cart"), 409, "shop_closed")
+        self.assertEqual(self.get(f"/shop/orders/{order['id']}").status_code, 200)
+
+        from waffle import get_waffle_flag_model
+
+        get_waffle_flag_model().objects.get(name="shop").clubs.remove(self.club)
+        self.assertError(self.get("/shop/orders"), 404, "feature_disabled")
+
+    def test_someone_elses_order_is_404(self):
+        from shop.models import Order
+
+        theirs = Order.objects.create(club=self.club, purchaser=self.stranger(), total=Decimal("5"))
+        self.assertError(self.get(f"/shop/orders/{theirs.pk}"), 404, "not_found")

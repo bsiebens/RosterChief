@@ -10,7 +10,8 @@ What the app can use today, and what's next. The full plan is `API.md` in the re
 | Push registration (`POST`/`DELETE /devices`) and delivery | **Available** once the server has SNS set up |
 | Member: home, calendar, events, RSVP, referee/official invites, tasks, news, notifications, profile (view/edit), member photos | **Available** |
 | Member: payments & invoices, forms, photo upload, bug reports, calendar subscription | **Available** |
-| Member: shop & orders, re-registration | Next (phase 3, in progress) |
+| Member: shop, cart, orders & invoices | **Available** |
+| Member: re-registration | Next (phase 3, in progress) |
 | Coach: today, attendance, events, lineup, roster, news, evaluations | Phase 4 |
 | Passkeys on iOS, "signed-in devices", universal links for password reset | Phase 5 |
 | Android | After iOS, on the same API |

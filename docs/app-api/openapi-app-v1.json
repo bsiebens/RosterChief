@@ -369,6 +369,332 @@
         "title": "CalendarOut",
         "type": "object"
       },
+      "CartDiscountOut": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "amount"
+        ],
+        "title": "CartDiscountOut",
+        "type": "object"
+      },
+      "CartItemIn": {
+        "properties": {
+          "beneficiary_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who it's for: one of the managed people. Leave empty when ordering for yourself only.",
+            "title": "Beneficiary Id"
+          },
+          "personalization_name": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Personalization Name",
+            "type": "string"
+          },
+          "personalization_number": {
+            "default": "",
+            "maxLength": 20,
+            "title": "Personalization Number",
+            "type": "string"
+          },
+          "product_id": {
+            "format": "uuid",
+            "title": "Product Id",
+            "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "maximum": 99,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "variant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Id"
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "title": "CartItemIn",
+        "type": "object"
+      },
+      "CartItemOut": {
+        "properties": {
+          "beneficiary_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The managed person it's for, if chosen.",
+            "title": "Beneficiary Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "line_total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "personalization_name": {
+            "title": "Personalization Name",
+            "type": "string"
+          },
+          "personalization_number": {
+            "title": "Personalization Number",
+            "type": "string"
+          },
+          "product": {
+            "$ref": "#/components/schemas/CartProductOut"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "unavailable": {
+            "description": "Can't be ordered any more (product withdrawn or option gone): remove it before checking out.",
+            "title": "Unavailable",
+            "type": "boolean"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Current price; the cart is re-priced on every read."
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VariantOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "product",
+          "variant",
+          "quantity",
+          "unit_price",
+          "line_total",
+          "beneficiary_id",
+          "personalization_number",
+          "personalization_name",
+          "unavailable"
+        ],
+        "title": "CartItemOut",
+        "type": "object"
+      },
+      "CartItemPatchIn": {
+        "properties": {
+          "quantity": {
+            "description": "0 removes the line.",
+            "maximum": 99,
+            "minimum": 0,
+            "title": "Quantity",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quantity"
+        ],
+        "title": "CartItemPatchIn",
+        "type": "object"
+      },
+      "CartOut": {
+        "properties": {
+          "discount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CartDiscountOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `code` passed, when it's valid now."
+          },
+          "discount_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the `code` passed can't be used.",
+            "title": "Discount Error"
+          },
+          "has_unavailable": {
+            "title": "Has Unavailable",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CartItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "max_quantity": {
+            "title": "Max Quantity",
+            "type": "integer"
+          },
+          "prices_changed": {
+            "description": "Some prices changed since they were added: tell the user.",
+            "title": "Prices Changed",
+            "type": "boolean"
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "items",
+          "subtotal",
+          "discount",
+          "discount_error",
+          "total",
+          "has_unavailable",
+          "prices_changed",
+          "max_quantity"
+        ],
+        "title": "CartOut",
+        "type": "object"
+      },
+      "CartProductOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "image_url"
+        ],
+        "title": "CartProductOut",
+        "type": "object"
+      },
+      "CatalogOut": {
+        "properties": {
+          "categories": {
+            "description": "In display order; only categories with products.",
+            "items": {
+              "$ref": "#/components/schemas/CategoryOut"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories",
+          "items"
+        ],
+        "title": "CatalogOut",
+        "type": "object"
+      },
+      "CategoryOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CategoryOut",
+        "type": "object"
+      },
+      "CheckoutIn": {
+        "properties": {
+          "discount_code": {
+            "default": "",
+            "maxLength": 50,
+            "title": "Discount Code",
+            "type": "string"
+          }
+        },
+        "title": "CheckoutIn",
+        "type": "object"
+      },
       "ClubFeatures": {
         "properties": {
           "evaluations": {
@@ -2236,6 +2562,233 @@
         "title": "OpenTaskOut",
         "type": "object"
       },
+      "OrderDiscountOut": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount"
+        ],
+        "title": "OrderDiscountOut",
+        "type": "object"
+      },
+      "OrderLineOut": {
+        "properties": {
+          "beneficiary_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beneficiary Id"
+          },
+          "line_total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "personalization_name": {
+            "title": "Personalization Name",
+            "type": "string"
+          },
+          "personalization_number": {
+            "title": "Personalization Number",
+            "type": "string"
+          },
+          "product_name": {
+            "title": "Product Name",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "variant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Name"
+          }
+        },
+        "required": [
+          "product_name",
+          "variant_name",
+          "quantity",
+          "unit_price",
+          "line_total",
+          "beneficiary_id",
+          "personalization_number",
+          "personalization_name"
+        ],
+        "title": "OrderLineOut",
+        "type": "object"
+      },
+      "OrderListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "OrderListOut",
+        "type": "object"
+      },
+      "OrderOut": {
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "discounts": {
+            "items": {
+              "$ref": "#/components/schemas/OrderDiscountOut"
+            },
+            "title": "Discounts",
+            "type": "array"
+          },
+          "has_invoice": {
+            "description": "The PDF is at `/shop/orders/{id}/invoice.pdf`.",
+            "title": "Has Invoice",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "payment_status": {
+            "description": "`pending`, `partially_paid`, `paid`, `refunded`.",
+            "title": "Payment Status",
+            "type": "string"
+          },
+          "pickup_instructions": {
+            "title": "Pickup Instructions",
+            "type": "string"
+          },
+          "purchaser_id": {
+            "format": "uuid",
+            "title": "Purchaser Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "`not_ready`, `in_production`, `ready_for_pickup`, `completed`, `cancelled`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "created",
+          "total",
+          "purchaser_id",
+          "payment_status",
+          "status",
+          "lines",
+          "discounts",
+          "pickup_instructions",
+          "has_invoice"
+        ],
+        "title": "OrderOut",
+        "type": "object"
+      },
+      "OrderSummaryOut": {
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "payment_status": {
+            "description": "`pending`, `partially_paid`, `paid`, `refunded`.",
+            "title": "Payment Status",
+            "type": "string"
+          },
+          "purchaser_id": {
+            "format": "uuid",
+            "title": "Purchaser Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "`not_ready`, `in_production`, `ready_for_pickup`, `completed`, `cancelled`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "created",
+          "total",
+          "purchaser_id",
+          "payment_status",
+          "status"
+        ],
+        "title": "OrderSummaryOut",
+        "type": "object"
+      },
       "PaymentItemOut": {
         "properties": {
           "due_date": {
@@ -2384,6 +2937,80 @@
           "last_name"
         ],
         "title": "PersonOut",
+        "type": "object"
+      },
+      "ProductOut": {
+        "properties": {
+          "category_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "personalization_enabled": {
+            "description": "Offer a number and/or name to print (e.g. on a jersey).",
+            "title": "Personalization Enabled",
+            "type": "boolean"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Base price; a variant may have its own."
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "variants": {
+            "description": "Active options; when not empty, pick one.",
+            "items": {
+              "$ref": "#/components/schemas/VariantOut"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "image_url",
+          "price",
+          "category_id",
+          "personalization_enabled",
+          "variants"
+        ],
+        "title": "ProductOut",
         "type": "object"
       },
       "ProfileOut": {
@@ -2948,6 +3575,30 @@
           "email"
         ],
         "title": "UserOut",
+        "type": "object"
+      },
+      "VariantOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "One free-text option, e.g. `M` or `Medium — Red`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price"
+        ],
+        "title": "VariantOut",
         "type": "object"
       }
     },
@@ -5688,6 +6339,810 @@
         "summary": "Registration invoice (PDF)",
         "tags": [
           "payments"
+        ]
+      }
+    },
+    "/api/app/v1/shop/cart": {
+      "get": {
+        "description": "Re-priced to what checkout would charge now. Pass `code` to preview a discount\ncode (`discount` or `discount_error`); only checkout actually redeems it. Wrong codes\ncount towards a throttle.",
+        "operationId": "appapi_routers_shop_cart",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The cart",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/cart/items": {
+      "post": {
+        "description": "Adds to an existing line for the same product, option, person and\npersonalisation. Returns the whole cart. Send an `Idempotency-Key` so a retried tap\ndoesn't add twice.",
+        "operationId": "appapi_routers_shop_add_item",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartItemIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Add to cart",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/cart/items/{item_id}": {
+      "delete": {
+        "operationId": "appapi_routers_shop_remove_item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove a line",
+        "tags": [
+          "shop"
+        ]
+      },
+      "patch": {
+        "operationId": "appapi_routers_shop_update_item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartItemPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change a quantity",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/orders": {
+      "get": {
+        "description": "Newest first, also while the shop is closed.",
+        "operationId": "appapi_routers_shop_orders",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The family's orders",
+        "tags": [
+          "shop"
+        ]
+      },
+      "post": {
+        "description": "Turns the cart into an order, paid at the club on pickup. Send an\n`Idempotency-Key`: a double tap must not order twice. `409 checkout_failed` carries\nthe reason (empty cart, unavailable lines, a code that can't be used) in `message`.",
+        "operationId": "appapi_routers_shop_checkout",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Place the order",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/orders/{order_id}": {
+      "get": {
+        "operationId": "appapi_routers_shop_order_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One order",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/orders/{order_id}/invoice.pdf": {
+      "get": {
+        "operationId": "appapi_routers_shop_order_invoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "The invoice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Order invoice (PDF)",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/products": {
+      "get": {
+        "operationId": "appapi_routers_shop_products",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Catalogue",
+        "tags": [
+          "shop"
+        ]
+      }
+    },
+    "/api/app/v1/shop/products/{slug}": {
+      "get": {
+        "operationId": "appapi_routers_shop_product_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One product",
+        "tags": [
+          "shop"
         ]
       }
     }

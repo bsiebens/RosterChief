@@ -578,3 +578,126 @@ class CalendarFeedStateOut(Schema):
 class CalendarFeedOut(Schema):
     feed_url: str = Field(description="https URL of the .ics feed, for the family's events in every club. Treat it like a password.")
     webcal_url: str = Field(description="The same as `webcal://`: open it to subscribe in the Calendar app.")
+
+
+# --- shop ------------------------------------------------------------------------------
+
+
+class VariantOut(Schema):
+    id: uuid.UUID
+    name: str = Field(description="One free-text option, e.g. `M` or `Medium — Red`.")
+    price: Money
+
+
+class ProductOut(Schema):
+    id: uuid.UUID
+    slug: str
+    name: str
+    description: str
+    image_url: str | None
+    price: Money = Field(description="Base price; a variant may have its own.")
+    category_id: uuid.UUID | None
+    personalization_enabled: bool = Field(description="Offer a number and/or name to print (e.g. on a jersey).")
+    variants: list[VariantOut] = Field(description="Active options; when not empty, pick one.")
+
+
+class CategoryOut(Schema):
+    id: uuid.UUID
+    name: str
+
+
+class CatalogOut(Schema):
+    categories: list[CategoryOut] = Field(description="In display order; only categories with products.")
+    items: list[ProductOut]
+
+
+class CartProductOut(Schema):
+    id: uuid.UUID
+    slug: str
+    name: str
+    image_url: str | None
+
+
+class CartItemOut(Schema):
+    id: uuid.UUID
+    product: CartProductOut
+    variant: VariantOut | None
+    quantity: int
+    unit_price: Money = Field(description="Current price; the cart is re-priced on every read.")
+    line_total: Money
+    beneficiary_id: uuid.UUID | None = Field(description="The managed person it's for, if chosen.")
+    personalization_number: str
+    personalization_name: str
+    unavailable: bool = Field(description="Can't be ordered any more (product withdrawn or option gone): remove it before checking out.")
+
+
+class CartDiscountOut(Schema):
+    code: str
+    name: str
+    amount: Money
+
+
+class CartOut(Schema):
+    items: list[CartItemOut]
+    subtotal: Money
+    discount: CartDiscountOut | None = Field(description="The `code` passed, when it's valid now.")
+    discount_error: str | None = Field(description="Why the `code` passed can't be used.")
+    total: Money
+    has_unavailable: bool
+    prices_changed: bool = Field(description="Some prices changed since they were added: tell the user.")
+    max_quantity: int
+
+
+class CartItemIn(Schema):
+    product_id: uuid.UUID
+    variant_id: uuid.UUID | None = None
+    quantity: int = Field(1, ge=1, le=99)
+    beneficiary_id: uuid.UUID | None = Field(None, description="Who it's for: one of the managed people. Leave empty when ordering for yourself only.")
+    personalization_number: str = Field("", max_length=20)
+    personalization_name: str = Field("", max_length=100)
+
+
+class CartItemPatchIn(Schema):
+    quantity: int = Field(ge=0, le=99, description="0 removes the line.")
+
+
+class CheckoutIn(Schema):
+    discount_code: str = Field("", max_length=50)
+
+
+class OrderSummaryOut(Schema):
+    id: uuid.UUID
+    number: str
+    created: datetime.datetime
+    total: Money
+    purchaser_id: uuid.UUID
+    payment_status: str = Field(description="`pending`, `partially_paid`, `paid`, `refunded`.")
+    status: str = Field(description="`not_ready`, `in_production`, `ready_for_pickup`, `completed`, `cancelled`.")
+
+
+class OrderListOut(Schema):
+    items: list[OrderSummaryOut]
+    next_cursor: str | None
+
+
+class OrderLineOut(Schema):
+    product_name: str
+    variant_name: str | None
+    quantity: int
+    unit_price: Money
+    line_total: Money
+    beneficiary_id: uuid.UUID | None
+    personalization_number: str
+    personalization_name: str
+
+
+class OrderDiscountOut(Schema):
+    description: str
+    amount: Money
+
+
+class OrderOut(OrderSummaryOut):
+    lines: list[OrderLineOut]
+    discounts: list[OrderDiscountOut]
+    pickup_instructions: str
+    has_invoice: bool = Field(description="The PDF is at `/shop/orders/{id}/invoice.pdf`.")

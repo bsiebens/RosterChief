@@ -68,10 +68,10 @@ from registration.services import (
 from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
 from rosterchief.client_ip import client_ip
-from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
-from shop.services.checkout import CheckoutError, find_discount, place_order, reprice_cart_items
+from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
+from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
+from shop.services.checkout import CheckoutError, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
-from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
 from teams.services.numbers import member_current_number
 
@@ -1411,8 +1411,8 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         # (registration.services.pricing) -- excluded structurally here
         # regardless of is_public, not left to staff remembering to flag
         # each one.
-        products = list(Product.objects.filter(club=self.request.club, is_active=True, is_public=True).exclude(product_type=Product.ProductType.MEMBERSHIP).select_related("category"))
-        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
+        products = list(catalog(self.request.club))
+        cart = open_cart(self.request.club, self.request.user)
         cart_item_count = cart.items.count() if cart is not None else 0
 
         # One products query total (not one per category) -- see ShopHomeView's
@@ -1430,12 +1430,6 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             groups.append({"category": None, "products": uncategorized})
 
         return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
-
-
-#: Upper bound on one cart line's quantity -- adding more (or incrementing
-#: past it) clamps to this rather than erroring, well inside CartItem.
-#: quantity's PositiveSmallIntegerField range.
-MAX_CART_QUANTITY = 99
 
 
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1458,7 +1452,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def _product(self):
-        return get_object_or_404(Product.objects.exclude(product_type=Product.ProductType.MEMBERSHIP), club=self.request.club, slug=self.kwargs["slug"], is_active=True, is_public=True)
+        return get_object_or_404(catalog(self.request.club), slug=self.kwargs["slug"])
 
     def get(self, request, *args, **kwargs):
         product = self._product()
@@ -1493,29 +1487,17 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             if beneficiary is None:
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
-        # Only collected -- and only trusted from the request -- when the
-        # product actually opted in; a crafted POST can't sneak personalization
-        # onto a product that doesn't offer it.
-        personalization_number = ""
-        personalization_name = ""
-        if product.personalization_enabled:
-            personalization_number = request.POST.get("personalization_number", "").strip()[:20]
-            personalization_name = request.POST.get("personalization_name", "").strip()[:100]
-
-        unit_price = variant.effective_price if variant is not None else product.price
-        cart, _created = Cart.objects.get_or_create(club=request.club, user=request.user, status=Cart.CartStatus.OPEN)
-        item, item_created = CartItem.objects.get_or_create(
-            cart=cart,
-            product=product,
+        # Personalisation only sticks on a product that offers it (shop.services.cart).
+        add_to_cart(
+            request.club,
+            request.user,
+            product,
+            quantity=quantity,
             variant=variant,
             beneficiary=beneficiary,
-            personalization_number=personalization_number,
-            personalization_name=personalization_name,
-            defaults={"quantity": quantity, "unit_price": unit_price},
+            personalization_number=request.POST.get("personalization_number", ""),
+            personalization_name=request.POST.get("personalization_name", ""),
         )
-        if not item_created:
-            item.quantity = min(item.quantity + quantity, MAX_CART_QUANTITY)
-            item.save(update_fields=["quantity"])
 
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}
@@ -1544,26 +1526,18 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
-        items = list(cart.items.select_related("cart", "product", "variant", "beneficiary").order_by("created")) if cart is not None else []
-        unavailable, repriced = reprice_cart_items(items)
-        unavailable_ids = {item.pk for item in unavailable}
-        for item in items:
-            item.line_total = item.unit_price * item.quantity
-            item.unavailable = item.pk in unavailable_ids
-
-        code = self.request.GET.get("code", "").strip()
-        discount = None
-        discount_error = None
-        if code and cart is not None:
-            try:
-                discount = find_discount(self.request.club, code, member=self.me, ip=client_ip(self.request))
-            except CheckoutError as error:
-                discount_error = str(error)
-
-        totals = cart_totals(cart, discount) if cart is not None else {"subtotal": Decimal("0"), "discount_amount": Decimal("0"), "total": Decimal("0")}
-
-        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, has_unavailable=bool(unavailable), prices_changed=bool(repriced), **kwargs)
+        summary = cart_summary(self.request.club, self.request.user, code=self.request.GET.get("code", ""), member=self.me, ip=client_ip(self.request))
+        return super().get_context_data(
+            cart=summary["cart"],
+            items=summary["items"],
+            code=summary["code"],
+            discount=summary["discount"],
+            discount_error=summary["discount_error"],
+            totals=summary["totals"],
+            has_unavailable=summary["has_unavailable"],
+            prices_changed=summary["prices_changed"],
+            **kwargs,
+        )
 
 
 class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
@@ -1576,17 +1550,11 @@ class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
         action = request.POST.get("action")
 
         if action == "increment":
-            if item.quantity < MAX_CART_QUANTITY:
-                item.quantity += 1
-                item.save(update_fields=["quantity"])
+            set_quantity(item, item.quantity + 1)
         elif action == "decrement":
-            if item.quantity > 1:
-                item.quantity -= 1
-                item.save(update_fields=["quantity"])
-            else:
-                item.delete()
+            set_quantity(item, item.quantity - 1)
         elif action == "remove":
-            item.delete()
+            set_quantity(item, 0)
         else:
             return HttpResponseBadRequest(_("Unknown action."))
 
@@ -1600,7 +1568,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
     and translate CheckoutError into a flashed message instead of a 500."""
 
     def post(self, request, *args, **kwargs):
-        cart = Cart.objects.filter(club=request.club, user=request.user, status=Cart.CartStatus.OPEN).first()
+        cart = open_cart(request.club, request.user)
         if cart is None or self.me is None:
             notify(request, f"e|{_('Nothing to order')}|{_('Your cart is empty.')}")
             return HttpResponseRedirect(reverse("mobile:shop_cart"))
@@ -1630,7 +1598,7 @@ class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        orders = Order.objects.filter(club=self.request.club, purchaser__in=self.managed_people).select_related("purchaser").order_by("-created") if self.managed_people else Order.objects.none()
+        orders = orders_for(self.request.club, self.managed_people)
         rows = [
             {
                 "order": order,
