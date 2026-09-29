@@ -1,0 +1,85 @@
+"""Native push for new notifications (API.md §9): the SNS counterpart of the member web
+app's Web Push (mobile.services.push). Both hang off notifications.signals.
+notifications_created, the one fan-out point, so a notification reaches every channel.
+
+Recipients are *accounts*, resolved the way email already is (notifications.services.
+recipient_emails): the member's own login plus every parent/guardian's in that club. One
+install serves every club and child of its account, so an account gets one push per
+distinct notification even when it concerns several of its children (a club-wide news
+item makes a row per child). Pushes are pointers (API.md §9): the stored, already
+localised title/body and ``{notification_id, club_slug, target}``; the app fetches the
+rest over the API.
+"""
+
+import logging
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.db import transaction
+
+from notifications.models import Notification
+from rosterchief.concurrency import run_in_background
+
+from .models import PushDevice
+from .presenters import notification_source
+from .push import get_gateway
+
+logger = logging.getLogger(__name__)
+
+
+def push_configured() -> bool:
+    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or settings.APP_PUSH_SNS_APNS_ARN or settings.APP_PUSH_SNS_APNS_SANDBOX_ARN or settings.APP_PUSH_SNS_FCM_ARN)
+
+
+def recipient_user_ids(notification: Notification) -> set:
+    member = notification.member
+    user_ids = {member.user_id} if member.user_id else set()
+    user_ids |= set(member.guardians(notification.club).exclude(user__isnull=True).values_list("user_id", flat=True))
+    return user_ids
+
+
+def payload_data(notification: Notification) -> dict:
+    source = notification_source(notification.source)
+    target = {key: str(value) for key, value in source.items() if value is not None} if source else None
+    return {"notification_id": str(notification.pk), "club_slug": notification.club.slug, "target": target}
+
+
+def deliver(notification_ids) -> int:
+    """Push the given notifications to their recipients' enabled devices. Returns how many
+    pushes were handed to the gateway. A device whose token is dead is disabled."""
+    notifications = list(Notification.objects.filter(pk__in=notification_ids).select_related("club", "member").order_by("created"))
+    per_user: dict = {}
+    for notification in notifications:
+        dedupe_key = (notification.club_id, notification.content_type_id, notification.object_id, notification.title, notification.body)
+        for user_id in recipient_user_ids(notification):
+            per_user.setdefault(user_id, {}).setdefault(dedupe_key, notification)
+    if not per_user:
+        return 0
+
+    active_users = set(get_user_model().objects.filter(pk__in=per_user, is_active=True).values_list("pk", flat=True))
+    devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).exclude(endpoint_arn="")
+    gateway = get_gateway()
+    sent = 0
+    for device in devices:
+        for notification in per_user[device.user_id].values():
+            try:
+                alive = gateway.publish(device, title=str(notification.title), body=str(notification.body), data=payload_data(notification))
+            except Exception:
+                # Never fatal for the rest of the fan-out (throttling, a network blip).
+                logger.exception("app_push.publish_failed device=%s", device.pk)
+                continue
+            if not alive:
+                device.enabled = False
+                device.save(update_fields=["enabled", "modified"])
+                break
+            sent += 1
+    return sent
+
+
+def on_notifications_created(sender, notifications, **kwargs) -> None:
+    """Receiver for notifications_created: after the transaction commits (the rows must
+    be visible to the worker thread), off the request thread."""
+    if not notifications or not push_configured():
+        return
+    ids = [notification.pk for notification in notifications]
+    transaction.on_commit(lambda: run_in_background(deliver, ids))

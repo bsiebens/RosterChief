@@ -206,12 +206,108 @@ Then retry the call that failed.
 4. The response's `push_enabled` is `false` until the server has push delivery set up. Don't show
    an error for that.
 
-**Payload** (arrives in `userInfo`): an `aps.alert` with a translated title and body, plus
-`notification_id`, `club_slug`, `type` and `target` (`{"type": "event", "id": "…"}`). The
-payload is only a pointer: fetch the details over the API. It never contains personal data.
-*(The server starts sending these with the member endpoints; registration works now.)*
+**Payload** (arrives in `userInfo`): an `aps.alert` with the title and body, plus:
 
-## 8. Other rules
+```json
+{"notification_id": "…", "club_slug": "hc-example",
+ "target": {"type": "news", "id": "…", "slug": "welcome"}}
+```
+
+`target` is `null` or has a `type` of `news`, `event` or `form_send` (ignore unknown types). On
+tap: switch to the club named by `club_slug`, mark the notification read
+(`POST /notifications/{notification_id}/read`), then open the target (`GET /news/{slug}`,
+`GET /events/{id}`; forms arrive in a later release). The payload is only a pointer and never
+contains personal data. One account gets **one** push per notification even when it concerns
+several of its children.
+
+A person who also has the web app installed with notifications on gets both for now.
+
+## 8. Member screens
+
+All on the club host (`<api_base_url>`), all read with the Bearer token. The web app's screens
+map one to one; the server decides every rule (deadlines, who may answer, caps), so the app
+only renders what it gets.
+
+### Who you act for
+
+`/context` → `managed_people` is the account's own person (`is_self: true`) and its children.
+Reads take `member_id` (one person) or nothing / `all` (everyone, the default). Every write names
+one `member_id`. Show a person switcher when there's more than one; each row in a response
+carries `member_id`, so label rows with that person's first name.
+
+### Home
+
+`GET /home?member_id=…`:
+
+* `rsvp_needed`: the next invitation nobody has answered. Show **In / Maybe / Out** buttons;
+  when `rsvp_closed` is true show the event read-only.
+* `next_going`: the next event someone is going to.
+* `needs_answer` (+ `needs_answer_more`): other open asks. `type` `rsvp` → answer the event;
+  `referee` / `official` → accept or decline `signup_id`.
+* `open_tasks`, `dues` (money), `news` (cards), `forms_to_complete`.
+
+### Calendar
+
+`GET /calendar?from=…&to=…&kind=game|training&member_id=…` returns everything in the window,
+soonest first. The window defaults to the next 92 days and may not be longer; for the next page,
+pass the previous `to` as `from`. Row types:
+
+| `type` | Show | Action |
+|---|---|---|
+| `rsvp` | the event with the person's `status` | open the event |
+| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`) or a confirmed duty (`accepted`) | respond to `signup_id` |
+| `blocked` | the event greyed out with `blocked_requirements` ("Medical certificate") | none: the club must clear it |
+
+### Event
+
+`GET /events/{id}`: the event, `answers` (one per invited managed person, with their `note`),
+a published `lineup`, `referee_signups` / `official_signups`, `tasks`, `blocked` people and the
+squad's `squad_summary` (counts only).
+
+**Answering** (`POST /events/{id}/rsvp`):
+
+```json
+{"member_id": "…", "status": "present" | "absent" | "maybe" | "dropout", "note": "Sick"}
+```
+
+* `absent` needs a reason (`note`); `maybe` may have one; `present` clears it.
+* Once a line-up is published, answers are read-only. A person with `can_drop_out: true` may
+  still send `dropout` with a reason: the coach is told.
+* Refusals: `409 rsvp_closed`, `409 event_started`, `409 not_in_lineup`, `422 note_required`.
+* It returns the stored answer, and repeating it is harmless.
+
+**Referee / official invites:** `POST /events/{id}/referee-signups/{signup_id}/respond` (or
+`official-signups`) with `{"response": "accept" | "decline"}`. `409 signup_unavailable` means it
+couldn't be accepted (e.g. full).
+
+**Tasks** ("bring fruit"): `POST` or `DELETE /events/{id}/tasks/{task_id}/claim`. A slot is
+taken by the account itself, not per child. Others see it as "<Family> family".
+
+### News
+
+`GET /news?cursor=…` (newest first, paged) and `GET /news/{slug}`. Titles and texts follow
+`Accept-Language`: English when the club wrote an English version, the club's own language
+otherwise (`language` says which). `body_html` is sanitised HTML: render it in a text view that
+supports basic HTML, or a non-scripting `WKWebView`. Crop photos around `focal_x` / `focal_y`.
+
+### Notifications
+
+`GET /notifications?cursor=…&member_id=…` (newest first), `GET /notifications/unread-count`
+(set the app icon badge from it), `POST /notifications/{id}/read`,
+`POST /notifications/read-all`, and `DELETE /notifications` (clears the inbox for good).
+
+### Profiles and photos
+
+`GET /members/{id}` for a managed person: contact details, guardians, current teams and open
+club requirements. `PATCH /members/{id}` with only the fields that change (`first_name`,
+`last_name`, `date_of_birth`, `email`, `phone`, `emergency_phone`, `photo_public_consent`);
+`422` lists invalid fields. Phone numbers come back as E.164 (`+32470123456`).
+
+`photo_url` (and `GET /members/{id}/photo`) needs the Bearer token, so load it with your own
+`URLRequest` (not `AsyncImage`). The URL changes when the photo does, so cache it by URL.
+Uploading a photo comes in a later release.
+
+## 9. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a
   maintenance screen and retry later.

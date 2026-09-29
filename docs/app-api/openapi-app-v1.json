@@ -1,6 +1,49 @@
 {
   "components": {
     "schemas": {
+      "AnswerOut": {
+        "properties": {
+          "can_drop_out": {
+            "description": "Selected in the published line-up: may still pull out with `dropout` (a reason is required).",
+            "title": "Can Drop Out",
+            "type": "boolean"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "note": {
+            "description": "The reason given with `absent`/`maybe`. Only ever returned for the account's own people.",
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "description": "`no_response`, `present`, `absent`, `maybe`, `selected`, `not_selected`, `excused`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamSpotOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "member_id",
+          "status",
+          "note",
+          "can_drop_out",
+          "team"
+        ],
+        "title": "AnswerOut",
+        "type": "object"
+      },
       "AppVersions": {
         "properties": {
           "android": {
@@ -18,6 +61,129 @@
           "android"
         ],
         "title": "AppVersions",
+        "type": "object"
+      },
+      "AttendanceOut": {
+        "properties": {
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "note": {
+            "description": "The reason given with `absent`/`maybe`. Only ever returned for the account's own people.",
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "description": "`no_response`, `present`, `absent`, `maybe`, `selected`, `not_selected`, `excused`.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "status",
+          "note"
+        ],
+        "title": "AttendanceOut",
+        "type": "object"
+      },
+      "BlockedOut": {
+        "properties": {
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "member_id",
+          "requirements"
+        ],
+        "title": "BlockedOut",
+        "type": "object"
+      },
+      "CalendarItemOut": {
+        "properties": {
+          "blocked_requirements": {
+            "description": "For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Requirements",
+            "type": "array"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "signup_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signup Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Attendance status for `rsvp`, sign-up status for `referee`/`official`, null for `blocked`.",
+            "title": "Status"
+          },
+          "type": {
+            "description": "`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "event",
+          "member_id",
+          "status",
+          "signup_id",
+          "blocked_requirements"
+        ],
+        "title": "CalendarItemOut",
+        "type": "object"
+      },
+      "CalendarOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CalendarOut",
         "type": "object"
       },
       "ClubFeatures": {
@@ -277,6 +443,20 @@
         "title": "ContextOut",
         "type": "object"
       },
+      "CountOut": {
+        "properties": {
+          "count": {
+            "description": "How many notifications were changed.",
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "CountOut",
+        "type": "object"
+      },
       "DeviceIn": {
         "properties": {
           "app_version": {
@@ -362,6 +542,59 @@
         "title": "DeviceOut",
         "type": "object"
       },
+      "DuesOut": {
+        "properties": {
+          "balance": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "early_payment_deadline": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pay by this date for the early-payment discount (then `early_payment_total` applies).",
+            "title": "Early Payment Deadline"
+          },
+          "early_payment_total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "membership_id": {
+            "format": "uuid",
+            "title": "Membership Id",
+            "type": "string"
+          },
+          "season": {
+            "$ref": "#/components/schemas/SeasonOut"
+          }
+        },
+        "required": [
+          "member_id",
+          "membership_id",
+          "season",
+          "balance",
+          "early_payment_deadline",
+          "early_payment_total"
+        ],
+        "title": "DuesOut",
+        "type": "object"
+      },
       "ErrorDetail": {
         "properties": {
           "code": {
@@ -410,6 +643,511 @@
           "error"
         ],
         "title": "ErrorOut",
+        "type": "object"
+      },
+      "EventDetailOut": {
+        "properties": {
+          "answers": {
+            "description": "One per managed person invited to this event.",
+            "items": {
+              "$ref": "#/components/schemas/AnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "blocked": {
+            "description": "Managed people kept off this event by open club requirements.",
+            "items": {
+              "$ref": "#/components/schemas/BlockedOut"
+            },
+            "title": "Blocked",
+            "type": "array"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "lineup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineupOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Published line-up. When present, `answers` are read-only except for `dropout`."
+          },
+          "official_signups": {
+            "items": {
+              "$ref": "#/components/schemas/SignupOut"
+            },
+            "title": "Official Signups",
+            "type": "array"
+          },
+          "referee_signups": {
+            "items": {
+              "$ref": "#/components/schemas/SignupOut"
+            },
+            "title": "Referee Signups",
+            "type": "array"
+          },
+          "rsvp_closed": {
+            "title": "Rsvp Closed",
+            "type": "boolean"
+          },
+          "squad_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SquadSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Counts only, never who answered what."
+          },
+          "started": {
+            "description": "Answers can no longer change once the event has started.",
+            "title": "Started",
+            "type": "boolean"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskOut"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "rsvp_closed",
+          "started",
+          "lineup",
+          "answers",
+          "blocked",
+          "referee_signups",
+          "official_signups",
+          "tasks",
+          "squad_summary"
+        ],
+        "title": "EventDetailOut",
+        "type": "object"
+      },
+      "EventOut": {
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "competition": {
+            "title": "Competition",
+            "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reply deadline. After it, answers are closed (a line-up dropout still works).",
+            "title": "Deadline"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "gathering": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When to be there, if earlier than the start.",
+            "title": "Gathering"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_home_game": {
+            "title": "Is Home Game",
+            "type": "boolean"
+          },
+          "is_live": {
+            "title": "Is Live",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "`training`, `game`, `tournament`, `meeting`, `social`, `other`.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opponent's name, for games.",
+            "title": "Opponent"
+          },
+          "score_against": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Against"
+          },
+          "score_for": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score For"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "start",
+          "end",
+          "gathering",
+          "deadline",
+          "cancelled",
+          "location",
+          "opponent",
+          "is_home_game",
+          "teams",
+          "competition",
+          "score_for",
+          "score_against",
+          "is_live"
+        ],
+        "title": "EventOut",
+        "type": "object"
+      },
+      "FormToCompleteOut": {
+        "properties": {
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "send_id": {
+            "format": "uuid",
+            "title": "Send Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "send_id",
+          "title",
+          "member_id",
+          "closes_at"
+        ],
+        "title": "FormToCompleteOut",
+        "type": "object"
+      },
+      "GuardianOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "role": {
+            "description": "`parent`, `guardian`, `other`.",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_name",
+          "last_name",
+          "role"
+        ],
+        "title": "GuardianOut",
+        "type": "object"
+      },
+      "HeroOut": {
+        "properties": {
+          "attendance": {
+            "$ref": "#/components/schemas/AttendanceOut"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "rsvp_closed": {
+            "title": "Rsvp Closed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event",
+          "attendance",
+          "rsvp_closed"
+        ],
+        "title": "HeroOut",
+        "type": "object"
+      },
+      "HomeOut": {
+        "properties": {
+          "dues": {
+            "items": {
+              "$ref": "#/components/schemas/DuesOut"
+            },
+            "title": "Dues",
+            "type": "array"
+          },
+          "forms_to_complete": {
+            "items": {
+              "$ref": "#/components/schemas/FormToCompleteOut"
+            },
+            "title": "Forms To Complete",
+            "type": "array"
+          },
+          "needs_answer": {
+            "description": "Other open asks (excluding `rsvp_needed`), soonest first, at most 5.",
+            "items": {
+              "$ref": "#/components/schemas/NeedsAnswerOut"
+            },
+            "title": "Needs Answer",
+            "type": "array"
+          },
+          "needs_answer_more": {
+            "description": "How many more there are beyond this list (see the calendar).",
+            "title": "Needs Answer More",
+            "type": "integer"
+          },
+          "news": {
+            "items": {
+              "$ref": "#/components/schemas/NewsSummaryOut"
+            },
+            "title": "News",
+            "type": "array"
+          },
+          "next_going": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeroOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The soonest event someone is going to."
+          },
+          "open_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/OpenTaskOut"
+            },
+            "title": "Open Tasks",
+            "type": "array"
+          },
+          "open_tasks_more": {
+            "title": "Open Tasks More",
+            "type": "integer"
+          },
+          "rsvp_needed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeroOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The soonest invitation nobody has answered yet. Shown read-only when `rsvp_closed`."
+          }
+        },
+        "required": [
+          "rsvp_needed",
+          "next_going",
+          "needs_answer",
+          "needs_answer_more",
+          "open_tasks",
+          "open_tasks_more",
+          "dues",
+          "news",
+          "forms_to_complete"
+        ],
+        "title": "HomeOut",
+        "type": "object"
+      },
+      "LineupCategoryOut": {
+        "properties": {
+          "label": {
+            "description": "The roster position (localised), or 'No position set'.",
+            "title": "Label",
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/LineupMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "label",
+          "members"
+        ],
+        "title": "LineupCategoryOut",
+        "type": "object"
+      },
+      "LineupMemberOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "first_name",
+          "last_name"
+        ],
+        "title": "LineupMemberOut",
+        "type": "object"
+      },
+      "LineupOut": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/LineupCategoryOut"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "published_at",
+          "categories"
+        ],
+        "title": "LineupOut",
+        "type": "object"
+      },
+      "LocationOut": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "is_home": {
+            "title": "Is Home",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "zip_code": {
+            "title": "Zip Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address",
+          "city",
+          "zip_code",
+          "is_home"
+        ],
+        "title": "LocationOut",
         "type": "object"
       },
       "ManagedPersonOut": {
@@ -534,6 +1272,421 @@
         "title": "MfaState",
         "type": "object"
       },
+      "Money": {
+        "properties": {
+          "amount": {
+            "description": "Decimal string with two places, e.g. `12.50`. Never a float.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "description": "ISO 4217, e.g. `EUR`.",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      },
+      "NeedsAnswerOut": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "signup_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `referee`/`official`: the sign-up to respond to.",
+            "title": "Signup Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "description": "`rsvp` (answer with POST /events/{id}/rsvp), `referee` or `official` (answer the sign-up).",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "event",
+          "member_id",
+          "status",
+          "signup_id"
+        ],
+        "title": "NeedsAnswerOut",
+        "type": "object"
+      },
+      "NewsDetailOut": {
+        "properties": {
+          "body_html": {
+            "description": "Sanitised HTML (paragraphs, lists, links, tables, images).",
+            "title": "Body Html",
+            "type": "string"
+          },
+          "excerpt": {
+            "description": "Plain text, a few dozen words.",
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "language": {
+            "description": "`en` when the English text was served, `default` for the club's own language.",
+            "title": "Language",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/NewsPhotoOut"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "excerpt",
+          "published_at",
+          "image_url",
+          "teams",
+          "language",
+          "body_html",
+          "photos"
+        ],
+        "title": "NewsDetailOut",
+        "type": "object"
+      },
+      "NewsPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "NewsPageOut",
+        "type": "object"
+      },
+      "NewsPhotoOut": {
+        "properties": {
+          "focal_x": {
+            "description": "Focal point, 0-100 % from the left; crop around it.",
+            "title": "Focal X",
+            "type": "integer"
+          },
+          "focal_y": {
+            "title": "Focal Y",
+            "type": "integer"
+          },
+          "is_main": {
+            "title": "Is Main",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "is_main",
+          "focal_x",
+          "focal_y"
+        ],
+        "title": "NewsPhotoOut",
+        "type": "object"
+      },
+      "NewsSummaryOut": {
+        "properties": {
+          "excerpt": {
+            "description": "Plain text, a few dozen words.",
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "excerpt",
+          "published_at",
+          "image_url",
+          "teams"
+        ],
+        "title": "NewsSummaryOut",
+        "type": "object"
+      },
+      "NotificationOut": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationSourceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "member_id",
+          "title",
+          "body",
+          "created",
+          "read_at",
+          "source"
+        ],
+        "title": "NotificationOut",
+        "type": "object"
+      },
+      "NotificationPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "NotificationPageOut",
+        "type": "object"
+      },
+      "NotificationSourceOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `news`: open it with GET /news/{slug}.",
+            "title": "Slug"
+          },
+          "type": {
+            "description": "`news`, `event` or `form_send`. Ignore unknown types.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "slug"
+        ],
+        "title": "NotificationSourceOut",
+        "type": "object"
+      },
+      "OpenTaskOut": {
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_start": {
+            "format": "date-time",
+            "title": "Event Start",
+            "type": "string"
+          },
+          "event_title": {
+            "title": "Event Title",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "open_count": {
+            "description": "Slots still free.",
+            "title": "Open Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "event_title",
+          "event_start",
+          "title",
+          "open_count"
+        ],
+        "title": "OpenTaskOut",
+        "type": "object"
+      },
       "PermissionsOut": {
         "properties": {
           "can_add_news": {
@@ -582,6 +1735,280 @@
         "title": "PersonOut",
         "type": "object"
       },
+      "ProfileOut": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "emergency_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Phone"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "guardians": {
+            "items": {
+              "$ref": "#/components/schemas/GuardianOut"
+            },
+            "title": "Guardians",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "open_requirements": {
+            "description": "Club requirements still open this season (e.g. a medical form).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Open Requirements",
+            "type": "array"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "E.164, e.g. `+32470123456`.",
+            "title": "Phone"
+          },
+          "photo_public_consent": {
+            "description": "The photo may appear on the club's public website.",
+            "title": "Photo Public Consent",
+            "type": "boolean"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GET it with the Bearer token; null without a photo.",
+            "title": "Photo Url"
+          },
+          "teams": {
+            "description": "Current season.",
+            "items": {
+              "$ref": "#/components/schemas/ProfileTeamOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "first_name",
+          "last_name",
+          "date_of_birth",
+          "email",
+          "phone",
+          "emergency_phone",
+          "photo_url",
+          "photo_public_consent",
+          "guardians",
+          "teams",
+          "open_requirements"
+        ],
+        "title": "ProfileOut",
+        "type": "object"
+      },
+      "ProfilePatchIn": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "emergency_phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Phone"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Any format; stored as E.164. Empty string clears it.",
+            "title": "Phone"
+          },
+          "photo_public_consent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Public Consent"
+          }
+        },
+        "title": "ProfilePatchIn",
+        "type": "object"
+      },
+      "ProfileTeamOut": {
+        "properties": {
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "team": {
+            "$ref": "#/components/schemas/TeamRefOut"
+          }
+        },
+        "required": [
+          "team",
+          "position",
+          "jersey_number"
+        ],
+        "title": "ProfileTeamOut",
+        "type": "object"
+      },
+      "RsvpIn": {
+        "properties": {
+          "member_id": {
+            "description": "The managed person answering (see `/context`).",
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "description": "Required for `absent` and `dropout`, optional for `maybe`, dropped for `present`.",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "description": "`dropout`: pull out of a published line-up you were selected for.",
+            "enum": [
+              "present",
+              "absent",
+              "maybe",
+              "dropout"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "status"
+        ],
+        "title": "RsvpIn",
+        "type": "object"
+      },
       "SeasonOut": {
         "properties": {
           "end_date": {
@@ -608,6 +2035,131 @@
         "title": "SeasonOut",
         "type": "object"
       },
+      "SignupOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "`invited`, `accepted` (`declined` ones are left out).",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "member_id",
+          "status"
+        ],
+        "title": "SignupOut",
+        "type": "object"
+      },
+      "SignupResponseIn": {
+        "properties": {
+          "response": {
+            "enum": [
+              "accept",
+              "decline"
+            ],
+            "title": "Response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "response"
+        ],
+        "title": "SignupResponseIn",
+        "type": "object"
+      },
+      "SquadSummaryOut": {
+        "properties": {
+          "in_count": {
+            "title": "In Count",
+            "type": "integer"
+          },
+          "no_reply_count": {
+            "title": "No Reply Count",
+            "type": "integer"
+          },
+          "out_count": {
+            "title": "Out Count",
+            "type": "integer"
+          },
+          "responded": {
+            "title": "Responded",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "responded",
+          "in_count",
+          "out_count",
+          "no_reply_count"
+        ],
+        "title": "SquadSummaryOut",
+        "type": "object"
+      },
+      "TaskOut": {
+        "properties": {
+          "claimed_by": {
+            "description": "Who took a slot, as family labels (never which person).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Claimed By",
+            "type": "array"
+          },
+          "claimed_by_me": {
+            "description": "Tasks are claimed by the account's own person, not per child.",
+            "title": "Claimed By Me",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_full": {
+            "title": "Is Full",
+            "type": "boolean"
+          },
+          "needed_quantity": {
+            "title": "Needed Quantity",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "needed_quantity",
+          "claimed_by",
+          "is_full",
+          "claimed_by_me"
+        ],
+        "title": "TaskOut",
+        "type": "object"
+      },
       "TeamRefOut": {
         "properties": {
           "id": {
@@ -630,6 +2182,57 @@
           "short_name"
         ],
         "title": "TeamRefOut",
+        "type": "object"
+      },
+      "TeamSpotOut": {
+        "properties": {
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "position",
+          "jersey_number"
+        ],
+        "title": "TeamSpotOut",
+        "type": "object"
+      },
+      "UnreadCountOut": {
+        "properties": {
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread"
+        ],
+        "title": "UnreadCountOut",
         "type": "object"
       },
       "UserOut": {
@@ -660,12 +2263,155 @@
     }
   },
   "info": {
-    "description": "\nThe API the RosterChief native apps are built on. Read the developer guide first:\n**[/api/docs/](/api/docs/)**.\n\n* **Sign-in** is a separate API (allauth headless): `/api/auth/app/v1/`, spec at\n  [/api/auth/openapi.html](/api/auth/openapi.html). It returns the `access_token` used here.\n* **Authentication:** `Authorization: Bearer <access_token>` on every call except `/meta`.\n* **Two planes:** account endpoints (`/me`, `/clubs`, `/devices`, `/meta`) on the base domain;\n  club endpoints (`/context`, …) on the club's own host — take it from `api_base_url` in `/clubs`.\n* **Errors** always use `{\"error\": {\"code\", \"message\", \"fields\"}}`; branch on `code`.\n",
+    "description": "\nThe API the RosterChief native apps are built on. Read the developer guide first:\n**[/api/docs/](/api/docs/)**.\n\n* **Sign-in** is a separate API (allauth headless): `/api/auth/app/v1/`, spec at\n  [/api/auth/openapi.html](/api/auth/openapi.html). It returns the `access_token` used here.\n* **Authentication:** `Authorization: Bearer <access_token>` on every call except `/meta`.\n* **Two planes:** account endpoints (`/me`, `/clubs`, `/devices`, `/meta`) on the base domain;\n  club endpoints (`/context`, …) on the club's own host — take it from `api_base_url` in `/clubs`.\n* **Who:** club endpoints act for the account's managed people (`/context`). Reads take\n  `member_id` (one person) or `all`; writes always name one `member_id`.\n* **Errors** always use `{\"error\": {\"code\", \"message\", \"fields\"}}`; branch on `code`.\n",
     "title": "RosterChief app API",
     "version": "1"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/app/v1/calendar": {
+      "get": {
+        "description": "Invitations, referee/official sign-ups (open or accepted) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. Cancelled events\nare left out. Fetch the next window by passing the previous `to` as `from`.",
+        "operationId": "appapi_routers_member_calendar",
+        "parameters": [
+          {
+            "description": "Start of the window (default: now).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start of the window (default: now).",
+              "title": "From"
+            }
+          },
+          {
+            "description": "End of the window, exclusive (default and maximum: `from` + 92 days).",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "End of the window, exclusive (default and maximum: `from` + 92 days).",
+              "title": "To"
+            }
+          },
+          {
+            "description": "`game` or `training`; anything else means all kinds.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`game` or `training`; anything else means all kinds.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "A managed person's id (see `/context`), or `all` (the default) for everyone the account acts for.",
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A managed person's id (see `/context`), or `all` (the default) for everyone the account acts for.",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Agenda",
+        "tags": [
+          "member"
+        ]
+      }
+    },
     "/api/app/v1/clubs": {
       "get": {
         "description": "Every active club the account has a real tie to, with the base URL to use for that\nclub's endpoints. Cache it; offer a club picker when there is more than one.",
@@ -921,6 +2667,615 @@
         ]
       }
     },
+    "/api/app/v1/events/{event_id}": {
+      "get": {
+        "description": "The event as the account's family sees it: their answers, a published line-up,\nsign-ups, tasks and the squad's response counts.",
+        "operationId": "appapi_routers_member_event_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetailOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One event",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/official-signups/{signup_id}/respond": {
+      "post": {
+        "description": "As for referees; needs the club's `officials` feature (`404 feature_disabled`).",
+        "operationId": "appapi_routers_member_respond_official",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signup_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Signup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupResponseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Accept or decline being an official",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/referee-signups/{signup_id}/respond": {
+      "post": {
+        "description": "For a managed person's referee invite. `409 signup_unavailable` when it can't be\naccepted (e.g. every referee slot is taken); the invite stays open.",
+        "operationId": "appapi_routers_member_respond_referee",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "signup_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Signup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupResponseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Accept or decline refereeing",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/rsvp": {
+      "post": {
+        "description": "Answer for one managed person. Safe to repeat: it sets the answer, and returns\nthe stored state. Refusals: `409 event_started`, `409 rsvp_closed` (deadline\npassed), `409 not_in_lineup` (`dropout` without being selected), `422\nnote_required` (`absent`/`dropout` without a reason). `404` when the person isn't\ninvited.",
+        "operationId": "appapi_routers_member_rsvp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RsvpIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Answer an invitation",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/tasks/{task_id}/claim": {
+      "delete": {
+        "description": "Safe to repeat: without a claim it just returns the task.",
+        "operationId": "appapi_routers_member_unclaim",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Give a task slot back",
+        "tags": [
+          "member"
+        ]
+      },
+      "post": {
+        "description": "Claimed as the account's own person. `409 task_unavailable` when it's full or\nalready claimed by this account.",
+        "operationId": "appapi_routers_member_claim",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Take a task slot",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/home": {
+      "get": {
+        "description": "Everything the Home screen shows, capped the way the web app caps it: the next\nunanswered invitation, the next event someone is going to, other open asks, free\ntask slots, open dues, the latest news and forms still to fill in.",
+        "operationId": "appapi_routers_member_home",
+        "parameters": [
+          {
+            "description": "A managed person's id (see `/context`), or `all` (the default) for everyone the account acts for.",
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A managed person's id (see `/context`), or `all` (the default) for everyone the account acts for.",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Home screen",
+        "tags": [
+          "member"
+        ]
+      }
+    },
     "/api/app/v1/me": {
       "get": {
         "operationId": "appapi_routers_account_me",
@@ -978,6 +3333,227 @@
         ]
       }
     },
+    "/api/app/v1/members/{member_id}": {
+      "get": {
+        "description": "Only the account's own person and their children (`404` for anyone else).",
+        "operationId": "appapi_routers_people_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A managed person's profile",
+        "tags": [
+          "people"
+        ]
+      },
+      "patch": {
+        "description": "Send only the fields that change. `422` lists invalid fields (e.g. a phone\nnumber that can't be parsed).",
+        "operationId": "appapi_routers_people_update_profile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Edit a managed person's profile",
+        "tags": [
+          "people"
+        ]
+      }
+    },
+    "/api/app/v1/members/{member_id}/photo": {
+      "get": {
+        "description": "The same rule as the website: the member, their parents/guardians, staff who may\nsee them, or anyone when the photo is public. Anyone else gets `404`.",
+        "operationId": "appapi_routers_people_photo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {}
+            },
+            "description": "The image."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A member's photo",
+        "tags": [
+          "people"
+        ]
+      }
+    },
     "/api/app/v1/meta": {
       "get": {
         "description": "No authentication. Call on launch: if the app's version is below\n`min_supported_app_version`, show an 'update required' screen.",
@@ -1008,6 +3584,541 @@
         "summary": "Server and client-version info",
         "tags": [
           "account"
+        ]
+      }
+    },
+    "/api/app/v1/news": {
+      "get": {
+        "description": "Published news for members, newest first. Titles and excerpts follow\n`Accept-Language` (English when asked for and written, the club's language otherwise).",
+        "operationId": "appapi_routers_inbox_news_list",
+        "parameters": [
+          {
+            "description": "`next_cursor` from the previous page. Opaque.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` from the previous page. Opaque.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size, default 25, at most 100.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, default 25, at most 100.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsPageOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "News feed",
+        "tags": [
+          "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/news/{slug}": {
+      "get": {
+        "operationId": "appapi_routers_inbox_news_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsDetailOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One news item",
+        "tags": [
+          "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/notifications": {
+      "delete": {
+        "description": "Deletes every notification of every managed person (not just marks them read).",
+        "operationId": "appapi_routers_inbox_notifications_clear",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Clear the inbox",
+        "tags": [
+          "news & notifications"
+        ]
+      },
+      "get": {
+        "description": "Newest first. A parent sees their children's notifications too; `member_id` says\nwhose each one is. `source` points at what to open.",
+        "operationId": "appapi_routers_inbox_notifications",
+        "parameters": [
+          {
+            "description": "A managed person's id, or `all` (the default).",
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A managed person's id, or `all` (the default).",
+              "title": "Member Id"
+            }
+          },
+          {
+            "description": "`next_cursor` from the previous page. Opaque.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` from the previous page. Opaque.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size, default 25, at most 100.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, default 25, at most 100.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPageOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Notifications inbox",
+        "tags": [
+          "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/notifications/read-all": {
+      "post": {
+        "operationId": "appapi_routers_inbox_notifications_read_all",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Mark all read",
+        "tags": [
+          "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/notifications/unread-count": {
+      "get": {
+        "description": "Across every managed person: use it for the app icon badge.",
+        "operationId": "appapi_routers_inbox_notifications_unread",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Unread count",
+        "tags": [
+          "news & notifications"
+        ]
+      }
+    },
+    "/api/app/v1/notifications/{notification_id}/read": {
+      "post": {
+        "description": "Safe to repeat; returns the notification with its `read_at`.",
+        "operationId": "appapi_routers_inbox_notification_read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Mark one read",
+        "tags": [
+          "news & notifications"
         ]
       }
     }

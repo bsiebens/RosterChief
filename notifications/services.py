@@ -8,6 +8,7 @@ already established for dues invoices.
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -93,3 +94,45 @@ def notify_members(members, *, club, title: str, body: str, source=None, send_em
 
     notifications_created.send(sender=Notification, notifications=notifications)
     return notifications
+
+
+# -- the in-app inbox -------------------------------------------------------------------
+# One set of queries behind the member app's Notifications screen and unread badge
+# (mobile) and the app API's /notifications endpoints. Scoped to a club and a list of
+# managed people (members.services.family.managed_people): notifications are about a
+# member, and a parent reads their children's too.
+
+
+def inbox_for(club, people):
+    """Every notification for ``people`` in ``club``, newest first."""
+    return Notification.objects.filter(club=club, member__in=list(people)).order_by("-created")
+
+
+def unread_count(club, people) -> int:
+    people = list(people)
+    if not people:
+        return 0
+    return inbox_for(club, people).filter(read_at__isnull=True).count()
+
+
+def mark_read(club, people, notification_id) -> Notification | None:
+    """Mark one notification read; ``None`` when it isn't one of ``people``'s (or the id
+    is malformed). Already-read ones keep their original read time."""
+    try:
+        notification = inbox_for(club, people).filter(pk=notification_id).first()
+    except ValueError, ValidationError:
+        return None
+    if notification is not None and notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["read_at", "modified"])
+    return notification
+
+
+def mark_all_read(club, people) -> int:
+    return inbox_for(club, people).filter(read_at__isnull=True).update(read_at=timezone.now())
+
+
+def clear_all(club, people) -> int:
+    """A hard delete, like clearing a phone's notification centre -- not a read flag."""
+    count, _deleted = inbox_for(club, people).delete()
+    return count

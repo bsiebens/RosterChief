@@ -1,12 +1,14 @@
 # API.md — Native-app API (design)
 
-Status: **phase 1 (foundations) done on the server side** (2026-09-29). The `appapi` app serves
-`/api/app/v1/` with `AppAuth`, the error envelope, pagination and idempotency helpers, `/meta`,
-`/me`, `/clubs`, `/context` and push-device registration with an SNS gateway (§14). **Developer
-docs are online at `/api/docs/`** (Markdown in `docs/app-api/`, iOS first), next to the live
-OpenAPI references, and `docs/app-api/openapi-app-v1.json` is the committed snapshot that clients
-are generated from. Items that need real devices or cloud accounts (Android passkey prototype,
-SNS round trip) are still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
+Status: **phase 2 (member read + RSVP) done on the server side** (2026-09-29). On top of
+phase 1's foundations (`AppAuth`, error envelope, pagination, idempotency, `/meta`, `/me`,
+`/clubs`, `/context`, devices), the club host now serves home, calendar, events, RSVP,
+referee/official invites, tasks, news, notifications and profiles, and new notifications are
+pushed through SNS (§14). **Developer docs are online at `/api/docs/`** (Markdown in
+`docs/app-api/`, iOS first), next to the live OpenAPI references, and
+`docs/app-api/openapi-app-v1.json` is the committed snapshot clients are generated from.
+Items that need real devices or cloud accounts (Android passkey prototype, SNS round trip)
+are still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
 RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
 
 Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and re-checked
@@ -561,7 +563,6 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
 | Phase                         | Scope                                                                                                                                                                     | Exit criteria                                                                 |
 |-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
 | **0 — Spike**                 | allauth.headless mounted on the branch; JWT strategy vs session lifetime (§3.3); Android passkey origin prototype (§3.6); SNS platform-app round trip to a real device    | §16-1,2,3 answered; strategy chosen                                           |
-
 | **1 — Foundations**           | `AppAuth`, error envelope, pagination/idempotency helpers, `/clubs`, `/me`, `/context`, signup closed, proxy-count fix, `managed_people`, push device model + SNS gateway | a test client can log in with MFA, list clubs, hit an empty club-scoped route |
 | **2 — Member read + RSVP**    | home, calendar, events, RSVP (after `submit_rsvp` extraction), news, notifications, profile, push end-to-end                                                              | an internal build reaches PWA parity for a parent                             |
 | **3 — Member write/commerce** | payments, forms, shop, orders, re-registration, photo upload, bug reports, calendar feed                                                                                  | parity for the remaining member screens                                       |
@@ -596,6 +597,37 @@ platform applications, a test device. None of these block phase 1.
 Still needed from outside the code before push can be tested end to end: an Apple Developer
 account (APNs key), the SNS platform applications (production + sandbox), and a test iPhone.
 
+**Phase 2 status (2026-09-29).** Done. Service extractions first (§11 rows 2, 3 and 5), with
+the PWA switched over and `mobile/tests.py` green:
+
+- `events.services.rsvp.submit_rsvp` / `RsvpError(code)` / `rsvp_is_closed` (the RSVP rules
+  from `EventDetailView.post`);
+- `events.services.agenda.member_agenda` (Calendar), `events.services.member_view`
+  (event page, squad summary, tasks), `mobile.services.home.home_summary` (Home);
+- `news.services.{live_news, member_news, localized_news}` (replaces the view's
+  `get_language() == "en"` switch with an explicit language);
+- `notifications.services.{inbox_for, unread_count, mark_read, mark_all_read, clear_all}`.
+
+Endpoints (club host, `appapi/routers/{member,inbox,people}.py`, tests in
+`appapi/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
+`GET /events/{id}`, `POST /events/{id}/rsvp`, referee/official `…/respond` (officials behind
+the `officials` flag → 404 `feature_disabled`), task `claim`/`unclaim`, `GET /news` (cursor)
+and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`PATCH
+/members/{id}` (through `MemberProfileForm`) and the token-authenticated `GET
+/members/{id}/photo` (§6's private-photo rule, `can_view_member_photo`). Person scope is
+`appapi.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
+an unknown id with the 404 envelope (§13).
+
+Push delivery (`appapi/delivery.py`): a second `notifications_created` receiver, after commit
+and off the request thread (`run_in_background`), only when SNS (or a test gateway) is
+configured. Recipients are accounts: the member's own login plus their parents/guardians in that
+club (the `recipient_emails` rule, answering §16-4's mapping). One push per account per distinct
+notification, so a club-wide item doesn't buzz a parent once per child. Dead tokens disable the
+device. **Open:** the Web Push / native dedupe for someone using both (§9); both fire for now.
+
+Not in phase 2, by design: photo upload (phase 3, multipart), `Me`-screen extras (vouchers,
+staff assignments: use `/context` and phase 3's payments), `ETag`s and `updated_since` (§15).
+
 **Tournaments** (separate `tournaments` branch) are not blocked by this design: they slot in as a new router group under `/api/app/v1` with the same scope/flag/role stack (`tournaments` flag → role → object scope), member-facing reads first
 (schedule, standings, brackets, "my team's next match"), read-only public bracket data already fits the existing `/api/v1/` shape.
 
@@ -625,7 +657,7 @@ account (APNs key), the SNS platform applications (production + sandbox), and a 
 2. **(blocking for Android passkeys)** Android Credential Manager origin (`android:apk-key-hash:…`): **server side confirmed** that fido2 rejects it and that an allow-list via a replaced `get_server()` is the way in (§3.6). Still UNVERIFIED on a
    device.
 3. **iOS passkeys** need the AASA file served at the base domain — where (Caddy static vs Django)?
-4. **Push recipient resolution:** read `mobile.signals` and mirror its Member→User mapping for children without logins; and the Web-Push/native dedupe rule (§9). Also keying: per `User` (this doc's recommendation) vs per `Member`.
+4. ~~Push recipient resolution~~ **Answered (phase 2):** per `User`, resolved like email (the member's login + their guardians' in that club), deduplicated per account (§14). Still open: the Web-Push/native dedupe rule (§9).
 5. ~~`ALLAUTH_TRUSTED_PROXY_COUNT`~~ **Resolved on development:** `ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"` (set by Caddy, with Cloudflare as a trusted proxy). See §3.8.
 6. ~~Existing users' `EmailAddress` rows~~ **Moot:** verification is `"mandatory"`, and the web requires it too, so anyone who can sign in today has a verified address (§3.8).
 7. ~~Guardian submits a form for a child?~~ **Decided: yes**, and built on development (§8).

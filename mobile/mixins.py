@@ -18,7 +18,7 @@ from controlpanel.messages import notify
 from members.models import Member
 from members.services.family import managed_people
 from members.services.lookup import get_request_member
-from notifications.models import Notification
+from notifications.services import unread_count
 
 from .access import has_club_tie
 
@@ -131,9 +131,7 @@ class PersonScopeMixin(DesktopTemplateMixin, MemberAppMixin):
         return False, (self.managed_people[0] if self.managed_people else None)
 
     def get_context_data(self, **kwargs):
-        unread_notification_count = 0
-        if self.managed_people:
-            unread_notification_count = Notification.objects.filter(club=self.request.club, member__in=self.managed_people, read_at__isnull=True).count()
+        unread_notification_count = unread_count(self.request.club, self.managed_people)
 
         # Every screen sets these as class attributes (see e.g. HomeView.active_tab),
         # but only a subclass that explicitly forwards them into its own

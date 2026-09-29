@@ -8,3 +8,10 @@ class AppApiConfig(AppConfig):
 
     name = "appapi"
     verbose_name = _("app API")
+
+    def ready(self):
+        from notifications.signals import notifications_created
+
+        from .delivery import on_notifications_created
+
+        notifications_created.connect(on_notifications_created, dispatch_uid="appapi-native-push")

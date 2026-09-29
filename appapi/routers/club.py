@@ -6,7 +6,7 @@ from ninja import Router
 from club.services.access import can_add_news, can_manage_evaluations, current_season, has_management_access, teams_staffed_by
 from members.models import Member
 from members.services.family import managed_people
-from notifications.models import Notification
+from notifications.services import unread_count
 
 from .. import services
 from ..auth import require_club_member
@@ -40,5 +40,5 @@ def context(request):
         "staffed_teams": list(teams_staffed_by(user, club).order_by("name")),
         "permissions": {"has_management_access": has_management_access(user, club), "can_add_news": can_add_news(user, club), "can_manage_evaluations": can_manage_evaluations(user, club)},
         "features": services.club_features(club),
-        "unread_notifications": Notification.objects.filter(club=club, member__in=people, read_at__isnull=True).count() if people else 0,
+        "unread_notifications": unread_count(club, people),
     }

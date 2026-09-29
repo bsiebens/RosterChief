@@ -19,10 +19,17 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 403 | `mfa_enrollment_required` | The account must set up two-factor first: show the TOTP enrolment screen (sign-in API `GET/POST /account/authenticators/totp`). |
 | 403 | `not_a_member` | No tie to this club (any more): refresh `GET /clubs`. |
 | 403 | `forbidden` | Not allowed; hide the action. |
-| 404 | `not_found` | Doesn't exist, or you may not see it. Also answered for a feature the club doesn't have. |
+| 404 | `not_found` | Doesn't exist, or you may not see it (another family's person, another club's event). |
+| 404 | `feature_disabled` | The club doesn't have this module (e.g. officials): hide it. `/clubs` → `features` says so up front. |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still being processed: wait a moment and retry. |
-| 409 | `conflict` and specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
+| 409 | `event_started` | RSVP after the event started: refresh the event; answers are read-only now. |
+| 409 | `rsvp_closed` | The reply deadline passed. Only a line-up `dropout` is still possible. |
+| 409 | `not_in_lineup` | `dropout` from someone who isn't selected: refresh the event. |
+| 409 | `signup_unavailable` | A referee/official invite can't be accepted (e.g. all slots taken). The invite stays open. |
+| 409 | `task_unavailable` | The task is full, or this account already has a slot. Refresh the event. |
+| 409 | `conflict` and other specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
 | 422 | `validation_error` | Show `fields` next to the inputs. |
+| 422 | `note_required` | `absent`/`dropout` without a reason: ask for one (`fields.note`). |
 | 422 | `idempotency_key_reused` | Bug: one key was used for two different requests. |
 | 429 | `rate_limited` | Back off; honour `Retry-After`. |
 | 503 | `maintenance` | Show the maintenance screen; retry after `Retry-After` seconds. |

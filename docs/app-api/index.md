@@ -26,7 +26,8 @@ The app API has **two planes**:
 * **Account plane**, on the base domain (`https://rosterchief.app/api/app/v1`): `/meta`, `/me`,
   `/clubs`, `/devices`.
 * **Club plane**, on each club's own host (`https://<club>.rosterchief.app/api/app/v1`):
-  `/context` now, and the member and coach screens as they're built. Take each club's base URL
+  `/context` and the member screens (home, calendar, events, news, notifications, profiles);
+  coach screens follow. Take each club's base URL
   from `api_base_url` in `GET /clubs`; never build it yourself.
 
 One sign-in works for every club the account belongs to. The token says *who* you are, never
@@ -40,7 +41,10 @@ One sign-in works for every club the account belongs to. The token says *who* yo
 * Enums are machine values (`present`, `absent`, …). Translate them in the app.
   **Unknown fields and unknown enum values will appear** as the API grows. Ignore them rather
   than failing to decode.
-* Send `Accept-Language` (the app's language). Error messages and push texts follow it.
+* Send `Accept-Language` (the app's language). Error messages and news texts follow it.
+* **Who:** club endpoints act for the account's *managed people* (itself and its children, from
+  `/context`). Reads take `member_id=<id>` for one of them or `all` (the default); writes always
+  name one `member_id`. Anyone else's id is a `404`, the same as an id that doesn't exist.
 * Lists that can grow return `{"items": [...], "next_cursor": "…"|null}`. Pass `?cursor=` to get
   the next page and `?limit=` (≤ 100) to size it. Cursors are opaque.
 * Writes that a bad network might repeat accept an `Idempotency-Key` header (a UUID per

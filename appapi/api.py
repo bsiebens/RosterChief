@@ -11,6 +11,9 @@ from .auth import app_auth
 from .errors import install_handlers
 from .routers.account import router as account_router
 from .routers.club import router as club_router
+from .routers.inbox import router as inbox_router
+from .routers.member import router as member_router
+from .routers.people import router as people_router
 
 DESCRIPTION = """
 The API the RosterChief native apps are built on. Read the developer guide first:
@@ -21,6 +24,8 @@ The API the RosterChief native apps are built on. Read the developer guide first
 * **Authentication:** `Authorization: Bearer <access_token>` on every call except `/meta`.
 * **Two planes:** account endpoints (`/me`, `/clubs`, `/devices`, `/meta`) on the base domain;
   club endpoints (`/context`, …) on the club's own host — take it from `api_base_url` in `/clubs`.
+* **Who:** club endpoints act for the account's managed people (`/context`). Reads take
+  `member_id` (one person) or `all`; writes always name one `member_id`.
 * **Errors** always use `{"error": {"code", "message", "fields"}}`; branch on `code`.
 """
 
@@ -37,3 +42,6 @@ app_api = NinjaAPI(
 install_handlers(app_api)
 app_api.add_router("/", account_router)
 app_api.add_router("/", club_router)
+app_api.add_router("/", member_router)
+app_api.add_router("/", inbox_router)
+app_api.add_router("/", people_router)

@@ -75,7 +75,8 @@ def build_message(device: PushDevice, *, title: str, body: str, data: dict) -> s
         apns = {"aps": {"alert": {"title": title, "body": body}, "sound": "default", "mutable-content": 1}, **data}
         key = "APNS_SANDBOX" if device.environment == PushDevice.Environment.SANDBOX else "APNS"
         return json.dumps({"default": body, key: json.dumps(apns)})
-    fcm = {"notification": {"title": title, "body": body}, "data": {name: str(value) for name, value in data.items()}}
+    # FCM data values must be strings: nested values travel as JSON.
+    fcm = {"notification": {"title": title, "body": body}, "data": {name: value if isinstance(value, str) else json.dumps(value) for name, value in data.items()}}
     return json.dumps({"default": body, "GCM": json.dumps(fcm)})
 
 
