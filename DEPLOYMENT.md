@@ -619,6 +619,13 @@ above aren't done yet on a server, do those first.
 No server-side steps. 0.7.11 adds the `import_member_photos` command for attaching member
 photos in bulk; see "Bulk-importing member photos" below. Deploy it the usual way.
 
+### Upgrade notes: 0.7.12
+
+No manual steps. From this release on, every deploy writes the tag it deployed into the
+server's `.env` as `IMAGE_TAG=` (see "Rollback"), so a by-hand `docker compose run … web` uses the
+deployed image instead of an older local `:main`. The first 0.7.12 deploy sets it. Any
+`IMAGE_TAG` value already in `.env` is replaced.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
