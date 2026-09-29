@@ -254,6 +254,9 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 # The auth API's OpenAPI spec at /api/auth/openapi.json|.yaml|.html, for the app's client
 # code generation and the online docs (/api/docs/). The .html page loads ReDoc from a CDN.
 HEADLESS_SERVE_SPECIFICATION = True
+# allauth's own page loads ReDoc protocol-relative, which is blank on plain-http dev servers;
+# ours pins the same version over https (see the template's comment).
+HEADLESS_SPECIFICATION_TEMPLATE_NAME = "appapi/auth_spec.html"
 
 
 # Native-app API (appapi, /api/app/v1/) -- API.md.
