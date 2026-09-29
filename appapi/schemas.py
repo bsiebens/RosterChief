@@ -207,10 +207,16 @@ class SignupOut(Schema):
     status: str = Field(description="`invited`, `accepted` (`declined` ones are left out).")
 
 
+class AuthorOut(Schema):
+    first_name: str
+    last_name: str
+
+
 class NewsSummaryOut(Schema):
     id: uuid.UUID
     slug: str
     title: str
+    author: AuthorOut | None = Field(description="Who wrote it; null when unknown (e.g. the author's record was removed).")
     excerpt: str = Field(description="Plain text, a few dozen words.")
     published_at: datetime.datetime
     image_url: str | None

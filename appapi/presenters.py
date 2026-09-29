@@ -82,6 +82,7 @@ def news_summary(request, item: News) -> dict:
         "id": item.pk,
         "slug": item.slug,
         "title": title,
+        "author": {"first_name": item.created_by.first_name, "last_name": item.created_by.last_name} if item.created_by_id else None,
         "excerpt": render_body_excerpt(body, words=EXCERPT_WORDS),
         "published_at": item.published_at,
         "image_url": _absolute(request, photo.image.url) if photo else None,

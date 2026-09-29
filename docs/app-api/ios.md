@@ -306,6 +306,7 @@ taken by the account itself, not per child. Others see it as "<Family> family".
 `Accept-Language`: English when the club wrote an English version, the club's own language
 otherwise (`language` says which). `body_html` is sanitised HTML: render it in a text view that
 supports basic HTML, or a non-scripting `WKWebView`. Crop photos around `focal_x` / `focal_y`.
+`author` has the writer's first and last name (null when unknown).
 
 ### Notifications
 

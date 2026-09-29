@@ -123,6 +123,24 @@
         "title": "AttendanceOut",
         "type": "object"
       },
+      "AuthorOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_name",
+          "last_name"
+        ],
+        "title": "AuthorOut",
+        "type": "object"
+      },
       "BlockedOut": {
         "properties": {
           "member_id": {
@@ -2261,6 +2279,17 @@
       },
       "NewsDetailOut": {
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthorOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote it; null when unknown (e.g. the author's record was removed)."
+          },
           "body_html": {
             "description": "Sanitised HTML (paragraphs, lists, links, tables, images).",
             "title": "Body Html",
@@ -2324,6 +2353,7 @@
           "id",
           "slug",
           "title",
+          "author",
           "excerpt",
           "published_at",
           "image_url",
@@ -2394,6 +2424,17 @@
       },
       "NewsSummaryOut": {
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthorOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote it; null when unknown (e.g. the author's record was removed)."
+          },
           "excerpt": {
             "description": "Plain text, a few dozen words.",
             "title": "Excerpt",
@@ -2440,6 +2481,7 @@
           "id",
           "slug",
           "title",
+          "author",
           "excerpt",
           "published_at",
           "image_url",

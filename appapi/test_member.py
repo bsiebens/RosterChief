@@ -290,6 +290,15 @@ class NewsTests(ClubApiTestCase):
         self.assertIn("<strong>iedereen</strong>", dutch["body_html"])
         self.assertEqual((english["title"], english["language"], english["body_html"]), ("Hello", "en", "<p>Hi everyone</p>"))
 
+    def test_author(self):
+        self.news("by-pat", created_by=self.member)
+        self.news("anonymous")
+
+        items = {item["slug"]: item["author"] for item in self.get("/news").json()["items"]}
+
+        self.assertEqual(items, {"by-pat": {"first_name": "Pat", "last_name": "Parent"}, "anonymous": None})
+        self.assertEqual(self.get("/news/by-pat").json()["author"], {"first_name": "Pat", "last_name": "Parent"})
+
     def test_scheduled_item_is_404(self):
         self.news("later", published_at=timezone.now() + datetime.timedelta(days=1))
         self.assertError(self.get("/news/later"), 404, "not_found")

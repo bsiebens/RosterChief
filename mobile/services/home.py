@@ -96,6 +96,6 @@ def home_summary(club, people, *, officials_enabled: bool, now=None) -> dict:
         awaiting_confirmation = membership_ids_awaiting_confirmation(club)
         summary["dues_rows"] = [row for row in open_dues_rows(club, people, season) if row["membership"].pk not in awaiting_confirmation]
 
-    summary["news_items"] = list(member_news(club, now=now).prefetch_related("teams", "photos")[:NEWS_LIMIT])
+    summary["news_items"] = list(member_news(club, now=now).select_related("created_by").prefetch_related("teams", "photos")[:NEWS_LIMIT])
     summary["forms_to_complete"] = [row for row in form_status_rows_for(people, club) if row["submitted_at"] is None and is_send_open(row["send"], now)][:FORMS_LIMIT]
     return summary

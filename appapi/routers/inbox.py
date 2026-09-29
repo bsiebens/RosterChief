@@ -34,14 +34,14 @@ def news_list(request, cursor: Annotated[str | None, Query(description=CURSOR_HE
     """Published news for members, newest first. Titles and excerpts follow
     `Accept-Language` (English when asked for and written, the club's language otherwise)."""
     scope = club_scope(request)
-    page = paginate(member_news(scope.club).prefetch_related("teams", "photos"), sort_field="-published_at", cursor=cursor, limit=limit)
+    page = paginate(member_news(scope.club).select_related("created_by").prefetch_related("teams", "photos"), sort_field="-published_at", cursor=cursor, limit=limit)
     return {"items": [news_summary(request, item) for item in page.items], "next_cursor": page.next_cursor}
 
 
 @router.get("/news/{slug}", response={200: NewsDetailOut, **ERRORS}, summary="One news item")
 def news_detail(request, slug: str):
     scope = club_scope(request)
-    item = get_object_or_404(live_news(scope.club).prefetch_related("teams", "photos"), slug=slug)
+    item = get_object_or_404(live_news(scope.club).select_related("created_by").prefetch_related("teams", "photos"), slug=slug)
     _title, body, language = localized_news(item, get_language())
     photos = sorted(item.photos.all(), key=lambda photo: (not photo.is_main, photo.ordering))
     return {
