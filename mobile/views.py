@@ -51,17 +51,13 @@ from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import live_news, localized_news, member_news, render_body_html
 from notifications.services import clear_all, inbox_for, mark_all_read, mark_read, unread_count
-from registration.forms import RegistrationEntryFormSet, entries_from_formset
 from registration.models import RegistrationBatch
 from registration.services import (
     PricingError,
     RegistrationError,
     available_registration_products,
-    price_entries,
     priced_rows_with_jersey_fields,
     resolve_chosen_season,
-    resolve_registration_season,
-    submit_registration,
     team_number_pools,
     variant_registration_kinds,
 )
@@ -72,8 +68,7 @@ from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
-from teams.models import StaffAssignment, Team, TeamMembership
-from teams.services.numbers import member_current_number
+from teams.models import StaffAssignment, TeamMembership
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
@@ -83,6 +78,7 @@ from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
 from .services.payments import payments_overview
 from .services.push import subscription_error
+from .services.reregistration import entry_formset, member_current_numbers, price_formset, submit_reregistration
 
 
 class ManifestView(ClubScopedPublicMixin, View):
@@ -1043,45 +1039,14 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return [{"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk} for person in self.managed_people]
 
     def get_formset(self, season, data=None):
-        # enforce_single_contact=False -- here, is_contact is "Include this
-        # person" per managed person (reregister.html), not "this is me, the
-        # submitter" the way it is on the public page. Registering yourself
-        # and a child in the same batch is the ordinary case, not a conflict.
-        kwargs = {
-            "club": self.request.club,
-            "people": self.managed_people,
-            "season": season,
-            "team_number_pools": team_number_pools(self.request.club, season),
-            "member_current_numbers": self.get_member_current_numbers(season),
-            "prefix": "entries",
-            "enforce_single_contact": False,
-        }
-        if data is None:
-            kwargs["initial"] = self.get_initial_entries()
-        formset = RegistrationEntryFormSet(data, **kwargs)
+        # Scoping and the "Include this person" meaning of is_contact: mobile.services.reregistration.
+        formset = entry_formset(self.request.club, self.managed_people, season, data=data, initial=self.get_initial_entries())
         for row in formset.forms:
             style_dynamic_form(row)
         return formset
 
     def get_member_current_numbers(self, season):
-        """``{str(member_id): {str(team_id): number}}`` -- every managed
-        person's own current number in every pool-scoped team, so
-        reregister.html's script can offer "Keep #N" instead of silently
-        pre-filling it (the person may pick a different team than the one
-        that number came from). Only pool-scoped teams are considered --
-        a poolless team has no number step at all, see registration.
-        services.pricing.team_number_pools."""
-        pools_by_team = {team.pk: team.pool for team in Team.objects.filter(club=self.request.club, pool__isnull=False).select_related("pool")}
-        result = {}
-        for person in self.managed_people:
-            person_numbers = {}
-            for team_id, pool in pools_by_team.items():
-                current = member_current_number(person, pool, season)
-                if current is not None:
-                    person_numbers[str(team_id)] = current
-            if person_numbers:
-                result[str(person.pk)] = person_numbers
-        return result
+        return member_current_numbers(self.request.club, self.managed_people, season)
 
     def render_season_picker(self, available_seasons):
         return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
@@ -1157,28 +1122,18 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # re-pricing straight back into the receipt.
             return self.render_page(season, entry_formset)
 
-        entries = entries_from_formset(entry_formset)
         try:
-            resolve_registration_season([entry.product_variant for entry in entries])
+            entries, priced = price_formset(entry_formset)
         except PricingError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
-        priced = price_entries([entry.product_variant for entry in entries])
         priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), self.get_member_current_numbers(season))
 
         if request.POST.get("action") != "submit":
             return self.render_page(season, entry_formset, priced_entries=priced_rows)
 
-        contact_member = self.me or (entries[0].existing_member if entries and entries[0].existing_member else None)
-        contact = {
-            "contact_first_name": contact_member.first_name if contact_member else "",
-            "contact_last_name": contact_member.last_name if contact_member else "",
-            "contact_email": contact_member.contact_email if contact_member else "",
-            "contact_phone": "",
-        }
-
         try:
-            batch = submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
+            batch = submit_reregistration(request.club, request.user, self.me, entries)
         except RegistrationError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 

@@ -377,6 +377,28 @@ catalogue, cart and checkout then answer `409 shop_closed`, but orders stay read
   in `message`.
 * `GET /shop/orders` (paged), `GET /shop/orders/{id}` and `GET /shop/orders/{id}/invoice.pdf`.
 
+### Registering for a season
+
+Show "Register" when `GET /registration/options` returns seasons (empty: registration is
+closed). With several seasons, `season` is null: let the user pick, then call again with
+`?season_id=`.
+
+1. Per person, collect entries: a managed person (`member_id`) or someone new to the family
+   (`first_name`, `last_name`, `date_of_birth`); `entry_kind` (`player` / `volunteer`); a
+   `variant_id` from `products` (only products whose `registration_kind` is empty or matches);
+   optionally a `team_id`. A person may have several entries (two teams, or player and
+   volunteer).
+2. `POST /registration/quote` `{"season_id", "entries": [...]}` prices it without saving. Show
+   the lines, `total` and `early_payment_total`. For a player whose team has `jersey_numbers`,
+   offer those (plus the person's own number from `current_numbers`, as "keep #N") and send
+   the choice as `jersey_number`.
+3. `POST /registration` with the same body and an `Idempotency-Key` submits it. The club
+   reviews it and sends the invoice, which then appears under Payments; the account gets a
+   confirmation email now.
+
+`422` names the entry and field, e.g. `entries.1.variant_id` or `entries.0.jersey_number` (a
+number taken in the meantime).
+
 ### Calendar subscription
 
 `POST /calendar-feed` returns `webcal_url`: open it with `UIApplication.shared.open` and iOS

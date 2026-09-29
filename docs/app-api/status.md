@@ -11,7 +11,7 @@ What the app can use today, and what's next. The full plan is `API.md` in the re
 | Member: home, calendar, events, RSVP, referee/official invites, tasks, news, notifications, profile (view/edit), member photos | **Available** |
 | Member: payments & invoices, forms, photo upload, bug reports, calendar subscription | **Available** |
 | Member: shop, cart, orders & invoices | **Available** |
-| Member: re-registration | Next (phase 3, in progress) |
-| Coach: today, attendance, events, lineup, roster, news, evaluations | Phase 4 |
+| Member: re-registration | **Available** |
+| Coach: today, attendance, events, lineup, roster, news, evaluations | Next (phase 4) |
 | Passkeys on iOS, "signed-in devices", universal links for password reset | Phase 5 |
 | Android | After iOS, on the same API |

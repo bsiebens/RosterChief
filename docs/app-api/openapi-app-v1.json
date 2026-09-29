@@ -966,6 +966,32 @@
         "title": "CountOut",
         "type": "object"
       },
+      "CurrentNumberOut": {
+        "properties": {
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "number": {
+            "description": "The person's current number in this team's pool: offer 'keep #N' (it's valid even though it isn't in `jersey_numbers`).",
+            "title": "Number",
+            "type": "integer"
+          },
+          "team_id": {
+            "format": "uuid",
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "team_id",
+          "number"
+        ],
+        "title": "CurrentNumberOut",
+        "type": "object"
+      },
       "DeviceIn": {
         "properties": {
           "app_version": {
@@ -3251,6 +3277,448 @@
           "jersey_number"
         ],
         "title": "ProfileTeamOut",
+        "type": "object"
+      },
+      "QuoteLineOut": {
+        "properties": {
+          "early_payment_deadline": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Early Payment Deadline"
+          },
+          "early_payment_discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "entry_kind": {
+            "title": "Entry Kind",
+            "type": "string"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "multi_registrant_discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "product_name": {
+            "title": "Product Name",
+            "type": "string"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "variant_name": {
+            "title": "Variant Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "first_name",
+          "last_name",
+          "entry_kind",
+          "product_name",
+          "variant_name",
+          "team_id",
+          "jersey_number",
+          "price",
+          "multi_registrant_discount",
+          "early_payment_deadline",
+          "early_payment_discount"
+        ],
+        "title": "QuoteLineOut",
+        "type": "object"
+      },
+      "QuoteOut": {
+        "properties": {
+          "early_payment_total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The total when every line with an early-payment deadline is paid in time."
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/QuoteLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What will be invoiced."
+          }
+        },
+        "required": [
+          "lines",
+          "total",
+          "early_payment_total"
+        ],
+        "title": "QuoteOut",
+        "type": "object"
+      },
+      "RegistrationEntryIn": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "entry_kind": {
+            "default": "player",
+            "enum": [
+              "player",
+              "volunteer"
+            ],
+            "title": "Entry Kind",
+            "type": "string"
+          },
+          "first_name": {
+            "default": "",
+            "maxLength": 150,
+            "title": "First Name",
+            "type": "string"
+          },
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Players of a team with a number pool only.",
+            "title": "Jersey Number"
+          },
+          "last_name": {
+            "default": "",
+            "maxLength": 150,
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A managed person. Leave empty to register someone new to the club (then give their name and date of birth).",
+            "title": "Member Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested team (optional).",
+            "title": "Team Id"
+          },
+          "variant_id": {
+            "description": "What they register for (a variant from `products`).",
+            "format": "uuid",
+            "title": "Variant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variant_id"
+        ],
+        "title": "RegistrationEntryIn",
+        "type": "object"
+      },
+      "RegistrationIn": {
+        "properties": {
+          "entries": {
+            "description": "One per registration; the same person may appear more than once (e.g. two teams, or player and volunteer).",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationEntryIn"
+            },
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          },
+          "season_id": {
+            "format": "uuid",
+            "title": "Season Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "season_id",
+          "entries"
+        ],
+        "title": "RegistrationIn",
+        "type": "object"
+      },
+      "RegistrationOptionsOut": {
+        "properties": {
+          "current_numbers": {
+            "items": {
+              "$ref": "#/components/schemas/CurrentNumberOut"
+            },
+            "title": "Current Numbers",
+            "type": "array"
+          },
+          "max_entries": {
+            "title": "Max Entries",
+            "type": "integer"
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/RegistrationProductOut"
+            },
+            "title": "Products",
+            "type": "array"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RegistrationSeasonOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The season these options are for. Null when there are several: ask, then call again with `season_id`."
+          },
+          "seasons": {
+            "description": "Seasons open for registration. Empty: registration is closed.",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationSeasonOut"
+            },
+            "title": "Seasons",
+            "type": "array"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/RegistrationTeamOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "seasons",
+          "season",
+          "products",
+          "teams",
+          "current_numbers",
+          "max_entries"
+        ],
+        "title": "RegistrationOptionsOut",
+        "type": "object"
+      },
+      "RegistrationOut": {
+        "properties": {
+          "registration_id": {
+            "format": "uuid",
+            "title": "Registration Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "`received`: the club reviews it and then sends the invoice (it appears in `/payments`).",
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "registration_id",
+          "total",
+          "status"
+        ],
+        "title": "RegistrationOut",
+        "type": "object"
+      },
+      "RegistrationProductOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "registration_kind": {
+            "description": "`player` or `volunteer`: only for entries of that kind. Empty: for either.",
+            "title": "Registration Kind",
+            "type": "string"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/RegistrationVariantOut"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "registration_kind",
+          "variants"
+        ],
+        "title": "RegistrationProductOut",
+        "type": "object"
+      },
+      "RegistrationSeasonOut": {
+        "properties": {
+          "end_date": {
+            "format": "date",
+            "title": "End Date",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Short label, e.g. `26-27`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "start_date": {
+            "format": "date",
+            "title": "Start Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "start_date",
+          "end_date",
+          "name"
+        ],
+        "title": "RegistrationSeasonOut",
+        "type": "object"
+      },
+      "RegistrationTeamOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "jersey_numbers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free jersey numbers for players of this team; null when the team has no number pool (no number step).",
+            "title": "Jersey Numbers"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "jersey_numbers"
+        ],
+        "title": "RegistrationTeamOut",
+        "type": "object"
+      },
+      "RegistrationVariantOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price"
+        ],
+        "title": "RegistrationVariantOut",
         "type": "object"
       },
       "RsvpIn": {
@@ -6339,6 +6807,247 @@
         "summary": "Registration invoice (PDF)",
         "tags": [
           "payments"
+        ]
+      }
+    },
+    "/api/app/v1/registration": {
+      "post": {
+        "description": "The same entries as the quote. The club reviews it, then sends the invoice; the\naccount gets a confirmation email now. Send an `Idempotency-Key`: a double tap\nmust not register twice.",
+        "operationId": "appapi_routers_registration_register",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Submit a registration",
+        "tags": [
+          "registration"
+        ]
+      }
+    },
+    "/api/app/v1/registration/options": {
+      "get": {
+        "description": "Seasons open for registration and, once one is chosen (automatic when there's only\none), its products, teams and free jersey numbers.",
+        "operationId": "appapi_routers_registration_options",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "season_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Season Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationOptionsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "What can be registered for",
+        "tags": [
+          "registration"
+        ]
+      }
+    },
+    "/api/app/v1/registration/quote": {
+      "post": {
+        "description": "Validates and prices the entries without saving anything. `422` names the entry\nand field, e.g. `entries.1.variant_id`.",
+        "operationId": "appapi_routers_registration_quote",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Price a registration",
+        "tags": [
+          "registration"
         ]
       }
     },

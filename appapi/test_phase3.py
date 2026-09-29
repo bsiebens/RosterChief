@@ -266,3 +266,74 @@ class ShopTests(ClubApiTestCase):
 
         theirs = Order.objects.create(club=self.club, purchaser=self.stranger(), total=Decimal("5"))
         self.assertError(self.get(f"/shop/orders/{theirs.pk}"), 404, "not_found")
+
+
+class RegistrationTests(ClubApiTestCase):
+    def setUp(self):
+        super().setUp()
+        from shop.models import Product, ProductVariant
+        from teams.models import Team
+
+        self.product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("100.00"))
+        self.u10 = ProductVariant.objects.create(product=self.product, name="U10", price=Decimal("80.00"))
+        self.team = Team.objects.create(club=self.club, name="U10 Boys", short_name="U10B")
+
+    def payload(self, *entries):
+        return {"season_id": str(self.season.pk), "entries": list(entries)}
+
+    def entry(self, **kwargs):
+        return {"variant_id": str(self.u10.pk), **kwargs}
+
+    def test_options(self):
+        body = self.get("/registration/options").json()
+
+        self.assertEqual(body["season"]["id"], str(self.season.pk))
+        self.assertEqual(body["products"][0]["variants"], [{"id": str(self.u10.pk), "name": "U10", "price": {"amount": "80.00", "currency": "EUR"}}])
+        self.assertEqual(body["teams"], [{"id": str(self.team.pk), "name": "U10 Boys", "short_name": "U10B", "jersey_numbers": None}])
+
+    def test_quote_saves_nothing(self):
+        from registration.models import RegistrationBatch
+
+        body = self.send("post", "/registration/quote", self.payload(self.entry(member_id=str(self.child.pk)), self.entry(first_name="Lou", last_name="Parent", date_of_birth="2019-02-03"))).json()
+
+        self.assertEqual([(line["first_name"], line["price"]["amount"]) for line in body["lines"]], [("Kim", "80.00"), ("Lou", "80.00")])
+        self.assertEqual(body["total"], {"amount": "160.00", "currency": "EUR"})
+        self.assertFalse(RegistrationBatch.objects.exists())
+
+    def test_submit_registers_each_person_as_themselves(self):
+        from django.core import mail
+
+        from registration.models import RegistrationDetails
+
+        payload = self.payload(self.entry(member_id=str(self.member.pk)), self.entry(member_id=str(self.child.pk), team_id=str(self.team.pk)))
+        first = self.api("post", "/registration", token=self.token, host=CLUB_HOST, data=payload, HTTP_IDEMPOTENCY_KEY="reg-1")
+        again = self.api("post", "/registration", token=self.token, host=CLUB_HOST, data=payload, HTTP_IDEMPOTENCY_KEY="reg-1")
+
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(first.json(), again.json())
+        self.assertEqual(sorted(RegistrationDetails.objects.values_list("membership__member__first_name", flat=True)), ["Kim", "Pat"])
+        self.assertEqual(RegistrationDetails.objects.get(membership__member=self.child).requested_team, self.team)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_validation(self):
+        from shop.models import Product, ProductVariant
+
+        other_season = type(self.season).objects.create(club=self.club, start_date=self.season.end_date + datetime.timedelta(days=1), end_date=self.season.end_date + datetime.timedelta(days=300))
+        later = ProductVariant.objects.create(product=Product.objects.create(club=self.club, name="Next", product_type=Product.ProductType.MEMBERSHIP, season=other_season, price=Decimal("1")), name="All")
+
+        wrong_variant = self.send("post", "/registration/quote", self.payload(self.entry(member_id=str(self.child.pk), variant_id=str(later.pk))))
+        self.assertError(wrong_variant, 422, "validation_error")
+        self.assertIn("entries.0.variant_id", wrong_variant.json()["error"]["fields"])
+
+        no_name = self.send("post", "/registration/quote", self.payload(self.entry()))
+        self.assertIn("entries.0.last_name", no_name.json()["error"]["fields"])
+
+        self.assertError(self.send("post", "/registration/quote", self.payload(self.entry(member_id=str(self.stranger().pk)))), 404, "not_found")
+        bad_season = self.send("post", "/registration/quote", {"season_id": "00000000-0000-0000-0000-000000000000", "entries": [self.entry(member_id=str(self.child.pk))]})
+        self.assertIn("season_id", bad_season.json()["error"]["fields"])
+
+    def test_closed_registration(self):
+        self.product.is_active = False
+        self.product.save()
+        body = self.get("/registration/options").json()
+        self.assertEqual((body["seasons"], body["season"], body["products"]), ([], None, []))

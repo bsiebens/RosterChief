@@ -30,6 +30,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 409 | `form_unavailable` | The form is closed, not open yet, or the maximum number of responses was reached. |
 | 409 | `shop_closed` | The club closed the shop for now: hide the shop's catalogue and cart (orders stay readable). |
 | 409 | `checkout_failed` | The order couldn't be placed (empty cart, an unavailable line, changed prices, a code that can't be used): show `message` and refresh the cart. |
+| 409 | `registration_failed` | The registration couldn't be submitted as it stands: show `message`. |
 | 409 | `pdf_unavailable` | The invoice PDF can't be made right now: show `message`, try later. |
 | 409 | `conflict` and other specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
 | 422 | `validation_error` | Show `fields` next to the inputs. |

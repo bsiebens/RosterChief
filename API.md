@@ -1,14 +1,12 @@
 # API.md — Native-app API (design)
 
-Status: **phase 2 (member read + RSVP) done on the server side** (2026-09-29). On top of
-phase 1's foundations (`AppAuth`, error envelope, pagination, idempotency, `/meta`, `/me`,
-`/clubs`, `/context`, devices), the club host now serves home, calendar, events, RSVP,
-referee/official invites, tasks, news, notifications and profiles, and new notifications are
-pushed through SNS (§14). **Developer docs are online at `/api/docs/`** (Markdown in
-`docs/app-api/`, iOS first), next to the live OpenAPI references, and
-`docs/app-api/openapi-app-v1.json` is the committed snapshot clients are generated from.
-Items that need real devices or cloud accounts (Android passkey prototype, SNS round trip)
-are still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
+Status: **phase 3 (member write/commerce) done on the server side** (2026-09-29): with
+phases 1-2, every member screen of the PWA now has an app API equivalent (§14). **Developer
+docs are online at `/api/docs/`** (Markdown in `docs/app-api/`, iOS first), next to the live
+OpenAPI references, and `docs/app-api/openapi-app-v1.json` is the committed snapshot clients
+are generated from. Push setup for operators is in `DEPLOYMENT.md` "Native app push". Items
+that need real devices or cloud accounts (Android passkey prototype, SNS round trip) are
+still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
 RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
 
 Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and re-checked
@@ -627,6 +625,30 @@ device. **Open:** the Web Push / native dedupe for someone using both (§9); bot
 
 Not in phase 2, by design: photo upload (phase 3, multipart), `Me`-screen extras (vouchers,
 staff assignments: use `/context` and phase 3's payments), `ETag`s and `updated_since` (§15).
+
+**Phase 3 status (2026-09-29).** Done, in three slices (`appapi/routers/{payments,forms,
+people,support,shop,registration}.py`, tests in `appapi/test_phase3.py`). Service extractions
+(§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
+`shop.services.cart` (catalogue, cart, `orders_for`), `mobile.services.reregistration`.
+
+- Payments: `GET /payments` (registration-grouped, as the PWA) and the registration invoice PDF.
+- Forms: list, schema, `submit` (JSON, or multipart with files; idempotent; for one addressed
+  managed person, §8), submitted response. Not flag-gated, like the PWA: `formbuilder` licenses
+  creating forms.
+- Photos: `POST`/`DELETE /members/{id}/photo` via `MemberProfileForm`, 10 MB cap.
+- Shop: catalogue, cart (re-priced, code preview), idempotent checkout (pay on pickup, §12),
+  orders and invoice PDF. Unlicensed → 404 `feature_disabled`; closed → 409 `shop_closed` for
+  catalogue/cart/checkout, orders stay readable.
+- Re-registration: `GET /registration/options`, `POST /registration/quote`, idempotent
+  `POST /registration`. JSON entries are fed through the PWA's own `RegistrationEntryFormSet`,
+  so every rule (season scope, product kind, jersey numbers) is the same.
+- `GET/POST /bug-reports`, `GET/POST /calendar-feed` (link shown once).
+
+**Bug found and fixed on the way** (also on `development`, commit "Fix mobile re-registration
+booking a child's registration on the parent"): the PWA's re-registration reuses `is_contact`
+as "Include this person", and `submit_registration` read `is_contact` as "this is me", so a
+child's registration was booked on the parent. Existing data may need checking (the parent
+has a `RegistrationDetails` row per child registered that way, and the child no membership).
 
 **Tournaments** (separate `tournaments` branch) are not blocked by this design: they slot in as a new router group under `/api/app/v1` with the same scope/flag/role stack (`tournaments` flag → role → object scope), member-facing reads first
 (schedule, standings, brackets, "my team's next match"), read-only public bracket data already fits the existing `/api/v1/` shape.

@@ -701,3 +701,85 @@ class OrderOut(OrderSummaryOut):
     discounts: list[OrderDiscountOut]
     pickup_instructions: str
     has_invoice: bool = Field(description="The PDF is at `/shop/orders/{id}/invoice.pdf`.")
+
+
+# --- re-registration -------------------------------------------------------------------
+
+
+class RegistrationSeasonOut(SeasonOut):
+    name: str = Field(description="Short label, e.g. `26-27`.")
+
+
+class RegistrationVariantOut(Schema):
+    id: uuid.UUID
+    name: str
+    price: Money
+
+
+class RegistrationProductOut(Schema):
+    id: uuid.UUID
+    name: str
+    registration_kind: str = Field(description="`player` or `volunteer`: only for entries of that kind. Empty: for either.")
+    variants: list[RegistrationVariantOut]
+
+
+class RegistrationTeamOut(TeamRefOut):
+    jersey_numbers: list[int] | None = Field(description="Free jersey numbers for players of this team; null when the team has no number pool (no number step).")
+
+
+class CurrentNumberOut(Schema):
+    member_id: uuid.UUID
+    team_id: uuid.UUID
+    number: int = Field(description="The person's current number in this team's pool: offer 'keep #N' (it's valid even though it isn't in `jersey_numbers`).")
+
+
+class RegistrationOptionsOut(Schema):
+    seasons: list[RegistrationSeasonOut] = Field(description="Seasons open for registration. Empty: registration is closed.")
+    season: RegistrationSeasonOut | None = Field(description="The season these options are for. Null when there are several: ask, then call again with `season_id`.")
+    products: list[RegistrationProductOut]
+    teams: list[RegistrationTeamOut]
+    current_numbers: list[CurrentNumberOut]
+    max_entries: int
+
+
+class RegistrationEntryIn(Schema):
+    member_id: uuid.UUID | None = Field(None, description="A managed person. Leave empty to register someone new to the club (then give their name and date of birth).")
+    first_name: str = Field("", max_length=150)
+    last_name: str = Field("", max_length=150)
+    date_of_birth: datetime.date | None = None
+    entry_kind: Literal["player", "volunteer"] = "player"
+    variant_id: uuid.UUID = Field(description="What they register for (a variant from `products`).")
+    team_id: uuid.UUID | None = Field(None, description="Requested team (optional).")
+    jersey_number: int | None = Field(None, description="Players of a team with a number pool only.")
+
+
+class RegistrationIn(Schema):
+    season_id: uuid.UUID
+    entries: list[RegistrationEntryIn] = Field(min_length=1, description="One per registration; the same person may appear more than once (e.g. two teams, or player and volunteer).")
+
+
+class QuoteLineOut(Schema):
+    member_id: uuid.UUID | None
+    first_name: str
+    last_name: str
+    entry_kind: str
+    product_name: str
+    variant_name: str
+    team_id: uuid.UUID | None
+    jersey_number: int | None
+    price: Money
+    multi_registrant_discount: Money
+    early_payment_deadline: datetime.date | None
+    early_payment_discount: Money
+
+
+class QuoteOut(Schema):
+    lines: list[QuoteLineOut]
+    total: Money = Field(description="What will be invoiced.")
+    early_payment_total: Money = Field(description="The total when every line with an early-payment deadline is paid in time.")
+
+
+class RegistrationOut(Schema):
+    registration_id: uuid.UUID
+    total: Money
+    status: str = Field(description="`received`: the club reviews it and then sends the invoice (it appears in `/payments`).")
