@@ -8,7 +8,8 @@
 # building the image on a small box runs it out of memory. `build: .` stays so
 # `docker compose build` still works if you ever need to build locally. IMAGE_TAG picks the version: `:<branch>` (the default, "latest for this branch")
 # or `:<branch>-<short-sha>` to pin/roll back to an exact build -- see DEPLOYMENT.md's
-# "Deploying a specific version".
+# "Deploying a specific version". Each deploy writes the tag it deployed to .env
+# (deploy/record-image-tag.sh), so by-hand `docker compose run` one-offs use the same image.
 #
 # No `worker`/`beat`, and no separate scheduler/poller container either -- every scheduled
 # platform job (the once-a-minute live-score poll included) runs from an in-process
