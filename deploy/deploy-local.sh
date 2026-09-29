@@ -104,6 +104,11 @@ dc run --rm -T web python manage.py check --deploy --fail-level ERROR </dev/null
 say "Restarting web"
 dc up -d --no-deps --remove-orphans web
 
+# From here on web runs this tag; record it in .env so a by-hand `docker compose run ... web`
+# (one-off management commands) uses the same image instead of compose.yaml's :main fallback.
+say "Recording IMAGE_TAG=${IMAGE_TAG} in .env"
+./deploy/record-image-tag.sh "$IMAGE_TAG"
+
 say "Waiting for https://${BASE_DOMAIN}/healthz"
 for attempt in $(seq 1 20); do
     if curl -fsS "https://${BASE_DOMAIN}/healthz" >/dev/null 2>&1; then

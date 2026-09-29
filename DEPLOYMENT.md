@@ -911,6 +911,10 @@ docker compose run --rm --no-deps -v "$PWD/photos:/import:ro" web \
     python manage.py import_member_photos <club-slug> /import
 ```
 
+- `docker compose run` starts the image named by `IMAGE_TAG` in `.env`, which each deploy sets
+  to the tag it deployed (from 0.7.12 on). "Unknown command: 'import_member_photos'" means
+  `.env` still points at an older image. Check with `grep IMAGE_TAG .env`, or put the release
+  in front of the command: `IMAGE_TAG=v0.7.12 docker compose run …`.
 - `<club-slug>` is the club's subdomain. Licences are matched in that club only, across every
   season, ignoring case.
 - A member who already has a photo is skipped unless you add `--replace`.
@@ -1251,7 +1255,8 @@ on the server, so the compose file and deploy scripts match the image.
 as a release — short SHAs (7 characters) come from the GitHub Actions run or
 `git log --oneline`. There's no `deploy-prod.sh` flag for it; log in, check out that commit, and
 run `IMAGE_TAG=main-<short-sha> deploy/deploy-local.sh` (see "Deploying while logged into the
-server"). Don't set `IMAGE_TAG` in the server's `.env` — see "Rollback".
+server"). Don't edit `IMAGE_TAG` in the server's `.env`; each deploy records the tag it
+deployed there itself — see "Rollback".
 
 ## Backups
 
@@ -1781,9 +1786,11 @@ takes a backup, pulls `:v0.7.7`, runs `migrate` (a no-op — see below) and recr
 Prior releases are listed under the repo's GitHub Releases page, or `git tag --list 'v*'`. To go
 forward again, deploy the newer tag (or plain `deploy/deploy-prod.sh` for the tip of `main`).
 
-Don't pin versions through `IMAGE_TAG` in the production server's `.env`: `deploy-prod.sh` and
-`deploy-local.sh` always pass the tag they deploy (for the pull, the `migrate` and the restart),
-and a stale pin there only confuses a later by-hand `docker compose` command. Leave it at `main`.
+Don't edit `IMAGE_TAG` in the server's `.env` by hand. Every deploy (`deploy-local.sh`, and so
+`deploy-prod.sh`, and `deploy-dev.sh`) passes the tag it deploys to the pull, the `migrate` and
+the restart, then writes it to `.env` itself (`deploy/record-image-tag.sh`). So `.env` always
+names the image `web` is running, and a by-hand `docker compose run … web` uses that same image.
+A hand edit is overwritten by the next deploy.
 
 **Migrations don't roll back with the image.** The older code's `migrate` has nothing to apply,
 and it leaves the newer migrations in place — which is fine as long as they were additive.

@@ -113,6 +113,9 @@ dc run --rm -T web python manage.py migrate --noinput </dev/null
 step "Restarting web"
 dc up -d --no-deps web
 
+# So a by-hand `docker compose run ... web` here uses this branch's image too.
+./deploy/record-image-tag.sh "$IMAGE_TAG"
+
 step "Waiting for /healthz on :${WEB_PORT}"
 for attempt in $(seq 1 20); do
     if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
