@@ -1,0 +1,1016 @@
+{
+  "components": {
+    "schemas": {
+      "AppVersions": {
+        "properties": {
+          "android": {
+            "title": "Android",
+            "type": "string"
+          },
+          "ios": {
+            "description": "Oldest iOS app version still supported; below it, show the 'update required' screen.",
+            "title": "Ios",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ios",
+          "android"
+        ],
+        "title": "AppVersions",
+        "type": "object"
+      },
+      "ClubFeatures": {
+        "properties": {
+          "evaluations": {
+            "title": "Evaluations",
+            "type": "boolean"
+          },
+          "forms": {
+            "title": "Forms",
+            "type": "boolean"
+          },
+          "officials": {
+            "title": "Officials",
+            "type": "boolean"
+          },
+          "shop": {
+            "description": "The shop is licensed for this club.",
+            "title": "Shop",
+            "type": "boolean"
+          },
+          "shop_open": {
+            "description": "The shop is licensed *and* currently taking orders.",
+            "title": "Shop Open",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shop",
+          "shop_open",
+          "forms",
+          "officials",
+          "evaluations"
+        ],
+        "title": "ClubFeatures",
+        "type": "object"
+      },
+      "ClubListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClubOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ClubListOut",
+        "type": "object"
+      },
+      "ClubOut": {
+        "properties": {
+          "api_base_url": {
+            "description": "Base URL for this club's resource endpoints, e.g. `https://hc-example.rosterchief.app/api/app/v1`.",
+            "title": "Api Base Url",
+            "type": "string"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ClubFeatures"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo Url"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Color"
+          },
+          "relationship": {
+            "description": "How the account relates to the club: `member` (plays or is signed up), `guardian` (acts for children), `coach` (staffs a team this season), `staff` (club admin, editor or member admin). More values may appear: ignore unknown ones.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship",
+            "type": "array"
+          },
+          "secondary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Color"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "api_base_url",
+          "logo_url",
+          "primary_color",
+          "secondary_color",
+          "relationship",
+          "features"
+        ],
+        "title": "ClubOut",
+        "type": "object"
+      },
+      "ClubRefOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo Url"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Color"
+          },
+          "secondary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondary Color"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "logo_url",
+          "primary_color",
+          "secondary_color"
+        ],
+        "title": "ClubRefOut",
+        "type": "object"
+      },
+      "ContextOut": {
+        "properties": {
+          "club": {
+            "$ref": "#/components/schemas/ClubRefOut"
+          },
+          "features": {
+            "$ref": "#/components/schemas/ClubFeatures"
+          },
+          "managed_people": {
+            "description": "Who the account acts for here: themselves first, then their children. Pass one of these ids as `member_id`.",
+            "items": {
+              "$ref": "#/components/schemas/ManagedPersonOut"
+            },
+            "title": "Managed People",
+            "type": "array"
+          },
+          "me": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/PermissionsOut"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeasonOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The club's current season, if one covers today."
+          },
+          "staffed_teams": {
+            "description": "Teams the account coaches or staffs this season (coach endpoints take a team id from here).",
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Staffed Teams",
+            "type": "array"
+          },
+          "unread_notifications": {
+            "description": "Unread notifications across all managed people, for the app badge.",
+            "title": "Unread Notifications",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "club",
+          "season",
+          "me",
+          "managed_people",
+          "staffed_teams",
+          "permissions",
+          "features",
+          "unread_notifications"
+        ],
+        "title": "ContextOut",
+        "type": "object"
+      },
+      "DeviceIn": {
+        "properties": {
+          "app_version": {
+            "default": "",
+            "maxLength": 32,
+            "title": "App Version",
+            "type": "string"
+          },
+          "environment": {
+            "default": "production",
+            "description": "`sandbox` for debug builds run from Xcode (APNs sandbox tokens).",
+            "enum": [
+              "production",
+              "sandbox"
+            ],
+            "title": "Environment",
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "A random id the app generates once per install (e.g. a UUID) and keeps in the Keychain.",
+            "maxLength": 64,
+            "minLength": 8,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "locale": {
+            "default": "",
+            "description": "The app's language, e.g. `nl` or `en`; push texts are written in it.",
+            "maxLength": 16,
+            "title": "Locale",
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "title": "Platform",
+            "type": "string"
+          },
+          "push_token": {
+            "description": "The APNs device token as a hex string (iOS) or the FCM registration token (Android).",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Push Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "platform",
+          "push_token"
+        ],
+        "title": "DeviceIn",
+        "type": "object"
+      },
+      "DeviceOut": {
+        "properties": {
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "installation_id": {
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "push_enabled": {
+            "description": "False until the server can deliver pushes to this device (SNS configured, token accepted).",
+            "title": "Push Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "installation_id",
+          "platform",
+          "environment",
+          "push_enabled"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable code, e.g. `not_a_member`. Never translated.",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Validation messages per field; only on 422.",
+            "title": "Fields"
+          },
+          "message": {
+            "description": "Localised (Accept-Language), safe to show to the user.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorOut": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorOut",
+        "type": "object"
+      },
+      "ManagedPersonOut": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_self": {
+            "description": "True for the account's own record; the others are children the account is a parent/guardian of.",
+            "title": "Is Self",
+            "type": "boolean"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "first_name",
+          "last_name",
+          "date_of_birth",
+          "is_self"
+        ],
+        "title": "ManagedPersonOut",
+        "type": "object"
+      },
+      "MeOut": {
+        "properties": {
+          "member": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account's own person record, shared by every club it belongs to."
+          },
+          "mfa": {
+            "$ref": "#/components/schemas/MfaState"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "user",
+          "member",
+          "mfa"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "MetaOut": {
+        "properties": {
+          "api_version": {
+            "title": "Api Version",
+            "type": "string"
+          },
+          "docs_url": {
+            "title": "Docs Url",
+            "type": "string"
+          },
+          "min_supported_app_version": {
+            "$ref": "#/components/schemas/AppVersions"
+          },
+          "server_time": {
+            "format": "date-time",
+            "title": "Server Time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_version",
+          "server_time",
+          "min_supported_app_version",
+          "docs_url"
+        ],
+        "title": "MetaOut",
+        "type": "object"
+      },
+      "MfaState": {
+        "properties": {
+          "enabled": {
+            "description": "The account has at least one second factor.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "types": {
+            "description": "Enrolled factor types: `totp`, `recovery_codes`, `webauthn`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "types"
+        ],
+        "title": "MfaState",
+        "type": "object"
+      },
+      "PermissionsOut": {
+        "properties": {
+          "can_add_news": {
+            "title": "Can Add News",
+            "type": "boolean"
+          },
+          "can_manage_evaluations": {
+            "title": "Can Manage Evaluations",
+            "type": "boolean"
+          },
+          "has_management_access": {
+            "description": "Can use the club's web management pages. Management itself is not in the app API.",
+            "title": "Has Management Access",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "has_management_access",
+          "can_add_news",
+          "can_manage_evaluations"
+        ],
+        "title": "PermissionsOut",
+        "type": "object"
+      },
+      "PersonOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "first_name",
+          "last_name"
+        ],
+        "title": "PersonOut",
+        "type": "object"
+      },
+      "SeasonOut": {
+        "properties": {
+          "end_date": {
+            "format": "date",
+            "title": "End Date",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "start_date": {
+            "format": "date",
+            "title": "Start Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "start_date",
+          "end_date"
+        ],
+        "title": "SeasonOut",
+        "type": "object"
+      },
+      "TeamRefOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name"
+        ],
+        "title": "TeamRefOut",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "AppAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "\nThe API the RosterChief native apps are built on. Read the developer guide first:\n**[/api/docs/](/api/docs/)**.\n\n* **Sign-in** is a separate API (allauth headless): `/api/auth/app/v1/`, spec at\n  [/api/auth/openapi.html](/api/auth/openapi.html). It returns the `access_token` used here.\n* **Authentication:** `Authorization: Bearer <access_token>` on every call except `/meta`.\n* **Two planes:** account endpoints (`/me`, `/clubs`, `/devices`, `/meta`) on the base domain;\n  club endpoints (`/context`, …) on the club's own host — take it from `api_base_url` in `/clubs`.\n* **Errors** always use `{\"error\": {\"code\", \"message\", \"fields\"}}`; branch on `code`.\n",
+    "title": "RosterChief app API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/app/v1/clubs": {
+      "get": {
+        "description": "Every active club the account has a real tie to, with the base URL to use for that\nclub's endpoints. Cache it; offer a club picker when there is more than one.",
+        "operationId": "appapi_routers_account_clubs",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClubListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Clubs the account can use",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/context": {
+      "get": {
+        "description": "Call when a club is opened (and after pull-to-refresh): the season, the people the\naccount acts for (`member_id` values for other endpoints), coached teams, permissions\nand features. `403 not_a_member` means the account has no tie to this club.",
+        "operationId": "appapi_routers_club_context",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The caller in this club",
+        "tags": [
+          "club"
+        ]
+      }
+    },
+    "/api/app/v1/devices": {
+      "post": {
+        "description": "Call after sign-in and whenever the push token changes (iOS may rotate it). Keyed by\n`installation_id`: repeating the call updates the same registration. If another account\nregistered this install before, it moves to the signed-in account.",
+        "operationId": "appapi_routers_account_register_device",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Register this install for push",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/devices/{installation_id}": {
+      "delete": {
+        "description": "Call on sign-out, before discarding the tokens. Only the account's own installs.",
+        "operationId": "appapi_routers_account_unregister_device",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Unregister this install",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/me": {
+      "get": {
+        "operationId": "appapi_routers_account_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The signed-in account",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/meta": {
+      "get": {
+        "description": "No authentication. Call on launch: if the app's version is below\n`min_supported_app_version`, show an 'update required' screen.",
+        "operationId": "appapi_routers_account_meta",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Server and client-version info",
+        "tags": [
+          "account"
+        ]
+      }
+    }
+  },
+  "servers": []
+}

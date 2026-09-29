@@ -23,6 +23,31 @@ def families_of_club(club):
     return Family.objects.filter(club=club)
 
 
+def managed_people(member, club) -> list:
+    """The people ``member`` acts for in ``club``: themselves first, then every child
+    they're a parent/guardian of in one of *this club's* families who also holds a
+    membership here (any status, any season). ``[]`` without a member.
+
+    The single rule behind the member app's person switcher (mobile.mixins.
+    PersonScopeMixin), the calendar feed, and the native-app API's ``member_id`` scope
+    (API.md §5.1). ``family__club``: ``member`` is global -- without it, a family from
+    another club would make its children manageable here just because they also have
+    a membership in this one (2026-09-12 leak).
+
+    Deliberately not the same as club.services.access.members_visible_to, which answers
+    who *staff* may see and doesn't require the child's own membership here."""
+    if member is None:
+        return []
+    children = Member.objects.filter(
+        family_memberships__role=FamilyMembership.FamilyRole.CHILD,
+        family_memberships__family__club=club,
+        family_memberships__family__memberships__member=member,
+        family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
+        member_of__club=club,
+    ).distinct()
+    return [member, *children]
+
+
 def family_contacts(member, club):
     """Every parent/guardian on record in any family ``member`` belongs to
     within ``club`` (almost always exactly one) -- each as {"member", "email",

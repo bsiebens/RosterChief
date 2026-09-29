@@ -107,6 +107,8 @@ INSTALLED_APPS = [
     "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
+    # Authenticated native-app API at /api/app/v1/ -- see API.md and appapi/api.py.
+    "appapi.apps.AppApiConfig",
     # The project package itself, registered only for its system checks (rosterchief/checks.py):
     # no models, templates or static files live here.
     "rosterchief.apps.RosterchiefConfig",
@@ -143,6 +145,8 @@ MIDDLEWARE = [
     # After maintenance: a club under maintenance closes its public API too, same as
     # everything else on its subdomain.
     "api.middleware.PublicApiCorsMiddleware",
+    # No CORS on the app/auth APIs (native clients don't need it); only no-store caching.
+    "appapi.middleware.AppApiHeadersMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -247,6 +251,25 @@ HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = config("HEADLESS_JWT_ACCESS_TOKEN_EXPIRES
 # re-saves the session and so slides both forward. Web sessions keep Django's default lifetime.
 APP_SESSION_LIFETIME = config("APP_SESSION_LIFETIME", default=90 * 24 * 3600, cast=int)
 HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
+# The auth API's OpenAPI spec at /api/auth/openapi.json|.yaml|.html, for the app's client
+# code generation and the online docs (/api/docs/). The .html page loads ReDoc from a CDN.
+HEADLESS_SERVE_SPECIFICATION = True
+
+
+# Native-app API (appapi, /api/app/v1/) -- API.md.
+#
+# Oldest app versions still allowed; GET /meta reports them and the app shows an "update
+# required" screen below them. Raise when an old build would break against the API.
+APP_MIN_VERSION_IOS = config("APP_MIN_VERSION_IOS", default="1.0.0")
+APP_MIN_VERSION_ANDROID = config("APP_MIN_VERSION_ANDROID", default="1.0.0")
+# Push through Amazon SNS Mobile Push (appapi/push.py). Each ARN is an SNS platform
+# application holding that service's credentials; leave empty until it exists. Credentials
+# for SNS itself come from the environment/instance role, same as the S3 storage.
+APP_PUSH_SNS_REGION = config("APP_PUSH_SNS_REGION", default="")
+APP_PUSH_SNS_APNS_ARN = config("APP_PUSH_SNS_APNS_ARN", default="")
+APP_PUSH_SNS_APNS_SANDBOX_ARN = config("APP_PUSH_SNS_APNS_SANDBOX_ARN", default="")
+APP_PUSH_SNS_FCM_ARN = config("APP_PUSH_SNS_FCM_ARN", default="")
+APP_PUSH_GATEWAY = ""
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
 # under this key -- generate one with

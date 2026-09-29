@@ -1,10 +1,12 @@
 # API.md — Native-app API (design)
 
-Status: **phase 0 (spike) done on the server side** (2026-09-29). allauth.headless is mounted for
-the app client with the JWT strategy, and `authentication/test_headless_app.py` pins the token
-and session behaviour the design relies on (§3.3). Phase-0 items that need real devices or cloud
-accounts (Android passkey prototype, SNS round trip) are still open (§14, §16). No `/api/app/v1/`
-endpoints yet. Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
+Status: **phase 1 (foundations) done on the server side** (2026-09-29). The `appapi` app serves
+`/api/app/v1/` with `AppAuth`, the error envelope, pagination and idempotency helpers, `/meta`,
+`/me`, `/clubs`, `/context` and push-device registration with an SNS gateway (§14). **Developer
+docs are online at `/api/docs/`** (Markdown in `docs/app-api/`, iOS first), next to the live
+OpenAPI references, and `docs/app-api/openapi-app-v1.json` is the committed snapshot that clients
+are generated from. Items that need real devices or cloud accounts (Android passkey prototype,
+SNS round trip) are still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
 RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
 
 Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and re-checked
@@ -80,14 +82,14 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 
 ```python
 path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),  # -> /api/auth/app/v1/...
-path("api/app/v1/", app_api.urls),  # phase 1
+path("api/app/v1/", app_api.urls),  # phase 1 (appapi)
 ```
 
 `base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
 
 Dependencies: `pyjwt[crypto]` arrives with the `headless` extra (`django-allauth[mfa,headless]`),
-added in phase 0. `PyYAML` (the `headless-spec` extra) comes with `HEADLESS_SERVE_SPECIFICATION`
-in phase 1.
+added in phase 0; `PyYAML` (the `headless-spec` extra, for `HEADLESS_SERVE_SPECIFICATION`),
+and `boto3` (direct) in phase 1.
 
 ### 3.2 Endpoints (base domain, prefix `/api/auth/app/v1`)
 
@@ -560,16 +562,39 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
 |-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
 | **0 — Spike**                 | allauth.headless mounted on the branch; JWT strategy vs session lifetime (§3.3); Android passkey origin prototype (§3.6); SNS platform-app round trip to a real device    | §16-1,2,3 answered; strategy chosen                                           |
 
-**Phase 0 status (2026-09-29).** Done: headless mounted (app client, JWT, base domain only),
-signup closed, and 14 tests pinning login/MFA/refresh/revocation/session-lifetime behaviour. **§16-1
-answered, strategy kept.** Android origin checked server-side (§3.6), and a device prototype is still
-needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
-platform applications, a test device. None of these block phase 1.
 | **1 — Foundations**           | `AppAuth`, error envelope, pagination/idempotency helpers, `/clubs`, `/me`, `/context`, signup closed, proxy-count fix, `managed_people`, push device model + SNS gateway | a test client can log in with MFA, list clubs, hit an empty club-scoped route |
 | **2 — Member read + RSVP**    | home, calendar, events, RSVP (after `submit_rsvp` extraction), news, notifications, profile, push end-to-end                                                              | an internal build reaches PWA parity for a parent                             |
 | **3 — Member write/commerce** | payments, forms, shop, orders, re-registration, photo upload, bug reports, calendar feed                                                                                  | parity for the remaining member screens                                       |
 | **4 — Coach**                 | today, attendance/check-ins, events/series, lineup, roster, news submit, evaluations                                                                                      | parity for a coach                                                            |
 | **5 — Hardening**             | usersessions/devices UI, iOS then Android passkeys, universal links for reset, rate-limit tuning, load test, security review                                              | store submission                                                              |
+
+**Phase 0 status (2026-09-29).** Done: headless mounted (app client, JWT, base domain only),
+signup closed, and 14 tests pinning login/MFA/refresh/revocation/session-lifetime behaviour. **§16-1
+answered, strategy kept.** Android origin checked server-side (§3.6), and a device prototype is still
+needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
+platform applications, a test device. None of these block phase 1.
+
+**Phase 1 status (2026-09-29).** Done, in `appapi/` (tests in `appapi/tests.py`):
+
+- `AppAuth` (§3.4): 401 `unauthenticated` / `token_expired`, inactive accounts refused, 403
+  `mfa_enrollment_required` for privileged accounts without a second factor.
+- Error envelope for every failure (ninja validation → 422 with `fields`), and maintenance
+  mode answers 503 in the same envelope on `/api/app/` and `/api/auth/`. Responses are `private,
+  no-store`.
+- `paginate()` (cursor), `idempotent()` (claim-first `IdempotencyRecord`), unit-tested and ready
+  for phase 2.
+- `/meta` (unauthenticated; minimum app versions from `APP_MIN_VERSION_IOS`/`_ANDROID`), `/me`,
+  `/clubs` (relationship, feature flags, per-club `api_base_url`), `/context` on the club host.
+  `members.services.family.managed_people` is shared with the PWA.
+- `PushDevice` + `POST`/`DELETE /devices`. `SnsGateway` (APNs production/sandbox, FCM ready)
+  is chosen when an `APP_PUSH_SNS_*_ARN` is set, otherwise registration is stored with
+  `push_enabled: false`. Delivery starts in phase 2.
+- Docs: `/api/docs/` (overview, iOS guide, errors, status), `/api/app/v1/docs` (Swagger) and
+  `/api/auth/openapi.html` (allauth's spec). `manage.py export_app_openapi` refreshes the
+  snapshot; a test fails when it's stale.
+
+Still needed from outside the code before push can be tested end to end: an Apple Developer
+account (APNs key), the SNS platform applications (production + sandbox), and a test iPhone.
 
 **Tournaments** (separate `tournaments` branch) are not blocked by this design: they slot in as a new router group under `/api/app/v1` with the same scope/flag/role stack (`tournaments` flag → role → object scope), member-facing reads first
 (schedule, standings, brackets, "my team's next match"), read-only public bracket data already fits the existing `/api/v1/` shape.
@@ -606,8 +631,8 @@ platform applications, a test device. None of these block phase 1.
 7. ~~Guardian submits a form for a child?~~ **Decided: yes**, and built on development (§8).
 8. Tombstone source for `deleted[]` — a small `Deleted` log table vs per-model soft delete vs
    "client re-fetches the window". Recommend re-fetch windows for v1 and tombstones only for notifications/cart.
-9. `boto3`: **checked**, it's transitive only (via `django-storages[s3]`, 1.43 installed). Add it as a direct dependency with the SNS gateway (phase 1).
-10. `pyjwt[crypto]` is now a runtime dependency (headless extra, phase 0) and covered by the CI `pip-audit` job. `PyYAML` follows in phase 1.
+9. ~~`boto3`~~ **Done (phase 1):** a direct dependency, used by the SNS gateway.
+10. `pyjwt[crypto]` is now a runtime dependency (headless extra, phase 0) and covered by the CI `pip-audit` job. `PyYAML` arrived in phase 1 with the served spec.
 11. ~~Session/`usersessions` at launch or phase 5?~~ Decided: phase 5 (§3.7).
 12. Native identity linking: the account plane returns *all* clubs for a user — confirm there is no scenario where two people share one login (family login) that would need a profile switcher beyond the managed-people model.
 13. App-store review posture for the shop/registration flow (§12) — confirm with each store before the first submission.

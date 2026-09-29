@@ -34,6 +34,9 @@ ALWAYS_OPEN = ("/healthz", "/media/")
 
 RETRY_AFTER_SECONDS = 3600
 
+#: The native app's APIs (appapi, allauth.headless); see ``render``.
+APP_API_PREFIXES = ("/api/app/", "/api/auth/")
+
 
 class MaintenanceMiddleware:
     """Runs after ClubTenantMiddleware: whether a request is a club's or the platform's is
@@ -69,6 +72,11 @@ class MaintenanceMiddleware:
 
     def render(self, request, maintenance):
         message = maintenance.message or _("RosterChief is down for maintenance. It will be back shortly.")
+
+        # The native app's APIs answer in their own error envelope (API.md §6), whatever the
+        # Accept header, so the app can show its maintenance screen.
+        if request.path.startswith(APP_API_PREFIXES):
+            return JsonResponse({"error": {"code": "maintenance", "message": str(message)}}, status=503)
 
         # An API-ish caller gets JSON rather than a page of HTML it cannot read.
         if request.headers.get("accept", "").startswith("application/json"):

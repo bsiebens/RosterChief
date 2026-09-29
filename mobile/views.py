@@ -44,7 +44,7 @@ from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
 from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
-from members.services.family import claim_label_for
+from members.services.family import claim_label_for, managed_people
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import render_body_html
@@ -191,21 +191,7 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
         if feed_token is None:
             raise Http404("No such calendar feed.")
         me = Member.objects.filter(user=feed_token.user).first()
-        people = []
-        if me is not None:
-            children = Member.objects.filter(
-                family_memberships__role=FamilyMembership.FamilyRole.CHILD,
-                # family__club: me is global -- without this, a family relationship
-                # from another club could surface here just because the child also
-                # happens to have a ClubMembership in this one (2026-09-12 leak).
-                family_memberships__family__club=request.club,
-                family_memberships__family__memberships__member=me,
-                family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
-                member_of__club=request.club,
-            ).distinct()
-            people = [me, *children]
-
-        feed = build_feed(request.club, people)
+        feed = build_feed(request.club, managed_people(me, request.club))
         return HttpResponse(feed, content_type="text/calendar; charset=utf-8")
 
 

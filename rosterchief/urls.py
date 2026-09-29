@@ -19,6 +19,8 @@ from django.views.generic import RedirectView
 
 from announcements.views import PendingAnnouncementView
 from api.urls import api
+from appapi.api import app_api
+from appapi.docs import docs_page
 from club.views import root, signup_closed
 
 from .admin_host import base_domain_only, base_domain_only_urls
@@ -50,6 +52,12 @@ urlpatterns = [
     # Native-app authentication (allauth.headless, "app" client only): /api/auth/app/v1/...
     # Base domain only -- the account plane of API.md §4; a club subdomain 404s.
     path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),
+    # The native-app API itself (appapi): account endpoints on the base domain, club endpoints
+    # on each club's host -- each endpoint enforces its own plane (appapi/auth.py).
+    path("api/app/v1/", app_api.urls),
+    # Developer docs for the app APIs (docs/app-api/*.md), base domain only.
+    path("api/docs/", base_domain_only(docs_page), name="app_api_docs"),
+    path("api/docs/<slug:page>/", base_domain_only(docs_page), name="app_api_docs_page"),
     # Shared by management/base.html and mobile/base.html's own poll-on-load script --
     # not nested under either app's urls.py, since both surfaces hit this one verbatim.
     path("announcements/pending/", PendingAnnouncementView.as_view(), name="announcement_pending"),
