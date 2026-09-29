@@ -12,6 +12,8 @@ the network:
 Settings (all optional; empty = that platform can't receive pushes yet)::
 
     APP_PUSH_SNS_REGION
+    APP_PUSH_SNS_ACCESS_KEY_ID      # its own IAM user; empty = boto3's default chain
+    APP_PUSH_SNS_SECRET_ACCESS_KEY
     APP_PUSH_SNS_APNS_ARN           # App Store / TestFlight builds
     APP_PUSH_SNS_APNS_SANDBOX_ARN   # debug builds from Xcode
     APP_PUSH_SNS_FCM_ARN            # Android, later
@@ -85,7 +87,10 @@ class SnsGateway(PushGateway):
         if client is None:
             import boto3
 
-            client = boto3.client("sns", region_name=settings.APP_PUSH_SNS_REGION or None)
+            credentials = {}
+            if settings.APP_PUSH_SNS_ACCESS_KEY_ID:
+                credentials = {"aws_access_key_id": settings.APP_PUSH_SNS_ACCESS_KEY_ID, "aws_secret_access_key": settings.APP_PUSH_SNS_SECRET_ACCESS_KEY}
+            client = boto3.client("sns", region_name=settings.APP_PUSH_SNS_REGION or None, **credentials)
         self.client = client
 
     def register(self, device):

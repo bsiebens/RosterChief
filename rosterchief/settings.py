@@ -263,9 +263,13 @@ HEADLESS_SERVE_SPECIFICATION = True
 APP_MIN_VERSION_IOS = config("APP_MIN_VERSION_IOS", default="1.0.0")
 APP_MIN_VERSION_ANDROID = config("APP_MIN_VERSION_ANDROID", default="1.0.0")
 # Push through Amazon SNS Mobile Push (appapi/push.py). Each ARN is an SNS platform
-# application holding that service's credentials; leave empty until it exists. Credentials
-# for SNS itself come from the environment/instance role, same as the S3 storage.
+# application holding that service's credentials; leave empty until it exists. SNS has its
+# own access key (an IAM user limited to these applications, DEPLOYMENT.md "Native app
+# push"): the AWS_* keys above belong to the upload storage, which needn't be AWS at all.
+# Left empty, boto3 falls back to its default chain (e.g. an instance role).
 APP_PUSH_SNS_REGION = config("APP_PUSH_SNS_REGION", default="")
+APP_PUSH_SNS_ACCESS_KEY_ID = config("APP_PUSH_SNS_ACCESS_KEY_ID", default="")
+APP_PUSH_SNS_SECRET_ACCESS_KEY = config("APP_PUSH_SNS_SECRET_ACCESS_KEY", default="")
 APP_PUSH_SNS_APNS_ARN = config("APP_PUSH_SNS_APNS_ARN", default="")
 APP_PUSH_SNS_APNS_SANDBOX_ARN = config("APP_PUSH_SNS_APNS_SANDBOX_ARN", default="")
 APP_PUSH_SNS_FCM_ARN = config("APP_PUSH_SNS_FCM_ARN", default="")

@@ -181,6 +181,13 @@ Then retry the call that failed.
 
 ## 7. Push notifications (APNs)
 
+**Before you start:** in Xcode, add the **Push Notifications** capability to the app target.
+The bundle ID must be the one the server's push setup was made for. The server side (an APNs
+key and Amazon SNS) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
+push"](https://github.com/bsiebens/RosterChief/blob/development/DEPLOYMENT.md#native-app-push-amazon-sns).
+Hand them the bundle ID; they need the team's APNs `.p8` key from the Apple Developer account.
+Until that's done, `POST /devices` answers `push_enabled: false` and no pushes arrive.
+
 1. Ask permission (`UNUserNotificationCenter.requestAuthorization`) at a sensible moment, not
    on first launch.
 2. `UIApplication.shared.registerForRemoteNotifications()`. In

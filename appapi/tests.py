@@ -503,3 +503,21 @@ class DocsTests(TestCase):
             target = Path(directory) / "spec.json"
             call_command("export_app_openapi", "--output", str(target), stdout=io.StringIO())
             self.assertEqual(json.loads(target.read_text())["info"]["title"], "RosterChief app API")
+
+
+class SnsCredentialsTests(TestCase):
+    @override_settings(APP_PUSH_SNS_REGION="eu-west-1", APP_PUSH_SNS_ACCESS_KEY_ID="AKIAPUSH", APP_PUSH_SNS_SECRET_ACCESS_KEY="secret")
+    def test_dedicated_key_is_used(self):
+        from unittest.mock import patch
+
+        with patch("boto3.client") as client:
+            SnsGateway()
+        client.assert_called_once_with("sns", region_name="eu-west-1", aws_access_key_id="AKIAPUSH", aws_secret_access_key="secret")
+
+    @override_settings(APP_PUSH_SNS_REGION="", APP_PUSH_SNS_ACCESS_KEY_ID="")
+    def test_without_a_key_boto_uses_its_default_chain(self):
+        from unittest.mock import patch
+
+        with patch("boto3.client") as client:
+            SnsGateway()
+        client.assert_called_once_with("sns", region_name=None)
