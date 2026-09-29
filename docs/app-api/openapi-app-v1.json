@@ -753,6 +753,18 @@
             "title": "Api Base Url",
             "type": "string"
           },
+          "event_background_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The club's photo for event screens (the next-event card on Home, an event's page), as the web app shows it: in black & white, cropped to fill, under a dark gradient (`#0b1220` from about 45% at the top to 97% at the bottom) so white text reads. Null: use a plain dark background.",
+            "title": "Event Background Url"
+          },
           "features": {
             "$ref": "#/components/schemas/ClubFeatures"
           },
@@ -815,6 +827,7 @@
           "name",
           "api_base_url",
           "logo_url",
+          "event_background_url",
           "primary_color",
           "primary_content_color",
           "secondary_color",
@@ -827,6 +840,18 @@
       },
       "ClubRefOut": {
         "properties": {
+          "event_background_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The club's photo for event screens (the next-event card on Home, an event's page), as the web app shows it: in black & white, cropped to fill, under a dark gradient (`#0b1220` from about 45% at the top to 97% at the bottom) so white text reads. Null: use a plain dark background.",
+            "title": "Event Background Url"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -874,6 +899,7 @@
           "slug",
           "name",
           "logo_url",
+          "event_background_url",
           "primary_color",
           "primary_content_color",
           "secondary_color",

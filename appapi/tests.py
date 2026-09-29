@@ -558,3 +558,22 @@ class ClubColorsTests(AppApiTestCase):
         self.assertEqual((item["primary_color"], item["primary_content_color"]), ("#1e40af", "#ffffff"))
         self.assertEqual((item["secondary_color"], item["secondary_content_color"]), ("#fde047", "#000000"))
         self.assertEqual({key: club[key] for key in item if key.endswith("color")}, {key: item[key] for key in item if key.endswith("color")})
+
+
+@override_settings(**HOSTS)
+class EventBackgroundTests(AppApiTestCase):
+    def test_absent_then_present_on_clubs_and_context(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from .test_member import png_bytes
+
+        token = self.login()
+        self.assertIsNone(self.api("get", "/clubs", token=token).json()["items"][0]["event_background_url"])
+
+        self.club.event_background = SimpleUploadedFile("rink.png", png_bytes(), content_type="image/png")
+        self.club.save()
+
+        from_clubs = self.api("get", "/clubs", token=token).json()["items"][0]["event_background_url"]
+        from_context = self.api("get", "/context", token=token, host=CLUB_HOST).json()["club"]["event_background_url"]
+        self.assertTrue(from_clubs.startswith("http://") and from_clubs.endswith(".png"), from_clubs)
+        self.assertEqual(from_clubs.rsplit("/", 1)[1], from_context.rsplit("/", 1)[1])

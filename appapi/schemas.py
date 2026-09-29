@@ -70,6 +70,10 @@ class ClubOut(Schema):
     name: str
     api_base_url: str = Field(description="Base URL for this club's resource endpoints, e.g. `https://hc-example.rosterchief.app/api/app/v1`.")
     logo_url: str | None
+    event_background_url: str | None = Field(
+        description="The club's photo for event screens (the next-event card on Home, an event's page), as the web app shows it: in black & white, cropped to fill, under a dark"
+        " gradient (`#0b1220` from about 45% at the top to 97% at the bottom) so white text reads. Null: use a plain dark background."
+    )
     primary_color: str = Field(description="Hex, e.g. `#1e40af`: headers and the navigation bar. The club's own colour, or the app default when it set none.")
     primary_content_color: str = Field(description="`#000000` or `#ffffff`: text and icons on `primary_color`.")
     secondary_color: str = Field(description="Hex: buttons, active tabs and highlights. The club's own colour, or the app default.")
@@ -132,6 +136,10 @@ class ClubRefOut(Schema):
     slug: str
     name: str
     logo_url: str | None
+    event_background_url: str | None = Field(
+        description="The club's photo for event screens (the next-event card on Home, an event's page), as the web app shows it: in black & white, cropped to fill, under a dark"
+        " gradient (`#0b1220` from about 45% at the top to 97% at the bottom) so white text reads. Null: use a plain dark background."
+    )
     primary_color: str = Field(description="As in `/clubs`: never null.")
     primary_content_color: str
     secondary_color: str

@@ -61,6 +61,11 @@ def club_colors(club: Club) -> dict:
     }
 
 
+def event_background_url(request, club: Club) -> str | None:
+    """The club's photo behind event screens (Home's next-event card, an event's page)."""
+    return request.build_absolute_uri(club.event_background.url) if club.event_background else None
+
+
 def logo_url(request, club: Club) -> str | None:
     if not club.logo:
         return None

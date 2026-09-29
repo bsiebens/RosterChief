@@ -138,7 +138,7 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 {"items": [{
   "id": "…", "slug": "hc-example", "name": "HC Example",
   "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
-  "logo_url": "https://…",
+  "logo_url": "https://…", "event_background_url": "https://…",
   "primary_color": "#1e40af", "primary_content_color": "#ffffff",
   "secondary_color": "#e4002b", "secondary_content_color": "#ffffff",
   "relationship": ["guardian", "coach"],
@@ -155,6 +155,10 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
   `secondary_color` for buttons, the active tab and highlights, and the matching
   `*_content_color` (black or white) for text on each. The colours are never null: a club
   without its own gets the app defaults. Show `logo_url`, or the club's initials without one.
+* Event screens (the next-event card on Home, an event's page) use `event_background_url` as a
+  full-bleed photo in **black & white** under a dark gradient, with white text on top: in
+  SwiftUI, `.grayscale(1)` on the image plus a `LinearGradient` of `#0b1220` from ~45 %
+  opacity at the top to ~97 % at the bottom. Without one, use the plain dark background.
 * Hide tabs whose feature is off. The server 404s them anyway.
 * Push notifications carry `club_slug`: switch to that club before opening the target.
 
