@@ -76,9 +76,20 @@
                 {% for row in rows %}
                     <tr>
                         <td class="font-mono text-xs">{{ row.submission.submitted_at|date:"d M Y H:i" }}</td>
-                        <td>{{ row.submission.member|default:"—" }}</td>
+                        <td>
+                            {{ row.submission.member|default:"—" }}
+                            {% if row.submission.submitted_on_behalf_by %}
+                                <div class="text-xs text-dim">{% blocktrans with name=row.submission.submitted_on_behalf_by %}Filled in by {{ name }}{% endblocktrans %}</div>
+                            {% endif %}
+                        </td>
                         {% for cell in row.cells %}
-                            <td class="text-sm">{{ cell|default:"—" }}</td>
+                            <td class="text-sm">
+                                {% if cell.file_answer %}
+                                    <a class="link" href="{% url "formbuilder:answer_file" cell.file_answer.pk %}" aria-label="{% blocktrans with name=cell.file_answer.file_name %}Download {{ name }}{% endblocktrans %}">{{ cell.file_answer.file_name }}</a>
+                                {% else %}
+                                    {{ cell.value|default:"—" }}
+                                {% endif %}
+                            </td>
                         {% endfor %}
                     </tr>
                 {% empty %}

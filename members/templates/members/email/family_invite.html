@@ -1,0 +1,29 @@
+{% extends "email/_base.html" %}
+{% load i18n club_email %}
+
+{% comment %}
+    HTML sibling of family_invite.txt -- same content and context (club,
+    invite, accept_url), kept in lockstep by hand.
+{% endcomment %}
+
+{% block title %}{% blocktrans with club=club.name %}You're invited to join a family at {{ club }}{% endblocktrans %}{% endblock title %}
+
+{% block preheader %}{% blocktrans with club=club.name %}{{ club }} would like to add you as a parent or guardian.{% endblocktrans %}{% endblock preheader %}
+
+{% block content %}
+    <p style="margin:0 0 16px 0;">{% trans "Hello," %}</p>
+
+    <p style="margin:0 0 20px 0;">{% blocktrans with club=club.name %}{{ club }} would like to add you as a parent or guardian of a family registered with the club.{% endblocktrans %}</p>
+
+    <p style="margin:0 0 20px 0;">{% trans "Sign in with this email address and accept the invite:" %}</p>
+
+    {% trans "Accept invite" as accept_label %}
+    {% include "email/_button.html" with href=accept_url label=accept_label bg=club.primary_color|default:"#4f46e5" fg=club.primary_color|default:"#4f46e5"|contrast_color %}
+
+    <p style="margin:0; font-size:13px; color:#6b7280;">{% blocktrans with date=invite.expires_at|date:"j F Y" %}The link can be used once and expires on {{ date }}. Nothing is linked to your account until you accept.{% endblocktrans %}</p>
+{% endblock content %}
+
+{% block footer %}
+    <p style="margin:0 0 8px 0;">{% trans "Not expecting this? You can ignore this email." %}</p>
+    <p style="margin:0;">{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}</p>
+{% endblock footer %}

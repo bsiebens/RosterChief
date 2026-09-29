@@ -6,6 +6,7 @@ them) don't each re-derive this.
 """
 
 from django.conf import settings
+from django.contrib.auth.mixins import AccessMixin
 from django.http import Http404
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
@@ -16,8 +17,9 @@ from club.services.access import get_current_season, has_management_access, team
 from controlpanel.messages import notify
 from members.models import FamilyMembership, Member
 from members.services.lookup import get_request_member
-from members.views import ClubScopedPublicMixin
 from notifications.models import Notification
+
+from .access import has_club_tie
 
 
 class DesktopTemplateMixin:
@@ -35,7 +37,56 @@ class DesktopTemplateMixin:
         return desktop_names + names
 
 
-class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
+class MemberAppMixin(AccessMixin):
+    """The gate every signed-in member-app screen (Member mode, Coach mode,
+    Shop, bug reports) builds on: a club subdomain, a signed-in account, and
+    a real tie between that account and this club (mobile.access.has_club_tie).
+
+    A session is valid on every club subdomain, so without the tie check any
+    account from any club could open another club's app. No tie 404s rather
+    than 403s -- the app simply doesn't exist for outsiders. An anonymous
+    visitor is sent to login (``handle_no_permission``), same round trip
+    LoginRequiredMixin gave these views before.
+
+    Subclasses set up their own per-request state in ``prepare_member_app``,
+    which only runs once the gate has passed. mobile/tests.py walks
+    mobile/urls.py and fails for any route that isn't gated by this mixin or
+    explicitly listed as exempt, so a new view can't forget it.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if getattr(request, "club", None) is None:
+            raise Http404("This page belongs to a club.")
+        # Read by club/context_processors.py's branding() -- allauth's login/logout/
+        # password-reset/MFA screens live under /accounts/, not /app/, so a path check
+        # alone can't tell they were reached from the member app rather than the old
+        # public site. Same pattern and same "sticks for the rest of the session"
+        # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
+        # Set before the login redirect on purpose, so the login screen itself gets
+        # the app's skin.
+        request.session["mobile_context"] = True
+        if not request.user.is_authenticated:
+            return self.handle_no_permission()
+        if not has_club_tie(request.user, request.club):
+            raise Http404("No membership in this club.")
+        refusal = self.check_member_app(request)
+        if refusal is not None:
+            return refusal
+        self.prepare_member_app(request)
+        return super().dispatch(request, *args, **kwargs)
+
+    def check_member_app(self, request):
+        """Hook for a section's own gate (e.g. the shop's feature flag); runs
+        only once the visitor has passed the gate above, so an anonymous or
+        outside visitor learns nothing about it. Return a response to stop
+        the request there, raise Http404, or return ``None`` to carry on."""
+        return None
+
+    def prepare_member_app(self, request):
+        """Hook for per-request state; runs after the gate, before the handler."""
+
+
+class PersonScopeMixin(DesktopTemplateMixin, MemberAppMixin):
     """Resolves the signed-in account's own Member record plus every child
     they're a parent/guardian of *in this club*.
 
@@ -54,18 +105,12 @@ class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
     always the right list to filter by regardless of which mode is active.
     """
 
-    def dispatch(self, request, *args, **kwargs):
-        # Read by club/context_processors.py's branding() -- allauth's login/logout/
-        # password-reset/MFA screens live under /accounts/, not /app/, so a path check
-        # alone can't tell they were reached from the member app rather than the old
-        # public site. Same pattern and same "sticks for the rest of the session"
-        # reasoning as club/mixins.py's ClubStaffRequiredMixin sets management_context.
-        request.session["mobile_context"] = True
+    def prepare_member_app(self, request):
+        super().prepare_member_app(request)
         self.me = get_request_member(request)
         self.managed_people = self._managed_people(request)
         self.scope_everyone, self.scope_person = self._resolve_scope(request)
         self.people_in_scope = self.managed_people if self.scope_everyone else ([self.scope_person] if self.scope_person else [])
-        return super().dispatch(request, *args, **kwargs)
 
     def _managed_people(self, request):
         if self.me is None:
@@ -131,7 +176,7 @@ class PersonScopeMixin(DesktopTemplateMixin, ClubScopedPublicMixin):
             vapid_public_key=settings.VAPID_PUBLIC_KEY,
             # Gates the Shop tab itself (base.html) -- same "just absent, not
             # disabled" treatment as the Coach/Member switcher above.
-            shop_open=self.request.club.shop_open,
+            shop_open=shop_enabled(self.request),
             # Mirrors management.context_processors.feature_sections' own
             # officials_enabled -- mobile has no shared context-processor for
             # waffle flags, so every mobile screen that needs this reads it
@@ -156,12 +201,33 @@ class ShopScopeMixin(PersonScopeMixin):
     than duplicated onto each shop view.
 
     No club on the request at all is a different, more fundamental case (the
-    base domain has no tenant to redirect within) and still 404s."""
+    base domain has no tenant to redirect within) and still 404s.
 
-    def dispatch(self, request, *args, **kwargs):
-        if getattr(request, "club", None) is None:
-            raise Http404("No club on this request.")
-        if not request.club.shop_open:
+    Beyond the club's own open/closed switch, the shop is a licensed feature:
+    without the "shop" waffle flag active for this club the screens 404, the
+    same as every other disabled feature. Both checks run only after the
+    member-app gate (``check_member_app``), so an anonymous visitor is sent to
+    login first and learns nothing about the club's shop."""
+
+    def check_member_app(self, request):
+        refusal = super().check_member_app(request)
+        if refusal is not None:
+            return refusal
+        if not shop_enabled(request):
+            if not flag_is_active(request, SHOP_FLAG):
+                raise Http404("The “shop” feature isn't enabled for this club.")
             notify(request, f"w|{_('Shop closed')}|{_("The shop isn't taking orders right now.")}")
             return redirect("mobile:home")
-        return super().dispatch(request, *args, **kwargs)
+        return None
+
+
+#: The waffle Flag licensing the shop for a club -- the same name
+#: club.mixins.ShopManagerRequiredMixin gates the management side on.
+SHOP_FLAG = "shop"
+
+
+def shop_enabled(request) -> bool:
+    """Whether the member-facing shop is reachable on this request's club: the
+    feature is licensed for it (the "shop" flag) *and* the club has it open."""
+    club = getattr(request, "club", None)
+    return club is not None and club.shop_open and flag_is_active(request, SHOP_FLAG)

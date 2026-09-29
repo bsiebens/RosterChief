@@ -9,15 +9,17 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import Club, ClubMembership, ClubRole, FeePayment, OnboardingRequirement, Season, Sponsor
 from club.services.access import groups_manageable_by, is_club_admin, teams_managed_by
+from club.validators import LOGO_ACCEPT
 from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
+from events.services.dfel_import import DFELImportError, extract_ids
 from events.services.officials import officials_enabled_for
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
 from members.models import Family, FamilyMembership, Group, Member
-from members.services.family import families_of_club, find_member_by_email
+from members.services.family import families_of_club
 from news.models import News
 from registration.models import RegistrationDetails
 from registration.services.pricing import available_registration_products
@@ -33,11 +35,24 @@ User = get_user_model()
 
 
 class MemberForm(forms.ModelForm):
+    """``lock_person_fields`` -- set by MemberUpdateView when members.services.
+    deletion.member_has_ties_outside_club is true -- disables every field here:
+    they're the person's own details on a record shared with their account or
+    another club. A disabled field ignores whatever is posted for it and keeps
+    the stored value."""
+
     class Meta:
         model = Member
         fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
         labels = {"photo_public_consent": _("Show this photo on the club's public website")}
+
+    def __init__(self, *args, lock_person_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.person_fields_locked = lock_person_fields
+        if lock_person_fields:
+            for field in self.fields.values():
+                field.disabled = True
 
 
 class TeamForm(forms.ModelForm):
@@ -552,7 +567,7 @@ class PositionForm(forms.ModelForm):
 class NumberPoolForm(forms.ModelForm):
     class Meta:
         model = NumberPool
-        fields = ["name", "min_number", "max_number"]
+        fields = ["name", "min_number", "max_number", "min_age_gap_years"]
 
 
 class LocationForm(forms.ModelForm):
@@ -579,6 +594,7 @@ class SponsorForm(forms.ModelForm):
         model = Sponsor
         fields = ["name", "logo", "url", "start_date", "end_date"]
         widgets = {
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "start_date": forms.DateInput(attrs={"type": "date"}),
             "end_date": forms.DateInput(attrs={"type": "date"}),
         }
@@ -768,7 +784,13 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
 class RBIHFImportForm(forms.Form):
     """Step 1 of importing a team's fixtures from RBIHF's own website -- see
     events.services.rbihf_import. Only the URL and which of the club's own
-    teams it applies to; everything else is scraped."""
+    teams it applies to; everything else is scraped.
+
+    RBIHF gives a team a *separate* page (and so a separate URL/team id) per
+    competition it plays in -- a team in both Division 1 and the Cup has two
+    pages, imported separately. competition_label is how staff tell those
+    two imports apart on the schedule afterwards; it's optional, since a
+    team with only one RBIHF competition has nothing to disambiguate."""
 
     url = forms.CharField(
         label=_("RBIHF team page URL"),
@@ -776,6 +798,11 @@ class RBIHFImportForm(forms.Form):
         widget=forms.URLInput(attrs={"placeholder": "https://www.rbihf.be/league/team/4460"}),
     )
     team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+    competition_label = forms.CharField(
+        required=False,
+        label=_("Competition label"),
+        help_text=_("Optional. Only needed if this team plays in more than one RBIHF competition (e.g. “Division 1” vs “Cup”) -- keeps re-importing one from ever deleting the other's games."),
+    )
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -786,6 +813,42 @@ class RBIHFImportForm(forms.Form):
         try:
             extract_team_id(url)
         except RBIHFImportError as error:
+            raise forms.ValidationError(str(error)) from error
+        return url
+
+
+class DFELImportForm(forms.Form):
+    """Step 1 of importing a team's fixtures from the DFEL (hosted on the
+    EHV-NRW league site) -- see events.services.dfel_import. Mirrors
+    RBIHFImportForm: only the URL and which of the club's own teams it
+    applies to; everything else comes from the league's schedule feed.
+
+    The team URL carries both a team id and a division id, and EHV-NRW gives
+    a team a new one each season -- so a new season means pasting a new URL.
+    competition_label tells two imports for the same team apart (e.g. league
+    vs. playoffs), same as for RBIHF."""
+
+    url = forms.CharField(
+        label=_("DFEL team page URL"),
+        help_text=_("E.g. https://ehv-nrw.de/leagues/team/70779/21691/ -- the team's page on ehv-nrw.de (its “Spiele” tab lists the games). Each season has its own team URL."),
+        widget=forms.URLInput(attrs={"placeholder": "https://ehv-nrw.de/leagues/team/70779/21691/"}),
+    )
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+    competition_label = forms.CharField(
+        required=False,
+        label=_("Competition label"),
+        help_text=_("Optional. Only needed if this team plays in more than one DFEL competition (e.g. “League” vs “Playoffs”) -- keeps re-importing one from ever deleting the other's games."),
+    )
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+
+    def clean_url(self):
+        url = self.cleaned_data["url"].strip()
+        try:
+            extract_ids(url)
+        except DFELImportError as error:
             raise forms.ValidationError(str(error)) from error
         return url
 
@@ -914,7 +977,7 @@ class FamilyCreateForm(forms.Form):
 
     parent_first_name = forms.CharField(label=_("Parent first name"))
     parent_last_name = forms.CharField(label=_("Parent last name"))
-    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
+    parent_email = forms.EmailField(label=_("Parent email"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
 
     parent_is_member = forms.BooleanField(
         label=_("Parent is also a member"),
@@ -938,28 +1001,18 @@ class AddChildForm(forms.Form):
 
 class AddParentForm(forms.Form):
     """A family that needs one more parent/guardian registered -- see
-    members.services.family.add_parent_to_family."""
+    members.services.invites.add_or_invite_parent. The name is always
+    required, whether or not the email already has an account, so the form
+    behaves the same either way (an existing account's own name is kept)."""
 
-    email = forms.EmailField(label=_("Email address"), help_text=_("If this email has no account yet, one is created and they set a password via the reset link."))
-    first_name = forms.CharField(label=_("First name"), required=False)
-    last_name = forms.CharField(label=_("Last name"), required=False)
+    email = forms.EmailField(label=_("Email address"), help_text=_("A new person gets an account and sets a password via the reset link. If this email already has an account, they are emailed an invite to join the family instead."))
+    first_name = forms.CharField(label=_("First name"))
+    last_name = forms.CharField(label=_("Last name"))
     parent_is_member = forms.BooleanField(
         label=_("Also a member"),
         required=False,
         help_text=_("Tick only if this parent belongs to the club in their own right (they play, or hold a membership). Left unticked they are a guardian: they hold the login and can be contacted, but owe no fee and are not counted as a member."),
     )
-
-    def clean(self):
-        cleaned = super().clean()
-        email = cleaned.get("email")
-
-        # Only a brand-new person needs a name; an existing member already has one.
-        if email and find_member_by_email(email) is None:
-            for field in ("first_name", "last_name"):
-                if not cleaned.get(field):
-                    self.add_error(field, _("Required: this email has no account yet."))
-
-        return cleaned
 
 
 class AttachToFamilyForm(forms.Form):
@@ -978,11 +1031,22 @@ class AttachToFamilyForm(forms.Form):
         self.fields["family"].queryset = queryset
 
 
+#: Upper bound on an uploaded member-import workbook; the template for a whole
+#: club's membership is a small fraction of this.
+MEMBER_IMPORT_MAX_FILE_SIZE = 5 * 1024 * 1024
+
+
 class MemberImportUploadForm(forms.Form):
     """The mass-upload entry point -- one .xlsx file, built from the downloadable
     template. See management.bulk_import.read_member_import_workbook."""
 
     file = forms.FileField(label=_("Excel file"), help_text=_("Use the downloaded template — one row per member."))
+
+    def clean_file(self):
+        upload = self.cleaned_data["file"]
+        if upload.size > MEMBER_IMPORT_MAX_FILE_SIZE:
+            raise forms.ValidationError(_("This file is too large (maximum %(size)d MB).") % {"size": MEMBER_IMPORT_MAX_FILE_SIZE // (1024 * 1024)})
+        return upload
 
 
 class GrantLoginForm(forms.Form):
@@ -1005,9 +1069,21 @@ class ClubMembershipForm(forms.ModelForm):
     money field here -- amount_paid is exclusively written by club.services.fees,
     never hand-edited."""
 
+    #: Approval and money: a club ADMIN's call only. Anyone else managing members
+    #: (MEMBER_ADMIN) sees them read-only, and a disabled field ignores whatever
+    #: value is posted for it, keeping the instance's own.
+    ADMIN_ONLY_FIELDS = ("status", "fee_status", "fee_amount")
+
     class Meta:
         model = ClubMembership
         fields = ["kind", "license", "status", "fee_status", "fee_amount"]
+
+    def __init__(self, *args, can_edit_admin_fields=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not can_edit_admin_fields:
+            for name in self.ADMIN_ONLY_FIELDS:
+                self.fields[name].disabled = True
+                self.fields[name].help_text = _("Only a club admin can change this.")
 
 
 class NewsForm(forms.ModelForm):
@@ -1232,7 +1308,7 @@ class ClubSettingsForm(forms.ModelForm):
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
-            "logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"}),
+            "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }
 
@@ -1500,7 +1576,11 @@ ProductRegistrantDiscountTierFormSet = forms.formset_factory(ProductRegistrantDi
 class DiscountForm(forms.ModelForm):
     class Meta:
         model = Discount
-        fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active"]
+        fields = ["name", "description", "code", "discount_type", "discount_amount", "is_active", "valid_from", "valid_until", "max_uses", "once_per_member"]
+        widgets = {
+            "valid_from": forms.DateInput(attrs={"type": "date"}),
+            "valid_until": forms.DateInput(attrs={"type": "date"}),
+        }
 
 
 #: Voucher deliberately excluded from both forms below -- settling an order

@@ -1,0 +1,11 @@
+{% load i18n %}{% trans "Hello," %}
+
+{% blocktrans with club=club.name %}{{ club }} would like to add you as a parent or guardian of a family registered with the club.{% endblocktrans %}
+
+{% trans "Sign in with this email address and accept the invite here:" %}
+{{ accept_url }}
+{% blocktrans with date=invite.expires_at|date:"j F Y" %}The link can be used once and expires on {{ date }}. Nothing is linked to your account until you accept.{% endblocktrans %}
+
+{% trans "Not expecting this? You can ignore this email." %}
+
+{% blocktrans with club=club.name %}— {{ club }}{% endblocktrans %}

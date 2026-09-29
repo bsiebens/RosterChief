@@ -11,7 +11,7 @@
                 <tr>
                     <th>{% trans "Referee" %}</th>
                     <th>{% trans "Level" %}</th>
-                    <th>{% trans "Can referee for" %}</th>
+                    <th class="w-full">{% trans "Can referee for" %}</th>
                     <th>{% trans "Valid until" %}</th>
                     <th>{% trans "Status" %}</th>
                 </tr>
@@ -19,8 +19,8 @@
             <tbody>
                 {% for referee in referees %}
                     <tr>
-                        <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a></td>
-                        <td class="text-slate">{{ referee.referee_profile.level|default:"—" }}</td>
+                        <td class="whitespace-nowrap"><a class="link link-hover font-semibold" href="{% url 'management:member_detail' referee.pk %}">{{ referee }}</a></td>
+                        <td class="whitespace-nowrap text-slate">{{ referee.referee_profile.level|default:"—" }}</td>
                         <td>
                             {% if referee.referee_profile.is_eligible %}
                                 {% for team in referee.referee_profile.cached_eligible_teams %}
@@ -33,8 +33,8 @@
                             {% endif %}
                         </td>
                         {# text-xs, not text-sm: IBM Plex Mono reads noticeably larger than Barlow at the same declared size. #}
-                        <td class="font-mono text-xs text-muted">{{ referee.referee_profile.valid_until|default:"—" }}</td>
-                        <td>
+                        <td class="whitespace-nowrap font-mono text-xs text-muted">{{ referee.referee_profile.valid_until|default:"—" }}</td>
+                        <td class="whitespace-nowrap">
                             {% if referee.referee_profile.is_eligible %}
                                 <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
                             {% elif not referee.referee_profile.level %}

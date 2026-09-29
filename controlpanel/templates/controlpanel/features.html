@@ -127,7 +127,7 @@
                         <button class="btn btn-success gap-2" type="submit">{% lucide "mail-check" size=16 %} Resume automated email</button>
                     </form>
                 {% else %}
-                    <p class="text-sm text-muted">Silences every automated send — news and event notifications, billing reminders, dues invoices and reminders, claim-approval mail — except password reset, which always keeps working.</p>
+                    <p class="text-sm text-muted">Silences every automated send — news and event notifications, billing reminders, dues invoices and reminders, claim-approval mail — except password reset and email confirmation, which always keep working.</p>
 
                     <form class="mt-auto" method="post" action="{% url 'controlpanel:email_suppression' %}">
                         {% csrf_token %}

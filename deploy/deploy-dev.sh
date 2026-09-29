@@ -93,7 +93,10 @@ echo "     at $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 step "Pulling image for ${BRANCH}"
 # IMAGE_TAG, not a server-side .env edit -- this deploy is *for* $BRANCH, so pull exactly that
 # branch's latest build regardless of what a previous manual `docker compose pull` left set.
-IMAGE_TAG="$BRANCH" dc pull web
+# Exported, not prefixed to one command: pull, migrate and the restart must all use the same
+# image. A prefix on `pull` alone left the later steps on .env's IMAGE_TAG (default :main).
+export IMAGE_TAG="$BRANCH"
+dc pull web
 
 # Bring the data services up first and wait for Postgres, so the migration below has something
 # to connect to on a cold start.
@@ -109,6 +112,9 @@ dc run --rm -T web python manage.py migrate --noinput </dev/null
 # Recreate only web, with the freshly built image. db and redis keep running untouched.
 step "Restarting web"
 dc up -d --no-deps web
+
+# So a by-hand `docker compose run ... web` here uses this branch's image too.
+./deploy/record-image-tag.sh "$IMAGE_TAG"
 
 step "Waiting for /healthz on :${WEB_PORT}"
 for attempt in $(seq 1 20); do

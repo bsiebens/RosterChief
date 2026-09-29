@@ -5,6 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from club.models import Club, ClubMembership, Season
@@ -581,7 +582,7 @@ class RosterApiTests(TeamsTestCase):
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn("photo.jpg", roster.players[0].players[0].photo_url)
+        self.assertIn(reverse("members:photo", args=[member.pk]), roster.players[0].players[0].photo_url)
 
     def test_a_staff_members_photo_follows_the_same_consent_gate(self):
         coach = Member.objects.create(first_name="Cam", last_name="Coach", photo=SimpleUploadedFile("coach.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
@@ -589,7 +590,7 @@ class RosterApiTests(TeamsTestCase):
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn("coach.jpg", roster.staff[0].photo_url)
+        self.assertIn(reverse("members:photo", args=[coach.pk]), roster.staff[0].photo_url)
 
 
 class NumberPoolModelTests(TeamsTestCase):
@@ -768,6 +769,37 @@ class NumbersServiceTests(TeamsTestCase):
 
         self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=close_in_age))
 
+    def test_a_pool_with_a_smaller_age_gap_allows_a_closer_share(self):
+        self.pool.min_age_gap_years = 2
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        close_in_age = Member.objects.create(first_name="Close", last_name="Peer", date_of_birth=datetime.date(2012, 1, 1))
+
+        self.assertTrue(is_number_available(self.pool, self.season, 7, for_member=close_in_age))
+
+    def test_a_pool_with_a_larger_age_gap_blocks_a_five_year_share(self):
+        self.pool.min_age_gap_years = 8
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=younger))
+
+    def test_a_zero_age_gap_never_allows_sharing(self):
+        self.pool.min_age_gap_years = 0
+        self.pool.save()
+        self.member.date_of_birth = datetime.date(1980, 1, 1)
+        self.member.save()
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
+        much_younger = Member.objects.create(first_name="Kid", last_name="Rookie", date_of_birth=datetime.date(2016, 6, 1))
+
+        self.assertFalse(is_number_available(self.pool, self.season, 7, for_member=much_younger))
+        self.assertTrue(has_unresolved_conflict([self.member, much_younger], min_age_gap_years=0))
+
     def test_a_missing_date_of_birth_is_conservatively_unavailable(self):
         # self.member has no date_of_birth set by default (TeamsTestCase).
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=7)
@@ -803,6 +835,15 @@ class NumbersServiceTests(TeamsTestCase):
 
     def test_has_unresolved_conflict_is_false_for_a_single_holder(self):
         self.assertFalse(has_unresolved_conflict([self.member]))
+
+    def test_has_unresolved_conflict_is_false_for_the_same_member_listed_twice(self):
+        # One player on two teams sharing a pool -- not a clash with themselves.
+        self.assertFalse(has_unresolved_conflict([self.member, self.member]))
+
+    def test_has_unresolved_conflict_still_flags_a_real_clash_alongside_a_repeated_member(self):
+        other = Member.objects.create(first_name="No", last_name="Birthday")
+
+        self.assertTrue(has_unresolved_conflict([self.member, self.member, other]))
 
     def test_has_unresolved_conflict_is_false_for_an_age_gap_exempt_pair(self):
         self.member.date_of_birth = datetime.date(2010, 1, 1)

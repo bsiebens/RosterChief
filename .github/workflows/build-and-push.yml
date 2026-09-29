@@ -32,17 +32,33 @@ env:
   # registry image names must be all-lowercase, and the repo's own casing isn't.
   IMAGE_NAME: bsiebens/rosterchief
 
+# Least privilege: every job gets a read-only GITHUB_TOKEN unless it asks for more below.
+# Only `build` (packages: write, to push to ghcr.io) and `release` (contents: write, to push
+# the vX.Y.Z tag and create the GitHub Release) widen it.
+#
+# Third-party actions are pinned to full commit SHAs (the `# vX.Y.Z` comment is the tag that
+# SHA was resolved from); .github/dependabot.yml keeps them current.
+permissions:
+  contents: read
+
 jobs:
-  test:
-    # Every push and every PR -- this is the required status check on both `main` and
-    # `development` (see DEPLOYMENT.md/deploy/configure-branch-protection.sh).
+  test-shard:
+    # The suite, split over four jobs by test class (manage.py test --shard=I/N, see
+    # rosterchief/test_runner.py). A hosted runner only has a couple of cores, so one job
+    # took ~5 minutes; four in parallel each pay the ~30s setup/migrate once and run a
+    # quarter of the tests. Lint runs once, in the first shard.
+    name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Installs `uv` itself and provisions the exact Python this project requires
       # (pyproject.toml's requires-python) -- no separate actions/setup-python step needed.
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
@@ -50,13 +66,59 @@ jobs:
       # guarantee a production build gets from the committed lockfile.
       - run: uv sync --frozen
 
-      - run: uv run ruff check .
+      - if: matrix.shard == 1
+        run: uv run ruff check .
 
-      - run: uv run python manage.py test
+      - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
           # value, never used for anything real, exists only so Django will start.
           DJANGO_SECRET_KEY: ci-test-not-a-secret
+
+  test:
+    # Every push and every PR -- this is the required status check on both `main` and
+    # `development` (see DEPLOYMENT.md/deploy/configure-branch-protection.sh), and what
+    # `build` waits on. It only gathers the shards into one result, so branch protection
+    # and `needs: test` don't have to know how many shards there are. `always()` so a
+    # failed shard turns this red rather than skipped -- a skipped required check counts
+    # as passing.
+    needs: test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test-shard.result }}" = success
+
+  audit:
+    # Known-vulnerability scan of the production dependencies, on every push and PR. Separate
+    # from `test` and not a `needs:` of `build` on purpose: an advisory published overnight
+    # shouldn't block an unrelated hotfix from shipping. It is still a red check -- accept a
+    # specific advisory (with a reason) in .github/pip-audit-ignore.txt rather than ignoring it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      # The exact versions in uv.lock, production group only (dev tooling never ships in the
+      # image). Git-sourced packages (django-lucide) are not on PyPI, so no advisory database
+      # covers them -- they're filtered out rather than making pip-audit refuse the whole file.
+      # --no-deps/--disable-pip: the list is already fully resolved; audit exactly it.
+      - name: Audit Python dependencies (pip-audit)
+        run: |
+          uv export --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt \
+            | grep -v ' @ git+' > "$RUNNER_TEMP/requirements.txt"
+          ignore_args=()
+          while read -r id _; do
+            case "$id" in ''|'#'*) continue ;; esac
+            ignore_args+=(--ignore-vuln "$id")
+          done < .github/pip-audit-ignore.txt
+          uvx pip-audit --disable-pip --no-deps --desc -r "$RUNNER_TEMP/requirements.txt" "${ignore_args[@]}"
+
+      # Runtime JS only (htmx, Alpine, Chart.js -- vendored into static/js/). The dev group is
+      # the Tailwind build toolchain, which never reaches a browser. Reads package-lock.json
+      # directly; no install needed.
+      - name: Audit npm dependencies (npm audit)
+        run: npm audit --omit=dev --audit-level=high
 
   build:
     needs: test
@@ -68,16 +130,16 @@ jobs:
     if: github.event_name != 'pull_request' && (github.event_name != 'push' || contains(fromJSON('["refs/heads/main", "refs/heads/development"]'), github.ref))
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # only main's push actually tags/releases -- see the two steps below
-      packages: write
+      contents: read
+      packages: write  # push to ghcr.io
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # `git tag`/`git push` below need real history, not the default shallow clone
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -100,7 +162,7 @@ jobs:
       # deploy-prod.sh should actually be pointed at for a real release, not a floating
       # branch tag (`enable=` skips this line entirely off main, where steps.version never ran).
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -112,7 +174,7 @@ jobs:
       # daemon", not "publish it"), and smoke-tested below before anything is actually
       # published. The real build-and-push step further down reuses this same GHA cache, so
       # it costs a re-tag, not a rebuild.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: false
@@ -120,6 +182,29 @@ jobs:
           tags: rosterchief:smoke-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # `check --deploy` inside the image just built, with a production-shaped environment:
+      # catches a security setting that regressed (a check that started warning, a default
+      # that flipped) before the image is published. Throwaway, per-run random keys: long and
+      # random enough to pass rosterchief.E001's placeholder check, never used for anything.
+      # --fail-level WARNING is usable because the one warning production raises on purpose
+      # (security.W021, HSTS preload) is silenced in settings.py, with the reason there.
+      - name: Deployment checks in the built image
+        run: |
+          docker run --rm \
+            -e DJANGO_DEBUG=False \
+            -e DJANGO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')" \
+            -e MFA_ENCRYPTION_KEY="$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" \
+            -e DJANGO_ALLOWED_HOSTS=.rosterchief.example \
+            -e DJANGO_CSRF_TRUSTED_ORIGINS=https://rosterchief.example \
+            -e DJANGO_SECURE_SSL_REDIRECT=True \
+            -e DJANGO_SESSION_COOKIE_SECURE=True \
+            -e DJANGO_CSRF_COOKIE_SECURE=True \
+            -e DJANGO_SECURE_HSTS_SECONDS=31536000 \
+            -e DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=True \
+            -e DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
+            rosterchief:smoke-test \
+            python manage.py check --deploy --fail-level WARNING
 
       # Confirms the image actually boots and serves traffic before it's published -- catches
       # e.g. a broken entrypoint or a missing static file that no unit test would ever see.
@@ -130,9 +215,15 @@ jobs:
       # just for this one check.
       - name: Smoke test the built image
         run: |
+          # Same lockdown as compose.yaml's web service (read-only root, tmpfs /tmp, no
+          # capabilities), so this proves the hardened container starts. No database service
+          # here: SQLite in /tmp -- the app code in /app is read-only to the app user.
           docker run -d --name smoke -p 8000:8000 \
+            --read-only --tmpfs /tmp:size=256m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
             -e DJANGO_SECRET_KEY=ci-smoke-not-a-secret \
             -e DJANGO_ALLOWED_HOSTS='*' \
+            -e DJANGO_DATABASE_URL=sqlite:////tmp/smoke.sqlite3 \
             rosterchief:smoke-test
           for attempt in $(seq 1 20); do
             if curl -fsS http://localhost:8000/healthz; then
@@ -146,7 +237,7 @@ jobs:
           exit 1
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
@@ -155,14 +246,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # main only, and only once: tags this commit vX.Y.Z and cuts a GitHub Release from it.
-      # Idempotent -- re-running the workflow (workflow_dispatch, a retry) against a version
-      # already tagged skips both rather than failing the job over it.
+  release:
+    # main only, and only once: tags the commit vX.Y.Z and cuts a GitHub Release from it,
+    # after `build` has published the image. Its own job so that contents: write (needed to
+    # push a tag and create a release) is granted to these few lines only, not to the job that
+    # runs the Docker build. Idempotent -- re-running the workflow (workflow_dispatch, a retry)
+    # against a version already tagged skips both rather than failing the job over it.
+    needs: build
+    if: needs.build.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # `git rev-parse`/`git tag` below need real history and tags, not the default shallow clone
+
       - name: Tag the release and publish GitHub Release notes
-        if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists -- pyproject.toml's version wasn't bumped for this merge, or this run is a retry. Skipping."
@@ -189,8 +292,13 @@ jobs:
     # `if` on its own env var, inside `run:`, where `secrets`-derived values are just strings.
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/development' }}
     runs-on: ubuntu-latest
+    # A GitHub Environment, so protection rules (required reviewers, a wait timer, branch
+    # restrictions) can be added under Settings -> Environments -> dev without touching this
+    # file. The secrets below are read as repository secrets today; environment-scoped secrets
+    # of the same name would take precedence if they're ever moved there.
+    environment: dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # deploy-dev.sh's own preflight checks `origin/<branch>` locally -- a shallow,
           # single-commit checkout still has that ref, so the default depth is fine.
@@ -201,14 +309,30 @@ jobs:
           SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
           SSH_USER: ${{ secrets.DEV_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEV_REMOTE_DIR }}
+          # Passed through the environment, never interpolated into the script text, so the
+          # key's content can't be parsed as shell.
+          DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
+          # The dev host's public host key(s), in known_hosts format, captured once from a
+          # trusted machine and verified against the server's own fingerprint (DEPLOYMENT.md).
+          # Pinned rather than fetched with ssh-keyscan at deploy time: a scan from the runner
+          # trusts whatever answers on first use, which is exactly what host keys guard against.
+          DEV_SSH_KNOWN_HOSTS: ${{ secrets.DEV_SSH_KNOWN_HOSTS }}
           BRANCH: development
         run: |
           if [ -z "$SSH_HOST" ]; then
             echo "DEV_SSH_HOST not configured (Settings -> Secrets and variables -> Actions) -- skipping dev deploy."
             exit 0
           fi
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/dev_deploy_key
-          chmod 600 ~/.ssh/dev_deploy_key
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          SSH_KEY_FILE=~/.ssh/dev_deploy_key ./deploy/deploy-dev.sh
+          if [ -z "$DEV_SSH_KNOWN_HOSTS" ]; then
+            echo "::error::DEV_SSH_KNOWN_HOSTS is not set. Add the dev host's known_hosts line(s) as a secret (see DEPLOYMENT.md) -- the deploy refuses to trust an unverified host key."
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/id_dev_deploy
+          chmod 600 ~/.ssh/id_dev_deploy
+          printf '%s\n' "$DEV_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # deploy-dev.sh builds its own ssh command line; the host-key policy comes from here.
+          printf 'Host *\n  StrictHostKeyChecking yes\n  UserKnownHostsFile ~/.ssh/known_hosts\n' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          SSH_KEY_FILE=~/.ssh/id_dev_deploy ./deploy/deploy-dev.sh

@@ -3,6 +3,7 @@
 from django import forms
 
 from formbuilder.models import Field
+from rosterchief.uploads import DOCUMENT_ACCEPT, document_upload_validators
 
 from .options import field_choices
 
@@ -15,7 +16,7 @@ FIELD_BUILDERS = {
     Field.FieldType.CHOICE: lambda field, kw: forms.ChoiceField(choices=field_choices(field), **kw),
     Field.FieldType.MULTICHOICE: lambda field, kw: forms.MultipleChoiceField(choices=field_choices(field), **kw),
     Field.FieldType.CHECKBOX: lambda field, kw: forms.BooleanField(**kw),
-    Field.FieldType.FILE: lambda field, kw: forms.FileField(**kw),
+    Field.FieldType.FILE: lambda field, kw: forms.FileField(validators=document_upload_validators(), widget=forms.ClearableFileInput(attrs={"accept": DOCUMENT_ACCEPT}), **kw),
 }
 
 

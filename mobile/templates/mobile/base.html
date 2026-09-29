@@ -39,7 +39,8 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
         <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        {# Solid, not black-translucent: iOS 26 blurs whatever is drawn under a translucent status bar, which smeared the header crest/title. #}
+        <meta name="apple-mobile-web-app-status-bar-style" content="black">
         <meta name="mobile-web-app-capable" content="yes">
 
         <title>{% block title %}{{ screen_title }} &middot; {{ club.name }}{% endblock title %}</title>

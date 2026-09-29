@@ -1,3 +1,4 @@
+import csv
 import datetime
 import json
 import os
@@ -10,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import openpyxl
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core import mail
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -27,8 +29,9 @@ from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoic
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
-from events.models import Attendance, Competition, Event, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
 from events.services.calendar import week_bounds
+from events.services.dfel_import import DFELImportError
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
@@ -43,7 +46,7 @@ from management.pdf import PDFExportError, _tint_with_white, referee_form_colors
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
 from management.shop_export import build_production_export, stash_production_export
-from members.models import Family, FamilyMembership, Group, GroupMembership, Member
+from members.models import Family, FamilyInvite, FamilyMembership, Group, GroupMembership, Member
 from news.models import News, NewsPhoto
 from news.services import _notify_editors_of_pending_review_by_id, _send_and_mark_notified
 from notifications.models import Notification
@@ -51,7 +54,7 @@ from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import EntryInput, submit_registration
 from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
-from rosterchief.test_support import enrol_mfa
+from rosterchief.test_support import enrol_mfa, start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
@@ -61,6 +64,17 @@ from teams.services import eligible_roster_members
 User = get_user_model()
 
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def setUpModule():
+    # ShopManager/EvaluationManager grants and management-position staff
+    # assignments require MFA (authentication.middleware); the fixtures here
+    # model staff who have already enrolled.
+    start_auto_mfa_enrolment()
+
+
+def tearDownModule():
+    stop_auto_mfa_enrolment()
 
 
 def make_import_workbook(rows):
@@ -83,6 +97,14 @@ def make_season(club):
     # Season.covering(club, timezone.localdate()), not just any season row.
     today = timezone.localdate()
     return Season.objects.create(club=club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+
+
+def _midweek_noon():
+    """Wednesday 12:00 (local time) of the current week -- for tests whose
+    "this week" / "next week" logic must not depend on when the suite runs."""
+    today = timezone.localdate()
+    wednesday = today - datetime.timedelta(days=today.weekday()) + datetime.timedelta(days=2)
+    return timezone.make_aware(datetime.datetime.combine(wednesday, datetime.time(12, 0)))
 
 
 @override_settings(
@@ -716,12 +738,12 @@ class TeamRosterStaffTests(ManagementTestBase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(TeamMembership.objects.filter(team=self.team, season=self.season).exists())
 
-    def test_a_different_teams_coach_can_still_view_the_team(self):
+    def test_a_different_teams_coach_cannot_open_the_team(self):
         self.client.force_login(self.other_team_coach)
 
         response = self.club_get("team_detail", self.team.pk)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
 
     def test_admin_can_add_a_player_to_any_team(self):
         self.client.force_login(self.admin_user)
@@ -1641,7 +1663,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         self.assertNotContains(response, "Rival Pool")
 
     def test_creating_a_number_pool(self):
-        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99", "min_age_gap_years": "5"})
 
         pool = NumberPool.objects.get(club=self.club, name="Youth")
         self.assertRedirects(response, reverse("management:number_pool_list"))
@@ -1649,7 +1671,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         self.assertEqual(pool.max_number, 99)
 
     def test_min_number_must_not_exceed_max_number(self):
-        response = self.club_post("number_pool_create", {"name": "Bad", "min_number": "99", "max_number": "1"})
+        response = self.club_post("number_pool_create", {"name": "Bad", "min_number": "99", "max_number": "1", "min_age_gap_years": "5"})
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(NumberPool.objects.filter(club=self.club, name="Bad").exists())
@@ -1658,11 +1680,17 @@ class NumberPoolManagementTests(ManagementTestBase):
     def test_updating_a_number_pool(self):
         pool = NumberPool.objects.create(club=self.club, name="Old name", min_number=1, max_number=50)
 
-        self.club_post("number_pool_update", {"name": "New name", "min_number": "1", "max_number": "60"}, pool.pk)
+        self.club_post("number_pool_update", {"name": "New name", "min_number": "1", "max_number": "60", "min_age_gap_years": "3"}, pool.pk)
 
         pool.refresh_from_db()
         self.assertEqual(pool.name, "New name")
         self.assertEqual(pool.max_number, 60)
+        self.assertEqual(pool.min_age_gap_years, 3)
+
+    def test_a_new_pool_defaults_to_a_five_year_age_gap(self):
+        pool = NumberPool.objects.create(club=self.club, name="Default gap", min_number=1, max_number=50)
+
+        self.assertEqual(pool.min_age_gap_years, 5)
 
     def test_the_list_page_shows_assigned_teams(self):
         pool = NumberPool.objects.create(club=self.club, name="Youth", min_number=1, max_number=99)
@@ -1711,7 +1739,7 @@ class NumberPoolManagementTests(ManagementTestBase):
         StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
         self.client.force_login(coach_user)
 
-        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99"})
+        response = self.club_post("number_pool_create", {"name": "Youth", "min_number": "1", "max_number": "99", "min_age_gap_years": "5"})
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(NumberPool.objects.filter(club=self.club, name="Youth").exists())
@@ -2040,6 +2068,35 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[3]["state"], "taken")
 
+    def test_the_pools_own_age_gap_decides_whether_a_share_is_a_conflict(self):
+        # A 3-year gap is fine once the pool allows it -- the default 5 would flag it.
+        self.pool.min_age_gap_years = 3
+        self.pool.save()
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        self.member.date_of_birth = datetime.date(2010, 1, 1)
+        self.member.save()
+        younger_member = Member.objects.create(first_name="Jack", last_name="Roe", date_of_birth=datetime.date(2013, 6, 1))
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=younger_member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+
+    def test_one_member_on_two_teams_sharing_the_pool_is_taken_not_conflict(self):
+        # Same player fielded by two teams in one pool with the same number --
+        # not a clash with themselves, so no conflict flag.
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=self.member, season=self.season, jersey_number=3)
+
+        response = self.club_get("number_list")
+
+        tiles = {tile["number"]: tile for tile in response.context["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertCountEqual(tiles[3]["holders"], [f"{self.member} ({self.team.short_name})", f"{self.member} ({other_team.short_name})"])
+
     def test_a_number_placed_last_season_only_is_previous(self):
         previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
         TeamMembership.objects.create(team=self.team, member=self.member, season=previous_season, jersey_number=4)
@@ -2059,6 +2116,16 @@ class NumberListViewTests(ManagementTestBase):
         tiles = {tile["number"]: tile for tile in response.context["tiles"]}
         self.assertEqual(tiles[5]["state"], "pending")
         self.assertEqual(tiles[5]["holders"], [f"{self.member} ({self.team.short_name})"])
+
+    def test_the_legend_counts_numbers_per_state(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2)
+
+        response = self.club_get("number_list")
+
+        counts = response.context["state_counts"]
+        self.assertEqual((counts["available"], counts["taken"], counts["reserved"], counts["conflict"]), (3, 1, 1, 0))
+        self.assertContains(response, '<span class="tabular-nums">(3)</span>')
 
     def test_held_by_shows_the_holders_team(self):
         TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
@@ -2176,6 +2243,87 @@ class NumberListViewTests(ManagementTestBase):
         self.assertTrue(NumberReservation.objects.filter(pk=reservation.pk).exists())
 
 
+class NumberExportPdfTests(ManagementTestBase):
+    """management.views.NumberExportPdfView -- the Numbers page as a PDF,
+    render_pdf mocked out same as MembershipExportPdfTests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.pool = NumberPool.objects.create(club=cls.club, name="Youth", min_number=1, max_number=5)
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st", pool=cls.pool)
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", date_of_birth=datetime.date(2012, 3, 4))
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_downloads_as_a_pdf(self):
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            response = self.club_get("number_export_pdf")
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn('filename="numbers-youth-', response["Content-Disposition"])
+        self.assertEqual(response.content, b"%PDF-fake")
+        renderer.assert_called_once()
+
+    def test_uses_the_selected_pool(self):
+        other_pool = NumberPool.objects.create(club=self.club, name="Senior", min_number=10, max_number=12)
+
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("number_export_pdf", params={"pool": str(other_pool.pk)})
+
+        context = renderer.call_args[0][0]
+        self.assertEqual(context["pool"], other_pool)
+        self.assertEqual([tile["number"] for tile in context["tiles"]], [10, 11, 12])
+
+    def test_holders_carry_their_birth_year(self):
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+
+        with mock.patch("management.views.number_list_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("number_export_pdf")
+
+        tiles = {tile["number"]: tile for tile in renderer.call_args[0][0]["tiles"]}
+        self.assertEqual(tiles[3]["state"], "taken")
+        self.assertEqual(tiles[3]["people"], [{"member": self.member, "team": "1st", "birth_year": 2012}])
+
+    def test_rendered_html_flags_states_and_birth_years(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd", pool=self.pool)
+        other_member = Member.objects.create(first_name="Jack", last_name="Roe")
+        TeamMembership.objects.create(team=self.team, member=self.member, season=self.season, jersey_number=3)
+        TeamMembership.objects.create(team=other_team, member=other_member, season=self.season, jersey_number=3)
+        NumberReservation.objects.create(club=self.club, pool=self.pool, number=2, note="Retired")
+
+        with mock.patch("management.pdf.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.club_get("number_export_pdf")
+
+        html = response.content.decode()
+        self.assertIn('<tbody class="group-conflict">', html)
+        self.assertIn('<span class="tile state-conflict">3</span>', html)
+        self.assertIn('<span class="tile state-reserved">2</span>', html)
+        self.assertIn("Retired", html)
+        self.assertIn("2012", html)
+        self.assertIn(str(other_member), html)
+
+    def test_missing_pdf_libraries_redirect_back_to_the_page(self):
+        with mock.patch("management.views.number_list_pdf", side_effect=PDFExportError("no native libs")):
+            response = self.club_get("number_export_pdf", params={"pool": str(self.pool.pk)})
+
+        self.assertRedirects(response, f"{reverse('management:number_list')}?pool={self.pool.pk}", fetch_redirect_response=False)
+
+    def test_no_pools_redirects_back_to_the_page(self):
+        self.pool.delete()
+
+        response = self.club_get("number_export_pdf")
+
+        self.assertRedirects(response, reverse("management:number_list"), fetch_redirect_response=False)
+
+    def test_page_links_to_the_export_for_the_selected_pool_and_season(self):
+        response = self.club_get("number_list")
+
+        self.assertContains(response, f"{reverse('management:number_export_pdf')}?pool={self.pool.pk}&amp;season={self.season.pk}")
+
+
 class ClubRoleManagementTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
@@ -2269,9 +2417,10 @@ class FamilyManagementTests(ManagementTestBase):
         self.assertTrue(ClubMembership.objects.filter(club=self.club, member=parent, season=self.season).exists())
         self.assertTrue(ClubMembership.objects.filter(club=self.club, member=child, season=self.season).exists())
 
-    def test_reusing_an_existing_login_by_email(self):
-        # A parent who's already a Member elsewhere (an existing login) must be
-        # reused, not duplicated, when registered onto a second family.
+    def test_an_existing_login_is_invited_not_linked_or_duplicated(self):
+        # A parent who already has an account is never linked by staff typing
+        # their email (members.services.invites): the family is created with
+        # the child, and the parent gets an invite -- no duplicate either.
         existing_user = User.objects.create_user(email="existing@example.com", password="pw-secret-123")
         existing_member = Member.objects.create(user=existing_user, first_name="Existing", last_name="Parent")
 
@@ -2288,7 +2437,9 @@ class FamilyManagementTests(ManagementTestBase):
 
         self.assertEqual(Member.objects.filter(user=existing_user).count(), 1)
         family = Family.objects.get(memberships__member__first_name="New")
-        self.assertIn(existing_member, family.guardians)
+        self.assertNotIn(existing_member, family.guardians)
+        self.assertTrue(FamilyInvite.objects.filter(family=family, email="existing@example.com", accepted_at__isnull=True).exists())
+        self.assertEqual([message.to for message in mail.outbox], [["existing@example.com"]])
 
     def make_existing_family(self):
         # A family only counts as "of this club" once at least one of its members
@@ -4411,6 +4562,35 @@ class MemberBulkImportTests(ManagementTestBase):
         self.assertRedirects(response, reverse("management:member_import"))
         self.assertEqual(Member.objects.filter(last_name="Kid").count(), 0)
 
+    def test_an_admin_import_honours_the_status_and_fee_status_columns(self):
+        upload = make_import_workbook([["Imp", "Admin", "", "imported.admin@example.com", "", "", "", ClubMembership.StatusChoices.LAPSED, ClubMembership.FeeStatus.PAID]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        membership = ClubMembership.objects.get(club=self.club, member__email="imported.admin@example.com")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.LAPSED)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PAID)
+
+    def test_a_file_with_too_many_rows_is_rejected(self):
+        upload = make_import_workbook([[f"Row{index}", "Bulk", "", "", "", "", "", "", ""] for index in range(4)])
+
+        with mock.patch("management.bulk_import.MAX_IMPORT_ROWS", 3):
+            response = self.club_post("member_import", {"file": upload})
+
+        self.assertTemplateUsed(response, "management/member_import.html")
+        self.assertIn("file", response.context["form"].errors)
+        self.assertNotIn("member_import_rows", self.client.session)
+
+    def test_an_oversized_file_is_rejected(self):
+        upload = make_import_workbook([["Jamie", "Kid", "", "", "", "", "", "", ""]])
+
+        with mock.patch("management.forms.MEMBER_IMPORT_MAX_FILE_SIZE", 10):
+            response = self.club_post("member_import", {"file": upload})
+
+        self.assertTemplateUsed(response, "management/member_import.html")
+        self.assertIn("file", response.context["form"].errors)
+
     def test_confirm_is_admin_only(self):
         coach_user = self.make_non_admin_staff()
         upload = make_import_workbook([["Jamie", "Kid", "", "jamie.kid2@example.com", "", "", "", "", ""]])
@@ -4639,7 +4819,7 @@ class NewsManagementTests(ManagementTestBase):
         editor_member = Member.objects.create(user=cls.editor, first_name="Eve", last_name="Editor")
         ClubMembership.objects.create(club=cls.club, member=editor_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
         ClubRole.objects.filter(club=cls.club, member=editor_member).update(role=ClubRole.Roles.EDITOR)
-        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; StaffAssignment-only doesn't.
+        enrol_mfa(cls.editor)  # ClubRole ADMIN/EDITOR requires a second factor; a non-management StaffAssignment doesn't.
 
     def test_list_is_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
@@ -4852,7 +5032,7 @@ class NewsManagementTests(ManagementTestBase):
         member_user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
         member = Member.objects.create(first_name="Jamie", last_name="Doe", email="jamie@example.com", user=member_user)
         ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example.com/jamie", p256dh="key1", auth="key2")
+        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://fcm.googleapis.com/fcm/send/jamie", p256dh="key1", auth="key2")
         item = News.objects.create(club=self.club, title="Signed: New Player", body="Body.")
         self.client.force_login(self.editor)
 
@@ -6260,7 +6440,9 @@ class EventManagementTests(ManagementTestBase):
         self.assertContains(response, 'aria-label="Friendly"')
 
     def test_the_week_calendar_shows_a_gathering_strip_before_the_block(self):
-        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=timezone.now(), gathering=timezone.now() - datetime.timedelta(minutes=30))
+        # Noon today, not "now": just after Monday 00:00, now minus 30 minutes is last week.
+        start = timezone.localtime().replace(hour=12, minute=0, second=0, microsecond=0)
+        game = Event.objects.create(club=self.club, title="Cup game", kind=Event.EventKind.GAME, start=start, gathering=start - datetime.timedelta(minutes=30))
         game.teams.add(self.own_team)
         self.client.force_login(self.own_team_coach)
 
@@ -6398,7 +6580,12 @@ class EventManagementTests(ManagementTestBase):
 
     def test_the_list_groups_into_this_week_next_week_and_month_dividers(self):
         # Mirrors mobile.views.CalendarView's own This week/Next week/by-month
-        # agenda grouping -- see EventListView._list_groups.
+        # agenda grouping -- see EventListView._list_groups. Run at a fixed
+        # mid-week moment: late on a Sunday, "a few minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_list_groups()
+
+    def _check_list_groups(self):
         _this_week_start, this_week_end = week_bounds(timezone.localdate())
         this_week_event_start = timezone.make_aware(datetime.datetime.combine(this_week_end, datetime.time(18, 0)))
         if this_week_event_start <= timezone.now():
@@ -7591,6 +7778,11 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["range_choice"], "25")
 
     def test_the_week_range_excludes_a_game_beyond_this_week(self):
+        # Fixed mid-week moment: late on a Sunday, "5 minutes from now" is next week.
+        with mock.patch("django.utils.timezone.now", return_value=_midweek_noon()):
+            self._check_week_range()
+
+    def _check_week_range(self):
         today = timezone.localdate()
         end_of_this_week = today + datetime.timedelta(days=6 - today.weekday())
         game_this_week = self.make_game(start=timezone.now() + datetime.timedelta(minutes=5))
@@ -7614,6 +7806,44 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_no_referee"], 1)
         self.assertEqual(response.context["kpi_understaffed"], 1)
         self.assertEqual(response.context["kpi_fully_staffed"], 0)
+
+    def test_a_fully_staffed_game_is_listed_and_counted_by_default(self):
+        # "All games" is the default -- fully staffed games show up in the
+        # list too, and in the KPI.
+        game = self.make_game(max_referees=1)
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["need_choice"], "all")
+        self.assertEqual(response.context["kpi_fully_staffed"], 1)
+        self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
+
+    def test_the_fully_staffed_kpi_is_unaffected_by_the_range_choice(self):
+        # KPIs cover every upcoming game left this season, not bound to the
+        # range/need filters -- a narrow "this week" range must not hide a
+        # fully-staffed game from the count.
+        today = timezone.localdate()
+        beyond_this_week = today + datetime.timedelta(days=14)
+        far_away = self.make_game(max_referees=1, start=timezone.make_aware(datetime.datetime.combine(beyond_this_week, datetime.time(10, 0))))
+        EventReferee.objects.create(event=far_away, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"range": "week"})
+
+        self.assertNotContains(response, reverse("management:event_detail", args=[far_away.pk]))
+        self.assertEqual(response.context["kpi_fully_staffed"], 1)
+
+    def test_kpis_ignore_past_games(self):
+        # A past game nobody refereed isn't something left to arrange --
+        # counting those is what made the cards read far above the list.
+        self.make_game(start=timezone.now() - datetime.timedelta(days=2))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_no_referee"], 0)
 
     def test_an_assigned_referee_gets_a_fee_form_for_the_dashboard_modal(self):
         game = self.make_game()
@@ -7764,15 +7994,29 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(list(response.context["games"]), [])
 
     def test_a_fully_staffed_game_is_excluded_from_missing_either_too(self):
-        game = self.make_game(title="Fully staffed")
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        self.setUp_officials()
+        game = self.make_game(title="Fully staffed", team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "both"})
+
+        self.assertEqual(response.context["need_counts"]["both"], 0)
+        self.assertEqual(list(response.context["games"]), [])
+
+    def test_officials_fully_staffed_kpi_counts_it(self):
+        self.setUp_officials()
+        # federation_team needs officials only (referee_management=FEDERATION),
+        # so assigning an official is the only thing standing between "missing"
+        # and "fully staffed" here.
+        game = self.make_game(team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["need_choice"], "both")
-        self.assertEqual(list(response.context["games"]), [])
+        self.assertEqual(response.context["kpi_officials_fully_staffed"], 1)
+        self.assertContains(response, reverse("management:event_detail", args=[game.pk]))
 
     def test_each_buckets_count_matches_what_it_actually_shows(self):
         self.setUp_officials()
@@ -7783,11 +8027,29 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         # why the two are independent flags.
         self.make_game(title="Needs both")
         self.make_game(title="Needs officials only", team=self.federation_team)
+        staffed = self.make_game(title="Fully staffed", team=self.federation_team, max_officials=1)
+        EventOfficial.objects.create(event=staffed, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["need_counts"], {"referees": 1, "officials": 2, "both": 2})
+        self.assertEqual(response.context["need_counts"], {"all": 3, "referees": 1, "officials": 2, "both": 2})
+        for need, count in response.context["need_counts"].items():
+            self.assertEqual(len(self.club_get("referee_management", params={"need": need}).context["games"]), count)
+
+    def test_need_counts_stay_within_the_selected_range(self):
+        # The range picks the games in view first; the need chips only ever
+        # narrow that set, so none can read higher than "All games".
+        staffed = self.make_game(title="Staffed", max_referees=1)
+        EventReferee.objects.create(event=staffed, member=self.referee, assigned_by=self.admin_member)
+        for day in range(2, 13):
+            self.make_game(title=f"Unstaffed {day}", start=timezone.now() + datetime.timedelta(days=day))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"range": "10"})
+
+        self.assertEqual(response.context["need_counts"]["all"], 10)
+        self.assertEqual(response.context["need_counts"]["referees"], 9)
 
     def test_referees_filter_excludes_an_officials_only_game(self):
         self.setUp_officials()
@@ -7816,7 +8078,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         games = response.context["games"]
         self.assertEqual([game.pk for game in games], [officials_only_game.pk])
 
-    def test_both_is_the_default_and_shows_every_game(self):
+    def test_all_is_the_default_and_shows_every_game(self):
         self.setUp_officials()
         both_game = self.make_game(title="Needs both")
         officials_only_game = self.make_game(title="Needs officials only", team=self.federation_team)
@@ -7824,25 +8086,32 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
         games = response.context["games"]
         self.assertEqual({game.pk for game in games}, {both_game.pk, officials_only_game.pk})
 
-    def test_an_unknown_need_value_falls_back_to_both(self):
+    def test_an_unknown_need_value_falls_back_to_all(self):
         self.setUp_officials()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management", params={"need": "bogus"})
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
 
-    def test_need_officials_falls_back_to_both_when_the_flag_is_off(self):
+    def test_need_officials_falls_back_to_all_when_the_flag_is_off(self):
         # No setUp_officials() here -- the flag stays off for this club.
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management", params={"need": "officials"})
 
-        self.assertEqual(response.context["need_choice"], "both")
+        self.assertEqual(response.context["need_choice"], "all")
+
+    def test_need_referees_still_works_when_the_flag_is_off(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management", params={"need": "referees"})
+
+        self.assertEqual(response.context["need_choice"], "referees")
 
 
 class FeatureGatedSectionsTests(ManagementTestBase):
@@ -8616,6 +8885,63 @@ class EvaluationWalkthroughViewTests(EvaluationManagementTestBase):
         self.assertEqual(EvaluationSession.objects.filter(checklist=checklist).count(), 1)
 
 
+class EvaluationWalkthroughPlayerScopeTests(EvaluationManagementTestBase):
+    """The walkthrough's POST only acts on (and names) a player the checklist
+    actually covers -- management.views.EvaluationWalkthroughView resolves
+    player_pk from checklist_players, never from Member at large."""
+
+    def _evaluated_checklist(self):
+        checklist = self.make_rubric("U8")
+        self.client.force_login(self.eval_manager_user)
+        self.club_post("evaluation_create_for_checklist", {"ball-control": "5"}, self.player.pk, checklist.slug)
+        return checklist
+
+    def test_a_note_about_a_member_of_another_club_404s(self):
+        checklist = self._evaluated_checklist()
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+        ClubRole.objects.create(club=other_club, member=outsider)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(outsider.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=outsider).exists())
+
+    def test_a_note_about_a_club_member_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        unevaluated = Member.objects.create(first_name="Nora", last_name="Notevaluated")
+        ClubMembership.objects.create(club=self.club, member=unevaluated, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": str(unevaluated.pk), "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationNote.objects.filter(player=unevaluated).exists())
+
+    def test_an_outcome_for_a_player_not_on_the_checklist_404s(self):
+        checklist = self._evaluated_checklist()
+        self.club_post("evaluation_walkthrough", {"action": "start_session", "player_pk": str(self.player.pk)}, checklist.slug)
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider")
+
+        response = self.club_post("evaluation_walkthrough", {"action": "outcome", "player_pk": str(outsider.pk), "decision": "Promote"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(EvaluationOutcome.objects.filter(player=outsider).exists())
+
+    def test_a_malformed_player_pk_404s(self):
+        checklist = self._evaluated_checklist()
+
+        response = self.club_post("evaluation_walkthrough", {"player_pk": "not-a-uuid", "note": "Probe"}, checklist.slug)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_note_about_a_player_on_the_checklist_is_still_saved(self):
+        checklist = self._evaluated_checklist()
+
+        self.club_post("evaluation_walkthrough", {"player_pk": str(self.player.pk), "note": "Fine"}, checklist.slug)
+
+        self.assertTrue(EvaluationNote.objects.filter(checklist=checklist, player=self.player, note="Fine").exists())
+
+
 class EvaluationSessionOutcomesPdfTests(EvaluationManagementTestBase):
     def setUp(self):
         super().setUp()
@@ -8856,6 +9182,19 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertIn(self.team, event.teams.all())
 
     @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    def test_the_competition_label_survives_from_form_to_confirm(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "competition_label": "Division 1"})
+
+        response = self.club_post("rbihf_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertEqual(event.competition_label, "Division 1")
+        self.assertEqual(event.external_source_id, "4460")
+
+    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_respects_the_chosen_location(self, mock_fetch):
         self.activate_flag()
         location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="1 St", city="Deurne", zip_code="2100", country="BE")
@@ -8929,6 +9268,149 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         self.assertContains(response, "already up to date")
         self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
+
+
+DFEL_SAMPLE_GAME_ID = "3f1b2c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+DFEL_TEAM_URL = "https://ehv-nrw.de/leagues/team/70779/21691/"
+
+
+def dfel_sample_json():
+    """A minimal EHV-NRW schedule response: one upcoming home game. The
+    timestamp is relative to now so the game is always in the future."""
+    start = timezone.now() + datetime.timedelta(days=30)
+    return json.dumps(
+        {
+            "statusId": 1,
+            "statusMsg": "Ok",
+            "data": {
+                "rows": [
+                    {
+                        "id": DFEL_SAMPLE_GAME_ID,
+                        "gameUtcTimestamp": int(start.timestamp() * 1000),
+                        "homeTeamId": 70779,
+                        "homeTeamLongName": "Sharks Woman Mechelen",
+                        "awayTeamId": 70760,
+                        "awayTeamLongName": "EC Hannover Indians",
+                        "homeTeamScore": 0,
+                        "awayTeamScore": 0,
+                        "gameStatus": 0,
+                        "gameHasEnded": False,
+                        "labels": [],
+                        "location": {"longname": "Mechelen - Ice Skating Center", "shortname": "Ice Skating Center", "address": '{"city":"Mechelen"}'},
+                    }
+                ]
+            },
+        }
+    )
+
+
+class DFELImportViewTests(ManagementTestBase):
+    """The Events page's "Import from DFEL" button/flow -- same gating and
+    two-step shape as RBIHFImportViewTests above, behind the "DFEL" waffle
+    Flag. fetch_schedule is mocked; nothing touches the network."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="Sharks Women", short_name="SW")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        # A migration may already seed the "DFEL" flag row -- get_or_create, not create.
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="DFEL")
+        flag.clubs.add(self.club)
+
+    def test_button_shows_for_admin_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "Import from DFEL")
+
+    def test_button_hidden_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_list")
+
+        self.assertNotContains(response, "Import from DFEL")
+
+    def test_the_import_views_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("dfel_import").status_code, 404)
+        self.assertEqual(self.club_post("dfel_import_confirm", {}).status_code, 404)
+
+    def test_the_form_renders_with_the_flag_active(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("dfel_import")
+
+        self.assertContains(response, "Import from DFEL")
+        self.assertContains(response, "ehv-nrw.de/leagues/team/70779/21691/")
+
+    def test_a_non_dfel_url_is_a_form_error_not_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["form"].is_valid())
+        self.assertIn("url", response.context["form"].errors)
+
+    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    def test_submitting_the_form_shows_a_preview(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "EC Hannover Indians")
+        self.assertContains(response, f'name="opponent_{DFEL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, f'name="location_{DFEL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, reverse("management:dfel_import_confirm"))
+        mock_fetch.assert_called_once_with("70779", "21691")
+
+    @mock.patch("management.views.fetch_schedule", side_effect=DFELImportError("Could not reach the schedule."))
+    def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not reach the schedule.")
+
+    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    def test_confirming_creates_the_event(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+        self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "competition_label": "League"})
+
+        response = self.club_post("dfel_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id=DFEL_SAMPLE_GAME_ID)
+        self.assertEqual(event.competition, "DFEL")
+        self.assertEqual(event.external_source_id, "70779/21691")
+        self.assertEqual(event.competition_label, "League")
+        self.assertEqual(event.opponent.name, "EC Hannover Indians")
+        self.assertIn(self.team, event.teams.all())
+
+    def test_confirming_with_nothing_stashed_redirects_with_a_notice(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:dfel_import"))
 
 
 class MemberListKindFilterTests(ManagementTestBase):
@@ -9320,10 +9802,33 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["signup_pending_count"], 0)
 
-    def test_a_refereed_game_does_not_count(self):
+    def test_a_fully_refereed_game_does_not_count(self):
         referee = Member.objects.create(first_name="Ref", last_name="Eree")
         ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-        self.make_home_game(referee=referee)
+        game = self.make_home_game(referee=referee)
+        game.max_referees = 1
+        game.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 0)
+
+    def test_a_partially_refereed_game_still_counts(self):
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.make_home_game(referee=referee)  # 1 of Event.max_referees' default 2
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("home")
+
+        self.assertEqual(response.context["games_missing_referees_count"], 1)
+
+    def test_a_past_game_does_not_count(self):
+        game = self.make_home_game()
+        game.start = timezone.now() - datetime.timedelta(days=2)
+        game.end = None
+        game.save()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
@@ -9364,36 +9869,25 @@ class SidebarCounterTests(ManagementTestBase):
 
         self.assertEqual(response.context["games_missing_referees_count"], 1)
 
-    def test_a_fully_staffed_game_does_not_crowd_out_the_next_limit_window(self):
-        # Regression: the badge used to slice to the next `limit` games BEFORE
-        # dropping fully-staffed ones, while RefereeManagementDashboardView's own
-        # kpi_no_referee (for the same default range) filters to understaffed
-        # games first and only then slices. A fully-staffed game chronologically
-        # ahead of the unstaffed ones used to eat a slot in the badge's window
-        # without eating one in the dashboard's, so the two disagreed -- the
-        # inconsistency reported from production.
+    def test_the_badge_matches_the_dashboards_kpis_beyond_the_default_range(self):
+        # Every upcoming game left this season, not just the dashboard's
+        # default "next 10" -- and the same set its KPI cards count, so
+        # "Without a referee" + "Partially staffed" equals the badge.
         team = Team.objects.create(club=self.club, name="First Team", short_name="1st")
         home_ground = Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
-        referees = [Member.objects.create(first_name=f"Ref{i}", last_name="Eree") for i in range(2)]
-        for referee in referees:
-            ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
-
-        staffed = Event.objects.create(club=self.club, title="Staffed game", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=1))
-        staffed.teams.add(team)
-        for referee in referees:
-            EventReferee.objects.create(event=staffed, member=referee, assigned_by=self.admin_member)
-
-        for day in range(2, 12):
-            event = Event.objects.create(club=self.club, title=f"Unstaffed game {day}", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=day))
+        referee = Member.objects.create(first_name="Ref", last_name="Eree")
+        ClubMembership.objects.create(club=self.club, member=referee, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        for day in range(1, 13):
+            event = Event.objects.create(club=self.club, title=f"Game {day}", kind=Event.EventKind.GAME, location=home_ground, start=timezone.now() + datetime.timedelta(days=day))
             event.teams.add(team)
-
+        EventReferee.objects.create(event=event, member=referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("home")
         dashboard_response = self.club_get("referee_management")
 
-        self.assertEqual(response.context["games_missing_referees_count"], 10)
-        self.assertEqual(dashboard_response.context["kpi_no_referee"], 10)
+        self.assertEqual(response.context["games_missing_referees_count"], 12)
+        self.assertEqual(dashboard_response.context["kpi_no_referee"] + dashboard_response.context["kpi_understaffed"], 12)
 
     def test_a_non_admin_gets_no_counters_and_no_badge_links(self):
         coach_user = User.objects.create_user(email="coach-badge@example.com", password="pw-secret-123")
@@ -9633,15 +10127,9 @@ class MemberRequirementChecklistTests(ManagementTestBase):
     """Marking a member's checklist items done/undone from their own page, and
     downloading whatever document was attached -- management:member_requirement_*.
 
-    Uploads land on rosterchief.storage.private_storage's real, configured location
-    (PRIVATE_MEDIA_ROOT) rather than a tempdir substituted via override_settings: that
-    storage is a module-level singleton built once at process start (see
-    rosterchief/storage.py), and Django's override_settings machinery only reloads
-    django.core.files.storage.storages/default_storage on a STORAGES change -- it has
-    no way to know about a hand-built FileSystemStorage instance a model field
-    happens to hold a reference to, so overriding the setting here would silently do
-    nothing and this class would look green while actually writing outside a tempdir
-    it thinks it's using. Each uploading test cleans up after itself instead, the
+    Uploads land on rosterchief.storage.private_storage, which re-reads
+    PRIVATE_MEDIA_ROOT on every access -- the test runner points that at a
+    throwaway directory. Each uploading test still cleans up after itself, the
     same way FeePayment/Club-logo-style tests elsewhere in this suite do.
     """
 
@@ -9749,6 +10237,34 @@ class MemberRequirementChecklistTests(ManagementTestBase):
         response = self.club_get("member_requirement_document", self.member.pk, self.requirement.pk)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_a_coach_who_cannot_see_the_member_cannot_download_the_document(self):
+        self.upload_certificate()
+        team = Team.objects.create(club=self.club, name="U10 other")
+        coach_position = Position.objects.create(club=self.club, name="Other Coach", staff_position=True, management_position=True)
+        coach = User.objects.create_user(email="coach-other-doc@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach, first_name="Other", last_name="Coach")
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=coach_position)
+        enrol_mfa(coach)
+        self.client.force_login(coach)
+
+        response = self.club_get("member_requirement_document", self.member.pk, self.requirement.pk)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_member_admin_can_download_the_document(self):
+        self.upload_certificate()
+        member_admin_user = User.objects.create_user(email="memberadmin-doc@example.com", password="pw-secret-123")
+        member_admin_member = Member.objects.create(user=member_admin_user, first_name="Mia", last_name="Docs")
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_get("member_requirement_document", self.member.pk, self.requirement.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 fake")
 
     def test_the_document_is_never_reachable_through_the_public_media_url(self):
         # The whole point of a separate, private storage (rosterchief/storage.py):
@@ -10337,6 +10853,46 @@ class MemberAdminAccessTests(ManagementTestBase):
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)
+
+    def test_cannot_change_fee_or_approval_fields_from_the_member_page(self):
+        member = Member.objects.create(first_name="Fee", last_name="Target")
+        membership = ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.PENDING, fee_status=ClubMembership.FeeStatus.UNPAID, fee_amount=Decimal("150.00"))
+        # members_visible_to only shows a non-admin the rosters they staff, so tie
+        # the member to a team this MEMBER_ADMIN is on staff of.
+        team = Team.objects.create(club=self.club, name="U9 fee")
+        StaffAssignment.objects.create(team=team, member=Member.objects.get(user=self.member_admin_user), season=self.season, position=Position.objects.create(club=self.club, name="Fee Coach", staff_position=True))
+        TeamMembership.objects.create(team=team, member=member, season=self.season, position=Position.objects.create(club=self.club, name="Fee Player"), jersey_number=4)
+
+        response = self.club_post(
+            "member_update",
+            {
+                "first_name": "Fee",
+                "last_name": "Target",
+                "kind": ClubMembership.Kind.MEMBER,
+                "license": "BE-1",
+                "status": ClubMembership.StatusChoices.ACTIVE,
+                "fee_status": ClubMembership.FeeStatus.PAID,
+                "fee_amount": "0.00",
+            },
+            member.pk,
+        )
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[member.pk]), fetch_redirect_response=False)
+        membership.refresh_from_db()
+        self.assertEqual(membership.license, "BE-1")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.UNPAID)
+        self.assertEqual(membership.fee_amount, Decimal("150.00"))
+
+    def test_an_import_ignores_the_status_and_fee_status_columns(self):
+        upload = make_import_workbook([["Imp", "Orted", "", "imported.ma@example.com", "", "", "", ClubMembership.StatusChoices.LAPSED, ClubMembership.FeeStatus.PAID]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        membership = ClubMembership.objects.get(club=self.club, member__email="imported.ma@example.com")
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.ACTIVE)
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.UNPAID)
 
 
 class VolunteerListTests(ManagementTestBase):
@@ -12298,6 +12854,19 @@ class OrderProductionReprintTests(ShopTestBase):
         rows = list(workbook.active.iter_rows(values_only=True))
         self.assertIn((line.order.number, "Orderer", "Olly", None, None, None, 1), rows)
 
+    def test_the_export_neutralises_spreadsheet_formulas(self):
+        self.make_line(production_status=ProductionStatus.IN_PRODUCTION, personalization_name='=HYPERLINK("http://evil.example","x")', personalization_number="+1")
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("order_production_reprint", {"product_ids": [str(self.product.pk)]})
+
+        sheet = openpyxl.load_workbook(BytesIO(response.content)).active
+        number_cell, name_cell = sheet.cell(row=2, column=5), sheet.cell(row=2, column=6)
+        self.assertEqual(name_cell.value, '\'=HYPERLINK("http://evil.example","x")')
+        self.assertEqual(name_cell.data_type, "s")
+        self.assertEqual(number_cell.value, "'+1")
+        self.assertEqual(sheet.cell(row=2, column=7).value, 1)
+
     def test_does_not_mark_anything(self):
         line = self.make_line(production_status=ProductionStatus.IN_PRODUCTION)
         self.client.force_login(self.make_shop_manager())
@@ -12437,6 +13006,31 @@ class OrderReceiveProductionTests(ShopTestBase):
         response = self.club_post("order_receive_production", {self.field_name(): "1"})
 
         self.assertEqual(response.status_code, 403)
+
+    def make_other_club_line(self):
+        other_club = Club.objects.create(name="Rival Receive FC", slug="rival-receive-fc")
+        other_product = Product.objects.create(club=other_club, name="Rival Jersey", price=Decimal("25.00"), product_type=Product.ProductType.MERCHANDISE)
+        other_variant = ProductVariant.objects.create(product=other_product, name="Large")
+        other_order = Order.objects.create(club=other_club, purchaser=self.purchaser, total=Decimal("25.00"))
+        return self.make_line(order=other_order, product=other_product, variant=other_variant, quantity=2)
+
+    def test_another_clubs_in_production_lines_are_not_listed(self):
+        self.make_other_club_line()
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("order_receive_production")
+
+        self.assertEqual(response.context["summary"], [])
+
+    def test_a_crafted_key_for_another_clubs_product_is_ignored(self):
+        other_line = self.make_other_club_line()
+        self.make_line(quantity=1)
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("order_receive_production", {self.field_name(): "1", f"received__{other_line.product.pk}__{other_line.variant.pk}": "2"})
+
+        other_line.refresh_from_db()
+        self.assertEqual(other_line.production_status, ProductionStatus.IN_PRODUCTION)
 
 
 class OrderReadyForPickupTests(ShopTestBase):
@@ -13838,6 +14432,39 @@ class FormManagementTests(ManagementTestBase):
         content = response.content.decode()
         self.assertIn("Jane", content)
 
+    def test_responses_export_neutralises_spreadsheet_formulas(self):
+        form_obj = self.make_form()
+        field = FormBuilderField.objects.create(form=form_obj, key="name", label="=cmd|' /C calc'!A0", order=1)
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        submission = Submission.objects.create(send=send, member=None)
+        Answer.objects.create(submission=submission, field=field, value='=HYPERLINK("http://evil.example","x")')
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("formsend_responses_export", form_obj.pk, send.pk)
+
+        rows = list(csv.reader(response.content.decode().splitlines()))
+        self.assertEqual(rows[0][3], "'=cmd|' /C calc'!A0")
+        self.assertEqual(rows[1][3], '\'=HYPERLINK("http://evil.example","x")')
+
+    def test_responses_name_the_parent_who_filled_in_for_a_child(self):
+        form_obj = self.make_form()
+        send = FormSend.objects.create(club=self.club, form=form_obj, club_wide=True)
+        child = Member.objects.create(first_name="Mila", last_name="Bakker")
+        parent = Member.objects.create(first_name="Lars", last_name="Bakker")
+        Submission.objects.create(send=send, member=child, submitted_by=parent)
+        own = Member.objects.create(first_name="Jane", last_name="Doe")
+        Submission.objects.create(send=send, member=own, submitted_by=own)
+        self.client.force_login(self.admin_user)
+
+        rows = list(csv.reader(self.club_get("formsend_responses_export", form_obj.pk, send.pk).content.decode().splitlines()))
+        page = self.club_get("formsend_responses", form_obj.pk, send.pk)
+
+        self.assertEqual(rows[0][1:3], ["Member", "Submitted by"])
+        by_member = {row[1]: row[2] for row in rows[1:]}
+        self.assertEqual(by_member, {"Mila Bakker": "Lars Bakker", "Jane Doe": ""})
+        self.assertContains(page, "Filled in by Lars Bakker")
+        self.assertNotContains(page, "Filled in by Jane Doe")
+
 
 class BugListViewTests(ManagementTestBase):
     """The self-service "Report a bug" page reached from the topbar bug icon (see
@@ -13900,3 +14527,509 @@ class BugListViewTests(ManagementTestBase):
         self.assertIn("1.4.2", content)
         # Only the fixed report renders a fix date -- the open one must not.
         self.assertEqual(content.count("Fixed on"), 1)
+
+
+class LogoUploadFormatTests(ManagementTestBase):
+    """Club and sponsor logos accept raster formats only for new uploads; a
+    logo already stored in another format (e.g. SVG) keeps saving through
+    unrelated edits."""
+
+    SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+
+    def setUp(self):
+        self.client.force_login(self.admin_user)
+
+    def svg_file(self):
+        return SimpleUploadedFile("logo.svg", self.SVG, content_type="image/svg+xml")
+
+    def club_settings_data(self, **overrides):
+        data = {"name": "Ajax United", "legal_name": "", "contact_email": "", "website": "", "primary_color": "", "secondary_color": ""}
+        data.update(overrides)
+        return data
+
+    def sponsor_data(self, **overrides):
+        data = {"name": "Acme Corp", "url": "", "start_date": "2026-01-01", "end_date": ""}
+        data.update(overrides)
+        return data
+
+    def test_club_settings_rejects_an_svg_logo(self):
+        response = self.club_post("club_settings", self.club_settings_data(logo=self.svg_file()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("logo", response.context["form"].errors)
+        self.club.refresh_from_db()
+        self.assertFalse(self.club.logo)
+
+    def test_club_settings_accepts_a_png_logo(self):
+        response = self.club_post("club_settings", self.club_settings_data(logo=make_image_file("logo.png")))
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertTrue(self.club.logo.name.endswith(".png"))
+
+    def test_club_settings_logo_input_does_not_offer_svg(self):
+        response = self.club_get("club_settings")
+
+        self.assertNotContains(response, "image/svg+xml")
+
+    def test_club_with_an_existing_svg_logo_can_still_save_other_fields(self):
+        self.club.logo = self.svg_file()
+        self.club.save()
+
+        response = self.club_post("club_settings", self.club_settings_data(primary_color="#123456"))
+
+        self.assertRedirects(response, reverse("management:club_settings"))
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.primary_color, "#123456")
+        self.assertTrue(self.club.logo.name.endswith(".svg"))
+
+    def test_sponsor_form_rejects_an_svg_logo(self):
+        response = self.club_post("sponsor_create", self.sponsor_data(logo=self.svg_file()))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("logo", response.context["form"].errors)
+        self.assertFalse(Sponsor.objects.filter(club=self.club).exists())
+
+    def test_sponsor_form_accepts_a_png_logo(self):
+        response = self.club_post("sponsor_create", self.sponsor_data(logo=make_image_file("logo.png")))
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        self.assertTrue(Sponsor.objects.get(club=self.club).logo.name.endswith(".png"))
+
+    def test_sponsor_with_an_existing_svg_logo_can_still_be_renamed(self):
+        sponsor = Sponsor.objects.create(club=self.club, name="Acme Corp", start_date=datetime.date(2026, 1, 1), logo=self.svg_file())
+
+        response = self.club_post("sponsor_update", self.sponsor_data(name="Acme Renamed"), sponsor.pk)
+
+        self.assertRedirects(response, reverse("management:sponsor_list"))
+        sponsor.refresh_from_db()
+        self.assertEqual(sponsor.name, "Acme Renamed")
+        self.assertTrue(sponsor.logo.name.endswith(".svg"))
+
+
+class GlobalMemberBoundaryTests(ManagementTestBase):
+    """Member is global: a club's staff can't pull in, rewrite, or delete a
+    person record that also belongs to an account holder or another club (see
+    members.services.deletion.member_has_ties_outside_club and
+    members.services.invites)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.rival = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.rival_season = make_season(cls.rival)
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def make_family(self, club=None, season=None):
+        club = club or self.club
+        family = Family.objects.create(club=club)
+        kid = Member.objects.create(first_name="First", last_name="Kid")
+        FamilyMembership.objects.create(family=family, member=kid, role=FamilyMembership.FamilyRole.CHILD)
+        ClubMembership.objects.create(club=club, member=kid, season=season or self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return family
+
+    def shared_member(self):
+        """Someone on both clubs' books, in a family at each."""
+        member = Member.objects.create(first_name="Sam", last_name="Shared", email="sam@example.com", date_of_birth=datetime.date(1990, 1, 1))
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.create(club=self.rival, member=member, season=self.rival_season, status=ClubMembership.StatusChoices.ACTIVE)
+        return member
+
+    def messages_of(self, response):
+        return [(message.extra_tags, message.message) for message in get_messages(response.wsgi_request)]
+
+    # --- Adding a parent by email -------------------------------------------------
+
+    def test_an_existing_accounts_email_sends_an_invite_instead_of_linking(self):
+        user = User.objects.create_user(email="Other.Parent@example.com", password="pw-secret-123")
+        other = Member.objects.create(user=user, first_name="Other", last_name="Parent", phone="+32470000001")
+        ClubMembership.objects.create(club=self.rival, member=other, season=self.rival_season, status=ClubMembership.StatusChoices.ACTIVE)
+        family = self.make_family()
+
+        response = self.club_post("family_add_parent", {"email": "other.parent@example.com", "first_name": "Typed", "last_name": "Name"}, family.pk)
+
+        self.assertRedirects(response, reverse("management:family_detail", args=[family.pk]))
+        self.assertFalse(FamilyMembership.objects.filter(member=other).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=other).exists())
+        invite = FamilyInvite.objects.get(family=family)
+        self.assertEqual(invite.club, self.club)
+        self.assertEqual(invite.email, "other.parent@example.com")
+        self.assertIsNone(invite.accepted_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["other.parent@example.com"])
+        self.assertIn(reverse("members:family_invite_accept", args=[invite.token]), mail.outbox[0].body)
+        other.refresh_from_db()
+        self.assertEqual((other.first_name, other.last_name), ("Other", "Parent"))
+
+    def test_the_confirmation_reads_the_same_for_a_new_and_an_existing_email(self):
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+
+        existing = self.messages_of(self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "Kim", "last_name": "Known"}, family.pk))
+        new = self.messages_of(self.club_post("family_add_parent", {"email": "fresh@example.com", "first_name": "Fay", "last_name": "Fresh"}, family.pk))
+
+        # Unfollowed redirects leave the first message queued, so compare the last of each.
+        self.assertEqual(existing[-1][0], new[-1][0])
+        self.assertEqual(existing[-1][1].replace("known@example.com", "EMAIL"), new[-1][1].replace("fresh@example.com", "EMAIL"))
+
+    def test_a_new_email_is_still_created_and_linked_immediately(self):
+        family = self.make_family()
+
+        self.club_post("family_add_parent", {"email": "brand.new@example.com", "first_name": "Bea", "last_name": "New"}, family.pk)
+
+        parent = Member.objects.get(user__email="brand.new@example.com")
+        self.assertIn(parent, family.guardians)
+        self.assertTrue(ClubMembership.objects.filter(club=self.club, member=parent, season=self.season).exists())
+        self.assertFalse(FamilyInvite.objects.exists())
+
+    def test_the_name_is_required_even_for_an_existing_account(self):
+        # Uniform form behaviour: whether an email has an account never
+        # changes what the form asks for.
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+
+        self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "", "last_name": ""}, family.pk)
+        self.club_post("family_add_parent", {"email": "unknown@example.com", "first_name": "", "last_name": ""}, family.pk)
+
+        self.assertFalse(FamilyInvite.objects.exists())
+        self.assertFalse(User.objects.filter(email="unknown@example.com").exists())
+
+    def test_family_page_lists_pending_invites(self):
+        User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        family = self.make_family()
+        self.club_post("family_add_parent", {"email": "known@example.com", "first_name": "Kim", "last_name": "Known"}, family.pk)
+
+        response = self.club_get("family_detail", family.pk)
+
+        self.assertContains(response, "Pending invites")
+        self.assertContains(response, "known@example.com")
+
+    def test_family_create_with_an_existing_accounts_email_invites_the_parent(self):
+        user = User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        known = Member.objects.create(user=user, first_name="Kim", last_name="Known")
+
+        self.club_post("family_create", {"parent_first_name": "Kim", "parent_last_name": "Known", "parent_email": "known@example.com", "child_first_name": "New", "child_last_name": "Kid"})
+
+        family = Family.objects.get(memberships__member__first_name="New")
+        self.assertEqual(family.club, self.club)
+        self.assertFalse(FamilyMembership.objects.filter(member=known).exists())
+        self.assertTrue(FamilyInvite.objects.filter(family=family, email="known@example.com").exists())
+
+    def test_member_import_never_binds_a_row_to_an_existing_account(self):
+        user = User.objects.create_user(email="known@example.com", password="pw-secret-123")
+        known = Member.objects.create(user=user, first_name="Kim", last_name="Known")
+        upload = make_import_workbook([["Imported", "Parent", "", "known@example.com", "", "", "", "", "", "Known family", "parent"]])
+        self.club_post("member_import", {"file": upload})
+
+        self.club_post("member_import_confirm", {})
+
+        imported = Member.objects.get(first_name="Imported")
+        self.assertIsNone(imported.user_id)
+        self.assertEqual(imported.email, "known@example.com")
+        self.assertFalse(FamilyMembership.objects.filter(member=known).exists())
+
+    # --- Editing person fields -------------------------------------------------------
+
+    def update_payload(self, **overrides):
+        payload = {
+            "first_name": "Hacked",
+            "last_name": "Name",
+            "email": "attacker@example.com",
+            "date_of_birth": "2001-02-03",
+            "phone": "+32470999999",
+            "kind": ClubMembership.Kind.MEMBER,
+            "license": "BE-1234",
+            "status": ClubMembership.StatusChoices.ACTIVE,
+            "fee_status": ClubMembership.FeeStatus.PAID,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_person_fields_of_a_member_shared_with_another_club_are_read_only(self):
+        member = self.shared_member()
+
+        response = self.club_post("member_update", self.update_payload(), member.pk)
+
+        self.assertRedirects(response, reverse("management:member_detail", args=[member.pk]))
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.last_name, member.email, member.date_of_birth, member.phone), ("Sam", "Shared", "sam@example.com", datetime.date(1990, 1, 1), None))
+        membership = ClubMembership.objects.get(club=self.club, member=member, season=self.season)
+        self.assertEqual(membership.license, "BE-1234")
+        self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PAID)
+
+    def test_person_fields_of_a_member_with_a_login_are_read_only(self):
+        user = User.objects.create_user(email="login@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Lou", last_name="Login", email="lou@example.com")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_update", self.update_payload(), member.pk)
+
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.last_name, member.email), ("Lou", "Login", "lou@example.com"))
+        self.assertEqual(ClubMembership.objects.get(club=self.club, member=member).license, "BE-1234")
+
+    def test_the_edit_page_explains_and_disables_locked_fields(self):
+        member = self.shared_member()
+
+        response = self.club_get("member_update", member.pk)
+
+        self.assertTrue(response.context["form"].fields["email"].disabled)
+        self.assertContains(response, "can't be changed here")
+
+    def test_a_member_only_this_club_knows_is_still_editable(self):
+        member = Member.objects.create(first_name="Only", last_name="Here")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_update", self.update_payload(email="only@example.com"), member.pk)
+
+        member.refresh_from_db()
+        self.assertEqual((member.first_name, member.email), ("Hacked", "only@example.com"))
+
+    def test_granting_a_login_to_a_member_shared_with_another_club_is_refused(self):
+        member = self.shared_member()
+
+        self.club_post("member_grant_login", {"email": "someone.new@example.com"}, member.pk)
+
+        member.refresh_from_db()
+        self.assertIsNone(member.user_id)
+        self.assertFalse(User.objects.filter(email="someone.new@example.com").exists())
+
+    # --- Deleting -------------------------------------------------------------------
+
+    def test_deleting_a_shared_member_only_removes_this_clubs_rows(self):
+        member = self.shared_member()
+        own_family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=own_family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.PARENT)
+        team = Team.objects.create(club=self.club, name="Ours", short_name="O")
+        rival_team = Team.objects.create(club=self.rival, name="Theirs", short_name="T")
+        TeamMembership.objects.create(team=team, member=member, season=self.season)
+        TeamMembership.objects.create(team=rival_team, member=member, season=self.rival_season)
+        ClubRole.objects.filter(club=self.club, member=member).update(role=ClubRole.Roles.EDITOR)
+
+        response = self.club_post("member_delete", {}, member.pk)
+
+        self.assertRedirects(response, reverse("management:member_list"))
+        self.assertTrue(Member.objects.filter(pk=member.pk).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exists())
+        self.assertFalse(ClubRole.objects.filter(club=self.club, member=member).exists())
+        self.assertFalse(TeamMembership.objects.filter(team=team, member=member).exists())
+        # This club's family, left empty, is cleaned up; the other club's is untouched.
+        self.assertFalse(Family.objects.filter(pk=own_family.pk).exists())
+        self.assertTrue(FamilyMembership.objects.filter(family=rival_family, member=member).exists())
+        self.assertTrue(ClubMembership.objects.filter(club=self.rival, member=member).exists())
+        self.assertTrue(TeamMembership.objects.filter(team=rival_team, member=member).exists())
+
+    def test_deleting_never_removes_another_clubs_emptied_family(self):
+        # The member is the only one in a rival family: deleting them here must
+        # neither delete them nor that family.
+        member = self.shared_member()
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        self.club_post("member_delete", {}, member.pk)
+
+        self.assertTrue(Family.objects.filter(pk=rival_family.pk).exists())
+        self.assertTrue(FamilyMembership.objects.filter(family=rival_family, member=member).exists())
+
+    def test_deleting_a_member_with_a_login_keeps_the_record(self):
+        user = User.objects.create_user(email="login@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Lou", last_name="Login")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.club_post("member_delete", {}, member.pk)
+
+        self.assertTrue(Member.objects.filter(pk=member.pk, user=user).exists())
+        self.assertFalse(ClubMembership.objects.filter(club=self.club, member=member).exists())
+
+    def test_detaching_from_another_clubs_family_is_not_possible(self):
+        member = self.shared_member()
+        rival_family = Family.objects.create(club=self.rival)
+        FamilyMembership.objects.create(family=rival_family, member=member, role=FamilyMembership.FamilyRole.CHILD)
+
+        response = self.club_post("member_detach_family", {}, member.pk, rival_family.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Family.objects.filter(pk=rival_family.pk).exists())
+
+
+class RegistrationBilledToTests(ShopTestBase):
+    """Staff billing screens show the Member the registration itself resolved
+    (RegistrationBatch.contact_member), never one looked up by typed email, and
+    never drop a registration row."""
+
+    def make_confirmed_batch(self, contact_email="reg-parent@example.com"):
+        product = Product.objects.create(club=self.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=self.season, price=Decimal("80.00"))
+        variant = ProductVariant.objects.create(product=product, name="Standard", price=Decimal("80.00"))
+        entries = [EntryInput(first_name="Kid", last_name="Testerson", date_of_birth=datetime.date(2016, 5, 1), product_variant=variant)]
+        batch = submit_registration(self.club, contact_first_name="Reg", contact_last_name="Parent", contact_email=contact_email, entries=entries)
+        confirm_and_send_invoice(batch, due_in_days=14)
+        batch.refresh_from_db()
+        return batch
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.admin_user)
+
+    def test_an_anonymous_registration_typing_someone_elses_email_is_billed_to_its_own_contact(self):
+        victim_user = User.objects.create_user(email="victim@example.com", password="pw-secret-123")
+        victim = Member.objects.create(user=victim_user, first_name="Vic", last_name="Victim")
+        ClubMembership.objects.create(club=self.club, member=victim, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        batch = self.make_confirmed_batch(contact_email="victim@example.com")
+
+        self.assertNotEqual(batch.contact_member, victim)
+        detail = self.club_get("registration_invoice_detail", batch.pk)
+        self.assertEqual(detail.context["contact"], batch.contact_member)
+        listing = self.club_get("invoice_list")
+        row = next(row for row in listing.context["invoices"] if row["number"] == batch.invoice_number)
+        self.assertEqual(row["billed_to"], batch.contact_member)
+        self.assertNotContains(listing, "Vic Victim")
+
+    def test_a_registration_whose_contact_member_is_gone_is_still_listed(self):
+        batch = self.make_confirmed_batch()
+        RegistrationBatch.objects.filter(pk=batch.pk).update(contact_member=None)
+
+        listing = self.club_get("invoice_list")
+        detail = self.club_get("registration_invoice_detail", batch.pk)
+
+        self.assertContains(listing, batch.invoice_number)
+        self.assertContains(listing, "Reg Parent")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIsNone(detail.context["contact"])
+        self.assertContains(detail, "reg-parent@example.com")
+
+
+class ManagementRenderPdfUrlFetcherTests(TestCase):
+    """management.pdf.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from management.pdf import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("management.pdf.pdf_url_fetcher", return_value=fetcher):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
+
+
+class TeamDetailScopingTests(ManagementTestBase):
+    """Team pages for non-admin staff are limited to the teams they're on the
+    staff of this season; club admins and member admins see every team."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team_a = Team.objects.create(club=cls.club, name="Scoped A", short_name="SA")
+        cls.team_b = Team.objects.create(club=cls.club, name="Scoped B", short_name="SB")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
+        cls.physio_position = Position.objects.create(club=cls.club, name="Physio", short_name="PHY", staff_position=True, management_position=False)
+
+        cls.coach_user = User.objects.create_user(email="scoped-coach@example.com", password="pw-secret-123")
+        cls.coach_member = Member.objects.create(user=cls.coach_user, first_name="Cora", last_name="Coach")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.coach_member, season=cls.season, position=cls.coach_position)
+
+        cls.physio_user = User.objects.create_user(email="scoped-physio@example.com", password="pw-secret-123")
+        cls.physio_member = Member.objects.create(user=cls.physio_user, first_name="Pia", last_name="Physio")
+        StaffAssignment.objects.create(team=cls.team_a, member=cls.physio_member, season=cls.season, position=cls.physio_position)
+
+        cls.member_admin_user = User.objects.create_user(email="scoped-member-admin@example.com", password="pw-secret-123")
+        cls.member_admin_member = Member.objects.create(user=cls.member_admin_user, first_name="Mia", last_name="Memberadmin")
+        ClubMembership.objects.create(club=cls.club, member=cls.member_admin_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=cls.club, member=cls.member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(cls.member_admin_user)
+
+    def test_coach_opens_their_own_team(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+
+    def test_coach_of_team_a_gets_404_on_team_b(self):
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_non_managing_staff_opens_their_own_team_but_not_another(self):
+        self.client.force_login(self.physio_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_a.pk).status_code, 200)
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_last_seasons_coach_gets_404(self):
+        past_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=40))
+        StaffAssignment.objects.create(team=self.team_b, member=self.coach_member, season=past_season, position=self.coach_position)
+        self.client.force_login(self.coach_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 404)
+
+    def test_admin_opens_any_team(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+    def test_member_admin_opens_any_team(self):
+        self.client.force_login(self.member_admin_user)
+
+        self.assertEqual(self.club_get("team_detail", self.team_b.pk).status_code, 200)
+
+
+class DiscountLimitManagementTests(ShopTestBase):
+    """The discount-code form/list carry the validity window, total use cap
+    and once-per-member switch (shop.services.checkout enforces them)."""
+
+    def test_a_shop_manager_can_set_the_limits(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {
+            "name": "Summer sale",
+            "description": "",
+            "code": "summer10",
+            "discount_type": DiscountType.PERCENTAGE,
+            "discount_amount": "10",
+            "is_active": "on",
+            "valid_from": "2026-06-01",
+            "valid_until": "2026-08-31",
+            "max_uses": "50",
+            "once_per_member": "on",
+        }
+
+        self.club_post("discount_create", data)
+
+        discount = Discount.objects.get(club=self.club)
+        self.assertEqual(discount.valid_from, datetime.date(2026, 6, 1))
+        self.assertEqual(discount.valid_until, datetime.date(2026, 8, 31))
+        self.assertEqual(discount.max_uses, 50)
+        self.assertTrue(discount.once_per_member)
+
+    def test_the_window_cannot_end_before_it_starts(self):
+        self.client.force_login(self.make_shop_manager())
+        data = {"name": "Backwards", "description": "", "code": "BACK", "discount_type": DiscountType.FIXED_AMOUNT, "discount_amount": "5", "valid_from": "2026-08-31", "valid_until": "2026-06-01"}
+
+        response = self.club_post("discount_create", data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Discount.objects.exists())
+
+    def test_the_list_shows_uses_not_counting_cancelled_orders(self):
+        from shop.models import AppliedDiscount
+
+        discount = Discount.objects.create(club=self.club, name="Capped", code="CAP", discount_amount=Decimal("5"), max_uses=3)
+        member = Member.objects.create(first_name="Buyer", last_name="One")
+        for status in (Order.FulfillmentStatus.NOT_READY, Order.FulfillmentStatus.CANCELLED):
+            order = Order.objects.create(club=self.club, purchaser=member, total=Decimal("20.00"), fulfillment_status=status)
+            AppliedDiscount.objects.create(order=order, discount=discount, discount_amount=Decimal("5"), amount=Decimal("5"))
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("discount_list")
+
+        [listed] = response.context["discounts"]
+        self.assertEqual(listed.use_count, 1)
+        self.assertContains(response, "1 of 3")

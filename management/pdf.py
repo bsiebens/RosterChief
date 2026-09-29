@@ -11,6 +11,8 @@ real benefit.
 
 from django.template.loader import render_to_string
 
+from rosterchief.pdf import pdf_url_fetcher
+
 #: Referee form defaults, used whenever a club hasn't set its own colours (see
 #: club.models.Club.primary_color/secondary_color) -- picked to match the
 #: app's own daisyUI theme accent/secondary so an unbranded club's form still
@@ -59,13 +61,35 @@ def referee_form_colors(club) -> dict:
     return {"accent_color": accent, "info_card_color": _tint_with_white(tint_source)}
 
 
+def _shade_with_black(hex_color: str, strength: float = 0.8) -> str:
+    """`strength` of `hex_color` mixed into black -- the Python stand-in for
+    management/base.html's `color-mix(in srgb, <secondary> 80%, black)`
+    --tenant-club-dark, for the same reason as _tint_with_white above."""
+    channels = (int(hex_color[index : index + 2], 16) for index in (1, 3, 5))
+    return "#{:02x}{:02x}{:02x}".format(*(round(channel * strength) for channel in channels))
+
+
+def number_list_colors(club) -> dict:
+    """The Numbers page's tile colours (assets/management.css's
+    .number-tile-<state> rules) resolved to plain hex values WeasyPrint can
+    use -- "taken" follows the club's own --tenant-club-dark, as on screen."""
+    return {
+        "taken": _shade_with_black(club.secondary_color) if club.secondary_color else "#b00021",
+        "conflict": "#000000",
+        "pending": "#14b8e8",
+        "previous": "#f0a22e",
+        "reserved": "#7c5cfc",
+        "available": "#ffffff",
+    }
+
+
 def render_pdf(html: str) -> bytes:
     try:
         from weasyprint import HTML
     except (ImportError, OSError) as error:
         raise PDFExportError("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).") from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()
 
 
 def membership_list_pdf(context: dict) -> bytes:
@@ -85,4 +109,9 @@ def event_official_form_pdf(context: dict) -> bytes:
 
 def evaluation_outcomes_pdf(context: dict) -> bytes:
     html = render_to_string("management/evaluation_outcomes_pdf.html", context)
+    return render_pdf(html)
+
+
+def number_list_pdf(context: dict) -> bytes:
+    html = render_to_string("management/number_list_pdf.html", context)
     return render_pdf(html)

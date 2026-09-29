@@ -337,22 +337,56 @@ class TeamsApiTests(ApiTestBase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_a_players_license_comes_from_their_club_membership(self):
+    def test_a_player_entry_does_not_include_a_licence_number(self):
+        # Federation licence numbers are internal membership data, not public roster data.
         alice = Member.objects.create(first_name="Alice", last_name="Ash")
         TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
-        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345")
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345", status=ClubMembership.StatusChoices.ACTIVE)
 
-        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+        response = self.api_get(f"/teams/{self.team.pk}/roster/")
 
-        self.assertEqual(player["license"], "BE-12345")
+        self.assertNotIn("license", response.json()["players"][0]["players"][0])
+        self.assertNotContains(response, "BE-12345")
 
-    def test_a_players_license_is_null_without_a_club_membership(self):
+    def test_a_player_with_an_active_club_membership_is_listed(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_without_a_club_membership_is_still_listed(self):
         alice = Member.objects.create(first_name="Alice", last_name="Ash")
         TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
 
-        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
 
-        self.assertIsNone(player["license"])
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_whose_club_membership_is_pending_or_cancelled_is_left_off(self):
+        # A roster spot can be assigned while the sign-up is still awaiting
+        # approval; the public roster only lists confirmed players.
+        for status in (ClubMembership.StatusChoices.PENDING, ClubMembership.StatusChoices.CANCELLED):
+            with self.subTest(status=status):
+                member = Member.objects.create(first_name=f"Player-{status}", last_name="Ash")
+                TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward)
+                ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=status)
+                cache.clear()
+
+                response = self.api_get(f"/teams/{self.team.pk}/roster/")
+
+                self.assertNotContains(response, f"Player-{status}")
+
+    def test_staff_whose_club_membership_is_pending_is_left_off(self):
+        dana = Member.objects.create(first_name="Dana", last_name="Dean")
+        StaffAssignment.objects.create(team=self.team, member=dana, season=self.season, position=self.coach_position)
+        ClubMembership.objects.create(club=self.club, member=dana, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
+
+        self.assertEqual(staff, [])
 
 
 class GamesApiTests(ApiTestBase):
@@ -564,6 +598,126 @@ class GamesApiTests(ApiTestBase):
         home_team = self.api_get("/games/upcoming/").json()[0]["home_team"]
 
         self.assertIsNone(home_team["logo_url"])
+
+    def make_past_game(self, days_ago=1, **overrides):
+        # A game that meets every "fully completed" condition -- kind GAME, scored,
+        # not live, not cancelled, well past its (auto-defaulted 2h) end.
+        defaults = {"start": timezone.now() - datetime.timedelta(days=days_ago), "score_for": 1, "score_against": 0}
+        defaults.update(overrides)
+        return self.make_game(**defaults)
+
+    def test_past_games_are_listed_as_finished_with_scores(self):
+        self.make_past_game(score_for=4, score_against=3, location=self.home_location)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "finished")
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["home_score"], 4)
+        self.assertEqual(games[0]["away_score"], 3)
+
+    def test_past_games_relabel_scores_for_an_away_game(self):
+        self.make_past_game(score_for=4, score_against=3)
+
+        game = self.api_get("/games/past/").json()[0]
+
+        self.assertEqual(game["home_team"]["name"], "Rivals FC")
+        self.assertEqual(game["home_score"], 3)
+        self.assertEqual(game["away_score"], 4)
+
+    def test_past_games_are_newest_first(self):
+        self.make_past_game(title="Oldest", days_ago=3)
+        newest = self.make_past_game(title="Newest", days_ago=1)
+        middle = self.make_past_game(title="Middle", days_ago=2)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games[:2]], [str(newest.pk), str(middle.pk)])
+
+    def test_past_games_default_count_is_ten(self):
+        for i in range(12):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/").json()), 10)
+
+    def test_past_games_count_is_respected(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=2).json()), 2)
+
+    def test_past_games_count_is_clamped(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=0).json()), 1)
+
+        # Cap is 50, well above the 3 created -- just confirm an oversized
+        # request doesn't error and doesn't somehow exceed what exists.
+        response = self.api_get("/games/past/", count=500)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)
+
+    def test_past_games_exclude_a_game_missing_either_score(self):
+        self.make_past_game(score_for=None, score_against=2)
+        self.make_past_game(score_for=2, score_against=None)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_cancelled_games(self):
+        self.make_past_game(cancelled=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_still_flagged_live(self):
+        self.make_past_game(is_live=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_not_yet_finished(self):
+        # Started 30 minutes ago and already has a score, but the assumed 2h
+        # window means it isn't over yet.
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=30), score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_upcoming_games(self):
+        self.make_game(score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_tournaments_and_other_kinds(self):
+        self.make_past_game(kind=Event.EventKind.TOURNAMENT)
+        self.make_past_game(kind=Event.EventKind.TRAINING)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_previous_seasons_games(self):
+        # self.season started 30 days ago -- a game from before that is last
+        # season's, whether its season is left blank or set explicitly.
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        self.make_past_game(days_ago=60)
+        self.make_past_game(days_ago=90, season=previous_season)
+        current = self.make_past_game(days_ago=5)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games], [str(current.pk)])
+
+    def test_past_games_is_empty_without_a_current_season(self):
+        self.make_past_game()
+        self.season.delete()
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_another_clubs_games(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_opponent = Opponent.objects.create(club=other_club, name="Someone")
+        Event.objects.create(club=other_club, title="Their game", kind=Event.EventKind.GAME, start=timezone.now() - datetime.timedelta(days=1), opponent=other_opponent, score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
 
 
 class TenancyAndCorsTests(ApiTestBase):

@@ -541,3 +541,47 @@ class SchedulerLifecycleTests(TestCase):
         scheduler_module.start()
 
         self.assertIs(scheduler_module._leader_thread, first_thread)
+
+
+class FlagPerUserGrantScopingTests(TestCase):
+    """A per-user (or per-group) waffle grant carries no club, so on a club host
+    it must not switch a feature on -- otherwise it would leak into every club
+    that user belongs to."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth.models import Group
+
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.other = Club.objects.create(name="Rival FC", slug="rival-fc")
+        cls.user = get_user_model().objects.create_user(email="beta@example.com", password="pw-secret-123")
+        cls.group = Group.objects.create(name="beta")
+        cls.flag = get_waffle_flag_model().objects.get_or_create(name="evaluations")[0]
+        cls.flag.clubs.add(cls.club)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def request_for(self, club):
+        request = RequestFactory().get("/")
+        request.club = club
+        request.user = self.user
+        return request
+
+    def test_a_per_user_grant_does_not_enable_the_feature_in_an_unlicensed_club(self):
+        self.flag.users.add(self.user)
+
+        self.assertTrue(flag_is_active(self.request_for(self.club), "evaluations"))
+        self.assertFalse(flag_is_active(self.request_for(self.other), "evaluations"))
+
+    def test_a_per_group_grant_does_not_enable_the_feature_in_an_unlicensed_club(self):
+        self.flag.groups.add(self.group)
+        self.user.groups.add(self.group)
+
+        self.assertFalse(flag_is_active(self.request_for(self.other), "evaluations"))
+
+    def test_a_per_user_grant_still_applies_off_any_club(self):
+        self.flag.users.add(self.user)
+
+        self.assertTrue(flag_is_active(self.request_for(None), "evaluations"))

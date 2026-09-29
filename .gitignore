@@ -134,6 +134,10 @@ celerybeat.pid
 
 # Environments
 .env
+# Any local env variant (.env.production, .env.local, ...). Only the *.example
+# templates are meant to be committed.
+.env.*
+!.env*.example
 # Any per-target deploy config (SSH_HOST/SSH_USER/SSH_KEY_FILE/... -- see deploy/.env.deploy.
 # example), whatever you name the copy -- only the example itself is meant to be committed.
 deploy/.env.*

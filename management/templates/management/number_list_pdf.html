@@ -1,0 +1,121 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same standalone-document convention
+    as membership_list_pdf.html. Every number in the selected pool, one row per
+    holder, with the number cell coloured exactly like its tile on number_list.html
+    (colours resolved by management.pdf.number_list_colors: WeasyPrint can't read
+    management.css's custom properties or color-mix()).
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{% trans "Numbers" %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 18mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {{ pool.name }} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9.5pt; color: #111; line-height: 1.35; }
+            h1 { font-size: 18pt; margin: 0 0 1.5mm; }
+            .muted { color: #6b7280; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 4mm; margin-bottom: 5mm; border-bottom: 1px solid #e5e7eb; }
+            .generated { font-size: 8.5pt; text-align: right; }
+            .legend { margin-bottom: 7mm; font-size: 8pt; color: #4b5563; line-height: 2; }
+            .legend > span { display: inline-block; margin-right: 5mm; white-space: nowrap; }
+            .swatch { display: inline-block; width: 3mm; height: 3mm; border-radius: 0.8mm; vertical-align: -0.5mm; margin-right: 1.5mm; border: 1px solid #ccc; }
+            table { width: 100%; border-collapse: collapse; }
+            thead { display: table-header-group; }
+            {% comment %}One <tbody> per number (see below), so a number and all its holders stay together across a page break and share one divider.{% endcomment %}
+            tbody { page-break-inside: avoid; border-bottom: 1px solid #e5e7eb; }
+            th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #6b7280; border-bottom: 1.5px solid #9ca3af; padding: 0 3mm 2mm 0; }
+            td { padding: 2.2mm 3mm 2.2mm 0; vertical-align: middle; }
+            tr.holder-extra td { border-top: 1px dashed #e5e7eb; }
+            td.number { width: 12mm; padding: 1.6mm 3mm 1.6mm 1.5mm; }
+            .tile { display: block; width: 9mm; padding: 1.2mm 0; text-align: center; font-weight: bold; border-radius: 1.5mm; color: #fff; border: 1px solid transparent; }
+            .status { width: 32mm; color: #4b5563; }
+            .team { width: 22mm; }
+            .birth-year { width: 20mm; }
+            .note { font-style: italic; color: #4b5563; }
+            {% for state, color in colors.items %}
+                .state-{{ state }} { background: {{ color }}; border-color: {{ color }}; }
+            {% endfor %}
+            .tile.state-available { color: #111; border-color: #d1d5db; }
+            .swatch.state-available { border-color: #d1d5db; }
+            tbody.group-conflict td { background: #fdecec; }
+            tbody.group-conflict .status { color: #991b1b; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ club.name }}</h1>
+                <div class="muted">{% trans "Jersey numbers" %} — {{ pool.name }} — {% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</div>
+            </div>
+            <div class="muted generated">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
+            </div>
+        </div>
+
+        <div class="legend">
+            <span><span class="swatch state-available"></span>{% trans "Available" %} <span class="tabular-nums">({{ state_counts.available }})</span></span>
+            <span><span class="swatch state-taken"></span>{% trans "Taken this season" %} <span class="tabular-nums">({{ state_counts.taken }})</span></span>
+            <span><span class="swatch state-conflict"></span>{% trans "Conflict -- assigned to more than one player" %} <span class="tabular-nums">({{ state_counts.conflict }})</span></span>
+            <span><span class="swatch state-pending"></span>{% trans "Pending (requested, not placed)" %} <span class="tabular-nums">({{ state_counts.pending }})</span></span>
+            <span><span class="swatch state-previous"></span>{% trans "Taken last season only" %} <span class="tabular-nums">({{ state_counts.previous }})</span></span>
+            <span><span class="swatch state-reserved"></span>{% trans "Reserved" %} <span class="tabular-nums">({{ state_counts.reserved }})</span></span>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Team" %}</th>
+                    <th>{% trans "Birth year" %}</th>
+                </tr>
+            </thead>
+            {% for tile in tiles %}
+                <tbody class="group-{{ tile.state }}">
+                    {% if tile.people %}
+                        {% for person in tile.people %}
+                            <tr{% if not forloop.first %} class="holder-extra"{% endif %}>
+                                {% if forloop.first %}
+                                    <td class="number" rowspan="{{ tile.people|length }}"><span class="tile state-{{ tile.state }}">{{ tile.number }}</span></td>
+                                    <td class="status" rowspan="{{ tile.people|length }}">
+                                        {% if tile.state == "taken" %}{% trans "Taken this season" %}
+                                        {% elif tile.state == "conflict" %}{% trans "Conflict" %}
+                                        {% elif tile.state == "pending" %}{% trans "Pending" %}
+                                        {% elif tile.state == "previous" %}{% trans "Taken last season only" %}{% endif %}
+                                    </td>
+                                {% endif %}
+                                <td>{{ person.member }}</td>
+                                <td class="team">{{ person.team }}</td>
+                                <td class="birth-year">{{ person.birth_year|default:"—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td class="number"><span class="tile state-{{ tile.state }}">{{ tile.number }}</span></td>
+                            <td class="status">{% if tile.state == "reserved" %}{% trans "Reserved" %}{% else %}{% trans "Available" %}{% endif %}</td>
+                            {% if tile.state == "reserved" %}
+                                <td class="note" colspan="3">
+                                    {{ tile.note|default:"" }}{% if tile.reservation.reserved_by %}{% if tile.note %} — {% endif %}{% blocktrans with user=tile.reservation.reserved_by %}reserved by {{ user }}{% endblocktrans %}{% endif %}
+                                </td>
+                            {% else %}
+                                <td class="muted" colspan="3">—</td>
+                            {% endif %}
+                        </tr>
+                    {% endif %}
+                </tbody>
+            {% endfor %}
+        </table>
+    </body>
+</html>

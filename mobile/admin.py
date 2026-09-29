@@ -13,7 +13,6 @@ class PushSubscriptionAdmin(admin.ModelAdmin):
 
 @admin.register(CalendarFeedToken)
 class CalendarFeedTokenAdmin(admin.ModelAdmin):
-    # Never the token itself -- it's a bearer credential, not something to
-    # surface in a list view even to platform staff.
+    # Only a hash is stored, and even that stays out of the list view.
     list_display = ["user", "created", "modified"]
     search_fields = ["user__email"]

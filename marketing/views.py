@@ -13,6 +13,8 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
+from rosterchief import throttle
+from rosterchief.client_ip import client_ip
 from rosterchief.mail import send_message
 
 from .forms import ContactForm, fresh_timestamp_token
@@ -23,17 +25,32 @@ from .models import ContactRequest
 #: as free text into the notification email/record.
 KNOWN_PLANS = {"club", "large", "website"}
 
+#: Contact-form submissions accepted per client IP.
+CONTACT_IP_RATE = throttle.Rate("marketing:contact:ip", limit=5, window=60 * 60)
+
+SENT_MESSAGE = _("We've sent your message straight to Bernard — you'll hear back within two working days.")
+
 
 def home(request):
     contact_message = None
 
     if request.method == "POST":
         form = ContactForm(request.POST)
-        if form.is_valid():
-            _save_and_notify(request, form)
-            messages.success(request, _("We've sent your message straight to Bernard — you'll hear back within two working days."), extra_tags="contact_sent")
+        # Honeypot (ContactForm.website): answer exactly like a successful
+        # submission, but save and send nothing.
+        if request.POST.get("website"):
+            messages.success(request, SENT_MESSAGE, extra_tags="contact_sent")
             return redirect(reverse("root") + "#contact")
-        status = 400
+        if form.is_valid():
+            if throttle.check_and_record((CONTACT_IP_RATE, client_ip(request) or "unknown")):
+                form.add_error(None, _("Too many messages have been sent from your network recently. Please try again later, or email us directly."))
+                status = 429
+            else:
+                _save_and_notify(request, form)
+                messages.success(request, SENT_MESSAGE, extra_tags="contact_sent")
+                return redirect(reverse("root") + "#contact")
+        else:
+            status = 400
     else:
         plan = request.GET.get("plan", "")
         form = ContactForm(initial={"plan": plan if plan in KNOWN_PLANS else "", "ts": fresh_timestamp_token()})
@@ -57,7 +74,7 @@ def _save_and_notify(request, form: ContactForm) -> None:
         role=data["role"],
         message=data["message"],
         plan_interest=data["plan"],
-        ip=request.META.get("REMOTE_ADDR"),
+        ip=client_ip(request),
         user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
     )
 

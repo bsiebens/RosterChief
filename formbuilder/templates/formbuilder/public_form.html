@@ -27,6 +27,12 @@
             <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>
         {% endfor %}
 
+        {# Honeypot (formbuilder.views.HONEYPOT_FIELD): hidden from people and assistive tech, left for bots to fill in. #}
+        <div class="hidden" aria-hidden="true">
+            <label for="id_honeypot">{% trans "Leave this field empty" %}</label>
+            <input type="text" id="id_honeypot" name="{{ honeypot_field }}" tabindex="-1" autocomplete="off">
+        </div>
+
         <div class="card card-body">
             {% for field in form %}
                 {% form_field field %}

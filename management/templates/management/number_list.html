@@ -12,6 +12,12 @@
 {% block heading %}{% trans "Numbers" %}{% endblock heading %}
 {% block topbar_context %}<span class="text-sm text-muted">{% trans "Jersey numbers across every team sharing a pool." %}</span>{% endblock topbar_context %}
 
+{% block actions %}
+    {% if pool and season %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:number_export_pdf' %}?pool={{ pool.pk }}&amp;season={{ season.pk }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
+    {% endif %}
+{% endblock actions %}
+
 {% block filter_strip %}
     {% if pools %}
         <div class="border-b border-line bg-white px-7 py-3">
@@ -47,12 +53,12 @@
         </div>
     {% else %}
         <div class="mb-4 flex flex-wrap items-center gap-4 text-xs text-muted">
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-available"></span>{% trans "Available" %}</span>
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-taken"></span>{% trans "Taken this season" %}</span>
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-conflict"></span>{% trans "Conflict -- assigned to more than one player" %}</span>
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-pending"></span>{% trans "Pending (requested, not placed)" %}</span>
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-previous"></span>{% trans "Taken last season only" %}</span>
-            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-reserved"></span>{% trans "Reserved" %}</span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-available"></span>{% trans "Available" %} <span class="tabular-nums">({{ state_counts.available }})</span></span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-taken"></span>{% trans "Taken this season" %} <span class="tabular-nums">({{ state_counts.taken }})</span></span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-conflict"></span>{% trans "Conflict -- assigned to more than one player" %} <span class="tabular-nums">({{ state_counts.conflict }})</span></span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-pending"></span>{% trans "Pending (requested, not placed)" %} <span class="tabular-nums">({{ state_counts.pending }})</span></span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-previous"></span>{% trans "Taken last season only" %} <span class="tabular-nums">({{ state_counts.previous }})</span></span>
+            <span class="inline-flex items-center gap-1.5"><span class="number-tile-swatch number-tile-reserved"></span>{% trans "Reserved" %} <span class="tabular-nums">({{ state_counts.reserved }})</span></span>
         </div>
 
         <div class="number-grid">

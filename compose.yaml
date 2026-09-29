@@ -5,11 +5,11 @@
 #
 # `web` carries both `image:` and `build: .`: normal deploys pull the prebuilt image GitHub
 # Actions already pushed (.github/workflows/build-and-push.yml) rather than building here --
-# see DEPLOYMENT.md's "Sizing the server" for why building on a small box is the thing that
-# OOMs it. `build: .` stays so `docker compose build` still works if you ever need to build
-# locally. IMAGE_TAG picks the version: `:<branch>` (the default, "latest for this branch")
+# building the image on a small box runs it out of memory. `build: .` stays so
+# `docker compose build` still works if you ever need to build locally. IMAGE_TAG picks the version: `:<branch>` (the default, "latest for this branch")
 # or `:<branch>-<short-sha>` to pin/roll back to an exact build -- see DEPLOYMENT.md's
-# "Deploying a specific version".
+# "Deploying a specific version". Each deploy writes the tag it deployed to .env
+# (deploy/record-image-tag.sh), so by-hand `docker compose run` one-offs use the same image.
 #
 # No `worker`/`beat`, and no separate scheduler/poller container either -- every scheduled
 # platform job (the once-a-minute live-score poll included) runs from an in-process
@@ -43,6 +43,18 @@ services:
       # Read-only: Caddy serves club logos straight off disk instead of round-tripping every
       # image request through a gunicorn worker. Same volume `web` writes uploads into.
       - media_data:/srv/media:ro
+    # Hardening: read-only root (certificates and autosaved config live on the caddy_data /
+    # caddy_config volumes), a tmpfs /tmp, and of all Linux capabilities only
+    # NET_BIND_SERVICE, for :80/:443.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     depends_on:
       - web
 
@@ -60,6 +72,21 @@ services:
       # Deliberately NOT mounted into `caddy` below, unlike media_data: nothing should be able
       # to serve this except the authenticated Django view that reads it.
       - private_media_data:/app/private_media
+    # Hardening: the root filesystem is read-only (the image's code is root-owned and never
+    # written at runtime anyway); the only writable paths are the two upload volumes above and
+    # a tmpfs /tmp -- HOME and XDG_CACHE_HOME point there (see Dockerfile), so it takes
+    # gunicorn's control socket and worker heartbeats, fontconfig's cache for WeasyPrint, and
+    # large uploads spilled to disk mid-request (the 256m cap is above the 64MB request limit
+    # in the Caddyfile, with room for a few at once; tmpfs only uses RAM for what's in it).
+    # No Linux capabilities at all -- the app runs as an unprivileged user and binds :8000 --
+    # and no-new-privileges stops any setuid binary from raising them again.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
@@ -73,12 +100,17 @@ services:
       start_period: 20s
 
   db:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-rosterchief}
       POSTGRES_USER: ${POSTGRES_USER:-rosterchief}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a database password}
+      # POSTGRES_USER is the superuser: only the first-boot init and deploy/backup.sh use it.
+      # The app connects as APP_DB_USER (DJANGO_DATABASE_URL in .env.production), created on a
+      # fresh volume by deploy/postgres/10-app-role.sh -- see DEPLOYMENT.md's "Database roles".
+      APP_DB_USER: ${APP_DB_USER:-rosterchief_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
     # shared_buffers/max_connections default to 128MB / 100 — sized for a much bigger database
     # than this app's (DEPLOYMENT.md: ~0.2GB after 5 years). 20 connections is comfortably above
     # 2 gunicorn workers x 4 threads plus the odd `manage.py` one-off; trimmed both for the box,
@@ -86,6 +118,22 @@ services:
     command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20"]
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/10-app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    # Hardening: no-new-privileges plus only the capabilities the image's entrypoint uses, as
+    # root, to check/fix ownership and mode of the data and socket directories (CHOWN, FOWNER,
+    # DAC_OVERRIDE -- the data dir is 0700 postgres, so root can't even look inside without the
+    # last one) and then drop to the postgres user via gosu (SETUID, SETGID). Once it has
+    # dropped, postgres itself runs with no effective capabilities at all.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rosterchief}"]
       interval: 10s
@@ -93,7 +141,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     # Cache only (waffle flags, Maintenance -- see rosterchief/settings.py) plus
     # features/scheduler.py's leader-election lease -- no Celery broker/result-backend duty,
@@ -103,6 +151,15 @@ services:
     # are both exactly right for that -- nothing stored here needs to survive an eviction or
     # a restart.
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    # Hardening: the entrypoint only needs SETUID/SETGID to drop from root to the redis user
+    # (setpriv); redis-server itself then runs with no capabilities.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
 
 volumes:
   pgdata:

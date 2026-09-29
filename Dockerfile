@@ -1,9 +1,15 @@
 # syntax=docker/dockerfile:1
 
+# Every base image is pinned by version tag AND multi-arch index digest (the digest of the
+# manifest list, not of one platform's image -- so the same line builds on amd64 and arm64).
+# The tag is for humans; the digest is what's actually pulled, so a re-pushed tag can't swap
+# the base under a rebuild. To bump: `docker buildx imagetools inspect <image>:<new-tag>` and
+# copy the top-level "Digest:" line.
+
 # --- 1. the stylesheet -------------------------------------------------------
 # Tailwind is a build-time concern: the CSS it emits is committed, but building it here means
 # the image never depends on someone having remembered to run `npm run build`.
-FROM node:22-slim AS css
+FROM node:22.23.3-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS css
 
 WORKDIR /build
 COPY package.json package-lock.json ./
@@ -33,12 +39,12 @@ RUN npm run build
 # fork), so uv shells out to git to fetch it. python:*-slim has no git, and installing it in
 # the runtime image would leave a build-time tool — plus its dependency tree — in production
 # for the sake of one package that is already vendored into the venv by then.
-FROM python:3.14-slim AS venv
+FROM python:3.14.7-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS venv
 
 RUN apt-get update && apt-get install --no-install-recommends -y git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424 /uv /usr/local/bin/uv
 
 # Bytecode precompilation back on (see git history for the saga): phonenumbers'
 # largest generated geodata/data*.py files (~900KB of literal dict data each)
@@ -61,7 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # --- 3. the runtime ----------------------------------------------------------
-FROM python:3.14-slim AS app
+FROM python:3.14.7-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS app
 
 # WeasyPrint binds to these at import: no pango, no invoices. This is also why building the
 # PDF path in a container is easier than on a Mac — apt has what Homebrew would have to.
@@ -82,10 +88,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
-    # gunicorn 26's control server puts a socket in $HOME. The app user has no home dir, so
-    # without this it logs "Permission denied: /home/rosterchief" on every boot. /app is
-    # already the workdir and owned by the app user, so point HOME there.
-    HOME="/app"
+    # /app is root-owned and read-only to the app user (see the useradd step below), and
+    # compose runs the whole root filesystem read-only with a tmpfs on /tmp. Everything that
+    # wants a per-user writable spot therefore goes under /tmp: gunicorn 26's control socket
+    # ($HOME/.gunicorn/), fontconfig's cache for WeasyPrint ($XDG_CACHE_HOME/fontconfig), and
+    # anything else that reaches for ~. Worker heartbeat files and large-upload spill files
+    # already default to /tmp via tempfile.
+    HOME="/tmp" \
+    XDG_CACHE_HOME="/tmp/.cache"
 
 WORKDIR /app
 
@@ -112,13 +122,22 @@ RUN DJANGO_SECRET_KEY=build-only-not-a-secret \
 # falls back to the English msgid.
 RUN DJANGO_SECRET_KEY=build-only-not-a-secret python manage.py compilemessages
 
-# mkdir before chown, and before the volume ever mounts: media_data has nothing to copy from
-# at /app/media otherwise, so Docker creates the mount point itself, owned by root — and the
-# app runs as rosterchief, not root. Existing image content (even an empty, correctly-owned
-# dir) is what a named volume copies its initial ownership from on first use.
-RUN useradd --system --uid 1000 rosterchief \
+# Byte-compile the project's own code now, while the tree is still writable: the runtime user
+# can't write __pycache__ into a root-owned /app (and PYTHONDONTWRITEBYTECODE says not to try),
+# so without this every container start would recompile every module in memory. The venv was
+# already compiled in its own stage (UV_COMPILE_BYTECODE).
+RUN python -m compileall -q -j 0 -x '/\.venv/' /app
+
+# The code is root's; the app user can read it but not change it -- so a compromised worker
+# can't rewrite a template, a .py file or a collected static asset to persist itself. The only
+# directories it owns are the two upload volumes' mount points. mkdir before chown, and before
+# the volume ever mounts: media_data has nothing to copy from at /app/media otherwise, so
+# Docker creates the mount point itself, owned by root. Existing image content (even an empty,
+# correctly-owned dir) is what a named volume copies its initial ownership from on first use.
+# Runtime scratch space is /tmp (see HOME/XDG_CACHE_HOME above), a tmpfs under compose.
+RUN useradd --system --uid 1000 --no-create-home --home-dir /tmp rosterchief \
     && mkdir -p /app/media /app/private_media \
-    && chown -R rosterchief /app
+    && chown rosterchief /app/media /app/private_media
 USER rosterchief
 
 EXPOSE 8000

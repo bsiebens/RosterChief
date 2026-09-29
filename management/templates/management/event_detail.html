@@ -132,7 +132,10 @@
                     </div>
                     <div>
                         <div class="text-sm text-muted">{% trans "Competition" %}</div>
-                        <div class="text-sm text-ink">{{ event.competition|default:"—" }}</div>
+                        <div class="text-sm text-ink">
+                            {{ event.competition|default:"—" }}
+                            {% if event.competition_label %}<span class="text-muted">&middot; {{ event.competition_label }}</span>{% endif %}
+                        </div>
                     </div>
                     <div>
                         <div class="text-sm text-muted">{% trans "External game ID" %}</div>

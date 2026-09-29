@@ -122,7 +122,7 @@
                             <span class="badge badge-warning">{{ forms_to_complete|length }}</span>
                         </div>
                         {% for row in forms_to_complete %}
-                            <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3 last:border-b-0" href="{% url "mobile:form_fill" row.send.pk %}">
+                            <a class="flex items-center gap-3.5 border-b border-rule px-4.5 py-3 last:border-b-0" href="{% url "mobile:form_fill" row.send.pk %}?for={{ row.member.pk }}">
                                 <div class="min-w-0 flex-1">
                                     <div class="text-sm font-semibold text-ink">{{ row.send.form.title }}</div>
                                     <div class="text-xs text-muted">{{ row.member.first_name }}{% if row.send.closes_at %} &middot; {% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}{% endif %}</div>

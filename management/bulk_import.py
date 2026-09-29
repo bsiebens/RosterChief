@@ -20,6 +20,10 @@ from members.services.family import families_of_club
 
 from .forms import MemberForm
 
+#: More non-blank data rows than this and the whole file is refused -- well above
+#: any real club's membership, low enough to keep one request's parsing bounded.
+MAX_IMPORT_ROWS = 2000
+
 TEMPLATE_COLUMNS = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "license", "status", "fee_status", "family_group", "family_role", "membership_kind"]
 REQUIRED_HEADER_COLUMNS = {"first_name", "last_name"}
 
@@ -78,25 +82,32 @@ def read_member_import_workbook(file):
     deal with that -- everything downstream, including the session, only ever
     sees plain strings.
     """
-    workbook = openpyxl.load_workbook(file, data_only=True)
-    sheet = workbook.active
+    # read_only streams the sheet instead of building every cell in memory up front.
+    workbook = openpyxl.load_workbook(file, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        row_iter = sheet.iter_rows(values_only=True)
 
-    header = [str(cell.value).strip() if cell.value is not None else "" for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-    if not REQUIRED_HEADER_COLUMNS.issubset(header):
-        missing = REQUIRED_HEADER_COLUMNS - set(header)
-        raise ValueError(_("This doesn't look like the template — missing column(s): %(columns)s.") % {"columns": ", ".join(sorted(missing))})
+        header = [str(value).strip() if value is not None else "" for value in next(row_iter, ())]
+        if not REQUIRED_HEADER_COLUMNS.issubset(header):
+            missing = REQUIRED_HEADER_COLUMNS - set(header)
+            raise ValueError(_("This doesn't look like the template — missing column(s): %(columns)s.") % {"columns": ", ".join(sorted(missing))})
 
-    rows = []
-    for excel_row in sheet.iter_rows(min_row=2):
-        values = {}
-        for column_name, cell in zip(header, excel_row, strict=False):
-            if column_name not in TEMPLATE_COLUMNS:
-                continue
-            values[column_name] = _cell_to_str(cell.value)
+        rows = []
+        for excel_row in row_iter:
+            values = {}
+            for column_name, value in zip(header, excel_row, strict=False):
+                if column_name not in TEMPLATE_COLUMNS:
+                    continue
+                values[column_name] = _cell_to_str(value)
 
-        if not any(values.values()):
-            continue  # a fully blank row (trailing spreadsheet padding) isn't a row to import
-        rows.append(values)
+            if not any(values.values()):
+                continue  # a fully blank row (trailing spreadsheet padding) isn't a row to import
+            rows.append(values)
+            if len(rows) > MAX_IMPORT_ROWS:
+                raise ValueError(_("This file has more than %(count)d members. Split it into smaller files and import them one by one.") % {"count": MAX_IMPORT_ROWS})
+    finally:
+        workbook.close()
 
     return rows
 
@@ -113,10 +124,14 @@ def _cell_to_str(value):
     return str(value).strip()
 
 
-def parse_member_import_rows(rows, club):
+def parse_member_import_rows(rows, club, *, can_set_status_and_fee=False):
     """list[dict] (as returned by read_member_import_workbook) -> one result per
     row: {line_number, raw, member, membership_kwargs, errors}. `member` is an
-    unsaved Member instance (ready to .save()) when the row is valid, else None."""
+    unsaved Member instance (ready to .save()) when the row is valid, else None.
+
+    The status and fee_status columns are only honoured when
+    ``can_set_status_and_fee`` (a club ADMIN importing); otherwise they are ignored
+    and every row gets the defaults, same as leaving them blank."""
     results = []
     seen_emails = set()
 
@@ -141,6 +156,8 @@ def parse_member_import_rows(rows, club):
             if already_in_club:
                 errors.append(_("Already a member of this club."))
 
+        if not can_set_status_and_fee:
+            raw = {**raw, "status": "", "fee_status": ""}
         membership_kwargs, status_fee_errors = _parse_membership_fields(raw)
         errors.extend(status_fee_errors)
 

@@ -3,13 +3,14 @@ from decimal import Decimal
 from unittest import mock
 
 from django.core import mail
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import ClubMembership, MemberRequirementStatus, OnboardingRequirement, Season
+from club.models import ClubMembership, ClubRole, MemberRequirementStatus, OnboardingRequirement, Season
 from club.services.fees import effective_fee_amount, record_payment, remaining_balance
 from members.models import Family, FamilyMembership, Member
 from rosterchief.test_support import make_club
@@ -312,13 +313,18 @@ class SubmitRegistrationTests(TestCase):
         # Playing on a second team, on top of the first (already ACTIVE and
         # PAID) registration -- not a duplicate ClubMembership (unique per
         # club/member/season), a second request against the same one.
+        # existing_member is only ever honoured for a signed-in submitter
+        # (mobile re-registration, scoped to their own managed people).
         entries = [EntryInput(existing_member=existing_child, product_variant=self.u10, requested_team=second_team)]
-        submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)
+        submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries, submitted_by_user=self.make_parent_user())
 
         self.assertEqual(ClubMembership.objects.filter(club=self.club, member=existing_child, season=self.season).count(), 1)
         membership = ClubMembership.objects.get(club=self.club, member=existing_child, season=self.season)
         self.assertEqual(membership.fee_amount, Decimal("160.00"))  # 80 (first) + 80 (second)
-        self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)  # back in the queue -- there's a new, unplaced request
+        # Stays ACTIVE -- a new request never demotes an already-approved
+        # membership; the now-unpaid balance is what puts it back in front
+        # of staff on the Sign-up page.
+        self.assertEqual(membership.status, ClubMembership.StatusChoices.ACTIVE)
         self.assertEqual(membership.fee_status, ClubMembership.FeeStatus.PARTIALLY_PAID)  # 80 paid against a now-160 total
         self.assertEqual(RegistrationDetails.objects.filter(membership=membership).count(), 2)
         self.assertEqual({details.requested_team for details in RegistrationDetails.objects.filter(membership=membership)}, {self.team, second_team})
@@ -355,27 +361,91 @@ class SubmitRegistrationTests(TestCase):
         self.assertEqual(membership.early_payment_deadline, deadline)
         self.assertEqual(membership.early_payment_discount, Decimal("10.00"))
 
+    def make_parent_user(self, email="pat-login@example.com"):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        Member.objects.create(user=user, first_name="Pat", last_name="Parent")
+        return user
+
     def test_an_existing_member_is_reused_not_duplicated(self):
         existing_child = Member.objects.create(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
         entries = [EntryInput(existing_member=existing_child, product_variant=self.u10)]
 
-        submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)
+        submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries, submitted_by_user=self.make_parent_user())
 
         self.assertEqual(Member.objects.filter(first_name="Timmy").count(), 1)
         membership = ClubMembership.objects.get(member=existing_child, season=self.season)
         self.assertEqual(membership.status, ClubMembership.StatusChoices.PENDING)
 
-    def test_a_returning_contact_is_matched_by_email_not_forked_into_a_new_family(self):
+    def test_an_anonymous_contact_is_never_matched_to_an_existing_member_by_email(self):
+        # The typed email is unverified -- an anonymous submission always gets
+        # a fresh contact Member (and family); staff links it on the Sign-up
+        # page if it really is the same person (signup_linking.possible_duplicates).
         parent_user = User.objects.create_user(email="pat@example.com", password="pw-secret-123")
         parent = Member.objects.create(user=parent_user, first_name="Pat", last_name="Parent")
-        FamilyMembership.objects.create(family=Family.objects.create(club=self.club), member=parent, role=FamilyMembership.FamilyRole.PARENT)
+        existing_family = Family.objects.create(club=self.club)
+        FamilyMembership.objects.create(family=existing_family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         entries = [EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.u10)]
 
         submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)
 
-        self.assertEqual(Member.objects.filter(first_name="Pat", last_name="Parent").count(), 1)
+        self.assertEqual(Member.objects.filter(first_name="Pat", last_name="Parent").count(), 2)
         child = Member.objects.get(first_name="Timmy")
-        self.assertEqual(child.family_memberships.get().family, parent.family_memberships.get().family)
+        self.assertNotEqual(child.family_memberships.get().family, existing_family)
+        self.assertFalse(parent.member_of.exists())
+
+    def test_an_anonymous_this_is_me_entry_never_binds_to_an_existing_member(self):
+        victim_user = User.objects.create_user(email="kim@example.com", password="pw-secret-123")
+        victim = Member.objects.create(user=victim_user, first_name="Kim", last_name="Known")
+        entries = [EntryInput(first_name="Kim", last_name="Known", product_variant=self.u10, is_contact=True)]
+
+        batch = submit_registration(self.club, contact_first_name="Kim", contact_last_name="Known", contact_email="KIM@example.com", entries=entries)
+
+        details = RegistrationDetails.objects.get(batch=batch)
+        self.assertNotEqual(details.membership.member, victim)
+        self.assertIsNone(details.membership.member.user)
+        self.assertEqual(details.membership.member.email, "kim@example.com")
+        self.assertFalse(ClubMembership.objects.filter(member=victim).exists())
+        self.assertFalse(victim.family_memberships.exists())
+
+    def test_an_anonymous_submission_never_attaches_to_an_existing_login_without_a_member(self):
+        user = User.objects.create_user(email="kim@example.com", password="pw-secret-123")
+        entries = [EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.u10)]
+
+        submit_registration(self.club, contact_first_name="Kim", contact_last_name="Known", contact_email="kim@example.com", entries=entries)
+
+        self.assertFalse(Member.objects.filter(user=user).exists())
+        self.assertTrue(Member.objects.filter(first_name="Kim", last_name="Known", user=None, email="kim@example.com").exists())
+
+    def test_an_anonymous_submission_cannot_name_an_existing_member(self):
+        existing = Member.objects.create(first_name="Timmy", last_name="Tester")
+        entries = [EntryInput(existing_member=existing, product_variant=self.u10)]
+
+        with self.assertRaises(RegistrationError):
+            submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries)
+
+        self.assertFalse(ClubMembership.objects.filter(member=existing).exists())
+
+    def test_an_authenticated_this_is_me_entry_links_to_the_users_own_member(self):
+        user = User.objects.create_user(email="pat@example.com", password="pw-secret-123")
+        own = Member.objects.create(user=user, first_name="Pat", last_name="Parent")
+        entries = [EntryInput(first_name="Pat", last_name="Parent", product_variant=self.u10, is_contact=True)]
+
+        batch = submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=entries, submitted_by_user=user)
+
+        self.assertEqual(RegistrationDetails.objects.get(batch=batch).membership.member, own)
+        self.assertEqual(Member.objects.filter(first_name="Pat", last_name="Parent").count(), 1)
+
+    def test_an_authenticated_submitter_without_a_member_never_binds_to_someone_elses_by_email(self):
+        user = User.objects.create_user(email="new-login@example.com", password="pw-secret-123")
+        other_user = User.objects.create_user(email="kim@example.com", password="pw-secret-123")
+        other = Member.objects.create(user=other_user, first_name="Kim", last_name="Known")
+        entries = [EntryInput(first_name="Kim", last_name="Known", product_variant=self.u10, is_contact=True)]
+
+        batch = submit_registration(self.club, contact_first_name="Kim", contact_last_name="Known", contact_email="kim@example.com", entries=entries, submitted_by_user=user)
+
+        member = RegistrationDetails.objects.get(batch=batch).membership.member
+        self.assertNotEqual(member, other)
+        self.assertEqual(member.user, user)
 
     def test_an_authenticated_submitter_is_matched_by_login_not_email(self):
         user = User.objects.create_user(email="different-login-email@example.com", password="pw-secret-123")
@@ -473,6 +543,12 @@ class RegistrationViewTests(TestCase):
         cls.product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("100.00"))
         cls.u10 = ProductVariant.objects.create(product=cls.product, name="U10", price=Decimal("80.00"))
         cls.team = Team.objects.create(club=cls.club, name="U10 Boys", short_name="U10B")
+
+    def setUp(self):
+        # Submission throttling (registration.views) counts in the process-wide
+        # cache; start every test from an empty count.
+        cache.clear()
+        self.addCleanup(cache.clear)
 
     def _url(self):
         return reverse("registration:register")
@@ -714,6 +790,99 @@ class RegistrationViewTests(TestCase):
         status_path = reverse("registration:status", kwargs={"token": batch.status_token})
         self.assertIn(status_path, sent.body)
 
+    def submit_data(self, **contact_overrides):
+        return self.contact_data(**contact_overrides) | self.formset_management() | self.entry_data() | {"action": "submit"}
+
+    def test_submissions_from_one_ip_are_rate_limited(self):
+        from .views import REGISTRATION_IP_RATE
+
+        for index in range(REGISTRATION_IP_RATE.limit):
+            response = self.client.post(self._url(), self.submit_data(contact_email=f"parent{index}@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.20")
+            self.assertEqual(response.status_code, 302)
+        mail.outbox.clear()
+
+        response = self.client.post(self._url(), self.submit_data(contact_email="another@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.20")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertContains(response, "Too many registrations", status_code=429)
+        self.assertEqual(RegistrationBatch.objects.count(), REGISTRATION_IP_RATE.limit)
+        self.assertFalse(RegistrationBatch.objects.filter(contact_email="another@example.com").exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+        # A different address is unaffected.
+        response = self.client.post(self._url(), self.submit_data(contact_email="elsewhere@example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="198.51.100.21")
+        self.assertEqual(response.status_code, 302)
+
+    def test_submissions_for_one_contact_email_are_rate_limited(self):
+        from .views import REGISTRATION_EMAIL_RATE
+
+        for index in range(REGISTRATION_EMAIL_RATE.limit):
+            response = self.client.post(self._url(), self.submit_data(), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR=f"198.51.100.{30 + index}")
+            self.assertEqual(response.status_code, 302)
+        batches = RegistrationBatch.objects.count()
+        mail.outbox.clear()
+
+        # Different IP, same address in a different case.
+        response = self.client.post(self._url(), self.submit_data(contact_email="PAT@Example.com"), HTTP_HOST="ajax-united.rosterchief.app", REMOTE_ADDR="203.0.113.99")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(RegistrationBatch.objects.count(), batches)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_calculating_the_price_is_not_rate_limited(self):
+        from .views import REGISTRATION_IP_RATE
+
+        data = self.contact_data() | self.formset_management() | self.entry_data() | {"action": "preview"}
+        for _index in range(REGISTRATION_IP_RATE.limit + 2):
+            response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(self._url(), self.submit_data(), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_honeypot_field_is_rendered_hidden(self):
+        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertContains(response, 'name="website"')
+        self.assertContains(response, 'tabindex="-1"')
+
+    def test_a_filled_honeypot_pretends_success_but_creates_nothing(self):
+        data = self.submit_data() | {"website": "https://spam.example"}
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertFalse(Member.objects.filter(first_name="Timmy").exists())
+        self.assertFalse(ClubMembership.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_more_than_the_maximum_number_of_entries_is_rejected(self):
+        from .forms import MAX_REGISTRATION_ENTRIES
+
+        data = self.contact_data() | self.formset_management(MAX_REGISTRATION_ENTRIES + 1) | {"action": "submit"}
+        for index in range(MAX_REGISTRATION_ENTRIES + 1):
+            data |= self.entry_data(index, first_name=f"Kid{index}")
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "at most 10")
+        self.assertFalse(RegistrationBatch.objects.exists())
+        self.assertFalse(Member.objects.filter(first_name__startswith="Kid").exists())
+
+    def test_the_maximum_number_of_entries_is_accepted(self):
+        from .forms import MAX_REGISTRATION_ENTRIES
+
+        data = self.contact_data() | self.formset_management(MAX_REGISTRATION_ENTRIES) | {"action": "submit"}
+        for index in range(MAX_REGISTRATION_ENTRIES):
+            data |= self.entry_data(index, first_name=f"Kid{index}")
+
+        response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Member.objects.filter(first_name__startswith="Kid").count(), MAX_REGISTRATION_ENTRIES)
+
 
 class RegistrationJerseyNumberTests(RegistrationViewTests):
     """The optional jersey-number step (RegistrationEntryRowForm.
@@ -877,9 +1046,11 @@ class RegistrationStatusViewTests(TestCase):
     def setUpTestData(cls):
         cls.club = make_club()
         cls.season = make_season(cls.club)
+        # Batch first: a membership this batch created is always newer than
+        # the batch itself (see RegistrationDetails.created_membership).
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
         cls.child = Member.objects.create(first_name="Timmy", last_name="Tester", date_of_birth=datetime.date(2016, 5, 1))
         cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("80.00"))
-        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
         RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER, product_variant=None, price=Decimal("80.00"))
         cls.requirement = OnboardingRequirement.objects.create(club=cls.club, name="Medical certificate", requires_document=True)
 
@@ -921,6 +1092,56 @@ class RegistrationStatusViewTests(TestCase):
         self.assertTrue(status.is_complete)
         self.assertIsNone(status.completed_by)
         self.assertTrue(status.document.name)
+
+    def test_an_oversized_document_is_refused(self):
+        from rosterchief.uploads import MAX_DOCUMENT_UPLOAD_BYTES
+
+        upload = SimpleUploadedFile("cert.pdf", b"0" * (MAX_DOCUMENT_UPLOAD_BYTES + 1), content_type="application/pdf")
+
+        response = self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "too large")
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=self.membership, requirement=self.requirement, is_complete=True).exists())
+
+    def test_a_document_of_a_disallowed_type_is_refused(self):
+        upload = SimpleUploadedFile("page.html", b"<script>alert(1)</script>", content_type="text/html")
+
+        response = self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+
+        self.assertContains(response, "files are not accepted")
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=self.membership, requirement=self.requirement, is_complete=True).exists())
+
+    def test_a_phone_photo_is_accepted(self):
+        upload = SimpleUploadedFile("IMG_0001.HEIC", b"heic-bytes", content_type="image/heic")
+
+        self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.requirement).is_complete)
+
+    def test_uploading_for_a_membership_that_predates_the_batch_is_refused(self):
+        # A membership this batch only added a request onto (it already
+        # existed) isn't the batch's to manage from an unauthenticated link.
+        known = Member.objects.create(first_name="Kim", last_name="Known")
+        existing = ClubMembership.objects.create(club=self.club, member=known, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubMembership.objects.filter(pk=existing.pk).update(created=self.batch.created - datetime.timedelta(days=30))
+        RegistrationDetails.objects.create(membership=existing, batch=self.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+        upload = SimpleUploadedFile("cert.pdf", b"file-bytes", content_type="application/pdf")
+
+        response = self.client.post(self._url(), {"membership": str(existing.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(MemberRequirementStatus.objects.filter(membership=existing).exists())
+
+    def test_uploading_over_a_staff_verified_document_is_refused(self):
+        staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123")
+        MemberRequirementStatus.objects.create(membership=self.membership, requirement=self.requirement, is_complete=True, completed_by=staff, completed_at=timezone.now(), document="onboarding/original.pdf")
+        upload = SimpleUploadedFile("cert.pdf", b"file-bytes", content_type="application/pdf")
+
+        self.client.post(self._url(), {"membership": str(self.membership.pk), "requirement": str(self.requirement.pk), "document": upload}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        status = MemberRequirementStatus.objects.get(membership=self.membership, requirement=self.requirement)
+        self.assertEqual(status.completed_by, staff)
+        self.assertEqual(status.document.name, "onboarding/original.pdf")
 
     def test_a_membership_outside_this_batch_cannot_be_targeted(self):
         other_child = Member.objects.create(first_name="Alex", last_name="Outsider")
@@ -1065,9 +1286,9 @@ class RegistrationCancelViewTests(TestCase):
     def setUpTestData(cls):
         cls.club = make_club()
         cls.season = make_season(cls.club)
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
         cls.child = Member.objects.create(first_name="Timmy", last_name="Tester")
         cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING)
-        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
         RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
 
     def _url(self, membership=None):
@@ -1101,6 +1322,42 @@ class RegistrationCancelViewTests(TestCase):
         response = self.client.post(reverse("registration:cancel", kwargs={"token": "not-a-real-token", "membership_pk": self.membership.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_cancelling_a_membership_that_predates_the_batch_is_refused(self):
+        known = Member.objects.create(first_name="Kim", last_name="Known")
+        existing = ClubMembership.objects.create(club=self.club, member=known, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("80.00"))
+        ClubMembership.objects.filter(pk=existing.pk).update(created=self.batch.created - datetime.timedelta(days=30))
+        RegistrationDetails.objects.create(membership=existing, batch=self.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+        response = self.client.post(self._url(membership=existing), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Member.objects.filter(pk=known.pk).exists())
+        existing.refresh_from_db()
+        self.assertEqual(existing.status, ClubMembership.StatusChoices.ACTIVE)
+
+    def test_cancelling_never_deletes_a_member_with_a_login_or_another_club(self):
+        other_club = make_club(name="Rival FC", slug="rival-fc")
+        other_season = make_season(other_club)
+        user = User.objects.create_user(email="kim@example.com", password="pw-secret-123")
+        known = Member.objects.create(user=user, first_name="Kim", last_name="Known")
+        other_membership = ClubMembership.objects.create(club=other_club, member=known, season=other_season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=other_club, member=known).update(role=ClubRole.Roles.ADMIN)
+        membership = ClubMembership.objects.create(club=self.club, member=known, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+        RegistrationDetails.objects.create(membership=membership, batch=self.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+        self.client.post(self._url(membership=membership), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertTrue(Member.objects.filter(pk=known.pk, user=user).exists())
+        self.assertTrue(ClubMembership.objects.filter(pk=other_membership.pk).exists())
+        self.assertTrue(ClubRole.objects.filter(club=other_club, member=known, role=ClubRole.Roles.ADMIN).exists())
+
+    def test_the_status_page_hides_cancel_for_a_membership_that_predates_the_batch(self):
+        ClubMembership.objects.filter(pk=self.membership.pk).update(created=self.batch.created - datetime.timedelta(days=30))
+
+        response = self.client.get(reverse("registration:status", kwargs={"token": self.batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotContains(response, "Cancel registration")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -1258,3 +1515,205 @@ class RegistrationInvoiceViewTests(TestCase):
         with mock.patch("registration.services.invoicing.render_pdf", side_effect=lambda html: html.encode()):
             second = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
         self.assertIn("BE00 0000 0000 0000", second.content.decode())
+
+
+class RegistrationContactMemberTests(TestCase):
+    """RegistrationBatch.contact_member records the Member the submission
+    itself resolved -- what staff billing screens show as "billed to"."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        product = Product.objects.create(club=cls.club, name="Player Registration", product_type=Product.ProductType.MEMBERSHIP, season=cls.season, price=Decimal("80.00"))
+        cls.variant = ProductVariant.objects.create(product=product, name="U10", price=Decimal("80.00"))
+
+    def entries(self):
+        return [EntryInput(first_name="Timmy", last_name="Tester", product_variant=self.variant)]
+
+    def test_an_anonymous_submission_records_its_own_fresh_contact(self):
+        existing = Member.objects.create(user=User.objects.create_user(email="pat@example.com", password="x"), first_name="Real", last_name="Pat")
+
+        batch = submit_registration(self.club, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com", entries=self.entries())
+
+        self.assertIsNotNone(batch.contact_member)
+        self.assertNotEqual(batch.contact_member, existing)
+        self.assertEqual(batch.contact_member.first_name, "Pat")
+
+    def test_a_signed_in_submission_records_the_submitters_member(self):
+        user = User.objects.create_user(email="signed.in@example.com", password="x")
+        member = Member.objects.create(user=user, first_name="Signed", last_name="In")
+
+        batch = submit_registration(self.club, contact_first_name="Signed", contact_last_name="In", contact_email="typed@example.com", entries=self.entries(), submitted_by_user=user)
+
+        self.assertEqual(batch.contact_member, member)
+
+
+class BackfillContactMemberMigrationTests(TestCase):
+    """registration.migrations.0010_backfill_registrationbatch_contact_member,
+    run directly against the live app registry (data-only)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+
+    def batch(self, **kwargs):
+        kwargs.setdefault("contact_email", "nobody@example.com")
+        return RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Reg", contact_last_name="Parent", **kwargs)
+
+    def run_migration(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        import_module("registration.migrations.0010_backfill_registrationbatch_contact_member").backfill_contact_member(apps, None)
+
+    def test_backfills_from_the_login_email_and_the_submitter(self):
+        by_email = Member.objects.create(user=User.objects.create_user(email="parent@example.com", password="x"), first_name="By", last_name="Email")
+        submitter_user = User.objects.create_user(email="submitter@example.com", password="x")
+        submitter = Member.objects.create(user=submitter_user, first_name="Sub", last_name="Mitter")
+        email_batch = self.batch(contact_email="PARENT@example.com")
+        submitted_batch = self.batch(contact_email="parent@example.com", submitted_by_user=submitter_user)
+        unmatched_batch = self.batch()
+
+        self.run_migration()
+
+        for batch in (email_batch, submitted_batch, unmatched_batch):
+            batch.refresh_from_db()
+        self.assertEqual(email_batch.contact_member, by_email)
+        self.assertEqual(submitted_batch.contact_member, submitter)
+        self.assertIsNone(unmatched_batch.contact_member)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class RegistrationCancelPaidTests(TestCase):
+    """registration:cancel refuses a registration anything has been paid
+    toward (registration.views.cancellation_locked) -- the status page hides
+    the button then, and the POST itself is refused too."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+        cls.batch = RegistrationBatch.objects.create(club=cls.club, season=cls.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+        cls.child = Member.objects.create(first_name="Timmy", last_name="Tester")
+        cls.membership = ClubMembership.objects.create(club=cls.club, member=cls.child, season=cls.season, status=ClubMembership.StatusChoices.PENDING, fee_amount=Decimal("120.00"))
+        RegistrationDetails.objects.create(membership=cls.membership, batch=cls.batch, entry_kind=RegistrationDetails.EntryKind.PLAYER)
+
+    def _cancel(self):
+        return self.client.post(reverse("registration:cancel", kwargs={"token": self.batch.status_token, "membership_pk": self.membership.pk}), {}, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def _status(self):
+        return self.client.get(reverse("registration:status", kwargs={"token": self.batch.status_token}), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_a_fully_paid_registration_cannot_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+        record_payment(self.membership, amount=Decimal("120.00"))
+
+        response = self._cancel()
+
+        self.assertRedirects(response, reverse("registration:status", kwargs={"token": self.batch.status_token}), fetch_redirect_response=False)
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.status, ClubMembership.StatusChoices.PENDING)
+
+    def test_a_partly_paid_registration_cannot_be_cancelled(self):
+        # Refunds are a staff action -- any payment at all locks the self-service cancel.
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self._cancel()
+
+        self.assertTrue(Member.objects.filter(pk=self.child.pk).exists())
+        self.assertTrue(ClubMembership.objects.filter(pk=self.membership.pk, status=ClubMembership.StatusChoices.PENDING).exists())
+
+    def test_the_status_page_hides_cancel_once_something_was_paid(self):
+        record_payment(self.membership, amount=Decimal("20.00"))
+
+        self.assertNotContains(self._status(), "Cancel registration")
+
+    def test_an_unpaid_registration_can_still_be_cancelled(self):
+        RegistrationBatch.objects.filter(pk=self.batch.pk).update(invoice_sent_at=timezone.now())
+
+        self.assertContains(self._status(), "Cancel registration")
+        self._cancel()
+
+        self.assertFalse(Member.objects.filter(pk=self.child.pk).exists())
+
+
+class RegistrationRenderPdfUrlFetcherTests(TestCase):
+    """registration.services.invoicing.render_pdf must hand WeasyPrint the data:-only URL fetcher, never its default one."""
+
+    def test_render_pdf_passes_the_restricted_url_fetcher(self):
+        import sys
+        from unittest import mock as _mock
+
+        from registration.services.invoicing import render_pdf as _render_pdf
+
+        weasyprint = _mock.MagicMock()
+        weasyprint.HTML.return_value.write_pdf.return_value = b"%PDF-1.7"
+        fetcher = object()
+        with _mock.patch.dict(sys.modules, {"weasyprint": weasyprint}), _mock.patch("registration.services.invoicing.pdf_url_fetcher", return_value=fetcher):
+            self.assertEqual(_render_pdf("<p>hi</p>"), b"%PDF-1.7")
+
+        weasyprint.HTML.assert_called_once_with(string="<p>hi</p>", url_fetcher=fetcher)
+
+
+class RegistrationInvoiceNumberingTests(TestCase):
+    """confirm_invoice allocates REG-<year>-<seq> numbers: unique per club
+    (DB constraint + retry on collision), and a second confirm of an
+    already-confirmed batch (double submit, or a stale instance from a
+    concurrent request) never re-numbers it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.season = make_season(cls.club)
+
+    def make_batch(self):
+        return RegistrationBatch.objects.create(club=self.club, season=self.season, contact_first_name="Pat", contact_last_name="Parent", contact_email="pat@example.com")
+
+    def test_numbers_are_sequential_per_club(self):
+        from .services.invoicing import confirm_invoice
+
+        first, second = self.make_batch(), self.make_batch()
+        confirm_invoice(first, due_in_days=14)
+        confirm_invoice(second, due_in_days=14)
+
+        year = timezone.now().year
+        self.assertEqual(first.invoice_number, f"REG-{year}-00001")
+        self.assertEqual(second.invoice_number, f"REG-{year}-00002")
+
+    def test_the_database_refuses_a_duplicate_number_in_one_club(self):
+        from django.db import IntegrityError, transaction
+
+        RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RegistrationBatch.objects.filter(pk=self.make_batch().pk).update(invoice_number="REG-2026-00001")
+
+    def test_a_collision_is_retried_with_a_fresh_number(self):
+        from .services.invoicing import confirm_invoice
+
+        taken = self.make_batch()
+        RegistrationBatch.objects.filter(pk=taken.pk).update(invoice_number="REG-2999-00001")
+        batch = self.make_batch()
+
+        with mock.patch.object(RegistrationBatch, "generate_invoice_number", side_effect=["REG-2999-00001", "REG-2999-00002"]):
+            confirm_invoice(batch, due_in_days=14)
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.invoice_number, "REG-2999-00002")
+
+    def test_confirming_a_stale_instance_again_keeps_the_first_number(self):
+        from .services.invoicing import confirm_invoice
+
+        batch = self.make_batch()
+        stale = RegistrationBatch.objects.get(pk=batch.pk)
+        confirm_invoice(batch, due_in_days=14)
+
+        confirm_invoice(stale, due_in_days=30)
+
+        batch.refresh_from_db()
+        self.assertEqual(stale.invoice_number, batch.invoice_number)
+        self.assertTrue(batch.invoice_number.endswith("-00001"))
+        self.assertFalse(RegistrationBatch.objects.filter(invoice_number__endswith="-00002").exists())

@@ -74,7 +74,11 @@
                             </span>
                         </td>
                         <td>
-                            <a class="link link-hover font-semibold" href="{% url 'management:member_detail' invoice.billed_to.pk %}">{{ invoice.billed_to }}</a>
+                            {% if invoice.billed_to %}
+                                <a class="link link-hover font-semibold" href="{% url 'management:member_detail' invoice.billed_to.pk %}">{{ invoice.billed_to }}</a>
+                            {% else %}
+                                <span class="font-semibold">{{ invoice.billed_to_name }}</span>
+                            {% endif %}
                         </td>
                         <td class="font-mono text-xs tabular-nums">&euro; {{ invoice.amount }}</td>
                         <td>

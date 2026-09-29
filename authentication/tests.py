@@ -1,9 +1,12 @@
+import importlib
 import re
 import uuid
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
+from allauth.account.models import EmailAddress
 from allauth.core import context
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
@@ -16,16 +19,27 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from club.models import Club, ClubRole
+from club.models import Club, ClubRole, EvaluationManager, Season, ShopManager
+from controlpanel.services.admins import grant_club_admin
 from features.models import EmailSuppression
 from members.models import Member
 from rosterchief.test_support import enrol_mfa
+from teams.models import Position, StaffAssignment, Team
 
 from .adapters import RosterChiefAccountAdapter, RosterChiefMFAAdapter, webauthn_rp_id
 from .middleware import RequireMFAMiddleware, mfa_required_for
 
 User = get_user_model()
+
+
+def verified_user(email, password, **extra):
+    """An account whose login address is already confirmed -- what signing in
+    requires under ACCOUNT_EMAIL_VERIFICATION = "mandatory"."""
+    user = User.objects.create_user(email=email, password=password, **extra)
+    EmailAddress.objects.create(user=user, email=email, verified=True, primary=True)
+    return user
 
 
 class UserManagerTests(TestCase):
@@ -184,6 +198,45 @@ class MFARequirementTests(TestCase):
     def test_user_without_any_role_does_not_need_mfa(self):
         self.assertFalse(mfa_required_for(self.make_user("nobody@example.com")))
 
+    def test_shop_manager_must_have_mfa(self):
+        user = self.with_role(self.make_user("shop@example.com"), ClubRole.Roles.MEMBER)
+        ShopManager.objects.create(club=self.club, member=user.member)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_evaluation_manager_must_have_mfa(self):
+        user = self.with_role(self.make_user("eval@example.com"), ClubRole.Roles.MEMBER)
+        EvaluationManager.objects.create(club=self.club, member=user.member)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def make_assignment(self, user, *, management_position, season_offset_days=0):
+        today = timezone.localdate()
+        start = today + timedelta(days=season_offset_days)
+        season = Season.objects.create(club=self.club, start_date=start - timedelta(days=30), end_date=start + timedelta(days=30))
+        team = Team.objects.create(club=self.club, name=f"T{season_offset_days}{management_position}")
+        position = Position.objects.create(club=self.club, name=f"P{season_offset_days}{management_position}", staff_position=True, management_position=management_position)
+        member = Member.objects.create(user=user, first_name="Coach", last_name="Manager")
+        StaffAssignment.objects.create(team=team, member=member, season=season, position=position)
+
+    def test_current_season_coach_manager_must_have_mfa(self):
+        user = self.make_user("coach-manager@example.com")
+        self.make_assignment(user, management_position=True)
+
+        self.assertTrue(mfa_required_for(user))
+
+    def test_staff_without_a_management_position_does_not_need_mfa(self):
+        user = self.make_user("assistant@example.com")
+        self.make_assignment(user, management_position=False)
+
+        self.assertFalse(mfa_required_for(user))
+
+    def test_coach_manager_of_a_past_season_does_not_need_mfa(self):
+        user = self.make_user("former-coach@example.com")
+        self.make_assignment(user, management_position=True, season_offset_days=-400)
+
+        self.assertFalse(mfa_required_for(user))
+
 
 class RequireMFAMiddlewareTests(TestCase):
     def setUp(self):
@@ -223,6 +276,25 @@ class RequireMFAMiddlewareTests(TestCase):
         enrol_mfa(staff)
 
         self.assertEqual(self.dispatch(staff).content, b"ok")
+
+    def test_shop_manager_without_mfa_is_sent_to_enrolment(self):
+        club = Club.objects.create(name="Shop Club", slug="shop-club")
+        user = User.objects.create_user(email="shopkeeper@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Shop", last_name="Keeper")
+        ShopManager.objects.create(club=club, member=member)
+
+        response = self.dispatch(user)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mfa_index"))
+
+    def test_plain_member_passes_through(self):
+        club = Club.objects.create(name="Plain Club", slug="plain-club")
+        user = User.objects.create_user(email="plain-member@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Plain", last_name="Member")
+        ClubRole.objects.create(club=club, member=member, role=ClubRole.Roles.MEMBER)
+
+        self.assertEqual(self.dispatch(user).content, b"ok")
 
 
 class AdminLoginRoutingTests(TestCase):
@@ -376,15 +448,24 @@ class RosterChiefAccountAdapterTests(TestCase):
 
         message.send.assert_called_once()
 
+    def test_email_confirmation_still_sends_while_suppressed(self):
+        # Signing in waits on a confirmed address (ACCOUNT_EMAIL_VERIFICATION =
+        # "mandatory"), so the confirmation link is as essential as a reset link.
+        EmailSuppression.start()
+
+        for prefix in ("account/email/email_confirmation", "account/email/email_confirmation_signup"):
+            with self.subTest(prefix=prefix):
+                self.send(prefix).send.assert_called_once()
+
     def test_other_allauth_mail_sends_normally_when_not_suppressed(self):
-        message = self.send("account/email/email_confirmation")
+        message = self.send("account/email/password_changed")
 
         message.send.assert_called_once()
 
     def test_other_allauth_mail_is_silenced_while_suppressed(self):
         EmailSuppression.start()
 
-        message = self.send("account/email/email_confirmation")
+        message = self.send("account/email/password_changed")
 
         message.send.assert_not_called()
 
@@ -392,7 +473,7 @@ class RosterChiefAccountAdapterTests(TestCase):
 class TwoFactorPageTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        enrol_mfa(User.objects.create_user(email="mfa@example.com", password="pw-secret-123"))
+        enrol_mfa(verified_user(email="mfa@example.com", password="pw-secret-123"))
 
     def setUp(self):
         # The test client is per-test, so the sign-in itself cannot be hoisted.
@@ -451,7 +532,7 @@ class MfaPageTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        cls.user = verified_user(email="mfa@example.com", password="pw-secret-123")
 
     def setUp(self):
         # A real password login (not force_login) so allauth counts it as a recent
@@ -502,7 +583,7 @@ class ActionBarTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        cls.user = verified_user(email="mfa@example.com", password="pw-secret-123")
 
     def setUp(self):
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
@@ -525,7 +606,7 @@ class ActionBarTests(TestCase):
 class SignOutPageTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        cls.user = verified_user(email="mfa@example.com", password="pw-secret-123")
 
     def setUp(self):
         self.client.force_login(self.user)
@@ -554,7 +635,7 @@ class SignOutPageTests(TestCase):
 class ChangePasswordPageTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        verified_user(email="mfa@example.com", password="pw-secret-123")
 
     def setUp(self):
         self.client.post(reverse("account_login"), {"login": "mfa@example.com", "password": "pw-secret-123"}, follow=True)
@@ -588,7 +669,7 @@ class MfaButtonIconTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.user = User.objects.create_user(email="mfa@example.com", password="pw-secret-123")
+        cls.user = verified_user(email="mfa@example.com", password="pw-secret-123")
 
     def setUp(self):
         # Sign in *before* enrolling: a user who already holds a second factor is stopped at
@@ -633,3 +714,283 @@ class MfaButtonIconTests(TestCase):
 
         self.assertContains(response, "otp otp-lg")
         self.assertNotContains(response, '<span class="label-text">Code</span>')
+
+
+class AccountAdapterClientIPTests(TestCase):
+    """allauth's rate limits key on RosterChiefAccountAdapter.get_client_ip:
+    the proxy-supplied X-Real-IP, not the proxy's own REMOTE_ADDR."""
+
+    def test_uses_the_proxy_supplied_client_ip(self):
+        request = RequestFactory().get("/", HTTP_X_REAL_IP="203.0.113.7", REMOTE_ADDR="172.18.0.5")
+
+        self.assertEqual(RosterChiefAccountAdapter(request).get_client_ip(request), "203.0.113.7")
+
+    def test_falls_back_to_remote_addr_without_the_header(self):
+        request = RequestFactory().get("/", REMOTE_ADDR="198.51.100.9")
+
+        self.assertEqual(RosterChiefAccountAdapter(request).get_client_ip(request), "198.51.100.9")
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class EmailVerificationTests(TestCase):
+    """ACCOUNT_EMAIL_VERIFICATION = "mandatory" + ACCOUNT_CHANGE_EMAIL: an address
+    has to be confirmed before it signs anyone in, and a newly added one only
+    becomes the account's email once confirmed. Staff grants
+    (controlpanel.services.accounts) bind to an account through its email, so an
+    account must never be able to claim an address it can't receive mail at."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def log_in(self, email="member@example.com", password="pw-secret-123"):
+        return self.client.post(reverse("account_login"), {"login": email, "password": password})
+
+    def signed_in(self):
+        return "_auth_user_id" in self.client.session
+
+    def confirm_link_sent_to(self, email):
+        message = next(m for m in reversed(mail.outbox) if email in m.to)
+        return re.search(r"https?://[^\s]+/accounts/confirm-email/([^\s/]+)/", message.body).group(0)
+
+    def test_an_unconfirmed_address_cannot_sign_in(self):
+        User.objects.create_user(email="member@example.com", password="pw-secret-123")
+
+        self.log_in()
+
+        self.assertFalse(self.signed_in())
+        self.assertEqual([m.to for m in mail.outbox], [["member@example.com"]])
+
+    def test_following_the_confirmation_link_lets_them_sign_in(self):
+        user = User.objects.create_user(email="member@example.com", password="pw-secret-123")
+        self.log_in()
+
+        self.client.post(urlparse(self.confirm_link_sent_to("member@example.com")).path)
+        self.log_in()
+
+        self.assertTrue(self.signed_in())
+        self.assertTrue(EmailAddress.objects.get(user=user, email="member@example.com").verified)
+
+    def test_an_added_address_cannot_be_made_primary_before_it_is_confirmed(self):
+        user = verified_user("member@example.com", "pw-secret-123")
+        self.log_in()
+        self.assertTrue(self.signed_in())
+
+        self.client.post(reverse("account_email"), {"action_add": "", "email": "coach@club.example"})
+        self.client.post(reverse("account_email"), {"action_primary": "", "email": "coach@club.example"})
+
+        user.refresh_from_db()
+        self.assertEqual(user.email, "member@example.com")
+        self.assertFalse(EmailAddress.objects.get(user=user, email="coach@club.example").primary)
+
+        # ...so a grant for that address doesn't land on this account.
+        club = Club.objects.create(name="Ajax United", slug="ajax-united-verify")
+        role = grant_club_admin(club, "coach@club.example", "Co", "Ach")
+        self.assertNotEqual(role.member.user_id, user.pk)
+
+    def test_confirming_an_added_address_makes_it_the_account_email(self):
+        user = verified_user("member@example.com", "pw-secret-123")
+        self.log_in()
+        self.client.post(reverse("account_email"), {"action_add": "", "email": "new@example.com"})
+
+        self.client.post(urlparse(self.confirm_link_sent_to("new@example.com")).path)
+
+        user.refresh_from_db()
+        self.assertEqual(user.email, "new@example.com")
+        self.assertEqual(list(EmailAddress.objects.filter(user=user).values_list("email", "verified", "primary")), [("new@example.com", True, True)])
+
+    def test_an_invited_admin_sets_a_password_then_confirms_their_address_on_first_sign_in(self):
+        # grant_club_admin creates the account without a password or a confirmed
+        # address. allauth's password reset sets the password but does not mark
+        # the address verified, so the first sign-in asks for confirmation too.
+        club = Club.objects.create(name="Ajax United", slug="ajax-united-invite")
+        grant_club_admin(club, "invitee@example.com", "In", "Vitee")
+
+        self.client.post(reverse("account_reset_password"), {"email": "invitee@example.com"})
+        reset_url = urlparse(re.search(r"https?://[^\s]+/accounts/password/reset/key/[^\s]+", mail.outbox[-1].body).group(0)).path
+        form_url = self.client.get(reset_url)["Location"]
+        self.client.post(form_url, {"password1": "a-New-pw-4567", "password2": "a-New-pw-4567"})
+        self.log_in("invitee@example.com", "a-New-pw-4567")
+        self.assertFalse(self.signed_in())
+
+        self.client.post(urlparse(self.confirm_link_sent_to("invitee@example.com")).path)
+        self.log_in("invitee@example.com", "a-New-pw-4567")
+
+        self.assertTrue(self.signed_in())
+
+
+class VerifyExistingAccountEmailsMigrationTests(TestCase):
+    """authentication/migrations/0005_verify_existing_account_emails: accounts
+    created before verification became mandatory keep being able to sign in --
+    their current login address is marked verified, nothing else is."""
+
+    def run_migration(self):
+        from django.apps import apps
+
+        module = importlib.import_module("authentication.migrations.0005_verify_existing_account_emails")
+        module.verify_existing_account_emails(apps, None)
+
+    def test_creates_a_verified_primary_row_for_the_login_address(self):
+        user = User.objects.create_user(email="Member@example.com", password="x")
+
+        self.run_migration()
+
+        self.assertEqual(list(EmailAddress.objects.filter(user=user).values_list("email", "verified", "primary")), [("member@example.com", True, True)])
+
+    def test_verifies_an_existing_row_and_moves_primary_onto_it(self):
+        user = User.objects.create_user(email="member@example.com", password="x")
+        EmailAddress.objects.create(user=user, email="member@example.com", verified=False, primary=False)
+        EmailAddress.objects.create(user=user, email="other@example.com", verified=False, primary=True)
+
+        self.run_migration()
+
+        rows = {email: (verified, primary) for email, verified, primary in EmailAddress.objects.filter(user=user).values_list("email", "verified", "primary")}
+        self.assertEqual(rows, {"member@example.com": (True, True), "other@example.com": (False, False)})
+
+    def test_leaves_an_address_another_account_already_verified_alone(self):
+        owner = User.objects.create_user(email="owner@example.com", password="x")
+        EmailAddress.objects.create(user=owner, email="shared@example.com", verified=True, primary=False)
+        user = User.objects.create_user(email="shared@example.com", password="x")
+
+        self.run_migration()
+
+        self.assertFalse(EmailAddress.objects.filter(user=user, verified=True).exists())
+
+    def test_is_idempotent(self):
+        user = User.objects.create_user(email="member@example.com", password="x")
+
+        self.run_migration()
+        self.run_migration()
+
+        self.assertEqual(EmailAddress.objects.filter(user=user).count(), 1)
+
+
+class MfaSecretEncryptionTests(TestCase):
+    """authentication/crypto.py via RosterChiefMFAAdapter.encrypt/decrypt: TOTP
+    secrets and recovery-code seeds are stored Fernet-encrypted, legacy plaintext
+    values keep working, and TOTP sign-in still verifies codes end to end."""
+
+    SECRET = "JBSWY3DPEHPK3PXP"
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def current_code(self, secret=SECRET):
+        from allauth.mfa.totp.internal.auth import format_hotp_value, hotp_value, yield_hotp_counters_from_time
+
+        counters = list(yield_hotp_counters_from_time())
+        return format_hotp_value(hotp_value(secret, counters[len(counters) // 2]))
+
+    def test_round_trip_and_prefix(self):
+        from . import crypto
+
+        stored = RosterChiefMFAAdapter().encrypt(self.SECRET)
+
+        self.assertTrue(stored.startswith("fernet:"))
+        self.assertNotIn(self.SECRET, stored)
+        self.assertEqual(RosterChiefMFAAdapter().decrypt(stored), self.SECRET)
+        self.assertTrue(crypto.is_encrypted(stored))
+
+    def test_legacy_plaintext_is_returned_unchanged(self):
+        self.assertEqual(RosterChiefMFAAdapter().decrypt(self.SECRET), self.SECRET)
+
+    def test_a_missing_key_is_a_configuration_error(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from .checks import mfa_encryption_key_check
+
+        with override_settings(MFA_ENCRYPTION_KEY=""):
+            with self.assertRaises(ImproperlyConfigured):
+                RosterChiefMFAAdapter().encrypt(self.SECRET)
+            self.assertEqual([error.id for error in mfa_encryption_key_check(None)], ["authentication.E001"])
+        self.assertEqual(mfa_encryption_key_check(None), [])
+
+    def test_rotated_keys_still_decrypt(self):
+        from cryptography.fernet import Fernet
+
+        old_key, new_key = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+        with override_settings(MFA_ENCRYPTION_KEY=old_key):
+            stored = RosterChiefMFAAdapter().encrypt(self.SECRET)
+        with override_settings(MFA_ENCRYPTION_KEY=f"{new_key},{old_key}"):
+            self.assertEqual(RosterChiefMFAAdapter().decrypt(stored), self.SECRET)
+
+    def test_totp_activation_stores_the_secret_encrypted(self):
+        from allauth.mfa.totp.internal.auth import TOTP
+
+        user = User.objects.create_user(email="member@example.com", password="x")
+        totp = TOTP.activate(user, self.SECRET)
+
+        stored = Authenticator.objects.get(pk=totp.instance.pk).data["secret"]
+        self.assertTrue(stored.startswith("fernet:"))
+        self.assertTrue(TOTP(Authenticator.objects.get(pk=totp.instance.pk)).validate_code(self.current_code()))
+
+    def test_recovery_codes_seed_is_encrypted_and_codes_still_work(self):
+        user = User.objects.create_user(email="member@example.com", password="x")
+        codes = RecoveryCodes.activate(user)
+        instance = Authenticator.objects.get(pk=codes.instance.pk)
+
+        self.assertTrue(instance.data["seed"].startswith("fernet:"))
+        unused = RecoveryCodes(instance).get_unused_codes()
+        self.assertEqual(len(unused), 10)
+        self.assertTrue(RecoveryCodes(instance).validate_code(unused[0]))
+
+    def sign_in_with_totp(self, stored_secret):
+        user = verified_user("member@example.com", "pw-secret-123")
+        Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": stored_secret})
+        response = self.client.post(reverse("account_login"), {"login": "member@example.com", "password": "pw-secret-123"})
+        self.assertRedirects(response, reverse("mfa_authenticate"), fetch_redirect_response=False)
+        self.client.post(reverse("mfa_authenticate"), {"code": self.current_code()})
+        return "_auth_user_id" in self.client.session
+
+    def test_sign_in_with_an_encrypted_totp_secret(self):
+        self.assertTrue(self.sign_in_with_totp(RosterChiefMFAAdapter().encrypt(self.SECRET)))
+
+    def test_sign_in_with_a_legacy_plaintext_totp_secret(self):
+        self.assertTrue(self.sign_in_with_totp(self.SECRET))
+
+
+class EncryptMfaSecretsMigrationTests(TestCase):
+    """authentication/migrations/0006_encrypt_mfa_secrets encrypts existing
+    plaintext secrets, skips already-encrypted ones, and reverses cleanly."""
+
+    def setUp(self):
+        from django.apps import apps
+
+        self.apps = apps
+        self.module = importlib.import_module("authentication.migrations.0006_encrypt_mfa_secrets")
+        user = User.objects.create_user(email="member@example.com", password="x")
+        self.totp = Authenticator.objects.create(user=user, type=Authenticator.Type.TOTP, data={"secret": "JBSWY3DPEHPK3PXP"})
+        self.codes = Authenticator.objects.create(user=user, type=Authenticator.Type.RECOVERY_CODES, data={"seed": "abc123", "used_mask": 3, "migrated_codes": ["11111111", "22222222"]})
+
+    def test_encrypts_plaintext_secrets(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.codes.refresh_from_db()
+        self.assertTrue(self.totp.data["secret"].startswith("fernet:"))
+        self.assertTrue(self.codes.data["seed"].startswith("fernet:"))
+        self.assertTrue(all(code.startswith("fernet:") for code in self.codes.data["migrated_codes"]))
+        self.assertEqual(self.codes.data["used_mask"], 3)
+        adapter = RosterChiefMFAAdapter()
+        self.assertEqual(adapter.decrypt(self.totp.data["secret"]), "JBSWY3DPEHPK3PXP")
+        self.assertEqual([adapter.decrypt(code) for code in self.codes.data["migrated_codes"]], ["11111111", "22222222"])
+
+    def test_is_idempotent(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+        self.totp.refresh_from_db()
+        first = self.totp.data["secret"]
+
+        self.module.encrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.assertEqual(self.totp.data["secret"], first)
+
+    def test_reverse_decrypts(self):
+        self.module.encrypt_mfa_secrets(self.apps, None)
+        self.module.decrypt_mfa_secrets(self.apps, None)
+
+        self.totp.refresh_from_db()
+        self.codes.refresh_from_db()
+        self.assertEqual(self.totp.data["secret"], "JBSWY3DPEHPK3PXP")
+        self.assertEqual(self.codes.data["seed"], "abc123")

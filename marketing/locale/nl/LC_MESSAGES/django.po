@@ -46,7 +46,11 @@ msgid ""
 "person's inbox."
 msgstr "We jagen aanwezigheid na in zes WhatsApp-groepen en de lijst met licenties leeft in de mailbox van één persoon."
 
-#: forms.py:60 forms.py:68 forms.py:70
+#: forms.py:46
+msgid "Leave this field empty"
+msgstr "Laat dit veld leeg"
+
+#: forms.py:65 forms.py:67
 msgid "Something went wrong. Please try again."
 msgstr "Er ging iets mis. Probeer het opnieuw."
 
@@ -750,3 +754,11 @@ msgstr "We hebben je bericht rechtstreeks naar Bernard gestuurd — je hoort bin
 #, python-format
 msgid "RosterChief demo request — %(club)s"
 msgstr "RosterChief demo-aanvraag — %(club)s"
+
+#: views.py:46
+msgid ""
+"Too many messages have been sent from your network recently. Please try "
+"again later, or email us directly."
+msgstr ""
+"Er werden recent te veel berichten verstuurd vanaf je netwerk. Probeer het "
+"later opnieuw, of mail ons rechtstreeks."

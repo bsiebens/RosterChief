@@ -13,6 +13,8 @@ import openpyxl
 from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 
+from rosterchief.spreadsheet import append_safe_row
+
 TEMPLATE_COLUMNS = [_("Order"), _("Last name"), _("First name"), _("Option"), _("Number"), _("Name"), _("Quantity")]
 
 #: Characters Excel refuses in a sheet title, plus the 31-char length limit.
@@ -61,7 +63,7 @@ def build_production_export(lines):
 
         for line in product_lines:
             person = line.beneficiary or line.order.purchaser
-            sheet.append([line.order.number, person.last_name, person.first_name, line.variant.name if line.variant_id else "", line.personalization_number, line.personalization_name, line.quantity])
+            append_safe_row(sheet, [line.order.number, person.last_name, person.first_name, line.variant.name if line.variant_id else "", line.personalization_number, line.personalization_name, line.quantity])
 
         for column_index, column_name in enumerate(TEMPLATE_COLUMNS, start=1):
             sheet.column_dimensions[sheet.cell(row=1, column=column_index).column_letter].width = max(12, len(str(column_name)) + 2)

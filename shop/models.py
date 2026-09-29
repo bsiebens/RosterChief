@@ -473,6 +473,14 @@ class Discount(ClubScopedModel):
 
     is_active = models.BooleanField(_("is active?"), default=True)
 
+    #: Optional validity window, both days inclusive (club-local dates).
+    valid_from = models.DateField(_("valid from"), blank=True, null=True, help_text=_("Optional -- the first day the code can be used."))
+    valid_until = models.DateField(_("valid until"), blank=True, null=True, help_text=_("Optional -- the last day the code can be used."))
+    #: Counted over orders that used the code and weren't cancelled -- see
+    #: shop.services.checkout.discount_uses.
+    max_uses = models.PositiveIntegerField(_("maximum uses"), blank=True, null=True, help_text=_("Optional -- how many orders in total can use this code. Cancelled orders don't count."))
+    once_per_member = models.BooleanField(_("once per member?"), default=True, help_text=_("Each member can use this code on one order only."))
+
     slug_source = "name"
 
     class Meta:
@@ -487,17 +495,33 @@ class Discount(ClubScopedModel):
     def __str__(self):
         return self.name
 
+    def clean(self):
+        if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
+            raise ValidationError({"valid_until": _("Must be on or after the first valid day.")})
+
     def save(self, *args, **kwargs):
         self.code = self.code.upper().strip()
         super().save(*args, **kwargs)
+
+    def is_within_validity(self, today=None) -> bool:
+        today = today or timezone.localdate()
+        return (self.valid_from is None or self.valid_from <= today) and (self.valid_until is None or today <= self.valid_until)
 
 
 class AppliedDiscount(UUIDModel):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="applied_discounts", verbose_name=_("order"))
     discount = models.ForeignKey(Discount, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("discount"))
 
+    #: A snapshot of the discount's own terms when it was applied: for a
+    #: PERCENTAGE discount ``discount_amount`` is the *rate* (10 = 10%), not
+    #: euros -- ``amount`` below is the euro value actually deducted.
     discount_type = models.CharField(_("discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE)
-    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2)
+    discount_amount = models.DecimalField(_("discount amount"), max_digits=10, decimal_places=2, help_text=_("The discount's rate (for a percentage) or its fixed euro amount, as it was when applied."))
+    #: The euro amount this discount takes off the order. Set at checkout and
+    #: re-derived from discount_type/discount_amount whenever the order's
+    #: lines change (shop.services.pricing.order_total) -- a percentage keeps
+    #: meaning a percentage of whatever the lines now add up to.
+    amount = models.DecimalField(_("amount deducted"), max_digits=10, decimal_places=2, default=0)
     description = models.TextField(_("description"), blank=True)
 
     applied_by = models.ForeignKey(Member, on_delete=models.PROTECT, related_name="applied_discounts", verbose_name=_("applied by"), blank=True, null=True)

@@ -5,6 +5,9 @@ redirected to the allauth login, so Django staff go through the same MFA
 challenge as everyone else — Django's own admin login form knows nothing about
 second factors. ``RequireMFAMiddleware`` then blocks any staff user who has not
 enrolled.
+
+Both admin routes answer on the base domain only (``rosterchief.admin_host``): on
+a club subdomain they 404 like any path that doesn't exist there.
 """
 
 import re
@@ -13,19 +16,20 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
 from django.views.generic import RedirectView
-from django.views.static import serve
 
 from announcements.views import PendingAnnouncementView
 from api.urls import api
 from club.views import root, signup_closed
 
+from .admin_host import base_domain_only, base_domain_only_urls
 from .health import healthz
+from .media import serve_media
 
 urlpatterns = [
     # No auth and no tenant: the proxy and the load balancer must reach it on any host.
     path("healthz", healthz, name="healthz"),
-    path("admin/login/", RedirectView.as_view(pattern_name="account_login", query_string=True), name="admin_login_redirect"),
-    path("admin/", admin.site.urls),
+    path("admin/login/", base_domain_only(RedirectView.as_view(pattern_name="account_login", query_string=True)), name="admin_login_redirect"),
+    path("admin/", base_domain_only_urls(admin.site.urls)),
     # Before allauth's own urls so it wins the match: self-registration is closed.
     # Accounts are created by an admin or by the family-registration form -- a
     # club has no reason to let a stranger create one.
@@ -61,15 +65,17 @@ if settings.DEBUG:
 
 if not settings.AWS_STORAGE_BUCKET_NAME:
     # Gated on the storage backend, not on DEBUG: local disk is the default until a bucket is
-    # configured (see settings.STORAGES), and Caddy only reverse-proxies — it never serves
-    # /media/* itself — so without this route every uploaded club logo 404s in production too.
+    # configured (see settings.STORAGES). deploy/caddy/Caddyfile serves /media/* itself, but a
+    # proxy that only reverse-proxies (compose.behind-proxy.yaml) does not, so without this
+    # route every uploaded club logo 404s there in production too.
     # Once AWS_STORAGE_BUCKET_NAME is set, club.logo.url points straight at the bucket and this
     # route is simply never hit.
     #
     # django.conf.urls.static.static() looks like the right helper, but it hard-codes its own
     # `if not settings.DEBUG: return []` — it is documented as dev-only and silently no-ops in
     # production no matter what guards the call site. Build the pattern directly against the
-    # view it wraps instead, which has no such gate.
+    # view it wraps instead, which has no such gate. serve_media adds the same hardening
+    # headers the Caddy media block sets, since this route is reachable in production.
     urlpatterns += [
-        re_path(rf"^{re.escape(settings.MEDIA_URL.lstrip('/'))}(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+        re_path(rf"^{re.escape(settings.MEDIA_URL.lstrip('/'))}(?P<path>.*)$", serve_media, {"document_root": settings.MEDIA_ROOT}),
     ]

@@ -20,6 +20,13 @@
                 </div>
             {% endfor %}
 
+            {% if form.person_fields_locked %}
+                <div class="alert alert-info my-2" role="status">
+                    {% lucide "lock" size=18 %}
+                    <span>{% trans "These personal details are shared with this person's own account or another club, so they can't be changed here. Ask the person to update them. This season's membership below can still be edited." %}</span>
+                </div>
+            {% endif %}
+
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {% for field in form %}
                     {% form_field field %}

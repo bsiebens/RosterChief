@@ -57,6 +57,11 @@
         <form method="post" class="flex flex-col gap-4">
             {% csrf_token %}
             <input type="hidden" name="season" value="{{ season.pk }}">
+            {# Honeypot (RegistrationContactForm.website): hidden from people and assistive tech, left for bots to fill in. #}
+            <div class="hidden" aria-hidden="true">
+                <label for="{{ form.website.id_for_label }}">{{ form.website.label }}</label>
+                {{ form.website }}
+            </div>
 
             {% for error in form.non_field_errors %}
                 <div class="alert alert-error" role="alert">{% lucide "circle-x" size=18 %} <span>{{ error }}</span></div>

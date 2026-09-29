@@ -21,6 +21,20 @@
             <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Submit" %}</button>
         </div>
 
+        {% if show_for_member %}
+            <div class="m-card p-3.5 text-sm text-ink">
+                {% blocktrans with name=for_member.get_full_name %}Filling in for <strong>{{ name }}</strong>{% endblocktrans %}
+                {% if fill_for_others %}
+                    <div class="mt-1 text-xs text-muted">
+                        {% trans "Fill in for someone else:" %}
+                        {% for person in fill_for_others %}
+                            <a class="font-semibold text-club" href="{% url "mobile:form_fill" send.pk %}?for={{ person.pk }}">{{ person.get_full_name }}</a>{% if not forloop.last %},{% endif %}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
         {% if send.form.description %}
             <p class="text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
         {% endif %}

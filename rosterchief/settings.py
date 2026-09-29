@@ -10,6 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import base64
+import hashlib
+import sys
 import tomllib
 from importlib.util import find_spec
 from pathlib import Path
@@ -41,7 +44,9 @@ ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", cast=Csv(), default="")
 # The loopback is always allowed, and it must be: the container's own healthcheck and the
 # deploy probe hit /healthz over 127.0.0.1/localhost, before any proxy has supplied a real
 # Host header. Without this they get a 400 and the container is marked unhealthy forever.
-# It widens nothing — gunicorn binds to the loopback only; the proxy owns the public domains.
+# It widens nothing: gunicorn binds 0.0.0.0:8000 inside the container (see the Dockerfile's CMD),
+# but compose publishes that port only to the host's loopback or the internal Docker network, so
+# the only public entry point is the proxy, which owns the public domains and sets a real Host.
 ALLOWED_HOSTS += [host for host in ("localhost", "127.0.0.1") if host not in ALLOWED_HOSTS]
 
 INTERNAL_IPS = config("DJANGO_INTERNAL_IPS", cast=Csv(), default="127.0.0.1")
@@ -99,6 +104,9 @@ INSTALLED_APPS = [
     "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
+    # The project package itself, registered only for its system checks (rosterchief/checks.py):
+    # no models, templates or static files live here.
+    "rosterchief.apps.RosterchiefConfig",
 ]
 
 # Feature flags (django-waffle). The Flag model is swappable, like AUTH_USER_MODEL:
@@ -174,11 +182,23 @@ LOGIN_REDIRECT_URL = "/"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_EMAIL_VERIFICATION = "none"
+# An address has to be verified before it can be used to sign in, and a new
+# address only replaces the current one once its confirmation link is followed
+# (CHANGE_EMAIL keeps at most the current address plus one pending change).
+# Staff grants (controlpanel.services) bind to an existing account only through
+# a verified address, so an unverified one must never become the account email.
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_CHANGE_EMAIL = True
 
 # Routes allauth's own mail through the control panel's "pause automated email"
 # switch (features.models.EmailSuppression), exempt only for password reset.
 ACCOUNT_ADAPTER = "authentication.adapters.RosterChiefAccountAdapter"
+
+# Caddy sets X-Real-IP to the connecting address on every proxied request (see
+# deploy/caddy/Caddyfile), so REMOTE_ADDR is always the proxy. allauth's rate limits
+# key on this header instead; rosterchief.client_ip reads the same setting and falls
+# back to REMOTE_ADDR for requests that did not come through the proxy.
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"
 
 
 # Two-factor authentication (allauth.mfa)
@@ -202,6 +222,20 @@ MFA_WEBAUTHN_RP_NAME = config("ROSTERCHIEF_RP_NAME", default="RosterChief")
 # Where RequireMFAMiddleware sends privileged users who haven't enrolled yet.
 MFA_ENROLMENT_URL_NAME = "mfa_index"
 
+# TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
+# under this key -- generate one with
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Comma-separate several keys to rotate: the first encrypts, all of them decrypt. Losing the
+# key locks every TOTP user out of their authenticator (recovery codes too), so back it up
+# separately from the database. Required outside DEBUG/tests -- the authentication.E001 system
+# check fails `migrate`/`check` without it. DEBUG and the test runner derive a stable throwaway
+# key from SECRET_KEY so local dev and CI need no extra setup. Not enforced here at import time
+# on purpose: the image build runs collectstatic/compilemessages with DEBUG off and no key.
+TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
+MFA_ENCRYPTION_KEY = config("MFA_ENCRYPTION_KEY", default="")
+if not MFA_ENCRYPTION_KEY and (DEBUG or TESTING):
+    MFA_ENCRYPTION_KEY = base64.urlsafe_b64encode(hashlib.sha256(b"rosterchief-dev-mfa-key:" + SECRET_KEY.encode()).digest()).decode()
+
 
 # Sessions are shared across club subdomains: log in once and you're authenticated
 # on every club (matching the one-passkey-everywhere model). Tenancy still scopes
@@ -210,7 +244,14 @@ MFA_ENROLMENT_URL_NAME = "mfa_index"
 SHARED_COOKIE_DOMAIN = f".{ROSTERCHIEF_BASE_DOMAIN}" if ROSTERCHIEF_BASE_DOMAIN and ROSTERCHIEF_BASE_DOMAIN != "localhost" else None
 
 SESSION_COOKIE_DOMAIN = config("DJANGO_SESSION_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
-CSRF_COOKIE_DOMAIN = config("DJANGO_CSRF_COOKIE_DOMAIN", default=SHARED_COOKIE_DOMAIN)
+
+# The CSRF secret lives in the (server-side) session, not in a csrftoken cookie. A cookie --
+# whether scoped to the parent domain or host-only -- can be overwritten from any sibling
+# subdomain ("cookie tossing"), which would let a page on one subdomain plant a token it knows
+# and then forge POSTs to another. Nothing reads the cookie client-side: templates and
+# static/js/mobile-app.js take the token from {{ csrf_token }}. Every form posts to its own
+# host, so the Origin check needs no cross-subdomain trusted origins either.
+CSRF_USE_SESSIONS = True
 
 TEMPLATES = [
     {
@@ -268,6 +309,9 @@ DATABASES = {
 # a page like the control panel dashboard that fires 15-20+ queries pays that setup cost
 # on each one. Harmless for the SQLite dev default (no real connection to persist).
 DATABASES["default"]["CONN_MAX_AGE"] = config("DJANGO_DB_CONN_MAX_AGE", default=60, cast=int)
+# Check a reused connection is still alive before using it: after a database restart the
+# workers' persistent connections are dead, and without this they error until CONN_MAX_AGE runs out.
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 
 # Request-level performance tracing (rosterchief/perf_logging.py, rosterchief/middleware.py)
@@ -389,6 +433,12 @@ SECURE_HSTS_SECONDS = config("DJANGO_SECURE_HSTS_SECONDS", default=0, cast=int)
 # Every club is a subdomain, so HSTS must cover them all or it protects only the bare domain.
 SECURE_HSTS_INCLUDE_SUBDOMAINS = config("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True, cast=bool)
 SECURE_HSTS_PRELOAD = config("DJANGO_SECURE_HSTS_PRELOAD", default=False, cast=bool)
+
+# security.W021 ("SECURE_HSTS_PRELOAD is not True") is the only `check --deploy` warning this
+# configuration raises on purpose: preload-list submission is a near-irreversible commitment for
+# the base domain and every subdomain, so it stays an explicit operator decision. Silencing it
+# keeps `check --deploy --fail-level WARNING` (CI) usable for catching every other warning.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
 
 
 # Logging

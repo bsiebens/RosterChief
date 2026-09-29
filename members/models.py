@@ -1,9 +1,17 @@
+import hashlib
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.db.models.fields.files import ImageFieldFile
+from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
 from rosterchief.base import ClubScopedModel, UUIDModel
+from rosterchief.storage import get_private_storage
 
 
 def member_photo_path(instance, filename):
@@ -12,6 +20,23 @@ def member_photo_path(instance, filename):
     # belongs to), so there's no single club to scope the path by. Same
     # "stable id, not a name/slug" reasoning as news_photo_path/team_photo_path.
     return f"members/{instance.pk}/{filename}"
+
+
+class MemberPhotoFieldFile(ImageFieldFile):
+    """A member photo lives in private storage, which has no URL of its own
+    (rosterchief.storage.PrivateStorage). ``.url`` answers with the authorising
+    view instead (``Member.photo_url``), so anything that still asks a photo for
+    its URL -- a ClearableFileInput's "Currently:" link, the public roster API --
+    gets a link that goes through the access check rather than an exception."""
+
+    @property
+    def url(self):
+        self._require_file()
+        return self.instance.photo_url
+
+
+class MemberPhotoField(models.ImageField):
+    attr_class = MemberPhotoFieldFile
 
 
 class Family(ClubScopedModel):
@@ -62,11 +87,13 @@ class Member(UUIDModel):
     phone = PhoneNumberField(_("phone number"), null=True, blank=True)
     emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
-    photo = models.ImageField(_("photo"), upload_to=member_photo_path, blank=True)
-    #: Gates only the *public* surfaces (a club's public website/API roster) --
-    #: someone already inside the club (coach roster, staff lists, the app's
-    #: own "People I manage" rows) sees the photo regardless, same as they
-    #: already see this member's name. Off by default: a photo uploaded for
+    #: Private storage: readable only through members.views.MemberPhotoView,
+    #: which applies members.services.photos.can_view_member_photo.
+    photo = MemberPhotoField(_("photo"), upload_to=member_photo_path, storage=get_private_storage, blank=True)
+    #: Gates the *public* surfaces (a club's public website/API roster): once
+    #: on, members.views.MemberPhotoView serves the photo to anyone. Without
+    #: it, only staff who may see this member, the member themselves and their
+    #: parents/guardians can (members.services.photos). Off by default: a photo uploaded for
     #: in-app use (e.g. a parent picking their own kid out of a roster list)
     #: shouldn't become world-visible without a separate, explicit opt-in --
     #: this matters most for underage players.
@@ -86,6 +113,16 @@ class Member(UUIDModel):
 
     def get_short_name(self):
         return self.first_name
+
+    @property
+    def photo_url(self):
+        """The authorising view's URL for this member's photo, or None without
+        one. The ``v`` parameter changes whenever the stored file does, so a
+        browser's private cache never shows a replaced photo."""
+        if not self.photo:
+            return None
+        version = hashlib.sha256(self.photo.name.encode()).hexdigest()[:12]
+        return f"{reverse('members:photo', args=[self.pk])}?v={version}"
 
     @property
     def public_photo(self):
@@ -142,6 +179,50 @@ class FamilyMembership(models.Model):
 
     def __str__(self):
         return f"{self.family} - {self.member} ({self.get_role_display()})"
+
+
+def _generate_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _default_invite_expiry():
+    return timezone.now() + FamilyInvite.VALID_FOR
+
+
+class FamilyInvite(ClubScopedModel):
+    """A club's request for an existing account holder to join one of its
+    families as a parent/guardian (members.services.invites). Member is
+    global, so staff typing an email that already has an account never links
+    that person directly: nothing changes until the account holder signs in
+    and accepts. ``token`` is the single-use credential in the emailed link
+    (same secrets.token_urlsafe(32) approach as RegistrationBatch.status_token),
+    only honoured for this club, before ``expires_at``, and for a signed-in
+    user whose email matches ``email``."""
+
+    VALID_FOR = timedelta(days=14)
+
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name="invites", verbose_name=_("family"))
+    email = models.EmailField(_("email"))
+    first_name = models.CharField(_("first name"), max_length=150, blank=True)
+    last_name = models.CharField(_("last name"), max_length=150, blank=True)
+    parent_is_member = models.BooleanField(_("also a member"), default=False)
+    token = models.CharField(_("token"), max_length=64, unique=True, editable=False, default=_generate_invite_token)
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("invited by"))
+    expires_at = models.DateTimeField(_("expires at"), default=_default_invite_expiry)
+    accepted_at = models.DateTimeField(_("accepted at"), null=True, blank=True)
+    accepted_member = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("accepted by"))
+
+    class Meta:
+        verbose_name = _("family invite")
+        verbose_name_plural = _("family invites")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.email} -> {self.family}"
+
+    @property
+    def is_pending(self):
+        return self.accepted_at is None and self.expires_at > timezone.now()
 
 
 class Group(ClubScopedModel):

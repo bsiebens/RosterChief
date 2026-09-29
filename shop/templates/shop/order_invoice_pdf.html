@@ -133,10 +133,8 @@
                 {% endfor %}
                 {% for applied in order.applied_discounts.all %}
                     <tr class="discount">
-                        <td colspan="3">{% trans "Discount" %} — {{ applied.description }}</td>
-                        <td class="right">
-                            −{% if applied.discount_type == "percentage" %}{{ applied.discount_amount }}%{% else %}€{{ applied.discount_amount }}{% endif %}
-                        </td>
+                        <td colspan="3">{% trans "Discount" %} — {{ applied.description }}{% if applied.discount_type == "percentage" %} ({{ applied.discount_amount|floatformat:"-2" }}%){% endif %}</td>
+                        <td class="right">−€{{ applied.amount }}</td>
                     </tr>
                 {% endfor %}
                 <tr class="total">

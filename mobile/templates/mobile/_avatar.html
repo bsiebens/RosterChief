@@ -16,7 +16,7 @@
         isn't guaranteed to be dark enough for white text to read.
 {% endcomment %}
 {% if person.photo %}
-    <img src="{{ person.photo.url }}" alt="" class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 rounded-full object-cover">
+    <img src="{{ person.photo_url }}" alt="" class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 rounded-full object-cover">
 {% else %}
     <span class="flex {{ size_class|default:"h-10 w-10" }} shrink-0 items-center justify-center rounded-full {{ bg_class|default:"bg-steel" }} font-display {{ text_class|default:"text-sm" }} font-extrabold {{ content_class|default:"text-white" }}">{{ person.first_name|slice:":1" }}{{ person.last_name|slice:":1" }}</span>
 {% endif %}

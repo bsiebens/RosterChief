@@ -11,7 +11,7 @@
                 <tr>
                     <th>{% trans "Official" %}</th>
                     <th>{% trans "Level" %}</th>
-                    <th>{% trans "Can officiate for" %}</th>
+                    <th class="w-full">{% trans "Can officiate for" %}</th>
                     <th>{% trans "Valid until" %}</th>
                     <th>{% trans "Status" %}</th>
                 </tr>
@@ -19,8 +19,8 @@
             <tbody>
                 {% for official in officials %}
                     <tr>
-                        <td><a class="link link-hover font-semibold" href="{% url 'management:member_detail' official.pk %}">{{ official }}</a></td>
-                        <td class="text-slate">{{ official.official_profile.level|default:"—" }}</td>
+                        <td class="whitespace-nowrap"><a class="link link-hover font-semibold" href="{% url 'management:member_detail' official.pk %}">{{ official }}</a></td>
+                        <td class="whitespace-nowrap text-slate">{{ official.official_profile.level|default:"—" }}</td>
                         <td>
                             {% if official.official_profile.is_eligible %}
                                 {% for team in official.official_profile.cached_eligible_teams %}
@@ -32,8 +32,8 @@
                                 <span class="text-dim">—</span>
                             {% endif %}
                         </td>
-                        <td class="font-mono text-xs text-muted">{{ official.official_profile.valid_until|default:"—" }}</td>
-                        <td>
+                        <td class="whitespace-nowrap font-mono text-xs text-muted">{{ official.official_profile.valid_until|default:"—" }}</td>
+                        <td class="whitespace-nowrap">
                             {% if official.official_profile.is_eligible %}
                                 <span class="badge badge-success badge-sm">{% trans "Valid" %}</span>
                             {% elif not official.official_profile.level %}

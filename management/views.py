@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 from itertools import groupby
@@ -14,6 +15,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.functional import cached_property
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -63,7 +65,7 @@ from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice, invoice_pdf, invoices_due_for_reminder, recipient_for, resolve_document_address, send_invoice_email, send_reminders
 from club.services.onboarding import annotate_onboarding_status, approve_all_clean, approve_one, blocking_event_kinds, checklist_for, is_signup_clean, mark_bypassed, mark_complete, mark_incomplete, members_with_open_requirements
-from club.services.signup_linking import link_to_existing_member
+from club.services.signup_linking import link_to_existing_member, possible_duplicates
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
 from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
@@ -90,9 +92,11 @@ from evaluations.services import (
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
+from events.services import dfel_import
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
+from events.services.dfel_import import DFELImportError, fetch_schedule
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
@@ -104,9 +108,11 @@ from formbuilder.models import FormSend
 from formbuilder.services.audience import effective_members as form_effective_members
 from formbuilder.services.form_factory import build_form
 from formbuilder.services.notifications import dispatch_notify_form_send
-from formbuilder.services.reporting import form_report
+from formbuilder.services.reporting import display_value, form_report
 from members.models import Family, FamilyMembership, Group, GroupMembership, Member
-from members.services.family import add_child_to_family, add_parent_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, find_member_by_email, get_or_create_login_user, grant_login, register_family
+from members.services.deletion import member_has_ties_outside_club, remove_member_from_club
+from members.services.family import add_child_to_family, attach_to_family, claim_label_for, detach_from_family, families_of_club, family_contacts, get_or_create_login_user, grant_login
+from members.services.invites import account_exists, add_or_invite_parent, pending_invites, register_family_or_invite
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review, dispatch_send_publish_notification, render_body_html
 from notifications.models import Notification
@@ -124,10 +130,12 @@ from registration.services.invoicing import (
 from registration.services.notifications import confirm_and_send_invoice, send_registration_reminders
 from registration.services.pricing import team_number_pools, variant_prices
 from rosterchief.request_cache import cached_on_request
+from rosterchief.spreadsheet import safe_row
 from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
+from shop.services.payments import delete_payment as delete_shop_payment
 from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
@@ -147,6 +155,7 @@ from .forms import (
     ClubMembershipForm,
     ClubRoleAssignForm,
     ClubSettingsForm,
+    DFELImportForm,
     DiscountForm,
     EvaluationChecklistForm,
     EventForm,
@@ -212,7 +221,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, referee_form_colors
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, number_list_colors, number_list_pdf, referee_form_colors
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -919,7 +928,7 @@ class MemberImportView(MemberAdminRequiredMixin, View):
             return render(request, "management/member_import.html", {"form": form})
 
         request.session["member_import_rows"] = rows
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         return render(
             request,
             "management/member_import_preview.html",
@@ -945,7 +954,7 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
             notify(request, f"w|{_('Nothing to import')}|{_('Upload a file first.')}")
             return redirect("management:member_import")
 
-        results = parse_member_import_rows(rows, request.club)
+        results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
         season = current_season(request.club)
 
         created = 0
@@ -957,11 +966,12 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
                     continue
 
                 family_role = result["family_role"]
-                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email:
+                if family_role in (FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN) and member.email and not account_exists(member.email):
                     # Give the parent/guardian a login before saving, same as
-                    # registering a family by hand -- get_or_create_login_user
-                    # reuses an existing account for that email rather than
-                    # risking a duplicate.
+                    # registering a family by hand. An email that already has an
+                    # account is left as a plain contact address on this new,
+                    # login-less record: an import never binds a row to someone
+                    # else's existing account.
                     member.user, _unused = get_or_create_login_user(member.email)
 
                 member.save()
@@ -1038,7 +1048,13 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     """Not a generic UpdateView: this page owns two forms on one submit -- the
     member's own fields, and (when they're actually rostered this season) their
     ClubMembership's license/status/fee status. A Member has no club of its own
-    without one, so this is the only place to see or change it."""
+    without one, so this is the only place to see or change it. Status and the
+    fee fields stay read-only for a MEMBER_ADMIN (see ClubMembershipForm).
+
+    The person's own details are read-only here when the record isn't this
+    club's alone (a login, or ties to another club -- members.services.
+    deletion.member_has_ties_outside_club): the form disables them, and they
+    are never saved. The club's own membership row stays editable."""
 
     template_name = "management/member_form.html"
 
@@ -1057,17 +1073,18 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
     def get(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        membership_form = ClubMembershipForm(instance=membership) if membership else None
-        return self.render_form(member, MemberForm(instance=member), membership_form)
+        membership_form = ClubMembershipForm(instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
+        return self.render_form(member, MemberForm(instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club)), membership_form)
 
     def post(self, request, pk):
         member = self.get_member()
         membership = self.get_membership(member)
-        form = MemberForm(request.POST, request.FILES, instance=member)
-        membership_form = ClubMembershipForm(request.POST, instance=membership) if membership else None
+        form = MemberForm(request.POST, request.FILES, instance=member, lock_person_fields=member_has_ties_outside_club(member, request.club))
+        membership_form = ClubMembershipForm(request.POST, instance=membership, can_edit_admin_fields=is_club_admin(request.user, request.club)) if membership else None
 
         if form.is_valid() and (membership_form is None or membership_form.is_valid()):
-            form.save()
+            if not form.person_fields_locked:
+                form.save()
             if membership_form is not None:
                 membership_form.save()
             notify(request, f"s|{_('Member updated')}|{_('“%(member)s” updated.') % {'member': member}}")
@@ -1234,6 +1251,10 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
             # Already has one -- the row's button shouldn't have been there at all;
             # a direct POST replay (e.g. a resubmitted form) is the only way here.
             notify(self.request, f"w|{_('Already has a login')}|{_('“%(member)s” can already sign in.') % {'member': member}}")
+        elif member_has_ties_outside_club(member, self.request.club):
+            # A login decides who controls a shared person record, so one club
+            # can't hand it out on its own (same rule as MemberUpdateView).
+            notify(self.request, f"e|{_('Could not grant a login')}|{_('“%(member)s” is also known to another club, so a login cannot be set up from here.') % {'member': member}}")
         else:
             grant_login(member, form.cleaned_data["email"])
             notify(self.request, f"s|{_('Login granted')}|{_('“%(member)s” can now sign in.') % {'member': member}}")
@@ -1243,7 +1264,7 @@ class MemberGrantLoginView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, For
 class MemberDetachFromFamilyView(MemberAdminRequiredMixin, View):
     def post(self, request, pk, family_pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
-        family = get_object_or_404(Family, pk=family_pk, memberships__member=member)
+        family = get_object_or_404(families_of_club(request.club), pk=family_pk, memberships__member=member)
         # detach_from_family may delete `family` itself (left empty) -- str() it first,
         # since Family.__str__ queries self.memberships, which needs a pk to still exist.
         family_name = str(family)
@@ -1283,13 +1304,26 @@ class FamilyMembershipRoleUpdateView(MemberAdminRequiredMixin, View):
 
 
 class MemberDeleteView(MemberAdminRequiredMixin, View):
+    """Member is global: the record is only deleted when it is this club's
+    alone (members.services.deletion.member_has_ties_outside_club). Otherwise
+    only this club's rows about the person are removed
+    (remove_member_from_club) and the record itself stays. Either way the only
+    families that can be cleaned up are this club's, once left empty."""
+
     def post(self, request, pk):
         member = get_object_or_404(members_visible_to(request.user, request.club, include_guardians=True), pk=pk)
         name = str(member)
+
+        if member_has_ties_outside_club(member, request.club):
+            remove_member_from_club(member, request.club)
+            body = _("“%(member)s” has been removed from the club.") % {"member": name}
+            notify(request, f"w|{_('Member removed')}|{body}")
+            return redirect("management:member_list")
+
         # FamilyMembership cascades away with the member -- note which families
         # they were in before that happens, so an emptied one can be cleaned up
         # after, same as detach_from_family does.
-        family_ids = list(Family.objects.filter(memberships__member=member).values_list("pk", flat=True))
+        family_ids = list(families_of_club(request.club).filter(memberships__member=member).values_list("pk", flat=True))
 
         try:
             member.delete()
@@ -1310,7 +1344,7 @@ class MemberDeleteView(MemberAdminRequiredMixin, View):
 
 
 class TeamListView(ClubStaffRequiredMixin, ListView):
-    """ADMIN sees every team; everyone else (coach, manager, other staff) only
+    """ADMIN/MEMBER_ADMIN see every team; everyone else (coach, manager, other staff) only
     the teams they're staffed on this season -- same visibility rule as
     ``members_visible_to``, not the narrower management-only ``teams_managed_by``."""
 
@@ -1320,7 +1354,7 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
 
     def get_queryset(self):
         club = self.request.club
-        teams = Team.objects.filter(club=club) if is_club_admin(self.request.user, club) else teams_staffed_by(self.request.user, club)
+        teams = Team.objects.filter(club=club) if can_manage_members(self.request.user, club) else teams_staffed_by(self.request.user, club)
         search = self.request.GET.get("q", "").strip()
         if search:
             teams = teams.filter(name__icontains=search)
@@ -1404,7 +1438,13 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
     context_object_name = "team"
 
     def get_queryset(self):
-        return Team.objects.filter(club=self.request.club)
+        # Same visibility rule as TeamListView: club/member admins see every
+        # team, other staff only the teams they're on the staff of this
+        # season. Anything else is a 404, not just hidden from the list.
+        user, club = self.request.user, self.request.club
+        if can_manage_members(user, club):
+            return Team.objects.filter(club=club)
+        return teams_staffed_by(user, club)
 
     def get_context_data(self, **kwargs):
         club = self.request.club
@@ -2012,7 +2052,8 @@ class FamilyListView(ClubStaffRequiredMixin, ListView):
 
 class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     """One new family in one go: a parent (who gets a login) and a child (who
-    doesn't) -- see members.services.family.register_family."""
+    doesn't) -- see members.services.invites.register_family_or_invite: a
+    parent email that already has an account is invited, not linked."""
 
     form_class = FamilyCreateForm
     template_name = "management/family_form.html"
@@ -2020,9 +2061,11 @@ class FamilyCreateView(MemberAdminRequiredMixin, FormView):
     def form_valid(self, form):
         cd = form.cleaned_data
         season = current_season(self.request.club)
-        self.family = register_family(
+        self.family = register_family_or_invite(
             self.request.club,
             season,
+            invited_by=self.request.user,
+            request=self.request,
             parent_email=cd["parent_email"],
             parent_first_name=cd["parent_first_name"],
             parent_last_name=cd["parent_last_name"],
@@ -2072,6 +2115,7 @@ class FamilyDetailView(ClubStaffRequiredMixin, DetailView):
             family_role_choices=FamilyMembership.FamilyRole.choices,
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
+            pending_invites=pending_invites(self.object),
             **kwargs,
         )
 
@@ -2098,7 +2142,11 @@ class FamilyAddChildView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormV
 
 class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormView):
     """Reachable only via the "Add parent" modal on the family overview / member
-    detail pages -- a family that needs one more parent/guardian registered."""
+    detail pages -- a family that needs one more parent/guardian registered.
+
+    A new email is added straight away; an email that already has an account is
+    only invited (members.services.invites.add_or_invite_parent). The
+    confirmation reads the same either way."""
 
     form_class = AddParentForm
     http_method_names = ["post"]
@@ -2109,9 +2157,12 @@ class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, Form
 
     def form_valid(self, form):
         family = get_object_or_404(families_of_club(self.request.club), pk=self.kwargs["pk"])
-        parent = add_parent_to_family(self.request.club, current_season(self.request.club), family, **form.cleaned_data)
-        body = _("“%(parent)s” added to %(family)s.") % {"parent": parent, "family": family}
-        notify(self.request, f"s|{_('Parent registered')}|{body}")
+        email = form.cleaned_data["email"]
+        # Named before the add, so the message doesn't differ by whose surname joined.
+        family_name = str(family)
+        add_or_invite_parent(self.request.club, current_season(self.request.club), family, invited_by=self.request.user, request=self.request, **form.cleaned_data)
+        body = _("%(email)s has been added to %(family)s, or emailed an invite to join it if they already have an account.") % {"email": email, "family": family_name}
+        notify(self.request, f"s|{_('Parent added')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
 
 
@@ -2471,13 +2522,16 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         pools = NumberPool.objects.filter(club=club).order_by("name")
         pool = self.get_pool(club, pools)
         season = selected_season_from_request(self.request, club)
+        tiles = self.build_tiles(pool, season) if pool is not None and season is not None else []
 
         return super().get_context_data(
             pools=pools,
             pool=pool,
             seasons=Season.objects.filter(club=club).order_by("-start_date"),
             season=season,
-            tiles=self.build_tiles(pool, season) if pool is not None and season is not None else [],
+            tiles=tiles,
+            # Per-state totals for the legend -- Counter, so a state no tile is in reads 0.
+            state_counts=Counter(tile["state"] for tile in tiles),
             reservation_form=NumberReservationForm(),
             **kwargs,
         )
@@ -2486,7 +2540,7 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
 
         reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
-        # Kept as memberships (not pre-formatted strings, unlike the previous-season/
+        # Kept as memberships (not pre-formatted people, unlike the previous-season/
         # pending dicts below) until after the conflict check -- has_unresolved_conflict
         # needs the actual Member rows to weigh the age-gap exception, not display text.
         placed_this_season = {}
@@ -2495,31 +2549,66 @@ class NumberListView(ClubStaffRequiredMixin, TemplateView):
         placed_previous_season = {}
         if previous is not None:
             for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
-                placed_previous_season.setdefault(membership.jersey_number, []).append(f"{membership.member} ({membership.team.short_name or membership.team.name})")
+                placed_previous_season.setdefault(membership.jersey_number, []).append(self.person(membership.member, membership.team))
         pending_this_season = {}
         for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member", "requested_team"):
-            pending_this_season.setdefault(details.requested_jersey_number, []).append(f"{details.membership.member} ({details.requested_team.short_name or details.requested_team.name})")
+            pending_this_season.setdefault(details.requested_jersey_number, []).append(self.person(details.membership.member, details.requested_team))
 
         tiles = []
         for number in range(pool.min_number, pool.max_number + 1):
             reservation = reservations.get(number)
             if reservation is not None:
-                tiles.append({"number": number, "state": "reserved", "holders": [], "note": reservation.note, "reservation": reservation})
+                tiles.append(self.tile(number, "reserved", note=reservation.note, reservation=reservation))
             elif number in placed_this_season:
                 memberships = placed_this_season[number]
                 # A genuine conflict (issue #6) only ever comes from an admin's
                 # override_conflict on TeamMembershipForm -- is_number_available
                 # already blocks everything else, age-gap-exempt shares included.
-                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships]) else "taken"
-                holders = [f"{membership.member} ({membership.team.short_name or membership.team.name})" for membership in memberships]
-                tiles.append({"number": number, "state": state, "holders": holders, "note": "", "reservation": None})
+                state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships], min_age_gap_years=pool.min_age_gap_years) else "taken"
+                tiles.append(self.tile(number, state, people=[self.person(membership.member, membership.team) for membership in memberships]))
             elif number in pending_this_season:
-                tiles.append({"number": number, "state": "pending", "holders": pending_this_season[number], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "pending", people=pending_this_season[number]))
             elif number in placed_previous_season:
-                tiles.append({"number": number, "state": "previous", "holders": placed_previous_season[number], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "previous", people=placed_previous_season[number]))
             else:
-                tiles.append({"number": number, "state": "available", "holders": [], "note": "", "reservation": None})
+                tiles.append(self.tile(number, "available"))
         return tiles
+
+    @staticmethod
+    def person(member, team):
+        """One holder of a number -- structured for the PDF export's own
+        name/team/birth year columns; the page itself only ever shows the
+        flattened ``holders`` strings built from these in tile()."""
+        return {"member": member, "team": team.short_name or team.name, "birth_year": member.date_of_birth.year if member.date_of_birth else None}
+
+    @staticmethod
+    def tile(number, state, *, people=(), note="", reservation=None):
+        people = list(people)
+        holders = [f"{person['member']} ({person['team']})" for person in people]
+        return {"number": number, "state": state, "people": people, "holders": holders, "note": note, "reservation": reservation}
+
+
+class NumberExportPdfView(NumberListView):
+    """The Numbers page as a printable list -- same pool/season selection
+    (whatever query string the page currently has) and the same tile states
+    as NumberListView, one row per holder with their birth year, colour-flagged
+    the same way the page's tiles are. Same shape as MembershipExportPdfView."""
+
+    def get(self, request, *args, **kwargs):
+        context = self.get_context_data(club=request.club, generated_at=timezone.now(), colors=number_list_colors(request.club))
+        if context["pool"] is None or context["season"] is None:
+            notify(request, f"e|{_('PDF unavailable')}|{_('Pick a number pool and season first.')}")
+            return redirect("management:number_list")
+
+        try:
+            pdf = number_list_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect(f"{reverse('management:number_list')}?{request.GET.urlencode()}")
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="numbers-{slugify(context["pool"].name)}-{context["season"].start_date:%Y}.pdf"'
+        return response
 
 
 class NumberReservationCreateView(ClubStaffRequiredMixin, View):
@@ -3642,30 +3731,36 @@ class EventTaskDeleteView(EventManagerRequiredMixin, View):
         return redirect(reverse("management:event_detail", args=[event.pk]))
 
 
+def _club_games_needing_management(club, lookup, *, upcoming_only=False, season=None):
+    """The shared shape behind upcoming_games_needing_referee_management,
+    upcoming_games_needing_official_management, remaining_season_games_needing_referee_management
+    and remaining_season_games_needing_official_management below -- only which governance
+    flag a team must have (`lookup`, e.g.
+    {"teams__referee_management": Team.RefereeManagement.CLUB}) and the date
+    scoping (from now on, or bounded to a season, or neither) differ between
+    them; federation-managed teams never match `lookup` at all, see
+    events.services.referees/officials.needs_*_management (the kind/home-ground
+    condition mirrors Event.is_home_fixture -- a home tournament needs
+    officiating arranged just as much as a home game)."""
+    queryset = Event.objects.filter(
+        club=club,
+        kind__in=[Event.EventKind.GAME, Event.EventKind.TOURNAMENT],
+        cancelled=False,
+        location__is_home=True,
+        **lookup,
+    ).distinct()
+    if upcoming_only:
+        queryset = queryset.filter(start__gte=timezone.now())
+    if season is not None:
+        queryset = queryset.filter(start__date__gte=season.start_date, start__date__lte=season.end_date)
+    return queryset.order_by("start")
+
+
 def upcoming_games_needing_referee_management(club):
     """Upcoming home games/tournaments a club-arranged referee is needed for --
-    federation-managed teams never appear here, see events.services.referees.
-    needs_referee_management (the kind/home-ground condition below mirrors
-    Event.is_home_fixture -- a home tournament needs officiating arranged
-    just as much as a home game).
-
-    The base query behind RefereeManagementDashboardView's own list, factored out
-    so the nav's Referee management badge (games_missing_referees_count below,
-    used by management.context_processors.sidebar_counters) counts from exactly
-    the same set of games rather than a second, potentially-drifting definition
-    of "needs a referee"."""
-    return (
-        Event.objects.filter(
-            club=club,
-            kind__in=[Event.EventKind.GAME, Event.EventKind.TOURNAMENT],
-            cancelled=False,
-            location__is_home=True,
-            start__gte=timezone.now(),
-            teams__referee_management=Team.RefereeManagement.CLUB,
-        )
-        .distinct()
-        .order_by("start")
-    )
+    the base query behind RefereeManagementDashboardView's own game list
+    (sliced to whatever range is selected there)."""
+    return _club_games_needing_management(club, {"teams__referee_management": Team.RefereeManagement.CLUB}, upcoming_only=True)
 
 
 def referee_workload_stats(club):
@@ -3686,72 +3781,39 @@ def referee_workload_stats(club):
     return list(queryset.values("member__id", "member__first_name", "member__last_name").annotate(games=Count("id"), total_fees=Sum("fee")).order_by("-games", "member__last_name"))
 
 
-def games_missing_referees_count(club, limit=10):
-    """How many of the next `limit` upcoming, understaffed club-managed home
-    games have nobody assigned yet -- the same games RefereeManagementDashboardView's
-    own kpi_no_referee counts for its default "next 10" range, but via one
-    annotated query rather than the per-game referee_rows/eligible_referees
-    loop the dashboard builds for rendering (which a nav badge has no use for).
-
-    Filter to understaffed (referee_count < max_referees) BEFORE slicing to
-    `limit`, not after: the dashboard's own referee_qs does the same, so a
-    fully-staffed game chronologically ahead of an unstaffed one doesn't eat
-    a slot in the "next `limit`" window and silently shrink the badge below
-    what the page itself shows for the same range.
-    """
-    games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
-    return sum(1 for game in games if game.referee_count == 0)
-
-
 def upcoming_games_needing_official_management(club):
     """The officials counterpart to upcoming_games_needing_referee_management
     -- same shape, same reasoning, keyed off Team.official_management
     instead."""
-    return (
-        Event.objects.filter(
-            club=club,
-            kind__in=[Event.EventKind.GAME, Event.EventKind.TOURNAMENT],
-            cancelled=False,
-            location__is_home=True,
-            start__gte=timezone.now(),
-            teams__official_management=Team.OfficialManagement.CLUB,
-        )
-        .distinct()
-        .order_by("start")
-    )
+    return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, upcoming_only=True)
 
 
-def games_missing_officials_count(club, limit=10):
-    """The officials counterpart to games_missing_referees_count -- 0 when
-    the "officials" flag is off for this club, same as every other officials
-    entry point (checked here, not just at the view layer, since this feeds
-    the nav badge directly). Filters to understaffed before slicing to
-    `limit`, for the same reason games_missing_referees_count does."""
-    if not officials_enabled_for(club):
-        return 0
-    games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
-    return sum(1 for game in games if game.official_count == 0)
+def remaining_season_games_needing_referee_management(club, season):
+    """Every club-managed home game/tournament needing a referee from now
+    until the end of `season` -- what RefereeManagementDashboardView's status
+    KPI cards and the nav badge (games_missing_referee_or_official_count)
+    both count from, independent of the dashboard's range selector. Upcoming
+    only: a past game nobody refereed isn't something left to arrange, and
+    counting those is what made the cards read far higher than the list."""
+    return _club_games_needing_management(club, {"teams__referee_management": Team.RefereeManagement.CLUB}, upcoming_only=True, season=season)
 
 
-def games_missing_referee_or_official_count(club, limit=10):
-    """Distinct games missing a referee or an official (or both), within the
-    next `limit` of each -- the nav badge's own number.
+def remaining_season_games_needing_official_management(club, season):
+    """The officials counterpart to remaining_season_games_needing_referee_management."""
+    return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, upcoming_only=True, season=season)
 
-    Deliberately NOT games_missing_referees_count(club, limit) +
-    games_missing_officials_count(club, limit): that naive sum double-counts
-    a game missing both (it's found once by each query), so a club with one
-    game missing only a referee and one game missing both would show 3 in
-    the badge for only 2 actual games -- see management.context_processors.
-    sidebar_counters, and RefereeManagementDashboardView's own kpi_total for
-    the same "count distinct games, not distinct (game, gap) pairs" rule.
-    """
-    referee_games = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))[:limit]
-    missing_ids = {game.pk for game in referee_games if game.referee_count == 0}
 
+def games_missing_referee_or_official_count(club):
+    """Distinct upcoming games this season still short a referee or an
+    official (nobody assigned *or* only partially staffed) -- the nav badge's
+    own number. Same set the dashboard's status KPI cards count from, so the
+    badge always equals the distinct games behind "Without a referee" +
+    "Partially staffed" and their officials counterparts, a game short both
+    counted once (a naive sum of the two would count it twice)."""
+    season = current_season(club)
+    missing_ids = set(remaining_season_games_needing_referee_management(club, season).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees")).values_list("pk", flat=True))
     if officials_enabled_for(club):
-        official_games = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))[:limit]
-        missing_ids |= {game.pk for game in official_games if game.official_count == 0}
-
+        missing_ids |= set(remaining_season_games_needing_official_management(club, season).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials")).values_list("pk", flat=True))
     return len(missing_ids)
 
 
@@ -3767,33 +3829,32 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
     both anchored on the ISO week so "this week" always means Mon-Sun of the
     current week regardless of what weekday it is today) or a flat count of
     upcoming games -- buttons in the template, not a dropdown, since there
-    are only a handful of sensible choices."""
+    are only a handful of sensible choices. The range picks which games are
+    in view (every club-managed upcoming home game, fully staffed ones
+    included); the `need` chips ("all", the default, or only the games
+    still short a referee/an official/either) then narrow that same set, so
+    each chip's count is always a subset of "All games"."""
 
     template_name = "management/referee_management.html"
     RANGE_CHOICES = ["week", "two_weeks", "10", "25", "50"]
     DEFAULT_RANGE = "10"
-    NEED_CHOICES = ["both", "referees", "officials"]
-    DEFAULT_NEED = "both"
+    NEED_CHOICES = ["all", "both", "referees", "officials"]
+    DEFAULT_NEED = "all"
 
     def get_range(self):
         value = self.request.GET.get("range", self.DEFAULT_RANGE)
         return value if value in self.RANGE_CHOICES else self.DEFAULT_RANGE
 
     def get_need(self, officials_enabled):
-        # "officials" (and any other non-default value) only means anything once
-        # the flag's on for this club -- with it off there's no officials bucket
-        # to switch to, same reasoning every other officials-gated control here
-        # already follows.
-        if not officials_enabled:
-            return self.DEFAULT_NEED
+        # With officials off for this club there's no officials bucket to
+        # switch to, and "either" is just "referees" -- only all/referees remain.
+        choices = self.NEED_CHOICES if officials_enabled else ["all", "referees"]
         value = self.request.GET.get("need", self.DEFAULT_NEED)
-        return value if value in self.NEED_CHOICES else self.DEFAULT_NEED
+        return value if value in choices else self.DEFAULT_NEED
 
     def _apply_range(self, queryset, range_choice):
-        """The same "week/two_weeks -> date filter, else -> next N" window
-        every bucket (the rendered list and each toggle's own count) is
-        restricted to, so a count next to "Referees" always matches exactly
-        what clicking it would show."""
+        """The "week/two_weeks -> date filter, else -> next N" window -- applied once, to
+        every managed upcoming game, before the need chips narrow it down."""
         if range_choice in ("week", "two_weeks"):
             today = timezone.localdate()
             end_of_this_week = today + timedelta(days=6 - today.weekday())
@@ -3801,52 +3862,57 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             return queryset.filter(start__date__lte=end_date)
         return queryset[: int(range_choice)]
 
+    def _status_kpis(self, games_qs, related_name, max_field):
+        """Shared shape for the referee/official status breakdown -- counts
+        every game in `games_qs` (every upcoming game left this season, see
+        remaining_season_games_needing_referee/official_management) into
+        none/some/full, plus how many of those have at least one assignment
+        with no fee set. Not tied to the range/need selection -- see
+        get_context_data's own comment on why.
+
+        Kept light on purpose: `values_list` for the breakdown pulls two
+        integers per game, no Event or EventReferee/EventOfficial instances
+        at all, and fees_pending is one DB-side existence count rather than
+        a Python loop over every assignment's fee."""
+        no_one = understaffed = fully_staffed = 0
+        counts = games_qs.annotate(assigned_count=Count(related_name, distinct=True)).values_list("pk", "assigned_count", max_field)
+        for _pk, assigned_count, max_allowed in counts:
+            if assigned_count == 0:
+                no_one += 1
+            elif assigned_count < max_allowed:
+                understaffed += 1
+            else:
+                fully_staffed += 1
+        # fee's default is 0.00, never null (see EventReferee/EventOfficial's own
+        # docstring) -- "no fee set yet" and "a real row with fee=0" are the same
+        # value, same as the row-render loop's `not assignment.fee` treats them.
+        fees_pending = games_qs.filter(**{f"{related_name}__fee": 0}).distinct().count()
+        return no_one, understaffed, fully_staffed, fees_pending
+
     def get_context_data(self, **kwargs):
         club = self.request.club
         range_choice = self.get_range()
         officials_enabled = officials_enabled_for(club)
         need_choice = self.get_need(officials_enabled)
 
-        # Three buckets a game can belong to -- referees-only, officials-only
-        # (empty when the flag's off for this club), or the union of both
-        # (confirmed via AskUserQuestion as the *combined* page's default: a
-        # game needing either belongs in one list, not two separate pages).
-        # The `need` toggle picks which bucket actually renders; all three are
-        # still counted (within the same range) for the toggle's own numbers.
-        #
-        # "Missing" means not yet fully staffed (referee_count < max_referees)
-        # -- zero assigned *or* understaffed, but never a fully-staffed game.
-        # A game with one internal and one external referee (2 rows, the
-        # Event.max_referees default) is fully staffed and must NOT show up
-        # here just because it's still under this club's referee governance --
-        # that governance-only check is upcoming_games_needing_referee_management's
-        # own job, not this toggle's.
-        referee_qs = upcoming_games_needing_referee_management(club).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees"))
-        if officials_enabled:
-            official_qs = upcoming_games_needing_official_management(club).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials"))
-            # Not a queryset `|` union -- referee_qs/official_qs carry different
-            # annotations, so combining them directly by pk avoids relying on
-            # Django's ability to merge mismatched annotation sets.
-            both_ids = set(referee_qs.values_list("pk", flat=True)) | set(official_qs.values_list("pk", flat=True))
-            both_qs = Event.objects.filter(pk__in=both_ids).order_by("start")
-        else:
-            official_qs = Event.objects.none()
-            both_qs = referee_qs
-        buckets = {"referees": referee_qs, "officials": official_qs, "both": both_qs}
+        # Every managed upcoming game (referees, officials, or both governed by
+        # the club) -- not a queryset `|` union, the two querysets carry
+        # different .distinct()/join shapes, so combine by pk instead.
+        referee_managed = upcoming_games_needing_referee_management(club)
+        official_managed = upcoming_games_needing_official_management(club) if officials_enabled else Event.objects.none()
+        managed_ids = set(referee_managed.values_list("pk", flat=True)) | set(official_managed.values_list("pk", flat=True))
+        in_view_ids = list(self._apply_range(Event.objects.filter(pk__in=managed_ids).order_by("start").values_list("pk", flat=True), range_choice))
 
-        need_counts = {key: self._apply_range(bucket, range_choice).count() for key, bucket in buckets.items()}
+        # "Short" means not yet fully staffed (count < max) -- nobody assigned
+        # *or* understaffed. A game with one internal and one external referee
+        # (2 rows, the Event.max_referees default) is fully staffed.
+        short_referee_ids = set(referee_managed.filter(pk__in=in_view_ids).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees")).values_list("pk", flat=True))
+        short_official_ids = set(official_managed.filter(pk__in=in_view_ids).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials")).values_list("pk", flat=True))
+        buckets = {"all": set(in_view_ids), "referees": short_referee_ids, "officials": short_official_ids, "both": short_referee_ids | short_official_ids}
+        need_counts = {key: len(ids) for key, ids in buckets.items()}
 
-        queryset = buckets[need_choice].select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
-        games = list(self._apply_range(queryset, range_choice))
-
-        kpi_no_referee = 0
-        kpi_understaffed = 0
-        kpi_fully_staffed = 0
-        kpi_fees_pending = 0
-        kpi_no_official = 0
-        kpi_officials_understaffed = 0
-        kpi_officials_fully_staffed = 0
-        kpi_official_fees_pending = 0
+        queryset = Event.objects.filter(pk__in=buckets[need_choice]).order_by("start").select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
+        games = list(queryset)
 
         for game in games:
             game.needs_referees = needs_referee_management(game)
@@ -3855,22 +3921,13 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.referee_candidates = []
             game.fees_pending = any(not referee.fee for referee in game.referee_rows)
             game.pending_signups = list(game.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member")) if not game.referees_full else []
-            if game.needs_referees:
-                if not game.referee_rows:
-                    kpi_no_referee += 1
-                elif not game.referees_full:
-                    kpi_understaffed += 1
-                else:
-                    kpi_fully_staffed += 1
-                if game.fees_pending:
-                    kpi_fees_pending += 1
-                if not game.referees_full:
-                    game.referee_candidates = list(eligible_referees(game))
-                    conflicts_by_member = conflicting_events_for_members(game.referee_candidates, game)
-                    for candidate in game.referee_candidates:
-                        conflicts = conflicts_by_member[candidate.pk]
-                        candidate.has_conflict = bool(conflicts)
-                        candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+            if game.needs_referees and not game.referees_full:
+                game.referee_candidates = list(eligible_referees(game))
+                conflicts_by_member = conflicting_events_for_members(game.referee_candidates, game)
+                for candidate in game.referee_candidates:
+                    conflicts = conflicts_by_member[candidate.pk]
+                    candidate.has_conflict = bool(conflicts)
+                    candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
 
             game.needs_officials = officials_enabled and needs_official_management(game)
             game.official_rows = list(game.officials.all())
@@ -3878,22 +3935,23 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.official_candidates = []
             game.official_fees_pending = any(not official.fee for official in game.official_rows)
             game.pending_official_signups = list(game.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member")) if not game.officials_full else []
-            if game.needs_officials:
-                if not game.official_rows:
-                    kpi_no_official += 1
-                elif not game.officials_full:
-                    kpi_officials_understaffed += 1
-                else:
-                    kpi_officials_fully_staffed += 1
-                if game.official_fees_pending:
-                    kpi_official_fees_pending += 1
-                if not game.officials_full:
-                    game.official_candidates = list(eligible_officials(game))
-                    conflicts_by_member = conflicting_events_for_members(game.official_candidates, game)
-                    for candidate in game.official_candidates:
-                        conflicts = conflicts_by_member[candidate.pk]
-                        candidate.has_conflict = bool(conflicts)
-                        candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+            if game.needs_officials and not game.officials_full:
+                game.official_candidates = list(eligible_officials(game))
+                conflicts_by_member = conflicting_events_for_members(game.official_candidates, game)
+                for candidate in game.official_candidates:
+                    conflicts = conflicts_by_member[candidate.pk]
+                    candidate.has_conflict = bool(conflicts)
+                    candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
+
+        # Every upcoming game left this season, not range/need-bound -- a stable
+        # "what's still ahead" picture that also matches the nav badge
+        # (games_missing_referee_or_official_count counts the same set).
+        season = current_season(club)
+        kpi_no_referee, kpi_understaffed, kpi_fully_staffed, kpi_fees_pending = self._status_kpis(remaining_season_games_needing_referee_management(club, season), "referees", "max_referees")
+        if officials_enabled:
+            kpi_no_official, kpi_officials_understaffed, kpi_officials_fully_staffed, kpi_official_fees_pending = self._status_kpis(remaining_season_games_needing_official_management(club, season), "officials", "max_officials")
+        else:
+            kpi_no_official = kpi_officials_understaffed = kpi_officials_fully_staffed = kpi_official_fees_pending = 0
 
         stats = referee_workload_stats(club)
         kpi_active_referees = len(stats)
@@ -4065,6 +4123,11 @@ class EventFetchGameInfoView(EventManagerRequiredMixin, View):
         return redirect("management:event_detail", pk=event.pk)
 
 
+RBIHF_IMPORT_CONTEXT = {"source_name": "RBIHF", "import_url_name": "management:rbihf_import", "confirm_url_name": "management:rbihf_import_confirm", "show_game_ids": True}
+# DFEL game ids are UUIDs -- meaningless to staff and far too wide for the table.
+DFEL_IMPORT_CONTEXT = {"source_name": "DFEL", "import_url_name": "management:dfel_import", "confirm_url_name": "management:dfel_import_confirm", "show_game_ids": False}
+
+
 class RBIHFImportView(FeatureRequiredMixin, View):
     """Step 1: paste an RBIHF team page URL, pick which of the club's teams it's
     for. Fetches and parses the page server-side, stashes the raw HTML (not
@@ -4076,28 +4139,30 @@ class RBIHFImportView(FeatureRequiredMixin, View):
     feature_flag = "RBIHF"
 
     def get(self, request):
-        return render(request, "management/rbihf_import_form.html", {"form": RBIHFImportForm(club=request.club)})
+        return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": RBIHFImportForm(club=request.club)})
 
     def post(self, request):
         form = RBIHFImportForm(request.POST, club=request.club)
         if not form.is_valid():
-            return render(request, "management/rbihf_import_form.html", {"form": form})
+            return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": form})
 
         url = form.cleaned_data["url"]
         team = form.cleaned_data["team"]
+        competition_label = form.cleaned_data["competition_label"]
 
         rbihf_team_id = extract_team_id(url)
         try:
             html = fetch_html(url)
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError as error:
             form.add_error("url", str(error))
-            return render(request, "management/rbihf_import_form.html", {"form": form})
+            return render(request, "management/event_import_form.html", {**RBIHF_IMPORT_CONTEXT, "form": form})
 
         request.session["rbihf_import_html"] = html
         request.session["rbihf_import_team_id"] = str(team.pk)
         request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
-        return render(request, "management/rbihf_import_preview.html", {"plan": plan})
+        request.session["rbihf_import_competition_label"] = competition_label
+        return render(request, "management/event_import_preview.html", {**RBIHF_IMPORT_CONTEXT, "plan": plan})
 
 
 class RBIHFImportConfirmView(FeatureRequiredMixin, View):
@@ -4112,6 +4177,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         html = request.session.pop("rbihf_import_html", None)
         team_id = request.session.pop("rbihf_import_team_id", None)
         rbihf_team_id = request.session.pop("rbihf_import_rbihf_team_id", None)
+        competition_label = request.session.pop("rbihf_import_competition_label", "")
         if not html or not team_id or not rbihf_team_id:
             notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the RBIHF team URL again.')}")
             return redirect("management:rbihf_import")
@@ -4119,7 +4185,7 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
 
         try:
-            plan = build_plan(request.club, team, rbihf_team_id, html)
+            plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
         except RBIHFImportError:
             notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched page. Try again.')}")
             return redirect("management:rbihf_import")
@@ -4132,6 +4198,81 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
             opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
 
         result = apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+
+        body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
+        notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
+class DFELImportView(FeatureRequiredMixin, View):
+    """Step 1 of the DFEL (Deutsche Fraueneishockey-Liga, via the EHV-NRW
+    league site) fixture import -- the same shape as RBIHFImportView: paste a
+    team URL, pick which of the club's teams it's for, fetch the schedule
+    server-side, stash the raw JSON (not client-trusted parsed data) in the
+    session and render the create/update/delete preview. See
+    events.services.dfel_import."""
+
+    feature_flag = "DFEL"
+
+    def get(self, request):
+        return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": DFELImportForm(club=request.club)})
+
+    def post(self, request):
+        form = DFELImportForm(request.POST, club=request.club)
+        if not form.is_valid():
+            return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": form})
+
+        team = form.cleaned_data["team"]
+        competition_label = form.cleaned_data["competition_label"]
+
+        team_id, division_id = dfel_import.extract_ids(form.cleaned_data["url"])
+        source_id = dfel_import.source_id(team_id, division_id)
+        try:
+            raw_json = fetch_schedule(team_id, division_id)
+            plan = dfel_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except DFELImportError as error:
+            form.add_error("url", str(error))
+            return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": form})
+
+        request.session["dfel_import_json"] = raw_json
+        request.session["dfel_import_team_id"] = str(team.pk)
+        request.session["dfel_import_source_id"] = source_id
+        request.session["dfel_import_competition_label"] = competition_label
+        return render(request, "management/event_import_preview.html", {**DFEL_IMPORT_CONTEXT, "plan": plan})
+
+
+class DFELImportConfirmView(FeatureRequiredMixin, View):
+    """Step 2: re-parses and re-diffs the JSON stashed by DFELImportView
+    against the current DB state and applies it -- see RBIHFImportConfirmView,
+    which this mirrors."""
+
+    feature_flag = "DFEL"
+
+    def post(self, request):
+        raw_json = request.session.pop("dfel_import_json", None)
+        team_id = request.session.pop("dfel_import_team_id", None)
+        source_id = request.session.pop("dfel_import_source_id", None)
+        competition_label = request.session.pop("dfel_import_competition_label", "")
+        if not raw_json or not team_id or not source_id:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the DFEL team URL again.')}")
+            return redirect("management:dfel_import")
+
+        team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+
+        try:
+            plan = dfel_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except DFELImportError:
+            notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched schedule. Try again.')}")
+            return redirect("management:dfel_import")
+
+        locations_by_game_id = {}
+        opponents_by_game_id = {}
+        for planned in [*plan.to_create, *plan.to_update]:
+            game_id = planned.fixture.external_game_id
+            locations_by_game_id[game_id] = request.POST.get(f"location_{game_id}", "")
+            opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
+
+        result = dfel_import.apply_plan(plan, locations_by_game_id, opponents_by_game_id)
 
         body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
         notify(request, f"s|{_('Fixtures imported')}|{body}")
@@ -4755,7 +4896,11 @@ class DiscountListView(ShopManagerRequiredMixin, ListView):
     context_object_name = "discounts"
 
     def get_queryset(self):
-        return Discount.objects.filter(club=self.request.club)
+        # use_count: orders that used the code and weren't cancelled -- the
+        # same count Discount.max_uses is enforced against (shop.services.
+        # checkout.discount_uses).
+        uses = Count("applied_discounts", filter=~Q(applied_discounts__order__fulfillment_status=Order.FulfillmentStatus.CANCELLED))
+        return Discount.objects.filter(club=self.request.club).annotate(use_count=uses)
 
 
 class DiscountCreateView(ShopManagerRequiredMixin, CreateView):
@@ -5109,10 +5254,10 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
     template_name = "management/order_receive_production.html"
 
     def get(self, request):
-        return render(request, self.template_name, {"summary": production_receiving_summary()})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club)})
 
     def post(self, request):
-        summary = production_receiving_summary()
+        summary = production_receiving_summary(request.club)
 
         receipts = {}
         for entry in summary:
@@ -5130,7 +5275,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             notify(request, f"w|{_('Nothing entered')}|{_('Enter a received quantity for at least one item.')}")
             return redirect("management:order_receive_production")
 
-        results = receive_production(receipts)
+        results = receive_production(request.club, receipts)
 
         allocated_total = sum(len(result.allocated_lines) for result in results)
         discrepancy_count = sum(1 for result in results if result.has_discrepancy)
@@ -5145,7 +5290,7 @@ class OrderReceiveProductionView(ShopManagerRequiredMixin, View):
             body = ngettext("%(count)d line marked received.", "%(count)d lines marked received.", allocated_total) % {"count": allocated_total}
             notify(request, f"s|{_('Received')}|{body}")
 
-        return render(request, self.template_name, {"summary": production_receiving_summary(), "results": results})
+        return render(request, self.template_name, {"summary": production_receiving_summary(request.club), "results": results})
 
 
 class OrderReadyForPickupView(ShopManagerRequiredMixin, ListView):
@@ -5396,14 +5541,7 @@ class PaymentDeleteView(ShopManagerRequiredMixin, View):
     def post(self, request, order_pk, pk):
         payment = get_object_or_404(Payment.objects.filter(order__club=request.club, order__pk=order_pk).select_related("voucher"), pk=pk)
         order = payment.order
-        voucher = payment.voucher
-        amount = payment.amount
-        was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
-        payment.delete()
-
-        if voucher is not None and was_confirmed:
-            voucher.consumed_amount = max(Decimal("0"), voucher.consumed_amount - amount)
-            voucher.save(update_fields=["consumed_amount"])
+        delete_shop_payment(payment)
 
         reverted_to_pending = False
         if order.payment_status != Order.PaymentStatus.REFUNDED:
@@ -5773,10 +5911,12 @@ class RegistrationInvoiceDetailView(ClubAdminRequiredMixin, View):
     template_name = "management/registration_invoice_detail.html"
 
     def get(self, request, pk):
-        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season"), pk=pk)
+        batch = get_object_or_404(RegistrationBatch.objects.filter(club=request.club, invoice_sent_at__isnull=False).select_related("season", "contact_member"), pk=pk)
         entries = active_batch_entries(batch)
         subtotal, discount_amount, total = batch_totals(entries, batch.manual_discount_amount)
-        contact = find_member_by_email(batch.contact_email)
+        # The Member the submission itself resolved -- never re-derived from
+        # the typed email. None: the template shows the typed contact only.
+        contact = batch.contact_member
         memberships = {}
         for entry in entries:
             memberships.setdefault(entry.membership_id, entry.membership)
@@ -5972,7 +6112,7 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
         grouping batch_invoice_pdf's own document uses. A still-unconfirmed
         registration has no place here at all; it's on the review queue
         instead, until staff has actually reviewed and sent it."""
-        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).order_by("-invoice_sent_at")
+        batches = RegistrationBatch.objects.filter(club=club, invoice_sent_at__isnull=False).select_related("contact_member").order_by("-invoice_sent_at")
         if search:
             batches = (
                 batches.filter(contact_first_name__icontains=search)
@@ -5983,13 +6123,6 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
 
         rows = []
         for batch in batches:
-            contact = find_member_by_email(batch.contact_email)
-            if contact is None:
-                # The login account behind the contact email has since gone
-                # missing (changed/removed) -- billed_to has to be a real
-                # Member (the template links straight to its own detail
-                # page), so this row can't be shown rather than 500ing.
-                continue
             entries = active_batch_entries(batch)
             if not entries:
                 # Everyone in it has since been cancelled -- nothing left
@@ -6007,7 +6140,10 @@ class InvoiceListView(ClubStaffRequiredMixin, TemplateView):
                     "kind": "registration",
                     "kind_label": _("Registration"),
                     "number": batch.invoice_number,
-                    "billed_to": contact,
+                    # The Member the submission resolved; when that's gone, the
+                    # row still shows, with the typed contact and no link.
+                    "billed_to": batch.contact_member,
+                    "billed_to_name": f"{batch.contact_first_name} {batch.contact_last_name}".strip() or batch.contact_email,
                     "amount": total,
                     "date": batch.invoice_sent_at.date(),
                     "status_label": status_label,
@@ -6285,7 +6421,8 @@ class FormSendResponsesView(FormManagerRequiredMixin, DetailView):
         # each row carries its cells in the same column order.
         report = form_report(send)
         columns = [{"field": column, "summary": sorted(report.summaries[column.id].items()) if column.id in report.summaries else None} for column in report.columns]
-        rows = [{"submission": row.submission, "cells": [row.values.get(column.id) for column in report.columns]} for row in report.rows]
+        # A FILE answer's cell carries its Answer too, for the download link.
+        rows = [{"submission": row.submission, "cells": [{"value": row.values.get(column.id), "file_answer": row.files.get(column.id)} for column in report.columns]} for row in report.rows]
         return super().get_context_data(
             audience_count=audience_count,
             submission_count=submission_count,
@@ -6312,24 +6449,28 @@ class FormSendResponsesExportView(FormManagerRequiredMixin, View):
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = f'attachment; filename="{send.form.slug}-responses.csv"'
         writer = csv.writer(response)
-        writer.writerow([_("Submitted"), _("Member"), *[column.label for column in report.columns]])
+        # safe_row: labels and answers are free text typed by users (anonymous
+        # respondents included) -- never let a spreadsheet run one as a formula.
+        # "Submitted by" is only filled in when someone else (a parent) answered for the member.
+        writer.writerow(safe_row([_("Submitted"), _("Member"), _("Submitted by"), *[column.label for column in report.columns]]))
         for row in report.rows:
+            on_behalf_by = row.submission.submitted_on_behalf_by
             writer.writerow(
-                [
-                    timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
-                    str(row.submission.member) if row.submission.member else "",
-                    *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
-                ]
+                safe_row(
+                    [
+                        timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
+                        str(row.submission.member) if row.submission.member else "",
+                        str(on_behalf_by) if on_behalf_by else "",
+                        *[_format_answer_value(row.values.get(column.id)) for column in report.columns],
+                    ]
+                )
             )
         return response
 
 
 def _format_answer_value(value):
-    if value is None:
-        return ""
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    return str(value)
+    # A file answer exports its original file name, never its storage path.
+    return display_value(value)
 
 
 class EvaluationChecklistMixin:
@@ -6633,7 +6774,14 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
         action = request.POST.get("action", "note")
         since_raw = request.POST.get("since", "")
         player_pk = request.POST.get("player_pk")
-        player = get_object_or_404(Member, pk=player_pk) if player_pk else None
+        # Only a player this checklist actually covers (the same population
+        # the walkthrough steps through) -- never an arbitrary Member pk,
+        # which could belong to another club entirely.
+        player = None
+        if player_pk:
+            player = next((candidate for candidate in checklist_players(self.checklist) if str(candidate.pk) == player_pk), None)
+            if player is None:
+                raise Http404
         author = Member.objects.filter(user=request.user).first()
 
         if action == "start_session":
@@ -6647,6 +6795,9 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
                 end_session(session)
                 notify(request, f"s|{_('Meeting ended')}|{_('Download the outcomes PDF from the button above.')}")
             return self._redirect(player=player, since_raw=since_raw)
+
+        if action in ("outcome", "note") and player is None:
+            raise Http404
 
         if action == "outcome":
             session = active_session(self.checklist)
@@ -7009,12 +7160,17 @@ class MemberRequirementIncompleteView(MemberAdminRequiredMixin, View):
 
 
 class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
-    """Streams a checklist document (see MemberRequirementStatus.document) to any
-    signed-in staff -- same visibility as the rest of a member's profile. The file
-    itself lives on rosterchief.storage.private_storage, which has no public URL at
-    all; this view is the only way to read one."""
+    """Streams a checklist document (see MemberRequirementStatus.document) to staff
+    who may see that member -- the same members_visible_to rule MemberDetailView
+    applies, plus anyone who may manage members (who can already mark the item
+    complete/incomplete). Anyone else gets a 404, not a 403, so the view doesn't
+    confirm the member exists. The file itself lives on
+    rosterchief.storage.private_storage, which has no public URL at all; this view
+    is the only way to read one."""
 
     def get(self, request, pk, requirement_pk):
+        if not can_manage_members(request.user, request.club) and not members_visible_to(request.user, request.club, include_guardians=True).filter(pk=pk).exists():
+            raise Http404("No such member.")
         membership = _current_membership_or_404(request, pk)
         status = get_object_or_404(MemberRequirementStatus.objects.filter(membership=membership, requirement_id=requirement_pk))
 
@@ -7107,7 +7263,11 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
                 membership.teams_registered = teams.filter(Q(roster__member_id=membership.member_id, roster__season=season) | Q(staff_assignments__member_id=membership.member_id, staff_assignments__season=season)).distinct()
                 membership.requested_team_ids = {details.requested_team_id for details in membership.registration_details.all() if details.requested_team_id}
                 membership.placement_form = SignupTeamPlacementForm(club=club, season=season, member=membership.member)
-                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member)
+                # A fresh sign-up is never matched to an existing member
+                # automatically (registration.services.submission) -- this is
+                # where staff sees the likely match, preselected in the picker.
+                membership.possible_duplicates = list(possible_duplicates(membership.member, club))
+                membership.link_form = SignupLinkMemberForm(club=club, exclude_member=membership.member, initial={"member": membership.possible_duplicates[0].pk} if membership.possible_duplicates else None)
                 membership.is_clean = is_signup_clean(membership)
                 membership.is_oldest_pending = membership.pk == oldest_pending_id
             # Already-ACTIVE *and* clean (paid, checklist fully resolved) memberships

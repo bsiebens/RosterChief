@@ -91,8 +91,20 @@ class Event(ClubScopedModel):
     # is this game's id in an external competition/fixture data source, for a later
     # automatic score-fetcher to key off; nothing populates it yet.
     competition = models.CharField(_("competition"), max_length=255, blank=True, help_text=_("The league, cup or competition this game is part of."))
+    competition_label = models.CharField(
+        _("competition label"),
+        max_length=100,
+        blank=True,
+        help_text=_("Tells apart multiple competitions a team plays in via the same source, e.g. “Division 1” vs “Cup” -- purely a display label, unlike competition itself, which fetch_game_info matches against a Competition row's name."),
+    )
     is_friendly = models.BooleanField(_("friendly"), default=False, help_text=_("A friendly game doesn't count towards the standings."))
     external_game_id = models.CharField(_("external game ID"), max_length=255, blank=True, help_text=_("This game's id in an external competition data source, for automatic score fetching later."))
+    external_source_id = models.CharField(
+        _("external source ID"),
+        max_length=255,
+        blank=True,
+        help_text=_("Which of that data source's own entries this game came from -- e.g. RBIHF's own team id for the page it was scraped from. Set by the importer; scopes re-imports so one competition never deletes another's games."),
+    )
     score_for = models.PositiveSmallIntegerField(_("score (us)"), null=True, blank=True)
     score_against = models.PositiveSmallIntegerField(_("score (opponent)"), null=True, blank=True)
     is_live = models.BooleanField(_("live"), default=False, help_text=_("The game is currently in progress."))

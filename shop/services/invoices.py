@@ -2,11 +2,9 @@
 then cached to disk under a per-invoice path so the (comparatively slow)
 WeasyPrint render only happens once per invoice -- see ``render_invoice_pdf``.
 The ``Invoice`` row itself carries no ``pdf`` field; the cache lives purely
-in storage, keyed by ``invoice.pk``, and is never exposed as a public
-URL -- every read goes through ``default_storage.open()`` inside an
-authenticated view (InvoicePdfView/mobile ShopInvoiceView), the same way a
-club logo's *upload* uses this storage without the PDF ever getting a
-public-facing link the way a logo does.
+in ``rosterchief.storage.invoice_cache_storage`` (private, URL-less -- never the
+publicly served default storage), keyed by ``invoice.pk``, and every read goes
+through an authenticated view (InvoicePdfView/mobile ShopInvoiceView).
 
 Cache invalidation is event-driven, not time-based: ``shop.signals`` deletes
 an order's cached PDF the moment ``Order.status`` actually changes (paid,
@@ -25,16 +23,17 @@ import io
 
 import qrcode
 from django.conf import settings
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from club.services.invoicing import resolve_document_address
+from rosterchief.pdf import pdf_url_fetcher
+from rosterchief.storage import drop_cached_invoice_pdf, read_cached_invoice_pdf, write_cached_invoice_pdf
 
 from ..models import Invoice
 
+# "svg" stays for logos stored before new uploads became raster-only (club.validators).
 _LOGO_MIMETYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 
 
@@ -112,16 +111,14 @@ def invalidate_cached_invoice_pdf(invoice) -> None:
     """Drop invoice's cached PDF, if any -- called from shop.signals the
     moment its order's status changes. A no-op when nothing was cached yet
     (a PDF nobody has ever downloaded), which is the common case."""
-    path = _cache_path(invoice)
-    if default_storage.exists(path):
-        default_storage.delete(path)
+    drop_cached_invoice_pdf(_cache_path(invoice))
 
 
 def render_invoice_pdf(invoice) -> bytes:
     cache_path = _cache_path(invoice)
-    if default_storage.exists(cache_path):
-        with default_storage.open(cache_path, "rb") as cached:
-            return cached.read()
+    cached = read_cached_invoice_pdf(cache_path)
+    if cached is not None:
+        return cached
 
     order = invoice.order
     lines = order.order_items.select_related("product", "variant", "beneficiary")
@@ -137,7 +134,7 @@ def render_invoice_pdf(invoice) -> bytes:
         },
     )
     pdf_bytes = render_pdf(html)
-    default_storage.save(cache_path, ContentFile(pdf_bytes))
+    write_cached_invoice_pdf(cache_path, pdf_bytes)
     return pdf_bytes
 
 
@@ -147,4 +144,4 @@ def render_pdf(html: str) -> bytes:
     except (ImportError, OSError) as error:
         raise ShopInvoicePDFError(_("PDF rendering needs the native pango/cairo libraries (on macOS: brew install pango).")) from error
 
-    return HTML(string=html).write_pdf()
+    return HTML(string=html, url_fetcher=pdf_url_fetcher()).write_pdf()

@@ -18,6 +18,10 @@ on:
     branches: [main, development]
   workflow_dispatch:
 
+# Read-only token: this workflow only checks out and runs tests.
+permissions:
+  contents: read
+
 jobs:
   test-postgres:
     runs-on: ubuntu-latest
@@ -36,9 +40,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
