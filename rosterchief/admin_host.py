@@ -42,11 +42,14 @@ def _wrap_patterns(patterns):
 
 
 def base_domain_only_urls(urls):
-    """``admin.site.urls`` with every view wrapped by :func:`base_domain_only`.
+    """``admin.site.urls`` (or an ``include(...)``) with every view wrapped by
+    :func:`base_domain_only`.
 
     Takes and returns the ``(patterns, app_name, namespace)`` triple ``path()``
-    accepts for an include.
+    accepts for an include. ``include()`` hands over the urlconf *module* rather
+    than a list, so its ``urlpatterns`` are wrapped in that case.
     """
     patterns, app_name, namespace = urls
+    patterns = getattr(patterns, "urlpatterns", patterns)
     _wrap_patterns(patterns)
     return patterns, app_name, namespace

@@ -1,10 +1,14 @@
 # API.md — Native-app API (design)
 
-Status: **design only, no code.** Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md`
-(models, tenancy, RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
+Status: **phase 0 (spike) done on the server side** (2026-09-29). allauth.headless is mounted for
+the app client with the JWT strategy, and `authentication/test_headless_app.py` pins the token
+and session behaviour the design relies on (§3.3). Phase-0 items that need real devices or cloud
+accounts (Android passkey prototype, SNS round trip) are still open (§14, §16). No `/api/app/v1/`
+endpoints yet. Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
+RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
 
-Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20; items still
-unverified are marked **UNVERIFIED** and collected in §16.
+Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and re-checked
+against development at 0.7.12 on 2026-09-29; items still unverified are marked **UNVERIFIED** and collected in §16.
 
 ---
 
@@ -60,25 +64,30 @@ Allow-Origin: *` (`api/urls.py`, `api/middleware.py::PublicApiCorsMiddleware`, G
 Already decided with the product owner. It reuses the existing account stack (email login, TOTP, recovery codes, WebAuthn/passkeys, rate limits, password reset) instead of a second identity system, and it is the only option that gives the app **the
 same MFA** as the web. No DRF, simplejwt or oauth-toolkit is added.
 
-Config sketch (nothing here is implemented yet):
+Implemented in phase 0 (`rosterchief/settings.py`, `rosterchief/urls.py`):
 
 ```python
 INSTALLED_APPS += ["allauth.headless"]  # + allauth.usersessions in phase 5 (§3.7)
 HEADLESS_CLIENTS = ("app",)  # mount only the app client; no browser client
-HEADLESS_TOKEN_STRATEGY = "..."  # see §3.3
-HEADLESS_SERVE_SPECIFICATION = True  # /api/auth/openapi.json for client codegen
-ALLAUTH_TRUSTED_PROXY_COUNT = 1  # Caddy; see §3.8
+HEADLESS_TOKEN_STRATEGY = "allauth.headless.tokens.strategies.jwt.JWTTokenStrategy"
+HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = True
+HEADLESS_JWT_ALGORITHM = "HS256"  # allauth's default is RS256, which needs HEADLESS_JWT_PRIVATE_KEY
+HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = 600  # env-overridable
+APP_SESSION_LIFETIME = 90 * 24 * 3600  # ours; env-overridable (§3.3)
+HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 # Do NOT set HEADLESS_ONLY: it removes the HTML /accounts/ URLs the web UI still uses.
 ```
 
 ```python
-path("api/auth/", include("allauth.headless.urls")),  # -> /api/auth/app/v1/...
-path("api/app/v1/", app_api.urls),
+path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),  # -> /api/auth/app/v1/...
+path("api/app/v1/", app_api.urls),  # phase 1
 ```
 
-New dependencies: `pyjwt[crypto]` (the `headless` extra — also imported by
-`allauth.headless.contrib.ninja.security`) and `PyYAML` (the `headless-spec` extra, needed for
-`HEADLESS_SERVE_SPECIFICATION`). **Neither is in the venv today.**
+`base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
+
+Dependencies: `pyjwt[crypto]` arrives with the `headless` extra (`django-allauth[mfa,headless]`),
+added in phase 0. `PyYAML` (the `headless-spec` extra) comes with `HEADLESS_SERVE_SPECIFICATION`
+in phase 1.
 
 ### 3.2 Endpoints (base domain, prefix `/api/auth/app/v1`)
 
@@ -114,15 +123,21 @@ allauth ships two strategies:
   `meta.refresh_token`; `HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED=True` makes access tokens die with the underlying session (revocation). Sent as `Authorization: Bearer …`.
 
 **Decided (2026-09-20): the JWT strategy with stateful validation on**, refresh lifetime raised to the
-"stay signed in" horizon (target **90 days**, rotating on every refresh), access token **5–15 min**. Reasons: short-lived bearer credentials limit the blast radius of a leaked access token; refresh rotation gives theft detection; stateful validation
+"stay signed in" horizon (target **90 days**, rotating on every refresh), access token **5–15 min** (set to 10). Reasons: short-lived bearer credentials limit the blast radius of a leaked access token; refresh rotation gives theft detection; stateful validation
 keeps *server-side revocation* (logout,
 "sign out other devices", admin lock-out) which is the property a club app handling minors' data needs. Algorithm HS256 via `SECRET_KEY` is acceptable for a single deployment (tokens are only ever validated by us); use RS256 +
-`HEADLESS_JWT_PRIVATE_KEY` if a second verifier ever appears.
+`HEADLESS_JWT_PRIVATE_KEY` if a second verifier ever appears. **Consequence:** rotating `SECRET_KEY` (without a separate JWT key) signs every app user out, because the session id inside each token is also encrypted with `SECRET_KEY`, and
+`SECRET_KEY_FALLBACKS` isn't consulted.
 
-**Known gap to close in the phase-0 spike (blocking, §16-1):** a refresh token's life is capped by the *server session's* expiry. A 90-day refresh needs a ≥ 90-day session. The session for an app login must therefore get an explicit `set_expiry(...)` at login
-(adapter/`user_logged_in` hook, applied only to app-client logins so web sessions keep their current lifetime), and we must confirm that
-`/tokens/refresh` extends it (sliding) or add that in a small `JWTTokenStrategy` subclass. If the spike shows the JWT strategy fights us, the fallback is a custom `AbstractTokenStrategy`
-(`create_session_token`, `lookup_session`, optional `refresh_token`) — allauth's extension point is stable for exactly this.
+**Resolved in the phase-0 spike (§16-1)** — read from allauth 65.18's source, pinned by
+`authentication/test_headless_app.py`:
+
+- **A refresh token only works while its server session exists.** The set of valid refresh tokens (`jti → exp`) is stored *in* the session, so an expired or deleted session kills every refresh token for it, whatever the token's own `exp` says.
+- **App logins get a 90-day session; web logins don't change.** `authentication/signals.py` handles `user_logged_in` and, only when `request.allauth.headless.client == "app"`, calls `request.session.set_expiry(APP_SESSION_LIFETIME)`. That signal fires when
+  the login *completes*, i.e. after the MFA stage, and for passkey logins too.
+- **Refresh slides the session.** `/tokens/refresh` ends with `session.save()`, and a relative `set_expiry` recomputes `expire_date` from now on every save. An app in regular use stays signed in; one idle for 90 days has to log in again.
+- **Refresh rotates**, and replaying a used refresh token fails (400). Logging out (`DELETE /auth/session`) or deleting the session kills live access tokens at once (stateful validation → 401).
+- The JWT strategy doesn't fight us, so no custom `AbstractTokenStrategy` is needed.
 
 Tokens live in the platform secure store (iOS Keychain / Android Keystore-backed storage), never in plain preferences or logs. Refresh is single-flight in the client (one refresh at a time, queue the rest) — rotation makes concurrent refreshes look
 like replay.
@@ -165,6 +180,15 @@ The WebAuthn challenge is held in the *server session*, so the client **must** s
 `meta.session_token` from the GET and send it on the POST. In general: whenever a response carries
 `meta.session_token`, overwrite the stored one.
 
+**Unverified email** (`ACCOUNT_EMAIL_VERIFICATION = "mandatory"`, as on the web): the login answers
+**401** with a `verify_email` flow and no tokens. The app has to show "confirm your email first";
+the confirmation link goes to the web. Web sign-in has the same requirement, so every account that
+can log in today already has a verified address.
+
+**Client notes found in the spike:**
+- Logout (`DELETE /auth/session`) answers **401** with `is_authenticated: false`. That is success, not an error.
+- A non-GET request with `Content-Type: application/json` must have an empty body or valid JSON. Anything else is a bare 400.
+
 **Recovery code** goes through the same `/auth/2fa/authenticate`.
 
 ### 3.6 Passkeys on native — constraints (iOS phase 5, Android after a prototype)
@@ -174,10 +198,11 @@ The WebAuthn challenge is held in the *server session*, so the client **must** s
 - **iOS:** ASAuthorization sends `https://<rpId>` as the origin, so allauth's default check passes. Needs the *Associated Domains* entitlement `webcredentials:rosterchief.app` and an
   `apple-app-site-association` file served over HTTPS at
   `https://rosterchief.app/.well-known/apple-app-site-association` (Caddy static or a Django view).
-- **Android: UNVERIFIED and likely a problem.** Credential Manager reports the origin for a native app as `android:apk-key-hash:<hash>`, which fido2's default origin check (https + host ⊂ RP ID)
-  rejects. allauth exposes only an all-or-nothing `MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN`. Supporting Android passkeys means a custom origin allow-list (our APK signing hashes) — `get_server()` is a module-level function in
-  `allauth/mfa/webauthn/internal/auth.py`, so this is a wrapped/patched path we would own — plus Digital Asset Links at `/.well-known/assetlinks.json`
-  (`delegate_permission/common.get_login_creds`).
+- **Android: confirmed server-side, still needs a device.** Credential Manager reports the origin for a native app as `android:apk-key-hash:<hash>`. Checked in phase 0: fido2's default check (`fido2.rpid.verify_rp_id`) returns **False** for that origin with RP ID
+  `rosterchief.app`, and allauth only exposes an all-or-nothing `MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN`. `Fido2Server` does accept a `verify_origin` callable, but allauth builds it in the module-level `get_server()` in
+  `allauth/mfa/webauthn/internal/auth.py`, which that module's own functions look up by name. The fix is to replace that function at app start-up with one that accepts `verify_rp_id(...)` **or** an origin in our allow-list of APK signing-key hashes. It's a
+  patch on an allauth internal, so it needs a test that fails when allauth changes it. Also needs Digital Asset Links at `/.well-known/assetlinks.json` (`delegate_permission/common.get_login_creds`). What's left needs a device: that a passkey created on the web asserts from
+  the Android app with this origin.
 - **Decided (2026-09-20):** v1 ships **password + TOTP/recovery** on both platforms; **iOS passkeys** in a follow-up; **Android passkeys** only after a prototype proves the origin check. Existing web passkeys keep working — same RP ID, same credentials, as long
   as the RP ID does not change.
 
@@ -189,20 +214,16 @@ the list is readable.
 
 ### 3.8 Hardening checklist
 
-- **Close signup for headless.** The web signup is closed only by a URL override (`path("accounts/signup/", signup_closed)`). `POST /auth/signup` **would create accounts today**
-  and `/config` would advertise `is_open_for_signup: true`. Override
-  `RosterChiefAccountAdapter.is_open_for_signup` to return `False`; test it.
+- **Signup is closed (done, phase 0).** `RosterChiefAccountAdapter.is_open_for_signup` returns `False`, so `POST /auth/signup` answers 403 and `/config` says `is_open_for_signup: false`. The web's own URL override (`signup_closed`) stays.
 - **Rate limiting** is allauth's (`ACCOUNT_RATE_LIMITS`; defaults e.g. login 30/m/ip,
   `login_failed` 10/m/ip + 5/300s/key, reset 20/m/ip + 5/m/key → HTTP 429; MFA code entry shares
-  `login_failed`). **Caveat:** per-IP limits ignore `X-Forwarded-For` unless
-  `ALLAUTH_TRUSTED_PROXY_COUNT` or `ALLAUTH_TRUSTED_CLIENT_IP_HEADER` is set; neither is, and production is behind Caddy, so every client shares one bucket. Set `ALLAUTH_TRUSTED_PROXY_COUNT`
-  to the real hop count (1 for Caddy alone; **verify against the live topology** before relying on it). Applies to the web login too — a pre-existing weakness this design surfaces.
+  `login_failed`). The client IP is **fixed on development** (security audit): `ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"`, which Caddy sets on every proxied request, read through `RosterChiefAccountAdapter.get_client_ip` (falls back to
+  `REMOTE_ADDR`). No `ALLAUTH_TRUSTED_PROXY_COUNT` needed. Behind Cloudflare, Caddy's `trusted_proxies` makes `X-Real-IP` the visitor, not Cloudflare.
 - **Default cache** is Redis when `REDIS_URL` is set, else locmem — rate limits are only meaningful across gunicorn workers with Redis. Fine in prod; note in tests.
 - **Password-reset link:** without `HEADLESS_FRONTEND_URLS["account_reset_password_from_key"]` the email links to the *web* `/accounts/password/reset/key/…` page, which works from a phone browser. Keep that for v1; move to a universal/app link later.
 - **Maintenance mode** (`features.middleware.MaintenanceMiddleware`) closes club hosts and all but a few base-domain paths. `/api/` should return a **503 JSON `{code: "maintenance"}`** rather than the HTML page (§15), and the client should show a
   maintenance screen.
-- **Email verification** is `"none"` in settings, so `/auth/email/verify` is inert. But the MFA enrolment endpoints refuse (409) if a user has an *unverified* `EmailAddress` and
-  `MFA_ALLOW_UNVERIFIED_EMAIL` is False — check that existing users have `EmailAddress` rows, verified or not, before launch (§16-6).
+- **Email verification** is `"mandatory"` (security audit): login requires a verified address, and so does MFA enrolment. See §3.5 for what the app shows. Since web sign-in has the same rule, this adds no new gap for existing users (§16-6).
 
 ---
 
@@ -338,6 +359,10 @@ sizes hurt mobile networks.
 **Private media** (documents, invoices, private-storage files) are **never** exposed as public S3 URLs. Return an authenticated streaming endpoint (`GET …/invoice.pdf`, `Content-Type:
 application/pdf`, `Content-Disposition`) or, later, short-lived presigned URLs minted per request after the same authorization.
 
+**Member photos are private media now** (security audit, 0.7.9). `Member.photo` lives in private storage, and `Member.photo_url` points at `members:photo`, which checks
+`members.services.photos.can_view_member_photo`: the member, their parents/guardians, and staff who may see that member, plus anyone when `photo_public_consent` is on. The web view authenticates by session cookie, so the app API needs its own
+token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the same rule. Don't hand out the web URL.
+
 ---
 
 ## 7. Resource catalogue (v1)
@@ -404,8 +429,8 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 - **Secrets never in responses or logs:** access/refresh tokens, TOTP secrets after activation, recovery codes after first display, calendar-feed token except on the explicit endpoint, push tokens. Request logging on `/api/auth/` and `/api/app/` must
   scrub `Authorization`,
   `X-Session-Token`, `password`, `code`, `refresh_token`, `credential`.
-- **Form submission for a child.** `formbuilder.services.submit_form` checks audience against the submitting member, so today a guardian cannot submit *for* a child (only for `self.me`). API v1 keeps that; whether to allow submitting on behalf of a
-  managed child is a product question (§16).
+- **Form submission for a child is allowed** (decided and built during the security audit). A parent/guardian can answer a form on a child's behalf. `Submission` records who filled it in (`submitted_on_behalf_by`), and `formbuilder/services/submission.py`
+  takes the submitting person separately from the member it's for. `POST /forms/{send_id}/submit` therefore takes the `member_id` the answers are for (a managed person), like the other writes (§5.1).
 
 ---
 
@@ -498,8 +523,8 @@ pricing.cart_totals}`, `registration.services.{submission,pricing,invoicing}.*`,
 - `request.build_absolute_uri` (calendar feed, `send_registration_confirmation_email(request=…)`) → a base-URL parameter.
 - `get_language()` → an explicit language argument.
 
-**Latent bug found by the audit — fix on `development`, independent of the API:** the PWA's push *unsubscribe* deletes by `endpoint` without checking the subscription belongs to the caller (`mobile/views.py` push unsubscribe). Scope it to the member.
-The native `DELETE /devices/{id}` is defined ownership-scoped from day one.
+**Latent bug found by this audit — fixed on `development`** (security audit L-11): the PWA's push subscribe/unsubscribe now only touches subscriptions whose `member__user` is the caller (`mobile/views.py`). The native `DELETE /devices/{id}` is defined
+ownership-scoped from day one.
 
 ---
 
@@ -533,7 +558,13 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
 
 | Phase                         | Scope                                                                                                                                                                     | Exit criteria                                                                 |
 |-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| **0 — Spike**                 | allauth.headless mounted in a scratch env; JWT strategy vs session lifetime (§3.3); Android passkey origin prototype (§3.6); SNS platform-app round trip to a real device | §16-1,2,3 answered; strategy chosen                                           |
+| **0 — Spike**                 | allauth.headless mounted on the branch; JWT strategy vs session lifetime (§3.3); Android passkey origin prototype (§3.6); SNS platform-app round trip to a real device    | §16-1,2,3 answered; strategy chosen                                           |
+
+**Phase 0 status (2026-09-29).** Done: headless mounted (app client, JWT, base domain only),
+signup closed, and 14 tests pinning login/MFA/refresh/revocation/session-lifetime behaviour. **§16-1
+answered, strategy kept.** Android origin checked server-side (§3.6), and a device prototype is still
+needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
+platform applications, a test device. None of these block phase 1.
 | **1 — Foundations**           | `AppAuth`, error envelope, pagination/idempotency helpers, `/clubs`, `/me`, `/context`, signup closed, proxy-count fix, `managed_people`, push device model + SNS gateway | a test client can log in with MFA, list clubs, hit an empty club-scoped route |
 | **2 — Member read + RSVP**    | home, calendar, events, RSVP (after `submit_rsvp` extraction), news, notifications, profile, push end-to-end                                                              | an internal build reaches PWA parity for a parent                             |
 | **3 — Member write/commerce** | payments, forms, shop, orders, re-registration, photo upload, bug reports, calendar feed                                                                                  | parity for the remaining member screens                                       |
@@ -565,18 +596,18 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
 
 ## 16. Open questions / to verify
 
-1. **(blocking)** Token lifetime: does `/tokens/refresh` extend the server session, and can an app-client login get a 90-day session without touching web sessions? If not, custom strategy (§3.3).
-2. **(blocking for Android passkeys)** Android Credential Manager origin (`android:apk-key-hash:…`) vs allauth/fido2 origin verification — UNVERIFIED; needs a prototype.
+1. ~~**(blocking)** Token lifetime~~ **Answered (phase 0):** yes to both. App logins get `set_expiry(APP_SESSION_LIFETIME)`, web logins are unchanged, and each refresh re-saves and slides the session. No custom strategy (§3.3).
+2. **(blocking for Android passkeys)** Android Credential Manager origin (`android:apk-key-hash:…`): **server side confirmed** that fido2 rejects it and that an allow-list via a replaced `get_server()` is the way in (§3.6). Still UNVERIFIED on a
+   device.
 3. **iOS passkeys** need the AASA file served at the base domain — where (Caddy static vs Django)?
 4. **Push recipient resolution:** read `mobile.signals` and mirror its Member→User mapping for children without logins; and the Web-Push/native dedupe rule (§9). Also keying: per `User` (this doc's recommendation) vs per `Member`.
-5. **`ALLAUTH_TRUSTED_PROXY_COUNT`**: confirm real hop count in production (Caddy only? an AWS LB in front?). Wrong value ⇒ spoofable client IP or one shared bucket.
-6. Do all existing users have `EmailAddress` rows (verified or not)? Otherwise MFA enrolment via the API returns 409.
-7. **Guardian submits a form for a child?** Product decision (§8); today no.
+5. ~~`ALLAUTH_TRUSTED_PROXY_COUNT`~~ **Resolved on development:** `ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"` (set by Caddy, with Cloudflare as a trusted proxy). See §3.8.
+6. ~~Existing users' `EmailAddress` rows~~ **Moot:** verification is `"mandatory"`, and the web requires it too, so anyone who can sign in today has a verified address (§3.8).
+7. ~~Guardian submits a form for a child?~~ **Decided: yes**, and built on development (§8).
 8. Tombstone source for `deleted[]` — a small `Deleted` log table vs per-model soft delete vs
    "client re-fetches the window". Recommend re-fetch windows for v1 and tombstones only for notifications/cart.
-9. Is `boto3` a direct dependency (it isn't in `pyproject.toml`; S3 likely pulls it via
-   `django-storages`)? Add explicitly for SNS.
-10. `PyYAML`/`pyjwt[crypto]` licensing/supply-chain review is routine, but they are new runtime dependencies.
+9. `boto3`: **checked**, it's transitive only (via `django-storages[s3]`, 1.43 installed). Add it as a direct dependency with the SNS gateway (phase 1).
+10. `pyjwt[crypto]` is now a runtime dependency (headless extra, phase 0) and covered by the CI `pip-audit` job. `PyYAML` follows in phase 1.
 11. ~~Session/`usersessions` at launch or phase 5?~~ Decided: phase 5 (§3.7).
 12. Native identity linking: the account plane returns *all* clubs for a user — confirm there is no scenario where two people share one login (family login) that would need a profile switcher beyond the managed-people model.
 13. App-store review posture for the shop/registration flow (§12) — confirm with each store before the first submission.

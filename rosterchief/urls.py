@@ -47,6 +47,9 @@ urlpatterns = [
     path("manage/", include("management.urls")),
     path("app/", include("mobile.urls")),
     path("api/v1/", api.urls),
+    # Native-app authentication (allauth.headless, "app" client only): /api/auth/app/v1/...
+    # Base domain only -- the account plane of API.md §4; a club subdomain 404s.
+    path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),
     # Shared by management/base.html and mobile/base.html's own poll-on-load script --
     # not nested under either app's urls.py, since both surfaces hit this one verbatim.
     path("announcements/pending/", PendingAnnouncementView.as_view(), name="announcement_pending"),

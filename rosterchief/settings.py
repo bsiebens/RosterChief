@@ -75,6 +75,9 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.mfa",
+    # The native-app auth API at /api/auth/app/v1/ (API.md §3). Mounted for the "app" client
+    # only; the web keeps using the HTML /accounts/ views.
+    "allauth.headless",
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
     "members.apps.MembersConfig",
@@ -221,6 +224,29 @@ MFA_WEBAUTHN_RP_NAME = config("ROSTERCHIEF_RP_NAME", default="RosterChief")
 
 # Where RequireMFAMiddleware sends privileged users who haven't enrolled yet.
 MFA_ENROLMENT_URL_NAME = "mfa_index"
+
+
+# Native-app authentication (allauth.headless) -- API.md §3.
+#
+# Only the "app" client: native apps send tokens, never cookies. Do NOT set HEADLESS_ONLY,
+# which would remove the HTML /accounts/ views the web still uses.
+HEADLESS_CLIENTS = ("app",)
+# JWT access tokens (short-lived, sent as "Authorization: Bearer") plus rotating refresh tokens.
+# Stateful validation ties every access token to its server session, so logging out (or deleting
+# the session) kills it immediately instead of at expiry.
+HEADLESS_TOKEN_STRATEGY = "allauth.headless.tokens.strategies.jwt.JWTTokenStrategy"
+HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = True
+# allauth defaults to RS256, which needs its own private key. HS256 signs with SECRET_KEY: fine
+# while only this server ever verifies the tokens. Consequence: rotating SECRET_KEY (without
+# HEADLESS_JWT_PRIVATE_KEY set) signs every app user out, since the session id inside each token
+# is encrypted with it too.
+HEADLESS_JWT_ALGORITHM = "HS256"
+HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = config("HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN", default=600, cast=int)
+# "Stay signed in" horizon for the app. A refresh token only works while its server session
+# exists, so app logins also get a session this long (authentication/signals.py); each refresh
+# re-saves the session and so slides both forward. Web sessions keep Django's default lifetime.
+APP_SESSION_LIFETIME = config("APP_SESSION_LIFETIME", default=90 * 24 * 3600, cast=int)
+HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
 # under this key -- generate one with
