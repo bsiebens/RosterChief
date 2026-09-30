@@ -22,6 +22,7 @@ from decimal import Decimal
 
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.test import override_settings
 from django.utils import timezone
 from waffle import get_waffle_flag_model
@@ -68,6 +69,21 @@ class Command(MaintenanceAwareCommand):
 
         self.credentials = []  # [(email, note), ...], printed at the end.
 
+        # One transaction for wipe + reseed: the demo club is in use while this runs (app and
+        # web clients polling it), and without it they saw the half-built club in between --
+        # e.g. no seasons yet, so /context answered season: null. Others now see the old
+        # data until the new data is complete, and a failed run leaves the old data intact.
+        with transaction.atomic():
+            club = self._rebuild(club, admin_member)
+
+        self.stdout.write(self.style.SUCCESS(f"\n{club} has been wiped and reseeded."))
+        self.stdout.write(f"\nEvery seeded login shares one password: {DEMO_PASSWORD}\n")
+        self.stdout.write("Demo logins:")
+        self.stdout.write(f"  {admin_email:<40} admin (your own password, unchanged)")
+        for email, note in self.credentials:
+            self.stdout.write(f"  {email:<40} {note}")
+
+    def _rebuild(self, club: Club, admin_member: Member) -> Club:
         self.stdout.write(f"Wiping {club}...")
         club = self._wipe(club)
 
@@ -88,13 +104,7 @@ class Command(MaintenanceAwareCommand):
         seasons = self._make_seasons(club)
         self._reattach_admin(club, admin_member, seasons["current"])
         self._seed(club, seasons, admin_member)
-
-        self.stdout.write(self.style.SUCCESS(f"\n{club} has been wiped and reseeded."))
-        self.stdout.write(f"\nEvery seeded login shares one password: {DEMO_PASSWORD}\n")
-        self.stdout.write("Demo logins:")
-        self.stdout.write(f"  {admin_email:<40} admin (your own password, unchanged)")
-        for email, note in self.credentials:
-            self.stdout.write(f"  {email:<40} {note}")
+        return club
 
     # -- Wipe -------------------------------------------------------------
 
