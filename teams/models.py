@@ -106,6 +106,12 @@ class Team(ClubScopedModel):
         verbose_name=_("feeds into"),
         help_text=_("The team this one's players typically graduate to next season -- used to suggest call-ups from here when adding players to that team."),
     )
+    #: The federation fixture-list URLs this team's games are imported from, one
+    #: entry per (source, season, competition label) -- written only by a
+    #: confirmed one-off import and by the weekly check's bookkeeping, never by a
+    #: form. See events.services.import_sources for the entry shape and the
+    #: "same season + competition replaces, anything else appends" rule.
+    import_sources = models.JSONField(_("fixture import sources"), default=list, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("team")
