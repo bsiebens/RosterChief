@@ -129,6 +129,8 @@ _NAV_SECTIONS = {
     "rbihf_import_confirm": "event_list",
     "dfel_import": "event_list",
     "dfel_import_confirm": "event_list",
+    "fixture_recheck": "event_list",
+    "fixture_recheck_confirm": "event_list",
     "event_series_create": "event_list",
     "event_series_detail": "event_list",
     "event_series_update": "event_list",

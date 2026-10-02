@@ -8,6 +8,7 @@ from unittest import mock
 
 import requests
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -18,8 +19,9 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, OnboardingRequirement, Season
+from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
+from features.jobs import JOB_REGISTRY
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
@@ -35,6 +37,7 @@ from .services import (
     dfel_import,
     effective_members,
     generate_occurrences,
+    import_sources,
     occurrence_datetimes,
     player_attendance_rankings,
     players_who_missed_recent_practices,
@@ -3350,3 +3353,276 @@ class HockeyCompetitionRequestTimeoutTests(EventsTestBase):
                 game = self.make_game(name)
                 with mock.patch("events.competition.hockey.requests.get", side_effect=requests.Timeout("read timed out")), self.assertRaises(CompetitionFetchError):
                     fetch_game_info(game)
+
+
+class ImportSourcesTestBase(EventsTestBase):
+    """Shared scaffolding for events.services.import_sources and the weekly
+    check_fixture_sources job: RBIHF/DFEL team page URLs to store on a team, and
+    the RBIHF/DFEL flags reachable by name."""
+
+    RBIHF_URL = f"https://www.rbihf.be/league/team/{RBIHF_TEAM_ID}"
+    DFEL_URL = f"https://ehv-nrw.de/leagues/team/{DFEL_TEAM_ID}/{DFEL_DIVISION_ID}/"
+
+    def setUp(self):
+        # Flag._get_club_ids caches per flag name -- a rollback between tests doesn't clear it.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable_flag(self, name, club=None):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name=name)
+        flag.clubs.add(club or self.club)
+        cache.clear()
+        return flag
+
+    def fixture_row(self, game_id="5002", *, days=7, hour="12:15", visit_name="Amsterdam Tigers"):
+        date = (timezone.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        return {"game_id": game_id, "date": date, "hour": hour, "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": visit_name}
+
+    def import_rows(self, rows, team=None, label=""):
+        """What a confirmed one-off import leaves behind: the games, stamped with this source."""
+        apply_plan(build_plan(self.club, team or self.team, RBIHF_TEAM_ID, rbihf_sample_html(rows), label), {})
+
+    def store(self, team=None, *, source=import_sources.SOURCE_RBIHF, url=None, season=None, label=""):
+        url = url or (self.RBIHF_URL if source == import_sources.SOURCE_RBIHF else self.DFEL_URL)
+        return import_sources.record_source(team or self.team, source=source, url=url, season=season or self.season, competition_label=label)
+
+    def patch_fetch(self, payload):
+        """Patches the network half of check_entry -- ``payload`` is the RBIHF HTML
+        returned for every entry, an exception to raise, or a callable(entry)."""
+        if isinstance(payload, Exception) or callable(payload):
+            return mock.patch("events.services.import_sources.fetch", side_effect=payload)
+        return mock.patch("events.services.import_sources.fetch", return_value=payload)
+
+
+class RecordSourceTests(ImportSourcesTestBase):
+    def test_replaces_the_same_season_source_and_label_case_insensitively(self):
+        self.store(label="Division 1", url="https://www.rbihf.be/league/team/1111")
+        self.store(label="  division 1 ", url="https://www.rbihf.be/league/team/2222")
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(self.team.import_sources), 1)
+        self.assertEqual(self.team.import_sources[0]["url"], "https://www.rbihf.be/league/team/2222")
+        self.assertEqual(self.team.import_sources[0]["competition_label"], "division 1")
+
+    def test_appends_a_different_label_source_or_season(self):
+        next_season = Season.objects.create(club=self.club, start_date=self.season.end_date + timedelta(days=1), end_date=self.season.end_date + timedelta(days=365))
+
+        self.store(label="Division 1")
+        self.store(label="Cup")
+        self.store(source=import_sources.SOURCE_DFEL, label="Division 1")
+        self.store(label="Division 1", season=next_season)
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(self.team.import_sources), 4)
+
+    def test_rejects_an_unknown_source(self):
+        with self.assertRaises(ValueError):
+            import_sources.record_source(self.team, source="NOPE", url="https://example.com", season=self.season)
+
+    def test_sources_for_filters_by_season(self):
+        other_season = Season.objects.create(club=self.club, start_date=self.season.start_date - timedelta(days=365), end_date=self.season.start_date - timedelta(days=1))
+        self.store(label="Division 1")
+        self.store(label="Division 1", season=other_season)
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(import_sources.sources_for(self.team)), 2)
+        current = import_sources.sources_for(self.team, self.season)
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["season_id"], str(self.season.pk))
+
+
+class CheckEntryTests(ImportSourcesTestBase):
+    def check(self, payload):
+        entry = self.store()
+        with self.patch_fetch(payload):
+            return import_sources.check_entry(self.club, self.team, entry)
+
+    def test_a_moved_hour_is_reported_as_rescheduled(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(hour="20:00")]))
+
+        self.assertEqual([game_id for game_id, _old, _new in result.rescheduled], ["5002"])
+        self.assertTrue(result.has_changes)
+        self.assertEqual(result.as_dict(), {"rescheduled": 1, "new_games": 0, "removed_games": 0, "error": ""})
+
+    def test_a_new_game_is_reported(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(), self.fixture_row("5003", days=14)]))
+
+        self.assertEqual([game_id for game_id, _start, _opponent in result.new_games], ["5003"])
+        self.assertEqual(result.rescheduled, [])
+
+    def test_a_removed_future_game_is_reported(self):
+        self.import_rows([self.fixture_row(), self.fixture_row("5003", days=14)])
+
+        result = self.check(rbihf_sample_html([self.fixture_row()]))
+
+        self.assertEqual([game_id for game_id, _start, _title in result.removed_games], ["5003"])
+
+    def test_an_opponent_only_change_is_not_reported(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(visit_name="Amsterdam Lions")]))
+
+        self.assertFalse(result.has_changes)
+
+    def test_a_fetch_error_is_captured_not_raised(self):
+        result = self.check(import_sources.ImportSourceError("RBIHF is down"))
+
+        self.assertEqual(result.error, "RBIHF is down")
+        self.assertTrue(result.has_changes)
+        self.assertEqual(result.as_dict()["error"], "RBIHF is down")
+
+
+class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
+    """events.tasks.check_fixture_sources -- the weekly sweep over every active club's
+    current-season import sources, alerting only that club's admins, once."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # With logins -- notifications.services.recipient_emails only mails a member's own address when they have one.
+        users = get_user_model().objects
+        cls.admin = Member.objects.create(first_name="Ada", last_name="Admin", email="ada@example.com", user=users.create_user(email="ada@example.com", password="pw-secret-123"))
+        cls.second_admin = Member.objects.create(first_name="Abe", last_name="Admin", email="abe@example.com", user=users.create_user(email="abe@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=cls.club, member=cls.admin, role=ClubRole.Roles.ADMIN)
+        ClubRole.objects.create(club=cls.club, member=cls.second_admin, role=ClubRole.Roles.ADMIN)
+        cls.editor = Member.objects.create(first_name="Ed", last_name="Editor", email="ed@example.com")
+        ClubRole.objects.create(club=cls.club, member=cls.editor, role=ClubRole.Roles.EDITOR)
+        cls.second_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+
+    def setUp(self):
+        super().setUp()
+        self.enable_flag("RBIHF")
+
+    def run_job(self):
+        return call_command("check_fixture_sources", stdout=StringIO())
+
+    def stored(self, team=None):
+        team = team or self.team
+        team.refresh_from_db()
+        return team.import_sources
+
+    def test_is_registered_as_a_weekly_job(self):
+        meta = JOB_REGISTRY["events.tasks.check_fixture_sources"]
+
+        self.assertEqual(meta["command"], "check_fixture_sources")
+        self.assertEqual(meta["trigger"], {"trigger": "cron", "day_of_week": "mon", "hour": 6, "minute": 15})
+
+    def test_notifies_only_the_clubs_admins_once_with_a_summary(self):
+        self.import_rows([self.fixture_row(), self.fixture_row("5003", days=14)], label="Division 1")
+        self.store(label="Division 1")
+        self.store(self.second_team, label="Cup")
+        html = rbihf_sample_html([self.fixture_row(hour="20:00"), self.fixture_row("5004", days=21)])
+
+        with self.patch_fetch(html):
+            result = self.run_job()
+
+        notifications = Notification.objects.filter(club=self.club)
+        self.assertEqual(set(notifications.values_list("member_id", flat=True)), {self.admin.pk, self.second_admin.pk})
+        self.assertEqual(notifications.filter(member=self.admin).count(), 1)
+        body = notifications.get(member=self.admin).body
+        self.assertIn("First Team · RBIHF · Division 1: 1 game moved to another date or time, 1 new game, 1 game removed.", body)
+        self.assertIn("Second Team · RBIHF · Cup: 2 new games.", body)
+        self.assertIn("import button", body)
+        self.assertIn("Checked 2 fixture source(s): 2 with changes", result)
+        self.assertEqual(sorted(address for message in mail.outbox for address in message.to), ["abe@example.com", "ada@example.com"])
+
+    def test_no_notification_when_nothing_changed(self):
+        self.import_rows([self.fixture_row()])
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row(visit_name="Renamed Opponent")])):
+            self.run_job()
+
+        self.assertFalse(Notification.objects.exists())
+        self.assertEqual(self.stored()[0]["last_check"], {"rescheduled": 0, "new_games": 0, "removed_games": 0, "error": ""})
+
+    def test_writes_bookkeeping_on_the_entry(self):
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row()])):
+            self.run_job()
+
+        entry = self.stored()[0]
+        self.assertEqual(entry["last_check"]["new_games"], 1)
+        self.assertTrue(entry["last_checked_at"])
+        self.assertEqual(entry["url"], self.RBIHF_URL)
+
+    def test_a_source_whose_flag_is_off_is_skipped(self):
+        self.store(source=import_sources.SOURCE_DFEL)  # DFEL flag never enabled for this club
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+        self.assertNotIn("last_checked_at", self.stored()[0])
+        self.assertFalse(Notification.objects.exists())
+
+    def test_other_seasons_entries_are_skipped(self):
+        old_season = Season.objects.create(club=self.club, start_date=self.season.start_date - timedelta(days=365), end_date=self.season.start_date - timedelta(days=1))
+        self.store(season=old_season)
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
+
+    def test_archived_clubs_are_skipped(self):
+        self.store()
+        self.club.archive()
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+
+    def test_a_fetch_error_is_alerted(self):
+        self.store()
+
+        with self.patch_fetch(import_sources.ImportSourceError("Could not reach rbihf.be")):
+            self.run_job()
+
+        body = Notification.objects.get(member=self.admin).body
+        self.assertIn("First Team · RBIHF: the fixture list could not be fetched (Could not reach rbihf.be).", body)
+        self.assertEqual(self.stored()[0]["last_check"]["error"], "Could not reach rbihf.be")
+
+    def test_one_entry_blowing_up_does_not_stop_the_others(self):
+        self.store()
+        self.store(self.second_team)
+        calls = []
+
+        def fetch(entry):
+            calls.append(entry)
+            if len(calls) == 1:
+                raise RuntimeError("parser bug")
+            return rbihf_sample_html([self.fixture_row()])
+
+        with self.patch_fetch(fetch):
+            self.run_job()
+
+        self.assertEqual(len(calls), 2)
+        first, second = self.stored(self.team)[0], self.stored(self.second_team)[0]
+        self.assertTrue(first["last_check"]["error"])
+        self.assertEqual(second["last_check"]["new_games"], 1)
+        self.assertEqual(Notification.objects.filter(member=self.admin).count(), 1)
+
+    def test_one_notification_per_club(self):
+        today = timezone.localdate()
+        other_club = Club.objects.create(name="Other Club", slug="other-club")
+        other_season = Season.objects.create(club=other_club, start_date=today - timedelta(days=10), end_date=today + timedelta(days=300))
+        other_team = Team.objects.create(club=other_club, name="Other First", short_name="OF")
+        other_admin = Member.objects.create(first_name="Oz", last_name="Other", email="oz@example.com")
+        ClubRole.objects.create(club=other_club, member=other_admin, role=ClubRole.Roles.ADMIN)
+        self.enable_flag("RBIHF", other_club)
+        import_sources.record_source(other_team, source=import_sources.SOURCE_RBIHF, url=self.RBIHF_URL, season=other_season)
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row()])):
+            self.run_job()
+
+        self.assertEqual(Notification.objects.filter(club=self.club, member=self.admin).count(), 1)
+        self.assertEqual(list(Notification.objects.filter(club=other_club).values_list("member_id", flat=True)), [other_admin.pk])

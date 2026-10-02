@@ -66,6 +66,14 @@ JOB_REGISTRY = {
         "command": "poll_live_game_results",
         "args": [],
     },
+    "events.tasks.check_fixture_sources": {
+        "label": _("Check fixture sources"),
+        "description": _("Re-checks every team's stored federation fixture lists for the current season and notifies club admins of moved, new or removed games, or a list that could not be fetched."),
+        "schedule": _("Weekly, Monday at 06:15"),
+        "trigger": {"trigger": "cron", "day_of_week": "mon", "hour": 6, "minute": 15},
+        "command": "check_fixture_sources",
+        "args": [],
+    },
     "billing.tasks.renew_subscriptions": {
         "label": _("Renew subscriptions"),
         "description": _("Opens the next billing period for clubs whose current one is running out."),
