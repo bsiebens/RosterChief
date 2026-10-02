@@ -30,6 +30,7 @@ from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
+from events.services import import_sources
 from events.services.calendar import week_bounds
 from events.services.dfel_import import DFELImportError
 from events.services.notifications import notify_new_event
@@ -9159,7 +9160,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sportoase Antwerp Phantoms")
@@ -9172,7 +9173,7 @@ class RBIHFImportViewTests(ManagementTestBase):
     def test_confirming_creates_the_event(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         response = self.club_post("rbihf_import_confirm", {})
 
@@ -9185,7 +9186,7 @@ class RBIHFImportViewTests(ManagementTestBase):
     def test_the_competition_label_survives_from_form_to_confirm(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "competition_label": "Division 1"})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk), "competition_label": "Division 1"})
 
         response = self.club_post("rbihf_import_confirm", {})
 
@@ -9199,7 +9200,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.activate_flag()
         location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="1 St", city="Deurne", zip_code="2100", country="BE")
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.club_post("rbihf_import_confirm", {"location_5002": str(location.pk)})
 
@@ -9211,7 +9212,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.activate_flag()
         renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.club_post("rbihf_import_confirm", {"opponent_5002": str(renamed.pk)})
 
@@ -9223,7 +9224,7 @@ class RBIHFImportViewTests(ManagementTestBase):
     def test_a_blank_opponent_choice_falls_back_to_the_scraped_name(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.club_post("rbihf_import_confirm", {})
 
@@ -9242,7 +9243,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("rbihf_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk)})
+        response = self.club_post("rbihf_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "RBIHF team page")
@@ -9252,7 +9253,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Could not reach the page.")
@@ -9261,10 +9262,10 @@ class RBIHFImportViewTests(ManagementTestBase):
     def test_re_running_the_same_import_shows_it_as_unchanged(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
-        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
         self.club_post("rbihf_import_confirm", {})
 
-        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertContains(response, "already up to date")
         self.assertEqual(Event.objects.filter(club=self.club, external_game_id="5002").count(), 1)
@@ -9358,7 +9359,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("dfel_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk)})
+        response = self.club_post("dfel_import", {"url": "https://evil.example.com/x", "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context["form"].is_valid())
@@ -9369,7 +9370,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "EC Hannover Indians")
@@ -9383,7 +9384,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.activate_flag()
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk)})
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "season": str(self.season.pk)})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Could not reach the schedule.")
@@ -9392,7 +9393,7 @@ class DFELImportViewTests(ManagementTestBase):
     def test_confirming_creates_the_event(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
-        self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "competition_label": "League"})
+        self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "season": str(self.season.pk), "competition_label": "League"})
 
         response = self.club_post("dfel_import_confirm", {})
 
@@ -9411,6 +9412,349 @@ class DFELImportViewTests(ManagementTestBase):
         response = self.club_post("dfel_import_confirm", {})
 
         self.assertRedirects(response, reverse("management:dfel_import"))
+
+
+def rbihf_html_for(url):
+    """RBIHF_SAMPLE_HTML re-pointed at whichever RBIHF team id ``url`` names, so
+    a second URL still parses as "our" team's page."""
+    return RBIHF_SAMPLE_HTML.replace("4460", url.rstrip("/").rsplit("/", 1)[-1])
+
+
+def fake_source_fetch(entry):
+    """Stands in for events.services.import_sources.fetch -- never the network."""
+    if entry["source"] == import_sources.SOURCE_RBIHF:
+        return rbihf_html_for(entry["url"])
+    return dfel_sample_json()
+
+
+class FixtureImportTestMixin:
+    """Flag/coach helpers shared by the import-source tests below."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self, name):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name=name)
+        flag.clubs.add(self.club)
+
+    def make_coach(self, team, email="coach-sources@example.com"):
+        coach_user = User.objects.create_user(email=email, password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        position = Position.objects.create(club=self.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        return coach_user
+
+
+class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
+    """The one-off RBIHF/DFEL imports' season picker, and remembering the pasted
+    URL on Team.import_sources once the import is confirmed."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        today = timezone.localdate()
+        cls.old_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=400), end_date=today - datetime.timedelta(days=31))
+
+    def import_rbihf(self, url="https://www.rbihf.be/league/team/4460", label="", season=None):
+        self.club_post("rbihf_import", {"url": url, "team": str(self.team.pk), "season": str((season or self.season).pk), "competition_label": label})
+        return self.club_post("rbihf_import_confirm", {})
+
+    def test_season_defaults_to_the_current_one_newest_first(self):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("rbihf_import")
+
+        field = response.context["form"]["season"]
+        self.assertEqual(field.value(), self.season.pk)
+        self.assertEqual(list(field.field.queryset), [self.season, self.old_season])
+
+    def test_season_is_required(self):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk)})
+
+        self.assertIn("season", response.context["form"].errors)
+
+    def test_a_season_from_another_club_is_rejected(self):
+        self.activate_flag("DFEL")
+        other_club = Club.objects.create(name="Other", slug="other")
+        other_season = make_season(other_club)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "season": str(other_season.pk)})
+
+        self.assertIn("season", response.context["form"].errors)
+
+    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    def test_confirming_records_the_source(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+
+        self.import_rbihf(label="Division 1", season=self.old_season)
+
+        self.team.refresh_from_db()
+        [entry] = self.team.import_sources
+        self.assertEqual(entry["source"], "RBIHF")
+        self.assertEqual(entry["url"], "https://www.rbihf.be/league/team/4460")
+        self.assertEqual(entry["season_id"], str(self.old_season.pk))
+        self.assertEqual(entry["competition_label"], "Division 1")
+
+    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    def test_nothing_is_recorded_without_confirming(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+
+        self.club_post("rbihf_import", {"url": "https://www.rbihf.be/league/team/4460", "team": str(self.team.pk), "season": str(self.season.pk)})
+
+        self.team.refresh_from_db()
+        self.assertEqual(self.team.import_sources, [])
+
+    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    def test_a_new_url_for_the_same_season_and_competition_replaces_the_old_one(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+        self.import_rbihf(url="https://www.rbihf.be/league/team/4460", label="Division 1")
+
+        self.import_rbihf(url="https://www.rbihf.be/league/team/4461", label="division 1")
+
+        self.team.refresh_from_db()
+        self.assertEqual([entry["url"] for entry in self.team.import_sources], ["https://www.rbihf.be/league/team/4461"])
+
+    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    def test_another_competition_or_season_appends(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.client.force_login(self.admin_user)
+        self.import_rbihf(url="https://www.rbihf.be/league/team/4460", label="Division 1")
+
+        self.import_rbihf(url="https://www.rbihf.be/league/team/4461", label="Cup")
+        self.import_rbihf(url="https://www.rbihf.be/league/team/4460", label="Division 1", season=self.old_season)
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(self.team.import_sources), 3)
+
+    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    def test_confirming_a_dfel_import_records_the_source(self, mock_fetch):
+        self.activate_flag("DFEL")
+        self.client.force_login(self.admin_user)
+        self.club_post("dfel_import", {"url": DFEL_TEAM_URL, "team": str(self.team.pk), "season": str(self.season.pk), "competition_label": "League"})
+
+        self.club_post("dfel_import_confirm", {})
+
+        self.team.refresh_from_db()
+        [entry] = self.team.import_sources
+        self.assertEqual(entry["source"], "DFEL")
+        self.assertEqual(entry["url"], DFEL_TEAM_URL)
+        self.assertEqual(entry["season_id"], str(self.season.pk))
+        self.assertEqual(entry["competition_label"], "League")
+
+
+class TeamDetailImportSourcesTests(FixtureImportTestMixin, ManagementTestBase):
+    """The read-only "Fixture import sources" section on the team page -- club
+    admins only, and only once the team has any entries."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def test_shown_to_an_admin_with_entries(self):
+        self.activate_flag("RBIHF")
+        entry = import_sources.record_source(self.team, source="RBIHF", url="https://www.rbihf.be/league/team/4460", season=self.season, competition_label="Cup")
+        import_sources.update_entry(self.team, entry, last_checked_at=timezone.now().isoformat(), last_check={"rescheduled": 2, "new_games": 1, "removed_games": 0, "error": ""})
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "Fixture import sources")
+        self.assertContains(response, 'href="https://www.rbihf.be/league/team/4460"')
+        self.assertContains(response, "Cup")
+        self.assertContains(response, "2 rescheduled, 1 new, 0 removed")
+        self.assertContains(response, f"{reverse('management:fixture_recheck')}?team={self.team.pk}")
+
+    def test_hidden_when_the_team_has_no_entries(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertNotContains(response, "Fixture import sources")
+
+    def test_hidden_from_non_admin_staff(self):
+        import_sources.record_source(self.team, source="RBIHF", url="https://www.rbihf.be/league/team/4460", season=self.season)
+        self.client.force_login(self.make_coach(self.team))
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Fixture import sources")
+        self.assertNotContains(response, "rbihf.be/league/team/4460")
+
+
+class FixtureRecheckViewTests(FixtureImportTestMixin, ManagementTestBase):
+    """The "Re-check all imported fixtures" flow: one combined preview of every stored
+    source for a season, then a confirm that re-diffs and applies each.
+    events.services.import_sources.fetch is mocked throughout."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team_a = Team.objects.create(club=cls.club, name="A Team", short_name="A")
+        cls.team_b = Team.objects.create(club=cls.club, name="B Team", short_name="B")
+        cls.location = Location.objects.create(club=cls.club, name="Mechelen Rink", address="1 St", city="Mechelen", zip_code="2800", country="BE")
+
+    def record_both(self):
+        import_sources.record_source(self.team_a, source="RBIHF", url="https://www.rbihf.be/league/team/4460", season=self.season)
+        import_sources.record_source(self.team_b, source="DFEL", url=DFEL_TEAM_URL, season=self.season, competition_label="League")
+
+    def test_404_without_any_import_feature(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("fixture_recheck").status_code, 404)
+        self.assertEqual(self.club_post("fixture_recheck_confirm", {}).status_code, 404)
+
+    def test_403_for_non_admin_staff(self):
+        self.activate_flag("DFEL")
+        self.client.force_login(self.make_coach(self.team_a))
+
+        self.assertEqual(self.club_get("fixture_recheck").status_code, 403)
+
+    def test_event_list_button_follows_either_flag(self):
+        self.client.force_login(self.admin_user)
+        self.assertNotContains(self.club_get("event_list"), "Re-check all imported fixtures")
+
+        self.activate_flag("DFEL")
+
+        self.assertContains(self.club_get("event_list"), "Re-check all imported fixtures")
+
+    @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
+    def test_preview_namespaces_each_entrys_fields(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.activate_flag("DFEL")
+        self.record_both()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("fixture_recheck")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["season"], self.season)
+        self.assertContains(response, 'name="location_0_5002"')
+        self.assertContains(response, 'name="opponent_0_5002"')
+        self.assertContains(response, f'name="location_1_{DFEL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, reverse("management:fixture_recheck_confirm"))
+        self.assertEqual(mock_fetch.call_count, 2)
+
+    @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
+    def test_confirm_applies_every_entry_and_refreshes_recorded_at(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.activate_flag("DFEL")
+        self.record_both()
+        self.team_b.refresh_from_db()
+        import_sources.update_entry(self.team_b, self.team_b.import_sources[0], recorded_at="2000-01-01T00:00:00+00:00")
+        self.client.force_login(self.admin_user)
+        self.club_get("fixture_recheck")
+
+        response = self.club_post("fixture_recheck_confirm", {f"location_1_{DFEL_SAMPLE_GAME_ID}": str(self.location.pk)})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        rbihf_event = Event.objects.get(club=self.club, external_game_id="5002")
+        self.assertIn(self.team_a, rbihf_event.teams.all())
+        dfel_event = Event.objects.get(club=self.club, external_game_id=DFEL_SAMPLE_GAME_ID)
+        self.assertIn(self.team_b, dfel_event.teams.all())
+        self.assertEqual(dfel_event.location, self.location)
+        self.assertEqual(dfel_event.competition_label, "League")
+        self.team_b.refresh_from_db()
+        [entry] = self.team_b.import_sources
+        self.assertNotEqual(entry["recorded_at"], "2000-01-01T00:00:00+00:00")
+        self.assertEqual(entry["url"], DFEL_TEAM_URL)
+
+    @mock.patch("events.services.import_sources.fetch")
+    def test_an_entry_that_fails_to_fetch_is_shown_and_skipped(self, mock_fetch):
+        def fetch(entry):
+            if entry["source"] == import_sources.SOURCE_RBIHF:
+                raise import_sources.ImportSourceError("RBIHF is down.")
+            return dfel_sample_json()
+
+        mock_fetch.side_effect = fetch
+        self.activate_flag("RBIHF")
+        self.activate_flag("DFEL")
+        self.record_both()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("fixture_recheck")
+
+        self.assertContains(response, "RBIHF is down.")
+        # The failed entry takes no index -- the DFEL one is entry 0.
+        self.assertContains(response, f'name="location_0_{DFEL_SAMPLE_GAME_ID}"')
+
+        self.club_post("fixture_recheck_confirm", {})
+
+        self.assertFalse(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+        self.assertTrue(Event.objects.filter(club=self.club, external_game_id=DFEL_SAMPLE_GAME_ID).exists())
+
+    @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
+    def test_a_source_whose_flag_is_off_is_skipped(self, mock_fetch):
+        self.activate_flag("DFEL")
+        self.record_both()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("fixture_recheck")
+
+        self.assertNotContains(response, "rbihf.be/league/team/4460")
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.args[0]["source"], "DFEL")
+
+    @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
+    def test_only_the_chosen_seasons_entries_are_fetched(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        today = timezone.localdate()
+        old_season = Season.objects.create(club=self.club, start_date=today - datetime.timedelta(days=400), end_date=today - datetime.timedelta(days=31))
+        import_sources.record_source(self.team_a, source="RBIHF", url="https://www.rbihf.be/league/team/4460", season=self.season)
+        import_sources.record_source(self.team_a, source="RBIHF", url="https://www.rbihf.be/league/team/3999", season=old_season)
+        self.client.force_login(self.admin_user)
+
+        self.club_get("fixture_recheck", params={"season": str(old_season.pk)})
+
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.args[0]["url"], "https://www.rbihf.be/league/team/3999")
+
+    @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
+    def test_team_filter_limits_the_recheck_and_returns_to_the_team(self, mock_fetch):
+        self.activate_flag("RBIHF")
+        self.activate_flag("DFEL")
+        self.record_both()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("fixture_recheck", params={"team": str(self.team_b.pk)})
+
+        mock_fetch.assert_called_once()
+        self.assertEqual(response.context["selected_team"], self.team_b)
+        self.assertNotContains(response, 'name="location_0_5002"')
+
+        response = self.club_post("fixture_recheck_confirm", {})
+
+        self.assertRedirects(response, f"{reverse('management:team_detail', args=[self.team_b.pk])}?season={self.season.pk}")
+        self.assertFalse(Event.objects.filter(club=self.club, external_game_id="5002").exists())
+        self.assertTrue(Event.objects.filter(club=self.club, external_game_id=DFEL_SAMPLE_GAME_ID).exists())
+
+    def test_a_team_from_another_club_404s(self):
+        self.activate_flag("DFEL")
+        other_team = Team.objects.create(club=Club.objects.create(name="Other", slug="other"), name="Theirs", short_name="T")
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("fixture_recheck", params={"team": str(other_team.pk)}).status_code, 404)
+
+    def test_confirming_with_nothing_stashed_redirects(self):
+        self.activate_flag("DFEL")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("fixture_recheck_confirm", {})
+
+        self.assertRedirects(response, reverse("management:fixture_recheck"))
 
 
 class MemberListKindFilterTests(ManagementTestBase):
