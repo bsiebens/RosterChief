@@ -809,7 +809,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All eleven platform jobs run from **one in-process scheduler thread inside `web` itself** —
+All twelve platform jobs run from **one in-process scheduler thread inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
 `when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
@@ -824,6 +824,7 @@ class every one of them runs through.
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
 | `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
+| `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -841,7 +842,7 @@ instead of two.
 **`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
 and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
 without `--commit` the scheduler would tick them forever and nothing would actually happen. The
-other nine act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
+other ten act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
 manual use.
 
 **Overlap and misfire protection is APScheduler's job config, not `flock`.** Every job is added
@@ -944,7 +945,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the eleven jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the twelve jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually

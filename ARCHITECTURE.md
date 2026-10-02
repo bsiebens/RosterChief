@@ -850,6 +850,20 @@ EventReferee(UUIDModel)            # club implied by event
   original paper form, which itself uses a longer legal form up top and a shorter one in the
   body text.
 
+**Fixture import sources & the weekly re-check.** The RBIHF/DFEL one-off imports
+(`events/services/rbihf_import.py`, `dfel_import.py`) remember the pasted fixture-list URL on
+`Team.import_sources` — a JSON list (not form-editable), one entry per (source, season,
+competition label); a confirmed import of the same triple replaces its entry (label compared
+case-insensitively), anything else appends. `events/services/import_sources.py` owns the shape
+and the helpers (`record_source`, `sources_for`, `check_entry`, `update_entry`). The scheduled
+job `check_fixture_sources` (weekly, Monday 06:15) re-checks every active club's
+*current-season* entries whose source flag is still on for the club, writes
+`last_checked_at`/`last_check` back onto each entry, and — only when something changed — sends
+the club's ADMIN-role members one notification (in-app + email) summarising per team / source /
+competition: games moved to another date/hour, new games, removed future games, or a fetch
+error. Opponent/label drift is deliberately not alerted. It never imports anything; admins apply
+changes via the re-check page's import button.
+
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
 
 **`news` is built** (as of the coach_manager-authoring / editor-release-flow work) —
