@@ -781,6 +781,14 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         return super().save(commit=commit)
 
 
+def _setup_import_season_field(form, club):
+    """Shared by the fixture import forms (and FixtureRecheckForm): the club's
+    seasons, newest first, defaulting to the one covering today."""
+    form.fields["season"].queryset = Season.objects.filter(club=club).order_by("-start_date")
+    if club is not None and not form.is_bound:
+        form.fields["season"].initial = Season.covering(club, timezone.localdate())
+
+
 class RBIHFImportForm(forms.Form):
     """Step 1 of importing a team's fixtures from RBIHF's own website -- see
     events.services.rbihf_import. Only the URL and which of the club's own
@@ -804,9 +812,12 @@ class RBIHFImportForm(forms.Form):
         help_text=_("Optional. Only needed if this team plays in more than one RBIHF competition (e.g. “Division 1” vs “Cup”) -- keeps re-importing one from ever deleting the other's games."),
     )
 
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"), help_text=_("Which season these fixtures belong to -- the URL is remembered for this season so it can be re-checked later."))
+
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["team"].queryset = Team.objects.filter(club=club)
+        _setup_import_season_field(self, club)
 
     def clean_url(self):
         url = self.cleaned_data["url"].strip()
@@ -840,9 +851,12 @@ class DFELImportForm(forms.Form):
         help_text=_("Optional. Only needed if this team plays in more than one DFEL competition (e.g. “League” vs “Playoffs”) -- keeps re-importing one from ever deleting the other's games."),
     )
 
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"), help_text=_("Which season these fixtures belong to -- the URL is remembered for this season so it can be re-checked later."))
+
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["team"].queryset = Team.objects.filter(club=club)
+        _setup_import_season_field(self, club)
 
     def clean_url(self):
         url = self.cleaned_data["url"].strip()
@@ -851,6 +865,18 @@ class DFELImportForm(forms.Form):
         except DFELImportError as error:
             raise forms.ValidationError(str(error)) from error
         return url
+
+
+class FixtureRecheckForm(forms.Form):
+    """The "Re-check all imported fixtures" season picker -- see
+    management.views.FixtureRecheckView. Submitted via GET, so it's always
+    bound once a season is in the querystring."""
+
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        _setup_import_season_field(self, club)
 
 
 class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):

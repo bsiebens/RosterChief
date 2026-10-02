@@ -12,6 +12,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.utils.functional import cached_property
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -92,7 +93,7 @@ from evaluations.services import (
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
-from events.services import dfel_import
+from events.services import dfel_import, import_sources
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
@@ -167,6 +168,7 @@ from .forms import (
     ExternalRefereeForm,
     FamilyCreateForm,
     FieldFormSet,
+    FixtureRecheckForm,
     FormBuilderFieldForm,
     FormForm,
     FormSendForm,
@@ -1428,6 +1430,26 @@ class TeamDeleteView(MemberAdminRequiredMixin, View):
         return redirect("management:team_list")
 
 
+def fixture_import_sources_for_display(team) -> list[dict]:
+    """``team``'s stored fixture import sources (events.services.import_sources)
+    with their ISO timestamps parsed for the template, and whether the season
+    they were recorded for still exists (the re-check link needs its pk)."""
+    season_ids = {str(pk) for pk in Season.objects.filter(club_id=team.club_id).values_list("pk", flat=True)}
+    rows = []
+    for entry in import_sources.sources_for(team):
+        last_check = entry.get("last_check") or {}
+        rows.append(
+            {
+                **entry,
+                "season_exists": entry.get("season_id") in season_ids,
+                "recorded_at_dt": parse_datetime(entry["recorded_at"]) if entry.get("recorded_at") else None,
+                "last_checked_at_dt": parse_datetime(entry["last_checked_at"]) if entry.get("last_checked_at") else None,
+                "last_check": last_check,
+            }
+        )
+    return rows
+
+
 class TeamDetailView(ClubStaffRequiredMixin, DetailView):
     """Team, roster and staff for one season, all in one place -- viewing is open
     to any staff (visibility, not authority); managing the roster/staff of *this*
@@ -1501,6 +1523,7 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
             staff_form=StaffAssignmentForm(club=club, team=team, season=season) if can_manage and season else None,
             team_photo=team_photo,
             team_photo_form=TeamPhotoForm(instance=team_photo) if can_manage and season else None,
+            fixture_import_sources=fixture_import_sources_for_display(team) if is_club_admin(self.request.user, club) else [],
             attendance_rate=attendance_rate,
             top_attenders=top_attenders,
             bottom_attenders=bottom_attenders,
@@ -4123,6 +4146,19 @@ class EventFetchGameInfoView(EventManagerRequiredMixin, View):
         return redirect("management:event_detail", pk=event.pk)
 
 
+def _import_choices_from_post(post, prefix: str, plan) -> tuple[dict, dict]:
+    """The location/opponent choices for one plan's rows, read back from the
+    preview form under ``prefix`` (``""`` for the one-off imports, ``"<n>_"``
+    for entry ``n`` of a combined re-check)."""
+    locations_by_game_id = {}
+    opponents_by_game_id = {}
+    for planned in [*plan.to_create, *plan.to_update]:
+        game_id = planned.fixture.external_game_id
+        locations_by_game_id[game_id] = post.get(f"location_{prefix}{game_id}", "")
+        opponents_by_game_id[game_id] = post.get(f"opponent_{prefix}{game_id}", "")
+    return locations_by_game_id, opponents_by_game_id
+
+
 RBIHF_IMPORT_CONTEXT = {"source_name": "RBIHF", "import_url_name": "management:rbihf_import", "confirm_url_name": "management:rbihf_import_confirm", "show_game_ids": True}
 # DFEL game ids are UUIDs -- meaningless to staff and far too wide for the table.
 DFEL_IMPORT_CONTEXT = {"source_name": "DFEL", "import_url_name": "management:dfel_import", "confirm_url_name": "management:dfel_import_confirm", "show_game_ids": False}
@@ -4148,6 +4184,7 @@ class RBIHFImportView(FeatureRequiredMixin, View):
 
         url = form.cleaned_data["url"]
         team = form.cleaned_data["team"]
+        season = form.cleaned_data["season"]
         competition_label = form.cleaned_data["competition_label"]
 
         rbihf_team_id = extract_team_id(url)
@@ -4162,6 +4199,8 @@ class RBIHFImportView(FeatureRequiredMixin, View):
         request.session["rbihf_import_team_id"] = str(team.pk)
         request.session["rbihf_import_rbihf_team_id"] = rbihf_team_id
         request.session["rbihf_import_competition_label"] = competition_label
+        request.session["rbihf_import_url"] = url
+        request.session["rbihf_import_season_id"] = str(season.pk)
         return render(request, "management/event_import_preview.html", {**RBIHF_IMPORT_CONTEXT, "plan": plan})
 
 
@@ -4178,11 +4217,14 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
         team_id = request.session.pop("rbihf_import_team_id", None)
         rbihf_team_id = request.session.pop("rbihf_import_rbihf_team_id", None)
         competition_label = request.session.pop("rbihf_import_competition_label", "")
-        if not html or not team_id or not rbihf_team_id:
+        url = request.session.pop("rbihf_import_url", None)
+        season_id = request.session.pop("rbihf_import_season_id", None)
+        if not html or not team_id or not rbihf_team_id or not url or not season_id:
             notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the RBIHF team URL again.')}")
             return redirect("management:rbihf_import")
 
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+        season = get_object_or_404(Season.objects.filter(club=request.club), pk=season_id)
 
         try:
             plan = build_plan(request.club, team, rbihf_team_id, html, competition_label)
@@ -4190,14 +4232,10 @@ class RBIHFImportConfirmView(FeatureRequiredMixin, View):
             notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched page. Try again.')}")
             return redirect("management:rbihf_import")
 
-        locations_by_game_id = {}
-        opponents_by_game_id = {}
-        for planned in [*plan.to_create, *plan.to_update]:
-            game_id = planned.fixture.external_game_id
-            locations_by_game_id[game_id] = request.POST.get(f"location_{game_id}", "")
-            opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
+        locations_by_game_id, opponents_by_game_id = _import_choices_from_post(request.POST, "", plan)
 
         result = apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+        import_sources.record_source(team, source=import_sources.SOURCE_RBIHF, url=url, season=season, competition_label=competition_label)
 
         body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
         notify(request, f"s|{_('Fixtures imported')}|{body}")
@@ -4223,6 +4261,7 @@ class DFELImportView(FeatureRequiredMixin, View):
             return render(request, "management/event_import_form.html", {**DFEL_IMPORT_CONTEXT, "form": form})
 
         team = form.cleaned_data["team"]
+        season = form.cleaned_data["season"]
         competition_label = form.cleaned_data["competition_label"]
 
         team_id, division_id = dfel_import.extract_ids(form.cleaned_data["url"])
@@ -4238,6 +4277,8 @@ class DFELImportView(FeatureRequiredMixin, View):
         request.session["dfel_import_team_id"] = str(team.pk)
         request.session["dfel_import_source_id"] = source_id
         request.session["dfel_import_competition_label"] = competition_label
+        request.session["dfel_import_url"] = form.cleaned_data["url"]
+        request.session["dfel_import_season_id"] = str(season.pk)
         return render(request, "management/event_import_preview.html", {**DFEL_IMPORT_CONTEXT, "plan": plan})
 
 
@@ -4253,11 +4294,14 @@ class DFELImportConfirmView(FeatureRequiredMixin, View):
         team_id = request.session.pop("dfel_import_team_id", None)
         source_id = request.session.pop("dfel_import_source_id", None)
         competition_label = request.session.pop("dfel_import_competition_label", "")
-        if not raw_json or not team_id or not source_id:
+        url = request.session.pop("dfel_import_url", None)
+        season_id = request.session.pop("dfel_import_season_id", None)
+        if not raw_json or not team_id or not source_id or not url or not season_id:
             notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the DFEL team URL again.')}")
             return redirect("management:dfel_import")
 
         team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+        season = get_object_or_404(Season.objects.filter(club=request.club), pk=season_id)
 
         try:
             plan = dfel_import.build_plan(request.club, team, source_id, raw_json, competition_label)
@@ -4265,17 +4309,137 @@ class DFELImportConfirmView(FeatureRequiredMixin, View):
             notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched schedule. Try again.')}")
             return redirect("management:dfel_import")
 
-        locations_by_game_id = {}
-        opponents_by_game_id = {}
-        for planned in [*plan.to_create, *plan.to_update]:
-            game_id = planned.fixture.external_game_id
-            locations_by_game_id[game_id] = request.POST.get(f"location_{game_id}", "")
-            opponents_by_game_id[game_id] = request.POST.get(f"opponent_{game_id}", "")
+        locations_by_game_id, opponents_by_game_id = _import_choices_from_post(request.POST, "", plan)
 
         result = dfel_import.apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+        import_sources.record_source(team, source=import_sources.SOURCE_DFEL, url=url, season=season, competition_label=competition_label)
 
         body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
         notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
+FIXTURE_RECHECK_SESSION_KEY = "fixture_recheck"
+
+
+class FixtureRecheckAccessMixin(ClubAdminRequiredMixin):
+    """Club admin, and at least one fixture-import feature (RBIHF or DFEL) on --
+    otherwise the section doesn't exist for this club and 404s, the same way
+    FeatureFlagMixin treats a single flag (an anonymous visitor is still sent
+    to login first, so the 404 can't leak which features a club has)."""
+
+    def dispatch(self, request, *args, **kwargs):
+        club = getattr(request, "club", None)
+        if club is not None and not any(flag_is_active(request, flag) for flag in import_sources.FEATURE_FLAGS.values()):
+            if not request.user.is_authenticated:
+                return self.handle_no_permission()
+            raise Http404("No fixture import feature is enabled for this club.")
+        return super().dispatch(request, *args, **kwargs)
+
+
+class FixtureRecheckView(FixtureRecheckAccessMixin, View):
+    """Step 1 of "Re-check all imported fixtures": fetches every stored
+    fixture-list URL (Team.import_sources, see events.services.import_sources)
+    of every team in the club -- or just ``?team=<pk>`` -- for the chosen season
+    (``?season=<pk>``, default the current one), skipping sources whose feature
+    is off for the club, and renders one combined create/update/delete preview.
+    Like the one-off imports it stashes only the raw payloads (keyed by entry
+    index), never parsed data; FixtureRecheckConfirmView re-diffs them."""
+
+    def get(self, request):
+        club = request.club
+        form = FixtureRecheckForm(request.GET if "season" in request.GET else None, club=club)
+        if form.is_bound and form.is_valid():
+            season = form.cleaned_data["season"]
+        else:
+            season = Season.covering(club, timezone.localdate()) or Season.objects.filter(club=club).order_by("-start_date").first()
+            form = FixtureRecheckForm(club=club, initial={"season": season})
+
+        teams = Team.objects.filter(club=club).order_by("name")
+        selected_team = None
+        if request.GET.get("team"):
+            try:
+                selected_team = teams.get(pk=request.GET["team"])
+            except (Team.DoesNotExist, ValidationError) as error:
+                raise Http404("No such team.") from error
+            teams = teams.filter(pk=selected_team.pk)
+
+        sections = []
+        stash = []
+        if season is not None:
+            enabled = {source: import_sources.source_enabled(club, source) for source in import_sources.SOURCES}
+            for team in teams:
+                for entry in import_sources.sources_for(team, season):
+                    if not enabled.get(entry["source"]):
+                        continue
+                    # DFEL game ids are UUIDs -- see DFEL_IMPORT_CONTEXT.
+                    section = {"team": team, "entry": entry, "plan": None, "error": "", "prefix": "", "show_game_ids": entry["source"] == import_sources.SOURCE_RBIHF}
+                    try:
+                        raw = import_sources.fetch(entry)
+                        section["plan"] = import_sources.build_plan_for(club, team, entry, raw)
+                    except import_sources.ImportSourceError as error:
+                        section["error"] = str(error) or _("Could not fetch this fixture list.")
+                    else:
+                        section["prefix"] = f"{len(stash)}_"
+                        stash.append({"team_id": str(team.pk), "entry": entry, "raw": raw})
+                    sections.append(section)
+
+        if season is not None:
+            request.session[FIXTURE_RECHECK_SESSION_KEY] = {"season_id": str(season.pk), "team_id": str(selected_team.pk) if selected_team else "", "entries": stash}
+        else:
+            request.session.pop(FIXTURE_RECHECK_SESSION_KEY, None)
+
+        has_changes = any(section["plan"] and (section["plan"].to_create or section["plan"].to_update or section["plan"].to_delete) for section in sections)
+        return render(
+            request,
+            "management/fixture_recheck.html",
+            {"form": form, "season": season, "selected_team": selected_team, "sections": sections, "has_changes": has_changes},
+        )
+
+
+class FixtureRecheckConfirmView(FixtureRecheckAccessMixin, View):
+    """Step 2: re-builds every stashed entry's plan against the *current* DB
+    state, applies each with the location/opponent choices posted under that
+    entry's own field-name prefix, and refreshes the entry's ``recorded_at``."""
+
+    def post(self, request):
+        club = request.club
+        stash = request.session.pop(FIXTURE_RECHECK_SESSION_KEY, None)
+        if not stash or not stash.get("entries"):
+            notify(request, f"w|{_('Nothing to import')}|{_('Start the re-check again.')}")
+            return redirect("management:fixture_recheck")
+
+        season = Season.objects.filter(club=club, pk=stash.get("season_id")).first()
+        if season is None:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start the re-check again.')}")
+            return redirect("management:fixture_recheck")
+
+        teams_by_id = {str(team.pk): team for team in Team.objects.filter(club=club, pk__in=[item["team_id"] for item in stash["entries"]])}
+        enabled = {source: import_sources.source_enabled(club, source) for source in import_sources.SOURCES}
+        totals = {"created": 0, "updated": 0, "deleted": 0}
+        failed = 0
+        for index, item in enumerate(stash["entries"]):
+            team = teams_by_id.get(item["team_id"])
+            entry = item["entry"]
+            if team is None or not enabled.get(entry.get("source")):
+                continue
+            try:
+                plan = import_sources.build_plan_for(club, team, entry, item["raw"])
+            except import_sources.ImportSourceError:
+                failed += 1
+                continue
+            locations_by_game_id, opponents_by_game_id = _import_choices_from_post(request.POST, f"{index}_", plan)
+            result = apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+            for key in totals:
+                totals[key] += result.get(key, 0)
+            import_sources.record_source(team, source=entry["source"], url=entry["url"], season=season, competition_label=entry.get("competition_label", ""))
+
+        body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % totals
+        if failed:
+            body = f"{body} {ngettext('%(count)s fixture list could not be re-read and was skipped.', '%(count)s fixture lists could not be re-read and were skipped.', failed) % {'count': failed}}"
+        notify(request, f"s|{_('Fixtures re-checked')}|{body}")
+        if stash.get("team_id") and stash["team_id"] in teams_by_id:
+            return redirect(f"{reverse('management:team_detail', args=[stash['team_id']])}?season={season.pk}")
         return redirect("management:event_list")
 
 
