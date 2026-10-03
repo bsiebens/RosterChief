@@ -224,12 +224,15 @@ def build_plan(club, team, rbihf_team_id: str, html: str, competition_label: str
     return plan_from_fixtures(club, team, competition="RBIHF", source_id=rbihf_team_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
 
 
-def plan_from_fixtures(club, team, *, competition: str, source_id: str, scraped_team_name: str, fixtures: list[ScrapedFixture], competition_label: str = "") -> ImportPlan:
+def plan_from_fixtures(club, team, *, competition: str, source_id: str, scraped_team_name: str, fixtures: list[ScrapedFixture], competition_label: str = "", keep_game_ids=()) -> ImportPlan:
     """The source-agnostic half of ``build_plan``: diffs already-parsed
     ``fixtures`` against this club/team's existing ``competition`` events.
-    Shared by every fixture importer (RBIHF here, DFEL in
-    events.services.dfel_import) -- only fetching/parsing differs per source.
-    ``source_id`` plays the role ``rbihf_team_id`` describes in build_plan."""
+    Shared by every fixture importer (RBIHF here, DFEL/IJNL in
+    events.services.dfel_import/ijnl_import) -- only fetching/parsing differs
+    per source. ``source_id`` plays the role ``rbihf_team_id`` describes in
+    build_plan. ``keep_game_ids`` are games the source still lists but that
+    couldn't be parsed into a fixture (e.g. IJNL's "date TBD" for a postponed
+    game) -- left alone rather than deleted."""
     location_choices = list(Location.objects.filter(club=club).order_by("name"))
     opponent_choices = list(Opponent.objects.filter(club=club).order_by("name"))
 
@@ -242,7 +245,7 @@ def plan_from_fixtures(club, team, *, competition: str, source_id: str, scraped_
 
     plan = ImportPlan(club=club, team=team, scraped_team_name=scraped_team_name, location_choices=location_choices, opponent_choices=opponent_choices, rbihf_team_id=source_id, competition_label=competition_label, competition=competition)
 
-    seen_game_ids = set()
+    seen_game_ids = set(keep_game_ids)
     for fixture in fixtures:
         seen_game_ids.add(fixture.external_game_id)
         existing = existing_by_game_id.get(fixture.external_game_id)

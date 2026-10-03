@@ -30,7 +30,7 @@ from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
-from events.services import import_sources
+from events.services import ijnl_import, import_sources
 from events.services.calendar import week_bounds
 from events.services.dfel_import import DFELImportError
 from events.services.notifications import notify_new_event
@@ -9412,6 +9412,137 @@ class DFELImportViewTests(ManagementTestBase):
         response = self.club_post("dfel_import_confirm", {})
 
         self.assertRedirects(response, reverse("management:dfel_import"))
+
+
+IJNL_SAMPLE_GAME_ID = "49a66dbb-eaa2-4527-9c8b-31ee324d736b"
+IJNL_TEAM_URL = "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27"
+
+
+def ijnl_sample_json(season="2026/27"):
+    """A minimal ijshockey.nl team ``/data`` response: one upcoming away game."""
+    start = timezone.localtime() + datetime.timedelta(days=10)
+    return json.dumps(
+        {
+            "team": {"teamId": 64414, "naam": "Sharks Ladies Mechelen"},
+            "seizoen": season,
+            "programma": [
+                {
+                    "gameGuid": IJNL_SAMPLE_GAME_ID,
+                    "datum": start.strftime("%Y-%m-%d"),
+                    "tijd": "16:00",
+                    "datumOnbekend": False,
+                    "tijdOnbekend": False,
+                    "staat": "gepland",
+                    "thuis": {"teamId": 32609, "naam": "Amsterdam Tigers Vrouwen", "score": None},
+                    "uit": {"teamId": 64414, "naam": "Sharks Ladies Mechelen", "score": None},
+                    "locatie": None,
+                }
+            ],
+            "uitslagen": [],
+        }
+    )
+
+
+class IJNLImportViewTests(ManagementTestBase):
+    """The Events page's "Import from IJNL" button/flow -- same gating and
+    two-step shape as DFELImportViewTests, behind the "IJNL" waffle Flag.
+    fetch_team_data is mocked; nothing touches the network."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="Sharks Women", short_name="SW")
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def activate_flag(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="IJNL")
+        flag.clubs.add(self.club)
+
+    def post_form(self, url=IJNL_TEAM_URL, **extra):
+        return self.club_post("ijnl_import", {"url": url, "team": str(self.team.pk), "season": str(self.season.pk), **extra})
+
+    def test_button_shows_only_with_the_flag_active(self):
+        self.client.force_login(self.admin_user)
+        self.assertNotContains(self.club_get("event_list"), "Import from IJNL")
+
+        self.activate_flag()
+        cache.clear()
+        response = self.club_get("event_list")
+
+        self.assertContains(response, "Import from IJNL")
+        self.assertContains(response, "Re-check all imported fixtures")
+
+    def test_the_import_views_404_when_the_flag_is_not_active(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertEqual(self.club_get("ijnl_import").status_code, 404)
+        self.assertEqual(self.club_post("ijnl_import_confirm", {}).status_code, 404)
+
+    def test_a_non_ijnl_url_is_a_form_error_not_a_500(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.post_form(url="https://evil.example.com/competities/team/64414")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("url", response.context["form"].errors)
+
+    @mock.patch("events.services.ijnl_import.fetch_team_data", side_effect=ijnl_import.IJNLImportError("Could not reach ijshockey.nl."))
+    def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.post_form()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not reach ijshockey.nl.")
+
+    @mock.patch("events.services.ijnl_import.fetch_team_data", side_effect=lambda team_id, season: ijnl_sample_json())
+    def test_preview_then_confirm_creates_the_event_and_remembers_the_source(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.post_form(competition_label="Eredivisie")
+
+        self.assertContains(response, "Amsterdam Tigers Vrouwen")
+        self.assertContains(response, f'name="location_{IJNL_SAMPLE_GAME_ID}"')
+        self.assertContains(response, reverse("management:ijnl_import_confirm"))
+        mock_fetch.assert_called_once_with("64414", "2026/27")
+
+        response = self.club_post("ijnl_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:event_list"))
+        event = Event.objects.get(club=self.club, external_game_id=IJNL_SAMPLE_GAME_ID)
+        self.assertEqual((event.competition, event.external_source_id, event.competition_label), ("IJNL", "64414/2026/27", "Eredivisie"))
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers Vrouwen")
+        self.team.refresh_from_db()
+        [entry] = self.team.import_sources
+        self.assertEqual((entry["source"], entry["url"]), ("IJNL", IJNL_TEAM_URL))
+
+    @mock.patch("events.services.ijnl_import.fetch_team_data", side_effect=lambda team_id, season: ijnl_sample_json(season="2026/27"))
+    def test_a_url_without_a_season_is_pinned_to_the_fetched_season(self, mock_fetch):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        self.post_form(url="https://www.ijshockey.nl/competities/team/64414")
+        self.club_post("ijnl_import_confirm", {})
+
+        mock_fetch.assert_called_once_with("64414", "")
+        self.assertEqual(Event.objects.get(club=self.club, external_game_id=IJNL_SAMPLE_GAME_ID).external_source_id, "64414/2026/27")
+        self.team.refresh_from_db()
+        self.assertEqual(self.team.import_sources[0]["url"], IJNL_TEAM_URL)
+
+    def test_confirming_with_nothing_stashed_redirects_with_a_notice(self):
+        self.activate_flag()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("ijnl_import_confirm", {})
+
+        self.assertRedirects(response, reverse("management:ijnl_import"))
 
 
 def rbihf_html_for(url):

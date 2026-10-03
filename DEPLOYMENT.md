@@ -854,8 +854,9 @@ class every one of them runs through.
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
-| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
-| `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
+| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
+| `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
+| `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |

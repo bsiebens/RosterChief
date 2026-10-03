@@ -93,7 +93,7 @@ from evaluations.services import (
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
-from events.services import dfel_import, import_sources
+from events.services import dfel_import, ijnl_import, import_sources
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
@@ -175,6 +175,7 @@ from .forms import (
     GrantLoginForm,
     GroupBulkAddFormSet,
     GroupForm,
+    IJNLImportForm,
     LocationForm,
     MemberForm,
     MemberImportUploadForm,
@@ -4162,6 +4163,8 @@ def _import_choices_from_post(post, prefix: str, plan) -> tuple[dict, dict]:
 RBIHF_IMPORT_CONTEXT = {"source_name": "RBIHF", "import_url_name": "management:rbihf_import", "confirm_url_name": "management:rbihf_import_confirm", "show_game_ids": True}
 # DFEL game ids are UUIDs -- meaningless to staff and far too wide for the table.
 DFEL_IMPORT_CONTEXT = {"source_name": "DFEL", "import_url_name": "management:dfel_import", "confirm_url_name": "management:dfel_import_confirm", "show_game_ids": False}
+# IJNL game ids are UUIDs too.
+IJNL_IMPORT_CONTEXT = {"source_name": "IJNL", "import_url_name": "management:ijnl_import", "confirm_url_name": "management:ijnl_import_confirm", "show_game_ids": False}
 
 
 class RBIHFImportView(FeatureRequiredMixin, View):
@@ -4319,11 +4322,88 @@ class DFELImportConfirmView(FeatureRequiredMixin, View):
         return redirect("management:event_list")
 
 
+class IJNLImportView(FeatureRequiredMixin, View):
+    """Step 1 of the IJNL (IJshockey Nederland, ijshockey.nl) fixture import --
+    the same shape as DFELImportView. A pasted URL without a season is pinned
+    to whichever season the fetched data is for, so what's stashed (and later
+    remembered on Team.import_sources) always names one. See
+    events.services.ijnl_import."""
+
+    feature_flag = "IJNL"
+
+    def get(self, request):
+        return render(request, "management/event_import_form.html", {**IJNL_IMPORT_CONTEXT, "form": IJNLImportForm(club=request.club)})
+
+    def post(self, request):
+        form = IJNLImportForm(request.POST, club=request.club)
+        if not form.is_valid():
+            return render(request, "management/event_import_form.html", {**IJNL_IMPORT_CONTEXT, "form": form})
+
+        team = form.cleaned_data["team"]
+        season = form.cleaned_data["season"]
+        competition_label = form.cleaned_data["competition_label"]
+
+        team_id, source_season = ijnl_import.extract_ids(form.cleaned_data["url"])
+        try:
+            raw_json = ijnl_import.fetch_team_data(team_id, source_season)
+            source_season = source_season or ijnl_import.season_of(raw_json)
+            source_id = ijnl_import.source_id(team_id, source_season)
+            plan = ijnl_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except ijnl_import.IJNLImportError as error:
+            form.add_error("url", str(error))
+            return render(request, "management/event_import_form.html", {**IJNL_IMPORT_CONTEXT, "form": form})
+
+        request.session["ijnl_import_json"] = raw_json
+        request.session["ijnl_import_team_id"] = str(team.pk)
+        request.session["ijnl_import_source_id"] = source_id
+        request.session["ijnl_import_competition_label"] = competition_label
+        request.session["ijnl_import_url"] = ijnl_import.team_page_url(team_id, source_season)
+        request.session["ijnl_import_season_id"] = str(season.pk)
+        return render(request, "management/event_import_preview.html", {**IJNL_IMPORT_CONTEXT, "plan": plan})
+
+
+class IJNLImportConfirmView(FeatureRequiredMixin, View):
+    """Step 2: re-parses and re-diffs the JSON stashed by IJNLImportView
+    against the current DB state and applies it -- see RBIHFImportConfirmView,
+    which this mirrors."""
+
+    feature_flag = "IJNL"
+
+    def post(self, request):
+        raw_json = request.session.pop("ijnl_import_json", None)
+        team_id = request.session.pop("ijnl_import_team_id", None)
+        source_id = request.session.pop("ijnl_import_source_id", None)
+        competition_label = request.session.pop("ijnl_import_competition_label", "")
+        url = request.session.pop("ijnl_import_url", None)
+        season_id = request.session.pop("ijnl_import_season_id", None)
+        if not raw_json or not team_id or not source_id or not url or not season_id:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start over by pasting the ijshockey.nl team URL again.')}")
+            return redirect("management:ijnl_import")
+
+        team = get_object_or_404(Team.objects.filter(club=request.club), pk=team_id)
+        season = get_object_or_404(Season.objects.filter(club=request.club), pk=season_id)
+
+        try:
+            plan = ijnl_import.build_plan(request.club, team, source_id, raw_json, competition_label)
+        except ijnl_import.IJNLImportError:
+            notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the fetched schedule. Try again.')}")
+            return redirect("management:ijnl_import")
+
+        locations_by_game_id, opponents_by_game_id = _import_choices_from_post(request.POST, "", plan)
+
+        result = ijnl_import.apply_plan(plan, locations_by_game_id, opponents_by_game_id)
+        import_sources.record_source(team, source=import_sources.SOURCE_IJNL, url=url, season=season, competition_label=competition_label)
+
+        body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
+        notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
 FIXTURE_RECHECK_SESSION_KEY = "fixture_recheck"
 
 
 class FixtureRecheckAccessMixin(ClubAdminRequiredMixin):
-    """Club admin, and at least one fixture-import feature (RBIHF or DFEL) on --
+    """Club admin, and at least one fixture-import feature (RBIHF, DFEL or IJNL) on --
     otherwise the section doesn't exist for this club and 404s, the same way
     FeatureFlagMixin treats a single flag (an anonymous visitor is still sent
     to login first, so the 404 can't leak which features a club has)."""
@@ -4372,7 +4452,7 @@ class FixtureRecheckView(FixtureRecheckAccessMixin, View):
                 for entry in import_sources.sources_for(team, season):
                     if not enabled.get(entry["source"]):
                         continue
-                    # DFEL game ids are UUIDs -- see DFEL_IMPORT_CONTEXT.
+                    # DFEL/IJNL game ids are UUIDs -- see DFEL_IMPORT_CONTEXT.
                     section = {"team": team, "entry": entry, "plan": None, "error": "", "prefix": "", "show_game_ids": entry["source"] == import_sources.SOURCE_RBIHF}
                     try:
                         raw = import_sources.fetch(entry)
