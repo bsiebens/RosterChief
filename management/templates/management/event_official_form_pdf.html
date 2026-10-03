@@ -119,7 +119,7 @@
                 {% for official in officials %}
                     <tr>
                         <td>{{ official.display_name }}</td>
-                        <td class="amount">€{{ official.fee|floatformat:2 }}</td>
+                        <td class="amount">{% if official.no_fee %}{% trans "No fee" %}{% else %}€{{ official.fee|floatformat:2 }}{% endif %}</td>
                         <td class="amount">{% if official.km %}{{ official.km }} km{% else %}—{% endif %}</td>
                         <td class="amount">{% if official.km %}€{{ official.km_rate }}{% else %}—{% endif %}</td>
                         <td class="amount">€{{ official.total_payable|floatformat:2 }}</td>

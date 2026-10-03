@@ -7164,6 +7164,12 @@ class EventDetailDisplayTests(ManagementTestBase):
         self.assertContains(response, "is not enabled for this club")
 
 
+def fee_data(assignment, kind="referee", **fields):
+    """POST data for one row of the shared per-game fee form
+    (management.views.EventFeesUpdateView) -- fields prefixed ``<kind>_<pk>-``."""
+    return {f"{kind}_{assignment.pk}-{name}": value for name, value in fields.items()}
+
+
 class EventRefereeManagementTests(ManagementTestBase):
     """Assigning/removing referees from the event detail page's Referees
     panel -- home games only, see management.views.EventRefereeAssignView/
@@ -7396,12 +7402,26 @@ class EventRefereeManagementTests(ManagementTestBase):
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("event_referee_fee_update", {"fee": "25.00", "km": "40", "km_rate": "0.35"}, game.pk, assignment.pk)
+        response = self.club_post("event_fees_update", fee_data(assignment, fee="25.00", km="40", km_rate="0.35"), game.pk)
 
         self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
         assignment.refresh_from_db()
         self.assertEqual(assignment.fee, Decimal("25.00"))
         self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+    def test_admin_can_mark_a_referee_as_not_paid(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"))
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", fee_data(assignment, no_fee="on", fee="25.00", km="40", km_rate="0.35"), game.pk)
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.fee, assignment.km), (True, Decimal("0.00"), None))
+        response = self.club_get("event_detail", game.pk)
+        self.assertContains(response, f'name="referee_{assignment.pk}-no_fee" form="event_fees_form_{game.pk}" class="checkbox" checked')
+        self.assertContains(response, "No fee")
+        self.assertNotContains(response, "Fee not set")
 
     def test_a_km_rate_with_more_than_two_decimals_is_accepted(self):
         # e.g. a per-km rate of €0.083 -- the km_rate input must not be pinned
@@ -7410,7 +7430,7 @@ class EventRefereeManagementTests(ManagementTestBase):
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.admin_user)
 
-        response = self.club_post("event_referee_fee_update", {"fee": "0", "km": "40", "km_rate": "0.083"}, game.pk, assignment.pk)
+        response = self.club_post("event_fees_update", fee_data(assignment, fee="0", km="40", km_rate="0.083"), game.pk)
 
         self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
         assignment.refresh_from_db()
@@ -7446,7 +7466,9 @@ class EventRefereeManagementTests(ManagementTestBase):
 
         response = self.club_get("event_detail", game.pk)
 
-        self.assertContains(response, 'name="fee" value="25.00"')
+        self.assertContains(response, 'name="referee_')
+        self.assertContains(response, '-fee" form="event_fees_form_')
+        self.assertContains(response, 'value="25.00"')
 
     def test_an_unset_fee_is_flagged_on_the_referees_panel(self):
         game = self.make_game()
@@ -7471,9 +7493,44 @@ class EventRefereeManagementTests(ManagementTestBase):
         assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
         self.client.force_login(self.team_coach)
 
-        response = self.club_post("event_referee_fee_update", {"fee": "25.00"}, game.pk, assignment.pk)
+        response = self.club_post("event_fees_update", fee_data(assignment, fee="25.00"), game.pk)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_one_save_stores_every_rows_fee(self):
+        game = self.make_game(max_referees=2)
+        first = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"))
+        second = EventReferee.objects.create(event=game, external_name="Guest Referee", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_fees_update", {**fee_data(first, fee="25.00"), **fee_data(second, fee="30.00", km="12", km_rate="0.4")}, game.pk)
+
+        self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]))
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual((first.fee, second.fee, second.km), (Decimal("25.00"), Decimal("30.00"), Decimal("12.0")))
+
+    def test_an_invalid_row_is_skipped_but_the_others_are_saved(self):
+        game = self.make_game(max_referees=2)
+        good = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        bad = EventReferee.objects.create(event=game, external_name="Guest Referee", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", {**fee_data(good, fee="20.00"), **fee_data(bad, fee="lots")}, game.pk)
+
+        good.refresh_from_db()
+        bad.refresh_from_db()
+        self.assertEqual((good.fee, bad.fee), (Decimal("20.00"), Decimal("0.00")))
+
+    def test_another_games_assignment_is_never_touched(self):
+        game, other_game = self.make_game(), self.make_game()
+        other = EventReferee.objects.create(event=other_game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", fee_data(other, fee="99.00"), game.pk)
+
+        other.refresh_from_db()
+        self.assertEqual(other.fee, Decimal("0.00"))
 
 
 class EventRefereeFormPdfTests(ManagementTestBase):
@@ -7720,6 +7777,30 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_fees_pending"], 0)
         self.assertNotContains(response, "Fee not set")
 
+    def test_a_referee_marked_no_fee_is_not_flagged(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, no_fee=True)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertEqual(response.context["kpi_fees_pending"], 0)
+        self.assertNotContains(response, "Fee not set")
+
+    def test_the_modals_forms_return_to_the_open_modal(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+        modal_id = f"referee_game_modal_{game.pk}"
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, f'id="{modal_id}"')
+        next_url = f"{reverse('management:referee_management')}#{modal_id}"
+        self.assertContains(response, f'name="next" value="{next_url}"')
+        response = self.club_post("event_fees_update", {**fee_data(assignment, fee="25.00"), "next": next_url}, game.pk)
+        self.assertRedirects(response, next_url, fetch_redirect_response=False)
+
     def test_a_game_with_no_referee_at_all_is_not_counted_as_fees_pending(self):
         # Missing a referee entirely is a different, already-visible problem
         # (kpi_no_referee) -- it shouldn't also inflate the fees-pending count.
@@ -7853,7 +7934,7 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         response = self.club_get("referee_management")
 
-        self.assertContains(response, 'name="fee"')
+        self.assertContains(response, '-fee" form="event_fees_form_')
 
     def test_assigning_from_the_dashboard_redirects_back_to_the_dashboard(self):
         game = self.make_game()
@@ -8004,6 +8085,29 @@ class RefereeManagementDashboardTests(ManagementTestBase):
 
         self.assertEqual(response.context["need_counts"]["both"], 0)
         self.assertEqual(list(response.context["games"]), [])
+
+    def test_one_save_stores_referee_and_official_fees_together(self):
+        self.setUp_officials()
+        game = self.make_game()
+        referee = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        official = EventOfficial.objects.create(event=game, external_name="Guest Official", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", {**fee_data(referee, fee="25.00"), **fee_data(official, "official", no_fee="on", fee="0.00")}, game.pk)
+
+        referee.refresh_from_db()
+        official.refresh_from_db()
+        self.assertEqual((referee.fee, official.no_fee), (Decimal("25.00"), True))
+
+    def test_official_fees_are_ignored_without_the_officials_feature(self):
+        game = self.make_game()
+        official = EventOfficial.objects.create(event=game, external_name="Guest Official", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", fee_data(official, "official", fee="25.00"), game.pk)
+
+        official.refresh_from_db()
+        self.assertEqual(official.fee, Decimal("0.00"))
 
     def test_officials_fully_staffed_kpi_counts_it(self):
         self.setUp_officials()

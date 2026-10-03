@@ -18,14 +18,17 @@
         <a class="btn btn-outline btn-sm gap-1" href="{% url 'management:event_official_form_pdf' event.pk %}">{% lucide "file-down" size=12 %} {% trans "Official form (PDF)" %}</a>
     {% endif %}
 </div>
-<ul class="divide-y">
+{% with fees_form_id=event.pk|dom_id:"event_fees_form" %}
+<ul class="divide-y divide-line">
     {% for official in officials %}
-        <li class="flex flex-wrap items-center justify-between gap-3 py-2.5">
+        <li class="flex flex-wrap items-start justify-between gap-3 py-2.5">
             <div class="flex min-w-0 flex-col gap-0.5">
                 <div class="flex flex-wrap items-center gap-1.5">
                     <span class="text-sm font-semibold text-ink">{{ official.display_name }}</span>
                     {% if official.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
-                    {% if can_manage_referees and not official.fee %}<span class="badge badge-warning badge-xs">{% trans "Fee not set" %}</span>{% endif %}
+                    {% if can_manage_referees %}
+                        {% if official.no_fee %}<span class="badge badge-outline badge-xs">{% trans "No fee" %}</span>{% elif not official.fee %}<span class="badge badge-warning badge-xs">{% trans "Fee not set" %}</span>{% endif %}
+                    {% endif %}
                 </div>
                 {% if official.assigned_by %}
                     <span class="text-xs text-muted">{% blocktrans with name=official.assigned_by %}Assigned by {{ name }}{% endblocktrans %}</span>
@@ -35,35 +38,47 @@
             </div>
 
             {% if can_manage_referees %}
-                <div class="flex shrink-0 items-center gap-1.5">
-                    {% url 'management:event_official_fee_update' event.pk official.pk as fee_action_url %}
-                    <form method="post" action="{{ fee_action_url }}?next={{ next_url|urlencode }}" class="flex items-center gap-1.5">
-                        {% csrf_token %}
-                        <label class="flex items-center gap-1">
-                            <span class="font-mono text-xs text-dim">&euro;</span>
-                            <input type="number" step="0.01" min="0" name="fee" value="{{ official.fee }}" class="input w-20 text-right" aria-label="{% trans 'Fee' %}">
-                        </label>
-                        <details class="relative">
-                            <summary class="btn btn-square btn-outline btn-xs cursor-pointer list-none" title="{% trans 'Travel reimbursement' %}">{% lucide "car" size=12 %}</summary>
-                            <div class="absolute right-0 z-10 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-white p-2.5 shadow-lg">
-                                <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Km" %}
-                                    <input type="number" step="0.1" min="0" name="km" value="{{ official.km|default_if_none:'' }}" class="input">
-                                </label>
-                                <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Rate/km" %}
-                                    <input type="number" step="any" min="0" name="km_rate" value="{{ official.km_rate|default_if_none:'' }}" class="input">
-                                </label>
-                            </div>
-                        </details>
-                        <button class="btn btn-square btn-outline btn-xs" type="submit" title="{% trans 'Save fee' %}" aria-label="{% trans 'Save fee' %}">{% lucide "check" size=12 %}</button>
-                    </form>
-                    {% if official.km %}
-                        <span class="font-mono text-xs text-muted">{% blocktrans with total=official.total_payable|floatformat:2 %}{{ total }} due{% endblocktrans %}</span>
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                    <div class="flex items-center gap-1.5">
+                        {% comment %}
+                            Not a form of its own: every input here belongs to the game's shared fee
+                            form (_event_fees_form.html, rendered by the page), so any row's ✓ saves
+                            all rows. "No fee" hides the rest of the line (CSS only, via
+                            group-has-[:checked]) -- the server drops any fee/km still in it.
+                        {% endcomment %}
+                        {% with prefix=official.pk|dom_id:"official" %}
+                        <div class="group flex items-center gap-1.5">
+                            <label class="mr-3 flex cursor-pointer items-center gap-1 text-xs text-muted" title="{% trans 'Not paid for this game, or does not wish to be paid' %}">
+                                <input type="checkbox" name="{{ prefix }}-no_fee" form="{{ fees_form_id }}" class="checkbox" {% if official.no_fee %}checked{% endif %}>
+                                {% trans "No fee" %}
+                            </label>
+                            <label class="flex items-center gap-1 group-has-[:checked]:hidden">
+                                <span class="font-mono text-xs text-dim">&euro;</span>
+                                <input type="number" step="0.01" min="0" name="{{ prefix }}-fee" form="{{ fees_form_id }}" value="{{ official.fee }}" class="input input-xs w-20 text-right" aria-label="{% trans 'Fee' %}">
+                            </label>
+                            <details class="relative group-has-[:checked]:hidden">
+                                <summary class="btn btn-square btn-outline btn-xs cursor-pointer list-none" title="{% trans 'Travel reimbursement' %}">{% lucide "car" size=12 %}</summary>
+                                <div class="absolute right-0 z-10 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-white p-2.5 shadow-lg">
+                                    <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Km" %}
+                                        <input type="number" step="0.1" min="0" name="{{ prefix }}-km" form="{{ fees_form_id }}" value="{{ official.km|default_if_none:'' }}" class="input">
+                                    </label>
+                                    <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Rate/km" %}
+                                        <input type="number" step="any" min="0" name="{{ prefix }}-km_rate" form="{{ fees_form_id }}" value="{{ official.km_rate|default_if_none:'' }}" class="input">
+                                    </label>
+                                </div>
+                            </details>
+                            <button class="btn btn-square btn-outline btn-xs" type="submit" form="{{ fees_form_id }}" title="{% trans 'Save all fees' %}" aria-label="{% trans 'Save all fees' %}">{% lucide "check" size=12 %}</button>
+                        </div>
+                        {% endwith %}
+                        <form method="post" action="{% url 'management:event_official_remove' event.pk official.pk %}">
+                            {% csrf_token %}
+                            {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                            <button class="btn btn-square btn-outline btn-error btn-xs" type="submit" title="{% trans 'Remove' %}" aria-label="{% trans 'Remove' %}">{% lucide "x" size=12 %}</button>
+                        </form>
+                    </div>
+                    {% if official.km and not official.no_fee %}
+                        <span class="font-mono text-xs text-muted">{% blocktrans with total=official.total_payable|floatformat:2 %}&euro;{{ total }} due, travel included{% endblocktrans %}</span>
                     {% endif %}
-                    <form method="post" action="{% url 'management:event_official_remove' event.pk official.pk %}">
-                        {% csrf_token %}
-                        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-                        <button class="btn btn-square btn-outline btn-error btn-xs" type="submit" title="{% trans 'Remove' %}" aria-label="{% trans 'Remove' %}">{% lucide "x" size=12 %}</button>
-                    </form>
                 </div>
             {% elif official.total_payable %}
                 <span class="shrink-0 font-mono text-xs text-muted">{% blocktrans with total=official.total_payable|floatformat:2 %}&euro;{{ total }} due{% endblocktrans %}</span>
@@ -73,6 +88,7 @@
         <li class="py-2.5 text-sm text-muted">{% trans "No officials assigned yet." %}</li>
     {% endfor %}
 </ul>
+{% endwith %}
 
 {% if pending_official_signups %}
     <p class="mt-2 text-xs text-muted">

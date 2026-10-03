@@ -153,6 +153,10 @@
         </div>
     {% endif %}
 
+    {% if referee_management_needed or official_management_needed %}
+        {% include "management/_event_fees_form.html" %}
+    {% endif %}
+
     {% if referee_management_needed %}
         <div class="card">
             <div class="card-body">
