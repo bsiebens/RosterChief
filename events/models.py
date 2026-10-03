@@ -324,6 +324,7 @@ class EventReferee(UUIDModel):
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
     km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
 
     class Meta:
         verbose_name = _("event referee")
@@ -351,6 +352,11 @@ class EventReferee(UUIDModel):
     @property
     def km_total(self) -> Decimal:
         return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def fee_pending(self) -> bool:
+        """No fee entered yet, and not marked as unpaid either."""
+        return not self.fee and not self.no_fee
 
     @property
     def total_payable(self) -> Decimal:
@@ -409,6 +415,7 @@ class EventOfficial(UUIDModel):
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
     km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
 
     class Meta:
         verbose_name = _("event official")
@@ -436,6 +443,11 @@ class EventOfficial(UUIDModel):
     @property
     def km_total(self) -> Decimal:
         return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def fee_pending(self) -> bool:
+        """No fee entered yet, and not marked as unpaid either."""
+        return not self.fee and not self.no_fee
 
     @property
     def total_payable(self) -> Decimal:

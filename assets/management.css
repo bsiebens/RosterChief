@@ -862,6 +862,17 @@
         text-align: center;
     }
 
+    /* An input that lines up with the .btn-xs buttons beside it -- same height,
+       corner radius and border -- e.g. the fee field in the referee/official
+       assignment panels. */
+    .input-xs {
+        height: 1.5rem;
+        padding: 0 0.5rem;
+        border-radius: var(--radius-box);
+        border-color: var(--color-stroke);
+        font-size: 0.75rem;
+    }
+
     .otp {
         position: relative;
         display: inline-flex;

@@ -187,26 +187,36 @@
                     </div>
                 </div>
 
-                <dialog id="{{ game.pk|dom_id:"referee_game_modal" }}" class="modal">
-                    <div class="modal-box w-[36rem] max-w-[91vw]">
+                {% comment %}
+                    Every form in here redirects back to this page with the dialog's id as
+                    the URL fragment (game_next_url), and the script at the bottom reopens it --
+                    so saving a fee or adding someone keeps the modal open to carry on.
+                {% endcomment %}
+                {% with modal_id=game.pk|dom_id:"referee_game_modal" %}
+                {% with game_next_url=request.get_full_path|add:"#"|add:modal_id %}
+                <dialog id="{{ modal_id }}" class="modal">
+                    <div class="modal-box w-[72rem] max-w-[91vw]">
                         <form method="dialog"><button class="btn btn-ghost btn-square btn-sm absolute top-2 right-2">{% lucide "x" size=16 %}</button></form>
                         <h3 class="font-display text-lg font-extrabold text-ink uppercase">
                             {% for team in game.teams.all %}{{ team.short_name }}{% if not forloop.last %}, {% endif %}{% endfor %}
                             {% if game.opponent %}{% trans "vs" %} {{ game.opponent }}{% endif %}
                         </h3>
                         <div class="mb-4 font-mono text-sm text-muted">{{ game.start|date:"j M Y H:i" }}</div>
+                        {% include "management/_event_fees_form.html" with event=game next_url=game_next_url %}
                         {% if game.needs_referees %}
-                            {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full pending_signups=game.pending_signups can_manage_referees=True next_url=request.get_full_path %}
+                            {% include "management/_referee_assignment_panel.html" with event=game referees=game.referee_rows referee_candidates=game.referee_candidates referees_full=game.referees_full pending_signups=game.pending_signups can_manage_referees=True next_url=game_next_url %}
                         {% endif %}
                         {% if game.needs_referees and game.needs_officials %}
                             <div class="my-4 h-px bg-rule"></div>
                         {% endif %}
                         {% if game.needs_officials %}
-                            {% include "management/_official_assignment_panel.html" with event=game officials=game.official_rows official_candidates=game.official_candidates officials_full=game.officials_full pending_official_signups=game.pending_official_signups can_manage_referees=True next_url=request.get_full_path %}
+                            {% include "management/_official_assignment_panel.html" with event=game officials=game.official_rows official_candidates=game.official_candidates officials_full=game.officials_full pending_official_signups=game.pending_official_signups can_manage_referees=True next_url=game_next_url %}
                         {% endif %}
                     </div>
                     <form method="dialog" class="modal-backdrop"><button>close</button></form>
                 </dialog>
+                {% endwith %}
+                {% endwith %}
             {% endfor %}
         </div>
     {% empty %}
@@ -217,3 +227,20 @@
         </div>
     {% endfor %}
 {% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (() => {
+            // Reopen the game modal named in the URL fragment -- set by every form in it
+            // (game_next_url above), so the redirect after a save lands back in the modal.
+            // Closing it drops the fragment again, so a later reload doesn't reopen it.
+            const id = decodeURIComponent(window.location.hash.slice(1));
+            const dialog = id ? document.getElementById(id) : null;
+            if (!(dialog instanceof HTMLDialogElement)) return;
+            dialog.showModal();
+            dialog.addEventListener("close", () => {
+                history.replaceState(null, "", window.location.pathname + window.location.search);
+            }, { once: true });
+        })();
+    </script>
+{% endblock extra_body %}

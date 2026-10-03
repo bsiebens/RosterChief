@@ -28,6 +28,7 @@ from bugs.forms import BugReportForm
 from bugs.models import BugReport
 from bugs.services import file_report
 from club.mixins import (
+    OFFICIALS_FLAG,
     ClubAdminRequiredMixin,
     ClubStaffRequiredMixin,
     EvaluationManagerRequiredMixin,
@@ -3504,38 +3505,46 @@ class EventRefereeAddExternalView(ClubAdminRequiredMixin, View):
         return fallback
 
 
-class EventRefereeFeeUpdateView(ClubAdminRequiredMixin, FormView):
-    """Set one referee assignment's fee/km/rate -- reachable via the "Fee"
-    modal on the Referees panel. POST-only, no standalone template. Not
-    RedirectOnInvalidMixin: that redirects to a fixed url name, but this view
-    (like the assign/remove ones) needs to honour the next-aware fallback so
-    it works from both the event detail page and the dashboard."""
+class EventFeesUpdateView(ClubAdminRequiredMixin, View):
+    """Saves the fee line (fee, travel km/rate, "No fee") of *every* referee and
+    official on one game in a single POST -- the panels' fee inputs all belong to
+    one per-game form (``form="<id>"``, see _event_fees_form.html), so the ✓ on
+    any row saves the lot and an edit typed into another row isn't lost to the
+    page reload. Each row's fields arrive prefixed ``referee_<pk>-`` /
+    ``official_<pk>-`` (the panels' ``pk|dom_id:"referee"``); a row whose fields weren't posted (its panel isn't on the
+    page) or didn't change is left alone. Officials are only touched while the
+    "officials" feature is on (OfficialsAdminRequiredMixin's own gate). A row
+    that doesn't validate is reported and skipped; the others are still saved.
+    Redirects next-aware, like the assign/remove views."""
 
-    form_class = EventRefereeFeeForm
     http_method_names = ["post"]
 
-    def get_event(self):
-        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+    def post(self, request, pk):
+        event = get_object_or_404(Event.objects.filter(club=request.club), pk=pk)
+        rows = [("referee", assignment, EventRefereeFeeForm, set_referee_fee) for assignment in event.referees.select_related("member")]
+        if flag_is_active(request, OFFICIALS_FLAG):
+            rows += [("official", assignment, EventOfficialFeeForm, set_official_fee) for assignment in event.officials.select_related("member")]
 
-    def get_referee(self):
-        return get_object_or_404(EventReferee.objects.filter(event=self.get_event()), pk=self.kwargs["referee_pk"])
+        saved, failed = [], []
+        for kind, assignment, form_class, save in rows:
+            prefix = f"{kind}_{assignment.pk}"
+            if f"{prefix}-fee" not in request.POST:
+                continue
+            form = form_class(request.POST, instance=assignment, prefix=prefix)
+            if not form.is_valid():
+                failed.append(assignment.display_name)
+                continue
+            if form.has_changed():
+                save(assignment, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"], no_fee=form.cleaned_data["no_fee"])
+                saved.append(assignment.display_name)
 
-    def get_fallback(self):
-        return _redirect_next_or(self.request, reverse("management:event_detail", args=[self.kwargs["pk"]]))
-
-    def get_form_kwargs(self):
-        return super().get_form_kwargs() | {"instance": self.get_referee()}
-
-    def form_invalid(self, form):
-        for error in form.errors.values():
-            notify(self.request, f"e|{_('Could not update fee')}|{' '.join(error)}")
-        return self.get_fallback()
-
-    def form_valid(self, form):
-        referee = self.get_referee()
-        set_referee_fee(referee, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"])
-        notify(self.request, f"s|{_('Fee updated')}|" + _("Updated the fee for “%(name)s”.") % {"name": referee.display_name})
-        return self.get_fallback()
+        if failed:
+            notify(request, f"e|{_('Could not update fee')}|" + _("Check the amounts for: %(names)s.") % {"names": ", ".join(failed)})
+        if saved:
+            notify(request, f"s|{_('Fees updated')}|" + _("Updated the fee for: %(names)s.") % {"names": ", ".join(saved)})
+        elif not failed:
+            notify(request, f"i|{_('Nothing changed')}|{_('No fees were changed.')}")
+        return _redirect_next_or(request, reverse("management:event_detail", args=[pk]))
 
 
 class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
@@ -3624,36 +3633,6 @@ class EventOfficialAddExternalView(OfficialsAdminRequiredMixin, View):
             notify(request, f"s|{_('Official added')}|" + _("“%(name)s” will officiate this game.") % {"name": form.cleaned_data["name"]})
 
         return fallback
-
-
-class EventOfficialFeeUpdateView(OfficialsAdminRequiredMixin, FormView):
-    """The officials counterpart to EventRefereeFeeUpdateView."""
-
-    form_class = EventOfficialFeeForm
-    http_method_names = ["post"]
-
-    def get_event(self):
-        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
-
-    def get_official(self):
-        return get_object_or_404(EventOfficial.objects.filter(event=self.get_event()), pk=self.kwargs["official_pk"])
-
-    def get_fallback(self):
-        return _redirect_next_or(self.request, reverse("management:event_detail", args=[self.kwargs["pk"]]))
-
-    def get_form_kwargs(self):
-        return super().get_form_kwargs() | {"instance": self.get_official()}
-
-    def form_invalid(self, form):
-        for error in form.errors.values():
-            notify(self.request, f"e|{_('Could not update fee')}|{' '.join(error)}")
-        return self.get_fallback()
-
-    def form_valid(self, form):
-        official = self.get_official()
-        set_official_fee(official, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"])
-        notify(self.request, f"s|{_('Fee updated')}|" + _("Updated the fee for “%(name)s”.") % {"name": official.display_name})
-        return self.get_fallback()
 
 
 class EventOfficialFormPdfView(OfficialsAdminRequiredMixin, View):
@@ -3909,8 +3888,10 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
                 fully_staffed += 1
         # fee's default is 0.00, never null (see EventReferee/EventOfficial's own
         # docstring) -- "no fee set yet" and "a real row with fee=0" are the same
-        # value, same as the row-render loop's `not assignment.fee` treats them.
-        fees_pending = games_qs.filter(**{f"{related_name}__fee": 0}).distinct().count()
+        # value, same as the row-render loop's `assignment.fee_pending` treats them;
+        # a row marked no_fee is deliberately unpaid, not pending. Both conditions sit
+        # in one filter() so they apply to the same assignment row.
+        fees_pending = games_qs.filter(**{f"{related_name}__fee": 0, f"{related_name}__no_fee": False}).distinct().count()
         return no_one, understaffed, fully_staffed, fees_pending
 
     def get_context_data(self, **kwargs):
@@ -3943,7 +3924,7 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.referee_rows = list(game.referees.all())
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
-            game.fees_pending = any(not referee.fee for referee in game.referee_rows)
+            game.fees_pending = any(referee.fee_pending for referee in game.referee_rows)
             game.pending_signups = list(game.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member")) if not game.referees_full else []
             if game.needs_referees and not game.referees_full:
                 game.referee_candidates = list(eligible_referees(game))
@@ -3957,7 +3938,7 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.official_rows = list(game.officials.all())
             game.officials_full = len(game.official_rows) >= game.max_officials
             game.official_candidates = []
-            game.official_fees_pending = any(not official.fee for official in game.official_rows)
+            game.official_fees_pending = any(official.fee_pending for official in game.official_rows)
             game.pending_official_signups = list(game.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member")) if not game.officials_full else []
             if game.needs_officials and not game.officials_full:
                 game.official_candidates = list(eligible_officials(game))

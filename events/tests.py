@@ -2457,6 +2457,22 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.km_total, Decimal("0"))
         self.assertEqual(assignment.total_payable, Decimal("25.00"))
 
+    def test_no_fee_drops_the_fee_and_travel_and_is_not_pending(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+        self.assertTrue(assignment.fee_pending)
+
+        set_referee_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"), no_fee=True)
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.fee, assignment.km, assignment.km_rate, assignment.total_payable), (True, Decimal("0.00"), None, None, Decimal("0")))
+        self.assertFalse(assignment.fee_pending)
+
+        set_referee_fee(assignment, fee=Decimal("20.00"))
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.fee), (False, Decimal("20.00")))
+
 
 class RefereeSignupServiceTests(EventsTestBase):
     """events.services.referees.sync_referee_invites/accept_referee_signup/
@@ -2750,6 +2766,15 @@ class OfficialServiceTests(OfficialsTestBase):
         assignment.refresh_from_db()
         self.assertEqual(assignment.km_total, Decimal("14.00"))
         self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+    def test_set_official_fee_with_no_fee_owes_nothing(self):
+        game = self.make_home_game()
+        assignment = assign_official(game, self.official, assigned_by=self.alice)
+
+        set_official_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"), no_fee=True)
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.total_payable, assignment.fee_pending), (True, Decimal("0"), False))
 
 
 class OfficialSignupServiceTests(OfficialsTestBase):

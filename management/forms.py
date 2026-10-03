@@ -158,7 +158,7 @@ class EventRefereeFeeForm(forms.ModelForm):
 
     class Meta:
         model = EventReferee
-        fields = ["fee", "km", "km_rate"]
+        fields = ["fee", "km", "km_rate", "no_fee"]
         widgets = {
             "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
@@ -214,7 +214,7 @@ class EventOfficialFeeForm(forms.ModelForm):
 
     class Meta:
         model = EventOfficial
-        fields = ["fee", "km", "km_rate"]
+        fields = ["fee", "km", "km_rate", "no_fee"]
         widgets = {
             "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),

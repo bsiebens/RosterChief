@@ -124,7 +124,7 @@
                 {% for referee in referees %}
                     <tr>
                         <td>{{ referee.display_name }}</td>
-                        <td class="amount">€{{ referee.fee|floatformat:2 }}</td>
+                        <td class="amount">{% if referee.no_fee %}{% trans "No fee" %}{% else %}€{{ referee.fee|floatformat:2 }}{% endif %}</td>
                         <td class="amount">{% if referee.km %}{{ referee.km }} km{% else %}—{% endif %}</td>
                         <td class="amount">{% if referee.km %}€{{ referee.km_rate }}{% else %}—{% endif %}</td>
                         <td class="amount">€{{ referee.total_payable|floatformat:2 }}</td>
