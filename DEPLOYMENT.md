@@ -626,6 +626,18 @@ server's `.env` as `IMAGE_TAG=` (see "Rollback"), so a by-hand `docker compose r
 deployed image instead of an older local `:main`. The first 0.7.12 deploy sets it. Any
 `IMAGE_TAG` value already in `.env` is replaced.
 
+### Upgrade notes: 0.7.13
+
+Run the usual deploy; `migrate` adds `Team.import_sources`. No other manual steps.
+
+- **Redis 7.4 → 8.10.** `compose pull` fetches the new image and `web` reconnects to it. Redis
+  only holds cache entries and the scheduler lease, so losing them on the restart does no harm.
+- **Postgres stays on 17.** The 18 upgrade (dependabot #36) needs a dump/restore and a
+  volume-path change. It is held back for a planned maintenance window.
+- **New weekly job, `check_fixture_sources`** (Mondays 06:15). It runs inside the existing
+  scheduler, so there is nothing to configure. It can be switched off from the control panel's
+  Jobs tab like any other job.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
