@@ -5,9 +5,11 @@ from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import requests
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -18,15 +20,16 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, OnboardingRequirement, Season
+from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
+from features.jobs import JOB_REGISTRY
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
 from notifications.models import Notification
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .competition.hockey import DFEL
+from .competition.hockey import DFEL, IJNL
 from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
@@ -35,10 +38,13 @@ from .services import (
     dfel_import,
     effective_members,
     generate_occurrences,
+    ijnl_import,
+    import_sources,
     occurrence_datetimes,
     player_attendance_rankings,
     players_who_missed_recent_practices,
     propagate_series,
+    rbihf_standings,
     record_check_in,
     team_attendance_rate,
     team_no_shows,
@@ -1907,6 +1913,246 @@ class DFELUpdateGameInformationTests(EventsTestBase):
             fetch_game_info(game)
 
 
+IJNL_TEAM_ID = "64414"
+IJNL_SEASON = "2026/27"
+IJNL_SOURCE_ID = f"{IJNL_TEAM_ID}/{IJNL_SEASON}"
+IJNL_TEAM_NAME = "Sharks Ladies Mechelen"
+
+
+def ijnl_game(game_id, *, days=7, time_text="16:00", home_id=IJNL_TEAM_ID, home_name=IJNL_TEAM_NAME, away_id="32609", away_name="Amsterdam Tigers Vrouwen", undated=False, time_unknown=False, state="gepland"):
+    """One game in an ijshockey.nl team ``/data`` response, ``days`` from now."""
+    return {
+        "gameGuid": game_id,
+        "datum": None if undated else (timezone.now() + timedelta(days=days)).strftime("%Y-%m-%d"),
+        "tijd": None if time_unknown else time_text,
+        "datumOnbekend": undated,
+        "tijdOnbekend": time_unknown,
+        "staat": state,
+        "competitie": {"league": "Vrouwen", "onderdeelId": 21808, "onderdeel": "Vrouwen Eredivisie"},
+        "thuis": {"teamId": int(home_id), "naam": home_name, "score": None},
+        "uit": {"teamId": int(away_id), "naam": away_name, "score": None},
+        "locatie": None,
+    }
+
+
+def ijnl_team_data(programma, uitslagen=(), season=IJNL_SEASON):
+    return json.dumps(
+        {
+            "team": {"teamId": int(IJNL_TEAM_ID), "naam": IJNL_TEAM_NAME, "korteNaam": IJNL_TEAM_NAME, "club": IJNL_TEAM_NAME},
+            "seizoen": season,
+            "onderdelen": [{"onderdeelId": 21808, "onderdeel": "Vrouwen Eredivisie"}],
+            "programma": list(programma),
+            "uitslagen": list(uitslagen),
+        }
+    )
+
+
+def ijnl_game_data(state="live", home="2", away="1"):
+    """An ijshockey.nl game ``/data?part=live`` response."""
+    scoreboard = f'<section class="mp-scoreboard"><div class="mp-result"><span class="mp-status">Periode 2</span><div class="mp-score" aria-label="{home} tegen {away}"><span>{home}</span><span>{away}</span></div></div></section>'
+    return json.dumps({"title": "Sharks - Tigers", "state": state, "refreshSeconds": 60, "sections": {"scoreboard": scoreboard}})
+
+
+def ijnl_response(text, status_code=200):
+    return mock.Mock(status_code=status_code, text=text)
+
+
+class IJNLExtractIdsTests(TestCase):
+    def test_a_team_page_url_yields_team_and_season(self):
+        for url in [
+            "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27",
+            "https://ijshockey.nl/competities/team/64414/?seizoen=2026/27",
+            "  https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27  ",
+        ]:
+            with self.subTest(url=url):
+                self.assertEqual(ijnl_import.extract_ids(url), (IJNL_TEAM_ID, IJNL_SEASON))
+
+    def test_a_url_without_a_season_yields_a_blank_season(self):
+        self.assertEqual(ijnl_import.extract_ids("https://www.ijshockey.nl/competities/team/64414"), (IJNL_TEAM_ID, ""))
+
+    def test_a_non_matching_url_is_rejected(self):
+        for url in [
+            "https://www.ijshockey.nl/competities/wedstrijd/49a66dbb-eaa2-4527-9c8b-31ee324d736b",
+            "https://evil.example.com/competities/team/64414",
+            "https://www.ijshockey.nl.evil.example.com/competities/team/64414",
+            "https://www.ijshockey.nl/competities/team/64414?seizoen=next",
+            "",
+        ]:
+            with self.subTest(url=url), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.extract_ids(url)
+
+    def test_source_id_and_canonical_url(self):
+        self.assertEqual(ijnl_import.source_id(IJNL_TEAM_ID, IJNL_SEASON), IJNL_SOURCE_ID)
+        self.assertEqual(ijnl_import.team_page_url(IJNL_TEAM_ID, IJNL_SEASON), "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27")
+
+
+class IJNLFetchTeamDataTests(TestCase):
+    def test_fetch_asks_for_the_season(self):
+        with mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(ijnl_team_data([]))) as mock_get:
+            raw_json = ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+        self.assertEqual(ijnl_import.season_of(raw_json), IJNL_SEASON)
+        self.assertEqual(mock_get.call_args.args[0], "https://www.ijshockey.nl/competities/team/64414/data")
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"seizoen": IJNL_SEASON})
+
+    def test_a_network_or_http_error_is_an_ijnl_import_error(self):
+        for side_effect in [requests.ConnectionError("boom"), [ijnl_response("nope", status_code=500)]]:
+            with self.subTest(side_effect=side_effect), mock.patch("events.services.ijnl_import.requests.get", side_effect=side_effect), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+    def test_an_unexpected_payload_is_an_ijnl_import_error(self):
+        for body in ["<html>oops</html>", json.dumps({"team": {}}), json.dumps([])]:
+            with self.subTest(body=body), mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(body)), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+
+class IJNLParseFixturesTests(TestCase):
+    def test_home_and_away_games_are_detected_with_the_right_opponent(self):
+        games = [ijnl_game("home"), ijnl_game("away", days=14, home_id="32610", home_name="Dordrecht Lady Lions", away_id=IJNL_TEAM_ID, away_name=IJNL_TEAM_NAME)]
+        team_name, fixtures, undated = ijnl_import.parse_fixtures(ijnl_team_data(games), IJNL_TEAM_ID)
+
+        self.assertEqual((team_name, undated), (IJNL_TEAM_NAME, []))
+        home, away = fixtures
+        self.assertEqual((home.external_game_id, home.is_home, home.opponent_name), ("home", True, "Amsterdam Tigers Vrouwen"))
+        self.assertEqual((away.external_game_id, away.is_home, away.opponent_name), ("away", False, "Dordrecht Lady Lions"))
+
+    def test_start_is_dutch_wall_clock_time(self):
+        game = ijnl_game("g1", time_text="16:45")
+        _team_name, [fixture], _undated = ijnl_import.parse_fixtures(ijnl_team_data([game]), IJNL_TEAM_ID)
+
+        local = fixture.start.astimezone(ZoneInfo("Europe/Amsterdam"))
+        self.assertEqual((local.strftime("%Y-%m-%d"), local.hour, local.minute), (game["datum"], 16, 45))
+
+    def test_an_unknown_hour_falls_back_to_noon_like_the_site(self):
+        _team_name, [fixture], _undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("g1", time_unknown=True)]), IJNL_TEAM_ID)
+
+        self.assertEqual(fixture.start.astimezone(ZoneInfo("Europe/Amsterdam")).hour, 12)
+
+    def test_undated_games_are_reported_separately(self):
+        _team_name, fixtures, undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("g1"), ijnl_game("tbd", undated=True)]), IJNL_TEAM_ID)
+
+        self.assertEqual(([fixture.external_game_id for fixture in fixtures], undated), (["g1"], ["tbd"]))
+
+    def test_played_games_are_skipped(self):
+        _team_name, fixtures, _undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("future")], uitslagen=[ijnl_game("past", days=-3, state="definitief")]), IJNL_TEAM_ID)
+
+        self.assertEqual([fixture.external_game_id for fixture in fixtures], ["future"])
+
+    def test_parse_score_reads_the_scoreboard(self):
+        self.assertEqual(ijnl_import.parse_score(json.loads(ijnl_game_data(home="4", away="0"))), (4, 0))
+        self.assertEqual(ijnl_import.parse_score(json.loads(ijnl_game_data(state="gepland", home="-", away="-"))), (None, None))
+        self.assertEqual(ijnl_import.parse_score({"state": "gepland"}), (None, None))
+
+
+class IJNLImportPlanTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+
+    def plan(self, games, source_id=IJNL_SOURCE_ID, label=""):
+        return ijnl_import.build_plan(self.club, self.team, source_id, ijnl_team_data(games), label)
+
+    def test_apply_plan_creates_ijnl_events(self):
+        plan = self.plan([ijnl_game("h1")], label="Eredivisie")
+
+        self.assertEqual((plan.competition, plan.source_id, plan.scraped_team_name), ("IJNL", IJNL_SOURCE_ID, IJNL_TEAM_NAME))
+        self.assertEqual(plan.to_create[0].suggested_location, self.home_location)
+        result = ijnl_import.apply_plan(plan, {"h1": str(self.home_location.pk)})
+
+        self.assertEqual(result, {"created": 1, "updated": 0, "deleted": 0})
+        event = Event.objects.get(external_game_id="h1")
+        self.assertEqual((event.competition, event.external_source_id, event.competition_label), ("IJNL", IJNL_SOURCE_ID, "Eredivisie"))
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers Vrouwen")
+        self.assertEqual(list(event.teams.all()), [self.team])
+
+    def test_a_reimport_updates_a_moved_game_and_deletes_a_dropped_one(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1"), ijnl_game("h2", days=21)]), {})
+
+        plan = self.plan([ijnl_game("h1", days=8)])
+
+        self.assertEqual([p.fixture.external_game_id for p in plan.to_update], ["h1"])
+        self.assertIn("start", plan.to_update[0].changes)
+        self.assertEqual([event.external_game_id for event in plan.to_delete], ["h2"])
+
+    def test_a_game_that_lost_its_date_is_kept_not_deleted(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1"), ijnl_game("h2")]), {})
+
+        plan = self.plan([ijnl_game("h1"), ijnl_game("h2", undated=True)])
+
+        self.assertEqual((plan.to_delete, plan.to_create, plan.to_update), ([], [], []))
+
+    def test_another_seasons_import_never_deletes_these_events(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1")]), {})
+
+        plan = self.plan([ijnl_game("next1")], source_id=ijnl_import.source_id(IJNL_TEAM_ID, "2027/28"))
+
+        self.assertEqual(plan.to_delete, [])
+
+
+class IJNLUpdateGameInformationTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        cls.competition = Competition.objects.get(name="IJNL")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("competition", "IJNL")
+        kwargs.setdefault("external_game_id", "49a66dbb-eaa2-4527-9c8b-31ee324d736b")
+        kwargs.setdefault("external_source_id", IJNL_SOURCE_ID)
+        return self.make_event(**kwargs)
+
+    def patch_fetch(self, body):
+        return mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(body))
+
+    def test_the_seeded_competition_is_flagged_ice_hockey(self):
+        self.assertEqual(self.competition.module, "events.competition.hockey")
+        self.assertEqual(self.competition.sport_type, Club.SportType.ICE_HOCKEY)
+        self.assertEqual(self.competition.flag.name, "IJNL")
+
+    def test_a_live_home_game_maps_home_score_to_score_for(self):
+        game = self.make_game(location=self.home_location)
+        with self.patch_fetch(ijnl_game_data(state="live", home="3", away="1")) as mock_get:
+            IJNL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (3, 1, True))
+        self.assertEqual(mock_get.call_args.args[0], "https://www.ijshockey.nl/competities/wedstrijd/49a66dbb-eaa2-4527-9c8b-31ee324d736b/data")
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"part": "live"})
+
+    def test_a_finished_away_game_maps_away_score_to_score_for(self):
+        game = self.make_game(is_live=True)
+        with self.patch_fetch(ijnl_game_data(state="definitief", home="4", away="0")):
+            IJNL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (0, 4, False))
+
+    def test_a_missing_game_id_is_an_error_without_fetching(self):
+        with mock.patch("events.services.ijnl_import.requests.get") as mock_get, self.assertRaises(ValueError):
+            IJNL().update_game_information(self.make_game(external_game_id=""))
+        mock_get.assert_not_called()
+
+    def test_fetch_game_info_is_gated_on_the_ijnl_flag(self):
+        game = self.make_game(location=self.home_location)
+        with mock.patch("events.services.ijnl_import.requests.get") as mock_get:
+            self.assertFalse(fetch_game_info(game))
+        mock_get.assert_not_called()
+
+        self.competition.flag.clubs.add(self.club)
+        with self.patch_fetch(ijnl_game_data(state="live", home="1", away="0")):
+            self.assertTrue(fetch_game_info(game))
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against), (1, 0))
+
+
 class EventRefereeModelTests(EventsTestBase):
     def test_str(self):
         event = self.make_event(title="Cup Final")
@@ -3350,3 +3596,521 @@ class HockeyCompetitionRequestTimeoutTests(EventsTestBase):
                 game = self.make_game(name)
                 with mock.patch("events.competition.hockey.requests.get", side_effect=requests.Timeout("read timed out")), self.assertRaises(CompetitionFetchError):
                     fetch_game_info(game)
+
+
+class ImportSourcesTestBase(EventsTestBase):
+    """Shared scaffolding for events.services.import_sources and the weekly
+    check_fixture_sources job: RBIHF/DFEL team page URLs to store on a team, and
+    the RBIHF/DFEL flags reachable by name."""
+
+    RBIHF_URL = f"https://www.rbihf.be/league/team/{RBIHF_TEAM_ID}"
+    DFEL_URL = f"https://ehv-nrw.de/leagues/team/{DFEL_TEAM_ID}/{DFEL_DIVISION_ID}/"
+
+    def setUp(self):
+        # Flag._get_club_ids caches per flag name -- a rollback between tests doesn't clear it.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable_flag(self, name, club=None):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name=name)
+        flag.clubs.add(club or self.club)
+        cache.clear()
+        return flag
+
+    def fixture_row(self, game_id="5002", *, days=7, hour="12:15", visit_name="Amsterdam Tigers"):
+        date = (timezone.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        return {"game_id": game_id, "date": date, "hour": hour, "venue": "Deurne", "home_id": RBIHF_TEAM_ID, "home_name": RBIHF_TEAM_NAME, "visit_id": "4464", "visit_name": visit_name}
+
+    def import_rows(self, rows, team=None, label=""):
+        """What a confirmed one-off import leaves behind: the games, stamped with this source."""
+        apply_plan(build_plan(self.club, team or self.team, RBIHF_TEAM_ID, rbihf_sample_html(rows), label), {})
+
+    def store(self, team=None, *, source=import_sources.SOURCE_RBIHF, url=None, season=None, label=""):
+        url = url or (self.RBIHF_URL if source == import_sources.SOURCE_RBIHF else self.DFEL_URL)
+        return import_sources.record_source(team or self.team, source=source, url=url, season=season or self.season, competition_label=label)
+
+    def patch_fetch(self, payload):
+        """Patches the network half of check_entry -- ``payload`` is the RBIHF HTML
+        returned for every entry, an exception to raise, or a callable(entry)."""
+        if isinstance(payload, Exception) or callable(payload):
+            return mock.patch("events.services.import_sources.fetch", side_effect=payload)
+        return mock.patch("events.services.import_sources.fetch", return_value=payload)
+
+
+class RecordSourceTests(ImportSourcesTestBase):
+    def test_replaces_the_same_season_source_and_label_case_insensitively(self):
+        self.store(label="Division 1", url="https://www.rbihf.be/league/team/1111")
+        self.store(label="  division 1 ", url="https://www.rbihf.be/league/team/2222")
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(self.team.import_sources), 1)
+        self.assertEqual(self.team.import_sources[0]["url"], "https://www.rbihf.be/league/team/2222")
+        self.assertEqual(self.team.import_sources[0]["competition_label"], "division 1")
+
+    def test_appends_a_different_label_source_or_season(self):
+        next_season = Season.objects.create(club=self.club, start_date=self.season.end_date + timedelta(days=1), end_date=self.season.end_date + timedelta(days=365))
+
+        self.store(label="Division 1")
+        self.store(label="Cup")
+        self.store(source=import_sources.SOURCE_DFEL, label="Division 1")
+        self.store(label="Division 1", season=next_season)
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(self.team.import_sources), 4)
+
+    def test_rejects_an_unknown_source(self):
+        with self.assertRaises(ValueError):
+            import_sources.record_source(self.team, source="NOPE", url="https://example.com", season=self.season)
+
+    def test_sources_for_filters_by_season(self):
+        other_season = Season.objects.create(club=self.club, start_date=self.season.start_date - timedelta(days=365), end_date=self.season.start_date - timedelta(days=1))
+        self.store(label="Division 1")
+        self.store(label="Division 1", season=other_season)
+
+        self.team.refresh_from_db()
+        self.assertEqual(len(import_sources.sources_for(self.team)), 2)
+        current = import_sources.sources_for(self.team, self.season)
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["season_id"], str(self.season.pk))
+
+
+class CheckEntryTests(ImportSourcesTestBase):
+    def check(self, payload):
+        entry = self.store()
+        with self.patch_fetch(payload):
+            return import_sources.check_entry(self.club, self.team, entry)
+
+    def test_a_moved_hour_is_reported_as_rescheduled(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(hour="20:00")]))
+
+        self.assertEqual([game_id for game_id, _old, _new in result.rescheduled], ["5002"])
+        self.assertTrue(result.has_changes)
+        self.assertEqual(result.as_dict(), {"rescheduled": 1, "new_games": 0, "removed_games": 0, "error": ""})
+
+    def test_a_new_game_is_reported(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(), self.fixture_row("5003", days=14)]))
+
+        self.assertEqual([game_id for game_id, _start, _opponent in result.new_games], ["5003"])
+        self.assertEqual(result.rescheduled, [])
+
+    def test_a_removed_future_game_is_reported(self):
+        self.import_rows([self.fixture_row(), self.fixture_row("5003", days=14)])
+
+        result = self.check(rbihf_sample_html([self.fixture_row()]))
+
+        self.assertEqual([game_id for game_id, _start, _title in result.removed_games], ["5003"])
+
+    def test_an_opponent_only_change_is_not_reported(self):
+        self.import_rows([self.fixture_row()])
+
+        result = self.check(rbihf_sample_html([self.fixture_row(visit_name="Amsterdam Lions")]))
+
+        self.assertFalse(result.has_changes)
+
+    def test_a_fetch_error_is_captured_not_raised(self):
+        result = self.check(import_sources.ImportSourceError("RBIHF is down"))
+
+        self.assertEqual(result.error, "RBIHF is down")
+        self.assertTrue(result.has_changes)
+        self.assertEqual(result.as_dict()["error"], "RBIHF is down")
+
+
+class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
+    """events.tasks.check_fixture_sources -- the weekly sweep over every active club's
+    current-season import sources, alerting only that club's admins, once."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # With logins -- notifications.services.recipient_emails only mails a member's own address when they have one.
+        users = get_user_model().objects
+        cls.admin = Member.objects.create(first_name="Ada", last_name="Admin", email="ada@example.com", user=users.create_user(email="ada@example.com", password="pw-secret-123"))
+        cls.second_admin = Member.objects.create(first_name="Abe", last_name="Admin", email="abe@example.com", user=users.create_user(email="abe@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=cls.club, member=cls.admin, role=ClubRole.Roles.ADMIN)
+        ClubRole.objects.create(club=cls.club, member=cls.second_admin, role=ClubRole.Roles.ADMIN)
+        cls.editor = Member.objects.create(first_name="Ed", last_name="Editor", email="ed@example.com")
+        ClubRole.objects.create(club=cls.club, member=cls.editor, role=ClubRole.Roles.EDITOR)
+        cls.second_team = Team.objects.create(club=cls.club, name="Second Team", short_name="2nd")
+
+    def setUp(self):
+        super().setUp()
+        self.enable_flag("RBIHF")
+
+    def run_job(self):
+        return call_command("check_fixture_sources", stdout=StringIO())
+
+    def stored(self, team=None):
+        team = team or self.team
+        team.refresh_from_db()
+        return team.import_sources
+
+    def test_is_registered_as_a_weekly_job(self):
+        meta = JOB_REGISTRY["events.tasks.check_fixture_sources"]
+
+        self.assertEqual(meta["command"], "check_fixture_sources")
+        self.assertEqual(meta["trigger"], {"trigger": "cron", "day_of_week": "mon", "hour": 6, "minute": 15})
+
+    def test_notifies_only_the_clubs_admins_once_with_a_summary(self):
+        self.import_rows([self.fixture_row(), self.fixture_row("5003", days=14)], label="Division 1")
+        self.store(label="Division 1")
+        self.store(self.second_team, label="Cup")
+        html = rbihf_sample_html([self.fixture_row(hour="20:00"), self.fixture_row("5004", days=21)])
+
+        with self.patch_fetch(html):
+            result = self.run_job()
+
+        notifications = Notification.objects.filter(club=self.club)
+        self.assertEqual(set(notifications.values_list("member_id", flat=True)), {self.admin.pk, self.second_admin.pk})
+        self.assertEqual(notifications.filter(member=self.admin).count(), 1)
+        body = notifications.get(member=self.admin).body
+        self.assertIn("First Team · RBIHF · Division 1: 1 game moved to another date or time, 1 new game, 1 game removed.", body)
+        self.assertIn("Second Team · RBIHF · Cup: 2 new games.", body)
+        self.assertIn("import button", body)
+        self.assertIn("Checked 2 fixture source(s): 2 with changes", result)
+        self.assertEqual(sorted(address for message in mail.outbox for address in message.to), ["abe@example.com", "ada@example.com"])
+
+    def test_no_notification_when_nothing_changed(self):
+        self.import_rows([self.fixture_row()])
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row(visit_name="Renamed Opponent")])):
+            self.run_job()
+
+        self.assertFalse(Notification.objects.exists())
+        self.assertEqual(self.stored()[0]["last_check"], {"rescheduled": 0, "new_games": 0, "removed_games": 0, "error": ""})
+
+    def test_writes_bookkeeping_on_the_entry(self):
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row()])):
+            self.run_job()
+
+        entry = self.stored()[0]
+        self.assertEqual(entry["last_check"]["new_games"], 1)
+        self.assertTrue(entry["last_checked_at"])
+        self.assertEqual(entry["url"], self.RBIHF_URL)
+
+    def test_a_source_whose_flag_is_off_is_skipped(self):
+        self.store(source=import_sources.SOURCE_DFEL)  # DFEL flag never enabled for this club
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+        self.assertNotIn("last_checked_at", self.stored()[0])
+        self.assertFalse(Notification.objects.exists())
+
+    def test_other_seasons_entries_are_skipped(self):
+        old_season = Season.objects.create(club=self.club, start_date=self.season.start_date - timedelta(days=365), end_date=self.season.start_date - timedelta(days=1))
+        self.store(season=old_season)
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
+
+    def test_archived_clubs_are_skipped(self):
+        self.store()
+        self.club.archive()
+
+        with self.patch_fetch(import_sources.ImportSourceError("should not be fetched")) as fetch:
+            self.run_job()
+
+        fetch.assert_not_called()
+
+    def test_a_fetch_error_is_alerted(self):
+        self.store()
+
+        with self.patch_fetch(import_sources.ImportSourceError("Could not reach rbihf.be")):
+            self.run_job()
+
+        body = Notification.objects.get(member=self.admin).body
+        self.assertIn("First Team · RBIHF: the fixture list could not be fetched (Could not reach rbihf.be).", body)
+        self.assertEqual(self.stored()[0]["last_check"]["error"], "Could not reach rbihf.be")
+
+    def test_one_entry_blowing_up_does_not_stop_the_others(self):
+        self.store()
+        self.store(self.second_team)
+        calls = []
+
+        def fetch(entry):
+            calls.append(entry)
+            if len(calls) == 1:
+                raise RuntimeError("parser bug")
+            return rbihf_sample_html([self.fixture_row()])
+
+        with self.patch_fetch(fetch):
+            self.run_job()
+
+        self.assertEqual(len(calls), 2)
+        first, second = self.stored(self.team)[0], self.stored(self.second_team)[0]
+        self.assertTrue(first["last_check"]["error"])
+        self.assertEqual(second["last_check"]["new_games"], 1)
+        self.assertEqual(Notification.objects.filter(member=self.admin).count(), 1)
+
+    def test_one_notification_per_club(self):
+        today = timezone.localdate()
+        other_club = Club.objects.create(name="Other Club", slug="other-club")
+        other_season = Season.objects.create(club=other_club, start_date=today - timedelta(days=10), end_date=today + timedelta(days=300))
+        other_team = Team.objects.create(club=other_club, name="Other First", short_name="OF")
+        other_admin = Member.objects.create(first_name="Oz", last_name="Other", email="oz@example.com")
+        ClubRole.objects.create(club=other_club, member=other_admin, role=ClubRole.Roles.ADMIN)
+        self.enable_flag("RBIHF", other_club)
+        import_sources.record_source(other_team, source=import_sources.SOURCE_RBIHF, url=self.RBIHF_URL, season=other_season)
+        self.store()
+
+        with self.patch_fetch(rbihf_sample_html([self.fixture_row()])):
+            self.run_job()
+
+        self.assertEqual(Notification.objects.filter(club=self.club, member=self.admin).count(), 1)
+        self.assertEqual(list(Notification.objects.filter(club=other_club).values_list("member_id", flat=True)), [other_admin.pk])
+
+
+class IJNLImportSourceTests(ImportSourcesTestBase):
+    IJNL_URL = "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27"
+
+    def test_a_stored_ijnl_entry_is_fetched_and_planned_for_its_season(self):
+        entry = self.store(source=import_sources.SOURCE_IJNL, url=self.IJNL_URL)
+        with mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(ijnl_team_data([ijnl_game("h1")]))) as mock_get:
+            raw = import_sources.fetch(entry)
+
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"seizoen": IJNL_SEASON})
+        plan = import_sources.build_plan_for(self.club, self.team, entry, raw)
+        self.assertEqual((plan.competition, plan.source_id), ("IJNL", IJNL_SOURCE_ID))
+
+    def test_a_stored_entry_without_a_season_is_an_error(self):
+        entry = self.store(source=import_sources.SOURCE_IJNL, url="https://www.ijshockey.nl/competities/team/64414")
+
+        with self.assertRaises(import_sources.ImportSourceError):
+            import_sources.source_id_for(entry)
+
+
+def rbihf_league_html(played=(), upcoming=(), rule="Won: 2 points | Draw: 1 point | Lost: 0 points", friendly_played=()):
+    """A cut-down RBIHF league page: a ranked "Regular Competition" tab (type-513)
+    and an unranked "Friendly Games" tab (type-498). ``played`` rows are
+    (game_id, home_id, home_name, away_id, away_name, score); ``upcoming`` rows
+    the same without the score."""
+
+    def team_cell(team_id, name):
+        return f'<td><a href="/league/team/{team_id}" title="{name}">{name}</a></td>'
+
+    def played_table(rows):
+        body = "".join(
+            f'<tr><td class="game-nr"><a href="/game/{game_id}">{game_id}</a></td><td class="date">27 Sep 2026</td><td class="hour">20:00</td><td>Deurne</td>{team_cell(home_id, home)}{team_cell(away_id, away)}<td class="score">{score}</td></tr>'
+            for game_id, home_id, home, away_id, away, score in rows
+        )
+        return f"<h2>Played games</h2><table><tr><th>#</th><th>Date</th><th>Hour</th><th>Location</th><th>Home</th><th>Visit</th><th>Score</th></tr>{body}</table>"
+
+    def upcoming_table(rows):
+        body = "".join(f'<tr><td><a href="/game/{game_id}">{game_id}</a></td><td>04 Oct 2026</td><td>18:00</td><td>Mechelen</td>{team_cell(home_id, home)}{team_cell(away_id, away)}</tr>' for game_id, home_id, home, away_id, away in rows)
+        return f"<h2>Upcoming games</h2><table><tr><th>#</th><th>Date</th><th>Hour</th><th>Location</th><th>Home</th><th>Visit</th></tr>{body}</table>"
+
+    return f"""<html><head><title>RBIHF :: Under 18</title></head><body>
+    <ul><li><a href="#type-all">Summary</a></li><li><a href="#type-498">Friendly Games</a></li><li><a href="#type-513">Regular Competition</a></li></ul>
+    <div id="type-all" class="tab">{played_table(played)}</div>
+    <div id="type-498" class="tab">{played_table(friendly_played)}</div>
+    <div id="type-513" class="tab">{upcoming_table(upcoming)}{played_table(played)}
+      <div class="node page ranking"><div class="content"><img src="/images/league/ranking/513" /></div><div class="meta">{rule}<br /><a href="/league/u18/stats">More statistics</a>.</div></div>
+    </div></body></html>"""
+
+
+RBIHF_OT_RULE = "Won: 3 points | Won after overtime or penaltyshots: 2 points | Lost after overtime or penaltyshots: 1 point | Lost: 0 points"
+RBIHF_TEAM_PAGE_HTML = '<html><body><a href="/league/u18" title="Under 18">Under 18</a><a href="/league/team/4448">Antwerp</a></body></html>'
+
+
+def standings_rows(standings, competition=0):
+    return [(row["position"], row["team_name"], row["played"], row["points"]) for row in standings["competitions"][competition]["rows"]]
+
+
+class RBIHFStandingsParsingTests(TestCase):
+    PLAYED = [
+        ("816", "4448", "Antwerp", "4450", "Sharks", "3-6"),
+        ("823", "4445", "Haskey", "4443", "Bulldogs", "9-1"),
+        ("900", "4443", "Bulldogs", "4448", "Antwerp", "Unfinished"),
+    ]
+    UPCOMING = [("821", "4445", "Haskey", "4447", "Leuven")]
+
+    def test_points_rules_are_parsed(self):
+        simple = rbihf_standings.parse_points_rule("Won: 2 points | Draw: 1 point | Lost: 0 points More statistics.")
+        self.assertEqual((simple.win, simple.draw, simple.loss, simple.has_overtime), (2, 1, 0, False))
+
+        overtime = rbihf_standings.parse_points_rule(RBIHF_OT_RULE)
+        self.assertEqual((overtime.win, overtime.ot_win, overtime.ot_loss, overtime.loss, overtime.has_overtime), (3, 2, 1, 0, True))
+
+    def test_only_ranked_tabs_are_parsed_with_every_team_and_finished_games(self):
+        [competition] = rbihf_standings.parse_league(rbihf_league_html(self.PLAYED, self.UPCOMING, friendly_played=[("2004", "4450", "Sharks", "4445", "Haskey", "1-5")]))
+
+        self.assertEqual((competition.type_id, competition.name), ("513", "Regular Competition"))
+        self.assertEqual(set(competition.teams), {"4448", "4450", "4445", "4443", "4447"})
+        self.assertEqual([game.game_id for game in competition.games], ["816", "823"])  # "Unfinished" doesn't count
+        self.assertEqual(rbihf_standings.league_name(rbihf_league_html()), "Under 18")
+
+    def test_the_table_is_ordered_by_points_then_goal_difference_then_name(self):
+        [competition] = rbihf_standings.parse_league(rbihf_league_html(self.PLAYED, self.UPCOMING))
+        rows = rbihf_standings.compute_table(competition)
+
+        self.assertEqual([(row["position"], row["team_name"], row["points"], row["goal_difference"]) for row in rows], [(1, "Haskey", 2, 8), (2, "Sharks", 2, 3), (3, "Leuven", 0, 0), (4, "Antwerp", 0, -3), (5, "Bulldogs", 0, -8)])
+        sharks = rows[1]
+        self.assertEqual((sharks["played"], sharks["wins"], sharks["losses"], sharks["goals_for"], sharks["goals_against"]), (1, 1, 0, 6, 3))
+
+    def test_a_draw_scores_the_draw_points(self):
+        [competition] = rbihf_standings.parse_league(rbihf_league_html([("1", "4448", "Antwerp", "4450", "Sharks", "2-2")]))
+        rows = rbihf_standings.compute_table(competition)
+
+        self.assertEqual([(row["draws"], row["points"]) for row in rows], [(1, 1), (1, 1)])
+
+    def test_a_one_goal_game_decided_after_regulation_earns_overtime_points(self):
+        played = [("1", "4448", "Antwerp", "4450", "Sharks", "3-2"), ("2", "4445", "Haskey", "4443", "Bulldogs", "4-3"), ("3", "4447", "Leuven", "4442", "Lions", "5-1")]
+        [competition] = rbihf_standings.parse_league(rbihf_league_html(played, rule=RBIHF_OT_RULE))
+        checked = []
+
+        def overtime_check(game):
+            checked.append(game.game_id)
+            return game.game_id == "1"
+
+        rows = {row["team_name"]: row for row in rbihf_standings.compute_table(competition, overtime_check=overtime_check)}
+
+        self.assertEqual(checked, ["1", "2"])  # a three-goal margin can't have gone to overtime
+        self.assertEqual((rows["Antwerp"]["ot_wins"], rows["Antwerp"]["points"]), (1, 2))
+        self.assertEqual((rows["Sharks"]["ot_losses"], rows["Sharks"]["points"]), (1, 1))
+        self.assertEqual((rows["Haskey"]["wins"], rows["Haskey"]["points"]), (1, 3))
+        self.assertEqual(rows["Leuven"]["points"], 3)
+
+    def test_a_league_without_overtime_points_never_asks_for_the_overview(self):
+        [competition] = rbihf_standings.parse_league(rbihf_league_html([("1", "4448", "Antwerp", "4450", "Sharks", "3-2")]))
+        overtime_check = mock.Mock()
+
+        rbihf_standings.compute_table(competition, overtime_check=overtime_check)
+
+        overtime_check.assert_not_called()
+
+    def test_the_overview_tells_whether_regulation_ended_level(self):
+        def overview(home, away):
+            def cells(values):
+                return "".join(f"<td>{value}</td>" for value in values)
+
+            home_row = f'<tr><td rowspan="2" class="goals">Goals</td><td class="title">A</td>{cells(home)}<td>{sum(home)}</td></tr>'
+            away_row = f'<tr><td class="title">B</td>{cells(away)}<td>{sum(away)}</td></tr>'
+            return {"success": True, "data": f'<table><tr><th colspan="2">Per Period</th></tr>{home_row}{away_row}</table>'}
+
+        self.assertFalse(rbihf_standings.parse_overview(overview([0, 3, 2], [0, 2, 0])))
+        self.assertTrue(rbihf_standings.parse_overview(overview([1, 1, 0, 1], [0, 2, 0, 0])))
+        self.assertIsNone(rbihf_standings.parse_overview({"success": False, "data": ""}))
+
+    def test_season_code_runs_summer_to_summer(self):
+        self.assertEqual(rbihf_standings.season_code(date(2026, 9, 27)), "2627")
+        self.assertEqual(rbihf_standings.season_code(date(2027, 3, 1)), "2627")
+
+
+class RBIHFStandingsRefreshTests(ImportSourcesTestBase):
+    TEAM_URL = "https://www.rbihf.be/league/team/4448"
+    PLAYED = [("816", "4448", "Antwerp", "4450", "Sharks", "3-6")]
+
+    def patch_fetch(self, *pages):
+        return mock.patch("events.services.rbihf_standings.fetch_html", side_effect=list(pages))
+
+    def stored(self, team=None):
+        (team or self.team).refresh_from_db()
+        return (team or self.team).import_sources[0]["standings"]
+
+    def test_refresh_finds_the_league_and_stores_the_table(self):
+        entry = self.store(url=self.TEAM_URL)
+        with self.patch_fetch(RBIHF_TEAM_PAGE_HTML, rbihf_league_html(self.PLAYED)) as mock_fetch:
+            self.assertTrue(rbihf_standings.refresh_entry(self.team, entry))
+
+        self.assertEqual([call.args[0] for call in mock_fetch.call_args_list], [self.TEAM_URL, "https://www.rbihf.be/league/u18"])
+        standings = self.stored()
+        self.assertEqual((standings["league"], standings["league_slug"], standings["rbihf_team_id"], standings["error"]), ("Under 18", "u18", "4448", ""))
+        self.assertEqual(standings_rows(standings), [(1, "Sharks", 1, 2), (2, "Antwerp", 1, 0)])
+
+    def test_the_league_page_is_cached_and_the_league_remembered(self):
+        entry = self.store(url=self.TEAM_URL)
+        with self.patch_fetch(RBIHF_TEAM_PAGE_HTML, rbihf_league_html(self.PLAYED)):
+            rbihf_standings.refresh_entry(self.team, entry)
+
+        self.team.refresh_from_db()
+        with self.patch_fetch() as mock_fetch:
+            self.assertTrue(rbihf_standings.refresh_entry(self.team, self.team.import_sources[0]))
+        mock_fetch.assert_not_called()
+
+        with self.patch_fetch(rbihf_league_html([*self.PLAYED, ("817", "4450", "Sharks", "4448", "Antwerp", "1-4")])) as mock_fetch:
+            rbihf_standings.refresh_entry(self.team, self.team.import_sources[0], fresh=True)
+        mock_fetch.assert_called_once_with("https://www.rbihf.be/league/u18")
+        self.assertEqual(standings_rows(self.stored()), [(1, "Antwerp", 2, 2), (2, "Sharks", 2, 2)])
+
+    def test_a_failed_refresh_keeps_the_last_good_table(self):
+        entry = self.store(url=self.TEAM_URL)
+        with self.patch_fetch(RBIHF_TEAM_PAGE_HTML, rbihf_league_html(self.PLAYED)):
+            rbihf_standings.refresh_entry(self.team, entry)
+        cache.clear()
+
+        self.team.refresh_from_db()
+        with self.patch_fetch(RBIHFImportError("RBIHF is down")):
+            self.assertFalse(rbihf_standings.refresh_entry(self.team, self.team.import_sources[0]))
+
+        standings = self.stored()
+        self.assertEqual(standings["error"], "RBIHF is down")
+        self.assertEqual(standings_rows(standings), [(1, "Sharks", 1, 2), (2, "Antwerp", 1, 0)])
+
+    def test_a_reimport_keeps_the_standings_only_for_the_same_url(self):
+        entry = self.store(url=self.TEAM_URL)
+        import_sources.update_entry(self.team, entry, standings={"competitions": []})
+
+        self.store(url=self.TEAM_URL)
+        self.assertIn("standings", self.team.import_sources[0])
+
+        self.store(url="https://www.rbihf.be/league/team/9999")
+        self.assertNotIn("standings", self.team.import_sources[0])
+
+    def test_a_finished_game_refreshes_its_teams_matching_source_without_the_cache(self):
+        self.enable_flag("RBIHF")
+        self.store(url=self.TEAM_URL)
+        self.store(url="https://www.rbihf.be/league/team/5555", label="Cup")
+        game = self.make_event(kind=Event.EventKind.GAME, competition="RBIHF", external_game_id="816", external_source_id="4448")
+        game.teams.add(self.team)
+
+        with mock.patch("events.services.rbihf_standings.refresh_entry", return_value=True) as mock_refresh:
+            rbihf_standings.refresh_for_finished_game(game)
+
+        [call] = mock_refresh.call_args_list
+        self.assertEqual((call.args[1]["url"], call.kwargs["fresh"]), (self.TEAM_URL, True))
+
+    def test_a_finished_game_does_nothing_without_the_rbihf_feature(self):
+        self.store(url=self.TEAM_URL)
+        game = self.make_event(kind=Event.EventKind.GAME, competition="RBIHF", external_game_id="816", external_source_id="4448")
+        game.teams.add(self.team)
+
+        with mock.patch("events.services.rbihf_standings.refresh_entry") as mock_refresh:
+            rbihf_standings.refresh_for_finished_game(game)
+
+        mock_refresh.assert_not_called()
+
+    def test_the_poll_refreshes_standings_when_a_game_finishes(self):
+        self.enable_flag("RBIHF")
+        game = self.make_event(kind=Event.EventKind.GAME, competition="RBIHF", external_game_id="1234", is_live=True, start=timezone.now() - timedelta(hours=2), end=timezone.now() - timedelta(minutes=10))
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"live": False, "scoreA": 2, "scoreB": 3}
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=response), mock.patch("events.management.commands.poll_live_game_results.refresh_for_finished_game") as mock_refresh:
+            call_command("poll_live_game_results")
+
+        mock_refresh.assert_called_once_with(game)
+
+    def test_the_nightly_job_refreshes_only_clubs_with_the_rbihf_feature(self):
+        other_club = Club.objects.create(name="Rival", slug="rival-standings")
+        Season.objects.create(club=other_club, start_date=self.season.start_date, end_date=self.season.end_date)
+        other_team = Team.objects.create(club=other_club, name="Rival Team", short_name="RT")
+        self.enable_flag("RBIHF")
+        self.store(url=self.TEAM_URL)
+        import_sources.record_source(other_team, source=import_sources.SOURCE_RBIHF, url=self.TEAM_URL, season=Season.objects.get(club=other_club))
+
+        with mock.patch("events.services.rbihf_standings.refresh_entry", return_value=True) as mock_refresh:
+            result = call_command("refresh_standings")
+
+        self.assertEqual([call.args[0] for call in mock_refresh.call_args_list], [self.team])
+        self.assertIn("Refreshed standings for 1 competition source(s); 0 failed.", result)

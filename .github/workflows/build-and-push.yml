@@ -137,9 +137,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -162,7 +162,7 @@ jobs:
       # deploy-prod.sh should actually be pointed at for a real release, not a floating
       # branch tag (`enable=` skips this line entirely off main, where steps.version never ran).
       - id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -174,7 +174,7 @@ jobs:
       # daemon", not "publish it"), and smoke-tested below before anything is actually
       # published. The real build-and-push step further down reuses this same GHA cache, so
       # it costs a re-tag, not a rebuild.
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false
@@ -189,6 +189,9 @@ jobs:
       # random enough to pass rosterchief.E001's placeholder check, never used for anything.
       # --fail-level WARNING is usable because the one warning production raises on purpose
       # (security.W021, HSTS preload) is silenced in settings.py, with the reason there.
+      # DJANGO_DATABASE_URL points SQLite at /tmp: since Django 6.1 `check` runs field checks
+      # against every configured database, and JSONField's SQLite support check opens a real
+      # connection -- the default db.sqlite3 under the read-only /app can't be created.
       - name: Deployment checks in the built image
         run: |
           docker run --rm \
@@ -203,6 +206,7 @@ jobs:
             -e DJANGO_SECURE_HSTS_SECONDS=31536000 \
             -e DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=True \
             -e DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
+            -e DJANGO_DATABASE_URL=sqlite:////tmp/check.sqlite3 \
             rosterchief:smoke-test \
             python manage.py check --deploy --fail-level WARNING
 
@@ -237,7 +241,7 @@ jobs:
           exit 1
 
       - name: Build and push
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true

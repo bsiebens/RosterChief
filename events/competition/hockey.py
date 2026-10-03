@@ -4,7 +4,7 @@ import requests
 from django.utils.translation import gettext_lazy as _
 
 from ..models import Event
-from ..services import dfel_import
+from ..services import dfel_import, ijnl_import
 from ..services.attendance import resolve_season
 from .base import CompetitionBaseClass
 
@@ -127,5 +127,27 @@ class DFEL(CompetitionBaseClass):
         else:
             event.score_for = game.get("awayTeamScore")
             event.score_against = game.get("homeTeamScore")
+
+        event.save(update_fields=["is_live", "score_for", "score_against"])
+
+
+class IJNL(CompetitionBaseClass):
+    """IJshockey Nederland (ijshockey.nl), see events.services.ijnl_import. Each
+    game has its own live-data endpoint keyed by its uuid
+    (event.external_game_id), which the site's own game page polls."""
+
+    def update_game_information(self, event: Event) -> None:
+        if not event.external_game_id:
+            raise ValueError(_("This game has no ijshockey.nl game id."))
+
+        game = ijnl_import.fetch_game(event.external_game_id)
+        home_score, away_score = ijnl_import.parse_score(game)
+
+        event.is_live = game.get("state") == ijnl_import.LIVE_STATE
+
+        if event.is_home_game:
+            event.score_for, event.score_against = home_score, away_score
+        else:
+            event.score_for, event.score_against = away_score, home_score
 
         event.save(update_fields=["is_live", "score_for", "score_against"])

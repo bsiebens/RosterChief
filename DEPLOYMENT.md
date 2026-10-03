@@ -31,6 +31,25 @@ this is a deliberate convenience for a solo maintainer, not a reason to skip jud
 GitHub's `enforce_admins` is all-or-nothing: turning it off to skip the PR requirement also
 lets an admin force-push or delete `development`, not just commit to it directly.
 
+**`deploy/cut-release.sh` automates both sequences below**, up to an open PR into `main` that
+you then merge yourself:
+
+```bash
+deploy/cut-release.sh release 0.7.14                 # ship development as 0.7.14
+deploy/cut-release.sh hotfix 0.7.15 <commit>...      # ship main + these development commits
+```
+
+It shows what it's about to ship and asks before changing anything (`--yes` skips the prompt).
+It refuses a version that's already tagged or isn't newer than the latest release, and it won't
+run with uncommitted changes. It differs from the manual sequences in two ways:
+
+- **The version bump is committed on `development` too**, so `development` stays on the
+  current version. A release branch is just `development`'s tip after that bump.
+- **A hotfix cherry-picks commits that are already on `development`**: fix it there first, then
+  hotfix it out. That makes the back-merge PR unnecessary.
+
+Merging the PR and running `deploy/deploy-prod.sh --version vX.Y.Z` stay manual.
+
 **Cutting a release** (branched from `development`, feature-frozen while `development` keeps
 moving underneath it):
 
@@ -628,6 +647,18 @@ server's `.env` as `IMAGE_TAG=` (see "Rollback"), so a by-hand `docker compose r
 deployed image instead of an older local `:main`. The first 0.7.12 deploy sets it. Any
 `IMAGE_TAG` value already in `.env` is replaced.
 
+### Upgrade notes: 0.7.13
+
+Run the usual deploy; `migrate` adds `Team.import_sources`. No other manual steps.
+
+- **Redis 7.4 → 8.10.** `compose pull` fetches the new image and `web` reconnects to it. Redis
+  only holds cache entries and the scheduler lease, so losing them on the restart does no harm.
+- **Postgres stays on 17.** The 18 upgrade (dependabot #36) needs a dump/restore and a
+  volume-path change. It is held back for a planned maintenance window.
+- **New weekly job, `check_fixture_sources`** (Mondays 06:15). It runs inside the existing
+  scheduler, so there is nothing to configure. It can be switched off from the control panel's
+  Jobs tab like any other job.
+
 ### Keep DJANGO_DEBUG=False, even on the test server
 
 A test box is still a deployment: it is behind TLS, on a real domain, with real passkeys.
@@ -811,7 +842,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All eleven platform jobs run from **one in-process scheduler thread inside `web` itself** —
+All twelve platform jobs run from **one in-process scheduler thread inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
 `when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
@@ -825,7 +856,9 @@ class every one of them runs through.
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
-| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing) |
+| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
+| `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
+| `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -843,7 +876,7 @@ instead of two.
 **`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
 and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
 without `--commit` the scheduler would tick them forever and nothing would actually happen. The
-other nine act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
+other ten act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
 manual use.
 
 **Overlap and misfire protection is APScheduler's job config, not `flock`.** Every job is added
@@ -946,7 +979,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the eleven jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the twelve jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually

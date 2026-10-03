@@ -5,9 +5,11 @@ request cycle.
 """
 
 import uuid
+from datetime import datetime
 from itertools import groupby
 
 from django.db.models import F
+from django.utils.dateparse import parse_datetime
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
@@ -15,6 +17,7 @@ from api.cache import cached_for_club
 from api.errors import require_club
 from club.models import ClubMembership
 from club.services.access import current_season
+from events.services import import_sources
 
 from .models import Team, TeamMembership, TeamPhoto
 
@@ -56,6 +59,38 @@ class RosterOut(Schema):
     season: str | None
     players: list[PositionGroupOut]
     staff: list[StaffMemberOut]
+
+
+class StandingRowOut(Schema):
+    position: int
+    team_name: str
+    is_own_team: bool
+    played: int
+    wins: int
+    ot_wins: int
+    ot_losses: int
+    draws: int
+    losses: int
+    goals_for: int
+    goals_against: int
+    goal_difference: int
+    points: int
+
+
+class CompetitionStandingsOut(Schema):
+    league: str
+    competition: str
+    competition_label: str
+    points_rule: str
+    has_overtime: bool
+    updated_at: datetime | None
+    rows: list[StandingRowOut]
+
+
+class TeamStandingsOut(Schema):
+    team: TeamOut
+    season: str | None
+    competitions: list[CompetitionStandingsOut]
 
 
 def _to_team_out(team, request, photo=None) -> TeamOut:
@@ -125,6 +160,35 @@ def build_roster(team, request) -> RosterOut:
     return RosterOut(team=_to_team_out(team, request, photo=photo), season=season.name, players=players, staff=staff)
 
 
+def build_standings(team, season, request) -> TeamStandingsOut:
+    """``team``'s league standings for ``season``, read from what
+    events.services.rbihf_standings stored on its RBIHF import sources -- never
+    fetched from RBIHF here. Only meaningful while the club has the RBIHF feature;
+    callers check that."""
+    competitions = []
+    if season is not None:
+        for entry in import_sources.sources_for(team, season):
+            standings = entry.get("standings") or {}
+            if entry.get("source") != import_sources.SOURCE_RBIHF or not standings.get("competitions"):
+                continue
+            own_id = standings.get("rbihf_team_id")
+            updated_at = parse_datetime(standings["updated_at"]) if standings.get("updated_at") else None
+            for competition in standings["competitions"]:
+                rows = [StandingRowOut(**{key: row[key] for key in StandingRowOut.model_fields if key != "is_own_team"}, is_own_team=row.get("team_id") == own_id) for row in competition.get("rows", [])]
+                competitions.append(
+                    CompetitionStandingsOut(
+                        league=standings.get("league", ""),
+                        competition=competition.get("name", ""),
+                        competition_label=entry.get("competition_label", ""),
+                        points_rule=competition.get("points_rule", ""),
+                        has_overtime=competition.get("has_overtime", False),
+                        updated_at=updated_at,
+                        rows=rows,
+                    )
+                )
+    return TeamStandingsOut(team=_to_team_out(team, request), season=season.name if season else None, competitions=competitions)
+
+
 @router.get("/", response=list[TeamOut], summary="List teams")
 def list_teams(request):
     club = require_club(request)
@@ -151,6 +215,36 @@ def get_roster(request, team_id: uuid.UUID):
         return build_roster(team, request)
 
     return cached_for_club(club.pk, f"teams:roster:{team_id}", compute)
+
+
+@router.get("/standings/", response=list[TeamStandingsOut], summary="Current season's league standings of every team")
+def list_standings(request):
+    """Only teams that have standings are listed -- an empty list when the club
+    has no RBIHF-imported teams (or the RBIHF feature is off)."""
+    club = require_club(request)
+
+    def compute():
+        if not import_sources.source_enabled(club, import_sources.SOURCE_RBIHF):
+            return []
+        season = current_season(club)
+        results = [build_standings(team, season, request) for team in Team.objects.filter(club=club).order_by("name")]
+        return [result for result in results if result.competitions]
+
+    return cached_for_club(club.pk, "teams:standings", compute)
+
+
+@router.get("/{team_id}/standings/", response=TeamStandingsOut, summary="Current season's league standings of one team")
+def get_standings(request, team_id: uuid.UUID):
+    club = require_club(request)
+
+    def compute():
+        team = _get_team_or_404(club, team_id)
+        season = current_season(club)
+        if not import_sources.source_enabled(club, import_sources.SOURCE_RBIHF):
+            return TeamStandingsOut(team=_to_team_out(team, request), season=season.name if season else None, competitions=[])
+        return build_standings(team, season, request)
+
+    return cached_for_club(club.pk, f"teams:standings:{team_id}", compute)
 
 
 def _get_team_or_404(club, team_id):

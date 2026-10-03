@@ -12,6 +12,7 @@ from club.services.access import groups_manageable_by, is_club_admin, teams_mana
 from club.validators import LOGO_ACCEPT
 from evaluations.models import EvaluationChecklist
 from events.models import Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, Opponent
+from events.services import ijnl_import
 from events.services.dfel_import import DFELImportError, extract_ids
 from events.services.officials import officials_enabled_for
 from events.services.rbihf_import import RBIHFImportError, extract_team_id
@@ -781,6 +782,14 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         return super().save(commit=commit)
 
 
+def _setup_import_season_field(form, club):
+    """Shared by the fixture import forms (and FixtureRecheckForm): the club's
+    seasons, newest first, defaulting to the one covering today."""
+    form.fields["season"].queryset = Season.objects.filter(club=club).order_by("-start_date")
+    if club is not None and not form.is_bound:
+        form.fields["season"].initial = Season.covering(club, timezone.localdate())
+
+
 class RBIHFImportForm(forms.Form):
     """Step 1 of importing a team's fixtures from RBIHF's own website -- see
     events.services.rbihf_import. Only the URL and which of the club's own
@@ -804,9 +813,12 @@ class RBIHFImportForm(forms.Form):
         help_text=_("Optional. Only needed if this team plays in more than one RBIHF competition (e.g. “Division 1” vs “Cup”) -- keeps re-importing one from ever deleting the other's games."),
     )
 
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"), help_text=_("Which season these fixtures belong to -- the URL is remembered for this season so it can be re-checked later."))
+
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["team"].queryset = Team.objects.filter(club=club)
+        _setup_import_season_field(self, club)
 
     def clean_url(self):
         url = self.cleaned_data["url"].strip()
@@ -840,9 +852,12 @@ class DFELImportForm(forms.Form):
         help_text=_("Optional. Only needed if this team plays in more than one DFEL competition (e.g. “League” vs “Playoffs”) -- keeps re-importing one from ever deleting the other's games."),
     )
 
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"), help_text=_("Which season these fixtures belong to -- the URL is remembered for this season so it can be re-checked later."))
+
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["team"].queryset = Team.objects.filter(club=club)
+        _setup_import_season_field(self, club)
 
     def clean_url(self):
         url = self.cleaned_data["url"].strip()
@@ -851,6 +866,55 @@ class DFELImportForm(forms.Form):
         except DFELImportError as error:
             raise forms.ValidationError(str(error)) from error
         return url
+
+
+class IJNLImportForm(forms.Form):
+    """Step 1 of importing a team's fixtures from IJshockey Nederland
+    (ijshockey.nl) -- see events.services.ijnl_import. Mirrors DFELImportForm.
+
+    One ijshockey.nl team page covers every division the team plays in that
+    season (league, playoffs, cup, ...), so a single import brings them all in;
+    competition_label is only needed to tell apart two *separate* team pages
+    for the same team."""
+
+    url = forms.CharField(
+        label=_("ijshockey.nl team page URL"),
+        help_text=_("E.g. https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27 -- the team's page on ijshockey.nl. Without a “seizoen” the season the site currently shows is used."),
+        widget=forms.URLInput(attrs={"placeholder": "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27"}),
+    )
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"), help_text=_("Which of your teams this fixture list is for."))
+    competition_label = forms.CharField(
+        required=False,
+        label=_("Competition label"),
+        help_text=_("Optional. Shown next to these games on the schedule, and keeps re-importing a different ijshockey.nl team page for the same team from ever deleting these games."),
+    )
+
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"), help_text=_("Which season these fixtures belong to -- the URL is remembered for this season so it can be re-checked later."))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+        _setup_import_season_field(self, club)
+
+    def clean_url(self):
+        url = self.cleaned_data["url"].strip()
+        try:
+            ijnl_import.extract_ids(url)
+        except ijnl_import.IJNLImportError as error:
+            raise forms.ValidationError(str(error)) from error
+        return url
+
+
+class FixtureRecheckForm(forms.Form):
+    """The "Re-check all imported fixtures" season picker -- see
+    management.views.FixtureRecheckView. Submitted via GET, so it's always
+    bound once a season is in the querystring."""
+
+    season = forms.ModelChoiceField(queryset=Season.objects.none(), label=_("Season"))
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        _setup_import_season_field(self, club)
 
 
 class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):

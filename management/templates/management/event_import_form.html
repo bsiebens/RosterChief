@@ -1,7 +1,7 @@
 {% extends "management/base.html" %}
 {% load lucide ui i18n %}
 
-{% comment %}Shared by every external fixture import (RBIHF, DFEL, ...) -- the view passes source_name (e.g. "RBIHF").{% endcomment %}
+{% comment %}Shared by every external fixture import (RBIHF, DFEL, IJNL, ...) -- the view passes source_name (e.g. "RBIHF").{% endcomment %}
 {% block heading %}{% blocktrans %}Import from {{ source_name }}{% endblocktrans %}{% endblock heading %}
 
 {% block panel %}

@@ -1,0 +1,74 @@
+{% extends "management/base.html" %}
+{% load lucide i18n %}
+
+{% comment %}FixtureRecheckView: one combined preview of every stored fixture import source (Team.import_sources) for a season.{% endcomment %}
+{% block heading %}{% trans "Re-check imported fixtures" %}{% endblock heading %}
+
+{% block filter_strip %}
+    <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-3">
+        <form method="get" class="flex flex-wrap items-center gap-2">
+            {% if selected_team %}<input type="hidden" name="team" value="{{ selected_team.pk }}">{% endif %}
+            <label class="text-sm text-muted" for="recheck-season">{% trans "Season" %}</label>
+            <select id="recheck-season" name="season" class="select w-auto">
+                {% for option in form.fields.season.queryset %}
+                    <option value="{{ option.pk }}" {% if season and option.pk == season.pk %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "refresh-cw" size=16 %} {% trans "Fetch and preview" %}</button>
+        </form>
+        {% if selected_team %}
+            <span class="text-sm text-muted">
+                {% blocktrans with team=selected_team %}Only “{{ team }}”.{% endblocktrans %}
+                <a class="link" href="{% url 'management:fixture_recheck' %}{% if season %}?season={{ season.pk }}{% endif %}">{% trans "Show all teams" %}</a>
+            </span>
+        {% endif %}
+    </div>
+{% endblock filter_strip %}
+
+{% block panel %}
+    {% if season is None %}
+        <p class="text-sm text-muted">{% trans "This club has no seasons yet." %}</p>
+    {% elif not sections %}
+        <p class="text-sm text-muted">{% trans "No imported fixture lists are on file for this season. They're remembered whenever an RBIHF, DFEL or IJNL import is confirmed." %}</p>
+    {% else %}
+        <div class="alert alert-info">
+            {% lucide "info" size=16 %}
+            <span>{% trans "Every fixture list imported for this season was fetched again. Review the changes per team below; nothing is saved until you confirm." %}</span>
+        </div>
+
+        <form method="post" action="{% url 'management:fixture_recheck_confirm' %}">
+            {% csrf_token %}
+
+            <div class="flex flex-col gap-6">
+                {% for section in sections %}
+                    <section class="flex flex-col gap-3">
+                        <h2 class="font-display text-lg font-extrabold text-ink">
+                            {% if section.entry.competition_label %}
+                                {% blocktrans with team=section.team source=section.entry.source label=section.entry.competition_label %}{{ team }} &middot; {{ source }} &middot; {{ label }}{% endblocktrans %}
+                            {% else %}
+                                {% blocktrans with team=section.team source=section.entry.source %}{{ team }} &middot; {{ source }}{% endblocktrans %}
+                            {% endif %}
+                        </h2>
+                        <a class="link text-xs break-all text-muted" href="{{ section.entry.url }}" target="_blank" rel="noopener noreferrer">{{ section.entry.url }}</a>
+
+                        {% if section.error %}
+                            <div class="alert alert-error">
+                                {% lucide "triangle-alert" size=16 %}
+                                <span>{% blocktrans with error=section.error %}Could not fetch this fixture list, so it's skipped: {{ error }}{% endblocktrans %}</span>
+                            </div>
+                        {% else %}
+                            {% include "management/_event_import_plan.html" with plan=section.plan prefix=section.prefix source_name=section.entry.source show_game_ids=section.show_game_ids %}
+                        {% endif %}
+                    </section>
+                {% endfor %}
+            </div>
+
+            <div class="card-actions justify-start pt-4">
+                <a class="btn btn-outline gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+                {% if has_changes %}
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Confirm all changes" %}</button>
+                {% endif %}
+            </div>
+        </form>
+    {% endif %}
+{% endblock panel %}

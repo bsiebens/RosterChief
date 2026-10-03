@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from events.models import Event
 from events.services.competitions import CompetitionFetchError, fetch_game_info
+from events.services.rbihf_standings import refresh_for_finished_game
 from features.commands import ScheduledJobCommand
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,8 @@ class Command(ScheduledJobCommand):
         nothing left worth checking. Once a game is seen going live and then coming
         back off live, it's finished; live_score_polling_done_at is stamped so the
         rest of that trailing hour doesn't keep calling out to the data source for
-        no further benefit.
+        no further benefit, and the league standings of its teams are recomputed
+        (events.services.rbihf_standings -- a no-op for non-RBIHF games).
 
         fetch_game_info itself already gates on the competition's flag being active
         for the event's club and no-ops (returns False) when it isn't configured --
@@ -65,5 +67,9 @@ class Command(ScheduledJobCommand):
             if was_live and not event.is_live:
                 event.live_score_polling_done_at = now
                 event.save(update_fields=["live_score_polling_done_at"])
+                try:
+                    refresh_for_finished_game(event)
+                except Exception:
+                    logger.warning("poll_live_game_results.standings_failed event_id=%s", event.pk, exc_info=True)
 
         return f"Checked {len(candidates)} game(s); fetched {fetched}, {failed} failed."
