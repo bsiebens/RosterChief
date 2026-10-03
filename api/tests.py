@@ -6,9 +6,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
+from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, Season, Sponsor
 from events.models import Event, Location, Opponent
+from events.services import import_sources
 from members.models import Member
 from news.models import News, NewsPhoto
 from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -387,6 +389,60 @@ class TeamsApiTests(ApiTestBase):
         staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
 
         self.assertEqual(staff, [])
+
+
+class StandingsApiTests(ApiTestBase):
+    """/teams/standings/ and /teams/{id}/standings/ -- read straight from what
+    events.services.rbihf_standings stored on the team's RBIHF import sources,
+    behind the club's RBIHF feature flag."""
+
+    ROW = {"team_id": "4448", "team_name": "Antwerp", "position": 1, "played": 1, "wins": 1, "ot_wins": 0, "ot_losses": 0, "draws": 0, "losses": 0, "goals_for": 6, "goals_against": 3, "goal_difference": 3, "points": 2}
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.other_team = Team.objects.create(club=cls.club, name="U18", short_name="U18")
+        entry = import_sources.record_source(cls.team, source=import_sources.SOURCE_RBIHF, url="https://www.rbihf.be/league/team/4448", season=cls.season, competition_label="Division 1")
+        rival = {**cls.ROW, "team_id": "4450", "team_name": "Sharks", "position": 2, "wins": 0, "losses": 1, "goals_for": 3, "goals_against": 6, "goal_difference": -3, "points": 0}
+        competition = {"name": "Regular Competition", "points_rule": "Won: 2 | Draw: 1 | Lost: 0", "has_overtime": False, "rows": [cls.ROW, rival]}
+        standings = {"league": "Division 1", "rbihf_team_id": "4448", "updated_at": "2026-10-03T01:00:00+00:00", "error": "", "competitions": [competition]}
+        import_sources.update_entry(cls.team, entry, standings=standings)
+
+    def enable_rbihf(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="RBIHF")
+        flag.clubs.add(self.club)
+        cache.clear()
+
+    def test_nothing_without_the_rbihf_feature(self):
+        self.assertEqual(self.api_get("/teams/standings/").json(), [])
+        self.assertEqual(self.api_get(f"/teams/{self.team.pk}/standings/").json()["competitions"], [])
+
+    def test_lists_only_teams_with_standings(self):
+        self.enable_rbihf()
+
+        data = self.api_get("/teams/standings/").json()
+
+        self.assertEqual([item["team"]["name"] for item in data], ["First Team"])
+        [competition] = data[0]["competitions"]
+        self.assertEqual((competition["league"], competition["competition"], competition["competition_label"], competition["has_overtime"]), ("Division 1", "Regular Competition", "Division 1", False))
+        self.assertEqual(competition["updated_at"], "2026-10-03T01:00:00Z")
+        self.assertEqual([(row["position"], row["team_name"], row["is_own_team"], row["points"]) for row in competition["rows"]], [(1, "Antwerp", True, 2), (2, "Sharks", False, 0)])
+        self.assertNotIn("team_id", competition["rows"][0])
+
+    def test_one_teams_standings(self):
+        self.enable_rbihf()
+
+        data = self.api_get(f"/teams/{self.team.pk}/standings/").json()
+
+        self.assertEqual((data["team"]["name"], data["season"], len(data["competitions"])), ("First Team", self.season.name, 1))
+        self.assertEqual(self.api_get(f"/teams/{self.other_team.pk}/standings/").json()["competitions"], [])
+
+    def test_another_clubs_team_is_a_404(self):
+        self.enable_rbihf()
+        rival_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        rival_team = Team.objects.create(club=rival_club, name="Rivals", short_name="RV")
+
+        self.assertEqual(self.api_get(f"/teams/{rival_team.pk}/standings/").status_code, 404)
 
 
 class GamesApiTests(ApiTestBase):

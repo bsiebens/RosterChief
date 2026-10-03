@@ -74,6 +74,14 @@ JOB_REGISTRY = {
         "command": "check_fixture_sources",
         "args": [],
     },
+    "events.tasks.refresh_standings": {
+        "label": _("Refresh league standings"),
+        "description": _("Recomputes the league standings of every team imported from RBIHF for the current season, for the public API. A team's standings are also refreshed as soon as one of its games finishes."),
+        "schedule": _("Daily at 01:00"),
+        "trigger": {"trigger": "cron", "hour": 1, "minute": 0},
+        "command": "refresh_standings",
+        "args": [],
+    },
     "billing.tasks.renew_subscriptions": {
         "label": _("Renew subscriptions"),
         "description": _("Opens the next billing period for clubs whose current one is running out."),

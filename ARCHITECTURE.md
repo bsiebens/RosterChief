@@ -864,6 +864,20 @@ competition: games moved to another date/hour, new games, removed future games, 
 error. Opponent/label drift is deliberately not alerted. It never imports anything; admins apply
 changes via the re-check page's import button.
 
+**League standings (RBIHF).** RBIHF only publishes rankings as hot-link-protected PNGs, so
+`events/services/rbihf_standings.py` recomputes them from the league page (`/league/<slug>`,
+found via the stored team page's league link): every *ranked* competition tab (`#type-<id>`,
+i.e. one with a ranking block) the team appears in, its played-game scores, and the points rule
+printed under the ranking. Order: points, goal difference, goals for, name. In a league that
+awards overtime/shoot-out points, a one-goal game is checked against the game's
+`overview.php` period breakdown (regulation level ⇒ OT/SO result; cached ~30 days). The result is
+stored on the RBIHF import entry as `standings` (kept across a re-import from the same URL; a
+failed refresh keeps the last good table and records `error`), refreshed (league page bypassing
+its 10-min cache) when `poll_live_game_results` sees a team's game finish, and nightly by
+`refresh_standings` (01:00). The public API serves it read-only — `GET /api/v1/teams/standings/`
+and `/teams/{id}/standings/`, current season, behind the club's `RBIHF` flag — so visitors never
+trigger a federation round trip.
+
 **IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
 with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling
 (`/competities/team/<id>/data?seizoen=2026/27`) covers *every* division the team plays that season

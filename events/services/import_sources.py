@@ -19,6 +19,7 @@ Each entry is a plain dict::
         "recorded_at": "<ISO 8601>",           # last confirmed import from this URL
         "last_checked_at": "<ISO 8601>",       # optional -- set by the weekly check
         "last_check": {...},                   # optional -- see CheckResult.as_dict
+        "standings": {...},                    # optional, RBIHF only -- see events.services.rbihf_standings
     }
 
 ``fetch`` / ``build_plan_for`` turn an entry back into the same ``ImportPlan`` the
@@ -60,7 +61,8 @@ def entry_key(entry: dict) -> tuple:
 
 def record_source(team, *, source: str, url: str, season, competition_label: str = "") -> dict:
     """Upserts ``team``'s entry for (source, season, competition label) and saves
-    just that field. Returns the stored entry."""
+    just that field. Returns the stored entry. Computed standings survive a
+    re-import from the same URL -- they're about the league, not the import."""
     if source not in SOURCES:
         raise ValueError(f"Unknown import source {source!r}")
 
@@ -73,6 +75,9 @@ def record_source(team, *, source: str, url: str, season, competition_label: str
         "recorded_at": timezone.now().isoformat(),
     }
     key = entry_key(entry)
+    replaced = next((existing for existing in (team.import_sources or []) if entry_key(existing) == key), None)
+    if replaced and replaced.get("url") == entry["url"] and replaced.get("standings"):
+        entry["standings"] = replaced["standings"]
     sources = [existing for existing in (team.import_sources or []) if entry_key(existing) != key]
     sources.append(entry)
     team.import_sources = sources
