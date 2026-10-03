@@ -189,6 +189,9 @@ jobs:
       # random enough to pass rosterchief.E001's placeholder check, never used for anything.
       # --fail-level WARNING is usable because the one warning production raises on purpose
       # (security.W021, HSTS preload) is silenced in settings.py, with the reason there.
+      # DJANGO_DATABASE_URL points SQLite at /tmp: since Django 6.1 `check` runs field checks
+      # against every configured database, and JSONField's SQLite support check opens a real
+      # connection -- the default db.sqlite3 under the read-only /app can't be created.
       - name: Deployment checks in the built image
         run: |
           docker run --rm \
@@ -203,6 +206,7 @@ jobs:
             -e DJANGO_SECURE_HSTS_SECONDS=31536000 \
             -e DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=True \
             -e DJANGO_STATICFILES_BACKEND=whitenoise.storage.CompressedManifestStaticFilesStorage \
+            -e DJANGO_DATABASE_URL=sqlite:////tmp/check.sqlite3 \
             rosterchief:smoke-test \
             python manage.py check --deploy --fail-level WARNING
 
