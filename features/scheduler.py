@@ -128,8 +128,11 @@ def _leader_loop():
 
         if is_leader and _scheduler is None:
             logger.info("scheduler.leader_acquired token=%s", _TOKEN)
-            _scheduler = _build_scheduler()
-            _scheduler.start()
+            # Started before it's published: anything that sees _scheduler non-None
+            # (stop(), the lifecycle tests) can rely on it already running.
+            scheduler = _build_scheduler()
+            scheduler.start()
+            _scheduler = scheduler
         elif not is_leader and _scheduler is not None:
             logger.info("scheduler.leader_lost token=%s", _TOKEN)
             _scheduler.shutdown(wait=False)

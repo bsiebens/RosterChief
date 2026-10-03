@@ -11,7 +11,7 @@ features/scheduler.py's own docstring for the *periodic* job infrastructure this
 deliberately not reusing: that scheduler is leader-elected across the whole fleet, so a
 gunicorn worker -- the process actually handling this request -- never holds a live
 APScheduler instance of its own to submit ad-hoc work to; only the elected node's master
-process does, and only for the eleven registered jobs). A plain daemon thread per dispatch is
+process does, and only for the twelve registered jobs). A plain daemon thread per dispatch is
 the same trade DEPLOYMENT.md's "Sizing the server" already made for the whole job story: this
 app's actual volume doesn't justify a broker or a bounded worker pool, and a daemon thread
 costs nothing once the interpreter exits mid-flight -- an acceptable loss for a best-effort

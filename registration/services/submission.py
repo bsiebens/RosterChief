@@ -134,7 +134,7 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
     if parent_family_membership is None:
         FamilyMembership.objects.create(family=family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
 
-    has_self_entry = any(entry.is_contact for entry in entries)
+    has_self_entry = any(_is_self_entry(entry, parent) for entry in entries)
     if not has_self_entry:
         # A pure guardian -- no fee, active immediately.
         add_parent_to_family(club, season, family, parent=parent)
@@ -214,12 +214,24 @@ def submit_registration(club, *, contact_first_name, contact_last_name, contact_
     return batch
 
 
+def _is_self_entry(entry, parent) -> bool:
+    """Whether ``entry`` registers the submitter themselves. A named
+    ``existing_member`` decides on its own: mobile re-registration reuses
+    ``is_contact`` as its per-person "Include this person" toggle, so a child's
+    row carries ``is_contact`` too and must still register the child, not the
+    parent. Only a row naming nobody falls back to ``is_contact`` ("this is
+    me" on the public page)."""
+    if entry.existing_member is not None:
+        return entry.existing_member.pk == parent.pk
+    return entry.is_contact
+
+
 def _resolve_entry_member(family, parent, entry):
     """``parent`` is already safe to reuse here -- the signed-in submitter's
     own Member, or a fresh one for an anonymous submission (see
     _resolve_contact_member). ``existing_member`` is only reachable for a
     signed-in submitter; submit_registration refuses it otherwise."""
-    if entry.is_contact:
+    if _is_self_entry(entry, parent):
         return parent
     if entry.existing_member is not None:
         FamilyMembership.objects.get_or_create(family=family, member=entry.existing_member, defaults={"role": FamilyMembership.FamilyRole.CHILD})
