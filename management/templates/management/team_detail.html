@@ -273,11 +273,11 @@
         </div>
 
         {% if fixture_import_sources %}
-            {# Admin-only (the view leaves the list empty for anyone else), read-only: entries are written by confirmed RBIHF/DFEL imports and the weekly check. #}
+            {# Admin-only (the view leaves the list empty for anyone else), read-only: entries are written by confirmed RBIHF/DFEL/IJNL imports and the weekly check. #}
             <div class="card p-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="card-title mb-1">{% lucide "download" size=16 %} {% trans "Fixture import sources" %}</div>
-                    {% if rbihf_enabled or dfel_enabled %}
+                    {% if fixture_import_enabled %}
                         <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:fixture_recheck' %}?team={{ team.pk }}">{% lucide "refresh-cw" size=14 %} {% trans "Re-check this team" %}</a>
                     {% endif %}
                 </div>
@@ -316,7 +316,7 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if source.season_exists %}{% if rbihf_enabled or dfel_enabled %}
+                                        {% if source.season_exists %}{% if fixture_import_enabled %}
                                             <a class="link text-xs whitespace-nowrap" href="{% url 'management:fixture_recheck' %}?team={{ team.pk }}&amp;season={{ source.season_id }}">{% trans "Re-check" %}</a>
                                         {% endif %}{% endif %}
                                     </td>

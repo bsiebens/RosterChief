@@ -3,7 +3,7 @@ and competition so they can be re-checked without pasting them again.
 
 Stored on ``Team.import_sources`` (a JSON list, not editable through any form):
 a confirmed one-off import (management.views.RBIHFImportConfirmView /
-DFELImportConfirmView) calls ``record_source``, which **replaces** an existing
+DFELImportConfirmView / IJNLImportConfirmView) calls ``record_source``, which **replaces** an existing
 entry for the same (source, season, competition label) -- federations hand out a
 new URL each season, and a corrected URL for the same competition supersedes the
 old one -- and **appends** anything else (a second competition, a new season).
@@ -11,7 +11,7 @@ old one -- and **appends** anything else (a second competition, a new season).
 Each entry is a plain dict::
 
     {
-        "source": "RBIHF" | "DFEL",           # Event.competition of the imported games
+        "source": "RBIHF" | "DFEL" | "IJNL",  # Event.competition of the imported games
         "url": "https://...",                  # the team page staff pasted
         "season_id": "<Season pk as str>",
         "season_name": "25-26",                # display fallback if the season is ever deleted
@@ -31,16 +31,19 @@ from dataclasses import dataclass, field
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from events.services import dfel_import, rbihf_import
+from events.services import dfel_import, ijnl_import, rbihf_import
 
 SOURCE_RBIHF = "RBIHF"
 SOURCE_DFEL = "DFEL"
-SOURCES = (SOURCE_RBIHF, SOURCE_DFEL)
+SOURCE_IJNL = "IJNL"
+SOURCES = (SOURCE_RBIHF, SOURCE_DFEL, SOURCE_IJNL)
 
 #: The waffle flag gating each source's import section (management.views'
-#: RBIHFImportView/DFELImportView ``feature_flag``) -- a club whose flag was turned
+#: RBIHFImportView/DFELImportView/IJNLImportView ``feature_flag``) -- a club whose flag was turned
 #: off keeps its stored URLs but they're skipped by re-checks.
-FEATURE_FLAGS = {SOURCE_RBIHF: "RBIHF", SOURCE_DFEL: "DFEL"}
+FEATURE_FLAGS = {SOURCE_RBIHF: "RBIHF", SOURCE_DFEL: "DFEL", SOURCE_IJNL: "IJNL"}
+
+_IMPORT_ERRORS = (rbihf_import.RBIHFImportError, dfel_import.DFELImportError, ijnl_import.IJNLImportError)
 
 
 class ImportSourceError(Exception):
@@ -112,22 +115,30 @@ def source_id_for(entry: dict) -> str:
     try:
         if entry["source"] == SOURCE_RBIHF:
             return rbihf_import.extract_team_id(entry["url"])
+        if entry["source"] == SOURCE_IJNL:
+            team_id, season = ijnl_import.extract_ids(entry["url"])
+            if not season:
+                raise ijnl_import.IJNLImportError(_("This ijshockey.nl URL has no season -- re-import it."))
+            return ijnl_import.source_id(team_id, season)
         team_id, division_id = dfel_import.extract_ids(entry["url"])
         return dfel_import.source_id(team_id, division_id)
-    except (rbihf_import.RBIHFImportError, dfel_import.DFELImportError, KeyError) as error:
+    except (*_IMPORT_ERRORS, KeyError) as error:
         raise ImportSourceError(str(error)) from error
 
 
 def fetch(entry: dict) -> str:
-    """Fetches the raw payload (RBIHF: HTML, DFEL: unwrapped JSON) for ``entry`` --
+    """Fetches the raw payload (RBIHF: HTML, DFEL/IJNL: JSON) for ``entry`` --
     the same plain string the one-off import stashes in the session."""
     source_id = source_id_for(entry)
     try:
         if entry["source"] == SOURCE_RBIHF:
             return rbihf_import.fetch_html(entry["url"])
+        if entry["source"] == SOURCE_IJNL:
+            team_id, season = source_id.split("/", 1)
+            return ijnl_import.fetch_team_data(team_id, season)
         team_id, division_id = source_id.split("/", 1)
         return dfel_import.fetch_schedule(team_id, division_id)
-    except (rbihf_import.RBIHFImportError, dfel_import.DFELImportError) as error:
+    except _IMPORT_ERRORS as error:
         raise ImportSourceError(str(error)) from error
 
 
@@ -139,8 +150,10 @@ def build_plan_for(club, team, entry: dict, raw: str) -> rbihf_import.ImportPlan
     try:
         if entry["source"] == SOURCE_RBIHF:
             return rbihf_import.build_plan(club, team, source_id, raw, label)
+        if entry["source"] == SOURCE_IJNL:
+            return ijnl_import.build_plan(club, team, source_id, raw, label)
         return dfel_import.build_plan(club, team, source_id, raw, label)
-    except (rbihf_import.RBIHFImportError, dfel_import.DFELImportError) as error:
+    except _IMPORT_ERRORS as error:
         raise ImportSourceError(str(error)) from error
 
 

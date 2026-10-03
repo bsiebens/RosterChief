@@ -29,7 +29,7 @@
     {% if season is None %}
         <p class="text-sm text-muted">{% trans "This club has no seasons yet." %}</p>
     {% elif not sections %}
-        <p class="text-sm text-muted">{% trans "No imported fixture lists are on file for this season. They're remembered whenever an RBIHF or DFEL import is confirmed." %}</p>
+        <p class="text-sm text-muted">{% trans "No imported fixture lists are on file for this season. They're remembered whenever an RBIHF, DFEL or IJNL import is confirmed." %}</p>
     {% else %}
         <div class="alert alert-info">
             {% lucide "info" size=16 %}

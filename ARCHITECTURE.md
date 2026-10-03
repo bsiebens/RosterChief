@@ -850,8 +850,8 @@ EventReferee(UUIDModel)            # club implied by event
   original paper form, which itself uses a longer legal form up top and a shorter one in the
   body text.
 
-**Fixture import sources & the weekly re-check.** The RBIHF/DFEL one-off imports
-(`events/services/rbihf_import.py`, `dfel_import.py`) remember the pasted fixture-list URL on
+**Fixture import sources & the weekly re-check.** The RBIHF/DFEL/IJNL one-off imports
+(`events/services/rbihf_import.py`, `dfel_import.py`, `ijnl_import.py`) remember the pasted fixture-list URL on
 `Team.import_sources` — a JSON list (not form-editable), one entry per (source, season,
 competition label); a confirmed import of the same triple replaces its entry (label compared
 case-insensitively), anything else appends. `events/services/import_sources.py` owns the shape
@@ -863,6 +863,17 @@ the club's ADMIN-role members one notification (in-app + email) summarising per 
 competition: games moved to another date/hour, new games, removed future games, or a fetch
 error. Opponent/label drift is deliberately not alerted. It never imports anything; admins apply
 changes via the re-check page's import button.
+
+**IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
+with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling
+(`/competities/team/<id>/data?seizoen=2026/27`) covers *every* division the team plays that season
+(league, playoffs, cup), so one import brings them all in; games are keyed by their `gameGuid`
+UUID and `external_source_id` is `"<team id>/<season>"`. A pasted URL without `seizoen` is pinned
+to the fetched season before it's remembered. Dates are Dutch wall-clock time; a game with a date
+but no hour lands at 12:00 (as on the site), and a listed game with *no date yet* (postponed) is
+kept rather than deleted (`plan_from_fixtures(keep_game_ids=...)`). The live score refresh
+(`events.competition.hockey.IJNL`) polls the per-game `/competities/wedstrijd/<uuid>/data?part=live`
+endpoint and reads the scoreboard markup.
 
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
 

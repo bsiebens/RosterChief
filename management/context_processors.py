@@ -129,6 +129,8 @@ _NAV_SECTIONS = {
     "rbihf_import_confirm": "event_list",
     "dfel_import": "event_list",
     "dfel_import_confirm": "event_list",
+    "ijnl_import": "event_list",
+    "ijnl_import_confirm": "event_list",
     "fixture_recheck": "event_list",
     "fixture_recheck_confirm": "event_list",
     "event_series_create": "event_list",
@@ -340,19 +342,22 @@ def management_link(request):
 
 def feature_sections(request):
     """Whether the nav's Shop/Forms/Evaluations sections -- and the Events
-    page's "Import from RBIHF"/"Import from DFEL" buttons -- should show at all. Each is gated
+    page's "Import from RBIHF"/"Import from DFEL"/"Import from IJNL" buttons -- should show at all. Each is gated
     behind its own waffle Flag (see club.mixins.FeatureRequiredMixin, which
     gates the underlying views regardless), on top of the existing
     is_club_admin check those all already require."""
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "dfel_enabled": False, "officials_enabled": False, "evaluations_enabled": False}
+        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "dfel_enabled": False, "ijnl_enabled": False, "fixture_import_enabled": False, "officials_enabled": False, "evaluations_enabled": False}
 
     return {
         "shop_enabled": flag_is_active(request, "shop"),
         "forms_enabled": flag_is_active(request, "formbuilder"),
         "rbihf_enabled": flag_is_active(request, "RBIHF"),
         "dfel_enabled": flag_is_active(request, "DFEL"),
+        "ijnl_enabled": flag_is_active(request, "IJNL"),
+        # Any of the fixture imports -- gates the "Re-check all imported fixtures" links.
+        "fixture_import_enabled": any(flag_is_active(request, flag) for flag in ("RBIHF", "DFEL", "IJNL")),
         "officials_enabled": flag_is_active(request, "officials"),
         "evaluations_enabled": flag_is_active(request, "evaluations"),
     }

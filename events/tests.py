@@ -5,6 +5,7 @@ from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import requests
 from django.contrib.auth import get_user_model
@@ -28,7 +29,7 @@ from notifications.models import Notification
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .competition.hockey import DFEL
+from .competition.hockey import DFEL, IJNL
 from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
@@ -37,6 +38,7 @@ from .services import (
     dfel_import,
     effective_members,
     generate_occurrences,
+    ijnl_import,
     import_sources,
     occurrence_datetimes,
     player_attendance_rankings,
@@ -1910,6 +1912,246 @@ class DFELUpdateGameInformationTests(EventsTestBase):
             fetch_game_info(game)
 
 
+IJNL_TEAM_ID = "64414"
+IJNL_SEASON = "2026/27"
+IJNL_SOURCE_ID = f"{IJNL_TEAM_ID}/{IJNL_SEASON}"
+IJNL_TEAM_NAME = "Sharks Ladies Mechelen"
+
+
+def ijnl_game(game_id, *, days=7, time_text="16:00", home_id=IJNL_TEAM_ID, home_name=IJNL_TEAM_NAME, away_id="32609", away_name="Amsterdam Tigers Vrouwen", undated=False, time_unknown=False, state="gepland"):
+    """One game in an ijshockey.nl team ``/data`` response, ``days`` from now."""
+    return {
+        "gameGuid": game_id,
+        "datum": None if undated else (timezone.now() + timedelta(days=days)).strftime("%Y-%m-%d"),
+        "tijd": None if time_unknown else time_text,
+        "datumOnbekend": undated,
+        "tijdOnbekend": time_unknown,
+        "staat": state,
+        "competitie": {"league": "Vrouwen", "onderdeelId": 21808, "onderdeel": "Vrouwen Eredivisie"},
+        "thuis": {"teamId": int(home_id), "naam": home_name, "score": None},
+        "uit": {"teamId": int(away_id), "naam": away_name, "score": None},
+        "locatie": None,
+    }
+
+
+def ijnl_team_data(programma, uitslagen=(), season=IJNL_SEASON):
+    return json.dumps(
+        {
+            "team": {"teamId": int(IJNL_TEAM_ID), "naam": IJNL_TEAM_NAME, "korteNaam": IJNL_TEAM_NAME, "club": IJNL_TEAM_NAME},
+            "seizoen": season,
+            "onderdelen": [{"onderdeelId": 21808, "onderdeel": "Vrouwen Eredivisie"}],
+            "programma": list(programma),
+            "uitslagen": list(uitslagen),
+        }
+    )
+
+
+def ijnl_game_data(state="live", home="2", away="1"):
+    """An ijshockey.nl game ``/data?part=live`` response."""
+    scoreboard = f'<section class="mp-scoreboard"><div class="mp-result"><span class="mp-status">Periode 2</span><div class="mp-score" aria-label="{home} tegen {away}"><span>{home}</span><span>{away}</span></div></div></section>'
+    return json.dumps({"title": "Sharks - Tigers", "state": state, "refreshSeconds": 60, "sections": {"scoreboard": scoreboard}})
+
+
+def ijnl_response(text, status_code=200):
+    return mock.Mock(status_code=status_code, text=text)
+
+
+class IJNLExtractIdsTests(TestCase):
+    def test_a_team_page_url_yields_team_and_season(self):
+        for url in [
+            "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27",
+            "https://ijshockey.nl/competities/team/64414/?seizoen=2026/27",
+            "  https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27  ",
+        ]:
+            with self.subTest(url=url):
+                self.assertEqual(ijnl_import.extract_ids(url), (IJNL_TEAM_ID, IJNL_SEASON))
+
+    def test_a_url_without_a_season_yields_a_blank_season(self):
+        self.assertEqual(ijnl_import.extract_ids("https://www.ijshockey.nl/competities/team/64414"), (IJNL_TEAM_ID, ""))
+
+    def test_a_non_matching_url_is_rejected(self):
+        for url in [
+            "https://www.ijshockey.nl/competities/wedstrijd/49a66dbb-eaa2-4527-9c8b-31ee324d736b",
+            "https://evil.example.com/competities/team/64414",
+            "https://www.ijshockey.nl.evil.example.com/competities/team/64414",
+            "https://www.ijshockey.nl/competities/team/64414?seizoen=next",
+            "",
+        ]:
+            with self.subTest(url=url), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.extract_ids(url)
+
+    def test_source_id_and_canonical_url(self):
+        self.assertEqual(ijnl_import.source_id(IJNL_TEAM_ID, IJNL_SEASON), IJNL_SOURCE_ID)
+        self.assertEqual(ijnl_import.team_page_url(IJNL_TEAM_ID, IJNL_SEASON), "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27")
+
+
+class IJNLFetchTeamDataTests(TestCase):
+    def test_fetch_asks_for_the_season(self):
+        with mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(ijnl_team_data([]))) as mock_get:
+            raw_json = ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+        self.assertEqual(ijnl_import.season_of(raw_json), IJNL_SEASON)
+        self.assertEqual(mock_get.call_args.args[0], "https://www.ijshockey.nl/competities/team/64414/data")
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"seizoen": IJNL_SEASON})
+
+    def test_a_network_or_http_error_is_an_ijnl_import_error(self):
+        for side_effect in [requests.ConnectionError("boom"), [ijnl_response("nope", status_code=500)]]:
+            with self.subTest(side_effect=side_effect), mock.patch("events.services.ijnl_import.requests.get", side_effect=side_effect), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+    def test_an_unexpected_payload_is_an_ijnl_import_error(self):
+        for body in ["<html>oops</html>", json.dumps({"team": {}}), json.dumps([])]:
+            with self.subTest(body=body), mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(body)), self.assertRaises(ijnl_import.IJNLImportError):
+                ijnl_import.fetch_team_data(IJNL_TEAM_ID, IJNL_SEASON)
+
+
+class IJNLParseFixturesTests(TestCase):
+    def test_home_and_away_games_are_detected_with_the_right_opponent(self):
+        games = [ijnl_game("home"), ijnl_game("away", days=14, home_id="32610", home_name="Dordrecht Lady Lions", away_id=IJNL_TEAM_ID, away_name=IJNL_TEAM_NAME)]
+        team_name, fixtures, undated = ijnl_import.parse_fixtures(ijnl_team_data(games), IJNL_TEAM_ID)
+
+        self.assertEqual((team_name, undated), (IJNL_TEAM_NAME, []))
+        home, away = fixtures
+        self.assertEqual((home.external_game_id, home.is_home, home.opponent_name), ("home", True, "Amsterdam Tigers Vrouwen"))
+        self.assertEqual((away.external_game_id, away.is_home, away.opponent_name), ("away", False, "Dordrecht Lady Lions"))
+
+    def test_start_is_dutch_wall_clock_time(self):
+        game = ijnl_game("g1", time_text="16:45")
+        _team_name, [fixture], _undated = ijnl_import.parse_fixtures(ijnl_team_data([game]), IJNL_TEAM_ID)
+
+        local = fixture.start.astimezone(ZoneInfo("Europe/Amsterdam"))
+        self.assertEqual((local.strftime("%Y-%m-%d"), local.hour, local.minute), (game["datum"], 16, 45))
+
+    def test_an_unknown_hour_falls_back_to_noon_like_the_site(self):
+        _team_name, [fixture], _undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("g1", time_unknown=True)]), IJNL_TEAM_ID)
+
+        self.assertEqual(fixture.start.astimezone(ZoneInfo("Europe/Amsterdam")).hour, 12)
+
+    def test_undated_games_are_reported_separately(self):
+        _team_name, fixtures, undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("g1"), ijnl_game("tbd", undated=True)]), IJNL_TEAM_ID)
+
+        self.assertEqual(([fixture.external_game_id for fixture in fixtures], undated), (["g1"], ["tbd"]))
+
+    def test_played_games_are_skipped(self):
+        _team_name, fixtures, _undated = ijnl_import.parse_fixtures(ijnl_team_data([ijnl_game("future")], uitslagen=[ijnl_game("past", days=-3, state="definitief")]), IJNL_TEAM_ID)
+
+        self.assertEqual([fixture.external_game_id for fixture in fixtures], ["future"])
+
+    def test_parse_score_reads_the_scoreboard(self):
+        self.assertEqual(ijnl_import.parse_score(json.loads(ijnl_game_data(home="4", away="0"))), (4, 0))
+        self.assertEqual(ijnl_import.parse_score(json.loads(ijnl_game_data(state="gepland", home="-", away="-"))), (None, None))
+        self.assertEqual(ijnl_import.parse_score({"state": "gepland"}), (None, None))
+
+
+class IJNLImportPlanTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+
+    def plan(self, games, source_id=IJNL_SOURCE_ID, label=""):
+        return ijnl_import.build_plan(self.club, self.team, source_id, ijnl_team_data(games), label)
+
+    def test_apply_plan_creates_ijnl_events(self):
+        plan = self.plan([ijnl_game("h1")], label="Eredivisie")
+
+        self.assertEqual((plan.competition, plan.source_id, plan.scraped_team_name), ("IJNL", IJNL_SOURCE_ID, IJNL_TEAM_NAME))
+        self.assertEqual(plan.to_create[0].suggested_location, self.home_location)
+        result = ijnl_import.apply_plan(plan, {"h1": str(self.home_location.pk)})
+
+        self.assertEqual(result, {"created": 1, "updated": 0, "deleted": 0})
+        event = Event.objects.get(external_game_id="h1")
+        self.assertEqual((event.competition, event.external_source_id, event.competition_label), ("IJNL", IJNL_SOURCE_ID, "Eredivisie"))
+        self.assertEqual(event.opponent.name, "Amsterdam Tigers Vrouwen")
+        self.assertEqual(list(event.teams.all()), [self.team])
+
+    def test_a_reimport_updates_a_moved_game_and_deletes_a_dropped_one(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1"), ijnl_game("h2", days=21)]), {})
+
+        plan = self.plan([ijnl_game("h1", days=8)])
+
+        self.assertEqual([p.fixture.external_game_id for p in plan.to_update], ["h1"])
+        self.assertIn("start", plan.to_update[0].changes)
+        self.assertEqual([event.external_game_id for event in plan.to_delete], ["h2"])
+
+    def test_a_game_that_lost_its_date_is_kept_not_deleted(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1"), ijnl_game("h2")]), {})
+
+        plan = self.plan([ijnl_game("h1"), ijnl_game("h2", undated=True)])
+
+        self.assertEqual((plan.to_delete, plan.to_create, plan.to_update), ([], [], []))
+
+    def test_another_seasons_import_never_deletes_these_events(self):
+        ijnl_import.apply_plan(self.plan([ijnl_game("h1")]), {})
+
+        plan = self.plan([ijnl_game("next1")], source_id=ijnl_import.source_id(IJNL_TEAM_ID, "2027/28"))
+
+        self.assertEqual(plan.to_delete, [])
+
+
+class IJNLUpdateGameInformationTests(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        cls.competition = Competition.objects.get(name="IJNL")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("competition", "IJNL")
+        kwargs.setdefault("external_game_id", "49a66dbb-eaa2-4527-9c8b-31ee324d736b")
+        kwargs.setdefault("external_source_id", IJNL_SOURCE_ID)
+        return self.make_event(**kwargs)
+
+    def patch_fetch(self, body):
+        return mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(body))
+
+    def test_the_seeded_competition_is_flagged_ice_hockey(self):
+        self.assertEqual(self.competition.module, "events.competition.hockey")
+        self.assertEqual(self.competition.sport_type, Club.SportType.ICE_HOCKEY)
+        self.assertEqual(self.competition.flag.name, "IJNL")
+
+    def test_a_live_home_game_maps_home_score_to_score_for(self):
+        game = self.make_game(location=self.home_location)
+        with self.patch_fetch(ijnl_game_data(state="live", home="3", away="1")) as mock_get:
+            IJNL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (3, 1, True))
+        self.assertEqual(mock_get.call_args.args[0], "https://www.ijshockey.nl/competities/wedstrijd/49a66dbb-eaa2-4527-9c8b-31ee324d736b/data")
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"part": "live"})
+
+    def test_a_finished_away_game_maps_away_score_to_score_for(self):
+        game = self.make_game(is_live=True)
+        with self.patch_fetch(ijnl_game_data(state="definitief", home="4", away="0")):
+            IJNL().update_game_information(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against, game.is_live), (0, 4, False))
+
+    def test_a_missing_game_id_is_an_error_without_fetching(self):
+        with mock.patch("events.services.ijnl_import.requests.get") as mock_get, self.assertRaises(ValueError):
+            IJNL().update_game_information(self.make_game(external_game_id=""))
+        mock_get.assert_not_called()
+
+    def test_fetch_game_info_is_gated_on_the_ijnl_flag(self):
+        game = self.make_game(location=self.home_location)
+        with mock.patch("events.services.ijnl_import.requests.get") as mock_get:
+            self.assertFalse(fetch_game_info(game))
+        mock_get.assert_not_called()
+
+        self.competition.flag.clubs.add(self.club)
+        with self.patch_fetch(ijnl_game_data(state="live", home="1", away="0")):
+            self.assertTrue(fetch_game_info(game))
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against), (1, 0))
+
+
 class EventRefereeModelTests(EventsTestBase):
     def test_str(self):
         event = self.make_event(title="Cup Final")
@@ -3626,3 +3868,22 @@ class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
 
         self.assertEqual(Notification.objects.filter(club=self.club, member=self.admin).count(), 1)
         self.assertEqual(list(Notification.objects.filter(club=other_club).values_list("member_id", flat=True)), [other_admin.pk])
+
+
+class IJNLImportSourceTests(ImportSourcesTestBase):
+    IJNL_URL = "https://www.ijshockey.nl/competities/team/64414?seizoen=2026%2F27"
+
+    def test_a_stored_ijnl_entry_is_fetched_and_planned_for_its_season(self):
+        entry = self.store(source=import_sources.SOURCE_IJNL, url=self.IJNL_URL)
+        with mock.patch("events.services.ijnl_import.requests.get", return_value=ijnl_response(ijnl_team_data([ijnl_game("h1")]))) as mock_get:
+            raw = import_sources.fetch(entry)
+
+        self.assertEqual(mock_get.call_args.kwargs["params"], {"seizoen": IJNL_SEASON})
+        plan = import_sources.build_plan_for(self.club, self.team, entry, raw)
+        self.assertEqual((plan.competition, plan.source_id), ("IJNL", IJNL_SOURCE_ID))
+
+    def test_a_stored_entry_without_a_season_is_an_error(self):
+        entry = self.store(source=import_sources.SOURCE_IJNL, url="https://www.ijshockey.nl/competities/team/64414")
+
+        with self.assertRaises(import_sources.ImportSourceError):
+            import_sources.source_id_for(entry)
