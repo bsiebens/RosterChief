@@ -278,7 +278,7 @@
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="card-title mb-1">{% lucide "download" size=16 %} {% trans "Fixture import sources" %}</div>
                     {% if rbihf_enabled or dfel_enabled %}
-                        <a class="btn btn-outline gap-2" href="{% url 'management:fixture_recheck' %}?team={{ team.pk }}">{% lucide "refresh-cw" size=16 %} {% trans "Re-check this team" %}</a>
+                        <a class="btn btn-outline btn-sm gap-2" href="{% url 'management:fixture_recheck' %}?team={{ team.pk }}">{% lucide "refresh-cw" size=14 %} {% trans "Re-check this team" %}</a>
                     {% endif %}
                 </div>
                 <p class="text-sm text-muted">{% trans "The fixture lists this team's games were imported from, remembered per season and competition." %}</p>
