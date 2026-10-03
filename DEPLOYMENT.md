@@ -31,6 +31,25 @@ this is a deliberate convenience for a solo maintainer, not a reason to skip jud
 GitHub's `enforce_admins` is all-or-nothing: turning it off to skip the PR requirement also
 lets an admin force-push or delete `development`, not just commit to it directly.
 
+**`deploy/cut-release.sh` automates both sequences below**, up to an open PR into `main` that
+you then merge yourself:
+
+```bash
+deploy/cut-release.sh release 0.7.14                 # ship development as 0.7.14
+deploy/cut-release.sh hotfix 0.7.15 <commit>...      # ship main + these development commits
+```
+
+It shows what it's about to ship and asks before changing anything (`--yes` skips the prompt).
+It refuses a version that's already tagged or isn't newer than the latest release, and it won't
+run with uncommitted changes. It differs from the manual sequences in two ways:
+
+- **The version bump is committed on `development` too**, so `development` stays on the
+  current version. A release branch is just `development`'s tip after that bump.
+- **A hotfix cherry-picks commits that are already on `development`**: fix it there first, then
+  hotfix it out. That makes the back-merge PR unnecessary.
+
+Merging the PR and running `deploy/deploy-prod.sh --version vX.Y.Z` stay manual.
+
 **Cutting a release** (branched from `development`, feature-frozen while `development` keeps
 moving underneath it):
 
