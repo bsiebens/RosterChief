@@ -884,6 +884,15 @@ its 10-min cache) when `poll_live_game_results` sees a team's game finish, and n
 and `/teams/{id}/standings/`, current season, behind the club's `RBIHF` flag — so visitors never
 trigger a federation round trip.
 
+**Game timelines.** Behind the `game_timeline` flag (on top of the competition's own flag), each
+polled game's timeline (goals with scorer/assists/strength, penalties, goalie changes,
+time-outs, period markers) is stored as one normalized JSON document on
+`events.GameTimeline` (one-to-one with `Event`, so the blob never rides along on ordinary `Event`
+queries). It's fetched by each competition class's `fetch_timeline`, right after the score
+update in `fetch_game_info`, and parsed by `events/services/timeline_parsers.py`.
+`settle_game_timelines` (nightly) picks up post-game corrections, and `fetch_game_timelines` is
+the manual backfill. Design, source research and the later API/push phases: `GAME_TIMELINE.md`.
+
 **IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
 with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling
 (`/competities/team/<id>/data?seizoen=2026/27`) covers *every* division the team plays that season

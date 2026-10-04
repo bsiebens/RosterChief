@@ -93,12 +93,13 @@ from evaluations.services import (
     start_session,
     submit_evaluation,
 )
-from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, Location, OfficialSignup, Opponent, RefereeSignup
+from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, GameTimeline, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services import dfel_import, ijnl_import, import_sources
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.dfel_import import DFELImportError, fetch_schedule
+from events.services.game_timeline import display_periods
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
@@ -3401,6 +3402,9 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = EventTaskForm(instance=task)
         task_form = EventTaskForm()
+        # Read-only, staff-facing: what the competition's timeline says happened
+        # (events.services.game_timeline) -- mostly so it's visible what was parsed.
+        game_timeline = GameTimeline.objects.filter(event=event).first() if event.kind == Event.EventKind.GAME else None
 
         return super().get_context_data(
             can_manage=can_manage,
@@ -3421,6 +3425,8 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             pending_official_signups=pending_official_signups,
             tasks=tasks,
             task_form=task_form,
+            game_timeline=game_timeline,
+            game_timeline_periods=display_periods(game_timeline, event) if game_timeline else [],
             **kwargs,
         )
 

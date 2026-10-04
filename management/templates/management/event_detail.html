@@ -144,6 +144,9 @@
                 </div>
             </div>
         </div>
+        {% if game_timeline %}
+            {% include "management/_game_timeline_card.html" with timeline=game_timeline periods=game_timeline_periods %}
+        {% endif %}
     {% endif %}
 
     {% if event.is_home_fixture and not referee_management_needed %}

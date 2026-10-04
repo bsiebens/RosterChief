@@ -842,7 +842,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All thirteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
+All fourteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
 `when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
@@ -859,6 +859,7 @@ class every one of them runs through.
 | `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
 | `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
 | `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
+| `settle_game_timelines` | daily 01:30 | re-fetches the timelines (goals, penalties, …) of games that finished 3h–7 days ago until they stop changing, then marks them finalized — clubs with the `game_timeline` flag only (see GAME_TIMELINE.md) |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -979,7 +980,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the thirteen jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the fourteen jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually

@@ -530,6 +530,46 @@ class EventTaskClaim(UUIDModel):
         return f"{self.task} - {self.member}"
 
 
+class GameTimeline(UUIDModel):
+    """What happened during one game -- goals and who scored them, penalties,
+    goalie changes, time-outs, period scores -- as fetched from the game's
+    competition (see GAME_TIMELINE.md and events.services.game_timeline).
+
+    A one-to-one side table rather than columns on Event: Event is loaded
+    everywhere (calendar, lists, attendance, the API) and ``data`` runs from a
+    few to a few dozen KB, so it's only joined where it's actually wanted.
+    Club-scoped through ``event``, like Attendance/Lineup/EventReferee.
+
+    ``data`` is the normalized document (GAME_TIMELINE.md §2.2) -- one shape
+    for every source. ``data_hash`` lets a poll that found nothing new skip the
+    write. ``raw`` is the last payload ``data`` was parsed from, kept (only the
+    latest) so a parser fix can re-parse stored games.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", _("scheduled")
+        LIVE = "live", _("live")
+        FINAL = "final", _("final")
+
+    event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="timeline", verbose_name=_("event"))
+    source = models.CharField(_("source"), max_length=50, help_text=_("The competition this was fetched from (Event.competition at fetch time)."))
+    data = models.JSONField(_("data"), default=dict, blank=True)
+    data_hash = models.CharField(_("data hash"), max_length=64, blank=True)
+    raw = models.TextField(_("raw payload"), blank=True)
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.SCHEDULED, db_index=True)
+    fetched_at = models.DateTimeField(_("fetched at"), null=True, blank=True, help_text=_("Last successful fetch."))
+    changed_at = models.DateTimeField(_("changed at"), null=True, blank=True, help_text=_("Last time the timeline actually changed."))
+    finalized_at = models.DateTimeField(_("finalized at"), null=True, blank=True, help_text=_("Set once a finished game's timeline stopped changing; it isn't re-fetched after that."))
+    last_error = models.TextField(_("last error"), blank=True, help_text=_("The last fetch/parse error, if the latest attempt failed; the previous data is kept."))
+
+    class Meta:
+        verbose_name = _("game timeline")
+        verbose_name_plural = _("game timelines")
+
+    def __str__(self):
+        return f"{self.event} ({self.status})"
+
+
 class Competition(models.Model):
     """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
 

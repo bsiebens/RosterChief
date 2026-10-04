@@ -1,0 +1,45 @@
+{% load i18n lucide %}
+{% comment %}
+    Read-only: what the game's competition says happened, as stored by
+    events.services.game_timeline (fetched with the score while the game is
+    live, then re-fetched nightly until it stops changing -- see GAME_TIMELINE.md).
+    Context: timeline (GameTimeline), periods (display_periods(...): rows with
+    time, ours (True/False/None for period markers), team, text, score).
+{% endcomment %}
+<div class="card">
+    <div class="card-body">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title text-base">{% lucide "list" size=18 %} {% trans "Game timeline" %}</h2>
+            <span class="font-mono text-xs text-muted">
+                {{ timeline.get_status_display }}
+                {% if timeline.fetched_at %}&middot; {% blocktrans with when=timeline.fetched_at|date:"j M H:i" %}fetched {{ when }}{% endblocktrans %}{% endif %}
+                {% if timeline.finalized_at %}&middot; {% trans "final" %}{% endif %}
+            </span>
+        </div>
+        {% if timeline.last_error %}
+            <div class="alert alert-warning text-sm">
+                {% lucide "triangle-alert" size=16 %}
+                <span>{% blocktrans with error=timeline.last_error %}The last fetch failed: {{ error }}{% endblocktrans %}</span>
+            </div>
+        {% endif %}
+        {% for period in periods %}
+            <div class="mt-2 font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% blocktrans with label=period.label %}Period {{ label }}{% endblocktrans %}</div>
+            <ul class="divide-y divide-line">
+                {% for row in period.rows %}
+                    <li class="flex items-baseline gap-3 py-1.5 text-sm">
+                        <span class="w-12 shrink-0 font-mono text-xs text-muted tabular-nums">{{ row.time }}</span>
+                        {% if row.ours is None %}
+                            <span class="text-muted">{{ row.text }}</span>
+                        {% else %}
+                            <span class="w-28 shrink-0 truncate text-xs {% if row.ours %}font-semibold text-ink{% else %}text-muted{% endif %}">{{ row.team }}</span>
+                            <span class="{% if row.type == 'goal' %}font-semibold text-ink{% else %}text-slate{% endif %}">{{ row.text }}</span>
+                            {% if row.score %}<span class="ml-auto font-mono text-xs font-semibold text-ink tabular-nums">{{ row.score }}</span>{% endif %}
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% empty %}
+            <p class="text-sm text-muted">{% trans "Nothing has happened in this game yet." %}</p>
+        {% endfor %}
+    </div>
+</div>

@@ -33,6 +33,8 @@ from events.models import Attendance, Competition, Event, EventOfficial, EventRe
 from events.services import ijnl_import, import_sources
 from events.services.calendar import week_bounds
 from events.services.dfel_import import DFELImportError
+from events.services.game_timeline import TimelineFetch
+from events.services.game_timeline import store as store_game_timeline
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
@@ -7034,6 +7036,22 @@ class EventDetailDisplayTests(ManagementTestBase):
         event = Event.objects.create(club=self.club, **kwargs)
         event.teams.add(self.team)
         return event
+
+    def test_a_games_stored_timeline_is_shown(self):
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="IJNL", start=timezone.now() - datetime.timedelta(hours=2))
+        document = {"events": [{"id": "x", "type": "goal", "side": "away", "period": "1", "seconds": 61, "time": "01:01", "goal": {"scorer": {"name": "Sam Scorer", "number": 9}, "assists": [], "score_after": {"home": 0, "away": 1}}}]}
+        store_game_timeline(game, TimelineFetch(document=document))
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "Game timeline")
+        self.assertContains(response, "Goal: Sam Scorer (#9)")
+        self.assertContains(response, "1-0")
+
+    def test_no_timeline_card_without_a_stored_timeline(self):
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME)
+
+        self.assertNotContains(self.club_get("event_detail", game.pk), "Game timeline")
 
     def test_the_rsvp_breakdown_shows_every_status_even_at_zero(self):
         event = self.make_event()

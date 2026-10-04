@@ -9,7 +9,8 @@ else (`events/competition/hockey.py`). Every source we poll can give us much mor
 of it from the same request or one extra. This document records what each source offers, proposes
 one normalized shape to store it in, and splits the work into phases.
 
-Status: **design, not implemented.** The decisions still open are collected in §9.
+Status: **phase 1 (store) implemented** — see §7a for what shipped and where it deviates from
+this design. Phases 2–4 are not built yet; the decisions still open are collected in §9.
 
 ---
 
@@ -295,6 +296,44 @@ How it plugs into what exists:
 | **4. Push** | Subscriber + rules + opt-in + rate limiting, once §9 is decided. | depends on decisions |
 
 Phases 1–3 are independent of the push decisions and can ship first.
+
+## 7a. Phase 1 as built
+
+- **Model:** `events.GameTimeline` (`events/migrations/0041`) as in §2.1, plus `raw` (last payload
+  only). The `game_timeline` waffle flag is seeded by `0042`. Timelines are fetched only for clubs
+  that have both this flag and the competition's own flag.
+- **Parsers:** `events/services/timeline_parsers.py`, pure functions, one per source, tested
+  against real payloads in `events/test_fixtures/game_timeline/`. Players are pseudonymised there
+  and birthdates removed; real names never go into the repo.
+- **Storage service:** `events/services/game_timeline.py` (`store`, `fetch_and_store`,
+  `refresh_timeline`, `settle`, `display_periods`).
+- **Hook:** `events.services.competitions.fetch_game_info` calls `refresh_timeline` after a
+  successful score update, on the same competition instance. So the live poll and the "Fetch new
+  game info" button both cover it, and CEHL/IJNL reuse the response the score fetch already
+  downloaded (no extra request). A timeline failure is recorded in `last_error` and never fails
+  the score update.
+- **Commands:**
+  - `settle_game_timelines` is a scheduled job, daily at 01:30. It handles games that started
+    3h–7d ago and aren't finalized yet; a final timeline that comes back unchanged gets
+    `finalized_at`.
+  - `fetch_game_timelines` is the manual backfill (`--club`, `--since`, `--refetch`,
+    `--dry-run`). By default it covers each club's current season. Games older than the settle
+    window are finalized right away.
+- **Management:** the event detail page shows a read-only "Game timeline" card under the game
+  card, from the club's side.
+
+Deviations from §3.1, both to keep the score path untouched:
+- **No `GameSnapshot` refactor.** Each competition class keeps its proven
+  `update_game_information` for score and live status, and gains a separate
+  `fetch_timeline(event) -> TimelineFetch | None` (default `None`). The single shared score-mapping
+  function is left for later.
+- **DFEL still uses the division schedule for its score.** `GetGameReport` is used for the
+  timeline only. Its `gameStatus` values for "live" vs. "intermission" haven't been verified yet,
+  so it doesn't replace the schedule's proven live detection. The hockeydata API key is cached for
+  a day for the report fetch.
+- **RBIHF timelines cost two requests per poll:** the game page, cached 10 min per game, plus the
+  `timeline.php` POST. `overview.php` isn't called; per-period scores are derived from the goals,
+  which match it.
 
 ## 8. Testing
 
