@@ -6,13 +6,17 @@ import datetime
 import io
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
 from PIL import Image
+from waffle import get_waffle_flag_model
 
 from club.models import ClubMembership, OnboardingRequirement
 from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, RefereeSignup
+from events.services.game_timeline import TimelineFetch
+from events.services.game_timeline import store as store_game_timeline
 from members.models import Family, FamilyMembership, Member
 from news.models import News
 from notifications.models import Notification
@@ -171,6 +175,21 @@ class EventDetailTests(ClubApiTestCase):
 
         self.assertEqual(body["lineup"]["categories"][0]["members"], [{"id": str(self.child.pk), "first_name": "Kim", "last_name": "Parent"}])
         self.assertTrue(body["answers"][0]["can_drop_out"])
+
+    def test_a_games_timeline_always_carries_names_for_members(self):
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")  # show_player_names_publicly stays off
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        game.teams.add(team)
+        goal = {"id": "g1", "type": "goal", "side": "away", "period": "1", "seconds": 61, "time": "01:01", "goal": {"scorer": {"name": "Sam Scorer", "number": 9}, "assists": []}}
+        store_game_timeline(game, TimelineFetch(document={"events": [goal]}))
+
+        self.assertIsNone(self.get(f"/events/{game.pk}").json()["game_timeline"])  # feature off
+
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        timeline = self.get(f"/events/{game.pk}").json()["game_timeline"]
+
+        self.assertEqual(timeline["events"][0]["goal"]["scorer"], {"name": "Sam Scorer", "number": 9})
 
     def test_another_clubs_event_is_404(self):
         rival = make_club(name="Rival FC", slug="rival-fc")

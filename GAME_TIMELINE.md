@@ -9,8 +9,9 @@ else (`events/competition/hockey.py`). Every source we poll can give us much mor
 of it from the same request or one extra. This document records what each source offers, proposes
 one normalized shape to store it in, and splits the work into phases.
 
-Status: **phase 1 (store) implemented** — see §7a for what shipped and where it deviates from
-this design. Phases 2–4 are not built yet; the decisions still open are collected in §9.
+Status: **phases 1 (store) and 2 (expose) implemented.** §7a and §7b cover what shipped and where
+it deviates from this design. Phases 3–4 are not built yet; the decisions still open are
+collected in §9 (§9.1 is now decided).
 
 ---
 
@@ -334,6 +335,31 @@ Deviations from §3.1, both to keep the score path untouched:
 - **RBIHF timelines cost two requests per poll:** the game page, cached 10 min per game, plus the
   `timeline.php` POST. `overview.php` isn't called; per-period scores are derived from the goals,
   which match it.
+
+## 7b. Phase 2 as built
+
+- **Player names (§9.1, decided):** a per-team switch, `Team.show_player_names_publicly`, off
+  by default, editable on the management team form.
+  - **Public API:** names only when *every* one of our teams on the game has the switch on, so a
+    youth team sharing a game never leaks names. Otherwise each player is
+    `{"name": null, "number": 19}`. Opponent players follow the same rule.
+  - **Member app:** logged-in members always see names.
+- **Shared shape:** `events/timeline_schemas.py` (`TimelineOut` and its parts) is built by
+  `events.services.game_timeline.timeline_for_api`, so both APIs serve exactly the same
+  structure. `ours` is resolved per event and on `our_side`. When a source doesn't say how the
+  game was decided, `decided_in` is derived from the period labels once the game is final.
+- **Public API (`/api/v1/`):**
+  - `GET /games/{id}/` returns the game, as on the lists, plus `timeline` (404 for another club's
+    game or a non-game). It's cached for 15 s while the game is live, otherwise for the usual 30 s.
+  - Every game list (`upcoming`, `past`, `live`, `teams/{id}/games`) gains `periods`,
+    `decided_in` and `timeline_updated_at`, but never the events.
+  - Lists join the timeline but defer its `raw` payload. Timelines only appear while the club
+    has the `game_timeline` flag.
+- **Member app API (`appapi`):**
+  - `GET /events/{id}` gains `game_timeline`, filled only for games, with the club's
+    `game_timeline` feature, and with names.
+  - The club's `features` now includes `game_timeline`.
+  - `docs/app-api/openapi-app-v1.json` is regenerated.
 
 ## 8. Testing
 

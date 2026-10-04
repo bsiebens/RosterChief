@@ -723,6 +723,11 @@
             "title": "Forms",
             "type": "boolean"
           },
+          "game_timeline": {
+            "description": "Games carry a timeline (goals, penalties, ...) on `GET /events/{id}`.",
+            "title": "Game Timeline",
+            "type": "boolean"
+          },
           "officials": {
             "title": "Officials",
             "type": "boolean"
@@ -743,7 +748,8 @@
           "shop_open",
           "forms",
           "officials",
-          "evaluations"
+          "evaluations",
+          "game_timeline"
         ],
         "title": "ClubFeatures",
         "type": "object"
@@ -1338,6 +1344,17 @@
           },
           "event": {
             "$ref": "#/components/schemas/EventOut"
+          },
+          "game_timeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a game, when the club has game timelines: goals, penalties, goalie changes and time-outs as the federation reported them, with player names."
           },
           "lineup": {
             "anyOf": [
@@ -2982,6 +2999,30 @@
         "title": "PaymentsOut",
         "type": "object"
       },
+      "PeriodScoreOut": {
+        "properties": {
+          "away": {
+            "title": "Away",
+            "type": "integer"
+          },
+          "home": {
+            "title": "Home",
+            "type": "integer"
+          },
+          "label": {
+            "description": "\"1\", \"2\", \"3\", then \"OT\"/\"OT2\"/\"SO\".",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "home",
+          "away"
+        ],
+        "title": "PeriodScoreOut",
+        "type": "object"
+      },
       "PermissionsOut": {
         "properties": {
           "can_add_news": {
@@ -3820,6 +3861,24 @@
         "title": "RsvpIn",
         "type": "object"
       },
+      "ScoreOut": {
+        "properties": {
+          "away": {
+            "title": "Away",
+            "type": "integer"
+          },
+          "home": {
+            "title": "Home",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "home",
+          "away"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
       "SeasonOut": {
         "properties": {
           "end_date": {
@@ -4076,6 +4135,354 @@
           "jersey_number"
         ],
         "title": "TeamSpotOut",
+        "type": "object"
+      },
+      "TimelineEventOut": {
+        "properties": {
+          "goal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineGoalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "goalie_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineGoalieChangeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "description": "Stable across fetches -- use it to tell new events from ones already shown.",
+            "title": "Id",
+            "type": "string"
+          },
+          "ours": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether this was our club's side; null for period markers.",
+            "title": "Ours"
+          },
+          "penalty": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelinePenaltyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Game clock in seconds, for sorting.",
+            "title": "Seconds"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\"home\" or \"away\"; null for period markers.",
+            "title": "Side"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Game clock as the source shows it, mm:ss.",
+            "title": "Time"
+          },
+          "type": {
+            "description": "goal | penalty | goalie_change | timeout | period_start | period_end",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "period",
+          "time",
+          "seconds",
+          "side",
+          "ours"
+        ],
+        "title": "TimelineEventOut",
+        "type": "object"
+      },
+      "TimelineGoalOut": {
+        "properties": {
+          "assists": {
+            "items": {
+              "$ref": "#/components/schemas/TimelinePlayerOut"
+            },
+            "title": "Assists",
+            "type": "array"
+          },
+          "empty_net": {
+            "default": false,
+            "title": "Empty Net",
+            "type": "boolean"
+          },
+          "game_winning": {
+            "default": false,
+            "title": "Game Winning",
+            "type": "boolean"
+          },
+          "penalty_shot": {
+            "default": false,
+            "title": "Penalty Shot",
+            "type": "boolean"
+          },
+          "score_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The score right after this goal."
+          },
+          "scorer": {
+            "$ref": "#/components/schemas/TimelinePlayerOut"
+          },
+          "strength": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EQ, PP1, PP2, SH1, SH2, EN or PS, when the source says.",
+            "title": "Strength"
+          }
+        },
+        "required": [
+          "scorer",
+          "assists"
+        ],
+        "title": "TimelineGoalOut",
+        "type": "object"
+      },
+      "TimelineGoalieChangeOut": {
+        "properties": {
+          "action": {
+            "description": "\"in\" or \"out\".",
+            "title": "Action",
+            "type": "string"
+          },
+          "player": {
+            "$ref": "#/components/schemas/TimelinePlayerOut"
+          }
+        },
+        "required": [
+          "player",
+          "action"
+        ],
+        "title": "TimelineGoalieChangeOut",
+        "type": "object"
+      },
+      "TimelineOut": {
+        "properties": {
+          "away_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Away Score"
+          },
+          "decided_in": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "regulation | overtime | shootout, when known.",
+            "title": "Decided In"
+          },
+          "events": {
+            "description": "Chronological.",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "final": {
+            "description": "True once the federation stopped correcting it.",
+            "title": "Final",
+            "type": "boolean"
+          },
+          "home_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Home Score"
+          },
+          "our_side": {
+            "description": "Which side (\"home\"/\"away\") is our club in this game.",
+            "title": "Our Side",
+            "type": "string"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodScoreOut"
+            },
+            "title": "Periods",
+            "type": "array"
+          },
+          "status": {
+            "description": "scheduled | live | final",
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last time the timeline changed.",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "status",
+          "our_side",
+          "home_score",
+          "away_score",
+          "periods",
+          "decided_in",
+          "updated_at",
+          "final",
+          "events"
+        ],
+        "title": "TimelineOut",
+        "type": "object"
+      },
+      "TimelinePenaltyOut": {
+        "properties": {
+          "code": {
+            "default": "",
+            "description": "IIHF penalty code, e.g. TRIP.",
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes"
+          },
+          "player": {
+            "$ref": "#/components/schemas/TimelinePlayerOut"
+          }
+        },
+        "required": [
+          "player"
+        ],
+        "title": "TimelinePenaltyOut",
+        "type": "object"
+      },
+      "TimelinePlayerOut": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Left out on the public API unless every one of our teams on the game shows player names publicly (Team.show_player_names_publicly); always present in the member app.",
+            "title": "Name"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Jersey number, when the source gives one.",
+            "title": "Number"
+          }
+        },
+        "title": "TimelinePlayerOut",
         "type": "object"
       },
       "UnreadCountOut": {

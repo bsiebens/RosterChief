@@ -12,12 +12,14 @@ from django.utils import timezone
 from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
-from api.cache import cached_for_club
+from api.cache import CACHE_SECONDS, cached_for_club
 from api.errors import require_club
 from club.services.access import current_season
 from teams.models import Team
 
-from .models import ASSUMED_EVENT_DURATION, Event
+from .models import ASSUMED_EVENT_DURATION, Event, GameTimeline
+from .services.game_timeline import public_names_allowed, timeline_enabled, timeline_for_api
+from .timeline_schemas import PeriodScoreOut, TimelineOut
 
 router = Router(tags=["games"])
 
@@ -26,6 +28,10 @@ MAX_UPCOMING_COUNT = 50
 
 DEFAULT_PAST_COUNT = 10
 MAX_PAST_COUNT = 50
+
+#: A game that's live right now gets a shorter cache window on /games/{id}/ --
+#: its timeline is re-polled every minute (events.services.game_timeline).
+LIVE_GAME_CACHE_SECONDS = 15
 
 #: /games/upcoming/ covers anything worth putting on a public fixture list --
 #: not just Game, but Tournament too. The other game endpoints (live,
@@ -68,13 +74,32 @@ class GameOut(Schema):
     status: str  # "upcoming" | "live" | "finished"
     home_score: int | None
     away_score: int | None
+    # The light parts of the game's timeline (GAME_TIMELINE.md §5) -- the full
+    # list of goals/penalties only comes with GET /games/{id}/. Empty/null when
+    # the club doesn't have game timelines or this game has none yet.
+    periods: list[PeriodScoreOut] = Field([], description="Score per period, when the game has a timeline.")
+    decided_in: str | None = Field(None, description="regulation | overtime | shootout, once known.")
+    timeline_updated_at: datetime | None = Field(None, description="Last time the game's timeline changed -- poll /games/{id}/ only when this moves.")
+
+
+class GameDetailOut(GameOut):
+    timeline: TimelineOut | None = Field(description="What happened during the game: goals, penalties, goalie changes, time-outs. Null when the club doesn't have game timelines or there's nothing yet.")
+
+
+def _timeline_of(event) -> GameTimeline | None:
+    """The game's timeline, or None -- reading the reverse one-to-one raises
+    when there's no row."""
+    try:
+        return event.timeline
+    except GameTimeline.DoesNotExist:
+        return None
 
 
 def _to_team_ref_out(request, *, id, name, logo) -> TeamRefOut:
     return TeamRefOut(id=id, name=name, logo_url=request.build_absolute_uri(logo.url) if logo else None)
 
 
-def _to_game_out(event, request, club, team=None) -> GameOut:
+def _to_game_out(event, request, club, team=None, *, timelines=False) -> GameOut:
     # Every caller prefetches "teams" -- .all() reads that cache (Team's own
     # Meta.ordering, by name), where .first() would re-query per event.
     related_teams = list(event.teams.all())
@@ -113,6 +138,9 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
     if event.location_id:
         location = LocationOut(name=event.location.name, address=event.location.address, city=event.location.city, zip_code=event.location.zip_code, country=str(event.location.country), is_home=event.location.is_home)
 
+    timeline = _timeline_of(event) if timelines else None
+    summary = timeline_for_api(timeline, event, show_names=False) if timeline else None
+
     return GameOut(
         id=event.pk,
         start=event.start,
@@ -127,7 +155,19 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
         status=status,
         home_score=home_score,
         away_score=away_score,
+        periods=summary["periods"] if summary else [],
+        decided_in=summary["decided_in"] if summary else None,
+        timeline_updated_at=summary["updated_at"] if summary else None,
     )
+
+
+def _games(queryset, club):
+    """``queryset`` with what _to_game_out reads, plus the timeline when the
+    club has them -- without its ``raw`` payload, which lists never need."""
+    queryset = queryset.select_related("opponent", "location").prefetch_related("teams")
+    if timeline_enabled(club):
+        return queryset.select_related("timeline").defer("timeline__raw"), True
+    return queryset, False
 
 
 @router.get("/games/upcoming/", response=list[GameOut], summary="Upcoming games")
@@ -140,14 +180,8 @@ def list_upcoming_games(request, count: int = DEFAULT_UPCOMING_COUNT):
 
     def compute():
         now = timezone.now()
-        events = (
-            Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False)
-            .filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION))
-            .select_related("opponent", "location")
-            .prefetch_related("teams")
-            .order_by("start")[:count]
-        )
-        return [_to_game_out(event, request, club) for event in events]
+        events, timelines = _games(Event.objects.filter(club=club, kind__in=UPCOMING_KINDS, cancelled=False).filter(Q(end__gte=now) | Q(end__isnull=True, start__gte=now - ASSUMED_EVENT_DURATION)), club)
+        return [_to_game_out(event, request, club, timelines=timelines) for event in events.order_by("start")[:count]]
 
     return cached_for_club(club.pk, f"games:upcoming:{count}", compute)
 
@@ -171,15 +205,13 @@ def list_past_games(request, count: int = DEFAULT_PAST_COUNT):
             return []
 
         now = timezone.now()
-        events = (
+        events, timelines = _games(
             Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False)
             .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
-            .filter(Q(end__lte=now) | Q(end__isnull=True, start__lte=now - ASSUMED_EVENT_DURATION))
-            .select_related("opponent", "location")
-            .prefetch_related("teams")
-            .order_by("-start")[:count]
+            .filter(Q(end__lte=now) | Q(end__isnull=True, start__lte=now - ASSUMED_EVENT_DURATION)),
+            club,
         )
-        return [_to_game_out(event, request, club) for event in events]
+        return [_to_game_out(event, request, club, timelines=timelines) for event in events.order_by("-start")[:count]]
 
     return cached_for_club(club.pk, f"games:past:{count}", compute)
 
@@ -192,9 +224,9 @@ def list_live_games(request):
     # directly work against what an external site is polling this for.
     club = require_club(request)
 
-    events = Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=True).select_related("opponent", "location").prefetch_related("teams").order_by("start")
+    events, timelines = _games(Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False, is_live=True), club)
 
-    return [_to_game_out(event, request, club) for event in events]
+    return [_to_game_out(event, request, club, timelines=timelines) for event in events.order_by("start")]
 
 
 @router.get("/teams/{team_id}/games/", response=list[GameOut], summary="A team's current-season games")
@@ -213,13 +245,36 @@ def list_team_games(request, team_id: uuid.UUID):
         if season is None:
             return []
 
-        events = (
-            Event.objects.filter(club=club, teams=team, kind=Event.EventKind.GAME, cancelled=False)
-            .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
-            .select_related("opponent", "location")
-            .prefetch_related("teams")
-            .order_by("start")
+        events, timelines = _games(
+            Event.objects.filter(club=club, teams=team, kind=Event.EventKind.GAME, cancelled=False).filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)),
+            club,
         )
-        return [_to_game_out(event, request, club, team=team) for event in events]
+        return [_to_game_out(event, request, club, team=team, timelines=timelines) for event in events.order_by("start")]
 
     return cached_for_club(club.pk, f"games:team:{team_id}", compute)
+
+
+@router.get("/games/{game_id}/", response=GameDetailOut, summary="One game, with its timeline")
+def get_game(request, game_id: uuid.UUID):
+    """One game -- the same fields as the lists, plus ``timeline``: goals,
+    penalties, goalie changes and time-outs as the federation reported them
+    (GAME_TIMELINE.md). Player names are only included when every one of our
+    teams on the game shows them publicly (Team.show_player_names_publicly);
+    otherwise players are jersey numbers only. A game that's live right now is
+    cached for LIVE_GAME_CACHE_SECONDS instead of the usual window."""
+    club = require_club(request)
+    is_live = Event.objects.filter(club=club, pk=game_id, kind=Event.EventKind.GAME, cancelled=False).values_list("is_live", flat=True).first()
+    if is_live is None:
+        raise HttpError(404, "No such game.")
+
+    def compute():
+        events, timelines = _games(Event.objects.filter(club=club, pk=game_id), club)
+        event = events.first()
+        if event is None:
+            raise HttpError(404, "No such game.")
+        game = _to_game_out(event, request, club, timelines=timelines)
+        timeline = _timeline_of(event) if timelines else None
+        detail = timeline_for_api(timeline, event, show_names=public_names_allowed(event)) if timeline else None
+        return GameDetailOut(**game.dict(), timeline=detail)
+
+    return cached_for_club(club.pk, f"games:detail:{game_id}", compute, seconds=LIVE_GAME_CACHE_SECONDS if is_live else CACHE_SECONDS)

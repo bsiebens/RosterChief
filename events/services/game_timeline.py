@@ -216,3 +216,74 @@ def display_periods(timeline: GameTimeline, event) -> list[dict]:
             row["score"] = f"{score[our_side]}-{score['away' if our_side == 'home' else 'home']}"
         periods[-1]["rows"].append(row)
     return periods
+
+
+def public_names_allowed(event) -> bool:
+    """Player names on the public API: only when every one of our teams on the
+    game has Team.show_player_names_publicly on (youth teams default to off)."""
+    teams = list(event.teams.all())
+    return bool(teams) and all(team.show_player_names_publicly for team in teams)
+
+
+def _api_player(person, show_names: bool) -> dict:
+    person = person or {}
+    result = {"number": person.get("number")}
+    if show_names and person.get("name"):
+        result["name"] = person["name"]
+    return result
+
+
+def _decided_in(timeline: GameTimeline, data: dict) -> str | None:
+    """For sources that don't say (RBIHF, CEHL, IJNL): from the period labels
+    once the game is final -- a shoot-out or overtime period means it went
+    past regulation."""
+    if timeline.status != GameTimeline.Status.FINAL or not data.get("events"):
+        return None
+    labels = {str(period.get("label", "")).upper() for period in data.get("periods", [])}
+    if "SO" in labels:
+        return "shootout"
+    if any(label.startswith("OT") for label in labels):
+        return "overtime"
+    return "regulation"
+
+
+def timeline_for_api(timeline: GameTimeline, event, *, show_names: bool) -> dict:
+    """The stored document as the API serves it (events.timeline_schemas.
+    TimelineOut): our side resolved ("ours", same Event.is_home_game convention
+    as the score), and player names left out unless ``show_names``."""
+    data = timeline.data or {}
+    our_side = "home" if event.is_home_game else "away"
+    score = data.get("score") or {}
+    events = []
+    for item in data.get("events", []):
+        side = item.get("side")
+        row = {"id": item["id"], "type": item["type"], "period": item.get("period"), "time": item.get("time"), "seconds": item.get("seconds"), "side": side, "ours": (side == our_side) if side else None}
+        if item["type"] == "goal":
+            goal = item.get("goal") or {}
+            row["goal"] = {
+                "scorer": _api_player(goal.get("scorer"), show_names),
+                "assists": [_api_player(person, show_names) for person in goal.get("assists", [])],
+                "strength": goal.get("strength"),
+                "empty_net": bool(goal.get("empty_net")),
+                "penalty_shot": bool(goal.get("penalty_shot")),
+                "game_winning": bool(goal.get("game_winning")),
+                "score_after": goal.get("score_after"),
+            }
+        elif item["type"] == "penalty":
+            penalty = item.get("penalty") or {}
+            row["penalty"] = {"player": _api_player(penalty.get("player"), show_names), "code": penalty.get("code", ""), "description": penalty.get("description", ""), "minutes": penalty.get("minutes")}
+        elif item["type"] == "goalie_change":
+            change = item.get("goalie_change") or {}
+            row["goalie_change"] = {"player": _api_player(change.get("player"), show_names), "action": change.get("action", "in")}
+        events.append(row)
+    return {
+        "status": timeline.status,
+        "our_side": our_side,
+        "home_score": score.get("home"),
+        "away_score": score.get("away"),
+        "periods": data.get("periods", []),
+        "decided_in": data.get("decided_in") or _decided_in(timeline, data),
+        "updated_at": timeline.changed_at,
+        "final": timeline.finalized_at is not None,
+        "events": events,
+    }

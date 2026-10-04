@@ -613,6 +613,15 @@ class TeamManagementTests(ManagementTestBase):
 
         self.assertNotIn(team, response.context["form"].fields["feeds_into"].queryset)
 
+    def test_the_public_player_names_switch_is_editable_and_off_by_default(self):
+        team = Team.objects.create(club=self.club, name="Seniors", short_name="SEN")
+        self.assertFalse(team.show_player_names_publicly)
+
+        self.club_post("team_update", {"name": "Seniors", "short_name": "SEN", "referee_management": team.referee_management, "show_player_names_publicly": "on"}, team.pk)
+
+        team.refresh_from_db()
+        self.assertTrue(team.show_player_names_publicly)
+
     def test_deleting_a_team(self):
         team = Team.objects.create(club=self.club, name="U16", short_name="U16")
 

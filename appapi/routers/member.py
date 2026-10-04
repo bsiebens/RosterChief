@@ -12,8 +12,9 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from ninja import Query, Router
 
-from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeSignup
+from events.models import Attendance, Event, EventTask, GameTimeline, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS, member_agenda
+from events.services.game_timeline import timeline_for_api
 from events.services.member_view import event_tasks, member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
@@ -157,7 +158,18 @@ def event_detail(request, event_id: uuid.UUID):
         "official_signups": [signup_out(signup) for signup in view["official_signups"]],
         "tasks": [task_out(task) for task in view["tasks"]],
         "squad_summary": {key: view["squad_summary"][key] for key in ("total", "responded", "in_count", "out_count", "no_reply_count")} if view["squad_summary"] else None,
+        "game_timeline": _game_timeline(scope, event),
     }
+
+
+def _game_timeline(scope, event):
+    """The game's timeline for a logged-in member -- always with player names
+    (the public API's Team.show_player_names_publicly gate is about anonymous
+    visitors). None for anything but a game, or without the club's feature."""
+    if event.kind != Event.EventKind.GAME or not scope.feature("game_timeline"):
+        return None
+    timeline = GameTimeline.objects.filter(event=event).defer("raw").first()
+    return timeline_for_api(timeline, event, show_names=True) if timeline else None
 
 
 #: RsvpError code -> HTTP status. Refusals of a well-formed answer are state conflicts.

@@ -1,5 +1,7 @@
 import datetime
 import io
+import json
+from unittest import mock
 
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -8,9 +10,13 @@ from django.utils import timezone
 from PIL import Image
 from waffle import get_waffle_flag_model
 
+from api.cache import cached_for_club
 from club.models import Club, ClubMembership, Season, Sponsor
+from events.api import LIVE_GAME_CACHE_SECONDS
 from events.models import Event, Location, Opponent
 from events.services import import_sources
+from events.services.game_timeline import TimelineFetch
+from events.services.game_timeline import store as store_game_timeline
 from members.models import Member
 from news.models import News, NewsPhoto
 from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -712,7 +718,9 @@ class GamesApiTests(ApiTestBase):
         # Constant no matter how many games or teams: one query for the games
         # (opponent/location joined in), one prefetch for all their teams, plus
         # the per-request tenant lookups -- not one teams query per game.
-        with self.assertNumQueries(4):
+        # +2 over the old 4: the club's "game_timeline" flag lookup (flag row + its
+        # clubs, cached across requests outside tests) -- once per request, not per game.
+        with self.assertNumQueries(6):
             self.assertEqual(len(self.api_get("/games/upcoming/").json()), 3)
 
     def make_past_game(self, days_ago=1, **overrides):
@@ -834,6 +842,116 @@ class GamesApiTests(ApiTestBase):
         Event.objects.create(club=other_club, title="Their game", kind=Event.EventKind.GAME, start=timezone.now() - datetime.timedelta(days=1), opponent=other_opponent, score_for=1, score_against=0)
 
         self.assertEqual(self.api_get("/games/past/").json(), [])
+
+
+class GameTimelineApiTests(ApiTestBase):
+    """GET /games/{id}/ and the timeline fields on the game lists -- read from
+    events.GameTimeline, behind the club's "game_timeline" flag, with player
+    names only when every one of our teams on the game shows them publicly."""
+
+    DOCUMENT = {
+        "source": "RBIHF",
+        "events": [
+            {
+                "id": "g1",
+                "type": "goal",
+                "side": "home",
+                "period": "1",
+                "seconds": 61,
+                "time": "01:01",
+                "goal": {"scorer": {"name": "Sam Scorer", "number": 9}, "assists": [{"name": "Ann Assist", "number": 4}], "strength": "PP1", "score_after": {"home": 1, "away": 0}},
+            },
+            {"id": "p1", "type": "penalty", "side": "away", "period": "2", "seconds": 1300, "time": "21:40", "penalty": {"player": {"name": "Rex Rival", "number": 18}, "code": "TRIP", "description": "Tripping", "minutes": 2}},
+            {"id": "pe1", "type": "period_end", "side": None, "period": "1", "seconds": 1200, "time": "20:00"},
+        ],
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home = Location.objects.create(club=cls.club, name="Home Rink", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Rivals FC")
+
+    def enable_timelines(self):
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+
+    def make_game(self, *, teams=None, **kwargs):
+        kwargs.setdefault("start", timezone.now() - datetime.timedelta(hours=3))
+        game = Event.objects.create(club=self.club, title="Game", kind=Event.EventKind.GAME, location=self.home, opponent=self.opponent, score_for=1, score_against=0, **kwargs)
+        game.teams.set(teams or [self.team])
+        store_game_timeline(game, TimelineFetch(document=json.loads(json.dumps(self.DOCUMENT))))
+        return game
+
+    def test_no_timeline_without_the_flag(self):
+        game = self.make_game()
+
+        data = self.api_get(f"/games/{game.pk}/").json()
+
+        self.assertIsNone(data["timeline"])
+        self.assertEqual((data["periods"], data["decided_in"], data["timeline_updated_at"]), ([], None, None))
+
+    def test_the_timeline_with_numbers_only_by_default(self):
+        self.enable_timelines()
+        game = self.make_game()
+
+        timeline = self.api_get(f"/games/{game.pk}/").json()["timeline"]
+
+        self.assertEqual((timeline["status"], timeline["our_side"], timeline["home_score"], timeline["away_score"], timeline["decided_in"]), ("final", "home", 1, 0, "regulation"))
+        goal, penalty, marker = timeline["events"]
+        self.assertEqual((goal["ours"], goal["goal"]["strength"], goal["goal"]["score_after"]), (True, "PP1", {"home": 1, "away": 0}))
+        self.assertEqual(goal["goal"]["scorer"], {"name": None, "number": 9})
+        self.assertEqual(goal["goal"]["assists"], [{"name": None, "number": 4}])
+        self.assertEqual((penalty["ours"], penalty["penalty"]["player"], penalty["penalty"]["minutes"]), (False, {"name": None, "number": 18}, 2))
+        self.assertIsNone(marker["ours"])
+        self.assertNotIn("Sam Scorer", json.dumps(timeline))
+
+    def test_names_when_every_team_shows_them(self):
+        self.enable_timelines()
+        self.team.show_player_names_publicly = True
+        self.team.save(update_fields=["show_player_names_publicly"])
+        game = self.make_game()
+
+        goal = self.api_get(f"/games/{game.pk}/").json()["timeline"]["events"][0]
+
+        self.assertEqual(goal["goal"]["scorer"], {"name": "Sam Scorer", "number": 9})
+
+    def test_one_team_without_the_switch_keeps_names_hidden(self):
+        self.enable_timelines()
+        seniors = Team.objects.create(club=self.club, name="Seniors", short_name="SEN", show_player_names_publicly=True)
+        youth = Team.objects.create(club=self.club, name="U16", short_name="U16")
+        game = self.make_game(teams=[seniors, youth])
+
+        self.assertNotIn("Sam Scorer", self.api_get(f"/games/{game.pk}/").content.decode())
+
+    def test_the_lists_carry_the_light_timeline_fields(self):
+        self.enable_timelines()
+        self.make_game()
+
+        [game] = self.api_get("/games/past/").json()
+
+        self.assertEqual(game["periods"], [{"label": "1", "home": 1, "away": 0}, {"label": "2", "home": 0, "away": 0}, {"label": "3", "home": 0, "away": 0}])
+        self.assertEqual(game["decided_in"], "regulation")
+        self.assertIsNotNone(game["timeline_updated_at"])
+        self.assertNotIn("timeline", game)
+
+    def test_another_clubs_game_or_a_non_game_is_404(self):
+        self.enable_timelines()
+        rival = Club.objects.create(name="Rival FC", slug="rival-fc")
+        theirs = Event.objects.create(club=rival, title="Theirs", kind=Event.EventKind.GAME, start=timezone.now())
+        training = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now())
+
+        self.assertEqual(self.api_get(f"/games/{theirs.pk}/").status_code, 404)
+        self.assertEqual(self.api_get(f"/games/{training.pk}/").status_code, 404)
+
+    def test_a_live_game_gets_the_short_cache_window(self):
+        self.enable_timelines()
+        game = self.make_game(is_live=True)
+
+        with mock.patch("events.api.cached_for_club", wraps=cached_for_club) as mock_cache:
+            self.api_get(f"/games/{game.pk}/")
+
+        self.assertEqual(mock_cache.call_args.kwargs["seconds"], LIVE_GAME_CACHE_SECONDS)
 
 
 class TenancyAndCorsTests(ApiTestBase):

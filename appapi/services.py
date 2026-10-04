@@ -13,7 +13,7 @@ from mobile.access import has_club_tie
 from teams.models import StaffAssignment
 
 #: The waffle flags a client needs to know about, by the name the API reports them under.
-FEATURE_FLAGS = {"shop": "shop", "forms": "formbuilder", "officials": "officials", "evaluations": "evaluations"}
+FEATURE_FLAGS = {"shop": "shop", "forms": "formbuilder", "officials": "officials", "evaluations": "evaluations", "game_timeline": "game_timeline"}
 
 
 def club_features(club: Club) -> dict:

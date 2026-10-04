@@ -181,7 +181,7 @@ class AccountPlaneTests(AppApiTestCase):
         item = items[0]
         self.assertEqual(item["api_base_url"], f"http://{CLUB_HOST}/api/app/v1")
         self.assertEqual(item["relationship"], ["guardian"])
-        self.assertEqual(item["features"], {"shop": False, "shop_open": False, "forms": False, "officials": False, "evaluations": False})
+        self.assertEqual(item["features"], {"shop": False, "shop_open": False, "forms": False, "officials": False, "evaluations": False, "game_timeline": False})
         self.assertNotIn(str(rival.pk), [entry["id"] for entry in items])
 
     def test_clubs_reports_coach_and_member(self):

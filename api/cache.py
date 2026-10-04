@@ -25,7 +25,7 @@ from django.core.cache import cache
 CACHE_SECONDS = 30
 
 
-def cached_for_club(club_id, key: str, compute):
+def cached_for_club(club_id, key: str, compute, seconds: int = CACHE_SECONDS):
     """Return ``compute()``, cached under a key scoped to both ``club_id`` and
     ``key`` (the endpoint's own name plus whatever parameters affect its
     result -- limit/offset, a slug, a team id, ...) for CACHE_SECONDS.
@@ -35,5 +35,5 @@ def cached_for_club(club_id, key: str, compute):
     value = cache.get(cache_key)
     if value is None:
         value = compute()
-        cache.set(cache_key, value, CACHE_SECONDS)
+        cache.set(cache_key, value, seconds)
     return value

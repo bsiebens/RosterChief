@@ -8,6 +8,8 @@ from typing import Literal
 
 from ninja import Field, Schema
 
+from events.timeline_schemas import TimelineOut
+
 
 class ErrorDetail(Schema):
     code: str = Field(description="Stable machine-readable code, e.g. `not_a_member`. Never translated.")
@@ -62,6 +64,7 @@ class ClubFeatures(Schema):
     forms: bool
     officials: bool
     evaluations: bool
+    game_timeline: bool = Field(description="Games carry a timeline (goals, penalties, ...) on `GET /events/{id}`.")
 
 
 class ClubOut(Schema):
@@ -354,6 +357,7 @@ class EventDetailOut(Schema):
     official_signups: list[SignupOut]
     tasks: list[TaskOut]
     squad_summary: SquadSummaryOut | None = Field(description="Counts only, never who answered what.")
+    game_timeline: TimelineOut | None = Field(None, description="For a game, when the club has game timelines: goals, penalties, goalie changes and time-outs as the federation reported them, with player names.")
 
 
 class RsvpIn(Schema):
