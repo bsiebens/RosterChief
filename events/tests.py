@@ -4139,3 +4139,76 @@ class RBIHFStandingsRefreshTests(ImportSourcesTestBase):
 
         self.assertEqual([call.args[0] for call in mock_refresh.call_args_list], [self.team])
         self.assertIn("Refreshed standings for 1 competition source(s); 0 failed.", result)
+
+
+class SetGatheringTimesCommandTests(EventsTestBase):
+    """events.management.commands.set_gathering_times -- fills in a missing
+    gathering time N minutes before the start, never overwriting one."""
+
+    def setUp(self):
+        # Maintenance is cached (features.models) -- same leak concern as the job command tests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def run_command(self, *args):
+        out = StringIO()
+        call_command("set_gathering_times", *args, stdout=out)
+        return out.getvalue()
+
+    def test_sets_a_missing_gathering_time_and_skips_an_existing_one(self):
+        empty = self.make_event(title="No gathering")
+        existing_gathering = self.future - timedelta(minutes=15)
+        kept = self.make_event(title="Has gathering", gathering=existing_gathering)
+
+        output = self.run_command("45")
+
+        empty.refresh_from_db()
+        kept.refresh_from_db()
+        self.assertEqual(empty.gathering, empty.start - timedelta(minutes=45))
+        self.assertEqual(kept.gathering, existing_gathering)
+        self.assertIn("on 1 event(s); skipped 1 that already had one", output)
+
+    def test_past_and_cancelled_events_are_left_alone_by_default(self):
+        past = self.make_event(start=timezone.now() - timedelta(days=2))
+        cancelled = self.make_event(cancelled=True)
+
+        self.run_command("30")
+
+        past.refresh_from_db()
+        cancelled.refresh_from_db()
+        self.assertIsNone(past.gathering)
+        self.assertIsNone(cancelled.gathering)
+
+        self.run_command("30", "--include-past")
+
+        past.refresh_from_db()
+        self.assertEqual(past.gathering, past.start - timedelta(minutes=30))
+
+    def test_club_and_kind_filters(self):
+        other_club = Club.objects.create(name="Other", slug="other-gathering")
+        other_event = self.make_event(club=other_club, season=None)
+        training = self.make_event(kind=Event.EventKind.TRAINING)
+        game = self.make_event(kind=Event.EventKind.GAME)
+
+        self.run_command("60", "--club", self.club.slug, "--kind", "game")
+
+        for event in (other_event, training, game):
+            event.refresh_from_db()
+        self.assertEqual((other_event.gathering, training.gathering), (None, None))
+        self.assertEqual(game.gathering, game.start - timedelta(minutes=60))
+
+    def test_dry_run_saves_nothing(self):
+        event = self.make_event(title="Cup final")
+
+        output = self.run_command("45", "--dry-run")
+
+        event.refresh_from_db()
+        self.assertIsNone(event.gathering)
+        self.assertIn("Cup final", output)
+        self.assertIn("Would set the gathering time 45 min before the start on 1 event(s)", output)
+
+    def test_rejects_a_non_positive_number_or_unknown_club(self):
+        with self.assertRaisesMessage(CommandError, "positive"):
+            self.run_command("0")
+        with self.assertRaisesMessage(CommandError, "No club"):
+            self.run_command("30", "--club", "nope")
