@@ -1368,10 +1368,12 @@ class ClubSettingsForm(forms.ModelForm):
 
     class Meta:
         model = Club
-        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "payment_instructions", "contact_email", "website", "logo", "event_background", "primary_color", "secondary_color"]
+        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "payment_instructions", "contact_email", "website", "logo", "event_background", "primary_color", "secondary_color", "primary_text_color", "secondary_text_color"]
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
+            "primary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
+            "secondary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
             "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }

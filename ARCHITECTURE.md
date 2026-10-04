@@ -371,6 +371,12 @@ GroupMembership(UUIDModel)            # club implied by group
 drives subdomain/path resolution), contact, and branding. Provide `Club.objects.current()`
 and resolve it in middleware — never hardcode a PK.
 
+Branding: `primary_color`/`secondary_color`, plus optional `primary_text_color`/
+`secondary_text_color` for the text drawn on them. Templates and the app API always read
+`Club.primary_content_color`/`secondary_content_color`: the club's own text colour when that
+colour is set, otherwise the automatic WCAG black-or-white pick. Emails with a fallback
+background use the `club|primary_text_color:"#…"` filters (`club/templatetags/club_email.py`).
+
 **`ClubMembership`** — links a `Member` to the `Club` with a `license` string. **Being made
 season-scoped** (§5.1): it gains a `season` FK and sign-up / fee-status fields, so each row
 is one member's affiliation for one season (`unique_together (club, member, season)`). This

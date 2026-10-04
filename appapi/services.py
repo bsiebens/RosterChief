@@ -50,14 +50,15 @@ DEFAULT_SECONDARY_COLOR = "#e4002b"
 
 def club_colors(club: Club) -> dict:
     """The colours in effect for ``club`` -- its own, else the app defaults -- plus a
-    readable text colour (black or white, Club._content_color_for) for each."""
+    text colour for each: the club's own text colour when it set one, else the
+    readable black or white (Club.primary_content_color / _content_color_for)."""
     primary = club.primary_color or DEFAULT_PRIMARY_COLOR
     secondary = club.secondary_color or DEFAULT_SECONDARY_COLOR
     return {
         "primary_color": primary,
-        "primary_content_color": Club._content_color_for(primary),
+        "primary_content_color": club.primary_content_color if club.primary_color else Club._content_color_for(primary),
         "secondary_color": secondary,
-        "secondary_content_color": Club._content_color_for(secondary),
+        "secondary_content_color": club.secondary_content_color if club.secondary_color else Club._content_color_for(secondary),
     }
 
 

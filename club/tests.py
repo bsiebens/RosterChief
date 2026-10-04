@@ -1590,6 +1590,29 @@ class ClubBrandingModelTests(TestCase):
     def test_no_colour_means_no_contrast_colour(self):
         self.assertEqual(Club(primary_color="").primary_content_color, "")
 
+    def test_a_chosen_text_colour_wins_but_only_with_its_colour_set(self):
+        self.assertEqual(Club(primary_color="#1e40af", primary_text_color="#fde047").primary_content_color, "#fde047")
+        self.assertEqual(Club(secondary_color="#fef08a", secondary_text_color="#1e3a8a").secondary_content_color, "#1e3a8a")
+        # No primary colour: the app's default is showing, so the automatic pick for it stands.
+        self.assertEqual(Club(primary_color="", primary_text_color="#fde047").primary_content_color, "")
+
+    def test_the_email_text_colour_filters_honour_the_chosen_colour(self):
+        from club.templatetags.club_email import primary_text_color, secondary_text_color
+
+        club = Club(primary_color="#1e40af", primary_text_color="#fde047", secondary_color="", secondary_text_color="#000000")
+
+        self.assertEqual(primary_text_color(club, "#4f46e5"), "#fde047")
+        # No secondary colour set: the fallback background shows, with its own automatic contrast.
+        self.assertEqual(secondary_text_color(club, "#ec4899"), Club._content_color_for("#ec4899"))
+
+    def test_the_app_api_colours_carry_the_chosen_text_colour(self):
+        from appapi.services import club_colors
+
+        colors = club_colors(Club(primary_color="#1e40af", primary_text_color="#fde047"))
+
+        self.assertEqual(colors["primary_content_color"], "#fde047")
+        self.assertEqual(colors["secondary_content_color"], Club._content_color_for(colors["secondary_color"]))
+
     def test_contrast_color_filter_matches_the_same_algorithm(self):
         # HTML emails apply this to a literal fallback background (e.g.
         # club.secondary_color|default:"#ec4899") rather than a club's own

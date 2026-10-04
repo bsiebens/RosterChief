@@ -5779,6 +5779,22 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.secondary_color, "#654321")
         self.assertEqual(self.club.website, "https://ajax-united.example")
 
+    def test_the_text_colours_can_be_set_and_left_on_auto(self):
+        data = {"name": "Ajax United", "legal_name": "", "contact_email": "", "website": "", "primary_color": "#123456", "secondary_color": "#654321"}
+
+        self.club_post("club_settings", {**data, "primary_text_color": "#fde047", "secondary_text_color": ""})
+
+        self.club.refresh_from_db()
+        self.assertEqual((self.club.primary_text_color, self.club.secondary_text_color), ("#fde047", ""))
+        self.assertEqual(self.club.primary_content_color, "#fde047")
+        response = self.club_get("club_settings")
+        self.assertContains(response, 'id="id_primary_text_color" value="#fde047"')
+        self.assertContains(response, 'id="id_secondary_text_color" value=""')
+
+        self.club_post("club_settings", {**data, "primary_text_color": "yellow"})
+        self.club.refresh_from_db()
+        self.assertEqual(self.club.primary_text_color, "#fde047")
+
     def test_the_legal_address_can_be_set(self):
         response = self.club_post(
             "club_settings",

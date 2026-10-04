@@ -183,6 +183,15 @@ class ClubManagementTests(ControlPanelTestBase):
         self.club.refresh_from_db()
         self.assertEqual(self.club.sport_type, "ice_hockey")
 
+    def test_update_club_text_colours(self):
+        self.client.post(
+            reverse("controlpanel:club_update", args=[self.club.pk]),
+            {"name": self.club.name, "slug": self.club.slug, "sport_type": "other", "season_start": "2000-08-01", "season_duration_months": "12", "primary_color": "#1e40af", "primary_text_color": "#fde047", "secondary_text_color": ""},
+        )
+
+        self.club.refresh_from_db()
+        self.assertEqual((self.club.primary_text_color, self.club.secondary_text_color, self.club.primary_content_color), ("#fde047", "", "#fde047"))
+
     def test_club_detail_shows_statistics(self):
         response = self.client.get(reverse("controlpanel:club_detail", args=[self.club.pk]))
 

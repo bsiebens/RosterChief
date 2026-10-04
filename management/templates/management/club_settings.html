@@ -149,6 +149,12 @@
                                     <input type="text" form="club-settings-form" name="{{ form.primary_color.html_name }}" id="{{ form.primary_color.id_for_label }}" value="{{ form.primary_color.value|default:"" }}" placeholder="#0b1220" class="club-color-hex-input">
                                 </label>
                                 {% if form.primary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_color.errors|join:" " }}</p>{% endif %}
+                                <div class="mt-3 mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.primary_text_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="primary_text_color_swatch" class="club-color-swatch" value="{{ form.primary_text_color.value|default:"#ffffff" }}" aria-label="{% trans "Pick the text colour on the primary colour" %}">
+                                    <input type="text" form="club-settings-form" name="{{ form.primary_text_color.html_name }}" id="{{ form.primary_text_color.id_for_label }}" value="{{ form.primary_text_color.value|default:"" }}" placeholder="{% trans "auto" %}" class="club-color-hex-input">
+                                </label>
+                                {% if form.primary_text_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.primary_text_color.errors|join:" " }}</p>{% endif %}
                             </div>
                             <div>
                                 <div class="mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_color.label|capfirst }}</div>
@@ -157,8 +163,15 @@
                                     <input type="text" form="club-settings-form" name="{{ form.secondary_color.html_name }}" id="{{ form.secondary_color.id_for_label }}" value="{{ form.secondary_color.value|default:"" }}" placeholder="#e4002b" class="club-color-hex-input">
                                 </label>
                                 {% if form.secondary_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_color.errors|join:" " }}</p>{% endif %}
+                                <div class="mt-3 mb-1.5 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{{ form.secondary_text_color.label|capfirst }}</div>
+                                <label class="club-color-row">
+                                    <input type="color" id="secondary_text_color_swatch" class="club-color-swatch" value="{{ form.secondary_text_color.value|default:"#ffffff" }}" aria-label="{% trans "Pick the text colour on the secondary colour" %}">
+                                    <input type="text" form="club-settings-form" name="{{ form.secondary_text_color.html_name }}" id="{{ form.secondary_text_color.id_for_label }}" value="{{ form.secondary_text_color.value|default:"" }}" placeholder="{% trans "auto" %}" class="club-color-hex-input">
+                                </label>
+                                {% if form.secondary_text_color.errors %}<p class="mt-1 text-xs text-club-dark">{{ form.secondary_text_color.errors|join:" " }}</p>{% endif %}
                             </div>
                         </div>
+                        <p class="mt-2 text-xs text-muted">{% trans "Leave a text colour empty to pick black or white automatically, whichever reads best." %}</p>
 
                         <div class="mt-4">
                             <div class="mb-2 font-display text-[11px] font-bold tracking-[.12em] text-muted uppercase">{% trans "Contrast check" %}</div>
@@ -259,7 +272,9 @@
         (() => {
             // Mirrors club.models.Club._content_color_for exactly (WCAG relative
             // luminance, 0.179 threshold) -- the ratio/checkmark shown here is the
-            // real number the server computes on save, not an approximation.
+            // real number the server computes on save, not an approximation. A
+            // text colour typed in by hand wins over it, the same as
+            // Club.primary_content_color/secondary_content_color on the server.
             const relativeLuminance = (hex) => {
                 const channel = (value) => {
                     const fraction = value / 255;
@@ -281,6 +296,10 @@
             const secondaryText = document.getElementById("id_secondary_color");
             const primarySwatch = document.getElementById("primary_color_swatch");
             const secondarySwatch = document.getElementById("secondary_color_swatch");
+            const primaryTextColor = document.getElementById("id_primary_text_color");
+            const secondaryTextColor = document.getElementById("id_secondary_text_color");
+            const primaryTextSwatch = document.getElementById("primary_text_color_swatch");
+            const secondaryTextSwatch = document.getElementById("secondary_text_color_swatch");
             if (!primaryText || !secondaryText) return;
 
             const CONTENT_LABEL = { "#000000": "{% trans 'Black' %}", "#ffffff": "{% trans 'White' %}" };
@@ -290,6 +309,8 @@
                 document.getElementById(labelId).textContent = `${CONTENT_LABEL[contentHex]} ${onLabel}`;
                 document.getElementById(ratioId).textContent = `${ratio.toFixed(1)} ${ratio >= 4.5 ? "✓" : "⚠"}`;
                 const box = document.getElementById(boxId);
+                // A hand-picked text colour isn't black/white -- show its hex instead.
+                if (!CONTENT_LABEL[contentHex]) document.getElementById(labelId).textContent = `${contentHex} ${onLabel}`;
                 box.style.background = hex;
                 box.style.color = contentHex;
             };
@@ -297,8 +318,8 @@
             const updatePreview = () => {
                 const primary = isHex(primaryText.value) ? primaryText.value : "#0b1220";
                 const secondary = isHex(secondaryText.value) ? secondaryText.value : "#e4002b";
-                const primaryContent = contentColorFor(primary);
-                const secondaryContent = contentColorFor(secondary);
+                const primaryContent = primaryTextColor && isHex(primaryTextColor.value) ? primaryTextColor.value : contentColorFor(primary);
+                const secondaryContent = secondaryTextColor && isHex(secondaryTextColor.value) ? secondaryTextColor.value : contentColorFor(secondary);
 
                 document.getElementById("preview-phone-header").style.background = primary;
                 document.getElementById("preview-phone-header").style.color = primaryContent;
@@ -321,10 +342,23 @@
 
                 if (primarySwatch && isHex(primary)) primarySwatch.value = primary;
                 if (secondarySwatch && isHex(secondary)) secondarySwatch.value = secondary;
+                // Left on "auto", the swatch shows the colour that's actually used.
+                if (primaryTextSwatch) primaryTextSwatch.value = primaryContent;
+                if (secondaryTextSwatch) secondaryTextSwatch.value = secondaryContent;
             };
 
             primaryText.addEventListener("input", updatePreview);
             secondaryText.addEventListener("input", updatePreview);
+            [[primaryTextColor, primaryTextSwatch], [secondaryTextColor, secondaryTextSwatch]].forEach(([input, swatch]) => {
+                if (!input) return;
+                input.addEventListener("input", updatePreview);
+                if (swatch) {
+                    swatch.addEventListener("input", () => {
+                        input.value = swatch.value;
+                        updatePreview();
+                    });
+                }
+            });
             if (primarySwatch) {
                 primarySwatch.addEventListener("input", () => {
                     primaryText.value = primarySwatch.value;
