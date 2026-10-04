@@ -26,6 +26,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from events.models import Event, GameTimeline
+from events.services.game_moments import game_timeline_changed
 from events.services.timeline_parsers import finalize_document
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,9 @@ def status_for(event, document: dict) -> str:
 
 def store(event, fetched: TimelineFetch) -> tuple[GameTimeline, bool]:
     """Upserts ``event``'s timeline from ``fetched``; returns (timeline, changed).
-    An unchanged document only bumps ``fetched_at``."""
+    An unchanged document only bumps ``fetched_at``; a changed one sends
+    game_moments.game_timeline_changed (with the previous document, and whether
+    this is the game's first real fetch) once it's saved."""
     document = finalize_document(fetched.document)
     document["status"] = status_for(event, document)
     digest = document_hash(document)
@@ -80,6 +83,7 @@ def store(event, fetched: TimelineFetch) -> tuple[GameTimeline, bool]:
 
     timeline, _created = GameTimeline.objects.get_or_create(event=event, defaults={"source": event.competition})
     changed = digest != timeline.data_hash
+    previous, first_fetch = (timeline.data or None), not timeline.data_hash
     timeline.fetched_at = now
     timeline.last_error = ""
     if changed:
@@ -90,6 +94,8 @@ def store(event, fetched: TimelineFetch) -> tuple[GameTimeline, bool]:
         timeline.raw = fetched.raw or ""
         timeline.changed_at = now
     timeline.save()
+    if changed:
+        game_timeline_changed.send(sender=Event, event=event, previous=previous, current=document, first_fetch=first_fetch)
     return timeline, changed
 
 

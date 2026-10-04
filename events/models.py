@@ -570,6 +570,47 @@ class GameTimeline(UUIDModel):
         return f"{self.event} ({self.status})"
 
 
+class GameMoment(UUIDModel):
+    """One piece of news detected in a game's timeline, from the club's own
+    side -- a goal for or against, a goal taken back, a penalty, a period or
+    the game ending (events.services.game_moments, GAME_TIMELINE.md §4).
+
+    Recorded once per (event, key): ``key`` is the kind plus the timeline event
+    it's about, so a repeated or racing fetch can't record it twice. Push
+    notifications (not built yet) will read these rows -- ``notifiable`` says
+    whether it's recent enough to be worth telling anyone, ``delivered_at``
+    will say it was.
+    """
+
+    class Kind(models.TextChoices):
+        GAME_STARTED = "game_started", _("game started")
+        GOAL_FOR = "goal_for", _("goal for")
+        GOAL_AGAINST = "goal_against", _("goal against")
+        GOAL_CANCELLED = "goal_cancelled", _("goal cancelled")
+        PENALTY_FOR = "penalty_for", _("penalty for")
+        PENALTY_AGAINST = "penalty_against", _("penalty against")
+        PERIOD_ENDED = "period_ended", _("period ended")
+        GAME_FINAL = "game_final", _("game final")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="moments", verbose_name=_("event"))
+    key = models.CharField(_("key"), max_length=255)
+    kind = models.CharField(_("kind"), max_length=30, choices=Kind.choices)
+    payload = models.JSONField(_("payload"), default=dict, blank=True)
+    game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
+    notifiable = models.BooleanField(_("notifiable"), default=True, help_text=_("Recent enough in game time to be worth notifying about (not a catch-up after an outage)."))
+    created_at = models.DateTimeField(_("detected at"), auto_now_add=True)
+    delivered_at = models.DateTimeField(_("delivered at"), null=True, blank=True, help_text=_("When it was pushed out -- not used until push notifications exist."))
+
+    class Meta:
+        verbose_name = _("game moment")
+        verbose_name_plural = _("game moments")
+        ordering = ["event", "created_at"]
+        constraints = [models.UniqueConstraint(fields=["event", "key"], name="unique_game_moment_per_event")]
+
+    def __str__(self):
+        return f"{self.event} - {self.get_kind_display()}"
+
+
 class Competition(models.Model):
     """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
 

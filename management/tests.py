@@ -29,7 +29,7 @@ from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoic
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
-from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, Location, Opponent, RefereeSignup
 from events.services import ijnl_import, import_sources
 from events.services.calendar import week_bounds
 from events.services.dfel_import import DFELImportError
@@ -7072,6 +7072,17 @@ class EventDetailDisplayTests(ManagementTestBase):
         self.assertContains(response, "Game timeline")
         self.assertContains(response, "Goal: Sam Scorer (#9)")
         self.assertContains(response, "1-0")
+
+    def test_detected_moments_are_listed_under_the_timeline(self):
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="IJNL", start=timezone.now() - datetime.timedelta(hours=1))
+        store_game_timeline(game, TimelineFetch(document={"events": []}))
+        GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"time": "01:01", "scorer": {"name": "Sam Scorer", "number": 9}, "score": {"for": 1, "against": 0}}, notifiable=False)
+
+        response = self.club_get("event_detail", game.pk)
+
+        self.assertContains(response, "Detected moments")
+        self.assertContains(response, "Goal for us by Sam Scorer (#9), 1-0.")
+        self.assertContains(response, "catch-up")
 
     def test_no_timeline_card_without_a_stored_timeline(self):
         game = self.make_event(title="Cup game", kind=Event.EventKind.GAME)

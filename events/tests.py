@@ -31,13 +31,14 @@ from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel,
 
 from .admin import EventAdminForm
 from .competition.hockey import CEHL, DFEL, IJNL, RBIHF
-from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
     cancel_occurrence,
     detach_occurrence,
     dfel_import,
     effective_members,
+    game_moments,
     game_timeline,
     generate_occurrences,
     ijnl_import,
@@ -4536,3 +4537,112 @@ class FetchGameTimelinesCommandTests(GameTimelineTestBase):
         cache.clear()
         with self.assertRaisesMessage(CommandError, "game_timeline flag"):
             call_command("fetch_game_timelines", "--club", self.club.slug, stdout=StringIO())
+
+
+def moment_doc(status, events, home=0, away=0):
+    return {"status": status, "score": {"home": home, "away": away}, "events": events}
+
+
+def goal_item(event_id, side, seconds, home, away, name="Sam"):
+    return {
+        "id": event_id,
+        "type": "goal",
+        "side": side,
+        "period": "1",
+        "seconds": seconds,
+        "time": f"{seconds // 60:02d}:{seconds % 60:02d}",
+        "goal": {"scorer": {"name": name, "number": 9}, "assists": [], "score_after": {"home": home, "away": away}},
+    }
+
+
+class DeriveMomentsTests(TestCase):
+    """events.services.game_moments.derive_moments -- the pure rules."""
+
+    def kinds(self, previous, current, our_side="home", first_fetch=False):
+        return [moment.kind for moment in game_moments.derive_moments(previous, current, our_side=our_side, first_fetch=first_fetch)]
+
+    def test_the_first_fetch_is_silent(self):
+        current = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+
+        self.assertEqual(self.kinds(None, current, first_fetch=True), [])
+
+    def test_kick_off_goals_from_our_side_and_the_result(self):
+        scheduled = moment_doc("scheduled", [])
+        live = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+        final = moment_doc("final", [goal_item("g1", "home", 60, 1, 0), goal_item("g2", "away", 120, 1, 1)], home=1, away=1)
+
+        self.assertEqual(self.kinds(scheduled, live), ["game_started", "goal_for"])
+        self.assertEqual(self.kinds(live, final), ["goal_against", "game_final"])
+        self.assertEqual(self.kinds(live, final, our_side="away"), ["goal_for", "game_final"])
+
+    def test_the_score_is_from_our_side(self):
+        live = moment_doc("live", [])
+        current = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+
+        [moment] = game_moments.derive_moments(live, current, our_side="away", first_fetch=False)
+
+        self.assertEqual((moment.kind, moment.payload["score"], moment.key), ("goal_against", {"for": 0, "against": 1}, "goal_against:g1"))
+
+    def test_penalties_and_period_ends(self):
+        live = moment_doc("live", [])
+        current = moment_doc(
+            "live",
+            [
+                {"id": "p1", "type": "penalty", "side": "away", "period": "1", "seconds": 300, "penalty": {"player": {"name": "Rex"}, "description": "Tripping", "minutes": 2}},
+                {"id": "pe1", "type": "period_end", "side": None, "period": "1", "seconds": 1200},
+            ],
+        )
+
+        self.assertEqual(self.kinds(live, current), ["penalty_against", "period_ended"])
+
+    def test_corrections_after_the_final_are_silent(self):
+        final = moment_doc("final", [goal_item("g1", "home", 60, 1, 0)], home=1)
+        corrected = moment_doc("final", [goal_item("g1", "home", 60, 1, 0), goal_item("g2", "home", 3000, 2, 0)], home=2)
+
+        self.assertEqual(self.kinds(final, corrected), [])
+
+    def test_a_vanished_goal_is_cancelled_only_when_the_score_drops(self):
+        before = moment_doc("live", [goal_item("g1", "home", 60, 1, 0, name="Sam")], home=1)
+        rekeyed = moment_doc("live", [goal_item("g1b", "home", 60, 1, 0, name="Kim")], home=1)
+        taken_back = moment_doc("live", [], home=0)
+
+        self.assertEqual(self.kinds(before, rekeyed), ["goal_for"])  # same goal, corrected scorer -> new id, score unchanged
+        self.assertEqual(self.kinds(before, taken_back), ["goal_cancelled"])
+
+    def test_a_late_catch_up_is_recorded_but_not_notifiable(self):
+        live = moment_doc("live", [])
+        caught_up = moment_doc("live", [goal_item("old", "home", 60, 1, 0), goal_item("new", "home", 1500, 2, 0)], home=2)
+
+        moments = {moment.key: moment for moment in game_moments.derive_moments(live, caught_up, our_side="home", first_fetch=False)}
+
+        self.assertFalse(moments["goal_for:old"].notifiable)
+        self.assertTrue(moments["goal_for:new"].notifiable)
+
+
+class RecordGameMomentsTests(GameTimelineTestBase):
+    """game_timeline.store -> game_timeline_changed -> GameMoment rows."""
+
+    def fetch(self, status_events):
+        return game_timeline.TimelineFetch(document={"events": status_events})
+
+    def test_a_changed_timeline_records_its_moments_once(self):
+        game = self.make_game(is_live=True)
+        game_timeline.store(game, self.fetch([]))  # first fetch: silent
+        game_timeline.store(game, self.fetch([goal_item("g1", "home", 60, 1, 0)]))
+
+        game_moments.game_timeline_changed.send(sender=Event, event=game, previous={"status": "live", "events": [], "score": {"home": 0, "away": 0}}, current=game.timeline.data, first_fetch=False)
+
+        self.assertEqual(list(GameMoment.objects.filter(event=game).values_list("kind", "key")), [("goal_for", "goal_for:g1")])
+
+    def test_the_first_fetch_records_nothing(self):
+        game = self.make_game(is_live=True)
+
+        game_timeline.store(game, self.rbihf_fetch())
+
+        self.assertFalse(GameMoment.objects.filter(event=game).exists())
+
+    def test_describe_moment(self):
+        game = self.make_game(is_live=True)
+        moment = GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 2, "against": 1}})
+
+        self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")

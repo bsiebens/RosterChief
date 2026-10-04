@@ -4,7 +4,9 @@
     events.services.game_timeline (fetched with the score while the game is
     live, then re-fetched nightly until it stops changing -- see GAME_TIMELINE.md).
     Context: timeline (GameTimeline), periods (display_periods(...): rows with
-    time, ours (True/False/None for period markers), team, text, score).
+    time, ours (True/False/None for period markers), team, text, score), and
+    moments ((GameMoment, description) pairs -- what events.services.
+    game_moments detected while polling; nothing is pushed yet).
 {% endcomment %}
 <div class="card">
     <div class="card-body">
@@ -41,5 +43,20 @@
         {% empty %}
             <p class="text-sm text-muted">{% trans "Nothing has happened in this game yet." %}</p>
         {% endfor %}
+
+        {% if moments %}
+            <div class="mt-4 font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Detected moments" %}</div>
+            <p class="text-xs text-muted">{% trans "What would be notified once push notifications exist. Moments marked “catch-up” were detected late (after an outage) and wouldn't be pushed." %}</p>
+            <ul class="divide-y divide-line">
+                {% for moment, description in moments %}
+                    <li class="flex items-baseline gap-3 py-1.5 text-sm">
+                        <span class="w-12 shrink-0 font-mono text-xs text-muted tabular-nums">{{ moment.payload.time|default:"" }}</span>
+                        <span class="{% if moment.kind == 'goal_for' or moment.kind == 'game_final' %}font-semibold text-ink{% else %}text-slate{% endif %}">{{ description }}</span>
+                        {% if not moment.notifiable %}<span class="badge badge-outline badge-xs">{% trans "catch-up" %}</span>{% endif %}
+                        <span class="ml-auto font-mono text-xs text-muted">{{ moment.created_at|date:"H:i:s" }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
     </div>
 </div>

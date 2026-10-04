@@ -9,7 +9,9 @@ Registered from ``EventsConfig.ready``. Triggers:
 * adding or removing a member from a group re-syncs that group's future
   events;
 * a club membership going active/inactive re-syncs every future club_wide
-  event for that club.
+  event for that club;
+* a game's timeline changing (events.services.game_timeline.store) records the
+  "moments" in it -- goals, penalties, the result (events.services.game_moments).
 
 Joining a team/group specifically (not a plain field edit, not a removal)
 also sends one summary notification (events.services.attendance.
@@ -27,6 +29,7 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from events.models import Attendance, Event, EventSeries
 from events.services import notify_newly_invited, sync_event_attendances
+from events.services.game_moments import game_timeline_changed, record_moments
 from events.services.officials import sync_official_invites
 from events.services.referees import sync_referee_invites
 from members.models import Group, GroupMembership
@@ -137,3 +140,6 @@ def sync_on_club_membership_change(sender, instance, **kwargs):
     now = timezone.now()
     for event in Event.objects.filter(club_wide=True, club_id=instance.club_id, start__gte=now).distinct():
         sync_event_attendances(event)
+
+
+game_timeline_changed.connect(record_moments, dispatch_uid="events.record_game_moments")

@@ -2,7 +2,7 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 
 
 @admin.register(Opponent)
@@ -158,6 +158,21 @@ class GameTimelineAdmin(admin.ModelAdmin):
         if obj is None:
             return []
         return ["event", "source", "data", "data_hash", "raw", "status", "fetched_at", "changed_at", "finalized_at", "last_error"]
+
+
+@admin.register(GameMoment)
+class GameMomentAdmin(admin.ModelAdmin):
+    """Detected by events.services.game_moments -- an existing row is shown read-only."""
+
+    list_display = ["event", "kind", "game_seconds", "notifiable", "created_at", "delivered_at"]
+    list_filter = ["kind", "notifiable"]
+    search_fields = ["event__title", "key"]
+    raw_id_fields = ["event"]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return []
+        return ["event", "key", "kind", "payload", "game_seconds", "notifiable", "created_at", "delivered_at"]
 
 
 @admin.register(Lineup)

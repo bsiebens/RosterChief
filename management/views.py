@@ -99,6 +99,7 @@ from events.services.attendance import member_attendance_counts, member_attendan
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.dfel_import import DFELImportError, fetch_schedule
+from events.services.game_moments import describe_moment
 from events.services.game_timeline import display_periods
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
@@ -3427,6 +3428,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             task_form=task_form,
             game_timeline=game_timeline,
             game_timeline_periods=display_periods(game_timeline, event) if game_timeline else [],
+            game_moments=[(moment, describe_moment(moment)) for moment in event.moments.all()] if game_timeline else [],
             **kwargs,
         )
 

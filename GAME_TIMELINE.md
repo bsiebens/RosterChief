@@ -9,9 +9,9 @@ else (`events/competition/hockey.py`). Every source we poll can give us much mor
 of it from the same request or one extra. This document records what each source offers, proposes
 one normalized shape to store it in, and splits the work into phases.
 
-Status: **phases 1 (store) and 2 (expose) implemented.** §7a and §7b cover what shipped and where
-it deviates from this design. Phases 3–4 are not built yet; the decisions still open are
-collected in §9 (§9.1 is now decided).
+Status: **phases 1 (store), 2 (expose) and 3 (moments) implemented.** §7a–§7c cover what
+shipped and where it deviates from this design. Phase 4 (push) is not built yet; the decisions
+still open are collected in §9 (§9.1 is now decided).
 
 ---
 
@@ -360,6 +360,28 @@ Deviations from §3.1, both to keep the score path untouched:
     `game_timeline` feature, and with names.
   - The club's `features` now includes `game_timeline`.
   - `docs/app-api/openapi-app-v1.json` is regenerated.
+
+## 7c. Phase 3 as built
+
+- **Signal:** `events.services.game_timeline.store` sends `game_timeline_changed` (from
+  `events/services/game_moments.py`) after saving a timeline whose document actually changed.
+  It carries the previous document and `first_fetch`, which is true when the row had never held
+  real data.
+- **Derivation:** the pure `derive_moments(previous, current, our_side=, first_fetch=)` produces
+  the kinds in §4 with the guards as designed:
+  - a first fetch yields nothing;
+  - a game that was already final yields nothing (post-game corrections);
+  - a vanished goal is `goal_cancelled` only when the total score dropped, so a re-keyed goal is
+    treated as a correction;
+  - `notifiable` is false for anything more than `RECENT_SECONDS` (5 min of game clock) behind the
+    newest event, i.e. a catch-up after an outage.
+- **Storage:** `events.GameMoment` (`events/migrations/0043`), recorded by `record_moments`
+  (connected in `events/signals.py`). `unique(event, key)` makes a repeat a no-op. `key` is the
+  kind plus the timeline event id; `period_ended` and the game-level kinds use the period or the
+  kind itself. `delivered_at` is reserved for phase 4.
+- **Visibility (decided):** a "Detected moments" list under the management event page's
+  timeline card, with catch-ups flagged, plus a read-only Django admin. Moments are not exposed on
+  the APIs and nothing is pushed.
 
 ## 8. Testing
 

@@ -903,7 +903,10 @@ The public API serves timelines on `GET /api/v1/games/{id}/`, and the lists carr
 `decided_in`. Player names appear there only when every one of our teams on the game has
 `Team.show_player_names_publicly` on (off by default, for youth teams); otherwise jersey numbers
 only. The member app's `GET /events/{id}` carries the same shape (`game_timeline`), always with
-names. Design, source research and the later push phases: `GAME_TIMELINE.md`.
+names. A changed timeline also records "moments" (goal for/against, cancelled goal, penalties,
+period end, start, final) once each in `events.GameMoment`, via the `game_timeline_changed`
+signal. They're shown on the management event page and will feed push later. Design, source
+research and the push phase: `GAME_TIMELINE.md`.
 
 **IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
 with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling
