@@ -14,6 +14,7 @@ from ninja import Query, Router
 
 from events.models import Attendance, Event, EventTask, GameTimeline, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS, member_agenda
+from events.services.game_push import followed_team_ids, set_followed_teams
 from events.services.game_timeline import timeline_for_api
 from events.services.member_view import event_tasks, member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
@@ -21,10 +22,11 @@ from events.services.referees import RefereeAssignmentError, accept_referee_sign
 from events.services.rsvp import RsvpError, submit_rsvp
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from mobile.services.home import home_summary
+from teams.models import Team
 
 from ..errors import ApiError
 from ..presenters import attendance_out, event_out, money, news_summary, season_out, signup_out, task_out
-from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, HomeOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
+from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, GameFollowsIn, GameFollowsOut, HomeOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
 from ..scope import club_scope
 
 router = Router(tags=["member"])
@@ -170,6 +172,32 @@ def _game_timeline(scope, event):
         return None
     timeline = GameTimeline.objects.filter(event=event).defer("raw").first()
     return timeline_for_api(timeline, event, show_names=True) if timeline else None
+
+
+def _game_follows(scope, user) -> dict:
+    following = followed_team_ids(user, scope.club)
+    teams = Team.objects.filter(club=scope.club).order_by("name")
+    return {"teams": [{"id": team.pk, "name": team.name, "short_name": team.short_name, "following": team.pk in following} for team in teams]}
+
+
+@router.get("/game-follows", response={200: GameFollowsOut, **ERRORS}, summary="Teams followed for live game updates")
+def game_follows(request):
+    """The club's teams, and which of them this account gets live game pushes
+    for (goals, penalties, the result -- opt-in). `404 feature_disabled` when
+    the club doesn't have game timelines."""
+    scope = club_scope(request)
+    scope.require_feature("game_timeline")
+    return _game_follows(scope, request.user)
+
+
+@router.put("/game-follows", response={200: GameFollowsOut, **ERRORS}, summary="Choose teams to follow for live game updates")
+def update_game_follows(request, payload: GameFollowsIn):
+    """Replaces the set of followed teams (an empty list stops all live game
+    pushes for this club). Safe to repeat."""
+    scope = club_scope(request)
+    scope.require_feature("game_timeline")
+    set_followed_teams(request.user, scope.club, payload.team_ids)
+    return _game_follows(scope, request.user)
 
 
 #: RsvpError code -> HTTP status. Refusals of a well-formed answer are state conflicts.

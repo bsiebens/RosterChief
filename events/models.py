@@ -611,6 +611,26 @@ class GameMoment(UUIDModel):
         return f"{self.event} - {self.get_kind_display()}"
 
 
+class GameFollow(ClubScopedModel):
+    """An account following one of the club's teams for live game pushes --
+    goals, penalties, the result, as detected in its games' timelines
+    (events.services.game_push, GAME_TIMELINE.md phase 4). Opt-in: anyone with
+    an account in the club picks the teams they want, from the member app or
+    the PWA's "Live game updates" screen. Per account (not per Member), since
+    pushes go to an account's devices whichever of its people they concern."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="game_follows", verbose_name=_("user"))
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="followers", verbose_name=_("team"))
+
+    class Meta:
+        verbose_name = _("game follow")
+        verbose_name_plural = _("game follows")
+        constraints = [models.UniqueConstraint(fields=["user", "team"], name="unique_game_follow_per_team")]
+
+    def __str__(self):
+        return f"{self.user} -> {self.team}"
+
+
 class Competition(models.Model):
     """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
 

@@ -14,7 +14,7 @@ from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.paginator import Paginator
 from django.db.models import F
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -38,6 +38,7 @@ from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeS
 from events.services.agenda import KIND_FILTERS as AGENDA_KIND_FILTERS
 from events.services.agenda import member_agenda
 from events.services.calendar import agenda_groups, week_bounds
+from events.services.game_push import followed_team_ids, set_followed_teams
 from events.services.member_view import member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
@@ -68,7 +69,7 @@ from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
-from teams.models import StaffAssignment, TeamMembership
+from teams.models import StaffAssignment, Team, TeamMembership
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
@@ -226,6 +227,33 @@ class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         # The one response that carries the raw token: keep it out of every cache.
         add_never_cache_headers(response)
         return response
+
+
+class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """The "Live game updates" row under Me -- which of the club's teams this
+    account gets live game pushes for (goals, penalties, the result; see
+    events.services.game_push). Opt-in, per account: one tick per team. Only
+    there while the club has game timelines ("game_timeline" flag)."""
+
+    template_name = "mobile/live_game_updates.html"
+    screen_title = _("Live game updates")
+    active_tab = "me"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not flag_is_active(request, "game_timeline"):
+            raise Http404("Live game updates aren't available for this club.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        following = followed_team_ids(self.request.user, self.request.club)
+        teams = Team.objects.filter(club=self.request.club).order_by("name")
+        kwargs.setdefault("team_rows", [{"team": team, "following": team.pk in following} for team in teams])
+        return super().get_context_data(**kwargs)
+
+    def post(self, request, *args, **kwargs):
+        set_followed_teams(request.user, request.club, request.POST.getlist("team"))
+        notify(request, f"s|{_('Saved')}|{_('Your live game updates have been updated.')}")
+        return redirect("mobile:live_game_updates")
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -686,6 +714,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
+            live_game_updates_enabled=flag_is_active(self.request, "game_timeline"),
             people_rows=people_rows,
             open_dues_count=open_dues_count,
             staff_assignments=staff_assignments,

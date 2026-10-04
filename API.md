@@ -394,6 +394,7 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 | Officiating   | `POST /events/{id}/referee-signups/{sid}/respond` and `/official-signups/{sid}/respond` `{response: accept\|decline}`                                                                                                                                               |
 | Tasks         | `POST /events/{id}/tasks/{tid}/claim`, `DELETE …/claim`                                                                                                                                                                                                             |
 | News          | `GET /news?cursor`, `GET /news/{slug}` (`lang` follows `Accept-Language`)                                                                                                                                                                                           |
+| Game follows  | `GET /game-follows` — the club's teams with `following`; `PUT /game-follows` `{team_ids}` replaces the set (opt-in live game pushes; feature `game_timeline`, else `404 feature_disabled`) |
 | Notifications | `GET /notifications?member_id&cursor`, `GET /notifications/unread-count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `DELETE /notifications` (clear; hard delete, as today) — each carries `source: {type: news\|event\|form_send, id\|slug}` |
 | Profile       | `GET /members/{id}` (managed only), `PATCH /members/{id}`, `PUT /members/{id}/photo` (multipart, `photo_public_consent`)                                                                                                                                            |
 | Payments      | `GET /payments?member_id`, `GET /payments/batches/{id}/invoice.pdf`                                                                                                                                                                                                 |
@@ -469,6 +470,7 @@ Alternatives considered:
   `data`).
 - **Payload = pointer, not content.** `{notification_id, club_slug, type, target: {type, id}}` plus a localised title/short body (the recipient's `locale`). Anything sensitive is fetched by the app over the authenticated API after tap. Never put
   minors' details or financial data in the push body.
+- **Live game pushes** (`events.services.game_push`, GAME_TIMELINE.md phase 4) are the one push that has no `Notification` row behind it: no `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. The title is "<our teams> vs <opponent>", and the body has one line per moment the poll detected, so a coalesced update can span several lines. Who gets them is opt-in per team: `GET/PUT /game-follows`.
 - **Delivery hygiene:** on SNS `EndpointDisabled`/`InvalidParameter`/`NotFound` (token no longer valid) → mark the device disabled and delete the endpoint; also enable SNS delivery-status logging to CloudWatch. Badge/unread count from
   `GET /notifications/unread-count`.
 - **Preferences:** none per-type in v1 (mirrors Web Push today); a per-install `enabled` toggle only.

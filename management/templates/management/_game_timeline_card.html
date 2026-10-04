@@ -44,15 +44,19 @@
             <p class="text-sm text-muted">{% trans "Nothing has happened in this game yet." %}</p>
         {% endfor %}
 
+        {% if not moments and timeline.status == "final" %}
+            <div class="mt-4 font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Detected moments" %}</div>
+            <p class="text-xs text-muted">{% trans "None -- this game's timeline was fetched after it was over (or nothing changed while it was being polled), so no live moments were detected and nothing was pushed. The full timeline is above." %}</p>
+        {% endif %}
         {% if moments %}
             <div class="mt-4 font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Detected moments" %}</div>
-            <p class="text-xs text-muted">{% trans "What would be notified once push notifications exist. Moments marked “catch-up” were detected late (after an outage) and wouldn't be pushed." %}</p>
+            <p class="text-xs text-muted">{% trans "Pushed to everyone following this game's team(s). Moments marked “catch-up” were detected late (after an outage) and weren't pushed." %}</p>
             <ul class="divide-y divide-line">
                 {% for moment, description in moments %}
                     <li class="flex items-baseline gap-3 py-1.5 text-sm">
                         <span class="w-12 shrink-0 font-mono text-xs text-muted tabular-nums">{{ moment.payload.time|default:"" }}</span>
                         <span class="{% if moment.kind == 'goal_for' or moment.kind == 'game_final' %}font-semibold text-ink{% else %}text-slate{% endif %}">{{ description }}</span>
-                        {% if not moment.notifiable %}<span class="badge badge-outline badge-xs">{% trans "catch-up" %}</span>{% endif %}
+                        {% if not moment.notifiable %}<span class="badge badge-outline badge-xs">{% trans "catch-up" %}</span>{% elif moment.delivered_at %}<span class="badge badge-outline badge-xs">{% trans "pushed" %}</span>{% endif %}
                         <span class="ml-auto font-mono text-xs text-muted">{{ moment.created_at|date:"H:i:s" }}</span>
                     </li>
                 {% endfor %}

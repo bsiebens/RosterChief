@@ -1879,6 +1879,70 @@
         "title": "FormToCompleteOut",
         "type": "object"
       },
+      "GameFollowTeamOut": {
+        "properties": {
+          "following": {
+            "title": "Following",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "following"
+        ],
+        "title": "GameFollowTeamOut",
+        "type": "object"
+      },
+      "GameFollowsIn": {
+        "properties": {
+          "team_ids": {
+            "description": "The full set of teams to follow -- replaces the current one; ids of other clubs' teams are ignored.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Team Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "team_ids"
+        ],
+        "title": "GameFollowsIn",
+        "type": "object"
+      },
+      "GameFollowsOut": {
+        "properties": {
+          "teams": {
+            "description": "Every team of the club, with whether this account follows it for live game pushes.",
+            "items": {
+              "$ref": "#/components/schemas/GameFollowTeamOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "teams"
+        ],
+        "title": "GameFollowsOut",
+        "type": "object"
+      },
       "GuardianOut": {
         "properties": {
           "first_name": {
@@ -6056,6 +6120,130 @@
         "summary": "Submit a form",
         "tags": [
           "forms"
+        ]
+      }
+    },
+    "/api/app/v1/game-follows": {
+      "get": {
+        "description": "The club's teams, and which of them this account gets live game pushes\nfor (goals, penalties, the result -- opt-in). `404 feature_disabled` when\nthe club doesn't have game timelines.",
+        "operationId": "appapi_routers_member_game_follows",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameFollowsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Teams followed for live game updates",
+        "tags": [
+          "member"
+        ]
+      },
+      "put": {
+        "description": "Replaces the set of followed teams (an empty list stops all live game\npushes for this club). Safe to repeat.",
+        "operationId": "appapi_routers_member_update_game_follows",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameFollowsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameFollowsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Choose teams to follow for live game updates",
+        "tags": [
+          "member"
         ]
       }
     },

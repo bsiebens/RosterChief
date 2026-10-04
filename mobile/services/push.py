@@ -125,6 +125,19 @@ def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") ->
         _deliver(subscription, payload, label=member)
 
 
+def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") -> int:
+    """Web push to every subscription this account's people in ``club`` hold --
+    for pushes that aren't a stored Notification (e.g. live game updates,
+    events.services.game_push). Returns how many subscriptions it was sent to."""
+    if not settings.VAPID_PRIVATE_KEY:
+        return 0
+    payload = json.dumps({"title": str(title), "body": str(body), "url": url})
+    subscriptions = list(models.PushSubscription.objects.filter(club=club, member__user=user).select_related("member"))
+    for subscription in subscriptions:
+        _deliver(subscription, payload, label=subscription.member)
+    return len(subscriptions)
+
+
 def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     """Batched send_push_to_member for a whole notifications.services.
     notify_members() fan-out at once: every notification's member's

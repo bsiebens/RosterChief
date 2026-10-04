@@ -360,6 +360,21 @@ class EventDetailOut(Schema):
     game_timeline: TimelineOut | None = Field(None, description="For a game, when the club has game timelines: goals, penalties, goalie changes and time-outs as the federation reported them, with player names.")
 
 
+class GameFollowTeamOut(Schema):
+    id: uuid.UUID
+    name: str
+    short_name: str
+    following: bool
+
+
+class GameFollowsOut(Schema):
+    teams: list[GameFollowTeamOut] = Field(description="Every team of the club, with whether this account follows it for live game pushes.")
+
+
+class GameFollowsIn(Schema):
+    team_ids: list[uuid.UUID] = Field(description="The full set of teams to follow -- replaces the current one; ids of other clubs' teams are ignored.")
+
+
 class RsvpIn(Schema):
     member_id: uuid.UUID = Field(description="The managed person answering (see `/context`).")
     status: Literal["present", "absent", "maybe", "dropout"] = Field(description="`dropout`: pull out of a published line-up you were selected for.")

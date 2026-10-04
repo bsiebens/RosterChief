@@ -128,17 +128,24 @@ def derive_moments(previous: dict | None, current: dict, *, our_side: str, first
 
 
 def record_moments(sender, *, event, previous, current, first_fetch, **kwargs):
-    """game_timeline_changed receiver: stores each derived moment once. The
+    """game_timeline_changed receiver: stores each derived moment once, then
+    hands the notifiable ones to events.services.game_push for delivery. The
     unique (event, key) constraint makes a repeat (a retry, two pollers racing)
-    a no-op rather than a duplicate."""
+    a no-op rather than a duplicate -- and a duplicate is never pushed twice."""
+    from events.services.game_push import schedule_delivery  # deferred: game_push imports describe_moment from here
+
     our_side = "home" if event.is_home_game else "away"
+    recorded = []
     for moment in derive_moments(previous, current, our_side=our_side, first_fetch=first_fetch):
         try:
             with transaction.atomic():
-                GameMoment.objects.create(event=event, key=moment.key, kind=moment.kind, payload=moment.payload, game_seconds=moment.game_seconds, notifiable=moment.notifiable)
+                stored = GameMoment.objects.create(event=event, key=moment.key, kind=moment.kind, payload=moment.payload, game_seconds=moment.game_seconds, notifiable=moment.notifiable)
         except IntegrityError:
             continue
         logger.info("game_moment event_id=%s kind=%s key=%s notifiable=%s", event.pk, moment.kind, moment.key, moment.notifiable)
+        if stored.notifiable:
+            recorded.append(stored.pk)
+    schedule_delivery(event, recorded)
 
 
 def _who(person) -> str:

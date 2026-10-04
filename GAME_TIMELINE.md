@@ -9,9 +9,8 @@ else (`events/competition/hockey.py`). Every source we poll can give us much mor
 of it from the same request or one extra. This document records what each source offers, proposes
 one normalized shape to store it in, and splits the work into phases.
 
-Status: **phases 1 (store), 2 (expose) and 3 (moments) implemented.** §7a–§7c cover what
-shipped and where it deviates from this design. Phase 4 (push) is not built yet; the decisions
-still open are collected in §9 (§9.1 is now decided).
+Status: **all four phases implemented.** §7a–§7d cover what shipped and where it deviates from
+this design. The §9 decisions are recorded there.
 
 ---
 
@@ -382,6 +381,36 @@ Deviations from §3.1, both to keep the score path untouched:
 - **Visibility (decided):** a "Detected moments" list under the management event page's
   timeline card, with catch-ups flagged, plus a read-only Django admin. Moments are not exposed on
   the APIs and nothing is pushed.
+
+## 7d. Phase 4 as built
+
+Decisions (§9.2–9.6):
+- **Who:** opt-in, anyone with an account in the club, per team they follow.
+- **What:** every notifiable moment kind.
+- **Channel:** push only, with no inbox row.
+- **Batching:** the moments one poll detected are coalesced into one push per account, with no
+  cap per game.
+- **No backfill pushes:** a timeline first fetched after the game stays silent. The event page
+  says so, and the full timeline is shown above it.
+
+- **`events.GameFollow`** (`events/migrations/0044`): (club, user, team), unique per
+  user and team. Set it from the member app (`GET/PUT /game-follows`) or the PWA's
+  Me → "Live game updates" screen (`mobile:live_game_updates`). Both exist only while the club
+  has the `game_timeline` flag.
+- **Delivery:** `events/services/game_push.py`. After `record_moments` stores a batch, it calls
+  `schedule_delivery`, which runs `deliver_moments` after commit in a background thread (the
+  same pattern as `appapi.delivery`). `deliver_moments`:
+  - marks the batch's notifiable moments delivered, whether or not anyone follows the team, so
+    nothing is retried later;
+  - finds the followers of any of the game's teams (active accounts only);
+  - sends each one push, to native devices (`appapi.push` gateway, `kind: "game_moment"`,
+    target = the event) and to web push subscriptions (`mobile.services.push.send_push_to_user`).
+  - The body is one `describe_moment` line per moment, in game-clock order.
+- **Language:** push text is rendered in the server's default language (the background thread
+  has no request locale). Per-recipient localisation would need the device or account locale and
+  is not done yet.
+- **The management event page** marks moments as "pushed" (handled) or "catch-up" (never
+  pushed).
 
 ## 8. Testing
 

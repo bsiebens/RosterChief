@@ -191,6 +191,21 @@ class EventDetailTests(ClubApiTestCase):
 
         self.assertEqual(timeline["events"][0]["goal"]["scorer"], {"name": "Sam Scorer", "number": 9})
 
+    def test_choosing_teams_to_follow_for_live_game_updates(self):
+        seniors = Team.objects.create(club=self.club, name="Seniors", short_name="SEN")
+        Team.objects.create(club=self.club, name="U12", short_name="U12")
+
+        self.assertError(self.get("/game-follows"), 404, "feature_disabled")
+
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        self.assertEqual([team["following"] for team in self.get("/game-follows").json()["teams"]], [False, False])
+
+        body = self.send("put", "/game-follows", {"team_ids": [str(seniors.pk)]}).json()
+
+        self.assertEqual([(team["name"], team["following"]) for team in body["teams"]], [("Seniors", True), ("U12", False)])
+        self.assertEqual([team["following"] for team in self.send("put", "/game-follows", {"team_ids": []}).json()["teams"]], [False, False])
+
     def test_another_clubs_event_is_404(self):
         rival = make_club(name="Rival FC", slug="rival-fc")
         event = Event.objects.create(club=rival, title="Theirs", start=self.soon)

@@ -25,6 +25,7 @@ from evaluations.models import EvaluationChecklist, PlayerEvaluation
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services.attendance import record_check_in
 from events.services.calendar import week_bounds
+from events.services.game_push import followed_team_ids
 from events.services.notifications import notify_new_event
 from formbuilder.models import Answer, FormSend, Submission
 from formbuilder.models import Field as FormBuilderField
@@ -8857,6 +8858,46 @@ class ShopFeatureFlagTests(TestCase):
 
                 self.assertEqual(response.status_code, 302)
                 self.assertIn(reverse("account_login"), response["Location"])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
+class LiveGameUpdatesViewTests(TestCase):
+    """Me -> "Live game updates" (mobile.views.LiveGameUpdatesView): pick the
+    teams this account gets live game pushes for -- only while the club has
+    game timelines."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="fan@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Fay", last_name="Fan", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+        cls.seniors = Team.objects.create(club=cls.club, name="Seniors", short_name="SEN")
+        cls.youth = Team.objects.create(club=cls.club, name="U12", short_name="U12")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def enable(self):
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+
+    def test_hidden_without_game_timelines(self):
+        self.assertEqual(self.client.get(reverse("mobile:live_game_updates"), HTTP_HOST="ajax-united.rosterchief.app").status_code, 404)
+        self.assertNotContains(self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app"), "Live game updates")
+
+    def test_ticking_teams_saves_the_follows(self):
+        self.enable()
+        self.assertContains(self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app"), "Live game updates")
+
+        response = self.client.post(reverse("mobile:live_game_updates"), {"team": [str(self.seniors.pk)]}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:live_game_updates"), fetch_redirect_response=False)
+        self.assertEqual(followed_team_ids(self.user, self.club), {self.seniors.pk})
+        page = self.client.get(reverse("mobile:live_game_updates"), HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(page, f'value="{self.seniors.pk}" class="h-5 w-5 shrink-0 accent-ink" checked')
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])

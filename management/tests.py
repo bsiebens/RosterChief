@@ -7084,6 +7084,13 @@ class EventDetailDisplayTests(ManagementTestBase):
         self.assertContains(response, "Goal for us by Sam Scorer (#9), 1-0.")
         self.assertContains(response, "catch-up")
 
+    def test_a_game_fetched_after_it_ended_explains_why_it_has_no_moments(self):
+        game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="IJNL", start=timezone.now() - datetime.timedelta(days=2))
+        goal = {"id": "g1", "type": "goal", "side": "home", "period": "1", "seconds": 61, "time": "01:01", "goal": {"scorer": {"name": "Sam"}, "assists": []}}
+        store_game_timeline(game, TimelineFetch(document={"events": [goal]}))
+
+        self.assertContains(self.club_get("event_detail", game.pk), "fetched after it was over")
+
     def test_no_timeline_card_without_a_stored_timeline(self):
         game = self.make_event(title="Cup game", kind=Event.EventKind.GAME)
 

@@ -39,6 +39,7 @@ from .services import (
     dfel_import,
     effective_members,
     game_moments,
+    game_push,
     game_timeline,
     generate_occurrences,
     ijnl_import,
@@ -4646,3 +4647,84 @@ class RecordGameMomentsTests(GameTimelineTestBase):
         moment = GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 2, "against": 1}})
 
         self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")
+
+
+class GamePushTests(GameTimelineTestBase):
+    """events.services.game_push -- live game pushes to the accounts that
+    follow one of the game's teams; one coalesced push per poll, no cap."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.fan = get_user_model().objects.create_user(email="fan@example.com", password="pw-secret-123")
+        cls.stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw-secret-123")
+
+    def moment(self, game, key, kind=GameMoment.Kind.GOAL_FOR, seconds=60, notifiable=True, **payload):
+        return GameMoment.objects.create(event=game, key=key, kind=kind, game_seconds=seconds, notifiable=notifiable, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 1, "against": 0}, **payload})
+
+    def deliver(self, game, moments):
+        with mock.patch("events.services.game_push._send_native", return_value=1) as native, mock.patch("events.services.game_push._send_web", return_value=0) as web:
+            reached = game_push.deliver_moments(game.pk, [moment.pk for moment in moments])
+        return reached, native, web
+
+    def test_followers_get_one_coalesced_push_and_others_none(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        goal = self.moment(game, "goal_for:g1")
+        penalty = self.moment(game, "penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, seconds=90, player={"name": "Rex"}, description="Tripping")
+
+        reached, native, web = self.deliver(game, [penalty, goal])
+
+        self.assertEqual(reached, 1)
+        native.assert_called_once()
+        self.assertEqual(native.call_args.args[0], self.fan)
+        body = native.call_args.kwargs["body"]
+        self.assertEqual(body.splitlines(), ["Goal for us by Sam (#9), 1-0.", "Penalty for the opponent: Rex, Tripping."])
+        self.assertEqual(native.call_args.kwargs["title"], "1st vs Olympia Heist")
+        self.assertEqual(native.call_args.kwargs["data"]["target"], {"type": "event", "id": str(game.pk)})
+        web.assert_called_once()
+        self.assertEqual(GameMoment.objects.filter(event=game, delivered_at__isnull=False).count(), 2)
+
+    def test_catch_ups_are_never_pushed_and_a_moment_is_pushed_once(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        late = self.moment(game, "goal_for:old", notifiable=False)
+        fresh = self.moment(game, "goal_for:new")
+
+        _reached, native, _web = self.deliver(game, [late, fresh])
+        self.assertEqual(native.call_count, 1)
+        self.assertNotIn("old", native.call_args.kwargs["body"])
+
+        reached_again, native_again, _web = self.deliver(game, [fresh])
+        self.assertEqual(reached_again, 0)
+        native_again.assert_not_called()
+
+    def test_there_is_no_cap_per_game(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+
+        for number in range(15):
+            reached, _native, _web = self.deliver(game, [self.moment(game, f"goal_for:g{number}")])
+            self.assertEqual(reached, 1)
+
+    def test_recording_moments_schedules_delivery_after_commit(self):
+        game = self.make_game(is_live=True)
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": []}))
+
+        # Patch outermost: captured on-commit callbacks run when the capture block exits.
+        with mock.patch("events.services.game_push.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+            game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [goal_item("g1", "home", 60, 1, 0)]}))
+
+        func, event_id, ids = background.call_args.args
+        self.assertEqual((func, event_id, len(ids)), (game_push.deliver_moments, game.pk, 1))
+
+    def test_following_only_keeps_this_clubs_teams_and_replaces_the_set(self):
+        other_club = Club.objects.create(name="Rival", slug="rival-push")
+        theirs = Team.objects.create(club=other_club, name="Theirs", short_name="TH")
+        second = Team.objects.create(club=self.club, name="Second", short_name="2nd")
+
+        self.assertEqual(game_push.set_followed_teams(self.fan, self.club, [self.team.pk, theirs.pk]), {self.team.pk})
+        game_push.set_followed_teams(self.fan, self.club, [second.pk])
+
+        self.assertEqual(game_push.followed_team_ids(self.fan, self.club), {second.pk})
+        self.assertEqual(game_push.followers(self.make_game()), [])
