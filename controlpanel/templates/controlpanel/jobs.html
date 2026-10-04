@@ -6,98 +6,137 @@
 {% block breadcrumb %}
     <span class="text-ink">jobs</span>
     <span class="text-edge">|</span>
-    <span>{{ jobs|length }} scheduled</span>
+    <span>{{ summary.scheduled }} scheduled</span>
+    <span class="text-edge">|</span>
+    <span class="{% if summary.failing %}text-club-dark{% endif %}">{{ summary.failing }} failing</span>
+    <span class="text-edge">|</span>
+    <span class="{% if summary.paused %}text-warn-text{% endif %}">{{ summary.paused }} paused</span>
 {% endblock breadcrumb %}
 
 {% block panel %}
     <div class="rounded border border-info-border bg-info-bg px-4 py-3 text-sm text-info-text">
         {% lucide "info" size=16 class="inline -mt-0.5 mr-1" %}
-        These run on host cron (see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>) — "Run now" below triggers one off-schedule (in the background — the page doesn't wait for it), and each job can be paused individually too. A run that never appears at its scheduled time (and isn't paused) is the signal something's wrong with the server's crontab, not with this page.
+        These run on an in-process scheduler inside the <span class="font-mono">web</span> container (schedule: <span class="font-mono">JOB_REGISTRY</span> in <span class="font-mono">features/jobs.py</span>; see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>). Only one process ticks at a time, and a run still going makes its next tick skip rather than queue. "Run now" runs a job once in the background — the page doesn't wait, refresh for the result — and a paused job refuses it until resumed. A run that never shows up at its scheduled time (not paused, no maintenance, no earlier run still going) points at the web container's scheduler — check its logs — not at this page.
     </div>
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {% for job in jobs %}
-            <div class="card flex flex-col {% if not job.enabled %}opacity-70{% endif %}">
-                <div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
-                    <div>
-                        <div class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{{ job.label }}</div>
-                        <div class="mt-0.5 font-mono text-[11px] text-muted">{{ job.name }}</div>
-                    </div>
-                    <div class="flex shrink-0 flex-col items-end gap-1">
-                        {% if not job.enabled %}
-                            <span class="badge badge-warning shrink-0">paused</span>
-                        {% elif job.latest %}
-                            {% if job.latest.status == "success" %}
-                                <span class="badge badge-success shrink-0">ok</span>
-                            {% elif job.latest.status == "failure" %}
-                                <span class="badge badge-error shrink-0">error</span>
-                            {% else %}
-                                <span class="badge badge-info shrink-0">running</span>
-                            {% endif %}
-                        {% else %}
-                            <span class="badge shrink-0">never run</span>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="flex flex-1 flex-col gap-2 px-4 py-3 text-sm">
-                    {# flex-1 on the paragraph so it absorbs whatever space a shorter description leaves -- the schedule pill isn't pinned by this anymore (it always sits in the footer, just above the button, regardless of description/log length), but the log below still benefits from a consistent starting point across every card in the row. #}
-                    <p class="flex-1 text-slate">{{ job.description }}</p>
-                    {% if job.latest %}
-                        <div class="mt-1 font-mono text-[11px] text-muted">
-                            last run {{ job.latest.started_at|date:"j M Y, H:i" }}
-                            {% if job.latest.duration %}· {{ job.latest.duration.total_seconds|floatformat:1 }}s{% endif %}
-                        </div>
-                        {% if job.latest.status == "success" and job.latest.detail %}
-                            <div class="rounded bg-subhead px-2.5 py-2 font-mono text-xs text-slate">{{ job.latest.detail }}</div>
-                        {% elif job.latest.status == "failure" and job.latest.error %}
-                            <div class="rounded border border-danger-border bg-danger-bg px-2.5 py-2 font-mono text-xs text-club-dark">{{ job.latest.error }}</div>
-                        {% endif %}
-                    {% endif %}
-                </div>
+    {% comment %}
+        One <details> per job laid out as a grid row: the <summary> is the collapsed row,
+        clicking it expands the description, last output/error and run history. The action
+        forms can't live inside <summary> (forms aren't phrasing content, and a button in
+        a summary is a nested control), so they sit outside it, absolutely positioned over
+        the summary's reserved last column -- usable without expanding, and clicking them
+        never toggles the row. Rows whose latest run failed start open, so the error shows.
+    {% endcomment %}
+    <div class="card overflow-x-auto">
+        <div class="min-w-[62rem]">
+            <div class="grid grid-cols-[1.5rem_6rem_minmax(14rem,1fr)_10rem_10rem_8.5rem_13rem] items-center gap-3 border-b border-line bg-subhead px-4 py-2 font-mono text-[10px] tracking-[.06em] text-dim uppercase">
+                <span></span>
+                <span>Status</span>
+                <span>Job</span>
+                <span>Schedule</span>
+                <span>Last run</span>
+                <span>Recent</span>
+                <span class="text-right">Actions</span>
+            </div>
 
-                {% if job.runs|length > 1 %}
-                    <div class="flex flex-col gap-1.5 border-t border-rule px-4 py-3">
-                        <div class="font-mono text-[10px] tracking-[.06em] text-dim uppercase">Recent runs</div>
-                        {% for run in job.runs|slice:":5" %}
-                            <div class="flex items-center gap-2 font-mono text-[11px]">
-                                <span class="text-dim">{{ run.started_at|date:"d/m H:i" }}</span>
-                                {% if run.status == "success" %}
-                                    <span class="text-ok-text">ok</span>
-                                {% elif run.status == "failure" %}
-                                    <span class="text-club-dark">error</span>
+            {% for job in jobs %}
+                <div class="relative border-b border-rule last:border-b-0">
+                    <details class="group" {% if job.is_failing %}open{% endif %}>
+                        <summary class="grid h-12 cursor-pointer list-none grid-cols-[1.5rem_6rem_minmax(14rem,1fr)_10rem_10rem_8.5rem_13rem] items-center gap-3 px-4 hover:bg-row-focus [&::-webkit-details-marker]:hidden {% if job.is_failing %}bg-row-warn{% endif %}">
+                            <span class="text-dim">{% lucide "chevron-right" size=14 class="transition-transform group-open:rotate-90" %}</span>
+                            <span>
+                                {% if job.state == "paused" %}
+                                    <span class="badge badge-sm badge-warning">paused</span>
+                                {% elif job.state == "ok" %}
+                                    <span class="badge badge-sm badge-success">ok</span>
+                                {% elif job.state == "error" %}
+                                    <span class="badge badge-sm badge-error">error</span>
+                                {% elif job.state == "running" %}
+                                    <span class="badge badge-sm badge-info">running</span>
                                 {% else %}
-                                    <span class="text-info-text">running</span>
+                                    <span class="badge badge-sm">never run</span>
+                                {% endif %}
+                            </span>
+                            <span class="truncate font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase {% if not job.enabled %}opacity-60{% endif %}" title="{{ job.label }}">{{ job.label }}</span>
+                            <span class="flex items-center gap-1.5 truncate font-mono text-[11px] text-muted">{% lucide "clock" size=12 class="shrink-0" %} {{ job.schedule }}</span>
+                            <span class="truncate font-mono text-[11px] text-slate">
+                                {% if job.latest %}
+                                    {{ job.latest.started_at|date:"d/m H:i" }}
+                                    {% if job.latest.duration %}<span class="text-dim">· {{ job.latest.duration.total_seconds|floatformat:1 }}s</span>{% endif %}
+                                {% else %}
+                                    <span class="text-dim">—</span>
+                                {% endif %}
+                            </span>
+                            <span class="flex items-center gap-0.5">
+                                {% for run in job.runs_oldest_first %}
+                                    <span class="h-4 w-1.5 rounded-sm {% if run.status == "success" %}bg-ok{% elif run.status == "failure" %}bg-club{% else %}bg-ice{% endif %}" title="{{ run.started_at|date:"d/m/Y H:i" }} · {% if run.status == "success" %}ok{% elif run.status == "failure" %}error{% else %}running{% endif %}"></span>
+                                {% empty %}
+                                    <span class="font-mono text-[11px] text-dim">—</span>
+                                {% endfor %}
+                            </span>
+                            <span></span>
+                        </summary>
+
+                        <div class="grid gap-4 border-t border-rule bg-subhead px-4 py-3 text-sm lg:grid-cols-[1fr_18rem]">
+                            <div class="flex min-w-0 flex-col gap-2">
+                                <p class="text-slate">{{ job.description }}</p>
+                                <div class="font-mono text-[11px] text-muted">{{ job.name }}</div>
+                                {% if job.latest %}
+                                    <div class="font-mono text-[11px] text-muted">
+                                        last run {{ job.latest.started_at|date:"j M Y, H:i" }}
+                                        {% if job.latest.duration %}· {{ job.latest.duration.total_seconds|floatformat:1 }}s{% endif %}
+                                    </div>
+                                    {% if job.latest.status == "success" and job.latest.detail %}
+                                        <div class="rounded border border-line bg-white px-2.5 py-2 font-mono text-xs break-words whitespace-pre-wrap text-slate">{{ job.latest.detail }}</div>
+                                    {% elif job.latest.status == "failure" and job.latest.error %}
+                                        <div class="rounded border border-danger-border bg-danger-bg px-2.5 py-2 font-mono text-xs break-words whitespace-pre-wrap text-club-dark">{{ job.latest.error }}</div>
+                                    {% endif %}
+                                {% else %}
+                                    <div class="font-mono text-[11px] text-dim">No runs recorded yet.</div>
                                 {% endif %}
                             </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+                            {% if job.runs %}
+                                <div class="flex flex-col gap-1">
+                                    <div class="font-mono text-[10px] tracking-[.06em] text-dim uppercase">Recent runs</div>
+                                    {% for run in job.runs %}
+                                        <div class="flex items-center gap-2 font-mono text-[11px]">
+                                            <span class="h-2 w-2 shrink-0 rounded-full {% if run.status == "success" %}bg-ok{% elif run.status == "failure" %}bg-club{% else %}bg-ice{% endif %}"></span>
+                                            <span class="text-dim">{{ run.started_at|date:"d/m H:i" }}</span>
+                                            {% if run.status == "success" %}
+                                                <span class="text-ok-text">ok</span>
+                                            {% elif run.status == "failure" %}
+                                                <span class="text-club-dark">error</span>
+                                            {% else %}
+                                                <span class="text-info-text">running</span>
+                                            {% endif %}
+                                            {% if run.duration %}<span class="text-dim">· {{ run.duration.total_seconds|floatformat:1 }}s</span>{% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </details>
 
-                {# Schedule pill lives here now, not in the content block above -- always the row directly above the action buttons, regardless of description/log length. #}
-                <div class="mt-auto flex flex-col gap-2 border-t border-rule px-4 py-3">
-                    <div class="badge flex items-center gap-1.5 self-start font-mono text-[11px] text-muted">
-                        {% lucide "clock" size=12 %} {{ job.schedule }}
-                    </div>
-                    <div class="flex gap-2">
-                        {% if job.latest.status == "started" %}
-                            <span class="btn btn-outline btn-sm flex-1 gap-2 opacity-50">Running…</span>
+                    <div class="absolute top-0 right-0 flex h-12 items-center gap-2 pr-4">
+                        {% if job.is_running %}
+                            <span class="btn btn-outline btn-sm gap-1.5 opacity-50">Running…</span>
                         {% else %}
-                            <form method="post" action="{% url 'controlpanel:job_run_now' job.name %}" class="flex-1">
+                            <form method="post" action="{% url 'controlpanel:job_run_now' job.name %}">
                                 {% csrf_token %}
-                                <button type="submit" class="btn btn-outline btn-sm w-full gap-2">{% lucide "refresh-cw" size=14 %} Run now</button>
+                                <button type="submit" class="btn btn-outline btn-sm gap-1.5">{% lucide "refresh-cw" size=13 %} Run now</button>
                             </form>
                         {% endif %}
-                        <form method="post" action="{% url 'controlpanel:job_toggle' job.name %}" class="flex-1">
+                        <form method="post" action="{% url 'controlpanel:job_toggle' job.name %}">
                             {% csrf_token %}
                             {% if job.enabled %}
-                                <button type="submit" class="btn btn-outline btn-sm btn-error w-full gap-2">{% lucide "pause" size=14 %} Pause job</button>
+                                <button type="submit" class="btn btn-outline btn-sm btn-error gap-1.5">{% lucide "pause" size=13 %} Pause</button>
                             {% else %}
-                                <button type="submit" class="btn btn-outline btn-sm btn-success w-full gap-2">{% lucide "play" size=14 %} Resume job</button>
+                                <button type="submit" class="btn btn-outline btn-sm btn-success gap-1.5">{% lucide "play" size=13 %} Resume</button>
                             {% endif %}
                         </form>
                     </div>
                 </div>
-            </div>
-        {% endfor %}
+            {% endfor %}
+        </div>
     </div>
 {% endblock panel %}

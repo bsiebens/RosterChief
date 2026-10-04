@@ -508,7 +508,7 @@ class JobToggleViewTests(ControlPanelTestBase):
     def test_a_job_starts_enabled(self):
         response = self.client.get(reverse("controlpanel:jobs"))
 
-        self.assertContains(response, "Pause job")
+        self.assertContains(response, "Pause")
 
     def test_pausing_a_job(self):
         response = self.toggle()
@@ -529,7 +529,7 @@ class JobToggleViewTests(ControlPanelTestBase):
         response = self.client.get(reverse("controlpanel:jobs"))
 
         self.assertContains(response, "paused")
-        self.assertContains(response, "Resume job")
+        self.assertContains(response, "Resume")
 
     def test_an_unknown_job_name_is_a_404(self):
         response = self.toggle(name="not.a.real.job")
@@ -543,6 +543,74 @@ class JobToggleViewTests(ControlPanelTestBase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
+
+
+class JobsPageTests(ControlPanelTestBase):
+    """The Jobs tab's table and the command bar's failure indicator -- see controlpanel.
+    services.jobs and controlpanel.context_processors.job_health."""
+
+    FAILING = "events.tasks.extend_event_series"
+    PAUSED = "events.tasks.send_deadline_reminders"
+
+    def record_run(self, name, status, minutes_ago=5, **fields):
+        started = timezone.now() - datetime.timedelta(minutes=minutes_ago)
+        return JobRun.objects.create(task_id=f"{name}-{minutes_ago}-{status}", name=name, status=status, started_at=started, finished_at=started + datetime.timedelta(seconds=2), **fields)
+
+    def test_the_command_bar_counts_failed_runs_in_the_window_plural(self):
+        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=5)
+        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=10)
+        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=60 * 25)  # outside the window
+
+        response = self.client.get(reverse("controlpanel:club_list"))
+
+        self.assertContains(response, "2 job failures in the last 24h")
+
+    def test_the_command_bar_counts_failed_runs_in_the_window_singular(self):
+        self.record_run(self.FAILING, JobRun.Status.FAILURE)
+
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertContains(response, "1 job failure in the last 24h")
+        self.assertNotContains(response, "1 job failures")
+
+    def test_no_failures_reads_all_systems_ok(self):
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "all systems ok")
+        self.assertNotContains(response, "job failure")
+
+    def test_summary_counts_and_failing_job_first_with_its_error_visible(self):
+        self.record_run(self.FAILING, JobRun.Status.SUCCESS, minutes_ago=30)
+        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=5, error="Boom: horizon exploded")
+        JobToggle.set_enabled(self.PAUSED, False)
+
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        summary = response.context["summary"]
+        self.assertEqual(summary["failing"], 1)
+        self.assertEqual(summary["paused"], 1)
+        self.assertEqual(summary["scheduled"], len(response.context["jobs"]))
+        self.assertContains(response, "1 failing")
+        self.assertContains(response, "1 paused")
+        self.assertEqual(response.context["jobs"][0]["name"], self.FAILING)
+        self.assertEqual([run.status for run in response.context["jobs"][0]["runs_oldest_first"]], ["success", "failure"])
+        self.assertContains(response, "Boom: horizon exploded")
+        self.assertContains(response, '<details class="group" open>', count=1)
+
+    def test_every_job_keeps_its_run_now_and_pause_forms(self):
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        for job in response.context["jobs"]:
+            self.assertContains(response, reverse("controlpanel:job_run_now", args=[job["name"]]))
+            self.assertContains(response, reverse("controlpanel:job_toggle", args=[job["name"]]))
+
+    def test_a_running_job_disables_run_now(self):
+        JobRun.objects.create(task_id="running", name=self.FAILING, status=JobRun.Status.STARTED, started_at=timezone.now())
+
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "Running…")
+        self.assertNotContains(response, reverse("controlpanel:job_run_now", args=[self.FAILING]))
 
 
 class _SyncThread:
