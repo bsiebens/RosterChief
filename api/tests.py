@@ -655,6 +655,66 @@ class GamesApiTests(ApiTestBase):
 
         self.assertIsNone(home_team["logo_url"])
 
+    def make_game_for_two_teams(self, **overrides):
+        second_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        game = self.make_game(**overrides)
+        game.teams.add(second_team)
+        return game, second_team
+
+    def assert_lists_both_teams_once(self, games, game, second_team):
+        # One row per game, not one per assigned team -- and that row names every team.
+        self.assertEqual([row["id"] for row in games], [str(game.pk)])
+        self.assertEqual([team["id"] for team in games[0]["teams"]], [str(self.team.pk), str(second_team.pk)])
+        self.assertEqual([team["name"] for team in games[0]["teams"]], ["First Team", "Second Team"])
+
+    def test_upcoming_lists_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(location=self.home_location)
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assert_lists_both_teams_once(games, game, second_team)
+        # Kept for backwards compatibility: still a single team, the first by name.
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
+
+    def test_past_games_list_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(start=timezone.now() - datetime.timedelta(days=1), score_for=2, score_against=1)
+
+        self.assert_lists_both_teams_once(self.api_get("/games/past/").json(), game, second_team)
+
+    def test_live_games_list_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(start=timezone.now() - datetime.timedelta(minutes=10), is_live=True)
+
+        self.assert_lists_both_teams_once(self.api_get("/games/live/").json(), game, second_team)
+
+    def test_team_games_list_every_team_but_keep_the_requested_one_as_home_or_away(self):
+        game, second_team = self.make_game_for_two_teams(location=self.home_location)
+
+        games = self.api_get(f"/teams/{second_team.pk}/games/").json()
+
+        self.assert_lists_both_teams_once(games, game, second_team)
+        self.assertEqual(games[0]["home_team"]["name"], "Second Team")
+
+    def test_a_single_team_game_lists_just_that_team(self):
+        self.make_game()
+
+        teams = self.api_get("/games/upcoming/").json()[0]["teams"]
+
+        self.assertEqual([team["name"] for team in teams], ["First Team"])
+
+    def test_upcoming_games_do_not_query_teams_per_game(self):
+        self.make_game_for_two_teams()
+        for i in range(2):
+            self.make_game(start=timezone.now() + datetime.timedelta(days=i + 2))
+        self.api_get("/games/upcoming/")  # warm up tenant/session lookups
+        cache.clear()
+
+        # Constant no matter how many games or teams: one query for the games
+        # (opponent/location joined in), one prefetch for all their teams, plus
+        # the per-request tenant lookups -- not one teams query per game.
+        with self.assertNumQueries(4):
+            self.assertEqual(len(self.api_get("/games/upcoming/").json()), 3)
+
     def make_past_game(self, days_ago=1, **overrides):
         # A game that meets every "fully completed" condition -- kind GAME, scored,
         # not live, not cancelled, well past its (auto-defaulted 2h) end.

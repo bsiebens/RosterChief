@@ -1259,9 +1259,23 @@
         min-width: 55rem;
     }
 
+    /* Sticky against #cal-week-scroll (its own overflow-y-auto box, not the
+       page): the on-load script in event_list.html scrolls that box down to the
+       week's first event, which used to carry the day-name/date row off the
+       top. Pinned at top 0 it stays put instead -- no offset for the topbar
+       needed, since that's outside this scroll container. The script's
+       scrollTop math needs no adjusting either: the row still occupies its own
+       height above .cal-week-body in the scroll content, so the target hour
+       lands right underneath it rather than behind it. Opaque background and a
+       z-index over the absolutely positioned .cal-block-slot/.cal-gathering-slot
+       blocks (and the relative day columns) so events slide under it, not over. */
     .cal-week-header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
         display: flex;
         border-bottom: 1px solid var(--color-line);
+        background: #fff;
     }
 
     .cal-week-gutter-spacer {
@@ -1529,6 +1543,21 @@
     }
 
     /* --- Month grid --- */
+    /* Month title + day-name row, pinned under the page's own sticky topbar
+       (management/base.html: the window scrolls, the <header> is sticky top-0
+       h-16 = 4rem) while a tall six-week month scrolls past -- so the weekday
+       columns stay labelled. Only works because the enclosing .card uses
+       overflow: clip rather than overflow: hidden (see event_list.html): hidden
+       would make the card itself the sticky scroll container, and since the
+       card never scrolls the row would never stick. z-index stays under the
+       topbar's own z-10 so the notifications dropdown still opens over it. */
+    .cal-month-head {
+        position: sticky;
+        top: 4rem;
+        z-index: 2;
+        background: #fff;
+    }
+
     .cal-month-daynames {
         display: grid;
         grid-template-columns: repeat(7, 1fr);

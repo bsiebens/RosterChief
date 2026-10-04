@@ -157,7 +157,9 @@
                 comment), so inlining all of it into the page would mean scrolling past
                 a screenful of empty small-hours before reaching any events most weeks.
                 extra_body's own script scrolls this container to just before the
-                week's first event on load, for the same reason.
+                week's first event on load, for the same reason -- .cal-week-header
+                is sticky (top 0) within this container, so the dates stay visible
+                after that scroll (see its rule in assets/management.css).
             {% endcomment %}
             <div id="cal-week-scroll" class="max-h-[70vh] overflow-x-auto overflow-y-auto" data-first-event-hour="{{ calendar.first_event_hour|default_if_none:"" }}" data-day-start-hour="{{ calendar.day_start_hour }}" data-day-end-hour="{{ calendar.day_end_hour }}">
                 {% with hours_span=calendar.hours|length|add:"-1" %}
@@ -212,14 +214,23 @@
             </div>
         </div>
     {% elif calendar_range == "month" %}
-        <div class="card overflow-hidden">
-            <div class="border-b border-line px-4 py-2.5 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
-                {{ anchor|date:"F Y" }}
-            </div>
-            <div class="cal-month-daynames">
-                {% for cell in calendar.weeks.0 %}
-                    <div class="cal-month-dayname">{{ cell.date|date:"D" }}</div>
-                {% endfor %}
+        {% comment %}
+            overflow-clip, not overflow-hidden: both round off the card's corners,
+            but hidden also turns the card into a scroll container, which would
+            trap .cal-month-head's position: sticky inside a box that never
+            scrolls -- clip doesn't, so the head sticks against the page scroll
+            under the topbar (see .cal-month-head in assets/management.css).
+        {% endcomment %}
+        <div class="card overflow-clip">
+            <div class="cal-month-head">
+                <div class="border-b border-line px-4 py-2.5 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">
+                    {{ anchor|date:"F Y" }}
+                </div>
+                <div class="cal-month-daynames">
+                    {% for cell in calendar.weeks.0 %}
+                        <div class="cal-month-dayname">{{ cell.date|date:"D" }}</div>
+                    {% endfor %}
+                </div>
             </div>
             <div class="cal-month-grid">
                 {% for week in calendar.weeks %}

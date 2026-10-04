@@ -775,6 +775,12 @@ in whose (explicit, defaulted or assumed) end is at or before now, newest first 
 returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
 Current season only (explicit `season`, else derived from the start date, same as
 `/teams/{id}/games/`) — never an older season's results; empty when there's no current season.
+Every game row (`GameOut`, shared by `/games/upcoming/`, `/games/past/`, `/games/live/` and
+`/teams/{id}/games/`) carries **`teams`** — every one of the club's own teams assigned to the
+event (`Event.teams` is M2M), ordered by name, prefetched in one query. `home_team`/`away_team`
+still name only *one* of them (the requested team on `/teams/{id}/games/`, else the first by
+name) opposite the opponent; they're kept unchanged for external sites already reading them,
+but a multi-team game should be read through `teams`.
 
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**

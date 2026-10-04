@@ -9,7 +9,7 @@ from datetime import datetime
 
 from django.db.models import Q
 from django.utils import timezone
-from ninja import Router, Schema
+from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
 from api.cache import cached_for_club
@@ -55,8 +55,13 @@ class GameOut(Schema):
     start: datetime
     end: datetime
     location: LocationOut | None
-    home_team: TeamRefOut | None
-    away_team: TeamRefOut | None
+    # home_team/away_team only ever carry ONE of our own teams (the opponent on
+    # the other side) -- an Event can be assigned to several teams at once, so
+    # `teams` below is the complete list. The single-team pair is kept as-is
+    # for the external sites already reading it.
+    home_team: TeamRefOut | None = Field(description="Home side. For our club, only ONE of its teams (the requested one on /teams/{id}/games/, else the first by name). Kept for compatibility; read `teams`.")
+    away_team: TeamRefOut | None = Field(description="Away side. For our club, only ONE of its teams (the requested one on /teams/{id}/games/, else the first by name). Kept for compatibility; read `teams`.")
+    teams: list[TeamRefOut] = Field(description="Every one of our own club's teams assigned to this game, ordered by name. Use this rather than home_team/away_team when a game can involve more than one team.")
     competition: str
     is_friendly: bool
     is_live: bool
@@ -70,10 +75,10 @@ def _to_team_ref_out(request, *, id, name, logo) -> TeamRefOut:
 
 
 def _to_game_out(event, request, club, team=None) -> GameOut:
+    # Every caller prefetches "teams" -- .all() reads that cache (Team's own
+    # Meta.ordering, by name), where .first() would re-query per event.
+    related_teams = list(event.teams.all())
     if team is None:
-        # .first() would re-query even with teams prefetched; go through the
-        # prefetch cache instead.
-        related_teams = list(event.teams.all())
         team = related_teams[0] if related_teams else None
 
     # Our own team has no logo of its own -- it's shown under the club's badge. The
@@ -115,6 +120,7 @@ def _to_game_out(event, request, club, team=None) -> GameOut:
         location=location,
         home_team=home_team,
         away_team=away_team,
+        teams=[_to_team_ref_out(request, id=related.pk, name=related.name, logo=club.logo) for related in related_teams],
         competition=event.competition,
         is_friendly=event.is_friendly,
         is_live=event.is_live,
@@ -211,6 +217,7 @@ def list_team_games(request, team_id: uuid.UUID):
             Event.objects.filter(club=club, teams=team, kind=Event.EventKind.GAME, cancelled=False)
             .filter(Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date))
             .select_related("opponent", "location")
+            .prefetch_related("teams")
             .order_by("start")
         )
         return [_to_game_out(event, request, club, team=team) for event in events]
