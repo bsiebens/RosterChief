@@ -818,8 +818,13 @@
             "type": "string"
           },
           "primary_content_color": {
-            "description": "`#000000` or `#ffffff`: text and icons on `primary_color`.",
+            "description": "Hex: text and icons on `primary_color` -- the club's own text colour when it set one, else `#000000` or `#ffffff`, whichever reads best.",
             "title": "Primary Content Color",
+            "type": "string"
+          },
+          "public_api_base_url": {
+            "description": "Base URL of the club's public, read-only API (no token): news, teams and rosters, games with timelines, league standings, sponsors -- e.g. `https://hc-example.rosterchief.app/api/v1`. Its reference is at `<public_api_base_url>/docs`.",
+            "title": "Public Api Base Url",
             "type": "string"
           },
           "relationship": {
@@ -836,7 +841,7 @@
             "type": "string"
           },
           "secondary_content_color": {
-            "description": "`#000000` or `#ffffff`: text on `secondary_color`.",
+            "description": "Hex: text on `secondary_color` -- the club's own text colour when it set one, else `#000000` or `#ffffff`.",
             "title": "Secondary Content Color",
             "type": "string"
           },
@@ -850,6 +855,7 @@
           "slug",
           "name",
           "api_base_url",
+          "public_api_base_url",
           "logo_url",
           "event_background_url",
           "primary_color",
@@ -4497,6 +4503,18 @@
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "minor | bench_minor | double_minor | major | misconduct | game_misconduct | match, when the source says (or its length implies it). Anything from major up is serious.",
+            "title": "Kind"
           },
           "minutes": {
             "anyOf": [

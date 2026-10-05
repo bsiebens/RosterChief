@@ -72,15 +72,19 @@ class ClubOut(Schema):
     slug: str
     name: str
     api_base_url: str = Field(description="Base URL for this club's resource endpoints, e.g. `https://hc-example.rosterchief.app/api/app/v1`.")
+    public_api_base_url: str = Field(
+        description="Base URL of the club's public, read-only API (no token): news, teams and rosters, games with timelines, league standings, sponsors -- e.g."
+        " `https://hc-example.rosterchief.app/api/v1`. Its reference is at `<public_api_base_url>/docs`."
+    )
     logo_url: str | None
     event_background_url: str | None = Field(
         description="The club's photo for event screens (the next-event card on Home, an event's page), as the web app shows it: in black & white, cropped to fill, under a dark"
         " gradient (`#0b1220` from about 45% at the top to 97% at the bottom) so white text reads. Null: use a plain dark background."
     )
     primary_color: str = Field(description="Hex, e.g. `#1e40af`: headers and the navigation bar. The club's own colour, or the app default when it set none.")
-    primary_content_color: str = Field(description="`#000000` or `#ffffff`: text and icons on `primary_color`.")
+    primary_content_color: str = Field(description="Hex: text and icons on `primary_color` -- the club's own text colour when it set one, else `#000000` or `#ffffff`, whichever reads best.")
     secondary_color: str = Field(description="Hex: buttons, active tabs and highlights. The club's own colour, or the app default.")
-    secondary_content_color: str = Field(description="`#000000` or `#ffffff`: text on `secondary_color`.")
+    secondary_content_color: str = Field(description="Hex: text on `secondary_color` -- the club's own text colour when it set one, else `#000000` or `#ffffff`.")
     relationship: list[str] = Field(
         description="How the account relates to the club: `member` (plays or is signed up), `guardian`"
         " (acts for children), `coach` (staffs a team this season), `staff` (club admin, editor or member admin). More values may appear: ignore unknown ones."

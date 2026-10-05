@@ -5779,6 +5779,13 @@ class ClubSettingsPreviewTests(ManagementTestBase):
         self.assertEqual(self.club.secondary_color, "#654321")
         self.assertEqual(self.club.website, "https://ajax-united.example")
 
+    def test_the_public_api_address_is_shown(self):
+        response = self.club_get("club_settings")
+
+        self.assertContains(response, "Public API")
+        self.assertContains(response, f"http://{self.club.slug}.rosterchief.app/api/v1/")
+        self.assertContains(response, f'href="http://{self.club.slug}.rosterchief.app/api/v1/docs"')
+
     def test_the_text_colours_can_be_set_and_left_on_auto(self):
         data = {"name": "Ajax United", "legal_name": "", "contact_email": "", "website": "", "primary_color": "#123456", "secondary_color": "#654321"}
 

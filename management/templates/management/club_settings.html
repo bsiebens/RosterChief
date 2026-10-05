@@ -126,6 +126,17 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <div class="card-title">{% lucide "code" size=16 %} {% trans "Public API" %}</div>
+                        <p class="text-sm text-muted">{% trans "Read-only data for the club's own website or an app: news, teams and rosters, games with their timelines, league standings and sponsors. No login needed -- it only ever returns what's public anyway." %}</p>
+                        <div class="mt-3 flex flex-wrap items-center gap-3">
+                            <code class="rounded-lg border border-line bg-subhead px-3 py-2 font-mono text-xs break-all text-ink">{{ public_api_url }}</code>
+                            <a class="btn btn-outline btn-sm gap-2" href="{{ public_api_docs_url }}" target="_blank" rel="noopener">{% lucide "book-open" size=14 %} {% trans "API reference" %}</a>
+                        </div>
+                    </div>
+                </div>
             </form>
 
             <div class="xl:sticky xl:top-4 xl:self-start flex flex-col gap-5">

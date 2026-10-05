@@ -61,6 +61,7 @@ def clubs(request):
                 "slug": club.slug,
                 "name": club.name,
                 "api_base_url": services.club_api_base_url(request, club),
+                "public_api_base_url": services.club_public_api_base_url(request, club),
                 "logo_url": services.logo_url(request, club),
                 "event_background_url": services.event_background_url(request, club),
                 **services.club_colors(club),

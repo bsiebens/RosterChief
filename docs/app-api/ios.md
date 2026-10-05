@@ -138,11 +138,12 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 {"items": [{
   "id": "…", "slug": "hc-example", "name": "HC Example",
   "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
+  "public_api_base_url": "https://hc-example.rosterchief.app/api/v1",
   "logo_url": "https://…", "event_background_url": "https://…",
   "primary_color": "#1e40af", "primary_content_color": "#ffffff",
   "secondary_color": "#e4002b", "secondary_content_color": "#ffffff",
   "relationship": ["guardian", "coach"],
-  "features": {"shop": true, "shop_open": false, "forms": true, "officials": false, "evaluations": false}
+  "features": {"shop": true, "shop_open": false, "forms": true, "officials": false, "evaluations": false, "game_timeline": true}
 }]}
 ```
 
@@ -150,10 +151,11 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
   (staffs a team this season), `staff` (club admin, editor or member admin). Ignore values you
   don't know; more may come.
 * Exactly one club: open it. More: show a picker and remember the choice.
-* Use `api_base_url` for every club call.
+* Use `api_base_url` for every club call. For public content (games with timelines, league
+  standings, sponsors), `public_api_base_url` is the club's read-only public API: no token needed.
 * Theme the club like the web app does: `primary_color` for the header and navigation bar,
   `secondary_color` for buttons, the active tab and highlights, and the matching
-  `*_content_color` (black or white) for text on each. The colours are never null: a club
+  `*_content_color` for text on each (the club's own text colour, else black or white). The colours are never null: a club
   without its own gets the app defaults. Show `logo_url`, or the club's initials without one.
 * Event screens (the next-event card on Home, an event's page) use `event_background_url` as a
   full-bleed photo in **black & white** under a dark gradient, with white text on top: in

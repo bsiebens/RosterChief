@@ -38,6 +38,12 @@ def club_host(request, club: Club) -> str:
     return f"{club.slug}.{base}{suffix}"
 
 
+def club_public_api_base_url(request, club: Club) -> str:
+    """The club's public, read-only, unauthenticated API (api/urls.py): news,
+    teams and rosters, games and their timelines, standings, sponsors."""
+    return f"{request.scheme}://{club_host(request, club)}/api/v1"
+
+
 def club_api_base_url(request, club: Club) -> str:
     return f"{request.scheme}://{club_host(request, club)}/api/app/v1"
 

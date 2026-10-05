@@ -29,6 +29,9 @@ The app API has **two planes**:
   `/context` and the member screens (home, calendar, events, news, notifications, profiles);
   coach screens follow. Take each club's base URL
   from `api_base_url` in `GET /clubs`; never build it yourself.
+* **Public API**, also on each club's host (`https://<club>.rosterchief.app/api/v1`): read-only,
+  no token -- news, teams and rosters, games with timelines, league standings, sponsors. Its
+  base URL is `public_api_base_url` in `GET /clubs`, its reference at `<public_api_base_url>/docs`.
 
 One sign-in works for every club the account belongs to. The token says *who* you are, never
 *which club*. The server re-checks what you may see on every club request.

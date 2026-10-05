@@ -180,6 +180,7 @@ class AccountPlaneTests(AppApiTestCase):
         self.assertEqual([item["slug"] for item in items], ["ajax-united"])
         item = items[0]
         self.assertEqual(item["api_base_url"], f"http://{CLUB_HOST}/api/app/v1")
+        self.assertEqual(item["public_api_base_url"], f"http://{CLUB_HOST}/api/v1")
         self.assertEqual(item["relationship"], ["guardian"])
         self.assertEqual(item["features"], {"shop": False, "shop_open": False, "forms": False, "officials": False, "evaluations": False, "game_timeline": False})
         self.assertNotIn(str(rival.pk), [entry["id"] for entry in items])
