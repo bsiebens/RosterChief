@@ -229,7 +229,7 @@ _NAV_SECTIONS = {
 }
 
 
-#: The redesigned sidebar has two levels (design_handoff_rosterchief_platform/README.md,
+#: The redesigned sidebar has two levels (the design handoff,
 #: D1's 236px sidebar: Overview/Members/Teams/Calendar/News/Finance/Settings, each except
 #: News expandable into sub-items -- D2 shows Members expanded as All members/Sign-ups/
 #: Households/Roles). This maps each *leaf* nav value from _NAV_SECTIONS above to which

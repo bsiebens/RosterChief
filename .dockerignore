@@ -19,5 +19,5 @@ __pycache__
 .DS_Store
 **/.DS_Store
 .ruff_cache
-# Root-level documents only (ARCHITECTURE.pdf, reference forms); no PDF is read at runtime.
+# Root-level documents only; no PDF is read at runtime.
 *.pdf

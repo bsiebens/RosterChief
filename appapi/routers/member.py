@@ -95,7 +95,8 @@ def calendar(
 ):
     """Invitations, referee/official sign-ups (open or accepted) and events a person is
     kept off by an open club requirement (`blocked`), soonest first. Cancelled events
-    are left out. Fetch the next window by passing the previous `to` as `from`."""
+    are left out, and so are referee/official sign-ups for games that are already over (only
+    your own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`."""
     scope = club_scope(request)
     start = from_ or timezone.now()
     limit = start + datetime.timedelta(days=MAX_CALENDAR_DAYS)

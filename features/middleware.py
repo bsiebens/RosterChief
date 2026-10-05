@@ -68,7 +68,14 @@ class MaintenanceMiddleware:
             return True
 
         # The base domain keeps the way back in.
-        return not request.path.startswith(OPEN_PREFIXES)
+        return not self.is_open_on_base_domain(request.path)
+
+    @staticmethod
+    def is_open_on_base_domain(path: str) -> bool:
+        # "/control" (no slash) is open too: this runs before CommonMiddleware's APPEND_SLASH
+        # redirect could add the slash, so a bare "/control" would otherwise be a 503 -- and
+        # that is the URL people type.
+        return path.startswith(OPEN_PREFIXES) or path + "/" in OPEN_PREFIXES
 
     def render(self, request, maintenance):
         message = maintenance.message or _("RosterChief is down for maintenance. It will be back shortly.")

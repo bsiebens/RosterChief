@@ -19,7 +19,7 @@ _TEXTAREA_CLASSES = "h-40 w-full resize-y rounded-lg border border-stroke bg-pap
 
 
 class MemberProfileForm(forms.ModelForm):
-    """M6 -- "Edit personal info" (design_handoff_rosterchief_platform/README.md).
+    """M6 -- "Edit personal info" (the design handoff).
 
     Covers exactly the fields ``members.models.Member`` actually has. The
     design mock also shows a "National register no.", an "Address" and an

@@ -2,7 +2,7 @@
  *
  * A distinct surface, same posture as assets/controlpanel.css: its own stylesheet, its
  * own document shell (marketing/templates/marketing/home.html doesn't extend
- * templates/_base.html), no daisyUI. Design source: design_handoff_rosterchief_platform/
+ * templates/_base.html), no daisyUI. Design source: the design handoff
  * WEBSITE.md, which is explicit that "the tokens, fonts and component recipes [from the
  * app handoff] apply verbatim" -- so the @theme block and @font-face declarations below
  * are copied from assets/controlpanel.css rather than reinvented.

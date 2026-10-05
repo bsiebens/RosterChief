@@ -22,7 +22,7 @@ def fresh_timestamp_token() -> str:
 class ContactForm(forms.Form):
     """The "Book a demo" form on the marketing homepage (marketing/views.py:home).
 
-    Field set and copy match design_handoff_rosterchief_platform/WEBSITE.md's
+    Field set and copy match the website design handoff's
     Contact section table exactly.
     """
 

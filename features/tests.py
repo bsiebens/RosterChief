@@ -166,6 +166,16 @@ class MaintenanceModeTests(TestCase):
 
         self.assertEqual(self.platform_get("/control/").status_code, 200)
 
+    def test_the_control_panel_stays_reachable_without_a_trailing_slash(self):
+        # Maintenance runs before APPEND_SLASH can add the slash, and "/control" is what people type.
+        Maintenance.start()
+        self.client.force_login(self.user)
+
+        response = self.platform_get("/control")
+
+        self.assertNotEqual(response.status_code, 503)
+        self.assertRedirects(response, "/control/", fetch_redirect_response=False, status_code=301)
+
     def test_signing_in_stays_possible(self):
         # Close /accounts/ as well and you cannot sign in to turn maintenance off: a
         # lock-down with no key, fixable only from a shell.

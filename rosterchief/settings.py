@@ -102,7 +102,7 @@ INSTALLED_APPS = [
     # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
     # staff managing every club) and not the mobile member/parent app below.
     "management.apps.ManagementConfig",
-    # The installed PWA -- Member mode first (see design_handoff_rosterchief_platform/
+    # The installed PWA -- Member mode first (see the design handoff
     # README.md); Coach mode is a later phase, deliberately not built yet.
     "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.

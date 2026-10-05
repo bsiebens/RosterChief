@@ -581,7 +581,7 @@ class RenderFallbackIconTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class HomeViewTests(TestCase):
-    """M1 -- design_handoff_rosterchief_platform/README.md's M1 section."""
+    """M1 -- the design handoff's M1 section."""
 
     @classmethod
     def setUpTestData(cls):
@@ -1443,7 +1443,7 @@ class EventDetailDropoutTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CalendarViewTests(TestCase):
-    """M3 -- design_handoff_rosterchief_platform/README.md's M3 section: a
+    """M3 -- the design handoff's M3 section: a
     "This week"/"Next week" agenda. No person switcher and no club-wide
     toggle -- always every event self.managed_people is invited to."""
 
@@ -1956,7 +1956,7 @@ class RefereeSignupRespondViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class EventDetailScreenTests(TestCase):
-    """M2 -- design_handoff_rosterchief_platform/README.md's M2 section,
+    """M2 -- the design handoff's M2 section,
     "answer for several" (the GET side; POST is covered by
     EventDetailRsvpTests above)."""
 
@@ -2282,7 +2282,7 @@ class EventDetailScreenTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class NotificationsViewTests(TestCase):
-    """M7 -- design_handoff_rosterchief_platform/README.md's M7 section
+    """M7 -- the design handoff's M7 section
     ("Inbox"), scoped to every managed_people (see NotificationsView's own
     docstring for why, not just scope_person)."""
 
@@ -2502,7 +2502,7 @@ class NewsListViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class NewsDetailScreenTests(TestCase):
-    """M4 -- design_handoff_rosterchief_platform/README.md's M4 section,
+    """M4 -- the design handoff's M4 section,
     "News article". Visibility mirrors news.tasks.notify_news_published's own
     gate (see NewsDetailView's docstring); language is Django's own
     active-language detection, not a member-facing toggle."""
@@ -2654,7 +2654,7 @@ class NewsDetailScreenTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class MeViewTests(TestCase):
-    """M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me
+    """M5 -- the design handoff's M5 section, "Me
     & my people". See MeView's own docstring for the judgment calls: no
     licence/eligibility field backing "licence OK" (real roster data used
     instead), "Household & contacts"/"Coach mode" omitted since neither has
@@ -3244,7 +3244,7 @@ class RegistrationInvoicePdfViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class EditProfileViewTests(TestCase):
-    """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
+    """M6 -- the design handoff's M6 section,
     "Edit personal info". See EditProfileView's own docstring for the
     judgment calls: no schema fields for national register no./address/
     allergies/consent (all omitted), guardians and open onboarding
@@ -3998,7 +3998,7 @@ class CalendarFeedSettingsViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachTodayViewTests(TestCase):
-    """C1 -- design_handoff_rosterchief_platform/README.md's C1 section, plus
+    """C1 -- the design handoff's C1 section, plus
     mobile/coach_mixins.py's CoachScopeMixin (team resolution, session
     persistence, can_manage_active_team) exercised through this, the first
     Coach-mode screen."""
@@ -6637,7 +6637,7 @@ class CoachAddPlayerViewTests(TestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class CoachLineupViewTests(TestCase):
-    """C3 -- design_handoff_rosterchief_platform/README.md's C3 section; see
+    """C3 -- the design handoff's C3 section; see
     CoachLineupView's own docstring for the plain yes/no-per-player design
     (no lines/slots)."""
 

@@ -124,11 +124,7 @@ def blocked_upcoming_events_for_members(members, club):
         return result
 
     candidates = list(
-        Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now())
-        .filter(Q(teams__id__in=all_team_ids) | Q(groups__id__in=all_group_ids))
-        .distinct()
-        .prefetch_related("teams", "groups", "excluded_members")
-        .order_by("start")
+        Event.objects.filter(club=club, cancelled=False, start__gte=timezone.now()).filter(Q(teams__id__in=all_team_ids) | Q(groups__id__in=all_group_ids)).distinct().prefetch_related("teams", "groups", "excluded_members").order_by("start")
     )
     if not candidates:
         return result

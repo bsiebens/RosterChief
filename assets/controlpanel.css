@@ -1,6 +1,6 @@
 /* RosterChief control panel — a deliberately separate stylesheet.
  *
- * The control panel is a distinct surface (see design_handoff_rosterchief_platform/README.md):
+ * The control panel is a distinct surface (see the design handoff):
  * industrial, dark command bar over a light workspace, its own type system (Barlow /
  * Barlow Condensed / IBM Plex Mono) and colour tokens, and — per that handoff — "never
  * club-branded". It does not import assets/app.css and does not load daisyUI: sharing either

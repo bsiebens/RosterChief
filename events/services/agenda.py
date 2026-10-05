@@ -6,11 +6,13 @@ Each row is a dict with ``type`` and ``event`` plus, per type:
 
 * ``rsvp``: ``member`` and ``attendance`` -- an invitation (an Attendance row);
 * ``referee`` / ``official``: ``member`` and ``signup`` -- a referee/official invite
-  (INVITED) or commitment (ACCEPTED); declined ones are left out;
+  (INVITED) or commitment (ACCEPTED); declined ones are left out, and so is any game that
+  has already finished -- looking back you want the games you or your family *played*;
 * ``blocked``: ``member`` and ``requirements`` -- an event the person would be invited to
   but for open onboarding requirements, shown so it doesn't just silently vanish.
 """
 
+from django.db.models import Q
 from django.utils import timezone
 
 from events.models import Attendance, Event, OfficialSignup, RefereeSignup
@@ -34,6 +36,13 @@ def member_agenda(club, people, *, kind: str | None = None, officials_enabled: b
         queryset = queryset.filter(event__club=club, event__cancelled=False, event__start__gte=start)
         return queryset.filter(event__start__lt=end) if end is not None else queryset
 
+    now = timezone.now()
+
+    def not_finished(queryset):
+        # Refereeing a game is only of interest until it is over. A game with no end is judged
+        # by its start (games get an assumed end on save, so that is the rare case).
+        return queryset.filter(Q(event__end__gte=now) | Q(event__end__isnull=True, event__start__gte=now))
+
     related = ("event", "event__location", "event__opponent", "member")
     rows = []
 
@@ -43,10 +52,10 @@ def member_agenda(club, people, *, kind: str | None = None, officials_enabled: b
     rows += [{"type": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in attendances]
 
     if kind != "training":
-        referee_signups = in_window(RefereeSignup.objects.filter(member__in=people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]))
+        referee_signups = in_window(not_finished(RefereeSignup.objects.filter(member__in=people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED])))
         rows += [{"type": "referee", "event": signup.event, "member": signup.member, "signup": signup} for signup in referee_signups.select_related(*related).prefetch_related("event__teams")]
         if officials_enabled:
-            official_signups = in_window(OfficialSignup.objects.filter(member__in=people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED]))
+            official_signups = in_window(not_finished(OfficialSignup.objects.filter(member__in=people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED])))
             rows += [{"type": "official", "event": signup.event, "member": signup.member, "signup": signup} for signup in official_signups.select_related(*related).prefetch_related("event__teams")]
 
     blocked_by_person = blocked_upcoming_events_for_members(people, club)
