@@ -994,18 +994,12 @@ panel's **Jobs** tab (see that class's own docstring). Every command accepts
 `--ignore-maintenance` for the rare case you genuinely mean to run one by hand during a
 window.
 
-So a migration-heavy deploy looks like:
-
-```bash
-# 1. Close the platform in the control panel (or from a shell):
-docker compose run --rm web python manage.py shell -c \
-  "from features.models import Maintenance; Maintenance.start(message='Upgrading. Back by 21:00.')"
-
-# 2. Do the work — migrate is not blocked. From your own machine, as usual:
-deploy/deploy-prod.sh --version vX.Y.Z
-
-# 3. Reopen from the control panel.
-```
+`deploy/deploy-local.sh` (and so `deploy/deploy-prod.sh`, which runs it over `ssh -t`) does this
+for you: it enters maintenance mode before the backup and migration, and once the new image is
+healthy asks whether to reopen the platform. Answering anything but `y` -- or a failed deploy,
+or no terminal -- leaves it closed and prints the command to reopen it (also available from
+the control panel). `NO_MAINTENANCE=1` skips the whole thing; `MAINTENANCE_MESSAGE="..."` sets
+what clubs see. A first deploy (no running web yet) has nothing to close and skips it.
 
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
