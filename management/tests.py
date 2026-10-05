@@ -7070,8 +7070,8 @@ class EventDetailDisplayTests(ManagementTestBase):
         response = self.club_get("event_detail", game.pk)
 
         self.assertContains(response, "Game timeline")
-        self.assertContains(response, "Goal: Sam Scorer (#9)")
-        self.assertContains(response, "1-0")
+        self.assertContains(response, "#9 Sam Scorer")
+        self.assertContains(response, "1\u20130")
 
     def test_detected_moments_are_listed_under_the_timeline(self):
         game = self.make_event(title="Cup game", kind=Event.EventKind.GAME, competition="IJNL", start=timezone.now() - datetime.timedelta(hours=1))

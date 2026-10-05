@@ -24,10 +24,11 @@ from datetime import timedelta
 
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _lazy
 
 from events.models import Event, GameTimeline
-from events.services.game_moments import game_timeline_changed
-from events.services.timeline_parsers import finalize_document
+from events.services.game_moments import PENALTY_KIND_LABELS, game_timeline_changed
+from events.services.timeline_parsers import SERIOUS_PENALTIES, finalize_document
 
 logger = logging.getLogger(__name__)
 
@@ -169,59 +170,92 @@ def games_for_backfill(*, since, club=None):
 
 
 def _person(person) -> str:
+    """ "#78 Sam Scorer" -- number first, the way a scoresheet reads."""
     if not person:
         return ""
-    number = person.get("number")
-    return f"{person.get('name', '')} (#{number})" if number is not None else person.get("name", "")
+    number, name = person.get("number"), person.get("name", "")
+    return f"#{number} {name}".strip() if number is not None else name
 
 
-def _describe(item: dict) -> str:
-    kind = item["type"]
-    if kind == "goal":
+#: Between the two sides of a score, as on a scoreboard (an en dash, not a hyphen).
+EN_DASH = "\u2013"
+
+
+def _period_title(label: str) -> str:
+    if label.isdigit():
+        return _("Period %(number)s") % {"number": label}
+    if label == "SO":
+        return _("Shoot-out")
+    if label.startswith("OT"):
+        return _("Overtime")
+    return label
+
+
+#: The kinds of timeline event a row is shown for -- period start/end markers
+#: are what the period headings already say, so they get no row of their own.
+_ROW_TYPES = ("goal", "penalty", "goalie_change", "timeout")
+_STRENGTHS = {"PP1": _lazy("power play"), "PP2": _lazy("5-on-3 power play"), "SH1": _lazy("short-handed"), "SH2": _lazy("short-handed"), "EN": _lazy("empty net"), "PS": _lazy("penalty shot")}
+
+
+def _row(item: dict, *, our_side: str, ours_label: str, theirs_label: str) -> dict:
+    side = item.get("side")
+    ours = side == our_side if side else None
+    row = {"time": item.get("time") or "", "type": item["type"], "ours": ours, "team": (ours_label if ours else theirs_label) if side else ""}
+    if item["type"] == "goal":
         goal = item.get("goal") or {}
-        text = _("Goal: %(scorer)s") % {"scorer": _person(goal.get("scorer"))}
-        if goal.get("assists"):
-            text += " " + _("(assists: %(assists)s)") % {"assists": ", ".join(_person(person) for person in goal["assists"])}
-        return text
-    if kind == "penalty":
+        assists = ", ".join(_person(person) for person in goal.get("assists", []))
+        detail = _("Assists: %(names)s") % {"names": assists} if assists else _("Unassisted")
+        strength = _STRENGTHS.get(goal.get("strength") or "")
+        if goal.get("empty_net"):
+            strength = _("empty net")
+        row.update(icon="goal", kind=_("Goal"), who=_person(goal.get("scorer")) or _("Unknown scorer"), detail=detail, tag=strength or "")
+        score = goal.get("score_after")
+        if score:
+            row["score"] = f"{score[our_side]}{EN_DASH}{score['away' if our_side == 'home' else 'home']}"
+    elif item["type"] == "penalty":
         penalty = item.get("penalty") or {}
         reason = penalty.get("description") or penalty.get("code") or ""
-        if penalty.get("minutes"):
-            return _("Penalty: %(player)s, %(reason)s, %(minutes)s min") % {"player": _person(penalty.get("player")), "reason": reason, "minutes": penalty["minutes"]}
-        return _("Penalty: %(player)s, %(reason)s") % {"player": _person(penalty.get("player")), "reason": reason}
-    if kind == "goalie_change":
+        detail = _("%(reason)s · %(minutes)s min") % {"reason": reason, "minutes": penalty["minutes"]} if penalty.get("minutes") else reason
+        kind = penalty.get("kind") or ""
+        # Anything beyond a plain minor is tagged with its kind; the serious ones
+        # (major, misconduct, game misconduct, match) are highlighted on the page.
+        row.update(icon="timer", kind=_("Penalty"), who=_person(penalty.get("player")), detail=detail, tag=str(PENALTY_KIND_LABELS.get(kind, "")) if kind not in ("", "minor") else "", serious=kind in SERIOUS_PENALTIES)
+    elif item["type"] == "goalie_change":
         change = item.get("goalie_change") or {}
-        template = _("Goalie in: %(player)s") if change.get("action") == "in" else _("Goalie out: %(player)s")
-        return template % {"player": _person(change.get("player"))}
-    if kind == "timeout":
-        return _("Time-out")
-    if kind == "period_start":
-        return _("Period %(period)s started") % {"period": item.get("period") or ""}
-    if kind == "period_end":
-        return _("Period %(period)s ended") % {"period": item.get("period") or ""}
-    return kind
+        row.update(icon="shield-user", kind=_("Goalie"), who=_person(change.get("player")), detail=_("In") if change.get("action") == "in" else _("Out"))
+    else:
+        row.update(icon="circle-pause", kind=_("Time-out"), who=row["team"], detail="")
+    return row
 
 
-def display_periods(timeline: GameTimeline, event) -> list[dict]:
-    """``timeline``'s events grouped by period for a template, each row with
-    who it was from the club's side ("ours" -- same Event.is_home_game
-    convention as the score), the score after a goal from our side, and a
-    translated one-line description."""
+def display_timeline(timeline: GameTimeline, event) -> dict:
+    """``timeline`` laid out for the management event page from the club's own
+    side ("ours" -- same Event.is_home_game convention as the score): the
+    score and per-period scores as ours-theirs, and one row per goal, penalty,
+    goalie change or time-out, grouped by period. Translated here, so the
+    template only lays it out."""
+    data = timeline.data or {}
     our_side = "home" if event.is_home_game else "away"
-    ours_label = ", ".join(team.short_name or team.name for team in event.teams.all())
+    their_side = "away" if our_side == "home" else "home"
+    ours_label = ", ".join(team.short_name or team.name for team in event.teams.all()) or event.club.name
     theirs_label = event.opponent.name if event.opponent_id else _("Opponent")
+
+    period_scores = {str(period.get("label")): f"{period.get(our_side, 0)}{EN_DASH}{period.get(their_side, 0)}" for period in data.get("periods", [])}
     periods = []
-    for item in (timeline.data or {}).get("events", []):
-        label = item.get("period") or "?"
+    for item in data.get("events", []):
+        label = str(item.get("period") or "?")
         if not periods or periods[-1]["label"] != label:
-            periods.append({"label": label, "rows": []})
-        side = item.get("side")
-        row = {"time": item.get("time") or "", "type": item["type"], "ours": side == our_side if side else None, "team": (ours_label if side == our_side else theirs_label) if side else "", "text": _describe(item)}
-        score = (item.get("goal") or {}).get("score_after")
-        if score:
-            row["score"] = f"{score[our_side]}-{score['away' if our_side == 'home' else 'home']}"
-        periods[-1]["rows"].append(row)
-    return periods
+            periods.append({"label": label, "title": _period_title(label), "score": period_scores.get(label, ""), "rows": []})
+        if item["type"] in _ROW_TYPES:
+            periods[-1]["rows"].append(_row(item, our_side=our_side, ours_label=ours_label, theirs_label=theirs_label))
+    score = data.get("score") or {}
+    return {
+        "ours_label": ours_label,
+        "theirs_label": theirs_label,
+        "score": f"{score.get(our_side, 0)}{EN_DASH}{score.get(their_side, 0)}" if score else "",
+        "period_scores": [{"label": label, "score": value} for label, value in period_scores.items()],
+        "periods": periods,
+    }
 
 
 def public_names_allowed(event) -> bool:
@@ -277,7 +311,7 @@ def timeline_for_api(timeline: GameTimeline, event, *, show_names: bool) -> dict
             }
         elif item["type"] == "penalty":
             penalty = item.get("penalty") or {}
-            row["penalty"] = {"player": _api_player(penalty.get("player"), show_names), "code": penalty.get("code", ""), "description": penalty.get("description", ""), "minutes": penalty.get("minutes")}
+            row["penalty"] = {"player": _api_player(penalty.get("player"), show_names), "code": penalty.get("code", ""), "description": penalty.get("description", ""), "minutes": penalty.get("minutes"), "kind": penalty.get("kind") or None}
         elif item["type"] == "goalie_change":
             change = item.get("goalie_change") or {}
             row["goalie_change"] = {"player": _api_player(change.get("player"), show_names), "action": change.get("action", "in")}

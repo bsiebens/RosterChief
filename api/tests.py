@@ -902,7 +902,7 @@ class GameTimelineApiTests(ApiTestBase):
         self.assertEqual((goal["ours"], goal["goal"]["strength"], goal["goal"]["score_after"]), (True, "PP1", {"home": 1, "away": 0}))
         self.assertEqual(goal["goal"]["scorer"], {"name": None, "number": 9})
         self.assertEqual(goal["goal"]["assists"], [{"name": None, "number": 4}])
-        self.assertEqual((penalty["ours"], penalty["penalty"]["player"], penalty["penalty"]["minutes"]), (False, {"name": None, "number": 18}, 2))
+        self.assertEqual((penalty["ours"], penalty["penalty"]["player"], penalty["penalty"]["minutes"], penalty["penalty"]["kind"]), (False, {"name": None, "number": 18}, 2, None))
         self.assertIsNone(marker["ours"])
         self.assertNotIn("Sam Scorer", json.dumps(timeline))
 

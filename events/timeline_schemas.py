@@ -41,6 +41,7 @@ class TimelinePenaltyOut(Schema):
     code: str = Field("", description="IIHF penalty code, e.g. TRIP.")
     description: str = ""
     minutes: int | None = None
+    kind: str | None = Field(None, description="minor | bench_minor | double_minor | major | misconduct | game_misconduct | match, when the source says (or its length implies it). Anything from major up is serious.")
 
 
 class TimelineGoalieChangeOut(Schema):

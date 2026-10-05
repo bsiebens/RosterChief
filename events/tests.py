@@ -4263,6 +4263,32 @@ class TimelineParserTests(TestCase):
         self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["rbihf"]["periods"]], [("1", 0, 0), ("2", 3, 2), ("3", 2, 0)])
         self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["ijnl"]["periods"]], [("1", 3, 0), ("2", 1, 0), ("3", 0, 0)])
 
+    def test_penalty_kinds_are_normalized_and_fill_in_minutes(self):
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("game miscodunct"), "game_misconduct")  # RBIHF's own spelling
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("Double Minor"), "double_minor")
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("Tripping"), "")
+        self.assertEqual(timeline_parsers.finish_penalty({}, "major"), {"kind": "major", "minutes": 5})
+        self.assertEqual(timeline_parsers.finish_penalty({"minutes": 10}), {"kind": "misconduct", "minutes": 10})
+        self.assertEqual(timeline_parsers.finish_penalty({"minutes": 3}), {"minutes": 3})
+
+    def test_an_rbihf_game_misconduct_is_recognised(self):
+        note = '<span>Max (#17)</span> was given a <span class="highlight">game miscodunct</span> penalty for Checking To The Head.'
+        row = f'<tr class="penalty"><td class="time">52:16</td><td class="event">Penalty<br />CHHE</td><td class="team">COP</td><td class="note">{note}</td></tr>'
+
+        [penalty] = timeline_parsers.parse_rbihf(json.dumps({"success": True, "data": f"<table>{row}</table>"}), {"visit": {"code": "COP"}})["events"]
+
+        self.assertEqual((penalty["side"], penalty["penalty"]["kind"], penalty["penalty"]["minutes"], penalty["penalty"]["description"]), ("away", "game_misconduct", 20, "Checking To The Head"))
+
+    def test_period_markers_carry_their_own_period_in_order(self):
+        # RBIHF writes "The 2<sup>nd</sup> period has started" -- the <sup> must not
+        # break the ordinal, and at 20:00 the 1st period ends before the 2nd starts.
+        documents = self.parse_all()
+        for source in ("rbihf", "cehl"):
+            with self.subTest(source=source):
+                markers = [(event["time"], event["type"], event["period"]) for event in documents[source]["events"] if event["type"] in ("period_start", "period_end")]
+                self.assertIn(("20:00", "period_end", "1"), markers)
+                self.assertEqual(markers[markers.index(("20:00", "period_end", "1")) + 1], ("20:00", "period_start", "2"))
+
     def test_rbihf_goal_and_penalty_details(self):
         events = self.parse_all()["rbihf"]["events"]
         goal = next(event for event in events if event["type"] == "goal")
@@ -4365,18 +4391,42 @@ class GameTimelineStoreTests(GameTimelineTestBase):
 
         self.assertEqual(timeline.status, GameTimeline.Status.LIVE)
 
-    def test_display_periods_is_from_our_side(self):
+    def test_display_timeline_is_from_our_side(self):
         home_game = self.make_game()
         away_game = self.make_game(external_game_id="138", location=None)
         for game in (home_game, away_game):
             game_timeline.store(game, self.rbihf_fetch())
 
-        home_rows = [row for period in game_timeline.display_periods(home_game.timeline, home_game) for row in period["rows"] if row["type"] == "goal"]
-        away_rows = [row for period in game_timeline.display_periods(away_game.timeline, away_game) for row in period["rows"] if row["type"] == "goal"]
+        home = game_timeline.display_timeline(home_game.timeline, home_game)
+        away = game_timeline.display_timeline(away_game.timeline, away_game)
+        home_goal = next(row for period in home["periods"] for row in period["rows"] if row["type"] == "goal")
+        away_goal = next(row for period in away["periods"] for row in period["rows"] if row["type"] == "goal")
 
-        self.assertEqual((home_rows[0]["ours"], home_rows[0]["team"], home_rows[0]["score"]), (False, "Olympia Heist", "0-1"))
-        self.assertEqual((away_rows[0]["ours"], away_rows[0]["team"], away_rows[0]["score"]), (True, "1st", "1-0"))
-        self.assertTrue(home_rows[0]["text"].startswith("Goal: "))
+        self.assertEqual((home["score"], away["score"]), ("5\u20132", "2\u20135"))
+        self.assertEqual((home_goal["ours"], home_goal["team"], home_goal["score"]), (False, "Olympia Heist", "0\u20131"))
+        self.assertEqual((away_goal["ours"], away_goal["team"], away_goal["score"]), (True, "1st", "1\u20130"))
+        self.assertTrue(home_goal["who"].startswith("#"))
+        self.assertTrue(home_goal["detail"].startswith("Assists: "))
+
+    def test_serious_penalties_are_tagged(self):
+        game = self.make_game()
+        major = {"id": "p1", "type": "penalty", "side": "away", "period": "3", "seconds": 3136, "time": "52:16", "penalty": {"player": {"name": "Max", "number": 17}, "description": "Checking To The Head", "kind": "game_misconduct", "minutes": 20}}
+        minor = {"id": "p2", "type": "penalty", "side": "home", "period": "3", "seconds": 3200, "time": "53:20", "penalty": {"player": {"name": "Kim"}, "description": "Tripping", "kind": "minor", "minutes": 2}}
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [major, minor]}))
+
+        serious, plain = game_timeline.display_timeline(game.timeline, game)["periods"][0]["rows"]
+
+        self.assertEqual((serious["serious"], serious["tag"], serious["detail"]), (True, "Game misconduct", "Checking To The Head · 20 min"))
+        self.assertEqual((plain["serious"], plain["tag"]), (False, ""))
+
+    def test_display_timeline_groups_by_period_without_marker_rows(self):
+        game = self.make_game()
+        game_timeline.store(game, self.rbihf_fetch())
+
+        view = game_timeline.display_timeline(game.timeline, game)
+
+        self.assertEqual([(period["title"], period["score"]) for period in view["periods"]], [("Period 1", "0\u20130"), ("Period 2", "3\u20132"), ("Period 3", "2\u20130")])
+        self.assertFalse(any(row["type"].startswith("period") for period in view["periods"] for row in period["rows"]))
 
 
 class GameTimelineFetchTests(GameTimelineTestBase):
@@ -4647,6 +4697,8 @@ class RecordGameMomentsTests(GameTimelineTestBase):
         moment = GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 2, "against": 1}})
 
         self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")
+        penalty = GameMoment.objects.create(event=game, key="penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, payload={"player": {"name": "Max", "number": 17}, "description": "Checking To The Head", "kind": "game_misconduct"})
+        self.assertEqual(game_moments.describe_moment(penalty), "Penalty for the opponent: Max (#17), Checking To The Head (game misconduct).")
 
 
 class GamePushTests(GameTimelineTestBase):

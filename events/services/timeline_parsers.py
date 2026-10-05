@@ -67,13 +67,20 @@ PENALTY_DESCRIPTIONS = {
     "UNSP": "Unsportsmanlike Conduct",
 }
 
-#: Minutes per penalty kind, for sources that name the kind rather than the length.
-PENALTY_MINUTES = {"minor": 2, "bench minor": 2, "double minor": 4, "major": 5, "misconduct": 10, "game misconduct": 20, "match": 25}
+#: The canonical penalty kinds (``penalty.kind`` in the document) and the minutes
+#: each is recorded with -- for sources that name the kind but not the length.
+PENALTY_MINUTES = {"minor": 2, "bench_minor": 2, "double_minor": 4, "major": 5, "misconduct": 10, "game_misconduct": 20, "match": 25}
+#: ...and the other way round, for sources that only give the length (IJNL, hockeydata).
+_KIND_FOR_MINUTES = {2: "minor", 4: "double_minor", 5: "major", 10: "misconduct", 20: "game_misconduct", 25: "match"}
+#: Kinds that mean more than a couple of minutes in the box -- highlighted on the
+#: event page, and worth calling out to an API consumer.
+SERIOUS_PENALTIES = {"major", "misconduct", "game_misconduct", "match"}
 
 CLOCK_RE = re.compile(r"^(\d{1,3}):(\d{2})$")
 PLAYER_RE = re.compile(r"^(?P<name>.*?)\s*\(#(?P<number>\d*)\)\s*$")
 SCORE_RE = re.compile(r"(\d+)\s*[-:\u2013]\s*(\d+)")  # \u2013 = en dash: IJNL writes period scores with one
-ORDINAL_RE = re.compile(r"(\d+)(?:st|nd|rd|th)\s+period", re.IGNORECASE)
+# "\s*": the suffix is a <sup> ("2<sup>nd</sup> period"), which text extraction splits off with a space.
+ORDINAL_RE = re.compile(r"(\d+)\s*(?:st|nd|rd|th)\s+period", re.IGNORECASE)
 
 
 class TimelineParseError(Exception):
@@ -81,6 +88,42 @@ class TimelineParseError(Exception):
 
 
 # --- shared helpers ---------------------------------------------------------
+
+
+def normalize_penalty_kind(text: str) -> str:
+    """A source's own wording ("minor", "Game Misconduct", RBIHF's own typo "game
+    miscodunct") -> one of PENALTY_MINUTES' keys, or "" when it can't tell."""
+    words = re.sub(r"[^a-z]+", " ", (text or "").lower()).strip()
+    if not words:
+        return ""
+    if "match" in words:
+        return "match"
+    if "game" in words and "mis" in words:
+        return "game_misconduct"
+    if "mis" in words:
+        return "misconduct"
+    if "double" in words:
+        return "double_minor"
+    if "bench" in words:
+        return "bench_minor"
+    if "major" in words:
+        return "major"
+    if "minor" in words:
+        return "minor"
+    return ""
+
+
+def finish_penalty(penalty: dict, kind_text: str = "") -> dict:
+    """Fills ``kind`` and ``minutes`` from whichever of the two the source gave."""
+    kind = normalize_penalty_kind(kind_text) or penalty.get("kind") or ""
+    if not kind and penalty.get("minutes") in _KIND_FOR_MINUTES:
+        kind = _KIND_FOR_MINUTES[penalty["minutes"]]
+    if kind:
+        penalty["kind"] = kind
+        penalty.setdefault("minutes", PENALTY_MINUTES[kind])
+    else:
+        penalty.pop("kind", None)
+    return penalty
 
 
 def penalty_description(code: str) -> str:
@@ -151,10 +194,19 @@ def with_ids(events: list[dict], source: str) -> list[dict]:
     return events
 
 
-def chronological(events: list[dict]) -> list[dict]:
-    """Oldest first. Sources list newest first; a stable sort on time keeps
-    same-second events in their (reversed) source order, which is the real one."""
-    return sorted(events, key=lambda event: event.get("seconds") if event.get("seconds") is not None else -1)
+#: Order of events that share one clock time (40:00): the period that just
+#: ended, then the next one starting, then whatever happened at that moment
+#: (e.g. a goalie change for the new period).
+_SAME_SECOND_ORDER = {"period_end": 0, "period_start": 1}
+
+
+def chronological(events: list[dict], *, newest_first: bool = False) -> list[dict]:
+    """Oldest first. ``newest_first`` says the source lists events newest first
+    (RBIHF, CEHL), so its order is reversed before sorting -- the stable sort
+    then keeps same-second events in their real order; period markers at the
+    same second go first (_SAME_SECOND_ORDER)."""
+    ordered = list(reversed(events)) if newest_first else list(events)
+    return sorted(ordered, key=lambda event: (event.get("seconds") if event.get("seconds") is not None else -1, _SAME_SECOND_ORDER.get(event["type"], 2)))
 
 
 def finalize_document(document: dict) -> dict:
@@ -254,11 +306,9 @@ def parse_rbihf(timeline_json: str, gd: dict) -> dict:
             events.append({**base, "type": "goal", "goal": goal})
         elif kind == "penalty":
             kind_span = note.find("span", class_="highlight")
-            penalty_kind = kind_span.get_text(strip=True).lower() if kind_span else ""
             code = label_lines[1] if len(label_lines) > 1 else ""
-            penalty = {"player": player_from_text(spans[0].get_text(strip=True)) if spans else player(""), "code": code, "description": penalty_codes.get(code) or penalty_description(code), "kind": penalty_kind}
-            if penalty_kind in PENALTY_MINUTES:
-                penalty["minutes"] = PENALTY_MINUTES[penalty_kind]
+            penalty = {"player": player_from_text(spans[0].get_text(strip=True)) if spans else player(""), "code": code, "description": penalty_codes.get(code) or penalty_description(code)}
+            finish_penalty(penalty, kind_span.get_text(strip=True) if kind_span else "")
             events.append({**base, "type": "penalty", "penalty": penalty})
         elif kind == "goalie":
             action = "in" if "in" in label_lines[0].lower().split() else "out"
@@ -277,7 +327,7 @@ def parse_rbihf(timeline_json: str, gd: dict) -> dict:
         event.setdefault("period", None)
         if event["period"] is None:
             event["period"] = period_for(event["seconds"], period_seconds)
-    events = with_ids(chronological(events), "rbihf")
+    events = with_ids(chronological(events, newest_first=True), "rbihf")
     return {"source": "RBIHF", "events": events}
 
 
@@ -320,11 +370,9 @@ def parse_cehl(timeline_json: str) -> dict:
         elif "penalty" in classes:
             code = stamp_lines[1] if len(stamp_lines) > 1 else ""
             kind_node = content.find("i")
-            penalty_kind = kind_node.get_text(strip=True).lower() if kind_node else ""
             description = re.search(r"penalty for (.+)$", text)
-            penalty = {"player": player(names[0] if names else ""), "code": code, "description": description.group(1).strip() if description else penalty_description(code), "kind": penalty_kind}
-            if penalty_kind in PENALTY_MINUTES:
-                penalty["minutes"] = PENALTY_MINUTES[penalty_kind]
+            penalty = {"player": player(names[0] if names else ""), "code": code, "description": description.group(1).strip() if description else penalty_description(code)}
+            finish_penalty(penalty, kind_node.get_text(strip=True) if kind_node else "")
             events.append({**base, "type": "penalty", "penalty": penalty})
         elif "enter" in classes or "leave" in classes or "exit" in classes:
             action = "in" if "enter" in classes else "out"
@@ -343,7 +391,7 @@ def parse_cehl(timeline_json: str) -> dict:
         event.setdefault("period", None)
         if event["period"] is None:
             event["period"] = period_for(event["seconds"], period_seconds)
-    events = with_ids(chronological(events), "cehl")
+    events = with_ids(chronological(events, newest_first=True), "cehl")
     return {"source": "CEHL", "events": events}
 
 
@@ -404,6 +452,7 @@ def parse_hockeydata(report_json: str) -> dict:
             detail = {"player": _hd_player(penalty.get("offender")), "code": code, "description": penalty.get("offenceReason") or penalty_description(code)}
             if isinstance(length, int | float):
                 detail["minutes"] = int(length // 60)
+            finish_penalty(detail)
             if penalty.get("servedBy"):
                 detail["served_by"] = _hd_player(penalty["servedBy"])
             events.append({**_hd_base(penalty, side, id_key="guid"), "type": "penalty", "penalty": detail})
@@ -510,6 +559,7 @@ def parse_ijnl(game_json: str) -> dict:
             penalty = {"player": _ijnl_player(info), "description": description}
             if minutes:
                 penalty["minutes"] = int(minutes.group(1))
+            finish_penalty(penalty, description)
             events.append({**base, "type": "penalty", "penalty": penalty})
         elif kind == "goalie":
             text = line.get_text(" ", strip=True).lower() if line else ""

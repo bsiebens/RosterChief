@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 import django.dispatch
 from django.db import IntegrityError, transaction
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _lazy
 
 from events.models import GameMoment
 
@@ -39,6 +40,17 @@ game_timeline_changed = django.dispatch.Signal()
 #: How far behind the newest event (in game seconds) a moment may be and still
 #: be worth telling someone about right now.
 RECENT_SECONDS = 5 * 60
+
+#: events.services.timeline_parsers.PENALTY_MINUTES' kinds, as people read them.
+PENALTY_KIND_LABELS = {
+    "minor": _lazy("Minor"),
+    "bench_minor": _lazy("Bench minor"),
+    "double_minor": _lazy("Double minor"),
+    "major": _lazy("Major"),
+    "misconduct": _lazy("Misconduct"),
+    "game_misconduct": _lazy("Game misconduct"),
+    "match": _lazy("Match penalty"),
+}
 
 GAME_STARTED = "game_started"
 GOAL_FOR, GOAL_AGAINST, GOAL_CANCELLED = "goal_for", "goal_against", "goal_cancelled"
@@ -105,7 +117,15 @@ def derive_moments(previous: dict | None, current: dict, *, our_side: str, first
         elif item["type"] == "penalty" and ours is not None:
             penalty = item.get("penalty") or {}
             kind = PENALTY_FOR if ours else PENALTY_AGAINST
-            moments.append(Moment(kind=kind, key=f"{kind}:{event_id}", game_seconds=seconds, notifiable=recent, payload={**base, "player": penalty.get("player"), "description": penalty.get("description"), "minutes": penalty.get("minutes")}))
+            moments.append(
+                Moment(
+                    kind=kind,
+                    key=f"{kind}:{event_id}",
+                    game_seconds=seconds,
+                    notifiable=recent,
+                    payload={**base, "player": penalty.get("player"), "description": penalty.get("description"), "minutes": penalty.get("minutes"), "kind": penalty.get("kind")},
+                )
+            )
         elif item["type"] == "period_end":
             moments.append(Moment(kind=PERIOD_ENDED, key=f"{PERIOD_ENDED}:{item.get('period') or event_id}", game_seconds=seconds, notifiable=recent, payload={**base, "score": score_now}))
 
@@ -169,7 +189,10 @@ def describe_moment(moment: GameMoment) -> str:
         return _("A goal was taken back, %(score)s.") % {"score": score_text}
     if moment.kind in (GameMoment.Kind.PENALTY_FOR, GameMoment.Kind.PENALTY_AGAINST):
         template = _("Penalty for us: %(player)s, %(reason)s.") if moment.kind == GameMoment.Kind.PENALTY_FOR else _("Penalty for the opponent: %(player)s, %(reason)s.")
-        return template % {"player": _who(payload.get("player")) or "?", "reason": payload.get("description") or ""}
+        reason = payload.get("description") or ""
+        if payload.get("kind") not in (None, "", "minor"):
+            reason = _("%(reason)s (%(kind)s)") % {"reason": reason, "kind": str(PENALTY_KIND_LABELS.get(payload["kind"], payload["kind"])).lower()}
+        return template % {"player": _who(payload.get("player")) or "?", "reason": reason}
     if moment.kind == GameMoment.Kind.PERIOD_ENDED:
         return _("Period %(period)s ended, %(score)s.") % {"period": payload.get("period") or "", "score": score_text}
     if moment.kind == GameMoment.Kind.GAME_FINAL:
