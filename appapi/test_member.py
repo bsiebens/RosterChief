@@ -126,7 +126,7 @@ class CalendarTests(ClubApiTestCase):
 
     def test_window_and_kind(self):
         self.invite(self.event(title="Soon training", kind=Event.EventKind.TRAINING))
-        self.invite(self.event(title="Soon game", kind=Event.EventKind.GAME))
+        self.invite(self.event(title="Soon game", kind=Event.EventKind.GAME, start=self.soon + datetime.timedelta(hours=1)))
         self.invite(self.event(title="Far away", start=timezone.now() + datetime.timedelta(days=120)))
 
         self.assertEqual([item["event"]["title"] for item in self.get("/calendar").json()["items"]], ["Soon training", "Soon game"])
