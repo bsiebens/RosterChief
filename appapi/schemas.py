@@ -200,6 +200,7 @@ class EventOut(Schema):
     score_for: int | None
     score_against: int | None
     is_live: bool
+    game_status: str | None = Field(description="For games: `scheduled`, `live`, `finished` or `cancelled`. Null for other kinds. Ignore unknown values.")
 
 
 class AttendanceOut(Schema):
