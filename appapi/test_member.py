@@ -13,6 +13,7 @@ from django.utils import timezone
 from PIL import Image
 from waffle import get_waffle_flag_model
 
+from appapi.presenters import game_status
 from club.models import ClubMembership, OnboardingRequirement
 from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, RefereeSignup
 from events.services.game_timeline import TimelineFetch
@@ -133,6 +134,24 @@ class CalendarTests(ClubApiTestCase):
         self.assertEqual([item["event"]["title"] for item in self.get("/calendar", kind="game").json()["items"]], ["Soon game"])
         later = (timezone.now() + datetime.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.assertEqual([item["event"]["title"] for item in self.get("/calendar", **{"from": later}).json()["items"]], ["Far away"])
+
+    def test_game_status(self):
+        now = timezone.now()
+        hour = datetime.timedelta(hours=1)
+        games = {
+            "Upcoming": self.event(title="Upcoming", kind=Event.EventKind.GAME, start=now + 2 * hour),
+            "Live": self.event(title="Live", kind=Event.EventKind.GAME, start=now - hour, is_live=True),
+            "Played": self.event(title="Played", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=1), score_for=3, score_against=1),
+        }
+        training = self.event(title="Practice", kind=Event.EventKind.TRAINING, start=now + hour)
+        for event in [*games.values(), training]:
+            self.invite(event)
+
+        statuses = {item["event"]["title"]: item["event"]["game_status"] for item in self.get("/calendar", **{"from": (now - datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}).json()["items"]}
+
+        self.assertEqual(statuses, {"Upcoming": "scheduled", "Live": "live", "Played": "finished", "Practice": None})
+        # The calendar never lists cancelled events, so check that branch on the helper.
+        self.assertEqual(game_status(Event(kind=Event.EventKind.GAME, start=now, cancelled=True)), "cancelled")
 
     def test_window_too_long_is_422(self):
         start = timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ")

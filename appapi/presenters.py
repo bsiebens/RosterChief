@@ -4,6 +4,7 @@ values, ids and timestamps; no CSS classes, reversed web URLs or display groupin
 import hashlib
 from decimal import Decimal
 
+from django.utils import timezone
 from django.utils.translation import get_language
 
 from events.models import Attendance, Event
@@ -29,6 +30,27 @@ def season_out(season) -> dict:
     return {"id": season.pk, "start_date": season.start_date, "end_date": season.end_date}
 
 
+def game_status(event: Event) -> str | None:
+    """`cancelled`, `live`, `finished` or `scheduled` for a game; None for any other kind.
+
+    There is no stored status, so it is derived: the live flag wins, then the poller having seen
+    the game come off live, a final score on a game that has started, or its (assumed) end
+    having passed."""
+    if event.kind != Event.EventKind.GAME:
+        return None
+    if event.cancelled:
+        return "cancelled"
+    if event.is_live:
+        return "live"
+
+    now = timezone.now()
+    has_score = event.score_for is not None and event.score_against is not None
+    if event.live_score_polling_done_at or (has_score and event.start <= now) or (event.end is not None and event.end <= now):
+        return "finished"
+
+    return "scheduled"
+
+
 def event_out(event: Event) -> dict:
     location = event.location
     return {
@@ -48,6 +70,7 @@ def event_out(event: Event) -> dict:
         "score_for": event.score_for,
         "score_against": event.score_against,
         "is_live": event.is_live,
+        "game_status": game_status(event),
     }
 
 
