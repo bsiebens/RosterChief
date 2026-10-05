@@ -10,7 +10,7 @@
 #   MAINTENANCE_MESSAGE="..." deploy/deploy-local.sh # what clubs see while it is closed
 #
 # The platform is put in maintenance mode (features.models.Maintenance) before anything is
-# backed up or migrated, and once the deploy is healthy the script asks whether to reopen it.
+# backed up or migrated, and once the deploy is healthy the script asks whether to reopen it (Enter = yes).
 # That prompt needs a terminal: deploy-prod.sh gives this script one (ssh -t). With no terminal
 # -- or if the deploy fails -- maintenance is deliberately LEFT ON and the command to end it is
 # printed, so a half-upgraded platform never reopens by itself.
@@ -168,8 +168,21 @@ fi
 
 if [ "$MAINTENANCE_STARTED" = "1" ]; then
     say "Everything is up on '${IMAGE_TAG}'. The platform is still in maintenance mode."
-    answer=""
-    if [ -r /dev/tty ] && read -r -p "Take the platform out of maintenance mode now? [y/N] " answer </dev/tty 2>/dev/null && [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    # Enter means yes: everything is up and this is the question the deploy was waiting on.
+    # Asked until it gets a clear answer; with no terminal to ask on, the platform stays closed.
+    reopen=""
+    if ( : </dev/tty ) 2>/dev/null; then
+        while true; do
+            printf '\033[1;33m?\033[0m Take the platform out of maintenance mode now? [Y/n] ' >/dev/tty
+            read -r answer </dev/tty || break
+            case "$answer" in
+                ""|[Yy]|[Yy][Ee][Ss]) reopen=1; break ;;
+                [Nn]|[Nn][Oo]) break ;;
+                *) echo "Please answer y or n." >/dev/tty ;;
+            esac
+        done
+    fi
+    if [ -n "$reopen" ]; then
         say "Leaving maintenance mode"
         dc exec -T web python manage.py shell -c "from features.models import Maintenance; Maintenance.stop()" </dev/null
         MAINTENANCE_STARTED=0
