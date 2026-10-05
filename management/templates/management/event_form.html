@@ -46,9 +46,15 @@
                     {% endif %}
                 </div>
 
-                <div class="w-full">
+                {% comment %}
+                    Hidden (by the script below) for the kinds whose title is generated
+                    on save -- EventForm.auto_title_kinds: a game ("U10 vs Opponent"),
+                    and on a new event a training or tournament too.
+                {% endcomment %}
+                <div class="w-full" id="event-title-field" data-auto-title-kinds="{{ form.auto_title_kinds_csv }}">
                     {% form_field form.title %}
                 </div>
+                <p class="hidden text-sm text-muted" id="event-title-auto">{% trans "The title is filled in automatically -- for a game from the teams and the opponent." %}</p>
             </div>
         </div>
 
@@ -207,8 +213,15 @@
                 summary.textContent = `${kindLabel} – ${title} – ${when}`;
             };
 
+            const titleWrapper = document.getElementById("event-title-field");
+            const titleAuto = document.getElementById("event-title-auto");
+            const autoTitleKinds = titleWrapper ? (titleWrapper.dataset.autoTitleKinds || "").split(",") : [];
+
             const sync = () => {
                 const checked = checkedKind();
+                const autoTitle = Boolean(checked) && autoTitleKinds.includes(checked.value);
+                if (titleWrapper) titleWrapper.classList.toggle("hidden", autoTitle);
+                if (titleAuto) titleAuto.classList.toggle("hidden", !autoTitle);
                 gameOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || checked.value !== "game"));
                 officiatingOnlyElements.forEach((element) => element.classList.toggle("hidden", !checked || (checked.value !== "game" && checked.value !== "tournament")));
                 updateSummary();

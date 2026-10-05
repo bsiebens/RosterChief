@@ -4013,7 +4013,7 @@ class EventCreateView(ClubStaffRequiredMixin, CreateView):
         # against self.club_id -- on a brand-new instance that's still None until
         # ClubScopedModel.save() auto-assigns it, which only happens *after*
         # validation. Set it here so full_clean() sees the real club, not None.
-        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "instance": Event(club=self.request.club)}
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "instance": Event(club=self.request.club), "auto_titles": True}
 
     def form_valid(self, form):
         response = super().form_valid(form)
@@ -4044,7 +4044,7 @@ class EventUpdateView(EventManagerRequiredMixin, UpdateView):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"]).groups.all()
 
     def get_form_kwargs(self):
-        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "editing": True}
+        return super().get_form_kwargs() | {"club": self.request.club, "user": self.request.user, "editing": True, "auto_titles": True}
 
     def form_valid(self, form):
         response = super().form_valid(form)

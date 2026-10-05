@@ -6721,7 +6721,7 @@ class EventManagementTests(ManagementTestBase):
 
         self.club_post("event_create", self.event_data(kind="game", competition="Regional Cup", external_game_id="ext-42", score_for="3", score_against="1", is_live="on", is_friendly="on"))
 
-        game = Event.objects.get(title="Training")
+        game = Event.objects.get(club=self.club, kind=Event.EventKind.GAME)
         self.assertEqual(game.kind, Event.EventKind.GAME)
         self.assertEqual(game.competition, "Regional Cup")
         self.assertEqual(game.external_game_id, "ext-42")
@@ -6792,24 +6792,50 @@ class EventManagementTests(ManagementTestBase):
         game.refresh_from_db()
         self.assertEqual(game.title, f"{opponent} vs {self.own_team.short_name}")
 
-    def test_a_game_with_no_opponent_yet_keeps_its_typed_title(self):
+    def test_a_game_with_no_opponent_yet_is_titled_after_its_team(self):
+        # The add form shows no title for a game: a typed (or leftover) one is ignored.
         self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(title="Cup semi-final", kind="game"))
 
-        game = Event.objects.get(title="Cup semi-final")
-        self.assertEqual(game.title, "Cup semi-final")
+        game = Event.objects.get(club=self.club, kind=Event.EventKind.GAME)
+        self.assertEqual(game.title, self.own_team.short_name)
 
-    def test_a_training_keeps_its_typed_title_even_with_an_opponent_posted(self):
-        # Only Game auto-titles -- a tampered/leftover opponent value in the
-        # POST for a non-game kind shouldn't retitle it.
+    def test_a_new_training_or_tournament_is_simply_called_that(self):
         opponent = Opponent.objects.create(club=self.club, name="Rivals FC")
         self.client.force_login(self.own_team_coach)
 
         self.club_post("event_create", self.event_data(title="Practice", kind="training", opponent=str(opponent.pk)))
+        self.club_post("event_create", self.event_data(title="", kind="tournament"))
 
-        event = Event.objects.get(title="Practice")
-        self.assertEqual(event.title, "Practice")
+        self.assertEqual(Event.objects.get(club=self.club, kind=Event.EventKind.TRAINING).title, "Training")
+        self.assertEqual(Event.objects.get(club=self.club, kind=Event.EventKind.TOURNAMENT).title, "Tournament")
+
+    def test_other_kinds_still_need_a_title(self):
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_post("event_create", self.event_data(title="  ", kind="meeting"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("title", response.context["form"].errors)
+        self.assertFalse(Event.objects.filter(club=self.club, kind=Event.EventKind.MEETING).exists())
+
+    def test_editing_a_training_keeps_its_own_title(self):
+        training = Event.objects.create(club=self.club, title="Goalie training", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=2))
+        training.teams.add(self.own_team)
+        self.client.force_login(self.own_team_coach)
+
+        self.club_post("event_update", self.event_data(title="Goalie training", kind="training"), training.pk)
+
+        training.refresh_from_db()
+        self.assertEqual(training.title, "Goalie training")
+
+    def test_the_add_form_hides_the_title_for_generated_kinds(self):
+        self.client.force_login(self.own_team_coach)
+
+        response = self.club_get("event_create")
+
+        self.assertContains(response, 'data-auto-title-kinds="game,tournament,training"')
 
     def test_the_add_form_has_no_score_or_live_fields(self):
         self.client.force_login(self.own_team_coach)
@@ -6841,7 +6867,7 @@ class EventManagementTests(ManagementTestBase):
 
         self.club_post("event_create", self.event_data(kind="game", max_officials="3"))
 
-        game = Event.objects.get(title="Training")
+        game = Event.objects.get(club=self.club, kind=Event.EventKind.GAME)
         self.assertEqual(game.max_officials, 3)
 
     def test_editing_a_game_can_record_its_score_and_live_status(self):
