@@ -6,6 +6,14 @@
 #   deploy/deploy-local.sh                          # deploy IMAGE_TAG=main (the default)
 #   IMAGE_TAG=main-a1b2c3d deploy/deploy-local.sh    # pin/roll back to an exact build
 #   SKIP_BACKUP=1 deploy/deploy-local.sh             # skip the pre-migration backup (not recommended)
+#   NO_MAINTENANCE=1 deploy/deploy-local.sh          # don't wrap the deploy in maintenance mode
+#   MAINTENANCE_MESSAGE="..." deploy/deploy-local.sh # what clubs see while it is closed
+#
+# The platform is put in maintenance mode (features.models.Maintenance) before anything is
+# backed up or migrated, and once the deploy is healthy the script asks whether to reopen it.
+# That prompt needs a terminal: deploy-prod.sh gives this script one (ssh -t). With no terminal
+# -- or if the deploy fails -- maintenance is deliberately LEFT ON and the command to end it is
+# printed, so a half-upgraded platform never reopens by itself.
 #
 # Assumes the checkout is already where you want it -- `git pull`/`git fetch && reset --hard`
 # yourself first; this script only handles the docker/app side, same steps deploy-prod.sh's
@@ -13,8 +21,8 @@
 #
 #   ensure db/redis/caddy are up (caddy doesn't need a code deploy, so nothing else here would
 #   otherwise ever start it -- this is exactly the gap that bit the first manual deploy) ->
-#   back up the database -> pull the image -> migrate -> restart web -> verify
-#   https://$BASE_DOMAIN/healthz. No worker/beat, and no separate scheduler/poller container
+#   start maintenance mode -> back up the database -> pull the image -> migrate -> restart web
+#   -> verify https://$BASE_DOMAIN/healthz -> ask, then end maintenance mode. No worker/beat, and no separate scheduler/poller container
 #   either -- every scheduled platform job runs from an in-process APScheduler thread inside
 #   web itself (see features/scheduler.py and DEPLOYMENT.md's "Scheduled jobs"), so restarting
 #   web is all a deploy needs to cycle it onto the new image. `--remove-orphans` below cleans
@@ -27,6 +35,8 @@ IMAGE_TAG="${IMAGE_TAG:-main}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rosterchief}"
+NO_MAINTENANCE="${NO_MAINTENANCE:-0}"
+MAINTENANCE_MESSAGE="${MAINTENANCE_MESSAGE:-RosterChief is being upgraded. It will be back shortly.}"
 # Every docker compose call below uses this image tag -- pull, migrate and the restart alike.
 export IMAGE_TAG
 
@@ -77,6 +87,35 @@ else
     dc up -d --no-deps caddy
 fi
 
+# Close the platform before anything is backed up or migrated. Needs a running web (first
+# deploys have nothing to close, and no Maintenance table yet). Runs against the OLD image on
+# purpose: the lock-down is in place before the new code or schema is. Maintenance is stored in
+# the database and shared Redis, so it survives the web restart below.
+MAINTENANCE_STARTED=0
+maintenance_command() {
+    echo "docker compose -f $COMPOSE_FILE exec -T web python manage.py shell -c \"from features.models import Maintenance; Maintenance.stop()\""
+}
+if [ "$NO_MAINTENANCE" = "1" ]; then
+    say "Not entering maintenance mode (NO_MAINTENANCE=1)"
+elif [ -z "$(dc ps -q --status running web 2>/dev/null)" ]; then
+    say "web is not running (first deploy?) -- nothing to put in maintenance mode"
+else
+    say "Entering maintenance mode"
+    dc exec -T -e MAINTENANCE_MESSAGE="$MAINTENANCE_MESSAGE" web python manage.py shell -c "import os; from features.models import Maintenance; Maintenance.start(message=os.environ['MAINTENANCE_MESSAGE'])" </dev/null \
+        || die "Could not enter maintenance mode -- nothing has been changed."
+    MAINTENANCE_STARTED=1
+fi
+# Any exit before the platform is deliberately reopened leaves it closed, on purpose.
+on_exit() {
+    local status=$?
+    if [ "$status" -ne 0 ] && [ "$MAINTENANCE_STARTED" = "1" ]; then
+        printf '\033[1;33mThe deploy failed and the platform is STILL IN MAINTENANCE MODE.\033[0m\n' >&2
+        echo "Once it is sorted out, reopen it from the control panel, or with:" >&2
+        echo "  $(maintenance_command)" >&2
+    fi
+}
+trap on_exit EXIT
+
 if [ -z "$(dc ps -q --status running web 2>/dev/null)" ]; then
     # backup.sh reads the uploads out of the running web container. Not running means a first
     # deploy (nothing to back up yet) or a stopped app -- say so rather than fail.
@@ -110,15 +149,33 @@ say "Recording IMAGE_TAG=${IMAGE_TAG} in .env"
 ./deploy/record-image-tag.sh "$IMAGE_TAG"
 
 say "Waiting for https://${BASE_DOMAIN}/healthz"
+healthy=0
 for attempt in $(seq 1 20); do
     if curl -fsS "https://${BASE_DOMAIN}/healthz" >/dev/null 2>&1; then
         say "Healthy after ${attempt} check(s)."
-        exit 0
+        healthy=1
+        break
     fi
     sleep 3
 done
 
-echo "ERROR: health check never passed against https://${BASE_DOMAIN}/healthz" >&2
-echo "Recent web logs:" >&2
-dc logs --tail 40 web >&2
-exit 1
+if [ "$healthy" != "1" ]; then
+    echo "ERROR: health check never passed against https://${BASE_DOMAIN}/healthz" >&2
+    echo "Recent web logs:" >&2
+    dc logs --tail 40 web >&2
+    exit 1
+fi
+
+if [ "$MAINTENANCE_STARTED" = "1" ]; then
+    say "Everything is up on '${IMAGE_TAG}'. The platform is still in maintenance mode."
+    answer=""
+    if [ -r /dev/tty ] && read -r -p "Take the platform out of maintenance mode now? [y/N] " answer </dev/tty 2>/dev/null && [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        say "Leaving maintenance mode"
+        dc exec -T web python manage.py shell -c "from features.models import Maintenance; Maintenance.stop()" </dev/null
+        MAINTENANCE_STARTED=0
+        say "Maintenance mode is off -- the platform is open."
+    else
+        say "Leaving the platform in maintenance mode. Reopen it from the control panel, or with:"
+        echo "  $(maintenance_command)"
+    fi
+fi
