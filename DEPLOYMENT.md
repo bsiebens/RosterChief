@@ -996,7 +996,7 @@ window.
 
 `deploy/deploy-local.sh` (and so `deploy/deploy-prod.sh`, which runs it over `ssh -t`) does this
 for you: it enters maintenance mode before the backup and migration, and once the new image is
-healthy asks whether to reopen the platform (Enter = yes). Answering anything but `y` -- or a failed deploy,
+healthy asks whether to reopen the platform. Answering anything but `y` -- or a failed deploy,
 or no terminal -- leaves it closed and prints the command to reopen it (also available from
 the control panel). `NO_MAINTENANCE=1` skips the whole thing; `MAINTENANCE_MESSAGE="..."` sets
 what clubs see. A first deploy (no running web yet) has nothing to close and skips it.
