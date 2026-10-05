@@ -1465,6 +1465,18 @@
             ],
             "title": "End"
           },
+          "game_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For games: `scheduled`, `live`, `finished` or `cancelled`. Null for other kinds. Ignore unknown values.",
+            "title": "Game Status"
+          },
           "gathering": {
             "anyOf": [
               {
@@ -1573,7 +1585,8 @@
           "competition",
           "score_for",
           "score_against",
-          "is_live"
+          "is_live",
+          "game_status"
         ],
         "title": "EventOut",
         "type": "object"
