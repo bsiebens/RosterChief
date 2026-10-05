@@ -14,7 +14,7 @@ class ContactRequest(UUIDModel):
     """A "Book a demo" submission from the marketing homepage's contact form.
 
     Persisting this matters more than the notification email (see
-    design_handoff_rosterchief_platform/WEBSITE.md, "The contact form must be
+    the website design handoff, "The contact form must be
     built server-side") -- the mail can fail to send or get lost in a spam
     folder, this row can't.
     """

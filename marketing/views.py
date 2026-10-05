@@ -1,7 +1,7 @@
 """The public marketing homepage -- rosterchief.app's bare domain (``request.club
 is None``). Reached only via club.views.root()'s delegation, not its own URL
 pattern: the page is a single scrolling document with anchor navigation (see
-design_handoff_rosterchief_platform/WEBSITE.md), and its contact form posts
+the website design handoff), and its contact form posts
 straight back to "/" rather than to a separate endpoint.
 """
 

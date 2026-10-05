@@ -51,7 +51,7 @@ class Command(MaintenanceAwareCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--club", default="demo", help="Slug of the club to wipe and reseed. Default: demo.")
-        parser.add_argument("--admin-email", default="bernard@siebens.org", help="Email of the account to keep as this club's ADMIN. Must already exist. Default: bernard@siebens.org.")
+        parser.add_argument("--admin-email", required=True, help="Email of the account to keep as this club's ADMIN. Must already exist.")
 
     def handle(self, *args, **options):
         club_slug = options["club"]

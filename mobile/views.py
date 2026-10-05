@@ -1,6 +1,6 @@
 """Member-mode screens (M1-M7) plus the PWA plumbing (manifest, service worker,
 icon, push subscribe) they all sit on top of. Coach mode (C1-C6) is a later
-phase -- see design_handoff_rosterchief_platform/README.md -- and has no
+phase -- see the design handoff -- and has no
 routes here yet.
 """
 
@@ -257,7 +257,7 @@ class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: two
+    """M1 -- the design handoff's M1 section: two
     independent "next up" hero cards for everyone currently in scope -- the
     soonest event nobody's answered yet (with a quick In/Out RSVP -- see
     EventDetailView.post below), shown only when such an event exists, and
@@ -483,7 +483,7 @@ class EventTaskRespondView(PersonScopeMixin, LoginRequiredMixin, View):
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M2 -- design_handoff_rosterchief_platform/README.md's M2 section:
+    """M2 -- the design handoff's M2 section:
     "answer for several". A hero header (no event photos in this codebase --
     a solid dark block instead, like M1's hero card), an event-detail card
     (Face-off/Meet/Where -- the design mock's extra "Kit" row and dressing-room
@@ -580,7 +580,7 @@ class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M4 -- design_handoff_rosterchief_platform/README.md's M4 section: a
+    """M4 -- the design handoff's M4 section: a
     photo-hero permalink for a single published News item. Visibility mirrors
     news.tasks.notify_news_published's own gate -- PUBLISHED *and* actually
     live (published_at in the past) -- so a scheduled-but-not-yet-live item
@@ -612,7 +612,7 @@ class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M5 -- design_handoff_rosterchief_platform/README.md's M5 section, "Me
+    """M5 -- the design handoff's M5 section, "Me
     & my people". A header for ``self.me`` (member-since year plus a staff
     label, see below), a "People I manage" card (one row per managed_people,
     each with their current-season team + jersey number when they're on a
@@ -936,7 +936,7 @@ class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
 
 
 class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M6 -- design_handoff_rosterchief_platform/README.md's M6 section,
+    """M6 -- the design handoff's M6 section,
     "Edit personal info". The design mock also shows a "National register
     no.", an "Address", an "Allergies / notes" field and a "share contact
     with team parents" consent toggle -- none of those exist on
@@ -1187,7 +1187,7 @@ def _notification_source_link(source):
 
 
 class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M7 -- design_handoff_rosterchief_platform/README.md's M7 section
+    """M7 -- the design handoff's M7 section
     ("Inbox"). The mockup shows rich per-type cards (RSVP-needed, medical
     form missing, invoice due, line-up published, ...) with inline quick
     actions, but notifications.models.Notification is generic -- title/body/

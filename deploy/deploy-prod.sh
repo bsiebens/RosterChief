@@ -34,7 +34,7 @@ set -Eeuo pipefail
 SSH_HOST="${SSH_HOST:?set SSH_HOST -- the production server, e.g. SSH_HOST=1.2.3.4 (see deploy/.env.deploy.example)}"
 SSH_USER="${SSH_USER:?set SSH_USER}"
 SSH_KEY_FILE="${SSH_KEY_FILE:-}"
-REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/bernard/RosterChief}"
+REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/deploy/RosterChief}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 # "0", never empty: an empty argument can vanish when ssh rebuilds the remote command line.

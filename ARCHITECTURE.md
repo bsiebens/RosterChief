@@ -1,59 +1,55 @@
 # RosterChief — Model & Domain Architecture
 
-Baseline reference for implementing the domain models. This describes the **intended
-shape** of the data model: what exists today, what is planned, and the conventions every
-app should follow. It is a living document — update it when the model changes.
+Baseline reference for the domain models: the shape of the data model, the reasoning behind
+it, and the conventions every app follows. It is a living document — update it when the model changes.
 
-> **Tenancy: multi-tenant (row-based / shared-schema).** RosterChief is designed as a
+> **Tenancy: multi-tenant (row-based / shared-schema).** RosterChief is a
 > **multi-tenant platform** — one deployment serves many clubs, with **`Club` as the tenant
 > root**. Isolation is **row-based**: a shared database and schema where every club-owned
 > row carries a `club` FK (via `ClubScopedModel`), and *all* access is scoped to the
 > current tenant. The mechanics — tenant resolution, scoping manager, per-club uniqueness —
 > are specified in **§2.4**.
->
-> ⚠️ **This supersedes `CLAUDE.md`**, which currently states the app is "deliberately *not*
-> multi-tenant … there is no `club_id` tenancy." That guidance and the project memory are
-> now **out of date** and must be updated to match this document — see the **banner at the
-> foot of this file**. Where the two disagree, this architecture is the intended direction.
 
 ---
 
 ## 1. App decomposition
 
-The `isort` `known-first-party` roadmap lists nine apps. The build split the original
-`accounts` app into `authentication` + `club`. Per the decisions in §7, the people models
-(`Member`, `Family`) **move out of `authentication` into a dedicated `members` app**, and
-two apps (`formbuilder`, `shop`) are added **beyond the original roadmap** — add all new
-labels to `known-first-party` in `pyproject.toml` when they land. The target decomposition:
+The project is decomposed into the apps below. `authentication` holds the global login identity;
+the people models (`Member`, `Family`) live in `members`; everything else that belongs to a club
+is tenant-scoped (§2.4). New app labels go into `known-first-party` in `pyproject.toml`.
 
-> Several rows below (`teams`, `events`, `members`, `club`'s `Season`/`ClubRole`) are marked
-> "planned" but have since been built out considerably further than this table reflects —
-> it hasn't been kept in lockstep with every session's work. Only `formbuilder` and the new
-> `evaluations` row have been corrected here; treat the rest as directional, not current,
-> and verify against the actual tree (per `CLAUDE.md`) before relying on a "planned" marker.
+> The per-app model sketches in §4 and §5 started as design notes and have since been built out
+> well beyond them. Treat them as the intent and rationale, and verify field-level detail
+> against the actual models.
 
-| App              | Status       | Responsibility                                            | Models |
-|------------------|--------------|-----------------------------------------------------------|--------|
-| `authentication` | **built**    | Login identity + tenancy/role services (global, cross-club) | `User` |
-| `members`        | **planned**  | People: person records, families (extract from `authentication`) | `Member`, `Family`, `FamilyMembership` |
-| `club`           | **built**    | Tenant root, **season**, season-scoped affiliation, club roles | `Club`, `Season` *(planned)*, `ClubMembership`, `ClubRole` *(planned)* |
-| `teams`          | planned      | Teams and season rosters                                  | `Team`, `TeamMembership`, `StaffAssignment` |
-| `events`         | planned      | Training / matches / social events + attendance           | `Event`, `Attendance` |
-| `news`           | **built**    | Club news: coach_manager-authored, editor-released         | `News`, `NewsPhoto` |
-| `pages`          | planned      | Flat CMS pages for the public site                        | `Page` |
-| `home`           | planned      | Homepage composition / featured content                   | `HomeConfig` (per-club) or config-only |
-| `formbuilder`    | **partial**  | Admin-defined dynamic forms + submissions + reporting — models, dynamic-form-class builder, and the submit service are built (§5.6); no view/template renders a form for someone to fill in yet | `Form`, `Field`, `Submission`, `Answer` |
-| `shop`           | planned      | Cart-like shop, orders, payments, PDF invoices            | `Product`, `Cart`, `CartItem`, `Order`, `OrderLine`, `Payment`, `Invoice` |
-| `search`         | planned      | Site search (likely no models; index/config only)         | — |
-| `evaluations`    | **built**   | Player evaluations: multiple named, independently-versioned checklists per club (reuses `formbuilder`), restricted to ADMIN/`EvaluationManager` grant, per-question statistics + a results matrix + a re-confirm walkthrough, player profile (§5.8) | `EvaluationChecklist`, `PlayerEvaluation` |
+| App              | Responsibility                                            | Main models |
+|------------------|-----------------------------------------------------------|-------------|
+| `authentication` | Login identity, MFA, platform-level access (global)       | `User` |
+| `members`        | People and households                                     | `Member`, `Family`, `FamilyMembership` |
+| `club`           | Tenant root, seasons, season-scoped affiliation, club roles, onboarding requirements | `Club`, `Season`, `ClubMembership`, `ClubRole` |
+| `teams`          | Teams and season rosters, staff                           | `Team`, `TeamMembership`, `StaffAssignment` |
+| `events`         | Training, games, tournaments, attendance, line-ups, referee/official sign-ups, game timelines | `Event`, `Attendance`, `Lineup`, `RefereeSignup` |
+| `tournaments`    | Tournament structure on top of events                     | |
+| `news`           | Club news, authored by coaches and released by editors    | `News`, `NewsPhoto` |
+| `announcements`  | Short club-wide announcements                             | |
+| `notifications`  | In-app, e-mail and push notifications                     | `Notification` |
+| `registration`   | Public season sign-up and re-registration                | |
+| `formbuilder`    | Admin-defined dynamic forms, submissions and reporting (§5.6) | `Form`, `Field`, `Submission`, `Answer` |
+| `evaluations`    | Player evaluation checklists (§5.8)                       | `EvaluationChecklist`, `PlayerEvaluation` |
+| `shop`           | Cart, orders, payments, PDF invoices (§5.7)               | `Product`, `Order`, `Payment`, `Invoice` |
+| `billing`        | What the platform charges each club (`BILLING.md`)        | |
+| `features`       | Feature flags, maintenance mode, the in-process job scheduler | `Maintenance`, `JobRun` |
+| `controlpanel`   | Platform operator UI (`/control/`)                        | |
+| `management`     | Club admin UI (`/manage/`)                                | |
+| `mobile`         | Member and coach PWA (`/app/`)                            | |
+| `marketing`      | The public marketing site and contact form                | |
+| `appapi`         | Native-app API (`/api/app/v1/`)                           | |
+| `api`            | Public API for club websites (`/api/v1/`)                 | |
+| `bugs`           | In-app bug reports                                        | |
 
 **`User` stays global** (one login identity across the whole platform); everything else
 that belongs to a club is tenant-scoped (§2.4). This is why `Member` — a *person within a
 club* — lives in its own app and carries a `club` FK, while `User` does not.
-
-**Open decision (§7):** whether to migrate `Member`/`Family` out of `authentication` into
-a dedicated `members` app. Recommendation: keep them in `authentication` for now; revisit
-only if the app grows unwieldy. The roadmap `members` name is reserved either way.
 
 ---
 
@@ -117,7 +113,7 @@ per request (recommended: **subdomain**, `ajax-united.rosterchief.app`; path-pre
 variable so non-request code (services, management commands) can read it:
 
 ```
-# rosterchief/tenancy.py
+# club/tenancy.py
 from contextvars import ContextVar
 _current_club: ContextVar = ContextVar("current_club", default=None)
 
@@ -285,7 +281,7 @@ changes that matter (membership activation/lapse), so authorization never drifts
 
 ---
 
-## 4. Built models (as-is, + planned tenancy changes)
+## 4. Core models
 
 ### `authentication`
 
@@ -296,10 +292,9 @@ user may belong to several clubs, `get_full_name` / `get_short_name` resolve the
 **for the current club** (via tenant context), falling back to email — they can no longer
 assume a single member.
 
-### `members` *(planned — extract from `authentication`)*
+### `members`
 
-`Member`, `Family`, `FamilyMembership` **move here** and become tenant-scoped
-(`ClubScopedModel`).
+`Member`, `Family`, `FamilyMembership` are tenant-scoped (`ClubScopedModel`).
 
 **`Member`** — a *person within one club*. `user` becomes a **`ForeignKey`** (was
 `OneToOneField`), still nullable (`on_delete=SET_NULL`), so one login maps to one member
@@ -1436,7 +1431,7 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
    rows with the current season and re-scopes `unique_together`.
 3. ✅ **Full multi-tenancy** — adopt **row-based multi-tenancy**, `Club` as tenant root
    (§2.4). Requires: `ClubScopedModel` on every aggregate root, `Member.user` →
-   `ForeignKey` (+`unique(club, user)`), tenant middleware + `rosterchief/tenancy.py`
+   `ForeignKey` (+`unique(club, user)`), tenant middleware + `club/tenancy.py`
    context, tenant-aware manager, per-club uniqueness, per-club roles (§3). **Supersedes
    `CLAUDE.md`.**
 4. ✅ **Jersey uniqueness** — unique **within a team** via a partial `UniqueConstraint`
@@ -1593,19 +1588,6 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
 ---
 
 *Conventions cross-reference:* `rosterchief/base.py` (`UUIDModel`, `ClubScopedModel`),
-`rosterchief/tenancy.py` (*to add* — tenant context/middleware, §2.4),
+`club/tenancy.py` (tenant context and middleware, §2.4),
 `authentication/managers.py` (`UserManager`), `authentication/services/` (service-layer
 pattern).
-
----
-
-> ### ⚠️ Banner: supersedes `CLAUDE.md`
->
-> This architecture adopts **full multi-tenancy** (§2.4), which **directly contradicts**
-> the current `CLAUDE.md` ("RosterChief is a **single-club** app … deliberately *not*
-> multi-tenant — there is no `club_id` tenancy") and the project memory
-> (`project_overview` — "Single-club (NOT multi-tenant)").
->
-> **Action required** before/alongside implementation: update `CLAUDE.md` and the memory
-> to describe RosterChief as a **multi-tenant platform (row-based, `Club` = tenant root)**.
-> Until that is done, where the two disagree **this document is authoritative**.

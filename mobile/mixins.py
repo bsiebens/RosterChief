@@ -1,4 +1,4 @@
-"""Shared scaffolding for every Member-mode screen (design_handoff_rosterchief_platform/
+"""Shared scaffolding for every Member-mode screen (the design handoff
 README.md: "there is no parent app... every per-member screen carries a person
 switcher at the top" + "the [Coach/Member] switcher only renders for an account
 holding >=1 staff role"). One mixin so M1-M7's views (and the subagents building

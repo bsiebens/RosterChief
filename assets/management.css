@@ -3,7 +3,7 @@
  * _club_base.html) and assets/controlpanel.css (the platform-staff surface, which is
  * explicitly never club-branded).
  *
- * Management IS club-branded (see design_handoff_rosterchief_platform/README.md, "Club
+ * Management IS club-branded (see the design handoff, "Club
  * theming"): --color-club and --color-club-dark below resolve through --tenant-club /
  * --tenant-club-dark custom properties, which management/templates/management/base.html
  * sets per-request from Club.secondary_color -- everything else (structure, type,

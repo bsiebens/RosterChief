@@ -22,11 +22,11 @@
 # keep these set rather than typing them every deploy.
 set -Eeuo pipefail
 
-# --- config (override via env) ----------------------------------------------
-SSH_HOST="${SSH_HOST:-home.siebens.org}"
-SSH_USER="${SSH_USER:-bernard}"
+# --- config (SSH_HOST/SSH_USER/REMOTE_DIR have no defaults; the rest can be overridden via env) ----------------------------------------------
+SSH_HOST="${SSH_HOST:?set SSH_HOST -- the dev server (see deploy/.env.deploy.example)}"
+SSH_USER="${SSH_USER:?set SSH_USER}"
 SSH_KEY_FILE="${SSH_KEY_FILE:-}"
-REMOTE_DIR="${REMOTE_DIR:-/home/bernard/RosterChief}"
+REMOTE_DIR="${REMOTE_DIR:?set REMOTE_DIR, e.g. /home/deploy/RosterChief}"
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.behind-proxy.yaml}"
 # The published port lives in the server's .env (WEB_PORT), so it is read there, not here —

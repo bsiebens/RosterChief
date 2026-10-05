@@ -178,7 +178,7 @@ development if you touch invoicing.
 
 ## First deploy
 
-The commands below use `/home/bernard/RosterChief` as the checkout and `bernard` as the
+The commands below use `/home/deploy/RosterChief` as the checkout and `deploy` as the
 login user — substitute your own. Everything runs as that user (in the `docker` group) unless
 it says `sudo`.
 
@@ -248,8 +248,8 @@ Before the first start, so Caddy can get its certificate:
 ```bash
 # 1. Clone. The repository is public, so HTTPS needs no key on the server (deploys `git fetch`
 #    from this remote). If the repo ever goes private, clone over SSH with a read-only deploy key.
-git clone https://github.com/bsiebens/RosterChief.git /home/bernard/RosterChief
-cd /home/bernard/RosterChief
+git clone https://github.com/bsiebens/RosterChief.git /home/deploy/RosterChief
+cd /home/deploy/RosterChief
 
 # 2. Configure. Two files, both gitignored:
 cp .env.compose.example .env                 # read by docker compose (see the list below)
@@ -359,7 +359,7 @@ update the server's checkout, then run the server's own `deploy/deploy-local.sh`
 
 ```bash
 cp deploy/.env.deploy.example deploy/.env.prod.local    # gitignored, never committed
-# fill in SSH_HOST, SSH_USER, REMOTE_DIR (/home/bernard/RosterChief), optionally SSH_KEY_FILE
+# fill in SSH_HOST, SSH_USER, REMOTE_DIR (/home/deploy/RosterChief), optionally SSH_KEY_FILE
 ```
 
 Check that `ssh <user>@<host>` works without a password prompt (key-based login), that the
@@ -418,7 +418,7 @@ docker compose build caddy && docker compose up -d --force-recreate caddy
 very script. Update the checkout yourself first, then run it from the repo root:
 
 ```bash
-cd /home/bernard/RosterChief
+cd /home/deploy/RosterChief
 git fetch --tags origin && git checkout main && git reset --hard origin/main
 deploy/deploy-local.sh                          # pulls and deploys :main
 
@@ -478,7 +478,7 @@ this order; delete this list once 0.7.8 is live everywhere.
    that does this — so for *this* release only, run it once more by hand to be sure:
 
    ```bash
-   cd /home/bernard/RosterChief
+   cd /home/deploy/RosterChief
    docker compose up -d --force-recreate caddy
    ```
 
@@ -735,7 +735,7 @@ first** — the first line below. Generate a password without URL-special charac
 into `DJANGO_DATABASE_URL` as-is:
 
 ```bash
-cd /home/bernard/RosterChief
+cd /home/deploy/RosterChief
 deploy/backup.sh /var/backups/rosterchief
 APP_PW="$(openssl rand -hex 32)"; echo "$APP_PW"     # keep it for the two env files below
 
@@ -1302,8 +1302,8 @@ First-time setup on the server, once (Docker and git as in "First deploy → Pre
 server"):
 
 ```bash
-git clone https://github.com/bsiebens/RosterChief.git /home/bernard/RosterChief
-cd /home/bernard/RosterChief
+git clone https://github.com/bsiebens/RosterChief.git /home/deploy/RosterChief
+cd /home/deploy/RosterChief
 cp .env.compose.example .env             # POSTGRES_PASSWORD, APP_DB_USER/APP_DB_PASSWORD (WEB_PORT if not 8001)
 cp .env.production.example .env.production   # test.rosterchief.app values -- see point 6 above
 chmod 600 .env .env.production
@@ -1391,7 +1391,7 @@ the same way a person would, and is skipped entirely unless these repo secrets a
 | `DEV_SSH_HOST` | the dev server's host/IP (the box this section is about) |
 | `DEV_SSH_USER` | the SSH user on that box |
 | `DEV_SSH_KEY` | a private key authorized on that box, scoped to deploys only |
-| `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/bernard/RosterChief` |
+| `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/deploy/RosterChief` |
 
 Worth tightening later: these currently live as plain repo secrets, readable by any workflow
 run regardless of which branch triggered it. Moving them into a GitHub **Environment** named
@@ -1599,14 +1599,14 @@ run these with `sudo -i` first.
 
    ```bash
    mkdir -p /var/backups/rosterchief
-   chown bernard: /var/backups/rosterchief && chmod 700 /var/backups/rosterchief
+   chown deploy: /var/backups/rosterchief && chmod 700 /var/backups/rosterchief
    ```
 
 2. **Tell the backup which key to encrypt to.** Add the public key from step 1 to the compose
    `.env` in the checkout (the same file that holds `POSTGRES_PASSWORD`):
 
    ```bash
-   cd /home/bernard/RosterChief
+   cd /home/deploy/RosterChief
    echo 'BACKUP_AGE_RECIPIENT=age1…your public key…' >> .env
    ```
 
@@ -1710,7 +1710,7 @@ run these with `sudo -i` first.
 Still as root on the production server:
 
 ```bash
-cd /home/bernard/RosterChief
+cd /home/deploy/RosterChief
 BACKUP_REMOTE=offsite:rosterchief/incoming deploy/backup.sh /var/backups/rosterchief
 ls -l /var/backups/rosterchief                 # db-…sql.gz.age etc. -- only .age files are new
 rclone ls offsite:rosterchief/incoming         # the same files on the backup server
@@ -1762,7 +1762,7 @@ MAILTO=you@example.com
 # cron's default PATH lacks /usr/local/bin (where age lives on Amazon Linux) -- keep this line.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Nightly at 02:30: dump, encrypt, keep 14 days here, upload anything not yet sent.
-30 2 * * *  cd /home/bernard/RosterChief && BACKUP_REMOTE=offsite:rosterchief/incoming deploy/backup.sh /var/backups/rosterchief
+30 2 * * *  cd /home/deploy/RosterChief && BACKUP_REMOTE=offsite:rosterchief/incoming deploy/backup.sh /var/backups/rosterchief
 ```
 
 `sudo crontab -e` on the **backup server** (install `cronie` first on Amazon Linux):

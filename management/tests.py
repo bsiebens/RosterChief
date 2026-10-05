@@ -10351,7 +10351,7 @@ class FamilyListViewTests(ManagementTestBase):
         self.assertNotContains(response, "Other Kid")
 
     def test_the_families_nav_link_is_reachable(self):
-        # The sidebar is two levels now (design_handoff_rosterchief_platform/README.md,
+        # The sidebar is two levels now (the design handoff,
         # D1/D2): Households only expands under Members while a Members-section page is
         # current, not from every page the way the old flat nav showed it everywhere.
         response = self.club_get("member_list")

@@ -1,4 +1,4 @@
-"""Coach-mode screens (C1-C6) -- design_handoff_rosterchief_platform/README.md's
+"""Coach-mode screens (C1-C6) -- the design handoff's
 "Coach mode (mobile, dark chrome)" section. Kept separate from mobile/views.py
 (Member mode, M1-M7) since the two modes share almost no view logic beyond the
 club/season plumbing already factored into club.services.access -- see

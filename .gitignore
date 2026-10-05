@@ -392,3 +392,6 @@ staticfiles/
 
 # macOS Finder metadata
 .DS_Store
+
+# Per-developer IDE settings (PyCharm) -- not shared.
+.idea/
