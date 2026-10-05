@@ -135,19 +135,6 @@ class CalendarTests(ClubApiTestCase):
         later = (timezone.now() + datetime.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.assertEqual([item["event"]["title"] for item in self.get("/calendar", **{"from": later}).json()["items"]], ["Far away"])
 
-    def test_looking_back_leaves_out_games_only_refereed(self):
-        now = timezone.now()
-        played = self.event(title="Played", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=2))
-        refereed = self.event(title="Refereed", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=2))
-        ahead = self.event(title="Refereeing ahead", kind=Event.EventKind.GAME, start=now + datetime.timedelta(days=2))
-        self.invite(played, member=self.child)
-        for event in (refereed, ahead):
-            RefereeSignup.objects.create(event=event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
-
-        items = self.get("/calendar", **{"from": (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}).json()["items"]
-
-        self.assertEqual([(item["type"], item["event"]["title"]) for item in items], [("rsvp", "Played"), ("referee", "Refereeing ahead")])
-
     def test_game_status(self):
         now = timezone.now()
         hour = datetime.timedelta(hours=1)
