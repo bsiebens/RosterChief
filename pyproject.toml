@@ -72,7 +72,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "api", "billing", "bugs", "announcements", "authentication", "club", "members", "teams", "events", "formbuilder", "evaluations", "shop", "registration", "controlpanel", "management", "marketing", "mobile", "news", "notifications", "features", "appapi", "tournaments", "rosterchief"]
+    "api", "billing", "bugs", "announcements", "authentication", "club", "members", "teams", "events", "formbuilder", "evaluations", "shop", "registration", "controlpanel", "management", "marketing", "mobile", "news", "notifications", "features", "appapi", "rosterchief"]
 
 [tool.uv.sources]
 django-lucide = { git = "https://github.com/bsiebens/lucide" }

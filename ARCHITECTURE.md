@@ -29,7 +29,6 @@ is tenant-scoped (§2.4). New app labels go into `known-first-party` in `pyproje
 | `club`           | Tenant root, seasons, season-scoped affiliation, club roles, onboarding requirements | `Club`, `Season`, `ClubMembership`, `ClubRole` |
 | `teams`          | Teams and season rosters, staff                           | `Team`, `TeamMembership`, `StaffAssignment` |
 | `events`         | Training, games, tournaments, attendance, line-ups, referee/official sign-ups, game timelines | `Event`, `Attendance`, `Lineup`, `RefereeSignup` |
-| `tournaments`    | Tournament structure on top of events                     | |
 | `news`           | Club news, authored by coaches and released by editors    | `News`, `NewsPhoto` |
 | `announcements`  | Short club-wide announcements                             | |
 | `notifications`  | In-app, e-mail and push notifications                     | `Notification` |

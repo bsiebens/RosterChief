@@ -40,7 +40,7 @@ The database is configured through a single `DJANGO_DATABASE_URL` (parsed by **d
 
 ## Architecture
 
-**`ARCHITECTURE.md` is the source of truth for the model design; this is a summary.** Apps: `authentication` (global login), `members` (people and families), `club` (tenant root, seasons, roles, onboarding), `teams`, `events`, `tournaments`, `news`, `announcements`, `notifications`, `registration`, `formbuilder`, `evaluations`, `shop`, `billing` (the platform billing its clubs), `bugs`, `features` (flags, maintenance mode, scheduler), and the surfaces `controlpanel`, `management`, `mobile`, `marketing`, plus the APIs `appapi` (native apps) and `api` (public). Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
+**`ARCHITECTURE.md` is the source of truth for the model design; this is a summary.** Apps: `authentication` (global login), `members` (people and families), `club` (tenant root, seasons, roles, onboarding), `teams`, `events`, `news`, `announcements`, `notifications`, `registration`, `formbuilder`, `evaluations`, `shop`, `billing` (the platform billing its clubs), `bugs`, `features` (flags, maintenance mode, scheduler), and the surfaces `controlpanel`, `management`, `mobile`, `marketing`, plus the APIs `appapi` (native apps) and `api` (public). Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
 
 Domain notes (drive modeling decisions):
 - **Multi-tenancy is the cross-cutting rule.** `Club` is the tenant root; club-owned models inherit `ClubScopedModel` (a `club` FK). Scope every query to the current tenant (`.for_club()` / `.current()`); previously-global uniqueness (slugs, season names, invoice numbers) becomes **unique per club**. Only `User` is global. See `ARCHITECTURE.md` §2.4.
