@@ -70,6 +70,13 @@ class RosterChiefAccountAdapter(DefaultAccountAdapter):
         message = self.render_mail(template_prefix, email, ctx)
         send_message(message, exempt=(template_prefix in self.EXEMPT_TEMPLATE_PREFIXES))
 
+    def is_open_for_signup(self, request):
+        """Self-registration is closed everywhere: accounts are created by an admin or by the
+        family-registration form. The web closes it with a URL override
+        (rosterchief/urls.py, ``signup_closed``), but the headless API's ``POST /auth/signup``
+        and ``/config``'s ``is_open_for_signup`` ask this instead."""
+        return False
+
     def get_client_ip(self, request):
         """The proxy-supplied client address (ALLAUTH_TRUSTED_CLIENT_IP_HEADER),
         falling back to REMOTE_ADDR when the request didn't come through the

@@ -231,6 +231,13 @@
 
         {% include "_announcement_popup.html" %}
 
+        {% comment %}
+            Loaded on every management page, not just the forms that opt a select in:
+            it also replaces the native option list of every select inside a modal
+            (see the script's own header). Pages that include it again are harmless --
+            a select is only ever enhanced once.
+        {% endcomment %}
+        <script src="{% static 'js/searchable-select.js' %}"></script>
         {% block extra_body %}{% endblock extra_body %}
     </body>
 </html>

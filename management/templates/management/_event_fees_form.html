@@ -1,0 +1,13 @@
+{% load ui %}
+{% comment %}
+    The one form every fee input of a game's referee/official panels belongs to
+    (their form="..." attribute -- see _referee_assignment_panel.html), so the ✓
+    on any row saves every row at once (management.views.EventFeesUpdateView).
+    Rendered once per game by whichever page includes those panels, outside them,
+    since a panel's row also holds its own (separate) remove form and forms can't
+    nest. Context: event, and an optional next_url.
+{% endcomment %}
+<form id="{{ event.pk|dom_id:"event_fees_form" }}" method="post" action="{% url 'management:event_fees_update' event.pk %}" hidden>
+    {% csrf_token %}
+    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+</form>

@@ -6,11 +6,12 @@ cached read, cheap anywhere), this runs a real query, and every other page on th
 (club subdomains, the public site) has no command bar to show it on.
 """
 
-from .services.jobs import recent_job_failures
+from .services.jobs import FAILURE_WINDOW_HOURS, recent_job_failures
 
 
 def job_health(request):
     if not (request.resolver_match and request.resolver_match.app_name == "controlpanel"):
         return {}
 
-    return {"failed_jobs": recent_job_failures()}
+    # A count, not the queryset: every consumer only ever shows the number.
+    return {"failed_jobs": recent_job_failures().count(), "failure_window_hours": FAILURE_WINDOW_HOURS}

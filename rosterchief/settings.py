@@ -75,6 +75,9 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.mfa",
+    # The native-app auth API at /api/auth/app/v1/ (API.md §3). Mounted for the "app" client
+    # only; the web keeps using the HTML /accounts/ views.
+    "allauth.headless",
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
     "members.apps.MembersConfig",
@@ -104,6 +107,8 @@ INSTALLED_APPS = [
     "mobile.apps.MobileConfig",
     # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
+    # Authenticated native-app API at /api/app/v1/ -- see API.md and appapi/api.py.
+    "appapi.apps.AppApiConfig",
     # The project package itself, registered only for its system checks (rosterchief/checks.py):
     # no models, templates or static files live here.
     "rosterchief.apps.RosterchiefConfig",
@@ -140,6 +145,8 @@ MIDDLEWARE = [
     # After maintenance: a club under maintenance closes its public API too, same as
     # everything else on its subdomain.
     "api.middleware.PublicApiCorsMiddleware",
+    # No CORS on the app/auth APIs (native clients don't need it); only no-store caching.
+    "appapi.middleware.AppApiHeadersMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -221,6 +228,55 @@ MFA_WEBAUTHN_RP_NAME = config("ROSTERCHIEF_RP_NAME", default="RosterChief")
 
 # Where RequireMFAMiddleware sends privileged users who haven't enrolled yet.
 MFA_ENROLMENT_URL_NAME = "mfa_index"
+
+
+# Native-app authentication (allauth.headless) -- API.md §3.
+#
+# Only the "app" client: native apps send tokens, never cookies. Do NOT set HEADLESS_ONLY,
+# which would remove the HTML /accounts/ views the web still uses.
+HEADLESS_CLIENTS = ("app",)
+# JWT access tokens (short-lived, sent as "Authorization: Bearer") plus rotating refresh tokens.
+# Stateful validation ties every access token to its server session, so logging out (or deleting
+# the session) kills it immediately instead of at expiry.
+HEADLESS_TOKEN_STRATEGY = "allauth.headless.tokens.strategies.jwt.JWTTokenStrategy"
+HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = True
+# allauth defaults to RS256, which needs its own private key. HS256 signs with SECRET_KEY: fine
+# while only this server ever verifies the tokens. Consequence: rotating SECRET_KEY (without
+# HEADLESS_JWT_PRIVATE_KEY set) signs every app user out, since the session id inside each token
+# is encrypted with it too.
+HEADLESS_JWT_ALGORITHM = "HS256"
+HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = config("HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN", default=600, cast=int)
+# "Stay signed in" horizon for the app. A refresh token only works while its server session
+# exists, so app logins also get a session this long (authentication/signals.py); each refresh
+# re-saves the session and so slides both forward. Web sessions keep Django's default lifetime.
+APP_SESSION_LIFETIME = config("APP_SESSION_LIFETIME", default=90 * 24 * 3600, cast=int)
+HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
+# The auth API's OpenAPI spec at /api/auth/openapi.json|.yaml|.html, for the app's client
+# code generation and the online docs (/api/docs/). The .html page loads ReDoc from a CDN.
+HEADLESS_SERVE_SPECIFICATION = True
+# allauth's own page loads ReDoc protocol-relative, which is blank on plain-http dev servers;
+# ours pins the same version over https (see the template's comment).
+HEADLESS_SPECIFICATION_TEMPLATE_NAME = "appapi/auth_spec.html"
+
+
+# Native-app API (appapi, /api/app/v1/) -- API.md.
+#
+# Oldest app versions still allowed; GET /meta reports them and the app shows an "update
+# required" screen below them. Raise when an old build would break against the API.
+APP_MIN_VERSION_IOS = config("APP_MIN_VERSION_IOS", default="1.0.0")
+APP_MIN_VERSION_ANDROID = config("APP_MIN_VERSION_ANDROID", default="1.0.0")
+# Push through Amazon SNS Mobile Push (appapi/push.py). Each ARN is an SNS platform
+# application holding that service's credentials; leave empty until it exists. SNS has its
+# own access key (an IAM user limited to these applications, DEPLOYMENT.md "Native app
+# push"): the AWS_* keys above belong to the upload storage, which needn't be AWS at all.
+# Left empty, boto3 falls back to its default chain (e.g. an instance role).
+APP_PUSH_SNS_REGION = config("APP_PUSH_SNS_REGION", default="")
+APP_PUSH_SNS_ACCESS_KEY_ID = config("APP_PUSH_SNS_ACCESS_KEY_ID", default="")
+APP_PUSH_SNS_SECRET_ACCESS_KEY = config("APP_PUSH_SNS_SECRET_ACCESS_KEY", default="")
+APP_PUSH_SNS_APNS_ARN = config("APP_PUSH_SNS_APNS_ARN", default="")
+APP_PUSH_SNS_APNS_SANDBOX_ARN = config("APP_PUSH_SNS_APNS_SANDBOX_ARN", default="")
+APP_PUSH_SNS_FCM_ARN = config("APP_PUSH_SNS_FCM_ARN", default="")
+APP_PUSH_GATEWAY = ""
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
 # under this key -- generate one with

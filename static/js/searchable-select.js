@@ -8,6 +8,12 @@
  *
  * Opt in with `data-searchable="true"` on the widget; `data-search-placeholder`
  * sets the search input's placeholder (see management/forms.py).
+ *
+ * Every other single <select> inside a <dialog> gets the same dropdown in
+ * "plain" mode -- no typing, just click (or Enter/arrows) and pick -- because a
+ * native select's option list is drawn by the OS, and macOS draws it as a
+ * see-through glass menu: over a modal's dark backdrop it reads as
+ * semi-transparent and hard to scan. This list is the page's own, solid white.
  */
 (() => {
     function enhance(select) {
@@ -18,6 +24,8 @@
         select.dataset.searchableReady = "1";
 
         const isMultiple = select.multiple;
+        // Plain mode (see the header): the select opted in only by being in a modal.
+        const searchable = select.hasAttribute("data-searchable");
         // !option.disabled excludes field.html's own <option selected disabled>
         // (inserted whenever a select is rendered with show_label=False, as a
         // stand-in for the hidden <label>) -- lacking a value="" attribute of
@@ -26,6 +34,9 @@
         // filter looked like a real "candidates" entry and got redisplayed as
         // the overlay's own value -- the field's own label, not a placeholder.
         const options = Array.from(select.options).filter((option) => option.value !== "" && !option.disabled);
+        // The "---------"/"- Select an option -" entry: the placeholder, and -- for a
+        // select that isn't required -- a choice of its own, so a pick can be undone.
+        const blank = Array.from(select.options).find((option) => option.value === "" && !option.disabled);
 
         const wrapper = document.createElement("div");
         wrapper.className = "relative";
@@ -35,9 +46,19 @@
 
         const input = document.createElement("input");
         input.type = "text";
-        input.className = "input input-bordered w-full";
-        input.placeholder = select.dataset.searchPlaceholder || "";
         input.autocomplete = "off";
+        if (searchable) {
+            input.className = "input input-bordered w-full";
+            input.placeholder = select.dataset.searchPlaceholder || "";
+        } else {
+            // Looks and behaves like the select it replaces: its chevron, no typing.
+            input.className = "select w-full cursor-pointer text-left";
+            input.readOnly = true;
+            input.placeholder = blank ? blank.text : "";
+            // The field's <label for=...> points at the now-hidden select; name the overlay after it.
+            const label = select.id ? document.querySelector(`label[for="${select.id}"]`) : null;
+            if (label) input.setAttribute("aria-label", label.textContent.trim());
+        }
 
         // `fixed`, not `absolute`: an absolutely positioned dropdown is clipped by
         // the nearest scrolling ancestor (e.g. the overflow-x-auto wrapper the
@@ -174,7 +195,7 @@
                 input.focus();
             } else {
                 select.value = option.value;
-                input.value = option.text;
+                input.value = option.value === "" ? "" : option.text;
                 list.classList.add("hidden");
             }
             select.dispatchEvent(new Event("change"));
@@ -186,8 +207,9 @@
             // time -- something else (registration-entry-rows.js's "Registering
             // as" filtering) can toggle it on the live <option> elements after
             // the fact, and this re-checks it on every render() call.
-            const candidates = (isMultiple ? options.filter((option) => !option.selected) : options).filter((option) => !option.hidden);
-            const matches = needle ? candidates.filter((option) => option.text.toLowerCase().includes(needle)) : candidates;
+            const choices = !searchable && blank && !select.required ? [blank, ...options] : options;
+            const candidates = (isMultiple ? choices.filter((option) => !option.selected) : choices).filter((option) => !option.hidden);
+            const matches = searchable && needle ? candidates.filter((option) => option.text.toLowerCase().includes(needle)) : candidates;
 
             list.innerHTML = "";
             matches.forEach((option) => {
@@ -213,7 +235,9 @@
         };
 
         input.addEventListener("input", () => render(input.value));
-        input.addEventListener("focus", () => render(input.value));
+        input.addEventListener("focus", () => render(searchable ? input.value : ""));
+        // Plain mode: a click on the already-focused field reopens a closed list.
+        if (!searchable) input.addEventListener("click", () => render(""));
         input.addEventListener("blur", () => list.classList.add("hidden"));
 
         input.addEventListener("keydown", (event) => {
@@ -227,6 +251,9 @@
             } else if (event.key === "Enter" && highlighted >= 0 && items[highlighted]) {
                 event.preventDefault();
                 items[highlighted].dispatchEvent(new Event("mousedown"));
+            } else if (!searchable && (event.key === "Enter" || event.key === " ") && list.classList.contains("hidden")) {
+                event.preventDefault();
+                render("");
             } else if (event.key === "Escape") {
                 list.classList.add("hidden");
             } else if (isMultiple && event.key === "Backspace" && input.value === "") {
@@ -257,7 +284,10 @@
     // the DOM, and a <template>'s inert content is deliberately not matched.
     window.enhanceSearchableSelect = enhance;
 
-    document.querySelectorAll("select[data-searchable]").forEach(enhance);
+    // Opted-in selects anywhere, plus every single select inside a modal (plain mode).
+    const SELECTOR = "select[data-searchable], dialog select:not([multiple])";
+
+    document.querySelectorAll(SELECTOR).forEach(enhance);
 
     // The mobile app's coach shell boosts same-shell navigation (hx-boost="true"
     // on <body>, mobile/coach/base.html), which swaps in a whole new screen's
@@ -268,6 +298,6 @@
     // data-searchable-ready guard makes re-sweeping the whole document safe even
     // where the swap target isn't known precisely.
     document.body.addEventListener("htmx:afterSettle", () => {
-        document.querySelectorAll("select[data-searchable]").forEach(enhance);
+        document.querySelectorAll(SELECTOR).forEach(enhance);
     });
 })();

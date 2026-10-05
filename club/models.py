@@ -107,6 +107,25 @@ class Club(UUIDModel):
         validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #be185d."))],
         help_text=_("Hex colour for highlights on the club's pages, e.g. avatar initials. Defaults to the theme's secondary colour."),
     )
+    #: Text drawn *on* the primary/secondary colour. Blank (the default) keeps the
+    #: automatic black-or-white contrast pick (_content_color_for); set, it wins --
+    #: but only while the matching colour itself is set, since without it the
+    #: app's own default colour is showing and the automatic pick fits that one.
+    #: Read through primary_content_color/secondary_content_color, never directly.
+    primary_text_color = models.CharField(
+        _("text colour on primary"),
+        max_length=7,
+        blank=True,
+        validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #ffffff."))],
+        help_text=_("Text colour on top of the primary colour, e.g. #ffffff. Leave blank to pick black or white automatically."),
+    )
+    secondary_text_color = models.CharField(
+        _("text colour on secondary"),
+        max_length=7,
+        blank=True,
+        validators=[RegexValidator(r"^#[0-9a-fA-F]{6}$", _("Enter a colour as a hex value, e.g. #ffffff."))],
+        help_text=_("Text colour on top of the secondary colour, e.g. #ffffff. Leave blank to pick black or white automatically."),
+    )
 
     sport_type = models.CharField(
         _("sport"),
@@ -184,12 +203,18 @@ class Club(UUIDModel):
 
     @property
     def primary_content_color(self) -> str:
-        """Readable text colour to sit *on* ``primary_color``. See ``_content_color_for``."""
+        """Text colour to sit *on* ``primary_color``: the club's own
+        ``primary_text_color`` when set, else the automatic pick (``_content_color_for``)."""
+        if self.primary_color and self.primary_text_color:
+            return self.primary_text_color
         return self._content_color_for(self.primary_color)
 
     @property
     def secondary_content_color(self) -> str:
-        """Readable text colour to sit *on* ``secondary_color``. See ``_content_color_for``."""
+        """Text colour to sit *on* ``secondary_color``: the club's own
+        ``secondary_text_color`` when set, else the automatic pick (``_content_color_for``)."""
+        if self.secondary_color and self.secondary_text_color:
+            return self.secondary_text_color
         return self._content_color_for(self.secondary_color)
 
     @staticmethod

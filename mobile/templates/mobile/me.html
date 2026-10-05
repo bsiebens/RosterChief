@@ -150,6 +150,13 @@
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
+            {% if live_game_updates_enabled %}
+                <div class="h-px bg-rule"></div>
+                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:live_game_updates" %}">
+                    <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Live game updates" %}</span>
+                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                </a>
+            {% endif %}
             <div class="h-px bg-rule"></div>
             <a class="flex items-center gap-3 p-3.5" href="{% url "account_change_password" %}">
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Change password" %}</span>

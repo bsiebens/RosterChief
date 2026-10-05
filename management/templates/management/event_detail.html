@@ -144,6 +144,9 @@
                 </div>
             </div>
         </div>
+        {% if game_timeline %}
+            {% include "management/_game_timeline_card.html" with timeline=game_timeline view=game_timeline_view moments=game_moments %}
+        {% endif %}
     {% endif %}
 
     {% if event.is_home_fixture and not referee_management_needed %}
@@ -151,6 +154,10 @@
             {% lucide "info" size=20 %}
             <span>{% trans "Referees for this game are managed by the federation, not the club." %}</span>
         </div>
+    {% endif %}
+
+    {% if referee_management_needed or official_management_needed %}
+        {% include "management/_event_fees_form.html" %}
     {% endif %}
 
     {% if referee_management_needed %}

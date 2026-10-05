@@ -151,15 +151,19 @@ def remove_referee(referee):
     referee.delete()
 
 
-def set_referee_fee(referee, *, fee=None, km=None, km_rate=None):
+def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
     """Update one referee assignment's payment details -- what the club owes
     for this game, split into a flat fee and a mileage component. Any
     argument left as None clears that field rather than leaving it
     unchanged, matching how the edit form always submits all three."""
+    if no_fee:
+        # Unpaid: nothing is owed, so whatever was typed into the (hidden) fee line is dropped.
+        fee, km, km_rate = None, None, None
     referee.fee = fee if fee is not None else Decimal("0.00")
     referee.km = km
     referee.km_rate = km_rate
-    referee.save(update_fields=["fee", "km", "km_rate"])
+    referee.no_fee = no_fee
+    referee.save(update_fields=["fee", "km", "km_rate", "no_fee"])
     return referee
 
 

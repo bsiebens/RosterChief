@@ -371,6 +371,12 @@ GroupMembership(UUIDModel)            # club implied by group
 drives subdomain/path resolution), contact, and branding. Provide `Club.objects.current()`
 and resolve it in middleware — never hardcode a PK.
 
+Branding: `primary_color`/`secondary_color`, plus optional `primary_text_color`/
+`secondary_text_color` for the text drawn on them. Templates and the app API always read
+`Club.primary_content_color`/`secondary_content_color`: the club's own text colour when that
+colour is set, otherwise the automatic WCAG black-or-white pick. Emails with a fallback
+background use the `club|primary_text_color:"#…"` filters (`club/templatetags/club_email.py`).
+
 **`ClubMembership`** — links a `Member` to the `Club` with a `license` string. **Being made
 season-scoped** (§5.1): it gains a `season` FK and sign-up / fee-status fields, so each row
 is one member's affiliation for one season (`unique_together (club, member, season)`). This
@@ -775,6 +781,12 @@ in whose (explicit, defaulted or assumed) end is at or before now, newest first 
 returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
 Current season only (explicit `season`, else derived from the start date, same as
 `/teams/{id}/games/`) — never an older season's results; empty when there's no current season.
+Every game row (`GameOut`, shared by `/games/upcoming/`, `/games/past/`, `/games/live/` and
+`/teams/{id}/games/`) carries **`teams`** — every one of the club's own teams assigned to the
+event (`Event.teams` is M2M), ordered by name, prefetched in one query. `home_team`/`away_team`
+still name only *one* of them (the requested team on `/teams/{id}/games/`, else the first by
+name) opposite the opponent; they're kept unchanged for external sites already reading them,
+but a multi-team game should be read through `teams`.
 
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**
@@ -877,6 +889,25 @@ its 10-min cache) when `poll_live_game_results` sees a team's game finish, and n
 `refresh_standings` (01:00). The public API serves it read-only — `GET /api/v1/teams/standings/`
 and `/teams/{id}/standings/`, current season, behind the club's `RBIHF` flag — so visitors never
 trigger a federation round trip.
+
+**Game timelines.** Behind the `game_timeline` flag (on top of the competition's own flag), each
+polled game's timeline (goals with scorer/assists/strength, penalties, goalie changes,
+time-outs, period markers) is stored as one normalized JSON document on
+`events.GameTimeline` (one-to-one with `Event`, so the blob never rides along on ordinary `Event`
+queries). It's fetched by each competition class's `fetch_timeline`, right after the score
+update in `fetch_game_info`, and parsed by `events/services/timeline_parsers.py`.
+`settle_game_timelines` (nightly) picks up post-game corrections, and `fetch_game_timelines` is
+the manual backfill.
+
+The public API serves timelines on `GET /api/v1/games/{id}/`, and the lists carry periods and
+`decided_in`. Player names appear there only when every one of our teams on the game has
+`Team.show_player_names_publicly` on (off by default, for youth teams); otherwise jersey numbers
+only. The member app's `GET /events/{id}` carries the same shape (`game_timeline`), always with
+names. A changed timeline also records "moments" (goal for/against, cancelled goal, penalties,
+period end, start, final) once each in `events.GameMoment`, via the `game_timeline_changed`
+signal. They're shown on the management event page and pushed (coalesced per poll, push only)
+to accounts that follow one of the game's teams (`events.GameFollow`, opt-in from the member
+app or PWA): `events/services/game_push.py`. Design and decisions: `GAME_TIMELINE.md`.
 
 **IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
 with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling

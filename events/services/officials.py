@@ -141,14 +141,18 @@ def remove_official(official):
     official.delete()
 
 
-def set_official_fee(official, *, fee=None, km=None, km_rate=None):
+def set_official_fee(official, *, fee=None, km=None, km_rate=None, no_fee=False):
     """Update one official assignment's payment details. Any argument left
     as None clears that field rather than leaving it unchanged, matching how
     the edit form always submits all three."""
+    if no_fee:
+        # Unpaid: nothing is owed, so whatever was typed into the (hidden) fee line is dropped.
+        fee, km, km_rate = None, None, None
     official.fee = fee if fee is not None else Decimal("0.00")
     official.km = km
     official.km_rate = km_rate
-    official.save(update_fields=["fee", "km", "km_rate"])
+    official.no_fee = no_fee
+    official.save(update_fields=["fee", "km", "km_rate", "no_fee"])
     return official
 
 

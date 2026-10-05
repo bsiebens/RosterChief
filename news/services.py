@@ -47,6 +47,31 @@ def render_body_html(body: str) -> str:
     return nh3.clean(html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRIBUTES, url_schemes=_ALLOWED_URL_SCHEMES)
 
 
+def live_news(club, now=None):
+    """Every published item of ``club`` that is actually live (``published_at`` passed)
+    -- a scheduled item stays invisible until then, everywhere a member could reach it."""
+    from news.models import News
+
+    return News.objects.filter(club=club, status=News.Status.PUBLISHED, published_at__lte=now or timezone.now())
+
+
+def member_news(club, now=None):
+    """The member app's news feed (mobile Home/News, app API): live items meant for
+    members -- internal or both, never external-only -- newest first. Club-wide on
+    purpose: news is what the club wants members to know, not a per-person feed."""
+    from news.models import News
+
+    return live_news(club, now).filter(visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH]).order_by("-published_at")
+
+
+def localized_news(news_item, language: str | None) -> tuple[str, str, str]:
+    """``(title, markdown body, language served)``: the English fields (with their own
+    fallback to the native text) when ``language`` is English, the native text otherwise."""
+    if (language or "").split("-")[0] == "en":
+        return news_item.effective_title_en, news_item.effective_body_en, "en"
+    return news_item.title, news_item.body, "default"
+
+
 def render_body_excerpt(body: str, *, words: int) -> str:
     """Plain-text excerpt, derived from the rendered HTML rather than the raw
     Markdown source -- otherwise syntax like `**`/`#`/`[text](url)` shows up

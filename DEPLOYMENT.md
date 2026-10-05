@@ -344,6 +344,8 @@ has all but the rarely-needed last row, with comments.
 | `ROSTERCHIEF_BILLING_CONTACT_EMAIL`, `ROSTERCHIEF_CONTACT_EMAIL` | no | reply-to for billing mail; where "Book a demo" requests go (defaults to the maintainer's address) |
 | `DJANGO_VAPID_PUBLIC_KEY` / `DJANGO_VAPID_PRIVATE_KEY` / `DJANGO_VAPID_ADMIN_EMAIL` | no | Web Push for the mobile app; without a private key push is silently off. Generate a pair on your own machine with `uv run vapid --gen` |
 | `AWS_STORAGE_BUCKET_NAME` and the other `AWS_*` | no | uploads to S3-compatible storage — see "The five things…", 4 |
+| `APP_PUSH_SNS_*` | no | push for the native iOS/Android apps through Amazon SNS — see "Native app push". Without them the app works, just without pushes |
+| `APP_MIN_VERSION_IOS` / `APP_MIN_VERSION_ANDROID` | no (`1.0.0`) | oldest app version still allowed; older apps show "update required" |
 | `DJANGO_TIME_ZONE` | no (`Europe/Brussels`) | also the timezone of the job schedule |
 | `DJANGO_SESSION_COOKIE_DOMAIN`, `DJANGO_SERVER_EMAIL`, `DJANGO_EMAIL_USE_SSL`, `DJANGO_EMAIL_TIMEOUT`, `DJANGO_INTERNAL_IPS`, `DJANGO_DB_CONN_MAX_AGE` (60), `DJANGO_PERFORMANCE_LOGGING*` | no | rarely needed; see `rosterchief/settings.py` |
 
@@ -840,7 +842,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All twelve platform jobs run from **one in-process scheduler thread inside `web` itself** —
+All fourteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
 `when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
@@ -857,6 +859,7 @@ class every one of them runs through.
 | `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
 | `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
 | `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
+| `settle_game_timelines` | daily 01:30 | re-fetches the timelines (goals, penalties, …) of games that finished 3h–7 days ago until they stop changing, then marks them finalized — clubs with the `game_timeline` flag only (see GAME_TIMELINE.md) |
 | `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
 | `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
 | `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
@@ -977,7 +980,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the twelve jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the fourteen jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
@@ -991,21 +994,142 @@ panel's **Jobs** tab (see that class's own docstring). Every command accepts
 `--ignore-maintenance` for the rare case you genuinely mean to run one by hand during a
 window.
 
-So a migration-heavy deploy looks like:
-
-```bash
-# 1. Close the platform in the control panel (or from a shell):
-docker compose run --rm web python manage.py shell -c \
-  "from features.models import Maintenance; Maintenance.start(message='Upgrading. Back by 21:00.')"
-
-# 2. Do the work — migrate is not blocked. From your own machine, as usual:
-deploy/deploy-prod.sh --version vX.Y.Z
-
-# 3. Reopen from the control panel.
-```
+`deploy/deploy-local.sh` (and so `deploy/deploy-prod.sh`, which runs it over `ssh -t`) does this
+for you: it enters maintenance mode before the backup and migration, and once the new image is
+healthy asks whether to reopen the platform. Answering anything but `y` -- or a failed deploy,
+or no terminal -- leaves it closed and prints the command to reopen it (also available from
+the control panel). `NO_MAINTENANCE=1` skips the whole thing; `MAINTENANCE_MESSAGE="..."` sets
+what clubs see. A first deploy (no running web yet) has nothing to close and skips it.
 
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
+
+## Native app push (Amazon SNS)
+
+The native apps (iOS first, API.md §9) get their push notifications through **Amazon SNS
+Mobile Push**. SNS holds the Apple (APNs) credentials; the server only holds an access key
+that may publish to them. Nothing here is needed for the web app's own Web Push (the
+`DJANGO_VAPID_*` keys). Without this setup the app still signs in and registers, it just
+gets no pushes (`push_enabled: false` in `POST /devices`).
+
+You need an Apple Developer account (the one the iOS app is published under) and an AWS
+account. Do it once per server: production and the test server each get **their own** SNS
+platform applications and access key. A phone that uses both servers would otherwise share
+one SNS endpoint, and signing out on one server would stop pushes from the other.
+
+### Step 1 — Apple: an APNs key
+
+In [developer.apple.com](https://developer.apple.com/account) → *Certificates, Identifiers &
+Profiles*:
+
+1. **Identifiers**: the app's App ID (e.g. `app.rosterchief.ios`) must have **Push
+   Notifications** ticked. The iOS developer sets the same bundle ID in Xcode.
+2. **Keys** → **+** → name it `RosterChief APNs`, tick **Apple Push Notifications service
+   (APNs)** → *Continue* → *Register* → **Download** the `.p8` file. It downloads **once**:
+   keep it in your password manager. Note the **Key ID** (10 characters) and your **Team ID**
+   (top right, under your name).
+
+One key serves both the sandbox (debug builds from Xcode) and production (TestFlight and App
+Store), and every app of the team. It doesn't expire; revoke it here if it leaks.
+
+### Step 2 — AWS: two platform applications
+
+In the AWS console, pick one region and keep it (e.g. `eu-west-1`, Ireland) → **Amazon SNS**
+→ *Mobile* → *Push notifications* → **Create platform application**, twice:
+
+| Name (production server) | Push service | Tick "Used for development in sandbox" |
+|---|---|---|
+| `rosterchief-ios-prod` | Apple iOS/VoIP/Mac | no |
+| `rosterchief-ios-prod-sandbox` | Apple iOS/VoIP/Mac | **yes** |
+
+(For the test server: `rosterchief-ios-test` and `rosterchief-ios-test-sandbox`.) For both,
+choose **Token-based authentication**, upload the `.p8`, and enter the key ID, team ID and the
+app's bundle ID. Copy each application's **ARN**
+(`arn:aws:sns:eu-west-1:<account>:app/APNS/rosterchief-ios-prod` and
+`…:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox`).
+
+Optional but useful: on each application, *Edit* → **Delivery status logging** → success
+sample rate `0`, IAM roles "Create new service role". Failed deliveries then show up in
+CloudWatch Logs with Apple's reason.
+
+### Step 3 — AWS: an access key that can only push
+
+*IAM* → *Users* → **Create user** `rosterchief-push-prod` (no console access) → *Add
+permissions* → *Create inline policy* → JSON (fill in region, account id and names):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sns:CreatePlatformEndpoint",
+      "Resource": [
+        "arn:aws:sns:eu-west-1:123456789012:app/APNS/rosterchief-ios-prod",
+        "arn:aws:sns:eu-west-1:123456789012:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["sns:SetEndpointAttributes", "sns:GetEndpointAttributes", "sns:DeleteEndpoint", "sns:Publish"],
+      "Resource": "arn:aws:sns:eu-west-1:123456789012:endpoint/APNS*/rosterchief-ios-prod*/*"
+    }
+  ]
+}
+```
+
+Then the user → *Security credentials* → **Create access key** ("Application running outside
+AWS") and copy the key id and secret. This key can't touch anything but these two
+applications. It's separate from the upload storage's `AWS_*` keys on purpose: those may not
+even be AWS.
+
+### Step 4 — The server
+
+Add to `.env.production` and redeploy (or `docker compose up -d web` to pick up the file):
+
+```bash
+APP_PUSH_SNS_REGION=eu-west-1
+APP_PUSH_SNS_ACCESS_KEY_ID=AKIA…
+APP_PUSH_SNS_SECRET_ACCESS_KEY=…
+APP_PUSH_SNS_APNS_ARN=arn:aws:sns:eu-west-1:123456789012:app/APNS/rosterchief-ios-prod
+APP_PUSH_SNS_APNS_SANDBOX_ARN=arn:aws:sns:eu-west-1:123456789012:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox
+```
+
+Leave out an ARN you don't have yet: that kind of build then registers without push. Android
+later adds `APP_PUSH_SNS_FCM_ARN` the same way (a Firebase platform application).
+
+Phones that registered before this was set up start receiving pushes once the app registers
+again, which it does on every launch.
+
+### Step 5 — Check it
+
+Open the app on a phone, sign in and allow notifications. Then, on the server:
+
+```bash
+docker compose exec web python manage.py shell -c "
+from appapi.models import PushDevice
+from appapi.push import get_gateway
+gateway = get_gateway()
+for device in PushDevice.objects.filter(user__email='you@example.com', enabled=True):
+    print(device.installation_id, device.environment, bool(device.endpoint_arn), gateway.publish(device, title='Test', body='Push works', data={}))
+"
+```
+
+Each line should end in `True True` and the phone should buzz. What the output means:
+
+| You see | Cause |
+|---|---|
+| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after a failed push. It re-registers on the next launch |
+| `False` in the third column | no ARN for that `environment` (a debug build needs the sandbox one), or SNS refused the token — see the `web` logs |
+| `True False` | SNS says the endpoint is disabled: usually a debug build's token sent to the production application or the other way round. Check the build and the "sandbox" tick in step 2 |
+| `True True` but nothing arrives | the app's bundle ID doesn't match the platform application's, or notifications are off for the app in iOS Settings. Delivery status logging (step 2) shows Apple's reason |
+
+### Rotating or revoking
+
+* **APNs key:** create a new key (step 1), upload it to both platform applications (*Edit*),
+  then revoke the old one. Nothing changes on the server.
+* **Access key:** create a second key on the IAM user, update `.env.production`, redeploy,
+  then delete the old key.
 
 ## Behind an existing Caddy (dev / test server)
 

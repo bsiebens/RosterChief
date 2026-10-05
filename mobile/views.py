@@ -12,9 +12,9 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.paginator import Paginator
-from django.db.models import Count, F, Q
+from django.db.models import F
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -31,54 +31,55 @@ from bugs.services import file_report
 from club.models import ClubMembership
 from club.services.access import current_season, get_current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
-from club.services.onboarding import checklist_for, open_requirements_blocking
+from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
-from events.models import Attendance, Event, EventTask, Lineup, OfficialSignup, RefereeSignup
-from events.services.attendance import blocked_upcoming_events_for_members
+from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeSignup
+from events.services.agenda import KIND_FILTERS as AGENDA_KIND_FILTERS
+from events.services.agenda import member_agenda
 from events.services.calendar import agenda_groups, week_bounds
-from events.services.lineup import notify_dropout, selected_members_by_position
+from events.services.game_push import followed_team_ids, set_followed_teams
+from events.services.member_view import member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
+from events.services.rsvp import ANSWERABLE_STATUSES, RsvpError, submit_rsvp
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, is_send_open, submit_form
+from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, submit_form
 from members.models import FamilyMembership, Member
-from members.services.family import claim_label_for
+from members.services.family import managed_people
 from members.views import ClubScopedPublicMixin
 from news.models import News
-from news.services import render_body_html
-from notifications.models import Notification
-from registration.forms import RegistrationEntryFormSet, entries_from_formset
+from news.services import live_news, localized_news, member_news, render_body_html
+from notifications.services import clear_all, inbox_for, mark_all_read, mark_read, unread_count
 from registration.models import RegistrationBatch
 from registration.services import (
     PricingError,
     RegistrationError,
     available_registration_products,
-    price_entries,
     priced_rows_with_jersey_fields,
     resolve_chosen_season,
-    resolve_registration_season,
-    submit_registration,
     team_number_pools,
     variant_registration_kinds,
 )
-from registration.services.invoicing import RegistrationInvoicePDFError, active_batch_entries, batch_early_payment_offer, batch_invoice_pdf, batch_totals, membership_ids_awaiting_confirmation
+from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
 from rosterchief.client_ip import client_ip
-from shop.models import Cart, CartItem, Order, Product, ProductCategory, Voucher
-from shop.services.checkout import CheckoutError, find_discount, place_order, reprice_cart_items
+from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
+from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
+from shop.services.checkout import CheckoutError, place_order
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
-from shop.services.pricing import cart_totals
 from teams.models import StaffAssignment, Team, TeamMembership
-from teams.services.numbers import member_current_number
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
 from .models import CalendarFeedToken, PushSubscription
 from .services.calendar_feed import build_feed
+from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
+from .services.payments import payments_overview
 from .services.push import subscription_error
+from .services.reregistration import entry_formset, member_current_numbers, price_formset, submit_reregistration
 
 
 class ManifestView(ClubScopedPublicMixin, View):
@@ -191,21 +192,7 @@ class CalendarFeedView(ClubScopedPublicMixin, View):
         if feed_token is None:
             raise Http404("No such calendar feed.")
         me = Member.objects.filter(user=feed_token.user).first()
-        people = []
-        if me is not None:
-            children = Member.objects.filter(
-                family_memberships__role=FamilyMembership.FamilyRole.CHILD,
-                # family__club: me is global -- without this, a family relationship
-                # from another club could surface here just because the child also
-                # happens to have a ClubMembership in this one (2026-09-12 leak).
-                family_memberships__family__club=request.club,
-                family_memberships__family__memberships__member=me,
-                family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
-                member_of__club=request.club,
-            ).distinct()
-            people = [me, *children]
-
-        feed = build_feed(request.club, people)
+        feed = build_feed(request.club, managed_people(me, request.club))
         return HttpResponse(feed, content_type="text/calendar; charset=utf-8")
 
 
@@ -242,6 +229,33 @@ class CalendarFeedSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         return response
 
 
+class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """The "Live game updates" row under Me -- which of the club's teams this
+    account gets live game pushes for (goals, penalties, the result; see
+    events.services.game_push). Opt-in, per account: one tick per team. Only
+    there while the club has game timelines ("game_timeline" flag)."""
+
+    template_name = "mobile/live_game_updates.html"
+    screen_title = _("Live game updates")
+    active_tab = "me"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated and not flag_is_active(request, "game_timeline"):
+            raise Http404("Live game updates aren't available for this club.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        following = followed_team_ids(self.request.user, self.request.club)
+        teams = Team.objects.filter(club=self.request.club).order_by("name")
+        kwargs.setdefault("team_rows", [{"team": team, "following": team.pk in following} for team in teams])
+        return super().get_context_data(**kwargs)
+
+    def post(self, request, *args, **kwargs):
+        set_followed_teams(request.user, request.club, request.POST.getlist("team"))
+        notify(request, f"s|{_('Saved')}|{_('Your live game updates have been updated.')}")
+        return redirect("mobile:live_game_updates")
+
+
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- design_handoff_rosterchief_platform/README.md's M1 section: two
     independent "next up" hero cards for everyone currently in scope -- the
@@ -271,142 +285,21 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Home")
     active_tab = "home"
 
-    #: Keeps the card from crowding the dues/news cards below it off the first
-    #: screenful -- Calendar is the place to see everything still awaiting a reply.
-    NEEDS_ANSWER_LIMIT = 5
-    #: Same reasoning -- an event's own page (linked from each row) is where
-    #: every task for it, open or not, actually lives.
-    OPEN_TASKS_LIMIT = 5
-    #: Same reasoning -- mobile:news_list is the place to see everything.
-    NEWS_LIMIT = 3
-    #: Same reasoning again -- mobile:me lists every form, not just the pending ones.
-    FORMS_LIMIT = 5
-
     def get_context_data(self, **kwargs):
-        people = self.people_in_scope
-        now = timezone.now()
-
-        hero_attendance = None
-        rsvp_closed = False
-        going_attendance = None
-        needs_answer = []
-        needs_answer_total = 0
-        open_tasks = []
-        open_tasks_total = 0
-        dues_rows = []
-        news_items = []
-        forms_to_complete = []
-
-        if people:
-            upcoming = Attendance.objects.filter(
-                member__in=people,
-                event__club=self.request.club,
-                event__cancelled=False,
-                event__start__gte=now,
-            ).select_related("event", "event__location", "member")
-
-            # Two independent hero cards, not one that falls back between the
-            # two ideas: the soonest event nobody's answered yet (a reply
-            # still owed -- home.html hides this card entirely once nothing
-            # needs a reply), and separately the soonest event someone in
-            # scope is actually going to (PRESENT, or SELECTED onto a roster)
-            # -- a read-only "you're in" overview, since there's nothing left
-            # to ask about it.
-            hero_attendance = upcoming.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).order_by("event__start").first()
-            if hero_attendance is not None:
-                deadline = hero_attendance.event.deadline
-                rsvp_closed = deadline is not None and deadline < now
-
-            going_attendance = upcoming.filter(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED]).order_by("event__start").first()
-
-            # Deadline already passed -> replying is no longer possible (see
-            # EventDetailView.post's own deadline check), so it doesn't belong
-            # in a "still needs a reply" list -- unlike hero_attendance above,
-            # which still shows a closed-but-unanswered event as a read-only
-            # pill rather than dropping it.
-            needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
-            if hero_attendance is not None:
-                needs_answer_qs = needs_answer_qs.exclude(pk=hero_attendance.pk)
-            needs_answer_items = [{"kind": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in needs_answer_qs]
-
-            # Same "still owed" idea as the RSVP rows above, for the two
-            # self-service invite tracks (RefereeSignup/OfficialSignup) --
-            # merged into this same box rather than a separate card, since
-            # from the invited person's point of view it's exactly the same
-            # kind of ask: an event that needs a yes/no from them. Only
-            # INVITED counts -- ACCEPTED/DECLINED already have an answer, so
-            # unlike the Calendar agenda (which also keeps ACCEPTED visible
-            # as a confirmed commitment) this box drops them.
-            referee_invites = RefereeSignup.objects.filter(member__in=people, event__club=self.request.club, event__cancelled=False, event__start__gte=now, status=RefereeSignup.Status.INVITED).select_related("event", "member")
-            needs_answer_items += [{"kind": "referee", "event": signup.event, "member": signup.member} for signup in referee_invites]
-
-            if flag_is_active(self.request, "officials"):
-                official_invites = OfficialSignup.objects.filter(member__in=people, event__club=self.request.club, event__cancelled=False, event__start__gte=now, status=OfficialSignup.Status.INVITED).select_related("event", "member")
-                needs_answer_items += [{"kind": "official", "event": signup.event, "member": signup.member} for signup in official_invites]
-
-            needs_answer_items.sort(key=lambda row: row["event"].start)
-            needs_answer_total = len(needs_answer_items)
-            needs_answer = needs_answer_items[: self.NEEDS_ANSWER_LIMIT]
-
-            # Its own card, not folded into "Needs your answer" above -- a task
-            # ("bring fruit") isn't a reply owed, it's a slot anyone in scope
-            # could take, and an event already answered can still have one
-            # open. Scoped to the same upcoming/invited events as the rest of
-            # this screen (not every upcoming club event), one row per open
-            # task rather than per event, so which specific ask is open is
-            # visible without a tap through to the event.
-            open_tasks_qs = (
-                EventTask.objects.filter(event_id__in=upcoming.values_list("event_id", flat=True).distinct()).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity")).select_related("event").order_by("event__start")
-            )
-            open_tasks_total = open_tasks_qs.count()
-            open_tasks = list(open_tasks_qs[: self.OPEN_TASKS_LIMIT])
-            for task in open_tasks:
-                task.open_count = task.needed_quantity - task.claim_count
-
-            season = current_season(self.request.club)
-            if season is not None:
-                # Holds back a balance nobody's reviewed yet -- same filter
-                # PaymentsView applies to the exact same open_dues_rows
-                # result, so Home and Payments & dues never disagree (see
-                # that function's own docstring).
-                awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
-                dues_rows = [row for row in open_dues_rows(self.request.club, people, season) if row["membership"].pk not in awaiting_confirmation]
-
-            # Every published item, club-wide or team-tagged -- not narrowed to
-            # this account's own teams. News is "things this club wants members
-            # to know about", not a per-person feed the way RSVP/dues are.
-            news_items = list(
-                News.objects.filter(
-                    club=self.request.club,
-                    status=News.Status.PUBLISHED,
-                    published_at__lte=now,
-                    visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
-                )
-                .prefetch_related("teams", "photos")
-                .order_by("-published_at")[: self.NEWS_LIMIT]
-            )
-
-            # Above the Club news block, per the design ask -- what's still
-            # outstanding, capped the same way as the other "see the full list
-            # elsewhere" cards above (mobile:forms_list is that full list
-            # here). One row per (send, member) rather than per send -- while
-            # on the "All" chip this is what actually shows *whose* form it
-            # is (a send addressed to two managed children is two rows, each
-            # named), the same shape needs_answer's own per-Attendance rows
-            # already use for the exact same reason.
-            forms_to_complete = [row for row in form_status_rows_for(people, self.request.club) if row["submitted_at"] is None and is_send_open(row["send"], now)][: self.FORMS_LIMIT]
-
+        # The cards themselves (and their caps) are mobile.services.home, shared with the
+        # app API's GET /home.
+        summary = home_summary(self.request.club, self.people_in_scope, officials_enabled=flag_is_active(self.request, "officials"))
         return super().get_context_data(
-            hero_attendance=hero_attendance,
-            rsvp_closed=rsvp_closed,
-            going_attendance=going_attendance,
-            needs_answer=needs_answer,
-            needs_answer_remaining=max(needs_answer_total - len(needs_answer), 0),
-            open_tasks=open_tasks,
-            open_tasks_remaining=max(open_tasks_total - len(open_tasks), 0),
-            dues_rows=dues_rows,
-            news_items=news_items,
-            forms_to_complete=forms_to_complete,
+            hero_attendance=summary["hero_attendance"],
+            rsvp_closed=summary["rsvp_closed"],
+            going_attendance=summary["going_attendance"],
+            needs_answer=summary["needs_answer"],
+            needs_answer_remaining=summary["needs_answer_total"] - len(summary["needs_answer"]),
+            open_tasks=summary["open_tasks"],
+            open_tasks_remaining=summary["open_tasks_total"] - len(summary["open_tasks"]),
+            dues_rows=summary["dues_rows"],
+            news_items=summary["news_items"],
+            forms_to_complete=summary["forms_to_complete"],
             # Club-wide, not person-specific -- shown regardless of managed_people,
             # unlike every other card on this screen. Reshuffled on every request
             # (see club.services.sponsors.active_sponsors) rather than once per
@@ -444,7 +337,7 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     #: ?kind= values this screen actually understands, mapped to the Event.EventKind
     #: they filter on -- anything else (including no param at all) means "All".
-    KIND_FILTERS = {"game": Event.EventKind.GAME, "training": Event.EventKind.TRAINING}
+    KIND_FILTERS = AGENDA_KIND_FILTERS
 
     #: Pill styling for a per-person RSVP status (assets/mobile.css's .pill-*).
     STATUS_PILL_CLASSES = {
@@ -458,93 +351,37 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     }
 
     def get_context_data(self, **kwargs):
-        now = timezone.now()
         today = timezone.localdate()
         kind_filter = self.request.GET.get("kind")
+        if kind_filter not in self.KIND_FILTERS:
+            kind_filter = None
 
+        # The merged agenda itself (invitations, referee/official sign-ups, events blocked
+        # by an open onboarding requirement) is events.services.agenda, shared with the app
+        # API; this only shapes each row for the template. Declined sign-ups are dropped,
+        # accepted ones stay visible as a confirmed commitment; the officials rows follow
+        # the "officials" flag like EventDetailView's own card.
+        agenda = member_agenda(self.request.club, self.managed_people, kind=kind_filter, officials_enabled=flag_is_active(self.request, "officials"))
+
+        # Only worth naming whose row it is once there's more than one managed person to
+        # tell apart -- a lone member's own agenda doesn't need it.
+        show_member = len(self.managed_people) > 1
         rows = []
-        if self.managed_people:
-            attendances = (
-                Attendance.objects.filter(
-                    member__in=self.managed_people,
-                    event__club=self.request.club,
-                    event__cancelled=False,
-                    event__start__gte=now,
-                )
-                .select_related("event", "event__location", "event__opponent", "member")
-                .prefetch_related("event__teams")
-                .order_by("event__start")
-            )
-            if kind_filter in self.KIND_FILTERS:
-                attendances = attendances.filter(event__kind=self.KIND_FILTERS[kind_filter])
-
-            # Only worth naming whose row it is once there's more than one managed
-            # person to tell apart -- a lone member's own agenda doesn't need it.
-            show_member = len(self.managed_people) > 1
-            rows = [
-                {"event": attendance.event, "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": attendance.member if show_member else None}
-                for attendance in attendances
-            ]
-
-        # Referee sign-ups are scoped to every managed person, same as the
-        # RSVP rows above -- a referee-eligible child is exactly as real as
-        # a referee-eligible parent, and a parent signing a kid up to
-        # referee is no different from answering an RSVP on their behalf.
-        # Merged into the same chronological list (own dict shape) rather
-        # than a separate section, so it reads on the actual day it falls
-        # on -- distinct styling is what sets it apart (mobile/
-        # _calendar_referee_row.html), not a different place on the screen.
-        # Declined invites are dropped; accepted ones stay visible as a
-        # confirmed commitment.
-        if self.managed_people and kind_filter != "training":
-            signups = (
-                RefereeSignup.objects.filter(
-                    member__in=self.managed_people,
-                    event__club=self.request.club,
-                    event__cancelled=False,
-                    event__start__gte=now,
-                    status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED],
-                )
-                .select_related("event", "event__location", "event__opponent", "member")
-                .prefetch_related("event__teams")
-            )
-            rows += [{"event": signup.event, "referee_signup": signup, "referee_member": signup.member if show_member else None} for signup in signups]
-
-        # Official sign-ups -- same reasoning and scope as the referee block
-        # above, gated behind the "officials" waffle flag (mirrors
-        # EventDetailView's own official_signups, mobile/mixins.py's
-        # officials_enabled context var) since the feature isn't on for
-        # every club yet.
-        if self.managed_people and kind_filter != "training" and flag_is_active(self.request, "officials"):
-            official_signups = (
-                OfficialSignup.objects.filter(
-                    member__in=self.managed_people,
-                    event__club=self.request.club,
-                    event__cancelled=False,
-                    event__start__gte=now,
-                    status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED],
-                )
-                .select_related("event", "event__location", "event__opponent", "member")
-                .prefetch_related("event__teams")
-            )
-            rows += [{"event": signup.event, "official_signup": signup, "official_member": signup.member if show_member else None} for signup in official_signups]
-
-        # A blocked event would otherwise just silently never appear (effective_
-        # members() already excludes it from Attendance sync) -- shown here
-        # instead, with which onboarding requirement is in the way, rather than
-        # a managed person's game quietly vanishing with no explanation at all.
-        blocked_by_person = blocked_upcoming_events_for_members(self.managed_people, self.request.club)
-        for person in self.managed_people:
-            for event, requirements in blocked_by_person[person.pk]:
-                if kind_filter in self.KIND_FILTERS and event.kind != self.KIND_FILTERS[kind_filter]:
-                    continue
-                rows.append({"event": event, "blocked_requirements": requirements, "blocked_member": person if show_member else None})
-
-        rows.sort(key=lambda row: row["event"].start)
+        for row in agenda:
+            member = row["member"] if show_member else None
+            if row["type"] == "rsvp":
+                attendance = row["attendance"]
+                rows.append({"event": row["event"], "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": member})
+            elif row["type"] == "referee":
+                rows.append({"event": row["event"], "referee_signup": row["signup"], "referee_member": member})
+            elif row["type"] == "official":
+                rows.append({"event": row["event"], "official_signup": row["signup"], "official_member": member})
+            else:
+                rows.append({"event": row["event"], "blocked_requirements": row["requirements"], "blocked_member": member})
 
         this_week, next_week, later_months = agenda_groups(rows, start_of=lambda row: row["event"].start, today=today)
 
-        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter if kind_filter in self.KIND_FILTERS else "", **kwargs)
+        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter or "", **kwargs)
 
 
 class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
@@ -672,107 +509,29 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=self.kwargs["pk"], club=self.request.club)
-        season = event.season or current_season(self.request.club)
-        rsvp_closed = event.deadline is not None and event.deadline < timezone.now()
-        # A published line-up supersedes ordinary RSVP -- the roster's locked
-        # in, so "Your answers" below switches to read-only and the line-up
-        # itself gets its own card.
-        lineup = Lineup.objects.filter(event=event, published_at__isnull=False).first()
-        lineup_categories = selected_members_by_position(lineup) if lineup is not None else []
-
-        # Same managed_people scope as the Calendar row this mirrors (mobile/
-        # _calendar_referee_row.html) -- a referee-eligible child is exactly
-        # as real as a referee-eligible parent. Declined signups are
-        # excluded -- nothing left to do. Rare in practice (a game usually
-        # has one eligible referee per family, if any), so this is a plain
-        # list rather than the "Your answers" card's counts-only aggregate.
-        referee_signups = []
-        if self.managed_people:
-            referee_signups = list(RefereeSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]).select_related("member"))
-
-        official_signups = []
-        if self.managed_people and flag_is_active(self.request, "officials"):
-            official_signups = list(OfficialSignup.objects.filter(event=event, member__in=self.managed_people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED]).select_related("member"))
-
-        # Every task on this event, each with its claim labels
-        # (members.services.family.claim_label_for -- never the claiming
-        # member's own name) and whether self.me has already claimed a slot.
-        tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
-        for task in tasks:
-            task.claim_labels = [claim_label_for(claim.member, event.club) for claim in task.claims.all()]
-            task.is_full = len(task.claim_labels) >= task.needed_quantity
-            task.claimed_by_me = self.me is not None and any(claim.member_id == self.me.pk for claim in task.claims.all())
-
-        your_answers = []
-        blocked_signups = []
-        if self.managed_people:
-            managed_ids = [person.pk for person in self.managed_people]
-            attendances_by_member = {attendance.member_id: attendance for attendance in Attendance.objects.filter(event=event, member_id__in=managed_ids).select_related("member")}
-
-            memberships_by_member = {}
-            if season is not None:
-                memberships_by_member = {membership.member_id: membership for membership in TeamMembership.objects.filter(member_id__in=managed_ids, team__in=event.teams.all(), season=season).select_related("team", "position")}
-
-            for person in self.managed_people:
-                attendance = attendances_by_member.get(person.pk)
-                if attendance is None:
-                    # No Attendance row at all -- either genuinely not invited, or
-                    # excluded by an open onboarding requirement (events.services.
-                    # attendance.effective_members). The latter still deserves an
-                    # explanation here rather than just silently not showing up.
-                    if season is not None:
-                        requirements = open_requirements_blocking(person, self.request.club, season, event.kind)
-                        if requirements:
-                            blocked_signups.append({"member": person, "requirements": requirements})
-                    continue
-                your_answers.append({"member": person, "attendance": attendance, "membership": memberships_by_member.get(person.pk)})
-
-        squad_summary = None
-        if event.teams.exists():
-            counts = Attendance.objects.filter(event=event).aggregate(
-                in_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED])),
-                out_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.NOT_SELECTED])),
-                no_reply_count=Count("id", filter=Q(status__in=[Attendance.AttendanceStatus.MAYBE, Attendance.AttendanceStatus.NO_RESPONSE])),
-            )
-            total = counts["in_count"] + counts["out_count"] + counts["no_reply_count"]
-            if total:
-                squad_summary = {
-                    "total": total,
-                    "responded": counts["in_count"] + counts["out_count"],
-                    "in_count": counts["in_count"],
-                    "out_count": counts["out_count"],
-                    "no_reply_count": counts["no_reply_count"],
-                    "in_pct": round(100 * counts["in_count"] / total),
-                    "out_pct": round(100 * counts["out_count"] / total),
-                    "no_reply_pct": round(100 * counts["no_reply_count"] / total),
-                }
-
+        # Line-up, sign-ups, tasks, per-person answers, blocked people and the squad
+        # summary come from events.services.member_view, shared with the app API.
+        view = member_event_view(event, self.request.club, self.managed_people, self.me, officials_enabled=flag_is_active(self.request, "officials"))
         return super().get_context_data(
             screen_title=event.title,
             event=event,
-            rsvp_closed=rsvp_closed,
-            lineup=lineup,
-            lineup_categories=lineup_categories,
-            referee_signups=referee_signups,
-            official_signups=official_signups,
-            tasks=tasks,
-            your_answers=your_answers,
-            blocked_signups=blocked_signups,
-            squad_summary=squad_summary,
+            rsvp_closed=view["rsvp_closed"],
+            lineup=view["lineup"],
+            lineup_categories=view["lineup_categories"],
+            referee_signups=view["referee_signups"],
+            official_signups=view["official_signups"],
+            tasks=view["tasks"],
+            your_answers=view["your_answers"],
+            blocked_signups=view["blocked_signups"],
+            squad_summary=view["squad_summary"],
             **kwargs,
         )
 
     def post(self, request, *args, **kwargs):
+        # The rules themselves (dropout, deadline, reasons) live in events.services.rsvp,
+        # shared with the app API; this only resolves who and what, and maps refusals.
         status = request.POST.get("status")
-        # "dropout" isn't an AttendanceStatus -- it's this same form posting
-        # from the "Can't make it after all" button a SELECTED member sees
-        # once the line-up's published (event_detail.html). It resolves to
-        # ABSENT below, same as an ordinary Out, but skips the closed-deadline
-        # guard (the line-up is published well after most deadlines) and
-        # additionally pings the event's managers, since by this point only
-        # they can still act on it (swap the slot, warn the opponent, ...).
-        is_dropout = status == "dropout"
-        if not is_dropout and status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.MAYBE):
+        if status not in ANSWERABLE_STATUSES:
             return HttpResponseBadRequest(_("Unknown RSVP status."))
 
         # Every current caller (Home's hero, M2's per-person rows) always sends an
@@ -784,59 +543,17 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return HttpResponseBadRequest(_("You can't RSVP for that person."))
 
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
-        # Only an invited person can answer: invitations are the Attendance rows
-        # events.services.attendance.sync_event_attendances creates, so an RSVP
-        # updates that row and never creates one for an event the person
-        # wasn't invited to.
-        existing = get_object_or_404(Attendance, event=event, member=member)
+        # Only an invited person can answer: an RSVP updates their Attendance row and
+        # never creates one for an event the person wasn't invited to.
+        existing = get_object_or_404(Attendance.objects.select_related("event", "member"), event=event, member=member)
 
-        if event.start <= timezone.now():
-            title = _("Too late to reply")
-            body = _("“%(title)s” has already started, so answers can no longer be changed.") % {"title": event.title}
-            notify(request, f"e|{title}|{body}")
-            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
-
-        if is_dropout:
-            if existing.status != Attendance.AttendanceStatus.SELECTED:
-                return HttpResponseBadRequest(_("You're not in the published line-up for this event."))
-        # Mirrors the read-only treatment Home's hero and this same screen's own
-        # "Your answers" card already show once the deadline has passed (see
-        # get_context_data's rsvp_closed) -- enforced here too, since a disabled
-        # button in the UI is only a hint, not a guarantee against a direct POST.
-        elif event.deadline is not None and event.deadline < timezone.now():
-            return HttpResponseBadRequest(_("Replies are closed for this event."))
-
-        # A reason is only ever meaningful attached to Out/Maybe -- clearing it
-        # the moment someone flips to In avoids a stale "sick" note hanging
-        # around under an answer it no longer explains. Private by
-        # construction, not by a visibility flag: nothing renders another
-        # member's own note anywhere -- only this member/family's own screens
-        # (event_detail's "Your answers") and Coach mode's bench attendance
-        # (mobile/templates/mobile/coach/attendance.html) ever read it.
-        note = ""
-        if is_dropout or status == Attendance.AttendanceStatus.ABSENT:
-            note = request.POST.get("note", "").strip()
-            # Rejects blank and punctuation-only "answers" (a bare ".", "-",
-            # "??") -- mandatory for Out/dropout specifically, unlike Maybe
-            # below. Backend-scoped, not the pretty inline-error UX this
-            # codebase gives ModelForm submissions elsewhere -- matches this
-            # view's own existing style (see "Unknown RSVP status"/"Replies
-            # are closed" above, both plain 400s a normal user should never
-            # actually see, since the template only ever offers Out through
-            # the reason form to begin with).
-            if not any(char.isalnum() for char in note):
-                return HttpResponseBadRequest(_("Please enter a reason."))
-        elif status == Attendance.AttendanceStatus.MAYBE:
-            # Optional here -- Maybe doesn't owe anyone an explanation the way
-            # a firm no does, but the same field carries it if given one.
-            note = request.POST.get("note", "").strip()
-
-        final_status = Attendance.AttendanceStatus.ABSENT if is_dropout else status
-        existing.status = final_status
-        existing.note = note
-        existing.save(update_fields=["status", "note", "modified"])
-        if is_dropout:
-            notify_dropout(event, member, note)
+        try:
+            submit_rsvp(existing, status, request.POST.get("note", ""))
+        except RsvpError as exc:
+            if exc.code == "event_started":
+                notify(request, f"e|{_('Too late to reply')}|{exc.message}")
+                return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
+            return HttpResponseBadRequest(exc.message)
 
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
@@ -857,16 +574,7 @@ class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     PAGE_SIZE = 20
 
     def get_context_data(self, **kwargs):
-        news_items = (
-            News.objects.filter(
-                club=self.request.club,
-                status=News.Status.PUBLISHED,
-                published_at__lte=timezone.now(),
-                visibility__in=[News.Visibility.INTERNAL, News.Visibility.BOTH],
-            )
-            .prefetch_related("teams")
-            .order_by("-published_at")
-        )
+        news_items = member_news(self.request.club).prefetch_related("teams")
         page = Paginator(news_items, self.PAGE_SIZE).get_page(self.request.GET.get("page"))
         return super().get_context_data(page=page, **kwargs)
 
@@ -891,18 +599,8 @@ class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "news"
 
     def get_context_data(self, **kwargs):
-        news_item = get_object_or_404(
-            News.objects.prefetch_related("teams", "photos"),
-            club=self.request.club,
-            slug=self.kwargs["slug"],
-            status=News.Status.PUBLISHED,
-            published_at__lte=timezone.now(),
-        )
-
-        if get_language() == "en":
-            title, body = news_item.effective_title_en, news_item.effective_body_en
-        else:
-            title, body = news_item.title, news_item.body
+        news_item = get_object_or_404(live_news(self.request.club).prefetch_related("teams", "photos"), slug=self.kwargs["slug"])
+        title, body, _language = localized_news(news_item, get_language())
 
         return super().get_context_data(
             screen_title=title,
@@ -1016,6 +714,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             member_since=member_since,
             team_manager_label=team_manager_label,
+            live_game_updates_enabled=flag_is_active(self.request, "game_timeline"),
             people_rows=people_rows,
             open_dues_count=open_dues_count,
             staff_assignments=staff_assignments,
@@ -1203,52 +902,8 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "me"
 
     def get_context_data(self, **kwargs):
-        season = current_season(self.request.club)
-        # Holds back a balance nobody's reviewed yet -- see
-        # registration.services.invoicing.membership_ids_awaiting_confirmation's
-        # own docstring. Filtered before the grouping below, so nothing's
-        # wasted decorating a row about to be dropped.
-        awaiting_confirmation = membership_ids_awaiting_confirmation(self.request.club)
-        # include_zero=True: a sibling already settled (or priced at 0/net
-        # negative after a credit) still has to show its own line items in a
-        # combined registration receipt below -- see open_dues_rows' own
-        # docstring on why the usual "still owed" filter would otherwise
-        # silently drop them from both the member list and the itemised
-        # breakdown. A standalone (non-registration) membership has no group
-        # total to reconcile against, so it's filtered back down to
-        # balance > 0 below, same as before -- nothing gained by showing an
-        # already-settled person their own €0 card on its own.
-        dues_rows = [row for row in open_dues_rows(self.request.club, self.managed_people, season, include_zero=True) if row["membership"].pk not in awaiting_confirmation]
-
-        registration_groups = {}
-        standalone_rows = []
-        for row in dues_rows:
-            entries = list(row["membership"].registration_details.select_related("product_variant__product", "requested_team", "batch"))
-            row["entries"] = entries
-            # Almost always one -- a membership only ever spans more than one
-            # registration batch if this person was registered twice in the
-            # same season (e.g. a second team added on afterwards), see
-            # registration.services.submission's own docstring. Only a
-            # *confirmed* batch groups this row -- an unconfirmed one can't
-            # exist here at all (already filtered above via
-            # membership_ids_awaiting_confirmation).
-            batch = next((entry.batch for entry in entries if entry.batch.invoice_sent_at is not None), None)
-            if batch is None:
-                if row["balance"] > 0:
-                    standalone_rows.append(row)
-                continue
-            group = registration_groups.setdefault(batch.pk, {"batch": batch, "rows": [], "total_balance": Decimal("0")})
-            group["rows"].append(row)
-            group["total_balance"] += row["balance"]
-
-        display_rows = [{"kind": "standalone", "row": row} for row in standalone_rows]
-        for group in registration_groups.values():
-            entries = active_batch_entries(group["batch"])
-            _subtotal, _discount_amount, total = batch_totals(entries, group["batch"].manual_discount_amount)
-            group["early_payment"] = batch_early_payment_offer(group["batch"], entries, total)
-            group["member_names"] = ", ".join(row["membership"].member.first_name for row in group["rows"])
-            display_rows.append({"kind": "registration", "group": group})
-
+        # Grouping and filtering live in mobile.services.payments, shared with the app API.
+        display_rows = payments_overview(self.request.club, self.managed_people)
         return super().get_context_data(display_rows=display_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
 
 
@@ -1413,45 +1068,14 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return [{"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk} for person in self.managed_people]
 
     def get_formset(self, season, data=None):
-        # enforce_single_contact=False -- here, is_contact is "Include this
-        # person" per managed person (reregister.html), not "this is me, the
-        # submitter" the way it is on the public page. Registering yourself
-        # and a child in the same batch is the ordinary case, not a conflict.
-        kwargs = {
-            "club": self.request.club,
-            "people": self.managed_people,
-            "season": season,
-            "team_number_pools": team_number_pools(self.request.club, season),
-            "member_current_numbers": self.get_member_current_numbers(season),
-            "prefix": "entries",
-            "enforce_single_contact": False,
-        }
-        if data is None:
-            kwargs["initial"] = self.get_initial_entries()
-        formset = RegistrationEntryFormSet(data, **kwargs)
+        # Scoping and the "Include this person" meaning of is_contact: mobile.services.reregistration.
+        formset = entry_formset(self.request.club, self.managed_people, season, data=data, initial=self.get_initial_entries())
         for row in formset.forms:
             style_dynamic_form(row)
         return formset
 
     def get_member_current_numbers(self, season):
-        """``{str(member_id): {str(team_id): number}}`` -- every managed
-        person's own current number in every pool-scoped team, so
-        reregister.html's script can offer "Keep #N" instead of silently
-        pre-filling it (the person may pick a different team than the one
-        that number came from). Only pool-scoped teams are considered --
-        a poolless team has no number step at all, see registration.
-        services.pricing.team_number_pools."""
-        pools_by_team = {team.pk: team.pool for team in Team.objects.filter(club=self.request.club, pool__isnull=False).select_related("pool")}
-        result = {}
-        for person in self.managed_people:
-            person_numbers = {}
-            for team_id, pool in pools_by_team.items():
-                current = member_current_number(person, pool, season)
-                if current is not None:
-                    person_numbers[str(team_id)] = current
-            if person_numbers:
-                result[str(person.pk)] = person_numbers
-        return result
+        return member_current_numbers(self.request.club, self.managed_people, season)
 
     def render_season_picker(self, available_seasons):
         return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
@@ -1527,28 +1151,18 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # re-pricing straight back into the receipt.
             return self.render_page(season, entry_formset)
 
-        entries = entries_from_formset(entry_formset)
         try:
-            resolve_registration_season([entry.product_variant for entry in entries])
+            entries, priced = price_formset(entry_formset)
         except PricingError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
-        priced = price_entries([entry.product_variant for entry in entries])
         priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), self.get_member_current_numbers(season))
 
         if request.POST.get("action") != "submit":
             return self.render_page(season, entry_formset, priced_entries=priced_rows)
 
-        contact_member = self.me or (entries[0].existing_member if entries and entries[0].existing_member else None)
-        contact = {
-            "contact_first_name": contact_member.first_name if contact_member else "",
-            "contact_last_name": contact_member.last_name if contact_member else "",
-            "contact_email": contact_member.contact_email if contact_member else "",
-            "contact_phone": "",
-        }
-
         try:
-            batch = submit_registration(request.club, submitted_by_user=request.user, entries=entries, **contact)
+            batch = submit_reregistration(request.club, request.user, self.me, entries)
         except RegistrationError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
@@ -1609,12 +1223,7 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # actually used -- News/Event/FormSend) instead of one query per
             # notification the plain GenericForeignKey lookup below would otherwise
             # issue on this unbounded list.
-            notifications = (
-                Notification.objects.filter(club=self.request.club, member__in=self.managed_people)
-                .select_related("member")
-                .prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all()]))
-                .order_by("-created")
-            )
+            notifications = inbox_for(self.request.club, self.managed_people).select_related("member").prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all()])).order_by("-created")
 
             for notification in notifications:
                 source_label, _url = _notification_source_link(notification.source)
@@ -1634,23 +1243,20 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         action = request.POST.get("action")
 
         if action == "mark_all_read":
-            Notification.objects.filter(club=request.club, member__in=self.managed_people, read_at__isnull=True).update(read_at=timezone.now())
+            mark_all_read(request.club, self.managed_people)
             return HttpResponseRedirect(reverse("mobile:notifications"))
 
         if action == "clear_all":
             # A hard delete, not another read-state flip -- "Clear" empties the
             # list itself, same as the clear-all gesture in a phone's own
             # notification centre, rather than just marking everything read.
-            Notification.objects.filter(club=request.club, member__in=self.managed_people).delete()
+            clear_all(request.club, self.managed_people)
             return HttpResponseRedirect(reverse("mobile:notifications"))
 
         if action == "mark_read":
-            notification = Notification.objects.filter(pk=request.POST.get("notification_id"), club=request.club, member__in=self.managed_people).first()
+            notification = mark_read(request.club, self.managed_people, request.POST.get("notification_id"))
             if notification is None:
                 return HttpResponseBadRequest(_("You can't mark that notification as read."))
-            if notification.read_at is None:
-                notification.read_at = timezone.now()
-                notification.save(update_fields=["read_at", "modified"])
 
             # A row whose source resolves to something this app has a detail
             # page for doubles as a link to it (see _notification_source_link)
@@ -1728,9 +1334,7 @@ class BugListView(DesktopTemplateMixin, MemberAppMixin, TemplateView):
     def get_context_data(self, **kwargs):
         bugs = BugReport.objects.filter(club=self.request.club, reported_by=self.me).order_by("-created").prefetch_related("notes") if self.me is not None else []
         rows = [{"bug": bug, "pill_class": BUG_STATUS_PILL_CLASSES.get(bug.status, "pill-neutral")} for bug in bugs]
-        unread_notification_count = 0
-        if self.me is not None:
-            unread_notification_count = Notification.objects.filter(club=self.request.club, member=self.me, read_at__isnull=True).count()
+        unread_notification_count = unread_count(self.request.club, [self.me] if self.me is not None else [])
         # PersonScopeMixin isn't in this view's MRO (see the class docstring), so
         # unlike every other Member-mode screen it doesn't get any of its
         # get_context_data's shell context for free -- the base template (both
@@ -1791,8 +1395,8 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         # (registration.services.pricing) -- excluded structurally here
         # regardless of is_public, not left to staff remembering to flag
         # each one.
-        products = list(Product.objects.filter(club=self.request.club, is_active=True, is_public=True).exclude(product_type=Product.ProductType.MEMBERSHIP).select_related("category"))
-        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
+        products = list(catalog(self.request.club))
+        cart = open_cart(self.request.club, self.request.user)
         cart_item_count = cart.items.count() if cart is not None else 0
 
         # One products query total (not one per category) -- see ShopHomeView's
@@ -1810,12 +1414,6 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             groups.append({"category": None, "products": uncategorized})
 
         return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
-
-
-#: Upper bound on one cart line's quantity -- adding more (or incrementing
-#: past it) clamps to this rather than erroring, well inside CartItem.
-#: quantity's PositiveSmallIntegerField range.
-MAX_CART_QUANTITY = 99
 
 
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1838,7 +1436,7 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def _product(self):
-        return get_object_or_404(Product.objects.exclude(product_type=Product.ProductType.MEMBERSHIP), club=self.request.club, slug=self.kwargs["slug"], is_active=True, is_public=True)
+        return get_object_or_404(catalog(self.request.club), slug=self.kwargs["slug"])
 
     def get(self, request, *args, **kwargs):
         product = self._product()
@@ -1873,29 +1471,17 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             if beneficiary is None:
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
-        # Only collected -- and only trusted from the request -- when the
-        # product actually opted in; a crafted POST can't sneak personalization
-        # onto a product that doesn't offer it.
-        personalization_number = ""
-        personalization_name = ""
-        if product.personalization_enabled:
-            personalization_number = request.POST.get("personalization_number", "").strip()[:20]
-            personalization_name = request.POST.get("personalization_name", "").strip()[:100]
-
-        unit_price = variant.effective_price if variant is not None else product.price
-        cart, _created = Cart.objects.get_or_create(club=request.club, user=request.user, status=Cart.CartStatus.OPEN)
-        item, item_created = CartItem.objects.get_or_create(
-            cart=cart,
-            product=product,
+        # Personalisation only sticks on a product that offers it (shop.services.cart).
+        add_to_cart(
+            request.club,
+            request.user,
+            product,
+            quantity=quantity,
             variant=variant,
             beneficiary=beneficiary,
-            personalization_number=personalization_number,
-            personalization_name=personalization_name,
-            defaults={"quantity": quantity, "unit_price": unit_price},
+            personalization_number=request.POST.get("personalization_number", ""),
+            personalization_name=request.POST.get("personalization_name", ""),
         )
-        if not item_created:
-            item.quantity = min(item.quantity + quantity, MAX_CART_QUANTITY)
-            item.save(update_fields=["quantity"])
 
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}
@@ -1924,26 +1510,18 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        cart = Cart.objects.filter(club=self.request.club, user=self.request.user, status=Cart.CartStatus.OPEN).first()
-        items = list(cart.items.select_related("cart", "product", "variant", "beneficiary").order_by("created")) if cart is not None else []
-        unavailable, repriced = reprice_cart_items(items)
-        unavailable_ids = {item.pk for item in unavailable}
-        for item in items:
-            item.line_total = item.unit_price * item.quantity
-            item.unavailable = item.pk in unavailable_ids
-
-        code = self.request.GET.get("code", "").strip()
-        discount = None
-        discount_error = None
-        if code and cart is not None:
-            try:
-                discount = find_discount(self.request.club, code, member=self.me, ip=client_ip(self.request))
-            except CheckoutError as error:
-                discount_error = str(error)
-
-        totals = cart_totals(cart, discount) if cart is not None else {"subtotal": Decimal("0"), "discount_amount": Decimal("0"), "total": Decimal("0")}
-
-        return super().get_context_data(cart=cart, items=items, code=code, discount=discount, discount_error=discount_error, totals=totals, has_unavailable=bool(unavailable), prices_changed=bool(repriced), **kwargs)
+        summary = cart_summary(self.request.club, self.request.user, code=self.request.GET.get("code", ""), member=self.me, ip=client_ip(self.request))
+        return super().get_context_data(
+            cart=summary["cart"],
+            items=summary["items"],
+            code=summary["code"],
+            discount=summary["discount"],
+            discount_error=summary["discount_error"],
+            totals=summary["totals"],
+            has_unavailable=summary["has_unavailable"],
+            prices_changed=summary["prices_changed"],
+            **kwargs,
+        )
 
 
 class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
@@ -1956,17 +1534,11 @@ class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
         action = request.POST.get("action")
 
         if action == "increment":
-            if item.quantity < MAX_CART_QUANTITY:
-                item.quantity += 1
-                item.save(update_fields=["quantity"])
+            set_quantity(item, item.quantity + 1)
         elif action == "decrement":
-            if item.quantity > 1:
-                item.quantity -= 1
-                item.save(update_fields=["quantity"])
-            else:
-                item.delete()
+            set_quantity(item, item.quantity - 1)
         elif action == "remove":
-            item.delete()
+            set_quantity(item, 0)
         else:
             return HttpResponseBadRequest(_("Unknown action."))
 
@@ -1980,7 +1552,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
     and translate CheckoutError into a flashed message instead of a 500."""
 
     def post(self, request, *args, **kwargs):
-        cart = Cart.objects.filter(club=request.club, user=request.user, status=Cart.CartStatus.OPEN).first()
+        cart = open_cart(request.club, request.user)
         if cart is None or self.me is None:
             notify(request, f"e|{_('Nothing to order')}|{_('Your cart is empty.')}")
             return HttpResponseRedirect(reverse("mobile:shop_cart"))
@@ -2010,7 +1582,7 @@ class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        orders = Order.objects.filter(club=self.request.club, purchaser__in=self.managed_people).select_related("purchaser").order_by("-created") if self.managed_people else Order.objects.none()
+        orders = orders_for(self.request.club, self.managed_people)
         rows = [
             {
                 "order": order,

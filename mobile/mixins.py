@@ -15,9 +15,10 @@ from waffle import flag_is_active
 from club.device import is_mobile_or_tablet
 from club.services.access import get_current_season, has_management_access, teams_staffed_by
 from controlpanel.messages import notify
-from members.models import FamilyMembership, Member
+from members.models import Member
+from members.services.family import managed_people
 from members.services.lookup import get_request_member
-from notifications.models import Notification
+from notifications.services import unread_count
 
 from .access import has_club_tie
 
@@ -113,22 +114,7 @@ class PersonScopeMixin(DesktopTemplateMixin, MemberAppMixin):
         self.people_in_scope = self.managed_people if self.scope_everyone else ([self.scope_person] if self.scope_person else [])
 
     def _managed_people(self, request):
-        if self.me is None:
-            return []
-        children = list(
-            Member.objects.filter(
-                family_memberships__role=FamilyMembership.FamilyRole.CHILD,
-                # family__club: self.me is global -- without this, a family
-                # relationship from another club could make its children
-                # manageable here too, just because they also happen to have a
-                # ClubMembership in this one (2026-09-12 leak).
-                family_memberships__family__club=request.club,
-                family_memberships__family__memberships__member=self.me,
-                family_memberships__family__memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN],
-                member_of__club=request.club,
-            ).distinct()
-        )
-        return [self.me, *children]
+        return managed_people(self.me, request.club)
 
     def _resolve_scope(self, request) -> tuple[bool, Member | None]:
         """Returns ``(scope_everyone, scope_person)`` -- exactly one of the
@@ -145,9 +131,7 @@ class PersonScopeMixin(DesktopTemplateMixin, MemberAppMixin):
         return False, (self.managed_people[0] if self.managed_people else None)
 
     def get_context_data(self, **kwargs):
-        unread_notification_count = 0
-        if self.managed_people:
-            unread_notification_count = Notification.objects.filter(club=self.request.club, member__in=self.managed_people, read_at__isnull=True).count()
+        unread_notification_count = unread_count(self.request.club, self.managed_people)
 
         # Every screen sets these as class attributes (see e.g. HomeView.active_tab),
         # but only a subclass that explicitly forwards them into its own

@@ -39,7 +39,7 @@ from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, 
 from .services.accounts import UnverifiedEmailError
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.club_deletion import ClubDeletionBlocked, delete_club, deletion_impact
-from .services.jobs import job_overview, recent_job_runs
+from .services.jobs import job_overview, job_summary, recent_job_runs
 from .services.platform_admins import (
     PlatformAdminError,
     grant_platform_access,
@@ -88,13 +88,14 @@ class JobsView(PlatformStaffRequiredMixin, TemplateView):
     the registry and features/models.JobRun for what a run writes (features.commands.
     ScheduledJobCommand, around each command's own execution). These run on the in-process
     scheduler's own schedule (see features/scheduler.py and DEPLOYMENT.md's "Scheduled
-    jobs") -- there is no "run now" here -- but each one can be paused/resumed individually
-    via JobToggleView below, without reaching for the platform-wide Maintenance lock."""
+    jobs"); JobRunNowView below triggers one off-schedule, and each one can be paused/resumed
+    individually via JobToggleView, without reaching for the platform-wide Maintenance lock."""
 
     template_name = "controlpanel/jobs.html"
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(nav="jobs", jobs=job_overview(), **kwargs)
+        jobs = job_overview()
+        return super().get_context_data(nav="jobs", jobs=jobs, summary=job_summary(jobs), **kwargs)
 
 
 class JobToggleView(PlatformStaffRequiredMixin, View):

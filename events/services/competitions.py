@@ -13,6 +13,7 @@ import importlib
 from django.utils.translation import gettext_lazy as _
 
 from events.models import Competition
+from events.services.game_timeline import refresh_timeline
 
 
 class CompetitionFetchError(Exception):
@@ -44,19 +45,34 @@ def fetch_game_info(event) -> bool:
     its own real message instead, so staff looking at a competition that's
     demonstrably linked correctly aren't told it isn't.
     """
+    source = competition_for(event)
+    if source is None:
+        return False
+
+    try:
+        source.update_game_information(event=event)
+    except Exception as error:
+        raise CompetitionFetchError(_("Could not fetch game info from “%(name)s”: %(error)s") % {"name": event.competition, "error": error}) from error
+
+    # Same instance, so a source can reuse the payload the score fetch just
+    # downloaded. Gated on its own flag; never raises (see game_timeline).
+    refresh_timeline(event, source)
+    return True
+
+
+def competition_for(event):
+    """An instance of ``event``'s competition class (events.competition.*), or
+    None when there's no data source this club may use (no Competition row, no
+    flag, or the flag is off for the club). A Competition whose module/name
+    doesn't resolve to a class is a configuration problem and raises
+    CompetitionFetchError -- see fetch_game_info's docstring."""
     competition = Competition.objects.filter(name=event.competition).select_related("flag").first()
     if competition is None or competition.flag is None or not competition.flag.is_active_for_club(event.club):
-        return False
+        return None
 
     try:
         module = importlib.import_module(competition.module)
         competition_class = getattr(module, competition.name)
     except (ImportError, AttributeError) as error:
         raise CompetitionFetchError(_("“%(name)s” isn't wired up to a real data source yet.") % {"name": competition.name}) from error
-
-    try:
-        competition_class().update_game_information(event=event)
-    except Exception as error:
-        raise CompetitionFetchError(_("Could not fetch game info from “%(name)s”: %(error)s") % {"name": competition.name, "error": error}) from error
-
-    return True
+    return competition_class()

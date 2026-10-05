@@ -24,13 +24,14 @@ from django.utils.translation import gettext_lazy as _
 
 from events.services.rbihf_import import ImportPlan, ScrapedFixture, apply_plan, plan_from_fixtures
 
-__all__ = ["DFELImportError", "ImportPlan", "apply_plan", "build_plan", "extract_api_key", "extract_ids", "fetch_schedule", "find_game", "parse_fixtures", "source_id"]
+__all__ = ["DFELImportError", "ImportPlan", "apply_plan", "build_plan", "extract_api_key", "extract_ids", "fetch_api_key", "fetch_game_report", "fetch_schedule", "find_game", "parse_fixtures", "source_id"]
 
 COMPETITION = "DFEL"
 
 TEAM_URL_RE = re.compile(r"^https?://(?:www\.)?ehv-nrw\.de/leagues/team/(?P<team_id>\d+)/(?P<division_id>\d+)/?$")
 TEAM_PAGE_URL = "https://ehv-nrw.de/leagues/team/{team_id}/{division_id}/"
 SCHEDULE_URL = "https://api.hockeydata.net/data/ebel/Schedule"
+GAME_REPORT_URL = "https://api.hockeydata.net/data/ebel/GetGameReport"
 JSONP_CALLBACK = "rosterchief"
 
 # The widget config is JSON inside a JS string literal, so its quotes show up
@@ -102,6 +103,20 @@ def _load_schedule(raw_json: str) -> dict:
         raise DFELImportError(_("The DFEL schedule response had no games list."))
 
     return payload
+
+
+def fetch_api_key(team_id: str, division_id: str) -> str:
+    """The public hockeydata API key, read off the team's EHV-NRW page."""
+    return extract_api_key(_get(TEAM_PAGE_URL.format(team_id=team_id, division_id=division_id)))
+
+
+def fetch_game_report(api_key: str, game_id: str) -> str:
+    """One game's full report (goals, penalties, goalie changes, stats) as JSON
+    text -- see events.services.timeline_parsers.parse_hockeydata. Plain JSON,
+    no callback needed (unlike Schedule's JSONP)."""
+    body = _get(GAME_REPORT_URL, params={"apiKey": api_key, "gameId": game_id, "lang": "en", "referer": "ehv-nrw.de"})
+    match = JSONP_RE.match(body)
+    return match.group("body") if match else body
 
 
 def fetch_schedule(team_id: str, division_id: str) -> str:

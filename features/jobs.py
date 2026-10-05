@@ -82,6 +82,14 @@ JOB_REGISTRY = {
         "command": "refresh_standings",
         "args": [],
     },
+    "events.tasks.settle_game_timelines": {
+        "label": _("Settle game timelines"),
+        "description": _("Re-fetches the timelines (goals, penalties, ...) of games that finished in the last week until they stop changing, since federations correct them after the final whistle. Only for clubs with game timelines switched on."),
+        "schedule": _("Daily at 01:30"),
+        "trigger": {"trigger": "cron", "hour": 1, "minute": 30},
+        "command": "settle_game_timelines",
+        "args": [],
+    },
     "billing.tasks.renew_subscriptions": {
         "label": _("Renew subscriptions"),
         "description": _("Opens the next billing period for clubs whose current one is running out."),

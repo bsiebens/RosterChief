@@ -15,7 +15,7 @@ from .services.admins import find_member_by_email
 class ClubForm(forms.ModelForm):
     class Meta:
         model = Club
-        fields = ["name", "legal_name", "vat_id", "contact_email", "website", "slug", "sport_type", "logo", "primary_color", "secondary_color", "season_start", "season_duration_months"]
+        fields = ["name", "legal_name", "vat_id", "contact_email", "website", "slug", "sport_type", "logo", "primary_color", "secondary_color", "primary_text_color", "secondary_text_color", "season_start", "season_duration_months"]
         help_texts = {"slug": _("Drives the club's subdomain. Left blank, it is derived from the name.")}
         # Deliberately a text input, not <input type="color">: a colour picker cannot
         # express "no colour" -- it would submit #000000 for every club that never
@@ -23,6 +23,8 @@ class ClubForm(forms.ModelForm):
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
+            "primary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
+            "secondary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
             "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "season_start": forms.DateInput(attrs={"type": "date"}),
         }

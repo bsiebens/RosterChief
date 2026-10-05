@@ -77,7 +77,7 @@
             {% elif failed_jobs %}
                 <a class="flex shrink-0 items-center gap-2 font-mono text-[11px] text-warn hover:underline" href="{% url 'controlpanel:jobs' %}">
                     <span class="h-[7px] w-[7px] rounded-full bg-warn"></span>
-                    {{ failed_jobs|length }} job failure{{ failed_jobs|length|pluralize }}
+                    {{ failed_jobs }} job failure{{ failed_jobs|pluralize }} in the last {{ failure_window_hours }}h
                 </a>
             {% else %}
                 <div class="flex shrink-0 items-center gap-2 font-mono text-[11px] text-ok">

@@ -59,7 +59,7 @@ class MemberForm(forms.ModelForm):
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
-        fields = ["name", "short_name", "referee_management", "pool", "age_min", "age_max", "feeds_into"]
+        fields = ["name", "short_name", "referee_management", "pool", "age_min", "age_max", "feeds_into", "show_player_names_publicly"]
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -158,7 +158,7 @@ class EventRefereeFeeForm(forms.ModelForm):
 
     class Meta:
         model = EventReferee
-        fields = ["fee", "km", "km_rate"]
+        fields = ["fee", "km", "km_rate", "no_fee"]
         widgets = {
             "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
@@ -214,7 +214,7 @@ class EventOfficialFeeForm(forms.ModelForm):
 
     class Meta:
         model = EventOfficial
-        fields = ["fee", "km", "km_rate"]
+        fields = ["fee", "km", "km_rate", "no_fee"]
         widgets = {
             "fee": forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
             "km": forms.NumberInput(attrs={"step": "0.1", "min": "0"}),
@@ -711,9 +711,22 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             **_AUDIENCE_WIDGETS,
         }
 
-    def __init__(self, *args, club=None, user=None, editing=False, **kwargs):
+    def __init__(self, *args, club=None, user=None, editing=False, auto_titles=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.scope_audience_fields(club, user)
+        # ``auto_titles`` (the management event form): kinds whose title isn't
+        # typed but generated in save() -- a game always (its match-up), and on a
+        # *new* event a training or tournament too ("Training"/"Tournament");
+        # editing one of those keeps its title editable, so an existing "Goalie
+        # training" isn't renamed. Every other kind needs a title (clean()).
+        # Without it (the coach app's form, which still shows a title box for
+        # every kind) a typed title is kept, except a game's full match-up.
+        self.auto_titles = auto_titles
+        if auto_titles:
+            self.auto_title_kinds = {Event.EventKind.GAME} if editing else {Event.EventKind.GAME, Event.EventKind.TRAINING, Event.EventKind.TOURNAMENT}
+            self.fields["title"].required = False
+        else:
+            self.auto_title_kinds = set()
         # Same filtering as the Django-admin form (events.admin.EventAdminForm):
         # only a competition whose feature flag is active for this club is
         # offered -- fetch_game_info (events.services.competitions) already
@@ -744,10 +757,21 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
             del self.fields["score_against"]
             del self.fields["is_live"]
 
+    @property
+    def auto_title_kinds_csv(self) -> str:
+        """For the template's show/hide of the title field."""
+        return ",".join(sorted(self.auto_title_kinds))
+
     def clean(self):
         cleaned = super().clean()
         self.clean_audience_requires_a_claim_for_non_admins(cleaned)
         self.clean_club_wide_excludes_teams_and_groups(cleaned)
+        if self.auto_titles and cleaned.get("kind") and cleaned["kind"] not in self.auto_title_kinds and not (cleaned.get("title") or "").strip():
+            self.add_error("title", _("Give this event a title."))
+        # A game with no team has no one to invite (its audience is its teams'
+        # rosters), no "us" side for its title or score, and nothing to follow.
+        if cleaned.get("kind") == Event.EventKind.GAME and not cleaned.get("teams"):
+            self.add_error("teams", _("A game needs at least one team."))
         return cleaned
 
     def save(self, commit=True):
@@ -769,16 +793,26 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         # historical "us first" ordering (there's nothing to say otherwise);
         # only a location explicitly on record as *not* the club's home ground
         # flips it.
-        if self.cleaned_data.get("kind") == Event.EventKind.GAME:
+        #
+        # Without an opponent yet the title is just our team(s) ("U10"), and
+        # with neither it's the kind itself ("Game") -- the title field isn't
+        # shown for a game at all, so there's never a typed one to fall back on.
+        # A new training/tournament is simply called that (auto_title_kinds).
+        kind = self.cleaned_data.get("kind")
+        if kind == Event.EventKind.GAME:
             teams = self.cleaned_data.get("teams")
             opponent = self.cleaned_data.get("opponent")
-            if teams and opponent:
+            us = ", ".join(team.short_name or team.name for team in teams) if teams else ""
+            if us and opponent:
                 vs = _("vs")
-                us = ", ".join(team.short_name for team in teams)
                 location = self.cleaned_data.get("location")
                 is_away = location is not None and not location.is_home
                 home_side, away_side = (opponent, us) if is_away else (us, opponent)
                 self.instance.title = f"{home_side} {vs} {away_side}"
+            elif self.auto_titles:
+                self.instance.title = us or (str(opponent) if opponent else str(Event.EventKind.GAME.label))
+        elif kind in self.auto_title_kinds:
+            self.instance.title = str(Event.EventKind(kind).label)
         return super().save(commit=commit)
 
 
@@ -1368,10 +1402,12 @@ class ClubSettingsForm(forms.ModelForm):
 
     class Meta:
         model = Club
-        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "payment_instructions", "contact_email", "website", "logo", "event_background", "primary_color", "secondary_color"]
+        fields = ["name", "legal_name", "legal_address", "legal_zip_code", "legal_city", "payment_instructions", "contact_email", "website", "logo", "event_background", "primary_color", "secondary_color", "primary_text_color", "secondary_text_color"]
         widgets = {
             "primary_color": forms.TextInput(attrs={"placeholder": "#1e40af"}),
             "secondary_color": forms.TextInput(attrs={"placeholder": "#be185d"}),
+            "primary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
+            "secondary_text_color": forms.TextInput(attrs={"placeholder": "auto"}),
             "logo": forms.ClearableFileInput(attrs={"accept": LOGO_ACCEPT}),
             "event_background": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/gif,image/webp"}),
         }

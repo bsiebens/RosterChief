@@ -324,6 +324,7 @@ class EventReferee(UUIDModel):
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
     km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
 
     class Meta:
         verbose_name = _("event referee")
@@ -351,6 +352,11 @@ class EventReferee(UUIDModel):
     @property
     def km_total(self) -> Decimal:
         return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def fee_pending(self) -> bool:
+        """No fee entered yet, and not marked as unpaid either."""
+        return not self.fee and not self.no_fee
 
     @property
     def total_payable(self) -> Decimal:
@@ -409,6 +415,7 @@ class EventOfficial(UUIDModel):
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
     km_rate = models.DecimalField(_("rate per km"), max_digits=6, decimal_places=4, null=True, blank=True, help_text=_("Reimbursement rate per kilometer, e.g. 0.4230."))
+    no_fee = models.BooleanField(_("no fee"), default=False, help_text=_("Not paid for this game (or doesn't wish to be) -- no fee or travel is owed, and the fee isn't flagged as missing."))
 
     class Meta:
         verbose_name = _("event official")
@@ -436,6 +443,11 @@ class EventOfficial(UUIDModel):
     @property
     def km_total(self) -> Decimal:
         return (self.km or Decimal("0")) * (self.km_rate or Decimal("0"))
+
+    @property
+    def fee_pending(self) -> bool:
+        """No fee entered yet, and not marked as unpaid either."""
+        return not self.fee and not self.no_fee
 
     @property
     def total_payable(self) -> Decimal:
@@ -516,6 +528,109 @@ class EventTaskClaim(UUIDModel):
 
     def __str__(self):
         return f"{self.task} - {self.member}"
+
+
+class GameTimeline(UUIDModel):
+    """What happened during one game -- goals and who scored them, penalties,
+    goalie changes, time-outs, period scores -- as fetched from the game's
+    competition (see GAME_TIMELINE.md and events.services.game_timeline).
+
+    A one-to-one side table rather than columns on Event: Event is loaded
+    everywhere (calendar, lists, attendance, the API) and ``data`` runs from a
+    few to a few dozen KB, so it's only joined where it's actually wanted.
+    Club-scoped through ``event``, like Attendance/Lineup/EventReferee.
+
+    ``data`` is the normalized document (GAME_TIMELINE.md §2.2) -- one shape
+    for every source. ``data_hash`` lets a poll that found nothing new skip the
+    write. ``raw`` is the last payload ``data`` was parsed from, kept (only the
+    latest) so a parser fix can re-parse stored games.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", _("scheduled")
+        LIVE = "live", _("live")
+        FINAL = "final", _("final")
+
+    event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="timeline", verbose_name=_("event"))
+    source = models.CharField(_("source"), max_length=50, help_text=_("The competition this was fetched from (Event.competition at fetch time)."))
+    data = models.JSONField(_("data"), default=dict, blank=True)
+    data_hash = models.CharField(_("data hash"), max_length=64, blank=True)
+    raw = models.TextField(_("raw payload"), blank=True)
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.SCHEDULED, db_index=True)
+    fetched_at = models.DateTimeField(_("fetched at"), null=True, blank=True, help_text=_("Last successful fetch."))
+    changed_at = models.DateTimeField(_("changed at"), null=True, blank=True, help_text=_("Last time the timeline actually changed."))
+    finalized_at = models.DateTimeField(_("finalized at"), null=True, blank=True, help_text=_("Set once a finished game's timeline stopped changing; it isn't re-fetched after that."))
+    last_error = models.TextField(_("last error"), blank=True, help_text=_("The last fetch/parse error, if the latest attempt failed; the previous data is kept."))
+
+    class Meta:
+        verbose_name = _("game timeline")
+        verbose_name_plural = _("game timelines")
+
+    def __str__(self):
+        return f"{self.event} ({self.status})"
+
+
+class GameMoment(UUIDModel):
+    """One piece of news detected in a game's timeline, from the club's own
+    side -- a goal for or against, a goal taken back, a penalty, a period or
+    the game ending (events.services.game_moments, GAME_TIMELINE.md §4).
+
+    Recorded once per (event, key): ``key`` is the kind plus the timeline event
+    it's about, so a repeated or racing fetch can't record it twice. Push
+    notifications (not built yet) will read these rows -- ``notifiable`` says
+    whether it's recent enough to be worth telling anyone, ``delivered_at``
+    will say it was.
+    """
+
+    class Kind(models.TextChoices):
+        GAME_STARTED = "game_started", _("game started")
+        GOAL_FOR = "goal_for", _("goal for")
+        GOAL_AGAINST = "goal_against", _("goal against")
+        GOAL_CANCELLED = "goal_cancelled", _("goal cancelled")
+        PENALTY_FOR = "penalty_for", _("penalty for")
+        PENALTY_AGAINST = "penalty_against", _("penalty against")
+        PENALTY_SHOT_FOR = "penalty_shot_for", _("penalty shot for")
+        PENALTY_SHOT_AGAINST = "penalty_shot_against", _("penalty shot against")
+        PERIOD_ENDED = "period_ended", _("period ended")
+        GAME_FINAL = "game_final", _("game final")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="moments", verbose_name=_("event"))
+    key = models.CharField(_("key"), max_length=255)
+    kind = models.CharField(_("kind"), max_length=30, choices=Kind.choices)
+    payload = models.JSONField(_("payload"), default=dict, blank=True)
+    game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
+    notifiable = models.BooleanField(_("notifiable"), default=True, help_text=_("Recent enough in game time to be worth notifying about (not a catch-up after an outage)."))
+    created_at = models.DateTimeField(_("detected at"), auto_now_add=True)
+    delivered_at = models.DateTimeField(_("delivered at"), null=True, blank=True, help_text=_("When it was pushed out -- not used until push notifications exist."))
+
+    class Meta:
+        verbose_name = _("game moment")
+        verbose_name_plural = _("game moments")
+        ordering = ["event", "created_at"]
+        constraints = [models.UniqueConstraint(fields=["event", "key"], name="unique_game_moment_per_event")]
+
+    def __str__(self):
+        return f"{self.event} - {self.get_kind_display()}"
+
+
+class GameFollow(ClubScopedModel):
+    """An account following one of the club's teams for live game pushes --
+    goals, penalties, the result, as detected in its games' timelines
+    (events.services.game_push, GAME_TIMELINE.md phase 4). Opt-in: anyone with
+    an account in the club picks the teams they want, from the member app or
+    the PWA's "Live game updates" screen. Per account (not per Member), since
+    pushes go to an account's devices whichever of its people they concern."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="game_follows", verbose_name=_("user"))
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="followers", verbose_name=_("team"))
+
+    class Meta:
+        verbose_name = _("game follow")
+        verbose_name_plural = _("game follows")
+        constraints = [models.UniqueConstraint(fields=["user", "team"], name="unique_game_follow_per_team")]
+
+    def __str__(self):
+        return f"{self.user} -> {self.team}"
 
 
 class Competition(models.Model):

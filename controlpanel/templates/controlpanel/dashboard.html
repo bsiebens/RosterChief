@@ -13,7 +13,7 @@
 
 {% block strip_right %}
     {% if failed_jobs %}
-        <span class="text-club-dark">{{ failed_jobs|length }} job failure{{ failed_jobs|length|pluralize }} · 24h</span>
+        <span class="text-club-dark">{{ failed_jobs }} job failure{{ failed_jobs|pluralize }} in the last {{ failure_window_hours }}h</span>
     {% endif %}
 {% endblock strip_right %}
 
@@ -51,8 +51,8 @@
         </div>
         <div class="card p-3.5 {% if failed_jobs %}border-club{% endif %}">
             <div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">failed jobs</div>
-            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold tabular-nums {% if failed_jobs %}text-club{% else %}text-ink{% endif %}">{{ failed_jobs|length }}</div>
-            <div class="mt-1.5 font-mono text-[11px] text-muted">last 24h · <a class="link link-hover" href="{% url 'controlpanel:jobs' %}">jobs</a></div>
+            <div class="mt-0.5 font-display text-4xl leading-none font-extrabold tabular-nums {% if failed_jobs %}text-club{% else %}text-ink{% endif %}">{{ failed_jobs }}</div>
+            <div class="mt-1.5 font-mono text-[11px] text-muted">last {{ failure_window_hours }}h · <a class="link link-hover" href="{% url 'controlpanel:jobs' %}">jobs</a></div>
         </div>
     </div>
 

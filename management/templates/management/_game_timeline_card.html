@@ -1,0 +1,98 @@
+{% load i18n lucide %}
+{% comment %}
+    Read-only: what the game's competition says happened, as stored by
+    events.services.game_timeline (fetched with the score while the game is
+    live, then re-fetched nightly until it stops changing -- see GAME_TIMELINE.md).
+    Context: timeline (GameTimeline), view (display_timeline(...): score and
+    period scores as ours-theirs, and per period its rows -- time, ours
+    (True/False), icon, kind, who, detail, tag, score), and moments ((GameMoment,
+    description) pairs: what events.services.game_moments detected and pushed).
+    Period start/end markers get no row of their own: the period headings say it.
+    Ours vs the opponent is the thin bar in front of each row (club colour vs grey).
+{% endcomment %}
+<div class="card">
+    <div class="card-body gap-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title text-base">{% lucide "list" size=18 %} {% trans "Game timeline" %}</h2>
+            <div class="flex items-center gap-2">
+                <span class="badge badge-sm {% if timeline.status == 'live' %}badge-error{% else %}badge-neutral{% endif %}">{{ timeline.get_status_display|capfirst }}</span>
+                {% if timeline.fetched_at %}<span class="font-mono text-xs text-muted">{% blocktrans with when=timeline.fetched_at|date:"j M H:i" %}fetched {{ when }}{% endblocktrans %}</span>{% endif %}
+            </div>
+        </div>
+
+        {% if timeline.last_error %}
+            <div class="alert alert-warning text-sm">
+                {% lucide "triangle-alert" size=16 %}
+                <span>{% blocktrans with error=timeline.last_error %}The last fetch failed: {{ error }}{% endblocktrans %}</span>
+            </div>
+        {% endif %}
+
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg bg-subhead px-4 py-3">
+            {% if view.score %}<span class="font-display text-2xl leading-none font-extrabold text-ink tabular-nums">{{ view.score }}</span>{% endif %}
+            {% if view.period_scores %}
+                <div class="flex flex-wrap gap-3 font-mono text-xs text-muted tabular-nums">
+                    {% for period in view.period_scores %}<span><span class="text-dim">{% if period.label|length == 1 %}P{% endif %}{{ period.label }}</span> {{ period.score }}</span>{% endfor %}
+                </div>
+            {% endif %}
+            <div class="ml-auto flex flex-wrap items-center gap-4 text-xs text-muted">
+                <span class="flex items-center gap-1.5"><span class="h-3 w-1 rounded-full bg-club"></span>{{ view.ours_label }}</span>
+                <span class="flex items-center gap-1.5"><span class="h-3 w-1 rounded-full bg-line"></span>{{ view.theirs_label }}</span>
+            </div>
+        </div>
+
+        {% for period in view.periods %}
+            <section>
+                <div class="flex items-baseline justify-between border-b border-line pb-1.5">
+                    <h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{{ period.title }}</h3>
+                    {% if period.score %}<span class="font-mono text-xs text-muted tabular-nums">{{ period.score }}</span>{% endif %}
+                </div>
+                {% if period.rows %}
+                    <ul>
+                        {% for row in period.rows %}
+                            <li class="flex items-center gap-3 py-2">
+                                <span class="w-11 shrink-0 font-mono text-xs text-muted tabular-nums">{{ row.time }}</span>
+                                <span class="h-8 w-1 shrink-0 rounded-full {% if row.ours %}bg-club{% else %}bg-line{% endif %}" title="{{ row.team }}"></span>
+                                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full {% if row.type == 'goal' and row.ours %}bg-club text-club-content{% elif row.serious %}border border-danger-border bg-danger-bg text-club-dark{% else %}bg-subhead text-slate{% endif %}" title="{{ row.kind }}">{% lucide row.icon size=14 %}</span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="truncate text-sm {% if row.type == 'goal' or row.serious %}font-semibold text-ink{% else %}text-slate{% endif %}">
+                                        {{ row.who|default:row.kind }}
+                                        {% if row.tag %}<span class="badge {% if row.serious %}badge-error{% else %}badge-outline{% endif %} badge-xs ml-1 align-middle">{{ row.tag }}</span>{% endif %}
+                                    </div>
+                                    {% if row.detail %}<div class="truncate text-xs text-muted">{% if row.type != 'goal' %}{{ row.kind }} · {% endif %}{{ row.detail }}</div>{% endif %}
+                                </div>
+                                {% if row.score %}<span class="shrink-0 font-mono text-sm font-bold text-ink tabular-nums">{{ row.score }}</span>{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="py-2 text-xs text-muted">{% trans "Nothing happened in this period." %}</p>
+                {% endif %}
+            </section>
+        {% empty %}
+            <p class="text-sm text-muted">{% trans "Nothing has happened in this game yet." %}</p>
+        {% endfor %}
+
+        {% if moments or timeline.status == "final" %}
+            <section>
+                <div class="border-b border-line pb-1.5">
+                    <h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{% trans "Detected moments" %}</h3>
+                </div>
+                {% if moments %}
+                    <p class="pt-2 text-xs text-muted">{% trans "Pushed to everyone following this game's team(s). Moments marked “catch-up” were detected late (after an outage) and weren't pushed." %}</p>
+                    <ul>
+                        {% for moment, description in moments %}
+                            <li class="flex items-center gap-3 py-1.5 text-sm">
+                                <span class="w-11 shrink-0 font-mono text-xs text-muted tabular-nums">{{ moment.payload.time|default:"" }}</span>
+                                <span class="min-w-0 flex-1 truncate {% if moment.kind == 'goal_for' or moment.kind == 'game_final' %}font-semibold text-ink{% else %}text-slate{% endif %}">{{ description }}</span>
+                                {% if not moment.notifiable %}<span class="badge badge-outline badge-xs">{% trans "catch-up" %}</span>{% elif moment.delivered_at %}<span class="badge badge-outline badge-xs">{% trans "pushed" %}</span>{% endif %}
+                                <span class="shrink-0 font-mono text-xs text-dim">{{ moment.created_at|date:"H:i:s" }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="pt-2 text-xs text-muted">{% trans "None -- this game's timeline was fetched after it was over (or nothing changed while it was being polled), so no live moments were detected and nothing was pushed." %}</p>
+                {% endif %}
+            </section>
+        {% endif %}
+    </div>
+</div>

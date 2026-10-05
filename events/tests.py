@@ -3,6 +3,7 @@ import json
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -29,14 +30,17 @@ from notifications.models import Notification
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
-from .competition.hockey import DFEL, IJNL
-from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from .competition.hockey import CEHL, DFEL, IJNL, RBIHF
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
     cancel_occurrence,
     detach_occurrence,
     dfel_import,
     effective_members,
+    game_moments,
+    game_push,
+    game_timeline,
     generate_occurrences,
     ijnl_import,
     import_sources,
@@ -48,6 +52,7 @@ from .services import (
     record_check_in,
     team_attendance_rate,
     team_no_shows,
+    timeline_parsers,
 )
 from .services.attendance import member_attendance_counts
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
@@ -2457,6 +2462,22 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.km_total, Decimal("0"))
         self.assertEqual(assignment.total_payable, Decimal("25.00"))
 
+    def test_no_fee_drops_the_fee_and_travel_and_is_not_pending(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+        self.assertTrue(assignment.fee_pending)
+
+        set_referee_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"), no_fee=True)
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.fee, assignment.km, assignment.km_rate, assignment.total_payable), (True, Decimal("0.00"), None, None, Decimal("0")))
+        self.assertFalse(assignment.fee_pending)
+
+        set_referee_fee(assignment, fee=Decimal("20.00"))
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.fee), (False, Decimal("20.00")))
+
 
 class RefereeSignupServiceTests(EventsTestBase):
     """events.services.referees.sync_referee_invites/accept_referee_signup/
@@ -2750,6 +2771,15 @@ class OfficialServiceTests(OfficialsTestBase):
         assignment.refresh_from_db()
         self.assertEqual(assignment.km_total, Decimal("14.00"))
         self.assertEqual(assignment.total_payable, Decimal("39.00"))
+
+    def test_set_official_fee_with_no_fee_owes_nothing(self):
+        game = self.make_home_game()
+        assignment = assign_official(game, self.official, assigned_by=self.alice)
+
+        set_official_fee(assignment, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"), no_fee=True)
+
+        assignment.refresh_from_db()
+        self.assertEqual((assignment.no_fee, assignment.total_payable, assignment.fee_pending), (True, Decimal("0"), False))
 
 
 class OfficialSignupServiceTests(OfficialsTestBase):
@@ -4114,3 +4144,676 @@ class RBIHFStandingsRefreshTests(ImportSourcesTestBase):
 
         self.assertEqual([call.args[0] for call in mock_refresh.call_args_list], [self.team])
         self.assertIn("Refreshed standings for 1 competition source(s); 0 failed.", result)
+
+
+class SetGatheringTimesCommandTests(EventsTestBase):
+    """events.management.commands.set_gathering_times -- fills in a missing
+    gathering time N minutes before the start, never overwriting one."""
+
+    def setUp(self):
+        # Maintenance is cached (features.models) -- same leak concern as the job command tests.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def run_command(self, *args):
+        out = StringIO()
+        call_command("set_gathering_times", *args, stdout=out)
+        return out.getvalue()
+
+    def test_sets_a_missing_gathering_time_and_skips_an_existing_one(self):
+        empty = self.make_event(title="No gathering")
+        existing_gathering = self.future - timedelta(minutes=15)
+        kept = self.make_event(title="Has gathering", gathering=existing_gathering)
+
+        output = self.run_command("45")
+
+        empty.refresh_from_db()
+        kept.refresh_from_db()
+        self.assertEqual(empty.gathering, empty.start - timedelta(minutes=45))
+        self.assertEqual(kept.gathering, existing_gathering)
+        self.assertIn("on 1 event(s); skipped 1 that already had one", output)
+
+    def test_past_and_cancelled_events_are_left_alone_by_default(self):
+        past = self.make_event(start=timezone.now() - timedelta(days=2))
+        cancelled = self.make_event(cancelled=True)
+
+        self.run_command("30")
+
+        past.refresh_from_db()
+        cancelled.refresh_from_db()
+        self.assertIsNone(past.gathering)
+        self.assertIsNone(cancelled.gathering)
+
+        self.run_command("30", "--include-past")
+
+        past.refresh_from_db()
+        self.assertEqual(past.gathering, past.start - timedelta(minutes=30))
+
+    def test_club_and_kind_filters(self):
+        other_club = Club.objects.create(name="Other", slug="other-gathering")
+        other_event = self.make_event(club=other_club, season=None)
+        training = self.make_event(kind=Event.EventKind.TRAINING)
+        game = self.make_event(kind=Event.EventKind.GAME)
+
+        self.run_command("60", "--club", self.club.slug, "--kind", "game")
+
+        for event in (other_event, training, game):
+            event.refresh_from_db()
+        self.assertEqual((other_event.gathering, training.gathering), (None, None))
+        self.assertEqual(game.gathering, game.start - timedelta(minutes=60))
+
+    def test_dry_run_saves_nothing(self):
+        event = self.make_event(title="Cup final")
+
+        output = self.run_command("45", "--dry-run")
+
+        event.refresh_from_db()
+        self.assertIsNone(event.gathering)
+        self.assertIn("Cup final", output)
+        self.assertIn("Would set the gathering time 45 min before the start on 1 event(s)", output)
+
+    def test_rejects_a_non_positive_number_or_unknown_club(self):
+        with self.assertRaisesMessage(CommandError, "positive"):
+            self.run_command("0")
+        with self.assertRaisesMessage(CommandError, "No club"):
+            self.run_command("30", "--club", "nope")
+
+
+TIMELINE_FIXTURES = Path(__file__).resolve().parent / "test_fixtures" / "game_timeline"
+
+
+def timeline_fixture(name):
+    """A real per-game payload (players pseudonymised) -- see events/test_fixtures/game_timeline."""
+    return (TIMELINE_FIXTURES / name).read_text()
+
+
+def rbihf_game_data():
+    return timeline_parsers.rbihf_extract_gd(timeline_fixture("rbihf_game_137.html"))
+
+
+class TimelineParserTests(TestCase):
+    """events.services.timeline_parsers against saved real payloads -- the
+    expected totals are the real results of those games."""
+
+    def parse_all(self):
+        return {
+            "rbihf": timeline_parsers.finalize_document(timeline_parsers.parse_rbihf(timeline_fixture("rbihf_timeline_137.json"), rbihf_game_data())),
+            "cehl": timeline_parsers.finalize_document(timeline_parsers.parse_cehl(timeline_fixture("cehl_timeline_7101.json"))),
+            "dfel": timeline_parsers.finalize_document(timeline_parsers.parse_hockeydata(timeline_fixture("hockeydata_report.json"))),
+            "ijnl": timeline_parsers.finalize_document(timeline_parsers.parse_ijnl(timeline_fixture("ijnl_game_920c9dc5.json"))),
+        }
+
+    def test_every_source_yields_the_real_score_with_unique_ids_in_order(self):
+        expected = {"rbihf": ({"home": 5, "away": 2}, 7), "cehl": ({"home": 1, "away": 4}, 5), "dfel": ({"home": 5, "away": 1}, 6), "ijnl": ({"home": 4, "away": 0}, 4)}
+        for source, document in self.parse_all().items():
+            with self.subTest(source=source):
+                score, goals = expected[source]
+                events = document["events"]
+                self.assertEqual(document["score"], score)
+                self.assertEqual(sum(event["type"] == "goal" for event in events), goals)
+                self.assertEqual(len({event["id"] for event in events}), len(events))
+                seconds = [event["seconds"] for event in events]
+                self.assertEqual(seconds, sorted(seconds))
+                self.assertEqual(document["version"], timeline_parsers.VERSION)
+                self.assertTrue(all(event["goal"]["scorer"]["name"] for event in events if event["type"] == "goal"))
+
+    def test_period_scores(self):
+        documents = self.parse_all()
+
+        self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["rbihf"]["periods"]], [("1", 0, 0), ("2", 3, 2), ("3", 2, 0)])
+        self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["ijnl"]["periods"]], [("1", 3, 0), ("2", 1, 0), ("3", 0, 0)])
+
+    def test_penalty_kinds_are_normalized_and_fill_in_minutes(self):
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("game miscodunct"), "game_misconduct")  # RBIHF's own spelling
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("Double Minor"), "double_minor")
+        self.assertEqual(timeline_parsers.normalize_penalty_kind("Tripping"), "")
+        self.assertEqual(timeline_parsers.finish_penalty({}, "major"), {"kind": "major", "minutes": 5})
+        self.assertEqual(timeline_parsers.finish_penalty({"minutes": 10}), {"kind": "misconduct", "minutes": 10})
+        self.assertEqual(timeline_parsers.finish_penalty({"minutes": 3}), {"minutes": 3})
+
+    def test_an_rbihf_game_misconduct_is_recognised(self):
+        note = '<span>Max (#17)</span> was given a <span class="highlight">game miscodunct</span> penalty for Checking To The Head.'
+        row = f'<tr class="penalty"><td class="time">52:16</td><td class="event">Penalty<br />CHHE</td><td class="team">COP</td><td class="note">{note}</td></tr>'
+
+        [penalty] = timeline_parsers.parse_rbihf(json.dumps({"success": True, "data": f"<table>{row}</table>"}), {"visit": {"code": "COP"}})["events"]
+
+        self.assertEqual((penalty["side"], penalty["penalty"]["kind"], penalty["penalty"]["minutes"], penalty["penalty"]["description"]), ("away", "game_misconduct", 20, "Checking To The Head"))
+
+    def test_a_penalty_shot_and_its_team_level_penalty(self):
+        game_data = {"home": {"code": "CHL", "name": "Charleroi Red Roosters"}, "visit": {"code": "COP", "name": "Sharks Mechelen"}}
+        shot = '<tr class="penalty"><td class="time">45:55</td><td class="event">Penalty shot</td><td class="team">COP</td><td class="note"><span>Sharks Mechelen</span> was awarded a penalty shot.</td></tr>'
+        foul_note = '<span>Charleroi Red Roosters</span> was given a <span class="highlight"></span> penalty for Tripping.'
+        foul = f'<tr class="penalty"><td class="time">45:55</td><td class="event">Penalty<br />TRIP</td><td class="team">CHL</td><td class="note">{foul_note}</td></tr>'
+
+        events = timeline_parsers.parse_rbihf(json.dumps({"success": True, "data": f"<table>{shot}{foul}</table>"}), game_data)["events"]
+
+        self.assertEqual([(event["type"], event["side"]) for event in events], [("penalty", "home"), ("penalty_shot", "away")])
+        self.assertIsNone(events[0]["penalty"]["player"])  # the team, not a player
+        self.assertEqual(events[0]["penalty"]["description"], "Tripping")
+
+    def test_a_cehl_penalty_shot(self):
+        html = '<div class="timeline-event penalty team-a"><div class="timeline-event-content"><span><b>45:55</b></span> <b>HC Example</b> was awarded a penalty shot</div></div>'
+
+        [event] = timeline_parsers.parse_cehl(json.dumps({"live": 0, "html": html}))["events"]
+
+        self.assertEqual((event["type"], event["side"]), ("penalty_shot", "home"))
+
+    def test_period_markers_carry_their_own_period_in_order(self):
+        # RBIHF writes "The 2<sup>nd</sup> period has started" -- the <sup> must not
+        # break the ordinal, and at 20:00 the 1st period ends before the 2nd starts.
+        documents = self.parse_all()
+        for source in ("rbihf", "cehl"):
+            with self.subTest(source=source):
+                markers = [(event["time"], event["type"], event["period"]) for event in documents[source]["events"] if event["type"] in ("period_start", "period_end")]
+                self.assertIn(("20:00", "period_end", "1"), markers)
+                self.assertEqual(markers[markers.index(("20:00", "period_end", "1")) + 1], ("20:00", "period_start", "2"))
+
+    def test_rbihf_goal_and_penalty_details(self):
+        events = self.parse_all()["rbihf"]["events"]
+        goal = next(event for event in events if event["type"] == "goal")
+        penalty = next(event for event in events if event["type"] == "penalty")
+
+        self.assertEqual((goal["side"], goal["period"], goal["goal"]["strength"], goal["goal"]["score_after"], len(goal["goal"]["assists"])), ("away", "2", "EQ", {"home": 0, "away": 1}, 2))
+        self.assertIsInstance(goal["goal"]["scorer"]["number"], int)
+        self.assertEqual((penalty["penalty"]["code"], penalty["penalty"]["description"], penalty["penalty"]["minutes"]), ("HOOK", "Hooking", 2))
+        self.assertEqual({event["type"] for event in events}, {"goal", "penalty", "goalie_change", "timeout", "period_start", "period_end"})
+
+    def test_rbihf_without_the_roster_still_parses_but_has_no_names(self):
+        row = '<tr class="goal"><td class="time">01:00</td><td class="event">Goal<br />EQ</td><td class="team"></td><td class="note"><span> (#)</span> scored the <span class="highlight">1-0</span>, no assists.</td></tr>'
+        bare = json.dumps({"success": True, "live": False, "data": f"<table>{row}</table>"})
+
+        [goal] = timeline_parsers.parse_rbihf(bare, {})["events"]
+
+        self.assertEqual((goal["goal"]["scorer"], goal["side"]), ({"name": ""}, None))
+
+    def test_hockeydata_ids_strength_and_hyphenated_codes(self):
+        events = self.parse_all()["dfel"]["events"]
+        powerplay = next(event for event in events if event["type"] == "goal" and event["goal"]["strength"] == "PP1")
+        hyphenated = next(event for event in events if event["type"] == "penalty" and event["penalty"]["code"] == "HI-ST")
+
+        self.assertTrue(powerplay["id"].startswith("hd:"))
+        self.assertEqual(hyphenated["penalty"]["description"], "High Sticking")
+        self.assertEqual(self.parse_all()["dfel"]["team_stats"]["home"]["pp_goals"], 2)
+
+    def test_ijnl_state_badges_and_keys(self):
+        document = self.parse_all()["ijnl"]
+        winner = next(event for event in document["events"] if event["type"] == "goal" and event["goal"]["game_winning"])
+
+        self.assertEqual(document["status"], "final")
+        self.assertTrue(winner["id"].startswith("ijnl:goal:home:13:39"))
+        self.assertEqual(next(event for event in document["events"] if event["type"] == "penalty")["penalty"]["minutes"], 2)
+
+    def test_a_malformed_payload_is_a_parse_error(self):
+        for parse, payload in [(timeline_parsers.parse_cehl, "<html>"), (timeline_parsers.parse_hockeydata, json.dumps({"statusId": 0, "statusMsg": "Invalid apiKey"})), (timeline_parsers.parse_ijnl, "nope")]:
+            with self.subTest(parse=parse.__name__), self.assertRaises(timeline_parsers.TimelineParseError):
+                parse(payload)
+        with self.assertRaises(timeline_parsers.TimelineParseError):
+            timeline_parsers.rbihf_extract_gd("<html></html>")
+
+    def test_rbihf_form_fields_nest_like_jquery(self):
+        fields = dict(timeline_parsers.rbihf_form_fields({"gameNr": "137", "home": {"team": {"18438": {"nr": 35}}}}))
+
+        self.assertEqual(fields, {"gd[gameNr]": "137", "gd[home][team][18438][nr]": "35"})
+
+
+class GameTimelineTestBase(EventsTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Hasselt", zip_code="3500", country="BE", is_home=True)
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Olympia Heist")
+
+    def setUp(self):
+        # Flag membership is cached (features.models) -- cleared so one test's flag doesn't leak into the next.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable(self, *flags):
+        for name in flags:
+            get_waffle_flag_model().objects.get_or_create(name=name)[0].clubs.add(self.club)
+        cache.clear()
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("competition", "RBIHF")
+        kwargs.setdefault("external_game_id", "137")
+        kwargs.setdefault("location", self.home_location)
+        kwargs.setdefault("opponent", self.opponent)
+        kwargs.setdefault("start", timezone.now() - timedelta(hours=1))
+        game = self.make_event(**kwargs)
+        game.teams.add(self.team)
+        return game
+
+    def rbihf_fetch(self):
+        raw = timeline_fixture("rbihf_timeline_137.json")
+        return game_timeline.TimelineFetch(document=timeline_parsers.parse_rbihf(raw, rbihf_game_data()), raw=raw)
+
+
+class GameTimelineStoreTests(GameTimelineTestBase):
+    def test_store_saves_the_document_and_skips_an_unchanged_one(self):
+        game = self.make_game()
+
+        timeline, changed = game_timeline.store(game, self.rbihf_fetch())
+        first_changed_at = timeline.changed_at
+        timeline_again, changed_again = game_timeline.store(game, self.rbihf_fetch())
+
+        self.assertTrue(changed)
+        self.assertFalse(changed_again)
+        self.assertEqual(timeline_again.changed_at, first_changed_at)
+        self.assertEqual((timeline.source, timeline.status, timeline.data["score"]), ("RBIHF", GameTimeline.Status.FINAL, {"home": 5, "away": 2}))
+        self.assertTrue(timeline.raw)
+
+    def test_a_live_game_is_stored_as_live(self):
+        game = self.make_game(is_live=True)
+
+        timeline, _changed = game_timeline.store(game, self.rbihf_fetch())
+
+        self.assertEqual(timeline.status, GameTimeline.Status.LIVE)
+
+    def test_display_timeline_is_from_our_side(self):
+        home_game = self.make_game()
+        away_game = self.make_game(external_game_id="138", location=None)
+        for game in (home_game, away_game):
+            game_timeline.store(game, self.rbihf_fetch())
+
+        home = game_timeline.display_timeline(home_game.timeline, home_game)
+        away = game_timeline.display_timeline(away_game.timeline, away_game)
+        home_goal = next(row for period in home["periods"] for row in period["rows"] if row["type"] == "goal")
+        away_goal = next(row for period in away["periods"] for row in period["rows"] if row["type"] == "goal")
+
+        self.assertEqual((home["score"], away["score"]), ("5\u20132", "2\u20135"))
+        self.assertEqual((home_goal["ours"], home_goal["team"], home_goal["score"]), (False, "Olympia Heist", "0\u20131"))
+        self.assertEqual((away_goal["ours"], away_goal["team"], away_goal["score"]), (True, "1st", "1\u20130"))
+        self.assertTrue(home_goal["who"].startswith("#"))
+        self.assertTrue(home_goal["detail"].startswith("Assists: "))
+
+    def test_serious_penalties_are_tagged(self):
+        game = self.make_game()
+        major = {"id": "p1", "type": "penalty", "side": "away", "period": "3", "seconds": 3136, "time": "52:16", "penalty": {"player": {"name": "Max", "number": 17}, "description": "Checking To The Head", "kind": "game_misconduct", "minutes": 20}}
+        minor = {"id": "p2", "type": "penalty", "side": "home", "period": "3", "seconds": 3200, "time": "53:20", "penalty": {"player": {"name": "Kim"}, "description": "Tripping", "kind": "minor", "minutes": 2}}
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [major, minor]}))
+
+        serious, plain = game_timeline.display_timeline(game.timeline, game)["periods"][0]["rows"]
+
+        self.assertEqual((serious["serious"], serious["tag"], serious["detail"]), (True, "Game misconduct", "Checking To The Head · 20 min"))
+        self.assertEqual((plain["serious"], plain["tag"]), (False, ""))
+
+    def test_a_penalty_shot_gets_its_own_row_and_a_team_penalty_names_the_team(self):
+        game = self.make_game()
+        shot = {"id": "s1", "type": "penalty_shot", "side": "home", "period": "3", "seconds": 2755, "time": "45:55"}
+        foul = {"id": "f1", "type": "penalty", "side": "away", "period": "3", "seconds": 2755, "time": "45:55", "penalty": {"player": None, "code": "TRIP", "description": "Tripping"}}
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [foul, shot]}))
+
+        foul_row, shot_row = game_timeline.display_timeline(game.timeline, game)["periods"][0]["rows"]
+
+        self.assertEqual((foul_row["who"], foul_row["ours"]), ("Olympia Heist", False))
+        self.assertEqual((shot_row["type"], shot_row["icon"], shot_row["ours"], shot_row["who"]), ("penalty_shot", "target", True, "1st"))
+
+    def test_display_timeline_groups_by_period_without_marker_rows(self):
+        game = self.make_game()
+        game_timeline.store(game, self.rbihf_fetch())
+
+        view = game_timeline.display_timeline(game.timeline, game)
+
+        self.assertEqual([(period["title"], period["score"]) for period in view["periods"]], [("Period 1", "0\u20130"), ("Period 2", "3\u20132"), ("Period 3", "2\u20130")])
+        self.assertFalse(any(row["type"].startswith("period") for period in view["periods"] for row in period["rows"]))
+
+
+class GameTimelineFetchTests(GameTimelineTestBase):
+    """fetch_game_info's timeline hook -- gated on the "game_timeline" flag on
+    top of the competition flag, and never allowed to break the score update."""
+
+    def time_php(self, live=False, score_a=5, score_b=2):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {"live": live, "scoreA": score_a, "scoreB": score_b}
+        return response
+
+    def test_no_timeline_without_the_flag(self):
+        self.enable("RBIHF")
+        game = self.make_game()
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.time_php()), mock.patch("events.competition.hockey.RBIHF.fetch_timeline") as mock_timeline:
+            self.assertTrue(fetch_game_info(game))
+
+        mock_timeline.assert_not_called()
+        self.assertFalse(GameTimeline.objects.filter(event=game).exists())
+
+    def test_the_timeline_is_stored_with_the_score(self):
+        self.enable("RBIHF", "game_timeline")
+        game = self.make_game()
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.time_php()), mock.patch("events.competition.hockey.RBIHF.fetch_timeline", return_value=self.rbihf_fetch()):
+            fetch_game_info(game)
+
+        game.refresh_from_db()
+        self.assertEqual((game.score_for, game.score_against), (5, 2))
+        self.assertEqual(len(game.timeline.data["events"]), 27)
+
+    def test_a_timeline_failure_keeps_the_score_and_the_previous_data(self):
+        self.enable("RBIHF", "game_timeline")
+        game = self.make_game()
+        game_timeline.store(game, self.rbihf_fetch())
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.time_php(score_a=6)), mock.patch("events.competition.hockey.RBIHF.fetch_timeline", side_effect=requests.ConnectionError("RBIHF is down")):
+            self.assertTrue(fetch_game_info(game))
+
+        game.refresh_from_db()
+        game.timeline.refresh_from_db()
+        self.assertEqual(game.score_for, 6)
+        self.assertEqual(game.timeline.last_error, "RBIHF is down")
+        self.assertEqual(len(game.timeline.data["events"]), 27)
+
+    def test_rbihf_posts_the_game_pages_roster_and_caches_it(self):
+        game = self.make_game()
+        page = mock.Mock(status_code=200, text=timeline_fixture("rbihf_game_137.html"))
+        page.raise_for_status = mock.Mock()
+        timeline = mock.Mock(status_code=200, text=timeline_fixture("rbihf_timeline_137.json"))
+        timeline.raise_for_status = mock.Mock()
+
+        with mock.patch("events.competition.hockey.requests.get", return_value=page) as mock_get, mock.patch("events.competition.hockey.requests.post", return_value=timeline) as mock_post:
+            fetched = RBIHF().fetch_timeline(game)
+            RBIHF().fetch_timeline(game)
+
+        mock_get.assert_called_once()
+        self.assertIn(f"/game/{self.season.start_date:%y}{self.season.end_date:%y}/137", mock_get.call_args.args[0])
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertIn(("gd[gameNr]", "137"), mock_post.call_args.kwargs["data"])
+        self.assertEqual(sum(event["type"] == "goal" for event in fetched.document["events"]), 7)
+
+    def test_cehl_and_ijnl_reuse_what_the_score_fetch_downloaded(self):
+        cehl_game = self.make_game(competition="CEHL", external_game_id="7101")
+        cehl = CEHL()
+        cehl.timeline_payload = (cehl_game.pk, timeline_fixture("cehl_timeline_7101.json"))
+        ijnl_game = self.make_game(competition="IJNL", external_game_id="920c9dc5")
+        ijnl = IJNL()
+        ijnl.game_payload = (ijnl_game.pk, json.loads(timeline_fixture("ijnl_game_920c9dc5.json")))
+
+        with mock.patch("events.competition.hockey.requests.get") as mock_get, mock.patch("events.services.ijnl_import.requests.get") as mock_ijnl_get:
+            cehl_events = cehl.fetch_timeline(cehl_game).document["events"]
+            ijnl_events = ijnl.fetch_timeline(ijnl_game).document["events"]
+
+        mock_get.assert_not_called()
+        mock_ijnl_get.assert_not_called()
+        self.assertEqual((len(cehl_events), len(ijnl_events)), (24, 13))
+
+    def test_dfel_reads_the_game_report_with_a_cached_key(self):
+        game = self.make_game(competition="DFEL", external_game_id="c441c652", external_source_id="70779/21691")
+
+        with mock.patch("events.services.dfel_import.fetch_api_key", return_value="key") as mock_key, mock.patch("events.services.dfel_import.fetch_game_report", return_value=timeline_fixture("hockeydata_report.json")) as mock_report:
+            DFEL().fetch_timeline(game)
+            fetched = DFEL().fetch_timeline(game)
+
+        mock_key.assert_called_once_with("70779", "21691")
+        mock_report.assert_called_with("key", "c441c652")
+        self.assertEqual(fetched.document["source"], "DFEL")
+
+
+class SettleGameTimelinesTests(GameTimelineTestBase):
+    def finished_game(self, **kwargs):
+        game = self.make_game(start=timezone.now() - timedelta(hours=5), **kwargs)
+        game_timeline.store(game, self.rbihf_fetch())
+        return game
+
+    def test_an_unchanged_final_timeline_is_finalized_and_a_changed_one_is_not(self):
+        self.enable("RBIHF", "game_timeline")
+        stable = self.finished_game()
+        corrected = self.finished_game(external_game_id="138")
+        changed_document = self.rbihf_fetch()
+        changed_document.document["events"] = changed_document.document["events"][:-1]
+
+        def fetch(event):
+            return changed_document if event.pk == corrected.pk else self.rbihf_fetch()
+
+        with mock.patch("events.competition.hockey.RBIHF.fetch_timeline", side_effect=fetch):
+            result = call_command("settle_game_timelines")
+
+        stable.timeline.refresh_from_db()
+        corrected.timeline.refresh_from_db()
+        self.assertIsNotNone(stable.timeline.finalized_at)
+        self.assertIsNone(corrected.timeline.finalized_at)
+        self.assertIn("1 finalized, 1 still changing", result)
+
+    def test_games_of_clubs_without_the_flag_or_too_recent_are_left_alone(self):
+        self.enable("RBIHF")
+        self.finished_game()
+        self.enable("game_timeline")
+        recent = self.make_game(external_game_id="139", start=timezone.now() - timedelta(minutes=30))
+        game_timeline.store(recent, self.rbihf_fetch())
+        get_waffle_flag_model().objects.get(name="game_timeline").clubs.remove(self.club)
+        cache.clear()
+
+        with mock.patch("events.competition.hockey.RBIHF.fetch_timeline") as mock_fetch:
+            call_command("settle_game_timelines")
+
+        mock_fetch.assert_not_called()
+
+
+class FetchGameTimelinesCommandTests(GameTimelineTestBase):
+    def test_backfills_played_games_and_finalizes_old_ones(self):
+        self.enable("RBIHF", "game_timeline")
+        old = self.make_game(start=timezone.now() - timedelta(days=20))
+        recent = self.make_game(external_game_id="138", start=timezone.now() - timedelta(days=1))
+        self.make_game(external_game_id="139", start=timezone.now() + timedelta(days=3))  # not played yet
+
+        with mock.patch("events.competition.hockey.RBIHF.fetch_timeline", side_effect=lambda event: self.rbihf_fetch()):
+            call_command("fetch_game_timelines", stdout=StringIO())
+
+        old.timeline.refresh_from_db()
+        recent.timeline.refresh_from_db()
+        self.assertIsNotNone(old.timeline.finalized_at)
+        self.assertIsNone(recent.timeline.finalized_at)
+        self.assertEqual(GameTimeline.objects.count(), 2)
+
+    def test_dry_run_fetches_nothing_and_the_flag_is_required(self):
+        self.enable("RBIHF", "game_timeline")
+        self.make_game()
+        out = StringIO()
+
+        with mock.patch("events.competition.hockey.RBIHF.fetch_timeline") as mock_fetch:
+            call_command("fetch_game_timelines", "--dry-run", stdout=out)
+        mock_fetch.assert_not_called()
+        self.assertIn("Would fetch 1 game timeline(s)", out.getvalue())
+
+        get_waffle_flag_model().objects.get(name="game_timeline").clubs.remove(self.club)
+        cache.clear()
+        with self.assertRaisesMessage(CommandError, "game_timeline flag"):
+            call_command("fetch_game_timelines", "--club", self.club.slug, stdout=StringIO())
+
+
+def moment_doc(status, events, home=0, away=0):
+    return {"status": status, "score": {"home": home, "away": away}, "events": events}
+
+
+def goal_item(event_id, side, seconds, home, away, name="Sam"):
+    return {
+        "id": event_id,
+        "type": "goal",
+        "side": side,
+        "period": "1",
+        "seconds": seconds,
+        "time": f"{seconds // 60:02d}:{seconds % 60:02d}",
+        "goal": {"scorer": {"name": name, "number": 9}, "assists": [], "score_after": {"home": home, "away": away}},
+    }
+
+
+class DeriveMomentsTests(TestCase):
+    """events.services.game_moments.derive_moments -- the pure rules."""
+
+    def kinds(self, previous, current, our_side="home", first_fetch=False):
+        return [moment.kind for moment in game_moments.derive_moments(previous, current, our_side=our_side, first_fetch=first_fetch)]
+
+    def test_the_first_fetch_is_silent(self):
+        current = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+
+        self.assertEqual(self.kinds(None, current, first_fetch=True), [])
+
+    def test_kick_off_goals_from_our_side_and_the_result(self):
+        scheduled = moment_doc("scheduled", [])
+        live = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+        final = moment_doc("final", [goal_item("g1", "home", 60, 1, 0), goal_item("g2", "away", 120, 1, 1)], home=1, away=1)
+
+        self.assertEqual(self.kinds(scheduled, live), ["game_started", "goal_for"])
+        self.assertEqual(self.kinds(live, final), ["goal_against", "game_final"])
+        self.assertEqual(self.kinds(live, final, our_side="away"), ["goal_for", "game_final"])
+
+    def test_the_score_is_from_our_side(self):
+        live = moment_doc("live", [])
+        current = moment_doc("live", [goal_item("g1", "home", 60, 1, 0)], home=1)
+
+        [moment] = game_moments.derive_moments(live, current, our_side="away", first_fetch=False)
+
+        self.assertEqual((moment.kind, moment.payload["score"], moment.key), ("goal_against", {"for": 0, "against": 1}, "goal_against:g1"))
+
+    def test_a_penalty_shot_is_a_moment_from_our_side(self):
+        live = moment_doc("live", [])
+        current = moment_doc("live", [{"id": "s1", "type": "penalty_shot", "side": "away", "period": "3", "seconds": 2755}])
+
+        self.assertEqual(self.kinds(live, current, our_side="away"), ["penalty_shot_for"])
+        self.assertEqual(self.kinds(live, current, our_side="home"), ["penalty_shot_against"])
+
+    def test_penalties_and_period_ends(self):
+        live = moment_doc("live", [])
+        current = moment_doc(
+            "live",
+            [
+                {"id": "p1", "type": "penalty", "side": "away", "period": "1", "seconds": 300, "penalty": {"player": {"name": "Rex"}, "description": "Tripping", "minutes": 2}},
+                {"id": "pe1", "type": "period_end", "side": None, "period": "1", "seconds": 1200},
+            ],
+        )
+
+        self.assertEqual(self.kinds(live, current), ["penalty_against", "period_ended"])
+
+    def test_corrections_after_the_final_are_silent(self):
+        final = moment_doc("final", [goal_item("g1", "home", 60, 1, 0)], home=1)
+        corrected = moment_doc("final", [goal_item("g1", "home", 60, 1, 0), goal_item("g2", "home", 3000, 2, 0)], home=2)
+
+        self.assertEqual(self.kinds(final, corrected), [])
+
+    def test_a_vanished_goal_is_cancelled_only_when_the_score_drops(self):
+        before = moment_doc("live", [goal_item("g1", "home", 60, 1, 0, name="Sam")], home=1)
+        rekeyed = moment_doc("live", [goal_item("g1b", "home", 60, 1, 0, name="Kim")], home=1)
+        taken_back = moment_doc("live", [], home=0)
+
+        self.assertEqual(self.kinds(before, rekeyed), ["goal_for"])  # same goal, corrected scorer -> new id, score unchanged
+        self.assertEqual(self.kinds(before, taken_back), ["goal_cancelled"])
+
+    def test_a_late_catch_up_is_recorded_but_not_notifiable(self):
+        live = moment_doc("live", [])
+        caught_up = moment_doc("live", [goal_item("old", "home", 60, 1, 0), goal_item("new", "home", 1500, 2, 0)], home=2)
+
+        moments = {moment.key: moment for moment in game_moments.derive_moments(live, caught_up, our_side="home", first_fetch=False)}
+
+        self.assertFalse(moments["goal_for:old"].notifiable)
+        self.assertTrue(moments["goal_for:new"].notifiable)
+
+
+class RecordGameMomentsTests(GameTimelineTestBase):
+    """game_timeline.store -> game_timeline_changed -> GameMoment rows."""
+
+    def fetch(self, status_events):
+        return game_timeline.TimelineFetch(document={"events": status_events})
+
+    def test_a_changed_timeline_records_its_moments_once(self):
+        game = self.make_game(is_live=True)
+        game_timeline.store(game, self.fetch([]))  # first fetch: silent
+        game_timeline.store(game, self.fetch([goal_item("g1", "home", 60, 1, 0)]))
+
+        game_moments.game_timeline_changed.send(sender=Event, event=game, previous={"status": "live", "events": [], "score": {"home": 0, "away": 0}}, current=game.timeline.data, first_fetch=False)
+
+        self.assertEqual(list(GameMoment.objects.filter(event=game).values_list("kind", "key")), [("goal_for", "goal_for:g1")])
+
+    def test_the_first_fetch_records_nothing(self):
+        game = self.make_game(is_live=True)
+
+        game_timeline.store(game, self.rbihf_fetch())
+
+        self.assertFalse(GameMoment.objects.filter(event=game).exists())
+
+    def test_describe_moment(self):
+        game = self.make_game(is_live=True)
+        moment = GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 2, "against": 1}})
+
+        self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")
+        penalty = GameMoment.objects.create(event=game, key="penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, payload={"player": {"name": "Max", "number": 17}, "description": "Checking To The Head", "kind": "game_misconduct"})
+        self.assertEqual(game_moments.describe_moment(penalty), "Penalty for the opponent: Max (#17), Checking To The Head (game misconduct).")
+
+
+class GamePushTests(GameTimelineTestBase):
+    """events.services.game_push -- live game pushes to the accounts that
+    follow one of the game's teams; one coalesced push per poll, no cap."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.fan = get_user_model().objects.create_user(email="fan@example.com", password="pw-secret-123")
+        cls.stranger = get_user_model().objects.create_user(email="stranger@example.com", password="pw-secret-123")
+
+    def moment(self, game, key, kind=GameMoment.Kind.GOAL_FOR, seconds=60, notifiable=True, **payload):
+        return GameMoment.objects.create(event=game, key=key, kind=kind, game_seconds=seconds, notifiable=notifiable, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 1, "against": 0}, **payload})
+
+    def deliver(self, game, moments):
+        with mock.patch("events.services.game_push._send_native", return_value=1) as native, mock.patch("events.services.game_push._send_web", return_value=0) as web:
+            reached = game_push.deliver_moments(game.pk, [moment.pk for moment in moments])
+        return reached, native, web
+
+    def test_followers_get_one_coalesced_push_and_others_none(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        goal = self.moment(game, "goal_for:g1")
+        penalty = self.moment(game, "penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, seconds=90, player={"name": "Rex"}, description="Tripping")
+
+        reached, native, web = self.deliver(game, [penalty, goal])
+
+        self.assertEqual(reached, 1)
+        native.assert_called_once()
+        self.assertEqual(native.call_args.args[0], self.fan)
+        body = native.call_args.kwargs["body"]
+        self.assertEqual(body.splitlines(), ["Goal for us by Sam (#9), 1-0.", "Penalty for the opponent: Rex, Tripping."])
+        self.assertEqual(native.call_args.kwargs["title"], "1st vs Olympia Heist")
+        self.assertEqual(native.call_args.kwargs["data"]["target"], {"type": "event", "id": str(game.pk)})
+        web.assert_called_once()
+        self.assertEqual(GameMoment.objects.filter(event=game, delivered_at__isnull=False).count(), 2)
+
+    def test_catch_ups_are_never_pushed_and_a_moment_is_pushed_once(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        late = self.moment(game, "goal_for:old", notifiable=False)
+        fresh = self.moment(game, "goal_for:new")
+
+        _reached, native, _web = self.deliver(game, [late, fresh])
+        self.assertEqual(native.call_count, 1)
+        self.assertNotIn("old", native.call_args.kwargs["body"])
+
+        reached_again, native_again, _web = self.deliver(game, [fresh])
+        self.assertEqual(reached_again, 0)
+        native_again.assert_not_called()
+
+    def test_there_is_no_cap_per_game(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+
+        for number in range(15):
+            reached, _native, _web = self.deliver(game, [self.moment(game, f"goal_for:g{number}")])
+            self.assertEqual(reached, 1)
+
+    def test_recording_moments_schedules_delivery_after_commit(self):
+        game = self.make_game(is_live=True)
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": []}))
+
+        # Patch outermost: captured on-commit callbacks run when the capture block exits.
+        with mock.patch("events.services.game_push.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+            game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [goal_item("g1", "home", 60, 1, 0)]}))
+
+        func, event_id, ids = background.call_args.args
+        self.assertEqual((func, event_id, len(ids)), (game_push.deliver_moments, game.pk, 1))
+
+    def test_following_only_keeps_this_clubs_teams_and_replaces_the_set(self):
+        other_club = Club.objects.create(name="Rival", slug="rival-push")
+        theirs = Team.objects.create(club=other_club, name="Theirs", short_name="TH")
+        second = Team.objects.create(club=self.club, name="Second", short_name="2nd")
+
+        self.assertEqual(game_push.set_followed_teams(self.fan, self.club, [self.team.pk, theirs.pk]), {self.team.pk})
+        game_push.set_followed_teams(self.fan, self.club, [second.pk])
+
+        self.assertEqual(game_push.followed_team_ids(self.fan, self.club), {second.pk})
+        self.assertEqual(game_push.followers(self.make_game()), [])

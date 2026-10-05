@@ -1,0 +1,38 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Me -> "Live game updates": which teams this account gets live game pushes
+    for (mobile.views.LiveGameUpdatesView, events.services.game_push). Plain
+    form of checkboxes, one per team -- saving replaces the whole set.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Live game updates" %}</span>
+    </div>
+
+    <p class="text-sm text-muted">{% trans "Get a push notification while a team is playing: goals, penalties, period ends and the final result. Pick the teams you want to follow." %}</p>
+
+    <form method="post" action="{% url "mobile:live_game_updates" %}" hx-boost="false" class="m-card divide-y divide-line">
+        {% csrf_token %}
+        {% for row in team_rows %}
+            <label class="flex items-center gap-3 p-3.5">
+                <input type="checkbox" name="team" value="{{ row.team.pk }}" class="h-5 w-5 shrink-0 accent-ink" {% if row.following %}checked{% endif %}>
+                <span class="flex-1 text-[15px] font-semibold text-ink">{{ row.team.name }}</span>
+            </label>
+        {% empty %}
+            <p class="p-3.5 text-sm text-muted">{% trans "This club has no teams yet." %}</p>
+        {% endfor %}
+        {% if team_rows %}
+            <div class="p-3.5">
+                <button class="btn btn-primary w-full" type="submit">{% trans "Save" %}</button>
+            </div>
+        {% endif %}
+    </form>
+
+    <p class="text-xs text-dim">{% trans "Notifications arrive on this device only once you've allowed notifications for the app." %}</p>
+{% endblock content %}

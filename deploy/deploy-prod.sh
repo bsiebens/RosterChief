@@ -5,8 +5,9 @@
 #   deploy/deploy-prod.sh --version v0.7.8       # deploy (or roll back to) an exact release
 #   deploy/deploy-prod.sh --push                 # push local main first, then deploy it
 #   SKIP_BACKUP=1 deploy/deploy-prod.sh          # skip the pre-migration backup (not recommended)
+#   NO_MAINTENANCE=1 deploy/deploy-prod.sh       # don't wrap the deploy in maintenance mode
 #
-# What it does is exactly the manual routine, run for you over one SSH session:
+# What it does is exactly the manual routine, run for you over SSH:
 #
 #   1. locally: refuse to deploy code that isn't on GitHub yet (the server pulls from there);
 #   2. on the server: `git fetch`, then check out origin/main (or the release tag) with
@@ -14,9 +15,10 @@
 #      Untracked files (.env, .env.production, backups) are never touched by this;
 #   3. on the server: check the env files carry every key the new code requires, *before*
 #      anything is stopped, backed up or migrated;
-#   4. on the server: run deploy/deploy-local.sh from that fresh checkout -- the same script you
-#      would run by hand after logging in (db/redis/caddy up -> backup -> pull image -> migrate
-#      -> restart web -> wait for https://$BASE_DOMAIN/healthz). Running the *checked-out*
+#   4. on the server (a second SSH session, with a terminal): run deploy/deploy-local.sh from that
+#      fresh checkout -- the same script you would run by hand after logging in (db/redis/caddy
+#      up -> maintenance mode ON -> backup -> pull image -> migrate -> restart web -> wait for
+#      https://$BASE_DOMAIN/healthz -> ask you, then maintenance mode OFF). Running the *checked-out*
 #      copy means the deploy steps always match the code being deployed.
 #
 # The image is the one .github/workflows/build-and-push.yml built: `:main` for the latest main,
@@ -37,6 +39,8 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 # "0", never empty: an empty argument can vanish when ssh rebuilds the remote command line.
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
+NO_MAINTENANCE="${NO_MAINTENANCE:-0}"
+MAINTENANCE_MESSAGE="${MAINTENANCE_MESSAGE:-RosterChief is being upgraded. It will be back shortly.}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -47,7 +51,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --version) VERSION="${2:?--version needs a tag, e.g. --version v0.7.8}"; shift 2 ;;
         --push) PUSH=1; shift ;;
-        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
         *) die "Unknown argument '$1' (see --help)." ;;
     esac
 done
@@ -83,9 +87,9 @@ say "Deploying ${WHAT} to PRODUCTION (${SSH_TARGET}:${REMOTE_DIR}), image :${IMA
 
 # --- the work, on the server ------------------------------------------------
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" bash -s -- \
-    "${REMOTE_DIR}" "${GIT_REF}" "${IMAGE_TAG}" "${COMPOSE_FILE}" "${BASE_DOMAIN}" "${SKIP_BACKUP}" <<'REMOTE'
+    "${REMOTE_DIR}" "${GIT_REF}" <<'REMOTE'
 set -Eeuo pipefail
-REMOTE_DIR="$1"; GIT_REF="$2"; IMAGE_TAG="$3"; COMPOSE_FILE="$4"; BASE_DOMAIN="$5"; SKIP_BACKUP="$6"
+REMOTE_DIR="$1"; GIT_REF="$2"
 
 step() { printf '\033[1;34m  ->\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -103,10 +107,14 @@ else
 fi
 echo "     at $(git rev-parse --short HEAD) -- $(git log -1 --pretty=%s)"
 
-# The rest is exactly the by-hand deploy. </dev/null: this heredoc is ssh's stdin, and nothing
-# below may read from it (docker compose run would otherwise swallow the rest of the script).
-IMAGE_TAG="$IMAGE_TAG" COMPOSE_FILE="$COMPOSE_FILE" BASE_DOMAIN="$BASE_DOMAIN" SKIP_BACKUP="$SKIP_BACKUP" \
-    ./deploy/deploy-local.sh </dev/null
 REMOTE
+
+# The rest is exactly the by-hand deploy, in a second SSH session with a terminal (-t): the
+# script puts the platform in maintenance mode first and, once everything is up, asks whether to
+# reopen it -- a prompt that can't be answered over the heredoc session above. A dropped
+# connection leaves maintenance ON, which is the safe side.
+say "Running deploy/deploy-local.sh on the server (maintenance mode on until you confirm)"
+ssh -t "${SSH_OPTS[@]}" "${SSH_TARGET}" \
+    "cd $(printf '%q' "$REMOTE_DIR") && IMAGE_TAG=$(printf '%q' "$IMAGE_TAG") COMPOSE_FILE=$(printf '%q' "$COMPOSE_FILE") BASE_DOMAIN=$(printf '%q' "$BASE_DOMAIN") SKIP_BACKUP=$(printf '%q' "$SKIP_BACKUP") NO_MAINTENANCE=$(printf '%q' "${NO_MAINTENANCE}") MAINTENANCE_MESSAGE=$(printf '%q' "${MAINTENANCE_MESSAGE}") ./deploy/deploy-local.sh"
 
 say "Production is running ${WHAT}."

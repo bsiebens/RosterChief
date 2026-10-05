@@ -1,0 +1,22 @@
+{% load i18n %}<!DOCTYPE html>
+{% comment %}
+    The sign-in API reference (allauth headless), in place of allauth's own
+    headless/spec/redoc_cdn.html (HEADLESS_SPECIFICATION_TEMPLATE_NAME). That one loads
+    ReDoc from a protocol-relative "//cdn.jsdelivr.net" URL: on a plain-http dev server that
+    becomes http://, jsdelivr redirects it to https without a CORS header, and the
+    crossorigin/integrity attributes make the browser refuse it -- a blank page. Same ReDoc
+    version and hash, over https explicitly.
+{% endcomment %}
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% trans "RosterChief sign-in API" %}</title>
+    </head>
+    <body>
+        <redoc spec-url="{% url 'headless:openapi_json' %}"></redoc>
+        <script crossorigin="anonymous"
+                integrity="sha384-70P5pmIdaQdVbxvjhrcTDv1uKcKqalZ3OHi7S2J+uzDl0PW8dO6L+pHOpm9EEjGJ"
+                src="https://cdn.jsdelivr.net/npm/redoc@2.5.2/bundles/redoc.standalone.js"></script>
+    </body>
+</html>

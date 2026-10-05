@@ -30,6 +30,22 @@ def contrast_color(hex_color):
     return Club._content_color_for(hex_color)
 
 
+@register.filter
+def primary_text_color(club, fallback):
+    """Text colour for the club's primary colour, or for ``fallback`` when the
+    club set none -- ``club|primary_text_color:"#4f46e5"`` pairs with a
+    background of ``club.primary_color|default:"#4f46e5"``. Honours the club's own
+    primary_text_color (Club.primary_content_color) when it has a colour."""
+    # ``club`` is None on emails sent off a club subdomain (e.g. a password reset).
+    return club.primary_content_color if club and club.primary_color else Club._content_color_for(fallback)
+
+
+@register.filter
+def secondary_text_color(club, fallback):
+    """The secondary-colour counterpart to primary_text_color."""
+    return club.secondary_content_color if club and club.secondary_color else Club._content_color_for(fallback)
+
+
 @register.simple_tag(takes_context=True)
 def absolute_media_url(context, file_field):
     """An absolute URL for ``file_field`` (e.g. ``club.logo``), for use in an
