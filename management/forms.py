@@ -768,6 +768,10 @@ class EventForm(EventAudienceFormMixin, forms.ModelForm):
         self.clean_club_wide_excludes_teams_and_groups(cleaned)
         if self.auto_titles and cleaned.get("kind") and cleaned["kind"] not in self.auto_title_kinds and not (cleaned.get("title") or "").strip():
             self.add_error("title", _("Give this event a title."))
+        # A game with no team has no one to invite (its audience is its teams'
+        # rosters), no "us" side for its title or score, and nothing to follow.
+        if cleaned.get("kind") == Event.EventKind.GAME and not cleaned.get("teams"):
+            self.add_error("teams", _("A game needs at least one team."))
         return cleaned
 
     def save(self, commit=True):

@@ -6818,6 +6818,20 @@ class EventManagementTests(ManagementTestBase):
         self.assertEqual(Event.objects.get(club=self.club, kind=Event.EventKind.TRAINING).title, "Training")
         self.assertEqual(Event.objects.get(club=self.club, kind=Event.EventKind.TOURNAMENT).title, "Tournament")
 
+    def test_a_game_needs_at_least_one_team(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_create", self.event_data(kind="game", teams=[]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("teams", response.context["form"].errors)
+        self.assertFalse(Event.objects.filter(club=self.club, kind=Event.EventKind.GAME).exists())
+
+    def test_every_page_loads_the_dropdown_used_for_selects_in_modals(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_list"), "js/searchable-select.js")
+
     def test_other_kinds_still_need_a_title(self):
         self.client.force_login(self.own_team_coach)
 
