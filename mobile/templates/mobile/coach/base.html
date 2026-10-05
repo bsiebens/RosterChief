@@ -34,7 +34,17 @@
     marked hx-boost="false" to force a real navigation instead.
 {% endcomment %}
 <!DOCTYPE html>
-<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+{% comment %}
+    The shell is a fixed-height column (header, scrolling .coach-sheet, tab bar), so its
+    height must be the *visible* window. h-full on <html> and <body> (height: 100%, which
+    resolves against the actual viewport), not h-screen (100vh): in an iOS home-screen app
+    with the solid status bar (apple-mobile-web-app-status-bar-style "black", below) the web
+    view starts under the status bar, but 100vh is still the full screen height -- the body
+    came out taller than the window by the status bar, and overflow-hidden clipped most of
+    the tab bar off the bottom. The member shell scrolls the page with a sticky tab bar, so
+    it never had a fixed height to get wrong.
+{% endcomment %}
+<html class="h-full" lang="{{ LANGUAGE_CODE|default:"en" }}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -67,7 +77,7 @@
         {% block extra_head %}{% endblock extra_head %}
     </head>
 
-    <body class="flex h-screen flex-col overflow-hidden bg-ink font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
+    <body class="flex h-full flex-col overflow-hidden bg-ink font-sans text-slate" hx-boost="true" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-csrftoken="{{ csrf_token }}">
         <header class="coach-header">
             <div class="flex min-h-11 items-center gap-2.5">
                 {% if club.logo %}
