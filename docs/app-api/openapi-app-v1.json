@@ -4304,7 +4304,7 @@
             "title": "Time"
           },
           "type": {
-            "description": "goal | penalty | goalie_change | timeout | period_start | period_end",
+            "description": "goal | penalty | penalty_shot | goalie_change | timeout | period_start | period_end. A penalty_shot has no detail object: `side`/`ours` say who was awarded it.",
             "title": "Type",
             "type": "string"
           }

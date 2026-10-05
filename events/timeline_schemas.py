@@ -51,7 +51,7 @@ class TimelineGoalieChangeOut(Schema):
 
 class TimelineEventOut(Schema):
     id: str = Field(description="Stable across fetches -- use it to tell new events from ones already shown.")
-    type: str = Field(description="goal | penalty | goalie_change | timeout | period_start | period_end")
+    type: str = Field(description="goal | penalty | penalty_shot | goalie_change | timeout | period_start | period_end. A penalty_shot has no detail object: `side`/`ours` say who was awarded it.")
     period: str | None
     time: str | None = Field(description="Game clock as the source shows it, mm:ss.")
     seconds: int | None = Field(description="Game clock in seconds, for sorting.")

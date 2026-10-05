@@ -589,6 +589,8 @@ class GameMoment(UUIDModel):
         GOAL_CANCELLED = "goal_cancelled", _("goal cancelled")
         PENALTY_FOR = "penalty_for", _("penalty for")
         PENALTY_AGAINST = "penalty_against", _("penalty against")
+        PENALTY_SHOT_FOR = "penalty_shot_for", _("penalty shot for")
+        PENALTY_SHOT_AGAINST = "penalty_shot_against", _("penalty shot against")
         PERIOD_ENDED = "period_ended", _("period ended")
         GAME_FINAL = "game_final", _("game final")
 

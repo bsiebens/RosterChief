@@ -274,6 +274,7 @@ def parse_rbihf(timeline_json: str, gd: dict) -> dict:
         raise TimelineParseError("RBIHF returned no timeline for this game.")
 
     sides = {code: side for side, code in (("home", (gd.get("home") or {}).get("code")), ("away", (gd.get("visit") or {}).get("code"))) if code}
+    team_names = {name for name in ((gd.get("home") or {}).get("name"), (gd.get("visit") or {}).get("name")) if name}
     penalty_codes = {**PENALTY_DESCRIPTIONS, **(gd.get("penCode") or {})}
     soup = BeautifulSoup(payload.get("data") or "", "html.parser")
     period_seconds = DEFAULT_PERIOD_SECONDS
@@ -304,10 +305,16 @@ def parse_rbihf(timeline_json: str, gd: dict) -> dict:
             if score:
                 goal["score_after"] = score
             events.append({**base, "type": "goal", "goal": goal})
+        elif kind == "penalty" and label_lines and label_lines[0].lower().startswith("penalty shot"):
+            # "<team> was awarded a penalty shot" -- the side it went to is the team cell.
+            events.append({**base, "type": "penalty_shot"})
         elif kind == "penalty":
             kind_span = note.find("span", class_="highlight")
             code = label_lines[1] if len(label_lines) > 1 else ""
-            penalty = {"player": player_from_text(spans[0].get_text(strip=True)) if spans else player(""), "code": code, "description": penalty_codes.get(code) or penalty_description(code)}
+            who = spans[0].get_text(strip=True) if spans else ""
+            # A team-level call ("<team> was given a penalty") names the team, not a player.
+            offender = None if who in team_names else player_from_text(who)
+            penalty = {"player": offender, "code": code, "description": penalty_codes.get(code) or penalty_description(code)}
             finish_penalty(penalty, kind_span.get_text(strip=True) if kind_span else "")
             events.append({**base, "type": "penalty", "penalty": penalty})
         elif kind == "goalie":
@@ -367,6 +374,8 @@ def parse_cehl(timeline_json: str) -> dict:
             if score:
                 goal["score_after"] = score
             events.append({**base, "type": "goal", "goal": goal})
+        elif "penalty" in classes and "awarded a penalty shot" in text.lower():
+            events.append({**base, "type": "penalty_shot"})
         elif "penalty" in classes:
             code = stamp_lines[1] if len(stamp_lines) > 1 else ""
             kind_node = content.find("i")

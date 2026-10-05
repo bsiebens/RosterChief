@@ -4279,6 +4279,25 @@ class TimelineParserTests(TestCase):
 
         self.assertEqual((penalty["side"], penalty["penalty"]["kind"], penalty["penalty"]["minutes"], penalty["penalty"]["description"]), ("away", "game_misconduct", 20, "Checking To The Head"))
 
+    def test_a_penalty_shot_and_its_team_level_penalty(self):
+        game_data = {"home": {"code": "CHL", "name": "Charleroi Red Roosters"}, "visit": {"code": "COP", "name": "Sharks Mechelen"}}
+        shot = '<tr class="penalty"><td class="time">45:55</td><td class="event">Penalty shot</td><td class="team">COP</td><td class="note"><span>Sharks Mechelen</span> was awarded a penalty shot.</td></tr>'
+        foul_note = '<span>Charleroi Red Roosters</span> was given a <span class="highlight"></span> penalty for Tripping.'
+        foul = f'<tr class="penalty"><td class="time">45:55</td><td class="event">Penalty<br />TRIP</td><td class="team">CHL</td><td class="note">{foul_note}</td></tr>'
+
+        events = timeline_parsers.parse_rbihf(json.dumps({"success": True, "data": f"<table>{shot}{foul}</table>"}), game_data)["events"]
+
+        self.assertEqual([(event["type"], event["side"]) for event in events], [("penalty", "home"), ("penalty_shot", "away")])
+        self.assertIsNone(events[0]["penalty"]["player"])  # the team, not a player
+        self.assertEqual(events[0]["penalty"]["description"], "Tripping")
+
+    def test_a_cehl_penalty_shot(self):
+        html = '<div class="timeline-event penalty team-a"><div class="timeline-event-content"><span><b>45:55</b></span> <b>HC Example</b> was awarded a penalty shot</div></div>'
+
+        [event] = timeline_parsers.parse_cehl(json.dumps({"live": 0, "html": html}))["events"]
+
+        self.assertEqual((event["type"], event["side"]), ("penalty_shot", "home"))
+
     def test_period_markers_carry_their_own_period_in_order(self):
         # RBIHF writes "The 2<sup>nd</sup> period has started" -- the <sup> must not
         # break the ordinal, and at 20:00 the 1st period ends before the 2nd starts.
@@ -4418,6 +4437,17 @@ class GameTimelineStoreTests(GameTimelineTestBase):
 
         self.assertEqual((serious["serious"], serious["tag"], serious["detail"]), (True, "Game misconduct", "Checking To The Head · 20 min"))
         self.assertEqual((plain["serious"], plain["tag"]), (False, ""))
+
+    def test_a_penalty_shot_gets_its_own_row_and_a_team_penalty_names_the_team(self):
+        game = self.make_game()
+        shot = {"id": "s1", "type": "penalty_shot", "side": "home", "period": "3", "seconds": 2755, "time": "45:55"}
+        foul = {"id": "f1", "type": "penalty", "side": "away", "period": "3", "seconds": 2755, "time": "45:55", "penalty": {"player": None, "code": "TRIP", "description": "Tripping"}}
+        game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [foul, shot]}))
+
+        foul_row, shot_row = game_timeline.display_timeline(game.timeline, game)["periods"][0]["rows"]
+
+        self.assertEqual((foul_row["who"], foul_row["ours"]), ("Olympia Heist", False))
+        self.assertEqual((shot_row["type"], shot_row["icon"], shot_row["ours"], shot_row["who"]), ("penalty_shot", "target", True, "1st"))
 
     def test_display_timeline_groups_by_period_without_marker_rows(self):
         game = self.make_game()
@@ -4633,6 +4663,13 @@ class DeriveMomentsTests(TestCase):
         [moment] = game_moments.derive_moments(live, current, our_side="away", first_fetch=False)
 
         self.assertEqual((moment.kind, moment.payload["score"], moment.key), ("goal_against", {"for": 0, "against": 1}, "goal_against:g1"))
+
+    def test_a_penalty_shot_is_a_moment_from_our_side(self):
+        live = moment_doc("live", [])
+        current = moment_doc("live", [{"id": "s1", "type": "penalty_shot", "side": "away", "period": "3", "seconds": 2755}])
+
+        self.assertEqual(self.kinds(live, current, our_side="away"), ["penalty_shot_for"])
+        self.assertEqual(self.kinds(live, current, our_side="home"), ["penalty_shot_against"])
 
     def test_penalties_and_period_ends(self):
         live = moment_doc("live", [])

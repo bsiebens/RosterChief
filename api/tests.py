@@ -863,6 +863,7 @@ class GameTimelineApiTests(ApiTestBase):
             },
             {"id": "p1", "type": "penalty", "side": "away", "period": "2", "seconds": 1300, "time": "21:40", "penalty": {"player": {"name": "Rex Rival", "number": 18}, "code": "TRIP", "description": "Tripping", "minutes": 2}},
             {"id": "pe1", "type": "period_end", "side": None, "period": "1", "seconds": 1200, "time": "20:00"},
+            {"id": "ps1", "type": "penalty_shot", "side": "home", "period": "2", "seconds": 1400, "time": "23:20"},
         ],
     }
 
@@ -898,7 +899,8 @@ class GameTimelineApiTests(ApiTestBase):
         timeline = self.api_get(f"/games/{game.pk}/").json()["timeline"]
 
         self.assertEqual((timeline["status"], timeline["our_side"], timeline["home_score"], timeline["away_score"], timeline["decided_in"]), ("final", "home", 1, 0, "regulation"))
-        goal, penalty, marker = timeline["events"]
+        goal, penalty, marker, penalty_shot = timeline["events"]
+        self.assertEqual((penalty_shot["type"], penalty_shot["ours"], penalty_shot["penalty"]), ("penalty_shot", True, None))
         self.assertEqual((goal["ours"], goal["goal"]["strength"], goal["goal"]["score_after"]), (True, "PP1", {"home": 1, "away": 0}))
         self.assertEqual(goal["goal"]["scorer"], {"name": None, "number": 9})
         self.assertEqual(goal["goal"]["assists"], [{"name": None, "number": 4}])

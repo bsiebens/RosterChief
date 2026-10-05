@@ -55,6 +55,7 @@ PENALTY_KIND_LABELS = {
 GAME_STARTED = "game_started"
 GOAL_FOR, GOAL_AGAINST, GOAL_CANCELLED = "goal_for", "goal_against", "goal_cancelled"
 PENALTY_FOR, PENALTY_AGAINST = "penalty_for", "penalty_against"
+PENALTY_SHOT_FOR, PENALTY_SHOT_AGAINST = "penalty_shot_for", "penalty_shot_against"
 PERIOD_ENDED = "period_ended"
 GAME_FINAL = "game_final"
 
@@ -126,6 +127,9 @@ def derive_moments(previous: dict | None, current: dict, *, our_side: str, first
                     payload={**base, "player": penalty.get("player"), "description": penalty.get("description"), "minutes": penalty.get("minutes"), "kind": penalty.get("kind")},
                 )
             )
+        elif item["type"] == "penalty_shot" and ours is not None:
+            kind = PENALTY_SHOT_FOR if ours else PENALTY_SHOT_AGAINST
+            moments.append(Moment(kind=kind, key=f"{kind}:{event_id}", game_seconds=seconds, notifiable=recent, payload={**base, "score": score_now}))
         elif item["type"] == "period_end":
             moments.append(Moment(kind=PERIOD_ENDED, key=f"{PERIOD_ENDED}:{item.get('period') or event_id}", game_seconds=seconds, notifiable=recent, payload={**base, "score": score_now}))
 
@@ -193,6 +197,10 @@ def describe_moment(moment: GameMoment) -> str:
         if payload.get("kind") not in (None, "", "minor"):
             reason = _("%(reason)s (%(kind)s)") % {"reason": reason, "kind": str(PENALTY_KIND_LABELS.get(payload["kind"], payload["kind"])).lower()}
         return template % {"player": _who(payload.get("player")) or "?", "reason": reason}
+    if moment.kind == GameMoment.Kind.PENALTY_SHOT_FOR:
+        return _("Penalty shot for us.")
+    if moment.kind == GameMoment.Kind.PENALTY_SHOT_AGAINST:
+        return _("Penalty shot for the opponent.")
     if moment.kind == GameMoment.Kind.PERIOD_ENDED:
         return _("Period %(period)s ended, %(score)s.") % {"period": payload.get("period") or "", "score": score_text}
     if moment.kind == GameMoment.Kind.GAME_FINAL:

@@ -193,7 +193,7 @@ def _period_title(label: str) -> str:
 
 #: The kinds of timeline event a row is shown for -- period start/end markers
 #: are what the period headings already say, so they get no row of their own.
-_ROW_TYPES = ("goal", "penalty", "goalie_change", "timeout")
+_ROW_TYPES = ("goal", "penalty", "penalty_shot", "goalie_change", "timeout")
 _STRENGTHS = {"PP1": _lazy("power play"), "PP2": _lazy("5-on-3 power play"), "SH1": _lazy("short-handed"), "SH2": _lazy("short-handed"), "EN": _lazy("empty net"), "PS": _lazy("penalty shot")}
 
 
@@ -219,10 +219,13 @@ def _row(item: dict, *, our_side: str, ours_label: str, theirs_label: str) -> di
         kind = penalty.get("kind") or ""
         # Anything beyond a plain minor is tagged with its kind; the serious ones
         # (major, misconduct, game misconduct, match) are highlighted on the page.
-        row.update(icon="timer", kind=_("Penalty"), who=_person(penalty.get("player")), detail=detail, tag=str(PENALTY_KIND_LABELS.get(kind, "")) if kind not in ("", "minor") else "", serious=kind in SERIOUS_PENALTIES)
+        # No player: a team-level call (bench, or the foul a penalty shot was awarded for).
+        row.update(icon="timer", kind=_("Penalty"), who=_person(penalty.get("player")) or row["team"], detail=detail, tag=str(PENALTY_KIND_LABELS.get(kind, "")) if kind not in ("", "minor") else "", serious=kind in SERIOUS_PENALTIES)
     elif item["type"] == "goalie_change":
         change = item.get("goalie_change") or {}
         row.update(icon="shield-user", kind=_("Goalie"), who=_person(change.get("player")), detail=_("In") if change.get("action") == "in" else _("Out"))
+    elif item["type"] == "penalty_shot":
+        row.update(icon="target", kind=_("Penalty shot"), who=row["team"], detail=_("Penalty shot awarded"))
     else:
         row.update(icon="circle-pause", kind=_("Time-out"), who=row["team"], detail="")
     return row
