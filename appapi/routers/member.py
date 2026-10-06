@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from ninja import Query, Router
 
-from events.models import Attendance, Event, EventTask, GameTimeline, OfficialSignup, RefereeSignup
+from events.models import Attendance, Event, EventTask, EventTaskClaim, GameTimeline, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS, member_agenda
 from events.services.game_push import followed_team_ids, set_followed_teams
 from events.services.game_timeline import timeline_for_api
@@ -39,10 +39,10 @@ MAX_CALENDAR_DAYS = 92
 EVENT_RELATED = ("location", "opponent")
 
 
-def _hero(attendance, tasks, *, closed=False) -> dict | None:
+def _hero(attendance, tasks, mine, *, closed=False) -> dict | None:
     if attendance is None:
         return None
-    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed, **_task_fields(tasks, attendance.event_id)}
+    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed, **_task_fields(tasks, attendance.event_id, mine)}
 
 
 @router.get("/home", response={200: HomeOut, **ERRORS}, summary="Home screen")
@@ -58,11 +58,12 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
     shown = [card["event"] for card in summary["member_cards"]] + [row["event"] for row in summary["needs_answer"]]
     shown += [attendance.event for attendance in (summary["hero_attendance"], summary["going_attendance"]) if attendance is not None]
     tasks = task_counts([event.pk for event in shown])
+    mine = household_tasks(scope, [event.pk for event in shown])
 
     needs_answer = []
     for row in summary["needs_answer"]:
         source = row.get("attendance") or row.get("signup")
-        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None, **_task_fields(tasks, row["event"].pk)})
+        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None, **_task_fields(tasks, row["event"].pk, mine)})
 
     dues = []
     for row in summary["dues_rows"]:
@@ -80,14 +81,14 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
         )
 
     return {
-        "rsvp_needed": _hero(summary["hero_attendance"], tasks, closed=summary["rsvp_closed"]),
-        "next_going": _hero(summary["going_attendance"], tasks),
+        "rsvp_needed": _hero(summary["hero_attendance"], tasks, mine, closed=summary["rsvp_closed"]),
+        "next_going": _hero(summary["going_attendance"], tasks, mine),
         "member_cards": [
             {
                 "kind": card["kind"],
                 "event": event_out(card["event"]),
                 "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]],
-                **_task_fields(tasks, card["event"].pk),
+                **_task_fields(tasks, card["event"].pk, mine),
             }
             for card in summary["member_cards"]
         ],
@@ -113,9 +114,29 @@ def task_counts(event_ids) -> dict:
     return counts
 
 
-def _task_fields(counts, event_id) -> dict:
+def household_tasks(scope, event_ids) -> dict:
+    """``{event_id: [task rows]}``: the tasks on these events that the account's household
+    has taken -- claimed by the account's own person or anyone sharing a family with them
+    (a claim is made as the account's own person, but covers the household). Each row is
+    ``{id, title, description, claimed_by_me}``; a task two of them took appears once."""
+    if scope.me is None:
+        return {}
+    household = {scope.me.pk, *scope.me.family_members(scope.club).values_list("pk", flat=True)}
+    claims = EventTaskClaim.objects.filter(task__event_id__in=set(event_ids), member_id__in=household).select_related("task").order_by("task__created_at", "task__title")
+    by_event: dict = {}
+    for claim in claims:
+        tasks = by_event.setdefault(claim.task.event_id, {})
+        row = tasks.setdefault(claim.task_id, {"id": claim.task_id, "title": claim.task.title, "description": claim.task.description, "claimed_by_me": False})
+        row["claimed_by_me"] = row["claimed_by_me"] or claim.member_id == scope.me.pk
+    return {event_id: list(tasks.values()) for event_id, tasks in by_event.items()}
+
+
+def _task_fields(counts, event_id, mine=None) -> dict:
     open_count, total = counts.get(event_id, (0, 0))
-    return {"open_tasks": open_count, "total_tasks": total}
+    fields = {"open_tasks": open_count, "total_tasks": total}
+    if mine is not None:  # Home only: what the household has already taken
+        fields["my_tasks"] = mine.get(event_id, [])
+    return fields
 
 
 @router.get("/calendar", response={200: CalendarOut, **ERRORS, 422: ErrorOut}, summary="Agenda")

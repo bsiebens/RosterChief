@@ -280,6 +280,12 @@ carries `member_id`, so label rows with that person's first name.
   calendar shows. Show "2 of 5 tasks open" straight from them (hide it when `total_tasks` is 0)
   instead of fetching each event; the tasks themselves and claiming are on
   `GET /events/{id}` → `tasks`.
+* The same cards, heroes and rows also have `my_tasks`: the tasks of that event the household has
+  **already taken**, so Home reminds them ("You're bringing fruit"). Household = the account's own
+  person plus anyone sharing a family with them: `claimed_by_me` is true when the account's own
+  person took it, false when someone else in the household did. Each entry is
+  `{id, title, description, claimed_by_me}`; empty when they took nothing. To give a task back,
+  use `DELETE /events/{id}/tasks/{task_id}/claim` (only works for `claimed_by_me`).
 * `rsvp_needed` and `next_going`: the single-card form of the above (the family's soonest only).
   Kept for older app versions; new code should use `member_cards`.
 * `needs_answer` (+ `needs_answer_more`): other open asks, not repeating anything on a `rsvp_needed` card. `type` `rsvp` → answer the event;

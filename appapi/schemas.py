@@ -252,12 +252,25 @@ TOTAL_TASKS_HELP = 'How many tasks the event has in all (taken or not); 0 when i
 OPEN_TASKS_HELP = "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them."
 
 
+MY_TASKS_HELP = (
+    "Tasks of this event that the account's household has already taken (the account's own person, or anyone sharing a family with them), so Home can remind them. `claimed_by_me` is false when another household member took it. Empty when none."
+)
+
+
+class TaskRefOut(Schema):
+    id: uuid.UUID
+    title: str
+    description: str
+    claimed_by_me: bool = Field(description="The account's own person took it, rather than someone else in the household.")
+
+
 class HeroOut(Schema):
     event: EventOut
     attendance: AttendanceOut
     rsvp_closed: bool
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
     total_tasks: int = Field(description=TOTAL_TASKS_HELP)
+    my_tasks: list[TaskRefOut] = Field(description=MY_TASKS_HELP)
 
 
 class CardMemberOut(Schema):
@@ -271,6 +284,7 @@ class MemberCardOut(Schema):
     members: list[CardMemberOut] = Field(description="Everyone this card is for: people whose next event of this kind is the same one share a card. Never empty.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
     total_tasks: int = Field(description=TOTAL_TASKS_HELP)
+    my_tasks: list[TaskRefOut] = Field(description=MY_TASKS_HELP)
 
 
 class NeedsAnswerOut(Schema):
@@ -281,6 +295,7 @@ class NeedsAnswerOut(Schema):
     signup_id: uuid.UUID | None = Field(description="For `referee`/`official`: the sign-up to respond to.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
     total_tasks: int = Field(description=TOTAL_TASKS_HELP)
+    my_tasks: list[TaskRefOut] = Field(description=MY_TASKS_HELP)
 
 
 class OpenTaskOut(Schema):
