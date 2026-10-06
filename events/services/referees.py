@@ -150,6 +150,12 @@ def assign_referee(event, member, *, assigned_by):
     # as "invited, no response yet", and one never invited had no signup row
     # at all, so the game never showed up among their own duties in the app.
     RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    if assigned_by is not None:
+        # A staff pick, made in the management app: the person didn't take this themselves, so
+        # tell them. (Self-service accepts pass assigned_by=None -- they just did it.)
+        when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
+        body = _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": when}
+        notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event)
     return referee
 
 

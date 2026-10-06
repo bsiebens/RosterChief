@@ -121,6 +121,12 @@ def assign_official(event, member, *, assigned_by):
     # invite, so they don't show as "no response yet" and the game appears
     # among their own duties in the app.
     OfficialSignup.objects.update_or_create(event=event, member=member, defaults={"status": OfficialSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    if assigned_by is not None:
+        # A staff pick from the management app -- tell them. Self-service accepts pass
+        # assigned_by=None: they just did it themselves.
+        when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
+        body = _("You have been assigned as an official for %(event)s on %(when)s.") % {"event": event.title, "when": when}
+        notify_members([member], club=event.club, title=_("Official assignment"), body=body, source=event)
     return official
 
 

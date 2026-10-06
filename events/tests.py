@@ -2398,6 +2398,23 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.member, self.referee)
         self.assertEqual(assignment.assigned_by, self.alice)
 
+    def test_a_staff_assignment_notifies_the_referee(self):
+        game = self.make_home_game()
+
+        assign_referee(game, self.referee, assigned_by=self.alice)
+
+        notification = Notification.objects.get(member=self.referee, title="Referee assignment")
+        self.assertIn(game.title, notification.body)
+        self.assertEqual(notification.source, game)
+
+    def test_a_self_service_accept_does_not_notify_the_referee(self):
+        game = self.make_home_game()
+        signup, _created = RefereeSignup.objects.update_or_create(event=game, member=self.referee, defaults={"status": RefereeSignup.Status.INVITED})
+
+        accept_referee_signup(signup)
+
+        self.assertFalse(Notification.objects.filter(member=self.referee, title="Referee assignment").exists())
+
     def test_assign_referee_settles_an_open_invite_as_accepted(self):
         game = self.make_home_game()
         RefereeSignup.objects.get_or_create(event=game, member=self.referee)  # usually already invited on creation
@@ -2766,6 +2783,23 @@ class OfficialServiceTests(OfficialsTestBase):
 
         self.assertEqual(assignment.event, game)
         self.assertEqual(assignment.member, self.official)
+
+    def test_a_staff_assignment_notifies_the_official(self):
+        game = self.make_home_game()
+
+        assign_official(game, self.official, assigned_by=self.alice)
+
+        notification = Notification.objects.get(member=self.official, title="Official assignment")
+        self.assertIn(game.title, notification.body)
+        self.assertEqual(notification.source, game)
+
+    def test_a_self_service_official_accept_does_not_notify(self):
+        game = self.make_home_game()
+        signup, _created = OfficialSignup.objects.update_or_create(event=game, member=self.official, defaults={"status": OfficialSignup.Status.INVITED})
+
+        accept_official_signup(signup)
+
+        self.assertFalse(Notification.objects.filter(member=self.official, title="Official assignment").exists())
 
     def test_assign_official_settles_an_open_invite_as_accepted(self):
         game = self.make_home_game()
