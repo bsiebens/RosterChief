@@ -21,7 +21,7 @@ from notifications.models import Notification
 from rosterchief.concurrency import run_in_background
 
 from .models import PushDevice
-from .presenters import notification_source
+from .presenters import notification_target
 from .push import get_gateway
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def recipient_user_ids(notification: Notification) -> set:
 
 
 def payload_data(notification: Notification) -> dict:
-    source = notification_source(notification.source)
+    source = notification_target(notification)
     target = {key: str(value) for key, value in source.items() if value is not None} if source else None
     return {"notification_id": str(notification.pk), "club_slug": notification.club.slug, "target": target}
 

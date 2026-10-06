@@ -56,7 +56,7 @@ def _send_email(notification: Notification, emails: list[str], attachments=None)
             continue
 
 
-def notify_members(members, *, club, title: str, body: str, source=None, send_email: bool = True, attachments=None) -> list[Notification]:
+def notify_members(members, *, club, title: str, body: str, source=None, target_type: str = "", send_email: bool = True, attachments=None) -> list[Notification]:
     """One Notification per member. Emailed to everyone recipient_emails()
     resolves for them, unless send_email is False -- e.g. a staff review
     queue (see news.services.notify_editors_of_pending_review), which is
@@ -64,6 +64,9 @@ def notify_members(members, *, club, title: str, body: str, source=None, send_em
     just the topbar/dashboard entry. Always creates the row, even when
     nobody was reachable or emailing was skipped -- that's still true
     history for the in-app feed, not a failure to silently drop.
+
+    ``target_type`` names a screen of the native app to open for a notification that has no
+    ``source`` object to point at (e.g. ``"calendar"``); ignored when there is a source.
 
     ``attachments``, when given, is a list of ``(filename, content, mimetype)``
     tuples attached to every email this batch sends -- e.g.
@@ -76,7 +79,7 @@ def notify_members(members, *, club, title: str, body: str, source=None, send_em
     a delivery channel (mobile.services.push) needs the batch shape, not one
     row at a time."""
     members = list(members)
-    notifications = [Notification(club=club, member=member, title=title, body=body, source=source) for member in members]
+    notifications = [Notification(club=club, member=member, title=title, body=body, source=source, target_type=target_type) for member in members]
     Notification.objects.bulk_create(notifications)
 
     if send_email:

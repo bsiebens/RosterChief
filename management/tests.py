@@ -9,6 +9,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import openpyxl
+from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
@@ -45,6 +46,7 @@ from formbuilder.models import Form as FormBuilderForm
 from formbuilder.services.notifications import notify_form_send
 from management.bulk_import import TEMPLATE_COLUMNS, family_choice_field_name
 from management.email_previews import EMAIL_PREVIEWS
+from management.forms import MemberRefereeEligibilityForm
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
@@ -2821,6 +2823,15 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertEqual(profile.valid_until, self.future_date)
         self.assertEqual(set(profile.eligible_teams), {self.team, self.other_team})
 
+    def test_not_allowed_teams_are_a_searchable_dropdown_of_the_clubs_teams(self):
+        form = MemberRefereeEligibilityForm(club=self.club, member=self.member)
+        field = form.fields["excluded_teams"]
+
+        self.assertIsInstance(field.widget, forms.SelectMultiple)
+        self.assertNotIsInstance(field.widget, forms.CheckboxSelectMultiple)
+        self.assertEqual(field.widget.attrs["data-searchable"], "true")
+        self.assertEqual(set(field.queryset), {self.team, self.other_team})
+
     def test_admin_can_rule_out_a_team_the_level_would_allow(self):
         self.client.force_login(self.admin_user)
 
@@ -2895,7 +2906,9 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         response = self.club_get("member_detail", self.member.pk)
 
         self.assertContains(response, "Not currently eligible to referee")
-        self.assertNotContains(response, "First Team")
+        # The "Can referee for" panel is absent. (Team names still appear in the edit modal's
+        # dropdown, so assert on the panel's own heading rather than on a team name.)
+        self.assertNotContains(response, "Can referee for")
 
     def test_team_page_lists_eligible_referees(self):
         RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)

@@ -4,6 +4,7 @@ child (Kim) in Ajax United, current season, signed in through allauth headless."
 
 import datetime
 import io
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -18,15 +19,19 @@ from appapi.scope import ClubScope
 from club.models import ClubMembership, OnboardingRequirement
 from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
 from events.services.agenda import member_agenda
+from events.services.attendance import notify_newly_invited
 from events.services.game_timeline import TimelineFetch
 from events.services.game_timeline import store as store_game_timeline
 from members.models import Family, FamilyMembership, Member
+from mobile.models import PushSubscription
+from mobile.services.push import send_push_for_notifications, send_push_to_user
 from news.models import News
 from notifications.models import Notification
 from notifications.services import notify_members
+from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
-from .delivery import deliver, on_notifications_created
+from .delivery import deliver, on_notifications_created, payload_data
 from .models import PushDevice
 from .push import NullGateway
 from .tests import CLUB_HOST, AppApiTestCase, make_club
@@ -646,3 +651,84 @@ class HomeSummaryCompatibilityTests(ClubApiTestCase):
         self.assertEqual([row["event"].title for row in web["needs_answer"]], ["Parent's meeting"])
         self.assertEqual(api["needs_answer"], [])
         self.assertEqual([card["event"].title for card in api["member_cards"]], ["Kid's training", "Parent's meeting"])
+
+
+class NotificationTargetTests(ClubApiTestCase):
+    """What the app opens: `target` in the push payload and `source` in the inbox share one shape."""
+
+    def test_an_order_notification_points_at_the_order(self):
+        order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("12.00"))
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Order placed", body="…", source=order)
+
+        self.assertEqual(payload_data(notification)["target"], {"type": "order", "id": str(order.pk)})
+        inbox = self.get("/notifications").json()["items"][0]["source"]
+        self.assertEqual((inbox["type"], inbox["id"]), ("order", str(order.pk)))
+
+    def test_new_events_on_your_calendar_points_at_the_calendar(self):
+        game = self.event(title="Game")
+        notify_newly_invited(self.member, club=self.club, events=[game])
+        notification = Notification.objects.get(member=self.member)
+
+        self.assertEqual(payload_data(notification)["target"], {"type": "calendar"})
+        self.assertEqual(self.get("/notifications").json()["items"][0]["source"], {"type": "calendar", "id": None, "slug": None})
+
+    def test_a_source_wins_over_a_target_type(self):
+        game = self.event(title="Game")
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Hi", body="…", source=game, target_type="calendar")
+
+        self.assertEqual(payload_data(notification)["target"]["type"], "event")
+
+    def test_no_source_and_no_target_type_means_no_target(self):
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Hi", body="…")
+
+        self.assertIsNone(payload_data(notification)["target"])
+
+
+@override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
+class WebPushDedupeTests(ClubApiTestCase):
+    """The PWA's web push sits out for an account whose phone gets the native push."""
+
+    def setUp(self):
+        super().setUp()
+        PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/mine", p256dh="k", auth="a")
+        self.notification = Notification.objects.create(club=self.club, member=self.member, title="Hi", body="…")
+
+    def web_pushes(self):
+        with patch("mobile.services.push._deliver") as deliver_web:
+            send_push_for_notifications([self.notification])
+        return deliver_web.call_count
+
+    def native_device(self, **kwargs):
+        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1", **kwargs)
+
+    def test_web_push_goes_out_when_there_is_no_native_device(self):
+        self.assertEqual(self.web_pushes(), 1)
+
+    def test_web_push_is_skipped_for_an_account_with_an_active_native_device(self):
+        self.native_device()
+
+        self.assertEqual(self.web_pushes(), 0)
+
+    def test_a_disabled_device_does_not_suppress_web_push(self):
+        self.native_device(enabled=False)
+
+        self.assertEqual(self.web_pushes(), 1)
+
+    def test_a_device_without_an_sns_endpoint_does_not_suppress_web_push(self):
+        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="")
+
+        self.assertEqual(self.web_pushes(), 1)
+
+    def test_a_long_unseen_device_no_longer_suppresses_web_push(self):
+        device = self.native_device()
+        PushDevice.objects.filter(pk=device.pk).update(last_seen=timezone.now() - datetime.timedelta(days=61))
+
+        self.assertEqual(self.web_pushes(), 1)
+
+    def test_live_game_web_push_is_skipped_too(self):
+        self.native_device()
+
+        with patch("mobile.services.push._deliver") as deliver_web:
+            sent = send_push_to_user(self.club, self.user, title="Goal", body="1-0")
+
+        self.assertEqual((sent, deliver_web.call_count), (0, 0))

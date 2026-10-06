@@ -185,7 +185,7 @@ def notify_newly_invited(member, *, club, events):
         return
     title = _("New events on your calendar")
     body = ngettext("%(count)d new event has been added to your calendar.", "%(count)d new events have been added to your calendar.", len(events)) % {"count": len(events)}
-    notify_members([member], club=club, title=title, body=body)
+    notify_members([member], club=club, title=title, body=body, target_type="calendar")
 
 
 def record_check_in(attendance, *, showed_up):

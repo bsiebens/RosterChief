@@ -12,10 +12,12 @@ import base64
 import binascii
 import json
 import logging
+from datetime import timedelta
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
@@ -32,6 +34,25 @@ PUSH_TIMEOUT = 10
 #: letting a subscription point the server at an arbitrary (e.g. internal) URL.
 ALLOWED_PUSH_HOSTS = frozenset({"fcm.googleapis.com", "web.push.apple.com"})
 ALLOWED_PUSH_HOST_SUFFIXES = (".push.services.mozilla.com", ".notify.windows.com")
+
+
+#: A native install that has checked in within this many days counts as the account's phone:
+#: its web push subscriptions are then skipped for notifications (below), so one event does not
+#: buzz the same person twice. Older installs stop suppressing, in case the token went stale
+#: without the push service ever reporting it dead.
+NATIVE_DEVICE_ACTIVE_DAYS = 60
+
+
+def users_with_native_push(user_ids) -> set:
+    """Of ``user_ids``, the accounts that currently receive native (iOS/Android) push: an enabled
+    device with a live SNS endpoint that has been seen recently."""
+    from appapi.models import PushDevice  # deferred: appapi imports back into mobile
+
+    user_ids = {user_id for user_id in user_ids if user_id}
+    if not user_ids:
+        return set()
+    cutoff = timezone.now() - timedelta(days=NATIVE_DEVICE_ACTIVE_DAYS)
+    return set(PushDevice.objects.filter(user_id__in=user_ids, enabled=True, last_seen__gte=cutoff).exclude(endpoint_arn="").values_list("user_id", flat=True))
 
 
 def is_allowed_push_endpoint(endpoint) -> bool:
@@ -131,6 +152,8 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") 
     events.services.game_push). Returns how many subscriptions it was sent to."""
     if not settings.VAPID_PRIVATE_KEY:
         return 0
+    if users_with_native_push([user.pk]):
+        return 0  # the phone already got it (events.services.game_push sends native alongside this)
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
     subscriptions = list(models.PushSubscription.objects.filter(club=club, member__user=user).select_related("member"))
     for subscription in subscriptions:
@@ -148,8 +171,14 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
         return
 
     member_ids = {notification.member_id for notification in notifications}
+    subscriptions = list(models.PushSubscription.objects.filter(member_id__in=member_ids).select_related("member"))
+    # An account with an active native install gets this through the native channel
+    # (appapi.delivery), so its web subscriptions sit this one out.
+    on_native = users_with_native_push(subscription.member.user_id for subscription in subscriptions)
     subscriptions_by_member = {}
-    for subscription in models.PushSubscription.objects.filter(member_id__in=member_ids).select_related("member"):
+    for subscription in subscriptions:
+        if subscription.member.user_id in on_native:
+            continue
         subscriptions_by_member.setdefault(subscription.member_id, []).append(subscription)
 
     for notification in notifications:

@@ -232,10 +232,11 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
  "target": {"type": "news", "id": "…", "slug": "welcome"}}
 ```
 
-`target` is `null` or has a `type` of `news`, `event` or `form_send` (ignore unknown types). On
-tap: switch to the club named by `club_slug`, mark the notification read
-(`POST /notifications/{notification_id}/read`), then open the target (`GET /news/{slug}`,
-`GET /events/{id}`; forms arrive in a later release). The payload is only a pointer and never
+`target` is `null` or has a `type` of `news`, `event`, `form_send`, `order` or `calendar`
+(ignore unknown types; `calendar` has no `id`). On tap: switch to the club named by `club_slug`,
+mark the notification read (`POST /notifications/{notification_id}/read`), then open the target
+(`GET /news/{slug}`, `GET /events/{id}`, `GET /shop/orders/{id}`, the Calendar tab for `calendar`;
+forms arrive in a later release). The inbox's `source` uses the same shape. The payload is only a pointer and never
 contains personal data. One account gets **one** push per notification even when it concerns
 several of its children.
 

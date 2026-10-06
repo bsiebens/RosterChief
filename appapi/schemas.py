@@ -429,8 +429,8 @@ class NewsDetailOut(NewsSummaryOut):
 
 
 class NotificationSourceOut(Schema):
-    type: str = Field(description="`news`, `event` or `form_send`. Ignore unknown types.")
-    id: uuid.UUID
+    type: str = Field(description="`news`, `event`, `form_send`, `order` or `calendar`. Ignore unknown types.")
+    id: uuid.UUID | None = Field(description="Null for `calendar`, which has no object: open the Calendar tab.")
     slug: str | None = Field(description="For `news`: open it with GET /news/{slug}.")
 
 

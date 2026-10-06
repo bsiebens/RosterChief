@@ -128,7 +128,7 @@ class MemberRefereeEligibilityForm(forms.ModelForm):
     class Meta:
         model = RefereeProfile
         fields = ["level", "valid_until", "excluded_teams"]
-        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"}), "excluded_teams": forms.CheckboxSelectMultiple}
+        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"}), "excluded_teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, member=None, **kwargs):
         instance = RefereeProfile.objects.filter(member=member, club=club).first() if member is not None else None

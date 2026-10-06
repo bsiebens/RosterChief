@@ -2735,9 +2735,17 @@
       "NotificationSourceOut": {
         "properties": {
           "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for `calendar`, which has no object: open the Calendar tab.",
+            "title": "Id"
           },
           "slug": {
             "anyOf": [
@@ -2752,7 +2760,7 @@
             "title": "Slug"
           },
           "type": {
-            "description": "`news`, `event` or `form_send`. Ignore unknown types.",
+            "description": "`news`, `event`, `form_send`, `order` or `calendar`. Ignore unknown types.",
             "title": "Type",
             "type": "string"
           }
