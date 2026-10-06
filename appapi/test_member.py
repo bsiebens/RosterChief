@@ -902,3 +902,67 @@ class HomeOpenTasksTests(ClubApiTestCase):
         home = self.get("/home").json()
 
         self.assertEqual([(card["open_tasks"], card["total_tasks"]) for card in home["member_cards"]], [(0, 0)])
+
+
+class HomeHouseholdTasksTests(ClubApiTestCase):
+    """A task the household has taken is listed on that event's Home card, so it isn't forgotten."""
+
+    def setUp(self):
+        super().setUp()
+        self.game = self.event(title="Card game", start=self.soon)
+        self.invite(self.game, member=self.child)
+        self.fruit = EventTask.objects.create(event=self.game, title="Bring fruit", description="For 12 kids", needed_quantity=2)
+        self.lifts = EventTask.objects.create(event=self.game, title="Lifts", needed_quantity=1)
+
+    def card(self):
+        return next(card for card in self.get("/home").json()["member_cards"] if card["event"]["title"] == "Card game")
+
+    def test_a_task_the_account_took_is_on_the_card(self):
+        EventTaskClaim.objects.create(task=self.fruit, member=self.member)
+
+        card = self.card()
+
+        self.assertEqual(card["my_tasks"], [{"id": str(self.fruit.pk), "title": "Bring fruit", "description": "For 12 kids", "claimed_by_me": True}])
+        self.assertEqual((card["open_tasks"], card["total_tasks"]), (2, 2))  # one slot of the fruit task is still free
+
+    def test_a_task_a_household_member_took_is_there_too_but_not_claimed_by_me(self):
+        partner = Member.objects.create(first_name="Pam", last_name="Parent")
+        FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=partner, role=FamilyMembership.FamilyRole.PARENT)
+        EventTaskClaim.objects.create(task=self.lifts, member=partner)
+
+        self.assertEqual([(task["title"], task["claimed_by_me"]) for task in self.card()["my_tasks"]], [("Lifts", False)])
+
+    def test_a_task_someone_elses_family_took_is_not_listed(self):
+        EventTaskClaim.objects.create(task=self.lifts, member=self.stranger())
+
+        self.assertEqual(self.card()["my_tasks"], [])
+
+    def test_a_task_both_of_us_took_appears_once_and_is_marked_mine(self):
+        partner = Member.objects.create(first_name="Pam", last_name="Parent")
+        FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=partner, role=FamilyMembership.FamilyRole.PARENT)
+        EventTaskClaim.objects.create(task=self.fruit, member=partner)
+        EventTaskClaim.objects.create(task=self.fruit, member=self.member)
+
+        tasks = self.card()["my_tasks"]
+
+        self.assertEqual([(task["title"], task["claimed_by_me"]) for task in tasks], [("Bring fruit", True)])
+
+    def test_nothing_taken_means_an_empty_list_and_giving_it_back_removes_it(self):
+        self.assertEqual(self.card()["my_tasks"], [])
+        claim = EventTaskClaim.objects.create(task=self.lifts, member=self.member)
+        self.assertEqual(len(self.card()["my_tasks"]), 1)
+
+        claim.delete()
+
+        self.assertEqual(self.card()["my_tasks"], [])
+
+    def test_the_heroes_and_open_asks_carry_it_too(self):
+        EventTaskClaim.objects.create(task=self.lifts, member=self.member)
+        maybe = self.event(title="Maybe game", start=self.soon + datetime.timedelta(days=3))
+        self.invite(maybe, status=Attendance.AttendanceStatus.MAYBE)
+        EventTaskClaim.objects.create(task=EventTask.objects.create(event=maybe, title="Drinks"), member=self.member)
+
+        home = self.get("/home").json()
+
+        self.assertEqual([task["title"] for task in home["rsvp_needed"]["my_tasks"]], ["Lifts"])
+        self.assertEqual([(row["event"]["title"], [task["title"] for task in row["my_tasks"]]) for row in home["needs_answer"]], [("Maybe game", ["Drinks"])])
