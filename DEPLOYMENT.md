@@ -1379,11 +1379,19 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
    deploying `development`'s image in response to a `main` release would be wrong, not just
    redundant.
 
-A separate workflow, `.github/workflows/test-postgres.yml`, runs the identical suite against a
-real `postgres:17` service container (compose.yaml's own major version) on a daily schedule
-plus every push to `development`/`main` — the everyday `test` job above runs against the same
-in-memory sqlite `rosterchief/test_runner.py` uses locally, which is fast but isn't what
-production actually runs on.
+**Which database the suite runs on.** Production runs Postgres, the quick feedback loop runs the
+in-memory sqlite `rosterchief/test_runner.py` uses locally, so the `test` shards pick one per
+event and the suite runs **once**, not twice:
+
+| Event | Database |
+|---|---|
+| push to `main` or `development` | Postgres (`postgres:17`, compose.yaml's own major version) |
+| pull request into `main` (every release/hotfix) | Postgres — a Postgres-only break is caught *before* it merges |
+| any other pull request (a feature branch into `development`) | sqlite — fast |
+
+The separate workflow `.github/workflows/test-postgres.yml` therefore only keeps a **nightly** run
+of the whole suite on Postgres (plus `workflow_dispatch`): it is what catches things that rot with
+no code change, like a date- or time-of-day-dependent test or a drifting dependency.
 
 **`test` is a required status check on both `development` and `main`** —
 `deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the

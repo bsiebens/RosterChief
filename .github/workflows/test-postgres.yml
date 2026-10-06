@@ -1,11 +1,11 @@
-# The everyday test job (build-and-push.yml) runs the full suite against the same in-memory
-# sqlite rosterchief/test_runner.py uses locally -- fast, and right for every-PR feedback, but
-# production runs Postgres (see DEPLOYMENT.md). A migration or a Postgres-specific query
-# behavior (locking, a constraint, CONCURRENTLY) could pass on sqlite and still break for
-# real. This runs the identical suite against a real postgres:17 service container instead --
-# same major version compose.yaml pins in production -- on a slower cadence than every PR,
-# since it's a safety net for drift between the two databases, not a substitute for the fast
-# every-push/every-PR job.
+# The everyday test job (build-and-push.yml) already runs the suite against a real Postgres
+# (postgres:17, the major version compose.yaml pins in production) for every push to
+# main/development and every PR into main, and against fast in-memory sqlite for feature-branch
+# PRs. So this workflow no longer runs on every push -- that was the same suite a second time.
+# What it keeps is the NIGHTLY run on main: the full suite, unsharded, on Postgres, with no code
+# change to trigger it. That is what catches things that rot on their own -- a date- or
+# time-of-day-dependent test (the one that broke near midnight), a dependency or service drifting
+# -- and `workflow_dispatch` lets you run it by hand.
 name: Test against Postgres
 
 on:
@@ -14,8 +14,6 @@ on:
     # scheduled jobs run in (see DEPLOYMENT.md's "Scheduled jobs"), so a slow CI run here
     # never contends with anything production actually depends on.
     - cron: "0 5 * * *"
-  push:
-    branches: [main, development]
   workflow_dispatch:
 
 # Read-only token: this workflow only checks out and runs tests.

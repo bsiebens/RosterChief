@@ -47,12 +47,34 @@ jobs:
     # rosterchief/test_runner.py). A hosted runner only has a couple of cores, so one job
     # took ~5 minutes; four in parallel each pay the ~30s setup/migrate once and run a
     # quarter of the tests. Lint runs once, in the first shard.
+    #
+    # Which database: production runs Postgres, the quick feedback loop runs in-memory sqlite.
+    # The suite runs ONCE per event, on the database that matters for it -- Postgres for a push
+    # to main/development and for a PR into main (every release/hotfix, so a Postgres-only break
+    # is caught before it merges, not after), sqlite for any other PR (a feature branch into
+    # development), where speed matters more. There is deliberately no second, separate
+    # Postgres run on every push (test-postgres.yml only keeps its nightly run).
     name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    # Always started (a few seconds, idle on sqlite runs); only used when "Use Postgres" below sets the URL.
+    services:
+      postgres:
+        image: postgres:17-alpine  # the major version compose.yaml pins in production
+        env:
+          POSTGRES_USER: rosterchief
+          POSTGRES_PASSWORD: rosterchief
+          POSTGRES_DB: rosterchief
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -68,6 +90,10 @@ jobs:
 
       - if: matrix.shard == 1
         run: uv run ruff check .
+
+      - name: Use Postgres
+        if: github.event_name != 'pull_request' || github.base_ref == 'main'
+        run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
       - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
         env:
