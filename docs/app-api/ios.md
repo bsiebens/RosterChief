@@ -258,10 +258,16 @@ carries `member_id`, so label rows with that person's first name.
 
 `GET /home?member_id=…`:
 
-* `rsvp_needed`: the next invitation nobody has answered. Show **In / Maybe / Out** buttons;
-  when `rsvp_closed` is true show the event read-only.
-* `next_going`: the next event someone is going to.
-* `needs_answer` (+ `needs_answer_more`): other open asks. `type` `rsvp` → answer the event;
+* `member_cards`: the cards to show first. Every person who has something gets at least one:
+  their next unanswered invitation (`kind: "rsvp_needed"`: show **In / Maybe / Out** buttons for
+  each person in `members`, answered with `POST /events/{id}/rsvp`) and their next event they are
+  going to (`kind: "next_going"`). People whose next event is the same one share a card, so label
+  each button row with that person's first name. All `rsvp_needed` cards come first, then
+  `next_going`, each soonest first. Invitations whose reply deadline has passed are not shown as
+  a card (they are still in the calendar).
+* `rsvp_needed` and `next_going`: the single-card form of the above (the family's soonest only).
+  Kept for older app versions; new code should use `member_cards`.
+* `needs_answer` (+ `needs_answer_more`): other open asks, not repeating anything on a `rsvp_needed` card. `type` `rsvp` → answer the event;
   `referee` / `official` → accept or decline `signup_id`.
 * `open_tasks`, `dues` (money), `news` (cards), `forms_to_complete`.
 

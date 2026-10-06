@@ -240,6 +240,17 @@ class HeroOut(Schema):
     rsvp_closed: bool
 
 
+class CardMemberOut(Schema):
+    member_id: uuid.UUID
+    attendance: AttendanceOut
+
+
+class MemberCardOut(Schema):
+    kind: str = Field(description="`rsvp_needed` (answer with POST /events/{id}/rsvp; the deadline has not passed) or `next_going` (someone's next event they are going to). Ignore unknown kinds.")
+    event: EventOut
+    members: list[CardMemberOut] = Field(description="Everyone this card is for: people whose next event of this kind is the same one share a card. Never empty.")
+
+
 class NeedsAnswerOut(Schema):
     type: str = Field(description="`rsvp` (answer with POST /events/{id}/rsvp), `referee` or `official` (answer the sign-up).")
     event: EventOut
@@ -274,6 +285,12 @@ class FormToCompleteOut(Schema):
 
 
 class HomeOut(Schema):
+    member_cards: list[MemberCardOut] = Field(
+        description=(
+            "At least one card for every person who has something: all `rsvp_needed` cards first, then `next_going`, each soonest first. "
+            "Replaces `rsvp_needed` and `next_going`, which stay for older app versions. Open asks shown here are left out of `needs_answer`."
+        )
+    )
     rsvp_needed: HeroOut | None = Field(description="The soonest invitation nobody has answered yet. Shown read-only when `rsvp_closed`.")
     next_going: HeroOut | None = Field(description="The soonest event someone is going to.")
     needs_answer: list[NeedsAnswerOut] = Field(description="Other open asks (excluding `rsvp_needed`), soonest first, at most 5.")

@@ -387,6 +387,24 @@
         "title": "CalendarOut",
         "type": "object"
       },
+      "CardMemberOut": {
+        "properties": {
+          "attendance": {
+            "$ref": "#/components/schemas/AttendanceOut"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id",
+          "attendance"
+        ],
+        "title": "CardMemberOut",
+        "type": "object"
+      },
       "CartDiscountOut": {
         "properties": {
           "amount": {
@@ -2023,6 +2041,14 @@
             "title": "Forms To Complete",
             "type": "array"
           },
+          "member_cards": {
+            "description": "At least one card for every person who has something: all `rsvp_needed` cards first, then `next_going`, each soonest first. Replaces `rsvp_needed` and `next_going`, which stay for older app versions. Open asks shown here are left out of `needs_answer`.",
+            "items": {
+              "$ref": "#/components/schemas/MemberCardOut"
+            },
+            "title": "Member Cards",
+            "type": "array"
+          },
           "needs_answer": {
             "description": "Other open asks (excluding `rsvp_needed`), soonest first, at most 5.",
             "items": {
@@ -2078,6 +2104,7 @@
           }
         },
         "required": [
+          "member_cards",
           "rsvp_needed",
           "next_going",
           "needs_answer",
@@ -2261,6 +2288,33 @@
           "mfa"
         ],
         "title": "MeOut",
+        "type": "object"
+      },
+      "MemberCardOut": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "kind": {
+            "description": "`rsvp_needed` (answer with POST /events/{id}/rsvp; the deadline has not passed) or `next_going` (someone's next event they are going to). Ignore unknown kinds.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "members": {
+            "description": "Everyone this card is for: people whose next event of this kind is the same one share a card. Never empty.",
+            "items": {
+              "$ref": "#/components/schemas/CardMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "event",
+          "members"
+        ],
+        "title": "MemberCardOut",
         "type": "object"
       },
       "MetaOut": {
@@ -6280,7 +6334,7 @@
     },
     "/api/app/v1/home": {
       "get": {
-        "description": "Everything the Home screen shows, capped the way the web app caps it: the next\nunanswered invitation, the next event someone is going to, other open asks, free\ntask slots, open dues, the latest news and forms still to fill in.",
+        "description": "Everything the Home screen shows, capped the way the web app caps it: `member_cards`\n(per person, their next unanswered invitation and their next event they are going to),\nother open asks, free task slots, open dues, the latest news and forms still to fill\nin. `rsvp_needed` and `next_going` are the older single-card form of `member_cards`.",
         "operationId": "appapi_routers_member_home",
         "parameters": [
           {

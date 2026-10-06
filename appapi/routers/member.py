@@ -46,11 +46,12 @@ def _hero(attendance, *, closed=False) -> dict | None:
 
 @router.get("/home", response={200: HomeOut, **ERRORS}, summary="Home screen")
 def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_HELP)] = None):
-    """Everything the Home screen shows, capped the way the web app caps it: the next
-    unanswered invitation, the next event someone is going to, other open asks, free
-    task slots, open dues, the latest news and forms still to fill in."""
+    """Everything the Home screen shows, capped the way the web app caps it: `member_cards`
+    (per person, their next unanswered invitation and their next event they are going to),
+    other open asks, free task slots, open dues, the latest news and forms still to fill
+    in. `rsvp_needed` and `next_going` are the older single-card form of `member_cards`."""
     scope = club_scope(request)
-    summary = home_summary(scope.club, scope.people_for(member_id), officials_enabled=scope.feature("officials"))
+    summary = home_summary(scope.club, scope.people_for(member_id), officials_enabled=scope.feature("officials"), exclude_card_rows=True)
 
     needs_answer = []
     for row in summary["needs_answer"]:
@@ -75,6 +76,7 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
     return {
         "rsvp_needed": _hero(summary["hero_attendance"], closed=summary["rsvp_closed"]),
         "next_going": _hero(summary["going_attendance"]),
+        "member_cards": [{"kind": card["kind"], "event": event_out(card["event"]), "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]]} for card in summary["member_cards"]],
         "needs_answer": needs_answer,
         "needs_answer_more": summary["needs_answer_total"] - len(summary["needs_answer"]),
         "open_tasks": [{"id": task.pk, "event_id": task.event_id, "event_title": task.event.title, "event_start": task.event.start, "title": task.title, "open_count": task.open_count} for task in summary["open_tasks"]],
