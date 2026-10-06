@@ -595,3 +595,45 @@ class FlagPerUserGrantScopingTests(TestCase):
         self.flag.users.add(self.user)
 
         self.assertTrue(flag_is_active(self.request_for(None), "evaluations"))
+
+
+class GunicornPostForkTests(TestCase):
+    """gunicorn.conf.py's post_fork: a worker must not inherit the master's cache clients (the
+    master's scheduler thread may hold the Redis pool's lock when the worker is forked, which
+    wedges every Redis call in that worker with ChildDeadlockedError)."""
+
+    def load_config(self):
+        import importlib.util
+        from pathlib import Path
+
+        spec = importlib.util.spec_from_file_location("gunicorn_conf_under_test", Path(__file__).resolve().parent.parent / "gunicorn.conf.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_post_fork_replaces_the_inherited_cache_clients(self):
+        from django.core.cache import caches
+
+        inherited = caches["default"]
+
+        self.load_config().post_fork(server=None, worker=None)
+
+        self.assertIsNot(caches["default"], inherited)
+
+    def test_post_fork_drops_the_inherited_redis_pools(self):
+        from django_redis.pool import ConnectionFactory
+
+        ConnectionFactory._pools["inherited-from-master"] = object()
+        self.addCleanup(ConnectionFactory._pools.pop, "inherited-from-master", None)
+
+        self.load_config().post_fork(server=None, worker=None)
+
+        self.assertNotIn("inherited-from-master", ConnectionFactory._pools)
+
+    def test_the_cache_still_works_after_post_fork(self):
+        from django.core.cache import cache
+
+        self.load_config().post_fork(server=None, worker=None)
+
+        cache.set("post-fork-check", "ok", 5)
+        self.assertEqual(cache.get("post-fork-check"), "ok")
