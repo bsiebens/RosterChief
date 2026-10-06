@@ -56,10 +56,11 @@ def event_tasks(event, me) -> list:
     return tasks
 
 
-def member_event_view(event, club, people, me, *, officials_enabled: bool, now=None) -> dict:
+def member_event_view(event, club, people, me, *, officials_enabled: bool, include_declined: bool = False, now=None) -> dict:
     """Keys: ``rsvp_closed``, ``started``, ``lineup`` (the published one or ``None``) and
     ``lineup_categories``; ``referee_signups`` / ``official_signups`` (managed people's
-    open or accepted invites); ``tasks``; ``your_answers`` (``{"member", "attendance",
+    open or accepted invites -- plus declined ones until the event starts, with
+    ``include_declined``, as the app API's calendar does); ``tasks``; ``your_answers`` (``{"member", "attendance",
     "membership"}`` per invited managed person); ``blocked_signups`` (``{"member",
     "requirements"}`` for managed people kept off by onboarding); ``squad_summary``."""
     now = now or timezone.now()
@@ -83,10 +84,15 @@ def member_event_view(event, club, people, me, *, officials_enabled: bool, now=N
     if not people:
         return view
 
-    open_statuses = [RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED]
-    view["referee_signups"] = list(RefereeSignup.objects.filter(event=event, member__in=people, status__in=open_statuses).select_related("member"))
+    def signups(model):
+        statuses = [model.Status.INVITED, model.Status.ACCEPTED]
+        if include_declined and not view["started"]:
+            statuses.append(model.Status.DECLINED)
+        return list(model.objects.filter(event=event, member__in=people, status__in=statuses).select_related("member"))
+
+    view["referee_signups"] = signups(RefereeSignup)
     if officials_enabled:
-        view["official_signups"] = list(OfficialSignup.objects.filter(event=event, member__in=people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED]).select_related("member"))
+        view["official_signups"] = signups(OfficialSignup)
 
     managed_ids = [person.pk for person in people]
     attendances_by_member = {attendance.member_id: attendance for attendance in Attendance.objects.filter(event=event, member_id__in=managed_ids).select_related("member")}

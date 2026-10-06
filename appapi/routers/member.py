@@ -113,6 +113,7 @@ def calendar(
         source = row.get("attendance") or row.get("signup")
         items.append(
             {
+                "id": f"{row['type']}:{row['member'].pk}:{row['event'].pk}",
                 "type": row["type"],
                 "event": event_out(row["event"]),
                 "member_id": row["member"].pk,
@@ -131,10 +132,11 @@ def _club_event(scope, event_id) -> Event:
 @router.get("/events/{event_id}", response={200: EventDetailOut, **ERRORS}, summary="One event")
 def event_detail(request, event_id: uuid.UUID):
     """The event as the account's family sees it: their answers, a published line-up,
-    sign-ups, tasks and the squad's response counts."""
+    sign-ups (a declined one stays until the game starts, as in the calendar), tasks and the
+    squad's response counts."""
     scope = club_scope(request)
     event = _club_event(scope, event_id)
-    view = member_event_view(event, scope.club, scope.people, scope.me, officials_enabled=scope.feature("officials"))
+    view = member_event_view(event, scope.club, scope.people, scope.me, officials_enabled=scope.feature("officials"), include_declined=True)
     lineup = view["lineup"]
 
     answers = []

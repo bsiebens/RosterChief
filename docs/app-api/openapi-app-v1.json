@@ -360,6 +360,11 @@
           "event": {
             "$ref": "#/components/schemas/EventOut"
           },
+          "id": {
+            "description": "Unique and stable for this row (`{type}:{member_id}:{event_id}`). The same game can appear several times -- one row per person and role -- so key lists on this, never on `event.id`.",
+            "title": "Id",
+            "type": "string"
+          },
           "member_id": {
             "format": "uuid",
             "title": "Member Id",
@@ -396,6 +401,7 @@
           }
         },
         "required": [
+          "id",
           "type",
           "event",
           "member_id",
@@ -5399,7 +5405,7 @@
     },
     "/api/app/v1/events/{event_id}": {
       "get": {
-        "description": "The event as the account's family sees it: their answers, a published line-up,\nsign-ups, tasks and the squad's response counts.",
+        "description": "The event as the account's family sees it: their answers, a published line-up,\nsign-ups (a declined one stays until the game starts, as in the calendar), tasks and the\nsquad's response counts.",
         "operationId": "appapi_routers_member_event_detail",
         "parameters": [
           {
