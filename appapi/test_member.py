@@ -165,6 +165,24 @@ class CalendarTests(ClubApiTestCase):
 
         self.assertEqual([(row["type"], row["event"].title) for row in rows], [("official", "Ahead")])
 
+    def test_looking_back_keeps_past_trainings_and_other_events_you_are_invited_to(self):
+        now = timezone.now()
+        past = now - datetime.timedelta(days=3)
+        kinds = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING, Event.EventKind.SOCIAL, Event.EventKind.OTHER]
+        for kind in kinds:
+            self.invite(self.event(title=f"Past {kind}", kind=kind, start=past))
+        # Even a past game you also refereed stays, as the player invitation.
+        refereed = self.event(title="Played and refereed", kind=Event.EventKind.GAME, start=past)
+        self.invite(refereed)
+        RefereeSignup.objects.create(event=refereed, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+
+        from_ = (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        items = self.get("/calendar", **{"from": from_}).json()["items"]
+
+        self.assertEqual(sorted(item["event"]["title"] for item in items), sorted([*(f"Past {kind}" for kind in kinds), "Played and refereed"]))
+        self.assertEqual({item["type"] for item in items}, {"rsvp"})
+        self.assertEqual([item["event"]["title"] for item in self.get("/calendar", kind="training", **{"from": from_}).json()["items"]], ["Past training"])
+
     def test_game_status(self):
         now = timezone.now()
         hour = datetime.timedelta(hours=1)
