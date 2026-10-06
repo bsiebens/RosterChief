@@ -282,7 +282,19 @@ carries `member_id`, so label rows with that person's first name.
 
 `GET /calendar?from=…&to=…&kind=game|training&member_id=…` returns everything in the window,
 soonest first. The window defaults to the next 92 days and may not be longer; for the next page,
-pass the previous `to` as `from`. Row types:
+pass the previous `to` as `from`.
+
+**One game can appear several times.** A row is one *person in one role* for one event, so a
+family where one child plays, the parent can referee and another child can officiate gets three
+rows for the same game (`rsvp`, `referee`, `official`), each with its own `member_id`. They share
+`event.id`, so **key the list on the row's `id`** (`{type}:{member_id}:{event_id}`, unique and
+stable), never on `event.id` -- keying on the event collapses them and hides the duties. Render
+every row; group by event only as a presentation choice, and then still list each role. The
+`official` rows only exist while the club has the officials feature (`features.officials` on
+`GET /context`). The same applies to `GET /events/{id}`: its `answers`, `referee_signups` and
+`official_signups` are the three roles for that one game.
+
+Row types:
 
 | `type` | Show | Action |
 |---|---|---|
@@ -293,8 +305,9 @@ pass the previous `to` as `from`. Row types:
 ### Event
 
 `GET /events/{id}`: the event, `answers` (one per invited managed person, with their `note`),
-a published `lineup`, `referee_signups` / `official_signups`, `tasks`, `blocked` people and the
-squad's `squad_summary` (counts only).
+a published `lineup`, `referee_signups` / `official_signups` (invited, accepted, or declined until
+the game starts -- the same rule as the calendar), `tasks`, `blocked` people and the squad's
+`squad_summary` (counts only).
 
 **Answering** (`POST /events/{id}/rsvp`):
 

@@ -66,3 +66,32 @@ class FamilyWithThreeRolesTests(ClubApiTestCase):
         items = self.get("/calendar").json()["items"]
 
         self.assertEqual(sorted(item["type"] for item in items), ["referee", "rsvp"])
+
+    def test_each_calendar_row_has_a_unique_stable_id(self):
+        items = self.get("/calendar").json()["items"]
+
+        ids = [item["id"] for item in items]
+        self.assertEqual(len(set(ids)), 3)  # three rows, one game: the event id alone can't tell them apart
+        self.assertEqual(sorted(ids), sorted([f"rsvp:{self.child.pk}:{self.game.pk}", f"referee:{self.member.pk}:{self.game.pk}", f"official:{self.sibling.pk}:{self.game.pk}"]))
+        self.assertEqual(ids, [item["id"] for item in self.get("/calendar").json()["items"]])
+
+    def test_event_detail_keeps_a_declined_duty_until_the_game_starts_like_the_calendar(self):
+        from events.models import OfficialSignup, RefereeSignup
+
+        RefereeSignup.objects.filter(event=self.game, member=self.member).update(status=RefereeSignup.Status.DECLINED)
+        OfficialSignup.objects.filter(event=self.game, member=self.sibling).update(status=OfficialSignup.Status.DECLINED)
+
+        detail = self.get(f"/events/{self.game.pk}").json()
+        calendar = {item["type"]: item["status"] for item in self.get("/calendar").json()["items"]}
+
+        self.assertEqual([signup["status"] for signup in detail["referee_signups"]], ["declined"])
+        self.assertEqual([signup["status"] for signup in detail["official_signups"]], ["declined"])
+        self.assertEqual((calendar["referee"], calendar["official"]), ("declined", "declined"))
+
+    def test_a_declined_duty_leaves_event_detail_once_the_game_has_started(self):
+        from events.models import RefereeSignup
+
+        RefereeSignup.objects.filter(event=self.game, member=self.member).update(status=RefereeSignup.Status.DECLINED)
+        Event.objects.filter(pk=self.game.pk).update(start=timezone.now() - datetime.timedelta(minutes=5))
+
+        self.assertEqual(self.get(f"/events/{self.game.pk}").json()["referee_signups"], [])

@@ -317,6 +317,7 @@ class HomeOut(Schema):
 
 
 class CalendarItemOut(Schema):
+    id: str = Field(description="Unique and stable for this row (`{type}:{member_id}:{event_id}`). The same game can appear several times -- one row per person and role -- so key lists on this, never on `event.id`.")
     type: str = Field(description="`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.")
     event: EventOut
     member_id: uuid.UUID
