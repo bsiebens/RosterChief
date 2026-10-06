@@ -275,9 +275,11 @@ carries `member_id`, so label rows with that person's first name.
   each button row with that person's first name. All `rsvp_needed` cards come first, then
   `next_going`, each soonest first. Invitations whose reply deadline has passed are not shown as
   a card (they are still in the calendar).
-* Every card, hero and `needs_answer` row has `open_tasks`: how many of that event's tasks still
-  have a free slot (the same number the calendar shows). Show it as a small "N open tasks" badge
-  on the card when it is above 0; the tasks and claiming are on `GET /events/{id}` → `tasks`.
+* Every card, hero and `needs_answer` row has two task counts for its event: `open_tasks`
+  (tasks that still have a free slot) and `total_tasks` (all its tasks), the same numbers the
+  calendar shows. Show "2 of 5 tasks open" straight from them (hide it when `total_tasks` is 0)
+  instead of fetching each event; the tasks themselves and claiming are on
+  `GET /events/{id}` → `tasks`.
 * `rsvp_needed` and `next_going`: the single-card form of the above (the family's soonest only).
   Kept for older app versions; new code should use `member_cards`.
 * `needs_answer` (+ `needs_answer_more`): other open asks, not repeating anything on a `rsvp_needed` card. `type` `rsvp` → answer the event;
@@ -300,9 +302,11 @@ every row; group by event only as a presentation choice, and then still list eac
 `GET /context`). The same applies to `GET /events/{id}`: its `answers`, `referee_signups` and
 `official_signups` are the three roles for that one game.
 
-Every row also has `open_tasks`: how many of that event's tasks (bring fruit, drive, ...) still
-have a free slot, the same for each row of one event. Use it for a small "N open tasks" badge;
-the tasks themselves, and claiming them, are on `GET /events/{id}` → `tasks`.
+Every row also carries the event's task counts, so the list can show them without a call per
+event: `open_tasks` (how many of that event's tasks, such as bring fruit or drive, still have a
+free slot) and `total_tasks` (how many tasks it has in all), identical for each row of one event.
+"2 of 5 tasks open" is `open_tasks` of `total_tasks`; hide it when `total_tasks` is 0. Only
+fetch `GET /events/{id}` → `tasks` when the user opens the event to see or claim them.
 
 Row types:
 

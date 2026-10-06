@@ -399,6 +399,11 @@
             "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.",
             "title": "Status"
           },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`. The same for every row of one event.",
+            "title": "Total Tasks",
+            "type": "integer"
+          },
           "type": {
             "description": "`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.",
             "title": "Type",
@@ -413,7 +418,8 @@
           "status",
           "signup_id",
           "blocked_requirements",
-          "open_tasks"
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "CalendarItemOut",
         "type": "object"
@@ -2079,13 +2085,19 @@
           "rsvp_closed": {
             "title": "Rsvp Closed",
             "type": "boolean"
+          },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
           }
         },
         "required": [
           "event",
           "attendance",
           "rsvp_closed",
-          "open_tasks"
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "HeroOut",
         "type": "object"
@@ -2381,13 +2393,19 @@
             "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
             "title": "Open Tasks",
             "type": "integer"
+          },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
           }
         },
         "required": [
           "kind",
           "event",
           "members",
-          "open_tasks"
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "MemberCardOut",
         "type": "object"
@@ -2495,6 +2513,11 @@
             "title": "Status",
             "type": "string"
           },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
+          },
           "type": {
             "description": "`rsvp` (answer with POST /events/{id}/rsvp), `referee` or `official` (answer the sign-up).",
             "title": "Type",
@@ -2507,7 +2530,8 @@
           "member_id",
           "status",
           "signup_id",
-          "open_tasks"
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "NeedsAnswerOut",
         "type": "object"

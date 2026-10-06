@@ -834,6 +834,9 @@ class CalendarOpenTasksTests(ClubApiTestCase):
     def counts(self, **params):
         return {item["event"]["title"]: item["open_tasks"] for item in self.get("/calendar", **params).json()["items"]}
 
+    def totals(self, **params):
+        return {item["event"]["title"]: item["total_tasks"] for item in self.get("/calendar", **params).json()["items"]}
+
     def test_calendar_rows_count_the_tasks_that_still_have_a_free_slot(self):
         busy = self.event(title="Busy", start=self.soon)
         quiet = self.event(title="Quiet", start=self.soon + datetime.timedelta(days=1))
@@ -846,6 +849,7 @@ class CalendarOpenTasksTests(ClubApiTestCase):
         EventTaskClaim.objects.create(task=fruit, member=self.child)  # one of two slots: still open
 
         self.assertEqual(self.counts(), {"Busy": 2, "Quiet": 0})
+        self.assertEqual(self.totals(), {"Busy": 3, "Quiet": 0})  # the full whistle task still counts in the total
 
     def test_a_task_stops_counting_once_every_slot_is_taken(self):
         event = self.event(title="Game")
@@ -856,7 +860,7 @@ class CalendarOpenTasksTests(ClubApiTestCase):
         EventTaskClaim.objects.create(task=task, member=self.child)
         EventTaskClaim.objects.create(task=task, member=self.member)
 
-        self.assertEqual(self.counts(), {"Game": 0})
+        self.assertEqual((self.counts(), self.totals()), ({"Game": 0}, {"Game": 1}))
 
     def test_every_row_of_one_event_shows_the_same_count(self):
         game = self.event(title="Game", kind=Event.EventKind.GAME)
@@ -866,7 +870,7 @@ class CalendarOpenTasksTests(ClubApiTestCase):
 
         items = self.get("/calendar").json()["items"]
 
-        self.assertEqual(sorted((item["type"], item["open_tasks"]) for item in items), [("referee", 1), ("rsvp", 1)])
+        self.assertEqual(sorted((item["type"], item["open_tasks"], item["total_tasks"]) for item in items), [("referee", 1, 1), ("rsvp", 1, 1)])
 
 
 class HomeOpenTasksTests(ClubApiTestCase):
@@ -887,13 +891,14 @@ class HomeOpenTasksTests(ClubApiTestCase):
 
         home = self.get("/home").json()
 
-        self.assertEqual({(card["kind"], card["event"]["title"]): card["open_tasks"] for card in home["member_cards"]}, {("rsvp_needed", "Card game"): 2, ("next_going", "Party"): 1})
+        self.assertEqual({(card["kind"], card["event"]["title"]): (card["open_tasks"], card["total_tasks"]) for card in home["member_cards"]}, {("rsvp_needed", "Card game"): (2, 2), ("next_going", "Party"): (1, 1)})
         self.assertEqual((home["rsvp_needed"]["open_tasks"], home["next_going"]["open_tasks"]), (2, 1))
-        self.assertEqual([(row["event"]["title"], row["open_tasks"]) for row in home["needs_answer"]], [("Meeting", 0)])
+        self.assertEqual((home["rsvp_needed"]["total_tasks"], home["next_going"]["total_tasks"]), (2, 1))
+        self.assertEqual([(row["event"]["title"], row["open_tasks"], row["total_tasks"]) for row in home["needs_answer"]], [("Meeting", 0, 1)])
 
     def test_an_event_without_tasks_counts_zero(self):
         self.invite(self.event(title="Plain"), member=self.child)
 
         home = self.get("/home").json()
 
-        self.assertEqual([card["open_tasks"] for card in home["member_cards"]], [0])
+        self.assertEqual([(card["open_tasks"], card["total_tasks"]) for card in home["member_cards"]], [(0, 0)])
