@@ -1,6 +1,6 @@
 [project]
 name = "rosterchief"
-version = "0.8.5"
+version = "0.8.6"
 requires-python = ">=3.14"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
@@ -41,6 +41,7 @@ dev = [
     "coverage>=7.16.2",
     "django-browser-reload>=1.21.0",
     "ruff>=0.16.9",
+    "tblib>=3.2.2",
 ]
 
 [tool.ruff]

@@ -37,9 +37,7 @@ cannot survive the process. It only pays off against a real PostgreSQL
 """
 
 import logging
-import sys
 import tempfile
-import traceback
 import unittest
 import zlib
 
@@ -179,23 +177,6 @@ class RosterChiefTestRunner(DiscoverRunner):
         # Load failures (_FailedTest) are kept in every slice so a broken module fails
         # every shard instead of silently vanishing from all but one.
         return unittest.TestSuite(test for test in iter_test_cases(tests) if isinstance(test, unittest.loader._FailedTest) or zlib.crc32(f"{type(test).__module__}.{type(test).__qualname__}".encode()) % total == index)
-
-    def run_suite(self, suite, **kwargs):
-        """Convert worker exceptions into a picklable test result.
-
-        multiprocessing cannot pickle traceback objects, and a failed test that bubbles
-        through a worker can hit exactly that path on CI. We format the exception into a
-        plain string before returning it, so the parent process still sees the real error
-        without tripping over Python's traceback serialization.
-        """
-        try:
-            return super().run_suite(suite, **kwargs)
-        except Exception as exc:
-            logging.exception("Test worker hit an exception that would be unpickleable across processes; serializing it into the result instead.")
-            result = unittest.TextTestResult(stream=sys.stderr, descriptions=True, verbosity=1)
-            result.testsRun = 1
-            result.errors.append((type(exc).__name__, "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))))
-            return result
 
     def setup_test_environment(self, **kwargs):
         settings.PASSWORD_HASHERS = TEST_PASSWORD_HASHERS
