@@ -14,6 +14,7 @@ from PIL import Image
 from waffle import get_waffle_flag_model
 
 from appapi.presenters import game_status
+from appapi.scope import ClubScope
 from club.models import ClubMembership, OnboardingRequirement
 from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
 from events.services.agenda import member_agenda
@@ -234,6 +235,30 @@ class CalendarTests(ClubApiTestCase):
         self.assertEqual(sorted(item["event"]["title"] for item in items), sorted([*(f"Past {kind}" for kind in kinds), "Played and refereed"]))
         self.assertEqual({item["type"] for item in items}, {"rsvp"})
         self.assertEqual([item["event"]["title"] for item in self.get("/calendar", kind="training", **{"from": from_}).json()["items"]], ["Past training"])
+
+    def test_a_declined_sign_up_stays_until_the_game_starts(self):
+        now = timezone.now()
+        hour = datetime.timedelta(hours=1)
+        upcoming = self.event(title="Upcoming", kind=Event.EventKind.GAME, start=now + 2 * hour)
+        started = self.event(title="Started", kind=Event.EventKind.GAME, start=now - hour)
+        Event.objects.filter(pk=started.pk).update(end=now + hour)  # still being played
+        for event in (upcoming, started):
+            RefereeSignup.objects.create(event=event, member=self.member, status=RefereeSignup.Status.DECLINED)
+            OfficialSignup.objects.create(event=event, member=self.member, status=OfficialSignup.Status.DECLINED)
+        from_ = (now - datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with patch.object(ClubScope, "feature", return_value=True):
+            items = self.get("/calendar", **{"from": from_}).json()["items"]
+
+        # Kept (as "declined") while the game is still ahead; dropped once it has started.
+        self.assertEqual([(item["type"], item["event"]["title"], item["status"]) for item in items], [("referee", "Upcoming", "declined"), ("official", "Upcoming", "declined")])
+
+    def test_the_web_agenda_still_leaves_declined_sign_ups_out(self):
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        RefereeSignup.objects.create(event=game, member=self.member, status=RefereeSignup.Status.DECLINED)
+
+        self.assertEqual(member_agenda(self.club, [self.member]), [])
+        self.assertEqual([row["type"] for row in member_agenda(self.club, [self.member], include_declined=True)], ["referee"])
 
     def test_game_status(self):
         now = timezone.now()

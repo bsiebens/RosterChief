@@ -280,7 +280,7 @@ pass the previous `to` as `from`. Row types:
 | `type` | Show | Action |
 |---|---|---|
 | `rsvp` | the event with the person's `status` | open the event |
-| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`) or a confirmed duty (`accepted`) | respond to `signup_id` |
+| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`), a confirmed duty (`accepted`) or a "can't make it" (`declined`, kept until the game starts) | respond to `signup_id` (a declined one can still be accepted) |
 | `blocked` | the event greyed out with `blocked_requirements` ("Medical certificate") | none: the club must clear it |
 
 ### Event

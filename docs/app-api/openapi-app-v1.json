@@ -351,7 +351,7 @@
                 "type": "null"
               }
             ],
-            "description": "Attendance status for `rsvp`, sign-up status for `referee`/`official`, null for `blocked`.",
+            "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.",
             "title": "Status"
           },
           "type": {
@@ -4055,7 +4055,7 @@
             "type": "string"
           },
           "status": {
-            "description": "`invited`, `accepted` (`declined` ones are left out).",
+            "description": "`invited`, `accepted` or `declined`.",
             "title": "Status",
             "type": "string"
           }
@@ -4841,7 +4841,7 @@
     },
     "/api/app/v1/calendar": {
       "get": {
-        "description": "Invitations, referee/official sign-ups (open or accepted) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. Cancelled events\nare left out, and so are referee/official sign-ups for games that are already over (only\nyour own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`.",
+        "description": "Invitations, referee/official sign-ups (open, accepted or declined) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. A declined referee/official\nsign-up (`status` `declined`) stays until the game starts, in case they change their mind. Cancelled events\nare left out, and so are referee/official sign-ups for games that are already over (only\nyour own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`.",
         "operationId": "appapi_routers_member_calendar",
         "parameters": [
           {

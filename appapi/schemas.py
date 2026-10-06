@@ -212,7 +212,7 @@ class AttendanceOut(Schema):
 class SignupOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
-    status: str = Field(description="`invited`, `accepted` (`declined` ones are left out).")
+    status: str = Field(description="`invited`, `accepted` or `declined`.")
 
 
 class AuthorOut(Schema):
@@ -309,7 +309,7 @@ class CalendarItemOut(Schema):
     type: str = Field(description="`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.")
     event: EventOut
     member_id: uuid.UUID
-    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status for `referee`/`official`, null for `blocked`.")
+    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.")
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
 
