@@ -3,8 +3,9 @@
 Eligibility comes from teams.RefereeProfile -- a per-member level + validity
 (unrelated to members.Group), with the *level* (teams.RefereeLevel) owning
 which teams it qualifies for. A profile with no level, or one whose validity
-has lapsed, is not eligible for anything -- see RefereeProfile.eligible_teams,
-the single definition this module reads through. Availability conflicts (the
+has lapsed, is not eligible for anything, and a team explicitly marked as not allowed
+for a profile is subtracted from what its level allows -- see
+RefereeProfile.eligible_teams, the single definition this module reads through. Availability conflicts (the
 member is expected elsewhere at an overlapping time) are surfaced as a
 warning only -- never a hard block, since a human may know the two
 commitments don't actually clash (enough travel time, one is optional).
@@ -32,7 +33,7 @@ from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSi
 from events.services.attendance import effective_members
 from members.models import Member
 from notifications.services import notify_members
-from teams.models import RefereeLevel, StaffAssignment, Team
+from teams.models import RefereeLevel, RefereeProfile, StaffAssignment, Team
 
 
 class RefereeAssignmentError(Exception):
@@ -54,24 +55,43 @@ def needs_referee_management(event) -> bool:
 
 
 def eligible_referees(event):
-    """Members who could referee `event`: their RefereeProfile has a level
-    qualifying for one of its club-managed teams (directly, or via whatever
-    that level inherits from), and is currently valid, minus whoever is
-    already assigned. Empty unless needs_referee_management.
+    """Members who could referee `event`: their RefereeProfile is currently valid and
+    allows one of its club-managed teams -- what the level qualifies for (directly, or via
+    whatever that level inherits from) minus the teams explicitly marked as not allowed
+    for that person -- minus whoever is already assigned. Empty unless
+    needs_referee_management.
 
     Levels resolved to ids first (RefereeLevel.eligible_team_ids can't be
-    expressed as a single ORM lookup once inheritance is transitive) rather
-    than the old flat `level__teams__id__in` filter -- a club has a handful
-    of levels, so this stays cheap."""
+    expressed as a single ORM lookup once inheritance is transitive), and the
+    profile check done per profile for the same reason plus the exclusions -- a
+    club has a handful of levels and a few dozen referees, so this stays cheap."""
     if not needs_referee_management(event):
         return Member.objects.none()
 
     team_ids = set(event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
-    qualifying_level_ids = [level.pk for level in RefereeLevel.objects.filter(club=event.club) if level.eligible_team_ids() & team_ids]
+    team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(event.club)
+    profiles = RefereeProfile.objects.filter(club=event.club, level__isnull=False, valid_until__gte=timezone.localdate()).prefetch_related("excluded_teams")
+    member_ids = [profile.member_id for profile in profiles if profile.eligible_team_ids(team_ids_by_level.get(profile.level_id, set())) & team_ids]
     assigned_ids = event.referees.values_list("member_id", flat=True)
-    today = timezone.localdate()
 
-    return Member.objects.filter(referee_profiles__club=event.club, referee_profiles__level_id__in=qualifying_level_ids, referee_profiles__valid_until__gte=today).exclude(pk__in=assigned_ids).distinct()
+    return Member.objects.filter(pk__in=member_ids).exclude(pk__in=assigned_ids).distinct()
+
+
+def retract_ineligible_invites(profile):
+    """After a profile's exclusions (or level) changed: withdraw the *open* invites
+    (INVITED, upcoming events) for games the person may no longer referee, so they
+    stop seeing them in the app. Accepted sign-ups and real assignments are left alone --
+    those are a person's commitments, for the club's managers to sort out. Returns how
+    many invites were withdrawn."""
+    allowed = profile.eligible_team_ids() if profile.level_id else set()
+    withdrawn = 0
+    invites = RefereeSignup.objects.filter(member=profile.member, event__club=profile.club, event__start__gt=timezone.now(), status=RefereeSignup.Status.INVITED).select_related("event")
+    for invite in invites:
+        club_teams = set(invite.event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
+        if not (allowed & club_teams):
+            invite.delete()
+            withdrawn += 1
+    return withdrawn
 
 
 def conflicting_events_for_members(members, event):
@@ -130,6 +150,12 @@ def assign_referee(event, member, *, assigned_by):
     # as "invited, no response yet", and one never invited had no signup row
     # at all, so the game never showed up among their own duties in the app.
     RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    if assigned_by is not None:
+        # A staff pick, made in the management app: the person didn't take this themselves, so
+        # tell them. (Self-service accepts pass assigned_by=None -- they just did it.)
+        when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
+        body = _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": when}
+        notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event)
     return referee
 
 
@@ -147,8 +173,19 @@ def add_external_referee(event, name, *, assigned_by):
     return EventReferee.objects.create(event=event, external_name=name, assigned_by=assigned_by)
 
 
+@transaction.atomic
 def remove_referee(referee):
+    """Staff taking a referee off a game (management app). The person's own sign-up is
+    set to declined, so the game stops showing as a confirmed duty in their app (and isn't
+    re-offered by the automatic invite sync), and they are told. An external referee has
+    no account behind them: only the assignment goes."""
+    event, member = referee.event, referee.member
     referee.delete()
+    if member is None:
+        return
+    RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.DECLINED, responded_at=timezone.now())
+    body = _("You have been removed as a referee for %(event)s.") % {"event": event.title}
+    notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event)
 
 
 def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
@@ -167,14 +204,16 @@ def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
     return referee
 
 
-def sync_referee_invites(event):
+def sync_referee_invites(event, *, notify=True):
     """Invites every currently-eligible, not-yet-invited referee to `event` --
     the referee-facing counterpart to events.sync_event_attendances, wired
     from the same signal points (events/signals.py's post_save(Event) and
     the Event.teams m2m). Idempotent: only creates rows for members with no
     RefereeSignup at all yet for this event, so an unrelated edit (or a
     second team added later) never re-notifies someone who already
-    responded -- or re-invites someone who already said no."""
+    responded -- or re-invites someone who already said no. ``notify=False`` creates the
+    rows without the "Referee needed" notification (events.services.crew_invites sends one
+    summary per person instead of one per game)."""
     if not needs_referee_management(event):
         return []
 
@@ -184,8 +223,9 @@ def sync_referee_invites(event):
         return []
 
     RefereeSignup.objects.bulk_create([RefereeSignup(event=event, member=member) for member in new_members])
-    body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
-    notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
+    if notify:
+        body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
+        notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
     return new_members
 
 

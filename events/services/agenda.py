@@ -6,8 +6,10 @@ Each row is a dict with ``type`` and ``event`` plus, per type:
 
 * ``rsvp``: ``member`` and ``attendance`` -- an invitation (an Attendance row);
 * ``referee`` / ``official``: ``member`` and ``signup`` -- a referee/official invite
-  (INVITED) or commitment (ACCEPTED); declined ones are left out, and so is any game that
-  has already finished -- looking back you want the games you or your family *played*;
+  (INVITED) or commitment (ACCEPTED), and so is any game that has already finished --
+  looking back you want the games you or your family *played*. Declined ones are left out,
+  unless the caller asks for them (``include_declined``): they stay until the game starts, in
+  case the person changes their mind;
 * ``blocked``: ``member`` and ``requirements`` -- an event the person would be invited to
   but for open onboarding requirements, shown so it doesn't just silently vanish.
 """
@@ -23,7 +25,7 @@ from events.services.attendance import blocked_upcoming_events_for_members
 KIND_FILTERS = {"game": Event.EventKind.GAME, "training": Event.EventKind.TRAINING}
 
 
-def member_agenda(club, people, *, kind: str | None = None, officials_enabled: bool = False, start=None, end=None) -> list[dict]:
+def member_agenda(club, people, *, kind: str | None = None, officials_enabled: bool = False, include_declined: bool = False, start=None, end=None) -> list[dict]:
     """Rows for ``people`` from ``start`` (default: now) up to ``end`` (default: no end),
     soonest first. ``kind`` is a KIND_FILTERS key or None for everything."""
     people = list(people)
@@ -51,12 +53,18 @@ def member_agenda(club, people, *, kind: str | None = None, officials_enabled: b
         attendances = attendances.filter(event__kind=kind_value)
     rows += [{"type": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in attendances]
 
+    def signup_rows(row_type, model):
+        queryset = in_window(not_finished(model.objects.filter(member__in=people, status__in=[model.Status.INVITED, model.Status.ACCEPTED])))
+        if include_declined:
+            # A "no" stays visible until the game starts (the person may change their mind),
+            # which is earlier than the end-of-game cut-off the other sign-ups use.
+            queryset = in_window(model.objects.filter(member__in=people).filter(Q(pk__in=queryset.values("pk")) | Q(status=model.Status.DECLINED, event__start__gte=now)))
+        return [{"type": row_type, "event": signup.event, "member": signup.member, "signup": signup} for signup in queryset.select_related(*related).prefetch_related("event__teams")]
+
     if kind != "training":
-        referee_signups = in_window(not_finished(RefereeSignup.objects.filter(member__in=people, status__in=[RefereeSignup.Status.INVITED, RefereeSignup.Status.ACCEPTED])))
-        rows += [{"type": "referee", "event": signup.event, "member": signup.member, "signup": signup} for signup in referee_signups.select_related(*related).prefetch_related("event__teams")]
+        rows += signup_rows("referee", RefereeSignup)
         if officials_enabled:
-            official_signups = in_window(not_finished(OfficialSignup.objects.filter(member__in=people, status__in=[OfficialSignup.Status.INVITED, OfficialSignup.Status.ACCEPTED])))
-            rows += [{"type": "official", "event": signup.event, "member": signup.member, "signup": signup} for signup in official_signups.select_related(*related).prefetch_related("event__teams")]
+            rows += signup_rows("official", OfficialSignup)
 
     blocked_by_person = blocked_upcoming_events_for_members(people, club)
     for person in people:

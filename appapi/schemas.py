@@ -41,6 +41,16 @@ class MfaState(Schema):
     types: list[str] = Field(description="Enrolled factor types: `totp`, `recovery_codes`, `webauthn`.")
 
 
+class AccountSettingsOut(Schema):
+    email_notifications: Literal["always", "unless_app"] = Field(
+        description="`always`: notifications are also emailed. `unless_app`: not emailed while this account has the app installed (mails with an attachment, such as an invoice, are always sent)."
+    )
+
+
+class AccountSettingsIn(Schema):
+    email_notifications: Literal["always", "unless_app"]
+
+
 class PersonOut(Schema):
     id: uuid.UUID
     first_name: str
@@ -56,6 +66,7 @@ class MeOut(Schema):
     user: UserOut
     member: PersonOut | None = Field(description="The account's own person record, shared by every club it belongs to.")
     mfa: MfaState
+    settings: AccountSettingsOut
 
 
 class ClubFeatures(Schema):
@@ -212,7 +223,7 @@ class AttendanceOut(Schema):
 class SignupOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
-    status: str = Field(description="`invited`, `accepted` (`declined` ones are left out).")
+    status: str = Field(description="`invited`, `accepted` or `declined`.")
 
 
 class AuthorOut(Schema):
@@ -309,7 +320,7 @@ class CalendarItemOut(Schema):
     type: str = Field(description="`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.")
     event: EventOut
     member_id: uuid.UUID
-    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status for `referee`/`official`, null for `blocked`.")
+    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.")
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
 
@@ -429,8 +440,8 @@ class NewsDetailOut(NewsSummaryOut):
 
 
 class NotificationSourceOut(Schema):
-    type: str = Field(description="`news`, `event` or `form_send`. Ignore unknown types.")
-    id: uuid.UUID
+    type: str = Field(description="`news`, `event`, `form_send`, `order` or `calendar`. Ignore unknown types.")
+    id: uuid.UUID | None = Field(description="Null for `calendar`, which has no object: open the Calendar tab.")
     slug: str | None = Field(description="For `news`: open it with GET /news/{slug}.")
 
 

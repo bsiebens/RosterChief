@@ -41,7 +41,13 @@ deploy/cut-release.sh hotfix 0.7.15 <commit>...      # ship main + these develop
 
 It shows what it's about to ship and asks before changing anything (`--yes` skips the prompt).
 It refuses a version that's already tagged or isn't newer than the latest release, and it won't
-run with uncommitted changes. It differs from the manual sequences in two ways:
+run with uncommitted changes. Before it changes anything it **audits the dependencies that would
+ship** -- `pip-audit` on `uv.lock` (as CI's `audit` job does, honouring
+`.github/pip-audit-ignore.txt`) and `npm audit` on the runtime JS. On a finding it prints the
+advisories and the update commands (`uv lock --upgrade-package <name>`, `npm audit fix
+--omit=dev`) and exits without touching anything: fix it on `development`, push, run it again.
+`--skip-audit` bypasses this when the advisory databases are unreachable or a hotfix can't wait.
+It differs from the manual sequences in two ways:
 
 - **The version bump is committed on `development` too**, so `development` stays on the
   current version. A release branch is just `development`'s tip after that bump.
@@ -842,7 +848,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All fourteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
+All fifteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
 `when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
@@ -856,6 +862,7 @@ class every one of them runs through.
 | `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
 | `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
 | `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
+| `sync_crew_invites` | hourly | creates any missing referee/official invites for upcoming home games (a safety net: eligibility can change after a game was scheduled -- a new referee/official, a level's teams, the officials feature switched on) |
 | `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
 | `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
 | `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
@@ -980,7 +987,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the fourteen jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the fifteen jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually

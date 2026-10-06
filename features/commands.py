@@ -73,7 +73,7 @@ class ScheduledJobCommand(MaintenanceAwareCommand):
             action="store_true",
             help="Log every SQL query this run makes, with timing -- for a one-off manual run "
             "you're actively watching, not something the scheduler should ever pass on its own "
-            'ticks (every query, on every scheduled run, would drown the log). The control '
+            "ticks (every query, on every scheduled run, would drown the log). The control "
             'panel\'s own "Run now" button always passes this.',
         )
         return parser

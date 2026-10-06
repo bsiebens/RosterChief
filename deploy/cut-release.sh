@@ -4,6 +4,7 @@
 #   deploy/cut-release.sh release 0.7.14                   # ship development as 0.7.14
 #   deploy/cut-release.sh hotfix 0.7.15 <commit>...        # ship main + these development commits
 #   deploy/cut-release.sh --yes release 0.7.14             # skip the confirmation prompt
+#   deploy/cut-release.sh --skip-audit hotfix 0.7.15 <commit>...   # don't run the dependency audit
 #
 # Runs the "Branching & release model" sequence from DEPLOYMENT.md, end to end except for the
 # merge itself -- merging the PR stays your call, and so does deploying it afterwards
@@ -19,6 +20,13 @@
 #   development gets the same version bump and is pushed as well. The version may equal main's
 #   current one when that release never got tagged (e.g. a CI fix for a failed release build).
 #
+# Before anything is pushed or branched it audits the dependencies that would ship (pip-audit on
+# uv.lock exactly like CI's `audit` job, honouring .github/pip-audit-ignore.txt; npm audit on the
+# runtime JS). If either finds something it prints the findings and the commands to update the
+# packages, then exits without touching anything -- fix on development, then run this again.
+# --skip-audit is the escape hatch for when the advisory databases can't be reached or a hotfix
+# can't wait.
+#
 # Refuses to run with uncommitted changes to tracked files, a version that's already tagged or
 # not newer than the latest tag, or a release/hotfix branch that already exists.
 set -Eeuo pipefail
@@ -28,7 +36,15 @@ die() { echo "error: $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 
 ASSUME_YES=0
-if [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]]; then ASSUME_YES=1; shift; fi
+SKIP_AUDIT=0
+while [[ "${1:-}" == -* ]]; do
+    case "$1" in
+        --yes|-y) ASSUME_YES=1 ;;
+        --skip-audit) SKIP_AUDIT=1 ;;
+        *) usage ;;
+    esac
+    shift
+done
 [[ $# -ge 2 ]] || usage
 
 KIND="$1"; VERSION="$2"; shift 2
@@ -76,6 +92,84 @@ for commit in ${COMMITS[@]+"${COMMITS[@]}"}; do
     git rev-parse -q --verify "$commit^{commit}" >/dev/null || die "unknown commit '$commit'"
     git merge-base --is-ancestor "$commit" development || die "$commit is not on development -- land the fix there first"
 done
+
+# --- dependency audit ---------------------------------------------------------
+# Audits the lock files as they are at the ref that would ship (development for a release,
+# origin/main for a hotfix), from a scratch copy, so the working tree is never touched.
+audit_dependencies() {
+    local ref="$1" dir report failed=0
+    dir="$(mktemp -d)"
+    for file in pyproject.toml uv.lock package.json package-lock.json; do
+        git show "$ref:$file" > "$dir/$file" 2>/dev/null || { echo "  (no $file at $ref, skipping)"; rm -f "$dir/$file"; }
+    done
+
+    step "Auditing Python dependencies (pip-audit, uv.lock at $ref)"
+    local ignore_args=() id
+    while read -r id _; do
+        case "$id" in ''|'#'*) continue ;; esac
+        ignore_args+=(--ignore-vuln "$id")
+    done < .github/pip-audit-ignore.txt
+    # Same recipe as CI's audit job: production group only, git-sourced packages filtered out
+    # (no advisory database covers them), the list is already fully resolved.
+    local requirements="$dir/requirements.txt" py_status=0
+    (cd "$dir" && uv export --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt | grep -v ' @ git+' > "$requirements") \
+        || { echo "error: could not export the Python dependencies at $ref" >&2; failed=1; }
+    report="$dir/pip-audit.json"
+    if [[ $failed -eq 0 ]]; then
+        uvx pip-audit --disable-pip --no-deps --format json -r "$requirements" ${ignore_args[@]+"${ignore_args[@]}"} > "$report" 2> "$dir/pip-audit.err" || py_status=$?
+        if [[ $py_status -ne 0 ]]; then
+            failed=1
+            if python3 - "$report" <<'PYEOF'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)  # not a findings report: pip-audit itself failed
+packages = [d for d in data.get("dependencies", []) if d.get("vulns")]
+for dep in packages:
+    for vuln in dep["vulns"]:
+        fixes = ", ".join(vuln.get("fix_versions") or []) or "no fix released yet"
+        print(f"  {dep['name']} {dep['version']}: {vuln['id']} (fixed in: {fixes})")
+print()
+print("  To update (then commit uv.lock on development, push, and re-run this script):")
+for dep in packages:
+    print(f"    uv lock --upgrade-package {dep['name']}")
+if any(not v.get("fix_versions") for d in packages for v in d["vulns"]):
+    print("  No fix is released for some of these: accept the advisory with a reason in")
+    print("  .github/pip-audit-ignore.txt, or pass --skip-audit if this can't wait.")
+PYEOF
+            then :; else
+                echo "error: pip-audit could not run (offline?):" >&2
+                cat "$dir/pip-audit.err" >&2
+            fi
+        fi
+    fi
+
+    step "Auditing JavaScript dependencies (npm audit, runtime only, package-lock.json at $ref)"
+    if [[ -f "$dir/package-lock.json" ]]; then
+        if ! (cd "$dir" && npm audit --omit=dev --audit-level=high); then
+            failed=1
+            echo
+            echo "  To update (then commit package-lock.json on development, push, and re-run this script):"
+            echo "    npm audit fix --omit=dev          # or: npm update <package>"
+            echo "    npm run vendor:htmx; npm run vendor:alpine; npm run vendor:chart   # if a vendored library changed"
+        fi
+    fi
+
+    rm -rf "$dir"
+    if [[ $failed -ne 0 ]]; then
+        echo
+        echo "error: the dependency audit failed -- nothing was changed. Fix the above, or use --skip-audit." >&2
+        exit 1
+    fi
+}
+
+if [[ $SKIP_AUDIT -eq 1 ]]; then
+    echo "Skipping the dependency audit (--skip-audit)."
+else
+    command -v npm >/dev/null || die "npm is not installed (needed for the audit; or pass --skip-audit)"
+    if [[ "$KIND" == release ]]; then audit_dependencies development; else audit_dependencies origin/main; fi
+fi
 
 # --- plan ---------------------------------------------------------------------
 echo

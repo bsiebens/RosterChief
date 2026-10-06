@@ -189,3 +189,83 @@ class NotificationModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             notification.clean()
+
+
+class EmailPreferenceTests(TestCase):
+    """User.email_notifications: "not when the app can notify me" skips the email while the
+    account has an active native install -- and only then."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="alex@example.com", password="pw-secret-123")
+        cls.parent = Member.objects.create(user=cls.user, first_name="Alex", last_name="Doe", email="alex@example.com")
+        cls.child = Member.objects.create(first_name="Jamie", last_name="Doe")
+        family = Family.objects.create(club=cls.club)
+        FamilyMembership.objects.create(family=family, member=cls.child, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+
+    def setUp(self):
+        cache.clear()
+
+    def prefer(self, value):
+        self.user.email_notifications = value
+        self.user.save(update_fields=["email_notifications"])
+
+    def phone(self, **kwargs):
+        from appapi.models import PushDevice
+
+        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1", **kwargs)
+
+    def emails(self, **kwargs):
+        return recipient_emails(self.child, self.club, honor_preferences=True, **kwargs)
+
+    def test_the_default_keeps_emailing(self):
+        self.phone()
+
+        self.assertEqual(self.emails(), ["alex@example.com"])
+
+    def test_unless_app_skips_the_email_while_the_app_is_installed(self):
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+        self.phone()
+
+        self.assertEqual(self.emails(), [])
+
+    def test_unless_app_still_emails_without_an_active_install(self):
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+
+        self.assertEqual(self.emails(), ["alex@example.com"])
+        self.phone(enabled=False)
+        self.assertEqual(self.emails(), ["alex@example.com"])
+
+    def test_a_guardian_without_an_account_is_always_emailed(self):
+        family = Family.objects.get(club=self.club)
+        other = Member.objects.create(first_name="Sam", last_name="Doe", email="sam@example.com")
+        FamilyMembership.objects.create(family=family, member=other, role=FamilyMembership.FamilyRole.PARENT)
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+        self.phone()
+
+        self.assertEqual(self.emails(), ["sam@example.com"])
+
+    def test_the_plain_lookup_ignores_preferences(self):
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+        self.phone()
+
+        self.assertEqual(recipient_emails(self.child, self.club), ["alex@example.com"])
+
+    def test_notify_members_skips_the_email_but_keeps_the_inbox_row(self):
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+        self.phone()
+
+        notify_members([self.child], club=self.club, title="Hi", body="There")
+
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(Notification.objects.filter(member=self.child).count(), 1)
+
+    def test_an_email_with_an_attachment_is_never_skipped(self):
+        self.prefer(User.EmailNotifications.UNLESS_APP)
+        self.phone()
+
+        notify_members([self.child], club=self.club, title="Invoice", body="Attached", attachments=[("invoice.pdf", b"%PDF", "application/pdf")])
+
+        self.assertEqual(len(mail.outbox), 1)

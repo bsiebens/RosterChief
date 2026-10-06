@@ -301,6 +301,14 @@
                                 <span class="text-sm text-muted">{% trans "This level has no teams linked yet." %}</span>
                             {% endfor %}
                         </div>
+                        {% if referee_profile.excluded_teams.all %}
+                            <div class="mt-3 mb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{% trans "Not allowed to referee" %}</div>
+                            <div class="flex flex-wrap gap-2">
+                                {% for team in referee_profile.excluded_teams.all %}
+                                    <span class="badge badge-error badge-outline">{{ team.name }}</span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
                     {% else %}
                         <div class="alert alert-warning mt-2">
                             {% lucide "triangle-alert" size=16 %}

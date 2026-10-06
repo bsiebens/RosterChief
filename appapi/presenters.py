@@ -11,6 +11,7 @@ from events.models import Attendance, Event
 from formbuilder.models import FormSend
 from news.models import News
 from news.services import localized_news, render_body_excerpt
+from shop.models import Order
 
 from .schemas import CURRENCY
 
@@ -120,7 +121,19 @@ def notification_source(source) -> dict | None:
         return {"type": "event", "id": source.pk, "slug": None}
     if isinstance(source, FormSend):
         return {"type": "form_send", "id": source.pk, "slug": None}
+    if isinstance(source, Order):
+        return {"type": "order", "id": source.pk, "slug": None}
     return None
+
+
+def notification_target(notification) -> dict | None:
+    """What the app opens for ``notification``: its source's screen, or -- for one with no
+    source that still points somewhere (``target_type``, e.g. "calendar") -- that bare
+    screen. ``id`` is null for those."""
+    source = notification_source(notification.source)
+    if source is None and notification.target_type:
+        return {"type": notification.target_type, "id": None, "slug": None}
+    return source
 
 
 def notification_out(notification) -> dict:
@@ -131,7 +144,7 @@ def notification_out(notification) -> dict:
         "body": notification.body,
         "created": notification.created,
         "read_at": notification.read_at,
-        "source": notification_source(notification.source),
+        "source": notification_target(notification),
     }
 
 

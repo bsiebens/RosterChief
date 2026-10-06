@@ -26,6 +26,7 @@ urlpatterns = [
     path("me/registrations/<uuid:pk>/invoice/pdf/", views.RegistrationInvoicePdfView.as_view(), name="registration_invoice_pdf"),
     path("me/calendar-sync/", views.CalendarFeedSettingsView.as_view(), name="calendar_feed_settings"),
     path("me/live-games/", views.LiveGameUpdatesView.as_view(), name="live_game_updates"),
+    path("me/notification-emails/", views.NotificationSettingsView.as_view(), name="notification_settings"),
     path("me/bugs/", views.BugListView.as_view(), name="bug_list"),
     path("me/<uuid:member_id>/edit/", views.EditProfileView.as_view(), name="edit_profile"),
     path("me/register/", views.ReRegisterView.as_view(), name="reregister"),

@@ -104,6 +104,7 @@ class RefereeProfileAdmin(admin.ModelAdmin):
     list_filter = ["level"]
     search_fields = ["member__first_name", "member__last_name"]
     autocomplete_fields = ["member"]
+    filter_horizontal = ["excluded_teams"]
 
     @admin.display(description=_("eligible"), boolean=True)
     def is_eligible(self, obj):

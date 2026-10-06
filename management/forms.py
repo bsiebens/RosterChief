@@ -121,12 +121,14 @@ class MemberRefereeEligibilityForm(forms.ModelForm):
     """This member's referee level and how long it's valid for -- edited from
     the member's own page (teams.RefereeProfile), get-or-created on save.
     Which teams that translates to is derived entirely from the level
-    (RefereeLevel.teams), not picked here -- see RefereeProfile.eligible_teams."""
+    (RefereeLevel.teams), not picked here -- see RefereeProfile.eligible_teams --
+    except that individual teams can be ruled out for this person (``excluded_teams``),
+    which are then subtracted from what the level allows."""
 
     class Meta:
         model = RefereeProfile
-        fields = ["level", "valid_until"]
-        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"})}
+        fields = ["level", "valid_until", "excluded_teams"]
+        widgets = {"valid_until": forms.DateInput(attrs={"type": "date"}), "excluded_teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, member=None, **kwargs):
         instance = RefereeProfile.objects.filter(member=member, club=club).first() if member is not None else None
@@ -141,6 +143,8 @@ class MemberRefereeEligibilityForm(forms.ModelForm):
         self.fields["level"].queryset = RefereeLevel.objects.filter(club=club)
         self.fields["level"].required = False
         self.fields["level"].empty_label = _("— no level (not eligible) —")
+        self.fields["excluded_teams"].queryset = Team.objects.filter(club=club).order_by("name")
+        self.fields["excluded_teams"].required = False
 
 
 class ExternalRefereeForm(forms.Form):

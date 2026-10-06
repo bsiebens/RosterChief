@@ -2412,6 +2412,25 @@ class NotificationsViewTests(TestCase):
         redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
         self.assertRedirects(redirect_response, reverse("mobile:event_detail", kwargs={"pk": event.pk}), fetch_redirect_response=False)
 
+    def test_notification_with_an_order_source_links_to_the_order(self):
+        order = Order.objects.create(club=self.club, purchaser=self.member, total=Decimal("12.00"))
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Order placed", body="Body.", source=order)
+        self.client.force_login(self.user)
+
+        self.assertContains(self._get(), "Order")
+
+        redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+        self.assertRedirects(redirect_response, reverse("mobile:shop_order_detail", kwargs={"pk": order.pk}), fetch_redirect_response=False)
+
+    def test_the_calendar_roll_up_links_to_the_calendar(self):
+        notification = Notification.objects.create(club=self.club, member=self.member, title="New events on your calendar", body="Body.", target_type="calendar")
+        self.client.force_login(self.user)
+
+        self.assertContains(self._get(), "Calendar")
+
+        redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
+        self.assertRedirects(redirect_response, reverse("mobile:calendar"), fetch_redirect_response=False)
+
     def test_empty_account_404s(self):
         bare_user = User.objects.create_user(email="new@example.com", password="pw-secret-123")
         self.client.force_login(bare_user)
@@ -8898,6 +8917,46 @@ class LiveGameUpdatesViewTests(TestCase):
         self.assertEqual(followed_team_ids(self.user, self.club), {self.seniors.pk})
         page = self.client.get(reverse("mobile:live_game_updates"), HTTP_HOST="ajax-united.rosterchief.app")
         self.assertContains(page, f'value="{self.seniors.pk}" class="h-5 w-5 shrink-0 accent-ink" checked')
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])
+class NotificationSettingsViewTests(TestCase):
+    """Me -> "Notification emails" (mobile.views.NotificationSettingsView):
+    authentication.User.email_notifications, account-wide."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="fan@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Fay", last_name="Fan", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def get(self):
+        return self.client.get(reverse("mobile:notification_settings"), HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_me_links_to_it_and_the_default_is_always(self):
+        self.assertContains(self.client.get(reverse("mobile:me"), HTTP_HOST="ajax-united.rosterchief.app"), reverse("mobile:notification_settings"))
+        self.assertContains(self.get(), 'value="always" class="h-5 w-5 shrink-0 accent-ink" checked')
+
+    def test_choosing_not_when_the_app_can_notify_me_saves_it(self):
+        response = self.client.post(reverse("mobile:notification_settings"), {"email_notifications": "unless_app"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertRedirects(response, reverse("mobile:notification_settings"), fetch_redirect_response=False)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email_notifications, "unless_app")
+        self.assertContains(self.get(), 'value="unless_app" class="h-5 w-5 shrink-0 accent-ink" checked')
+
+    def test_an_unknown_choice_is_rejected(self):
+        response = self.client.post(reverse("mobile:notification_settings"), {"email_notifications": "never"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email_notifications, "always")
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "other-club.rosterchief.app", "testserver"])

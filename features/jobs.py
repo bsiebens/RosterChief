@@ -58,6 +58,14 @@ JOB_REGISTRY = {
         "command": "publish_scheduled_lineups",
         "args": [],
     },
+    "events.tasks.sync_crew_invites": {
+        "label": _("Sync referee and official invites"),
+        "description": _("Invites everyone currently eligible to the upcoming home games that still need a referee or official -- a safety net for eligibility that changed after a game was scheduled."),
+        "schedule": _("Every hour"),
+        "trigger": {"trigger": "interval", "minutes": 60},
+        "command": "sync_crew_invites",
+        "args": [],
+    },
     "events.tasks.poll_live_game_results": {
         "label": _("Poll live game results"),
         "description": _("Checks each game due to start soon or still within its post-game window for a fresh score/live status from its competition's data source."),

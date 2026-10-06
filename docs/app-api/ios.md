@@ -232,12 +232,19 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
  "target": {"type": "news", "id": "…", "slug": "welcome"}}
 ```
 
-`target` is `null` or has a `type` of `news`, `event` or `form_send` (ignore unknown types). On
-tap: switch to the club named by `club_slug`, mark the notification read
-(`POST /notifications/{notification_id}/read`), then open the target (`GET /news/{slug}`,
-`GET /events/{id}`; forms arrive in a later release). The payload is only a pointer and never
+`target` is `null` or has a `type` of `news`, `event`, `form_send`, `order` or `calendar`
+(ignore unknown types; `calendar` has no `id`). On tap: switch to the club named by `club_slug`,
+mark the notification read (`POST /notifications/{notification_id}/read`), then open the target
+(`GET /news/{slug}`, `GET /events/{id}`, `GET /shop/orders/{id}`, the Calendar tab for `calendar`;
+forms arrive in a later release). The inbox's `source` uses the same shape. The payload is only a pointer and never
 contains personal data. One account gets **one** push per notification even when it concerns
-several of its children.
+several of its children. The payload also carries `aps.badge`: the account's total unread count across
+all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
+
+**Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
+changes it: `always` (default) or `unless_app` (no notification email while this account has the app
+installed; mails with an attachment such as an invoice are always sent). Offer it as a toggle in the app's
+settings.
 
 A person who also has the web app installed with notifications on gets both for now.
 
@@ -280,7 +287,7 @@ pass the previous `to` as `from`. Row types:
 | `type` | Show | Action |
 |---|---|---|
 | `rsvp` | the event with the person's `status` | open the event |
-| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`) or a confirmed duty (`accepted`) | respond to `signup_id` |
+| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`), a confirmed duty (`accepted`) or a "can't make it" (`declined`, kept until the game starts) | respond to `signup_id` (a declined one can still be accepted) |
 | `blocked` | the event greyed out with `blocked_requirements` ("Medical certificate") | none: the club must clear it |
 
 ### Event

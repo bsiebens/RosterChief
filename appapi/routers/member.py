@@ -95,8 +95,9 @@ def calendar(
     kind: Annotated[str | None, Query(description="`game` or `training`; anything else means all kinds.")] = None,
     member_id: Annotated[str | None, Query(description=MEMBER_ID_HELP)] = None,
 ):
-    """Invitations, referee/official sign-ups (open or accepted) and events a person is
-    kept off by an open club requirement (`blocked`), soonest first. Cancelled events
+    """Invitations, referee/official sign-ups (open, accepted or declined) and events a person is
+    kept off by an open club requirement (`blocked`), soonest first. A declined referee/official
+    sign-up (`status` `declined`) stays until the game starts, in case they change their mind. Cancelled events
     are left out, and so are referee/official sign-ups for games that are already over (only
     your own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`."""
     scope = club_scope(request)
@@ -106,7 +107,7 @@ def calendar(
     if end <= start or end > limit:
         raise ApiError(422, "validation_error", fields={"to": [_("Must be after “from” and at most %(days)d days later.") % {"days": MAX_CALENDAR_DAYS}]})
 
-    rows = member_agenda(scope.club, scope.people_for(member_id), kind=kind if kind in KIND_FILTERS else None, officials_enabled=scope.feature("officials"), start=start, end=end)
+    rows = member_agenda(scope.club, scope.people_for(member_id), kind=kind if kind in KIND_FILTERS else None, officials_enabled=scope.feature("officials"), include_declined=True, start=start, end=end)
     items = []
     for row in rows:
         source = row.get("attendance") or row.get("signup")

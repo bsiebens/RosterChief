@@ -47,8 +47,9 @@ class PushGateway:
     def unregister(self, device: PushDevice) -> None:
         raise NotImplementedError
 
-    def publish(self, device: PushDevice, *, title: str, body: str, data: dict) -> bool:
-        """Send one push. False means the token is dead: the caller disables the device."""
+    def publish(self, device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None) -> bool:
+        """Send one push. ``badge`` is the app icon's unread count (iOS); None leaves it as is.
+        False means the token is dead: the caller disables the device."""
         raise NotImplementedError
 
 
@@ -59,7 +60,7 @@ class NullGateway(PushGateway):
     def unregister(self, device):
         return None
 
-    def publish(self, device, *, title, body, data):
+    def publish(self, device, *, title, body, data, badge=None):
         return True
 
 
@@ -71,10 +72,13 @@ def _platform_application_arn(device: PushDevice) -> str:
     return settings.APP_PUSH_SNS_FCM_ARN
 
 
-def build_message(device: PushDevice, *, title: str, body: str, data: dict) -> str:
+def build_message(device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None) -> str:
     """The SNS ``MessageStructure=json`` message for ``device``'s platform."""
     if device.platform == PushDevice.Platform.IOS:
-        apns = {"aps": {"alert": {"title": title, "body": body}, "sound": "default", "mutable-content": 1}, **data}
+        aps = {"alert": {"title": title, "body": body}, "sound": "default", "mutable-content": 1}
+        if badge is not None:
+            aps["badge"] = badge
+        apns = {"aps": aps, **data}
         key = "APNS_SANDBOX" if device.environment == PushDevice.Environment.SANDBOX else "APNS"
         return json.dumps({"default": body, key: json.dumps(apns)})
     # FCM data values must be strings: nested values travel as JSON.
@@ -118,11 +122,11 @@ class SnsGateway(PushGateway):
         if device.endpoint_arn:
             self.client.delete_endpoint(EndpointArn=device.endpoint_arn)
 
-    def publish(self, device, *, title, body, data):
+    def publish(self, device, *, title, body, data, badge=None):
         if not device.endpoint_arn:
             return True
         try:
-            self.client.publish(TargetArn=device.endpoint_arn, MessageStructure="json", Message=build_message(device, title=title, body=body, data=data))
+            self.client.publish(TargetArn=device.endpoint_arn, MessageStructure="json", Message=build_message(device, title=title, body=body, data=data, badge=badge))
         except self.client.exceptions.EndpointDisabledException, self.client.exceptions.NotFoundException:
             return False
         return True

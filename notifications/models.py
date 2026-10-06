@@ -28,6 +28,12 @@ class Notification(ClubScopedModel):
     object_id = models.CharField(max_length=255, null=True, blank=True)  # noqa: DJ001 -- GenericForeignKey needs a real NULL, not "", for "no source"
     source = GenericForeignKey("content_type", "object_id")
 
+    target_type = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text=_('For notifications with no source object that still point at a place in the app (e.g. "calendar"): the native app opens that screen. Ignored when there is a source.'),
+    )
+
     sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
     sent_to_emails = models.JSONField(_("sent to"), default=list, blank=True, help_text=_("Every email address this actually went to -- the member's own, and/or a parent/guardian's. Empty means nobody reachable was found."))
     read_at = models.DateTimeField(_("read at"), null=True, blank=True, help_text=_("Set once there's somewhere for a member to read this -- not used yet."))

@@ -19,6 +19,8 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
+from notifications.services import recipient_user_ids, users_with_native_push
+
 from .. import models
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,8 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") 
     events.services.game_push). Returns how many subscriptions it was sent to."""
     if not settings.VAPID_PRIVATE_KEY:
         return 0
+    if users_with_native_push([user.pk]):
+        return 0  # the phone already got it (events.services.game_push sends native alongside this)
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
     subscriptions = list(models.PushSubscription.objects.filter(club=club, member__user=user).select_related("member"))
     for subscription in subscriptions:
@@ -139,23 +143,35 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") 
 
 
 def send_push_for_notifications(notifications, url: str = "/app/") -> None:
-    """Batched send_push_to_member for a whole notifications.services.
-    notify_members() fan-out at once: every notification's member's
-    PushSubscriptions are fetched in a single query instead of one query per
-    member (what a post_save-per-instance signal would otherwise cost),
-    still delivering each notification's own title/body."""
+    """Web push for a whole notifications.services.notify_members() fan-out at once.
+
+    Delivered to the same accounts the email and the native push reach
+    (notifications.services.recipient_user_ids: the member's own login plus every
+    parent/guardian's), through their PushSubscriptions in the notification's club -- so a
+    parent is told about their child's notification even though the child has no login. An
+    account gets one push per distinct notification even when it concerns several of its
+    children, and an account with an active native install is skipped: it gets this through
+    the native channel (appapi.delivery)."""
     if not settings.VAPID_PRIVATE_KEY or not notifications:
         return
 
-    member_ids = {notification.member_id for notification in notifications}
-    subscriptions_by_member = {}
-    for subscription in models.PushSubscription.objects.filter(member_id__in=member_ids).select_related("member"):
-        subscriptions_by_member.setdefault(subscription.member_id, []).append(subscription)
+    recipients = {notification.pk: recipient_user_ids(notification) for notification in notifications}
+    all_user_ids = set().union(*recipients.values())
+    if not all_user_ids:
+        return
+    skip = users_with_native_push(all_user_ids)
 
+    subscriptions_by_account = {}
+    for subscription in models.PushSubscription.objects.filter(member__user_id__in=all_user_ids - skip, club_id__in={notification.club_id for notification in notifications}).select_related("member"):
+        subscriptions_by_account.setdefault((subscription.club_id, subscription.member.user_id), []).append(subscription)
+
+    sent = set()
     for notification in notifications:
-        subscriptions = subscriptions_by_member.get(notification.member_id)
-        if not subscriptions:
-            continue
+        dedupe_key = (notification.club_id, notification.content_type_id, notification.object_id, notification.title, notification.body)
         payload = json.dumps({"title": str(notification.title), "body": str(notification.body), "url": url})
-        for subscription in subscriptions:
-            _deliver(subscription, payload, label=subscription.member)
+        for user_id in recipients[notification.pk] - skip:
+            for subscription in subscriptions_by_account.get((notification.club_id, user_id), []):
+                if (subscription.pk, dedupe_key) in sent:
+                    continue
+                sent.add((subscription.pk, dedupe_key))
+                _deliver(subscription, payload, label=subscription.member)

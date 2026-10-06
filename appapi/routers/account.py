@@ -15,7 +15,7 @@ from ..auth import require_base_domain
 from ..errors import ApiError
 from ..models import PushDevice
 from ..push import get_gateway
-from ..schemas import ClubListOut, DeviceIn, DeviceOut, ErrorOut, MeOut, MetaOut
+from ..schemas import AccountSettingsIn, AccountSettingsOut, ClubListOut, DeviceIn, DeviceOut, ErrorOut, MeOut, MetaOut
 
 router = Router(tags=["account"])
 
@@ -44,7 +44,18 @@ def me(request):
         "user": {"id": user.pk, "email": user.email},
         "member": member,
         "mfa": {"enabled": is_mfa_enabled(user), "types": sorted(Authenticator.objects.filter(user=user).values_list("type", flat=True))},
+        "settings": {"email_notifications": user.email_notifications},
     }
+
+
+@router.patch("/me/settings", response={200: AccountSettingsOut, **ERRORS}, summary="Change the account's settings")
+def update_settings(request, payload: AccountSettingsIn):
+    """Account-wide, for every club. `email_notifications`: `always` (default) or `unless_app`
+    -- skip the notification email while this account has the app installed."""
+    require_base_domain(request)
+    request.user.email_notifications = payload.email_notifications
+    request.user.save(update_fields=["email_notifications"])
+    return {"email_notifications": request.user.email_notifications}
 
 
 @router.get("/clubs", response={200: ClubListOut, **ERRORS}, summary="Clubs the account can use")

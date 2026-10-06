@@ -1,6 +1,41 @@
 {
   "components": {
     "schemas": {
+      "AccountSettingsIn": {
+        "properties": {
+          "email_notifications": {
+            "enum": [
+              "always",
+              "unless_app"
+            ],
+            "title": "Email Notifications",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_notifications"
+        ],
+        "title": "AccountSettingsIn",
+        "type": "object"
+      },
+      "AccountSettingsOut": {
+        "properties": {
+          "email_notifications": {
+            "description": "`always`: notifications are also emailed. `unless_app`: not emailed while this account has the app installed (mails with an attachment, such as an invoice, are always sent).",
+            "enum": [
+              "always",
+              "unless_app"
+            ],
+            "title": "Email Notifications",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_notifications"
+        ],
+        "title": "AccountSettingsOut",
+        "type": "object"
+      },
       "AnswerOut": {
         "properties": {
           "can_drop_out": {
@@ -351,7 +386,7 @@
                 "type": "null"
               }
             ],
-            "description": "Attendance status for `rsvp`, sign-up status for `referee`/`official`, null for `blocked`.",
+            "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.",
             "title": "Status"
           },
           "type": {
@@ -2278,6 +2313,9 @@
           "mfa": {
             "$ref": "#/components/schemas/MfaState"
           },
+          "settings": {
+            "$ref": "#/components/schemas/AccountSettingsOut"
+          },
           "user": {
             "$ref": "#/components/schemas/UserOut"
           }
@@ -2285,7 +2323,8 @@
         "required": [
           "user",
           "member",
-          "mfa"
+          "mfa",
+          "settings"
         ],
         "title": "MeOut",
         "type": "object"
@@ -2735,9 +2774,17 @@
       "NotificationSourceOut": {
         "properties": {
           "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for `calendar`, which has no object: open the Calendar tab.",
+            "title": "Id"
           },
           "slug": {
             "anyOf": [
@@ -2752,7 +2799,7 @@
             "title": "Slug"
           },
           "type": {
-            "description": "`news`, `event` or `form_send`. Ignore unknown types.",
+            "description": "`news`, `event`, `form_send`, `order` or `calendar`. Ignore unknown types.",
             "title": "Type",
             "type": "string"
           }
@@ -4055,7 +4102,7 @@
             "type": "string"
           },
           "status": {
-            "description": "`invited`, `accepted` (`declined` ones are left out).",
+            "description": "`invited`, `accepted` or `declined`.",
             "title": "Status",
             "type": "string"
           }
@@ -4841,7 +4888,7 @@
     },
     "/api/app/v1/calendar": {
       "get": {
-        "description": "Invitations, referee/official sign-ups (open or accepted) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. Cancelled events\nare left out, and so are referee/official sign-ups for games that are already over (only\nyour own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`.",
+        "description": "Invitations, referee/official sign-ups (open, accepted or declined) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. A declined referee/official\nsign-up (`status` `declined`) stays until the game starts, in case they change their mind. Cancelled events\nare left out, and so are referee/official sign-ups for games that are already over (only\nyour own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`.",
         "operationId": "appapi_routers_member_calendar",
         "parameters": [
           {
@@ -6461,6 +6508,74 @@
           }
         ],
         "summary": "The signed-in account",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/me/settings": {
+      "patch": {
+        "description": "Account-wide, for every club. `email_notifications`: `always` (default) or `unless_app`\n-- skip the notification email while this account has the app installed.",
+        "operationId": "appapi_routers_account_update_settings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSettingsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change the account's settings",
         "tags": [
           "account"
         ]

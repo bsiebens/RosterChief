@@ -57,6 +57,7 @@ from .services import (
 from .services.attendance import member_attendance_counts
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.competitions import CompetitionFetchError, fetch_game_info
+from .services.crew_invites import resync_upcoming_invites
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.officials import (
     OfficialAssignmentError,
@@ -66,6 +67,7 @@ from .services.officials import (
     decline_official_signup,
     eligible_officials,
     needs_official_management,
+    remove_official,
     set_official_fee,
     sync_official_invites,
 )
@@ -80,6 +82,7 @@ from .services.referees import (
     eligible_referees,
     needs_referee_management,
     remove_referee,
+    retract_ineligible_invites,
     set_referee_fee,
     sync_referee_invites,
 )
@@ -2275,6 +2278,50 @@ class RefereeServiceTests(EventsTestBase):
 
         self.assertEqual(set(eligible_referees(game)), set())
 
+    def test_an_excluded_team_is_subtracted_from_what_the_level_allows(self):
+        game = self.make_home_game()
+        self.referee_profile.excluded_teams.add(self.team)
+
+        self.assertEqual(set(eligible_referees(game)), set())
+        self.assertEqual(set(self.referee_profile.eligible_teams), set())
+
+    def test_an_exclusion_only_affects_that_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        self.referee_profile.excluded_teams.add(self.team)
+
+        self.assertEqual(set(self.referee_profile.eligible_teams), {other_team})
+        self.assertEqual(set(eligible_referees(self.make_home_game(teams=other_team))), {self.referee})
+        self.assertEqual(set(eligible_referees(self.make_home_game())), set())
+
+    def test_a_game_with_several_teams_needs_one_allowed_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        self.referee_profile.excluded_teams.add(self.team)
+        game = self.make_home_game()
+        game.teams.add(other_team)
+
+        self.assertEqual(set(eligible_referees(game)), {self.referee})
+
+    def test_retracting_withdraws_open_invites_for_excluded_games_only(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        excluded_game = self.make_home_game()
+        allowed_game = self.make_home_game(teams=other_team)
+        accepted_game = self.make_home_game()
+        for game in (excluded_game, allowed_game):
+            RefereeSignup.objects.update_or_create(event=game, member=self.referee, defaults={"status": RefereeSignup.Status.INVITED})
+        RefereeSignup.objects.update_or_create(event=accepted_game, member=self.referee, defaults={"status": RefereeSignup.Status.ACCEPTED})
+        self.referee_profile.excluded_teams.add(self.team)
+
+        withdrawn = retract_ineligible_invites(self.referee_profile)
+
+        self.assertEqual(withdrawn, 1)
+        self.assertFalse(RefereeSignup.objects.filter(event=excluded_game, member=self.referee).exists())
+        self.assertTrue(RefereeSignup.objects.filter(event=allowed_game, member=self.referee).exists())
+        # A commitment already made is left for the club's managers to sort out.
+        self.assertEqual(RefereeSignup.objects.get(event=accepted_game, member=self.referee).status, RefereeSignup.Status.ACCEPTED)
+
     def test_eligible_referees_ignores_someone_not_eligible_for_this_team(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
         unrelated_referee = Member.objects.create(first_name="Not", last_name="Eligible")
@@ -2352,6 +2399,42 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.event, game)
         self.assertEqual(assignment.member, self.referee)
         self.assertEqual(assignment.assigned_by, self.alice)
+
+    def test_removing_a_referee_declines_their_signup_and_tells_them(self):
+        game = self.make_home_game()
+        assignment = assign_referee(game, self.referee, assigned_by=self.alice)
+
+        remove_referee(assignment)
+
+        self.assertFalse(EventReferee.objects.filter(pk=assignment.pk).exists())
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.DECLINED)
+        self.assertEqual(Notification.objects.filter(member=self.referee, title="Referee assignment removed").count(), 1)
+
+    def test_removing_an_external_referee_notifies_nobody(self):
+        game = self.make_home_game()
+        external = add_external_referee(game, "Fed Eration", assigned_by=self.alice)
+        before = Notification.objects.count()
+
+        remove_referee(external)
+
+        self.assertEqual(Notification.objects.count(), before)
+
+    def test_a_staff_assignment_notifies_the_referee(self):
+        game = self.make_home_game()
+
+        assign_referee(game, self.referee, assigned_by=self.alice)
+
+        notification = Notification.objects.get(member=self.referee, title="Referee assignment")
+        self.assertIn(game.title, notification.body)
+        self.assertEqual(notification.source, game)
+
+    def test_a_self_service_accept_does_not_notify_the_referee(self):
+        game = self.make_home_game()
+        signup, _created = RefereeSignup.objects.update_or_create(event=game, member=self.referee, defaults={"status": RefereeSignup.Status.INVITED})
+
+        accept_referee_signup(signup)
+
+        self.assertFalse(Notification.objects.filter(member=self.referee, title="Referee assignment").exists())
 
     def test_assign_referee_settles_an_open_invite_as_accepted(self):
         game = self.make_home_game()
@@ -2721,6 +2804,32 @@ class OfficialServiceTests(OfficialsTestBase):
 
         self.assertEqual(assignment.event, game)
         self.assertEqual(assignment.member, self.official)
+
+    def test_removing_an_official_declines_their_signup_and_tells_them(self):
+        game = self.make_home_game()
+        assignment = assign_official(game, self.official, assigned_by=self.alice)
+
+        remove_official(assignment)
+
+        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.DECLINED)
+        self.assertEqual(Notification.objects.filter(member=self.official, title="Official assignment removed").count(), 1)
+
+    def test_a_staff_assignment_notifies_the_official(self):
+        game = self.make_home_game()
+
+        assign_official(game, self.official, assigned_by=self.alice)
+
+        notification = Notification.objects.get(member=self.official, title="Official assignment")
+        self.assertIn(game.title, notification.body)
+        self.assertEqual(notification.source, game)
+
+    def test_a_self_service_official_accept_does_not_notify(self):
+        game = self.make_home_game()
+        signup, _created = OfficialSignup.objects.update_or_create(event=game, member=self.official, defaults={"status": OfficialSignup.Status.INVITED})
+
+        accept_official_signup(signup)
+
+        self.assertFalse(Notification.objects.filter(member=self.official, title="Official assignment").exists())
 
     def test_assign_official_settles_an_open_invite_as_accepted(self):
         game = self.make_home_game()
@@ -4817,3 +4926,143 @@ class GamePushTests(GameTimelineTestBase):
 
         self.assertEqual(game_push.followed_team_ids(self.fan, self.club), {second.pk})
         self.assertEqual(game_push.followers(self.make_game()), [])
+
+
+class CrewInviteResyncTests(OfficialsTestBase):
+    """Referee/official invites follow eligibility, not just game saves: games already on the
+    calendar get invites when someone becomes eligible later (events.services.crew_invites).
+    Without this the management app listed the game as missing officials while the app --
+    which only shows sign-up rows -- never offered it to anyone."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.referee_level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.referee_level.teams.add(cls.team)
+        cls.official_level = OfficialLevel.objects.create(club=cls.club, name="Table")
+        cls.official_level.teams.add(cls.team)
+        cls.person = Member.objects.create(first_name="Cass", last_name="Crew")
+
+    def valid(self):
+        return timezone.localdate() + timedelta(days=30)
+
+    def game(self, **kwargs):
+        event = self.make_event(kind=Event.EventKind.GAME, location=self.home_ground, **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def test_a_referee_who_becomes_eligible_later_is_invited_to_existing_games(self):
+        game = self.game()
+        self.assertFalse(RefereeSignup.objects.filter(event=game).exists())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.person).status, RefereeSignup.Status.INVITED)
+        self.assertEqual(Notification.objects.get(member=self.person, title="Referee needed").source, game)
+
+    def test_an_official_who_becomes_eligible_later_is_invited_to_existing_games(self):
+        game = self.game()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            OfficialProfile.objects.create(club=self.club, member=self.person, level=self.official_level, valid_until=self.valid())
+
+        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.person).status, OfficialSignup.Status.INVITED)
+
+    def test_a_level_gaining_a_team_invites_its_holders_to_that_teams_games(self):
+        other = Team.objects.create(club=self.club, name="Second", short_name="2nd")
+        with self.captureOnCommitCallbacks(execute=True):
+            OfficialProfile.objects.create(club=self.club, member=self.person, level=self.official_level, valid_until=self.valid())
+        game = self.make_event(kind=Event.EventKind.GAME, location=self.home_ground)
+        game.teams.add(other)
+        self.assertFalse(OfficialSignup.objects.filter(event=game).exists())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.official_level.teams.add(other)
+
+        self.assertTrue(OfficialSignup.objects.filter(event=game, member=self.person).exists())
+
+    def test_lifting_an_exclusion_invites_them_again(self):
+        game = self.game()
+        with self.captureOnCommitCallbacks(execute=True):
+            profile = RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+            profile.excluded_teams.add(self.team)
+        self.assertFalse(RefereeSignup.objects.filter(event=game, member=self.person).exists())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            profile.excluded_teams.remove(self.team)
+
+        self.assertTrue(RefereeSignup.objects.filter(event=game, member=self.person).exists())
+
+    def test_the_officials_flag_switched_on_later_is_caught_by_the_sync(self):
+        get_waffle_flag_model().objects.get(name="officials").clubs.remove(self.club)
+        cache.clear()
+        game = self.game()
+        OfficialProfile.objects.create(club=self.club, member=self.person, level=self.official_level, valid_until=self.valid())
+        self.assertFalse(OfficialSignup.objects.filter(event=game).exists())
+
+        get_waffle_flag_model().objects.get(name="officials").clubs.add(self.club)
+        cache.clear()
+        created = resync_upcoming_invites(self.club)
+
+        self.assertEqual(created["official"], 1)
+        self.assertTrue(OfficialSignup.objects.filter(event=game, member=self.person).exists())
+
+    def test_it_never_touches_existing_rows_so_nobody_who_answered_is_reinvited(self):
+        game = self.game()
+        RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+        RefereeSignup.objects.update_or_create(event=game, member=self.person, defaults={"status": RefereeSignup.Status.DECLINED})
+
+        created = resync_upcoming_invites(self.club)
+
+        self.assertEqual(created["referee"], 0)
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.person).status, RefereeSignup.Status.DECLINED)
+
+    def test_past_cancelled_and_away_games_are_left_alone(self):
+        past = self.game(start=timezone.now() - timedelta(days=1))
+        cancelled = self.game(cancelled=True)
+        away = self.make_event(kind=Event.EventKind.GAME)
+        away.teams.add(self.team)
+        RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+
+        resync_upcoming_invites(self.club)
+
+        self.assertFalse(RefereeSignup.objects.filter(event__in=[past, cancelled, away]).exists())
+
+    def test_many_new_invites_for_one_person_arrive_as_one_notification(self):
+        games = [self.game(title=f"Game {number}", start=self.future + timedelta(days=number)) for number in range(3)]
+        RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+        Notification.objects.all().delete()
+
+        resync_upcoming_invites(self.club)
+
+        self.assertEqual(RefereeSignup.objects.filter(event__in=games, member=self.person).count(), 3)
+        notification = Notification.objects.get(member=self.person)
+        self.assertEqual(notification.title, "Referee needed")
+        self.assertEqual(notification.target_type, "calendar")
+        self.assertIn("3 games", notification.body)
+
+    def test_a_single_new_invite_names_the_game(self):
+        game = self.game(title="Cup tie")
+        RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+        Notification.objects.all().delete()
+
+        resync_upcoming_invites(self.club)
+
+        notification = Notification.objects.get(member=self.person)
+        self.assertIn("Cup tie", notification.body)
+        self.assertEqual(notification.source, game)
+
+    def test_the_hourly_job_runs_the_sync(self):
+        from django.core.management import call_command
+
+        from features.jobs import JOB_REGISTRY
+
+        self.assertIn("events.tasks.sync_crew_invites", JOB_REGISTRY)
+        game = self.game()
+        RefereeProfile.objects.create(club=self.club, member=self.person, level=self.referee_level, valid_until=self.valid())
+
+        call_command("sync_crew_invites")
+
+        self.assertTrue(RefereeSignup.objects.filter(event=game, member=self.person).exists())
