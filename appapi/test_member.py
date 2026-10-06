@@ -867,3 +867,33 @@ class CalendarOpenTasksTests(ClubApiTestCase):
         items = self.get("/calendar").json()["items"]
 
         self.assertEqual(sorted((item["type"], item["open_tasks"]) for item in items), [("referee", 1), ("rsvp", 1)])
+
+
+class HomeOpenTasksTests(ClubApiTestCase):
+    """Every event Home shows carries how many of its tasks still have a free slot."""
+
+    def test_cards_heroes_and_open_asks_all_carry_the_open_task_count(self):
+        card_event = self.event(title="Card game", start=self.soon)
+        going_event = self.event(title="Party", start=self.soon + datetime.timedelta(days=1))
+        ask_event = self.event(title="Meeting", start=self.soon + datetime.timedelta(days=2))
+        self.invite(card_event, member=self.child)
+        self.invite(going_event, status=Attendance.AttendanceStatus.PRESENT)
+        self.invite(ask_event, status=Attendance.AttendanceStatus.MAYBE)
+        EventTask.objects.create(event=card_event, title="Fruit", needed_quantity=2)
+        EventTask.objects.create(event=card_event, title="Lifts", needed_quantity=1)
+        EventTask.objects.create(event=going_event, title="Drinks", needed_quantity=1)
+        full = EventTask.objects.create(event=ask_event, title="Whistle", needed_quantity=1)
+        EventTaskClaim.objects.create(task=full, member=self.child)
+
+        home = self.get("/home").json()
+
+        self.assertEqual({(card["kind"], card["event"]["title"]): card["open_tasks"] for card in home["member_cards"]}, {("rsvp_needed", "Card game"): 2, ("next_going", "Party"): 1})
+        self.assertEqual((home["rsvp_needed"]["open_tasks"], home["next_going"]["open_tasks"]), (2, 1))
+        self.assertEqual([(row["event"]["title"], row["open_tasks"]) for row in home["needs_answer"]], [("Meeting", 0)])
+
+    def test_an_event_without_tasks_counts_zero(self):
+        self.invite(self.event(title="Plain"), member=self.child)
+
+        home = self.get("/home").json()
+
+        self.assertEqual([card["open_tasks"] for card in home["member_cards"]], [0])

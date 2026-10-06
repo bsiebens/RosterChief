@@ -275,6 +275,9 @@ carries `member_id`, so label rows with that person's first name.
   each button row with that person's first name. All `rsvp_needed` cards come first, then
   `next_going`, each soonest first. Invitations whose reply deadline has passed are not shown as
   a card (they are still in the calendar).
+* Every card, hero and `needs_answer` row has `open_tasks`: how many of that event's tasks still
+  have a free slot (the same number the calendar shows). Show it as a small "N open tasks" badge
+  on the card when it is above 0; the tasks and claiming are on `GET /events/{id}` → `tasks`.
 * `rsvp_needed` and `next_going`: the single-card form of the above (the family's soonest only).
   Kept for older app versions; new code should use `member_cards`.
 * `needs_answer` (+ `needs_answer_more`): other open asks, not repeating anything on a `rsvp_needed` card. `type` `rsvp` → answer the event;

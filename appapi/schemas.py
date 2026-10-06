@@ -247,10 +247,15 @@ class NewsSummaryOut(Schema):
 # --- home ------------------------------------------------------------------------------
 
 
+#: One definition for every place an event is shown with its open-task count (calendar rows, Home).
+OPEN_TASKS_HELP = "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them."
+
+
 class HeroOut(Schema):
     event: EventOut
     attendance: AttendanceOut
     rsvp_closed: bool
+    open_tasks: int = Field(description=OPEN_TASKS_HELP)
 
 
 class CardMemberOut(Schema):
@@ -262,6 +267,7 @@ class MemberCardOut(Schema):
     kind: str = Field(description="`rsvp_needed` (answer with POST /events/{id}/rsvp; the deadline has not passed) or `next_going` (someone's next event they are going to). Ignore unknown kinds.")
     event: EventOut
     members: list[CardMemberOut] = Field(description="Everyone this card is for: people whose next event of this kind is the same one share a card. Never empty.")
+    open_tasks: int = Field(description=OPEN_TASKS_HELP)
 
 
 class NeedsAnswerOut(Schema):
@@ -270,6 +276,7 @@ class NeedsAnswerOut(Schema):
     member_id: uuid.UUID
     status: str
     signup_id: uuid.UUID | None = Field(description="For `referee`/`official`: the sign-up to respond to.")
+    open_tasks: int = Field(description=OPEN_TASKS_HELP)
 
 
 class OpenTaskOut(Schema):
@@ -326,13 +333,7 @@ class CalendarItemOut(Schema):
     status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.")
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
-    open_tasks: int = Field(
-        description=(
-            "How many of the event's tasks still have a free slot (a task wants several helpers and not enough have taken it). "
-            "The same for every row of one event; 0 when nothing is open. "
-            "Open the event (`GET /events/{id}` -> `tasks`) to see and claim them."
-        )
-    )
+    open_tasks: int = Field(description=OPEN_TASKS_HELP + " The same for every row of one event.")
 
 
 class CalendarOut(Schema):

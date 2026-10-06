@@ -371,7 +371,7 @@
             "type": "string"
           },
           "open_tasks": {
-            "description": "How many of the event's tasks still have a free slot (a task wants several helpers and not enough have taken it). The same for every row of one event; 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them. The same for every row of one event.",
             "title": "Open Tasks",
             "type": "integer"
           },
@@ -2071,6 +2071,11 @@
           "event": {
             "$ref": "#/components/schemas/EventOut"
           },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
           "rsvp_closed": {
             "title": "Rsvp Closed",
             "type": "boolean"
@@ -2079,7 +2084,8 @@
         "required": [
           "event",
           "attendance",
-          "rsvp_closed"
+          "rsvp_closed",
+          "open_tasks"
         ],
         "title": "HeroOut",
         "type": "object"
@@ -2370,12 +2376,18 @@
             },
             "title": "Members",
             "type": "array"
+          },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
           }
         },
         "required": [
           "kind",
           "event",
-          "members"
+          "members",
+          "open_tasks"
         ],
         "title": "MemberCardOut",
         "type": "object"
@@ -2461,6 +2473,11 @@
             "title": "Member Id",
             "type": "string"
           },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
           "signup_id": {
             "anyOf": [
               {
@@ -2489,7 +2506,8 @@
           "event",
           "member_id",
           "status",
-          "signup_id"
+          "signup_id",
+          "open_tasks"
         ],
         "title": "NeedsAnswerOut",
         "type": "object"

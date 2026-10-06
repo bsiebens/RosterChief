@@ -39,10 +39,10 @@ MAX_CALENDAR_DAYS = 92
 EVENT_RELATED = ("location", "opponent")
 
 
-def _hero(attendance, *, closed=False) -> dict | None:
+def _hero(attendance, open_tasks, *, closed=False) -> dict | None:
     if attendance is None:
         return None
-    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed}
+    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed, "open_tasks": open_tasks.get(attendance.event_id, 0)}
 
 
 @router.get("/home", response={200: HomeOut, **ERRORS}, summary="Home screen")
@@ -54,10 +54,15 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
     scope = club_scope(request)
     summary = home_summary(scope.club, scope.people_for(member_id), officials_enabled=scope.feature("officials"), exclude_card_rows=True)
 
+    # One query for every event Home shows (the cards, the two heroes, the open asks).
+    shown = [card["event"] for card in summary["member_cards"]] + [row["event"] for row in summary["needs_answer"]]
+    shown += [attendance.event for attendance in (summary["hero_attendance"], summary["going_attendance"]) if attendance is not None]
+    open_tasks = open_task_counts([event.pk for event in shown])
+
     needs_answer = []
     for row in summary["needs_answer"]:
         source = row.get("attendance") or row.get("signup")
-        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None})
+        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None, "open_tasks": open_tasks.get(row["event"].pk, 0)})
 
     dues = []
     for row in summary["dues_rows"]:
@@ -75,9 +80,17 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
         )
 
     return {
-        "rsvp_needed": _hero(summary["hero_attendance"], closed=summary["rsvp_closed"]),
-        "next_going": _hero(summary["going_attendance"]),
-        "member_cards": [{"kind": card["kind"], "event": event_out(card["event"]), "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]]} for card in summary["member_cards"]],
+        "rsvp_needed": _hero(summary["hero_attendance"], open_tasks, closed=summary["rsvp_closed"]),
+        "next_going": _hero(summary["going_attendance"], open_tasks),
+        "member_cards": [
+            {
+                "kind": card["kind"],
+                "event": event_out(card["event"]),
+                "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]],
+                "open_tasks": open_tasks.get(card["event"].pk, 0),
+            }
+            for card in summary["member_cards"]
+        ],
         "needs_answer": needs_answer,
         "needs_answer_more": summary["needs_answer_total"] - len(summary["needs_answer"]),
         "open_tasks": [{"id": task.pk, "event_id": task.event_id, "event_title": task.event.title, "event_start": task.event.start, "title": task.title, "open_count": task.open_count} for task in summary["open_tasks"]],
