@@ -2077,6 +2077,14 @@
           "event": {
             "$ref": "#/components/schemas/EventOut"
           },
+          "my_tasks": {
+            "description": "Tasks of this event that the account's household has already taken (the account's own person, or anyone sharing a family with them), so Home can remind them. `claimed_by_me` is false when another household member took it. Empty when none.",
+            "items": {
+              "$ref": "#/components/schemas/TaskRefOut"
+            },
+            "title": "My Tasks",
+            "type": "array"
+          },
           "open_tasks": {
             "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
             "title": "Open Tasks",
@@ -2097,7 +2105,8 @@
           "attendance",
           "rsvp_closed",
           "open_tasks",
-          "total_tasks"
+          "total_tasks",
+          "my_tasks"
         ],
         "title": "HeroOut",
         "type": "object"
@@ -2389,6 +2398,14 @@
             "title": "Members",
             "type": "array"
           },
+          "my_tasks": {
+            "description": "Tasks of this event that the account's household has already taken (the account's own person, or anyone sharing a family with them), so Home can remind them. `claimed_by_me` is false when another household member took it. Empty when none.",
+            "items": {
+              "$ref": "#/components/schemas/TaskRefOut"
+            },
+            "title": "My Tasks",
+            "type": "array"
+          },
           "open_tasks": {
             "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
             "title": "Open Tasks",
@@ -2405,7 +2422,8 @@
           "event",
           "members",
           "open_tasks",
-          "total_tasks"
+          "total_tasks",
+          "my_tasks"
         ],
         "title": "MemberCardOut",
         "type": "object"
@@ -2491,6 +2509,14 @@
             "title": "Member Id",
             "type": "string"
           },
+          "my_tasks": {
+            "description": "Tasks of this event that the account's household has already taken (the account's own person, or anyone sharing a family with them), so Home can remind them. `claimed_by_me` is false when another household member took it. Empty when none.",
+            "items": {
+              "$ref": "#/components/schemas/TaskRefOut"
+            },
+            "title": "My Tasks",
+            "type": "array"
+          },
           "open_tasks": {
             "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
             "title": "Open Tasks",
@@ -2531,7 +2557,8 @@
           "status",
           "signup_id",
           "open_tasks",
-          "total_tasks"
+          "total_tasks",
+          "my_tasks"
         ],
         "title": "NeedsAnswerOut",
         "type": "object"
@@ -4323,6 +4350,36 @@
           "claimed_by_me"
         ],
         "title": "TaskOut",
+        "type": "object"
+      },
+      "TaskRefOut": {
+        "properties": {
+          "claimed_by_me": {
+            "description": "The account's own person took it, rather than someone else in the household.",
+            "title": "Claimed By Me",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "claimed_by_me"
+        ],
+        "title": "TaskRefOut",
         "type": "object"
       },
       "TeamRefOut": {

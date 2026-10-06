@@ -6,6 +6,7 @@
 #   deploy/deploy-prod.sh --push                 # push local main first, then deploy it
 #   SKIP_BACKUP=1 deploy/deploy-prod.sh          # skip the pre-migration backup (not recommended)
 #   NO_MAINTENANCE=1 deploy/deploy-prod.sh       # don't wrap the deploy in maintenance mode
+#   deploy/deploy-prod.sh --reopen               # leave maintenance mode by itself once healthy (no prompt)
 #
 # What it does is exactly the manual routine, run for you over SSH:
 #
@@ -40,6 +41,7 @@ BASE_DOMAIN="${BASE_DOMAIN:-rosterchief.app}"
 # "0", never empty: an empty argument can vanish when ssh rebuilds the remote command line.
 SKIP_BACKUP="${SKIP_BACKUP:-0}"
 NO_MAINTENANCE="${NO_MAINTENANCE:-0}"
+REOPEN_MAINTENANCE="${REOPEN_MAINTENANCE:-0}"
 MAINTENANCE_MESSAGE="${MAINTENANCE_MESSAGE:-RosterChief is being upgraded. It will be back shortly.}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -51,7 +53,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --version) VERSION="${2:?--version needs a tag, e.g. --version v0.7.8}"; shift 2 ;;
         --push) PUSH=1; shift ;;
-        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        --reopen) REOPEN_MAINTENANCE=1; shift ;;
+        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
         *) die "Unknown argument '$1' (see --help)." ;;
     esac
 done
@@ -115,6 +118,6 @@ REMOTE
 # connection leaves maintenance ON, which is the safe side.
 say "Running deploy/deploy-local.sh on the server (maintenance mode on until you confirm)"
 ssh -t "${SSH_OPTS[@]}" "${SSH_TARGET}" \
-    "cd $(printf '%q' "$REMOTE_DIR") && IMAGE_TAG=$(printf '%q' "$IMAGE_TAG") COMPOSE_FILE=$(printf '%q' "$COMPOSE_FILE") BASE_DOMAIN=$(printf '%q' "$BASE_DOMAIN") SKIP_BACKUP=$(printf '%q' "$SKIP_BACKUP") NO_MAINTENANCE=$(printf '%q' "${NO_MAINTENANCE}") MAINTENANCE_MESSAGE=$(printf '%q' "${MAINTENANCE_MESSAGE}") ./deploy/deploy-local.sh"
+    "cd $(printf '%q' "$REMOTE_DIR") && IMAGE_TAG=$(printf '%q' "$IMAGE_TAG") COMPOSE_FILE=$(printf '%q' "$COMPOSE_FILE") BASE_DOMAIN=$(printf '%q' "$BASE_DOMAIN") SKIP_BACKUP=$(printf '%q' "$SKIP_BACKUP") NO_MAINTENANCE=$(printf '%q' "${NO_MAINTENANCE}") REOPEN_MAINTENANCE=$(printf '%q' "${REOPEN_MAINTENANCE}") MAINTENANCE_MESSAGE=$(printf '%q' "${MAINTENANCE_MESSAGE}") ./deploy/deploy-local.sh"
 
 say "Production is running ${WHAT}."
