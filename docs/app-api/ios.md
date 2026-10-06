@@ -297,6 +297,10 @@ every row; group by event only as a presentation choice, and then still list eac
 `GET /context`). The same applies to `GET /events/{id}`: its `answers`, `referee_signups` and
 `official_signups` are the three roles for that one game.
 
+Every row also has `open_tasks`: how many of that event's tasks (bring fruit, drive, ...) still
+have a free slot, the same for each row of one event. Use it for a small "N open tasks" badge;
+the tasks themselves, and claiming them, are on `GET /events/{id}` → `tasks`.
+
 Row types:
 
 | `type` | Show | Action |

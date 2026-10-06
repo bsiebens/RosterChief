@@ -7,6 +7,7 @@ import datetime
 import uuid
 from typing import Annotated
 
+from django.db.models import Count, F
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -87,6 +88,16 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
     }
 
 
+def open_task_counts(event_ids) -> dict:
+    """``{event_id: how many of its tasks still have a free slot}`` -- the same "open"
+    Home's open-tasks card uses (fewer claims than the quantity needed)."""
+    counts: dict = {}
+    open_tasks = EventTask.objects.filter(event_id__in=set(event_ids)).annotate(claim_count=Count("claims")).filter(claim_count__lt=F("needed_quantity"))
+    for event_id in open_tasks.values_list("event_id", flat=True):
+        counts[event_id] = counts.get(event_id, 0) + 1
+    return counts
+
+
 @router.get("/calendar", response={200: CalendarOut, **ERRORS, 422: ErrorOut}, summary="Agenda")
 def calendar(
     request,
@@ -108,6 +119,7 @@ def calendar(
         raise ApiError(422, "validation_error", fields={"to": [_("Must be after “from” and at most %(days)d days later.") % {"days": MAX_CALENDAR_DAYS}]})
 
     rows = member_agenda(scope.club, scope.people_for(member_id), kind=kind if kind in KIND_FILTERS else None, officials_enabled=scope.feature("officials"), include_declined=True, start=start, end=end)
+    open_tasks = open_task_counts([row["event"].pk for row in rows])
     items = []
     for row in rows:
         source = row.get("attendance") or row.get("signup")
@@ -120,6 +132,7 @@ def calendar(
                 "status": source.status if source else None,
                 "signup_id": row["signup"].pk if "signup" in row else None,
                 "blocked_requirements": [requirement.name for requirement in row.get("requirements", [])],
+                "open_tasks": open_tasks.get(row["event"].pk, 0),
             }
         )
     return {"items": items}

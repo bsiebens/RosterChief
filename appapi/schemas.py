@@ -326,6 +326,13 @@ class CalendarItemOut(Schema):
     status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.")
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
+    open_tasks: int = Field(
+        description=(
+            "How many of the event's tasks still have a free slot (a task wants several helpers and not enough have taken it). "
+            "The same for every row of one event; 0 when nothing is open. "
+            "Open the event (`GET /events/{id}` -> `tasks`) to see and claim them."
+        )
+    )
 
 
 class CalendarOut(Schema):

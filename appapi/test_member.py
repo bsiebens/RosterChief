@@ -828,3 +828,42 @@ class AccountSettingsTests(AppApiTestCase):
     def test_an_unknown_choice_is_rejected(self):
         token = self.login()
         self.assertEqual(self.api("patch", "/me/settings", token=token, data={"email_notifications": "never"}).status_code, 422)
+
+
+class CalendarOpenTasksTests(ClubApiTestCase):
+    def counts(self, **params):
+        return {item["event"]["title"]: item["open_tasks"] for item in self.get("/calendar", **params).json()["items"]}
+
+    def test_calendar_rows_count_the_tasks_that_still_have_a_free_slot(self):
+        busy = self.event(title="Busy", start=self.soon)
+        quiet = self.event(title="Quiet", start=self.soon + datetime.timedelta(days=1))
+        for event in (busy, quiet):
+            self.invite(event)
+        fruit = EventTask.objects.create(event=busy, title="Fruit", needed_quantity=2)
+        EventTask.objects.create(event=busy, title="Lifts", needed_quantity=1)
+        taken = EventTask.objects.create(event=busy, title="Whistle", needed_quantity=1)
+        EventTaskClaim.objects.create(task=taken, member=self.child)
+        EventTaskClaim.objects.create(task=fruit, member=self.child)  # one of two slots: still open
+
+        self.assertEqual(self.counts(), {"Busy": 2, "Quiet": 0})
+
+    def test_a_task_stops_counting_once_every_slot_is_taken(self):
+        event = self.event(title="Game")
+        self.invite(event)
+        task = EventTask.objects.create(event=event, title="Fruit", needed_quantity=2)
+        self.assertEqual(self.counts(), {"Game": 1})
+
+        EventTaskClaim.objects.create(task=task, member=self.child)
+        EventTaskClaim.objects.create(task=task, member=self.member)
+
+        self.assertEqual(self.counts(), {"Game": 0})
+
+    def test_every_row_of_one_event_shows_the_same_count(self):
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        self.invite(game, member=self.child)
+        RefereeSignup.objects.create(event=game, member=self.member)
+        EventTask.objects.create(event=game, title="Fruit", needed_quantity=1)
+
+        items = self.get("/calendar").json()["items"]
+
+        self.assertEqual(sorted((item["type"], item["open_tasks"]) for item in items), [("referee", 1), ("rsvp", 1)])
