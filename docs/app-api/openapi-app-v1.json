@@ -907,12 +907,18 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "sport_type": {
+            "description": "The sport this club plays: `ice_hockey` or `other`. More sports will be added: treat any value you do not know as `other`.",
+            "title": "Sport Type",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "slug",
           "name",
+          "sport_type",
           "api_base_url",
           "public_api_base_url",
           "logo_url",
@@ -981,12 +987,18 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "sport_type": {
+            "description": "The sport this club plays: `ice_hockey` or `other`. More sports will be added: treat any value you do not know as `other`.",
+            "title": "Sport Type",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "slug",
           "name",
+          "sport_type",
           "logo_url",
           "event_background_url",
           "primary_color",

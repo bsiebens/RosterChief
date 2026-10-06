@@ -71,6 +71,7 @@ def clubs(request):
                 "id": club.pk,
                 "slug": club.slug,
                 "name": club.name,
+                "sport_type": club.sport_type,
                 "api_base_url": services.club_api_base_url(request, club),
                 "public_api_base_url": services.club_public_api_base_url(request, club),
                 "logo_url": services.logo_url(request, club),

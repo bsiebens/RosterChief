@@ -657,6 +657,20 @@ class HomeSummaryCompatibilityTests(ClubApiTestCase):
         self.assertEqual([card["event"].title for card in api["member_cards"]], ["Kid's training", "Parent's meeting"])
 
 
+class ClubSportTypeTests(ClubApiTestCase):
+    def test_context_and_clubs_expose_the_clubs_sport(self):
+        Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.ICE_HOCKEY)
+
+        context = self.get("/context").json()["club"]
+        clubs = self.api("get", "/clubs", token=self.token).json()["items"]
+
+        self.assertEqual(context["sport_type"], "ice_hockey")
+        self.assertEqual([club["sport_type"] for club in clubs if club["slug"] == self.club.slug], ["ice_hockey"])
+
+    def test_a_club_without_a_chosen_sport_is_other(self):
+        self.assertEqual(self.get("/context").json()["club"]["sport_type"], "other")
+
+
 class NotificationTargetTests(ClubApiTestCase):
     """What the app opens: `target` in the push payload and `source` in the inbox share one shape."""
 

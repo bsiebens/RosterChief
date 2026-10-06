@@ -136,7 +136,7 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 
 ```json
 {"items": [{
-  "id": "…", "slug": "hc-example", "name": "HC Example",
+  "id": "…", "slug": "hc-example", "name": "HC Example", "sport_type": "ice_hockey",
   "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
   "public_api_base_url": "https://hc-example.rosterchief.app/api/v1",
   "logo_url": "https://…", "event_background_url": "https://…",
@@ -150,6 +150,9 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 * `relationship`: `member` (plays or is signed up), `guardian` (acts for children), `coach`
   (staffs a team this season), `staff` (club admin, editor or member admin). Ignore values you
   don't know; more may come.
+* `sport_type` (also on `GET /context` → `club`): the sport the club plays, `ice_hockey` or `other`.
+  More sports will come: treat any value you don't know as `other`. Use it for sport-specific
+  wording or icons, not to decide which features exist (that is `features`).
 * Exactly one club: open it. More: show a picker and remember the choice.
 * Use `api_base_url` for every club call. For public content (games with timelines, league
   standings, sponsors), `public_api_base_url` is the club's read-only public API: no token needed.
