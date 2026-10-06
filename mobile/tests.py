@@ -4086,14 +4086,16 @@ class CoachTodayViewTests(TestCase):
         self.assertEqual(response.context["active_team"], second_team)
 
     def test_tonights_session_card_shows_for_an_event_starting_today(self):
-        # A small offset, not "+2 hours" -- late enough in the evening (this
-        # environment is UTC+2), a couple hours out would roll into tomorrow
-        # and silently break the "starts today" premise this test is about.
-        event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(minutes=5))
-        event.teams.add(self.team)
-        self.client.force_login(self.user)
+        # The clock is pinned to midday: with the real one, a run in the last minutes of the
+        # (local) day put "now + 5 minutes" on tomorrow's date, silently breaking the "starts
+        # today" premise this test is about.
+        noon = timezone.make_aware(datetime.datetime.combine(timezone.localdate(), datetime.time(12, 0)))
+        with mock.patch("django.utils.timezone.now", return_value=noon):
+            event = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=noon + datetime.timedelta(minutes=5))
+            event.teams.add(self.team)
+            self.client.force_login(self.user)
 
-        response = self._get()
+            response = self._get()
 
         self.assertEqual(response.context["tonight_event"], event)
         self.assertContains(response, "Practice")

@@ -41,6 +41,7 @@ dev = [
     "coverage>=7.16.2",
     "django-browser-reload>=1.21.0",
     "ruff>=0.16.9",
+    "tblib>=3.2.2",
 ]
 
 [tool.ruff]
