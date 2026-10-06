@@ -15,7 +15,8 @@ from waffle import get_waffle_flag_model
 
 from appapi.presenters import game_status
 from club.models import ClubMembership, OnboardingRequirement
-from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, RefereeSignup
+from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
+from events.services.agenda import member_agenda
 from events.services.game_timeline import TimelineFetch
 from events.services.game_timeline import store as store_game_timeline
 from members.models import Family, FamilyMembership, Member
@@ -82,6 +83,58 @@ class HomeTests(ClubApiTestCase):
         self.assertEqual(body["open_tasks"][0]["open_count"], 2)
         self.assertEqual(body["news"][0]["excerpt"], "Hello all")
 
+    def cards(self, **params):
+        return [(card["kind"], card["event"]["title"], sorted(row["member_id"] for row in card["members"])) for card in self.get("/home", **params).json()["member_cards"]]
+
+    def test_every_person_gets_their_own_rsvp_and_next_up_cards(self):
+        day = datetime.timedelta(days=1)
+        self.invite(self.event(title="Kid's training", start=self.soon), member=self.child)
+        self.invite(self.event(title="Parent's meeting", start=self.soon + day))
+        self.invite(self.event(title="Kid's party", start=self.soon + 2 * day), member=self.child, status=Attendance.AttendanceStatus.PRESENT)
+        self.invite(self.event(title="Parent's dinner", start=self.soon + 3 * day), status=Attendance.AttendanceStatus.SELECTED)
+
+        self.assertEqual(
+            self.cards(),
+            [
+                ("rsvp_needed", "Kid's training", [str(self.child.pk)]),
+                ("rsvp_needed", "Parent's meeting", [str(self.member.pk)]),
+                ("next_going", "Kid's party", [str(self.child.pk)]),
+                ("next_going", "Parent's dinner", [str(self.member.pk)]),
+            ],
+        )
+
+    def test_people_with_the_same_next_event_share_a_card(self):
+        game = self.event(title="Family day")
+        self.invite(game)
+        self.invite(game, member=self.child)
+
+        self.assertEqual(self.cards(), [("rsvp_needed", "Family day", sorted([str(self.member.pk), str(self.child.pk)]))])
+
+    def test_a_card_is_the_soonest_only_and_the_rest_stay_in_needs_answer(self):
+        first = self.event(title="First", start=self.soon)
+        later = self.event(title="Later", start=self.soon + datetime.timedelta(days=1))
+        self.invite(first)
+        self.invite(later)
+
+        body = self.get("/home").json()
+
+        self.assertEqual([(kind, title) for kind, title, _members in self.cards()], [("rsvp_needed", "First")])
+        # The card's own invitation is not repeated; the other one is still an ask.
+        self.assertEqual([row["event"]["title"] for row in body["needs_answer"]], ["Later"])
+
+    def test_a_closed_invitation_is_skipped_for_the_next_open_one(self):
+        closed = self.event(title="Closed", start=self.soon, deadline=timezone.now() - datetime.timedelta(hours=1))
+        self.invite(closed)
+        self.invite(self.event(title="Open", start=self.soon + datetime.timedelta(days=1)))
+
+        self.assertEqual([(kind, title) for kind, title, _members in self.cards()], [("rsvp_needed", "Open")])
+
+    def test_cards_follow_member_id_and_can_be_empty(self):
+        self.invite(self.event(title="Kid's game"), member=self.child)
+
+        self.assertEqual(self.cards(member_id=self.member.pk), [])
+        self.assertEqual(self.cards(member_id=self.child.pk), [("rsvp_needed", "Kid's game", [str(self.child.pk)])])
+
     def test_member_id_narrows_to_one_person(self):
         self.invite(self.event(title="Kid's game"), member=self.child)
         self.invite(self.event(title="Parents' meeting"))
@@ -147,6 +200,40 @@ class CalendarTests(ClubApiTestCase):
         items = self.get("/calendar", **{"from": (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}).json()["items"]
 
         self.assertEqual([(item["type"], item["event"]["title"]) for item in items], [("rsvp", "Played"), ("referee", "Refereeing ahead")])
+
+    def test_looking_back_covers_invited_and_official_signups_too(self):
+        # "Scheduled but never joined" is an INVITED sign-up; officials go through the same filter.
+        now = timezone.now()
+        past = self.event(title="Past", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=3))
+        no_end = self.event(title="Past, no end", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=4))
+        Event.objects.filter(pk=no_end.pk).update(end=None)
+        ahead = self.event(title="Ahead", kind=Event.EventKind.GAME, start=now + datetime.timedelta(days=1))
+        RefereeSignup.objects.create(event=past, member=self.member)
+        OfficialSignup.objects.create(event=past, member=self.member)
+        OfficialSignup.objects.create(event=no_end, member=self.member)
+        OfficialSignup.objects.create(event=ahead, member=self.member)
+
+        rows = member_agenda(self.club, [self.member], officials_enabled=True, start=now - datetime.timedelta(days=10))
+
+        self.assertEqual([(row["type"], row["event"].title) for row in rows], [("official", "Ahead")])
+
+    def test_looking_back_keeps_past_trainings_and_other_events_you_are_invited_to(self):
+        now = timezone.now()
+        past = now - datetime.timedelta(days=3)
+        kinds = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING, Event.EventKind.SOCIAL, Event.EventKind.OTHER]
+        for kind in kinds:
+            self.invite(self.event(title=f"Past {kind}", kind=kind, start=past))
+        # Even a past game you also refereed stays, as the player invitation.
+        refereed = self.event(title="Played and refereed", kind=Event.EventKind.GAME, start=past)
+        self.invite(refereed)
+        RefereeSignup.objects.create(event=refereed, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+
+        from_ = (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        items = self.get("/calendar", **{"from": from_}).json()["items"]
+
+        self.assertEqual(sorted(item["event"]["title"] for item in items), sorted([*(f"Past {kind}" for kind in kinds), "Played and refereed"]))
+        self.assertEqual({item["type"] for item in items}, {"rsvp"})
+        self.assertEqual([item["event"]["title"] for item in self.get("/calendar", kind="training", **{"from": from_}).json()["items"]], ["Past training"])
 
     def test_game_status(self):
         now = timezone.now()
@@ -513,3 +600,24 @@ class UnknownIdTests(ClubApiTestCase):
             with self.subTest(method=method, path=path):
                 response = self.api(method.lower(), concrete, token=self.token, host=host, data=data)
                 self.assertError(response, 404, response.json()["error"]["code"] if response.status_code == 404 else "not_found")
+
+
+class HomeSummaryCompatibilityTests(ClubApiTestCase):
+    """The web app shows one hero and everything else in `needs_answer`: keeping every other
+    person's open invitation there (while the API moves them to `member_cards`) is what
+    stops the PWA from losing them."""
+
+    def test_the_web_summary_keeps_other_peoples_invitations_in_needs_answer(self):
+        from mobile.services.home import home_summary
+
+        self.invite(self.event(title="Kid's training", start=self.soon), member=self.child)
+        self.invite(self.event(title="Parent's meeting", start=self.soon + datetime.timedelta(days=1)))
+        people = [self.member, self.child]
+
+        web = home_summary(self.club, people, officials_enabled=False)
+        api = home_summary(self.club, people, officials_enabled=False, exclude_card_rows=True)
+
+        self.assertEqual(web["hero_attendance"].event.title, "Kid's training")
+        self.assertEqual([row["event"].title for row in web["needs_answer"]], ["Parent's meeting"])
+        self.assertEqual(api["needs_answer"], [])
+        self.assertEqual([card["event"].title for card in api["member_cards"]], ["Kid's training", "Parent's meeting"])

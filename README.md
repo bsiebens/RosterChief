@@ -89,7 +89,7 @@ Every user-facing string must be translatable. See the Conventions section of [`
 | --- | --- |
 | Platform | `authentication`, `club`, `features`, `controlpanel`, `rosterchief` (settings, tenancy) |
 | People and teams | `members`, `teams`, `registration` |
-| Club life | `events`, `tournaments`, `announcements`, `news`, `notifications`, `evaluations`, `formbuilder` |
+| Club life | `events`, `announcements`, `news`, `notifications`, `evaluations`, `formbuilder` |
 | Money | `shop`, `billing` |
 | Surfaces | `management`, `mobile`, `marketing` |
 | APIs | `appapi` (native apps), `api` (public) |

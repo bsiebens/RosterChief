@@ -5,7 +5,8 @@ mobile.views.HomeView and the app API's ``GET /home`` so both agree on every car
 JSON). Every card is independently optional: an empty screen is all of them empty.
 """
 
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, Q, Window
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 
 from club.services.access import current_season
@@ -23,15 +24,36 @@ NEWS_LIMIT = 3
 FORMS_LIMIT = 5
 
 
-def home_summary(club, people, *, officials_enabled: bool, now=None) -> dict:
+def _first_per_member(queryset):
+    """The soonest row of ``queryset`` for each member (ties: lowest event id)."""
+    ranked = queryset.annotate(rank=Window(RowNumber(), partition_by=F("member_id"), order_by=[F("event__start").asc(), F("event_id").asc()])).filter(rank=1)
+    return list(ranked)
+
+
+def _group_cards(kind, attendances):
+    """One card per event: everyone whose soonest row of this kind is the same event shares it."""
+    by_event = {}
+    for attendance in attendances:
+        by_event.setdefault(attendance.event_id, []).append(attendance)
+    cards = [{"kind": kind, "event": rows[0].event, "attendances": sorted(rows, key=lambda row: (row.member.first_name, row.member.last_name))} for rows in by_event.values()]
+    return sorted(cards, key=lambda card: (card["event"].start, card["event"].pk))
+
+
+def home_summary(club, people, *, officials_enabled: bool, exclude_card_rows: bool = False, now=None) -> dict:
     """Keys:
 
     * ``hero_attendance`` / ``rsvp_closed``: the soonest upcoming invitation nobody has
       answered yet, and whether its deadline has passed (shown read-only then);
     * ``going_attendance``: the soonest event someone is going to (PRESENT or SELECTED);
+    * ``member_cards``: per person, their soonest still-answerable unanswered invitation
+      (``rsvp_needed``) and their soonest going/selected event (``next_going``), grouped so that
+      people with the same event share one card: ``{"kind", "event", "attendances"}``, all
+      ``rsvp_needed`` cards first, each group by event start. Unlike the single hero, an
+      invitation whose deadline has passed is skipped, so every card can be answered;
     * ``needs_answer`` (capped) / ``needs_answer_total``: rows ``{"kind": "rsvp"|"referee"|
       "official", "event", "member", "attendance"|"signup"}`` still owing an answer and still
-      answerable, excluding the hero;
+      answerable, excluding the hero -- and, with ``exclude_card_rows`` (the app API, which
+      shows them on ``member_cards`` instead), every ``rsvp_needed`` card's invitation too;
     * ``open_tasks`` (capped, each with ``open_count``) / ``open_tasks_total``: unclaimed
       task slots on the people's upcoming events;
     * ``dues_rows``: club.services.fees.open_dues_rows, minus balances nobody has
@@ -44,6 +66,7 @@ def home_summary(club, people, *, officials_enabled: bool, now=None) -> dict:
         "hero_attendance": None,
         "rsvp_closed": False,
         "going_attendance": None,
+        "member_cards": [],
         "needs_answer": [],
         "needs_answer_total": 0,
         "open_tasks": [],
@@ -63,11 +86,18 @@ def home_summary(club, people, *, officials_enabled: bool, now=None) -> dict:
     summary["rsvp_closed"] = hero is not None and rsvp_is_closed(hero.event, now)
     summary["going_attendance"] = upcoming.filter(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED]).order_by("event__start").first()
 
+    answerable = Q(event__deadline__isnull=True) | Q(event__deadline__gte=now)
+    rsvp_rows = _first_per_member(upcoming.filter(status=Attendance.AttendanceStatus.NO_RESPONSE).filter(answerable).select_related("event__opponent"))
+    going_rows = _first_per_member(upcoming.filter(status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED]).select_related("event__opponent"))
+    summary["member_cards"] = _group_cards("rsvp_needed", rsvp_rows) + _group_cards("next_going", going_rows)
+
     # Past the deadline a reply is no longer possible, so it doesn't belong in "still
     # needs a reply" -- unlike the hero, which shows a closed one read-only.
     needs_answer_qs = upcoming.filter(status__in=[Attendance.AttendanceStatus.NO_RESPONSE, Attendance.AttendanceStatus.MAYBE]).filter(Q(event__deadline__isnull=True) | Q(event__deadline__gte=now))
     if hero is not None:
         needs_answer_qs = needs_answer_qs.exclude(pk=hero.pk)
+    if exclude_card_rows:
+        needs_answer_qs = needs_answer_qs.exclude(pk__in=[row.pk for row in rsvp_rows])
     needs_answer = [{"kind": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in needs_answer_qs]
 
     # Referee/official invites are the same kind of ask (a yes/no owed), so they share the
