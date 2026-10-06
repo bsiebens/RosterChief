@@ -248,6 +248,7 @@ class NewsSummaryOut(Schema):
 
 
 #: One definition for every place an event is shown with its open-task count (calendar rows, Home).
+TOTAL_TASKS_HELP = 'How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives "2 of 5 tasks still open" without a call to `GET /events/{id}`.'
 OPEN_TASKS_HELP = "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them."
 
 
@@ -256,6 +257,7 @@ class HeroOut(Schema):
     attendance: AttendanceOut
     rsvp_closed: bool
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
+    total_tasks: int = Field(description=TOTAL_TASKS_HELP)
 
 
 class CardMemberOut(Schema):
@@ -268,6 +270,7 @@ class MemberCardOut(Schema):
     event: EventOut
     members: list[CardMemberOut] = Field(description="Everyone this card is for: people whose next event of this kind is the same one share a card. Never empty.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
+    total_tasks: int = Field(description=TOTAL_TASKS_HELP)
 
 
 class NeedsAnswerOut(Schema):
@@ -277,6 +280,7 @@ class NeedsAnswerOut(Schema):
     status: str
     signup_id: uuid.UUID | None = Field(description="For `referee`/`official`: the sign-up to respond to.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP)
+    total_tasks: int = Field(description=TOTAL_TASKS_HELP)
 
 
 class OpenTaskOut(Schema):
@@ -334,6 +338,7 @@ class CalendarItemOut(Schema):
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP + " The same for every row of one event.")
+    total_tasks: int = Field(description=TOTAL_TASKS_HELP + " The same for every row of one event.")
 
 
 class CalendarOut(Schema):
