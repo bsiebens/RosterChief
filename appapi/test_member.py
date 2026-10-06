@@ -15,7 +15,8 @@ from waffle import get_waffle_flag_model
 
 from appapi.presenters import game_status
 from club.models import ClubMembership, OnboardingRequirement
-from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, RefereeSignup
+from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
+from events.services.agenda import member_agenda
 from events.services.game_timeline import TimelineFetch
 from events.services.game_timeline import store as store_game_timeline
 from members.models import Family, FamilyMembership, Member
@@ -147,6 +148,22 @@ class CalendarTests(ClubApiTestCase):
         items = self.get("/calendar", **{"from": (now - datetime.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}).json()["items"]
 
         self.assertEqual([(item["type"], item["event"]["title"]) for item in items], [("rsvp", "Played"), ("referee", "Refereeing ahead")])
+
+    def test_looking_back_covers_invited_and_official_signups_too(self):
+        # "Scheduled but never joined" is an INVITED sign-up; officials go through the same filter.
+        now = timezone.now()
+        past = self.event(title="Past", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=3))
+        no_end = self.event(title="Past, no end", kind=Event.EventKind.GAME, start=now - datetime.timedelta(days=4))
+        Event.objects.filter(pk=no_end.pk).update(end=None)
+        ahead = self.event(title="Ahead", kind=Event.EventKind.GAME, start=now + datetime.timedelta(days=1))
+        RefereeSignup.objects.create(event=past, member=self.member)
+        OfficialSignup.objects.create(event=past, member=self.member)
+        OfficialSignup.objects.create(event=no_end, member=self.member)
+        OfficialSignup.objects.create(event=ahead, member=self.member)
+
+        rows = member_agenda(self.club, [self.member], officials_enabled=True, start=now - datetime.timedelta(days=10))
+
+        self.assertEqual([(row["type"], row["event"].title) for row in rows], [("official", "Ahead")])
 
     def test_game_status(self):
         now = timezone.now()
