@@ -17,7 +17,11 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
+from club.models import Club, ClubMembership
+from members.models import Member
+from members.services.family import managed_people
 from notifications.models import Notification
+from notifications.services import recipient_user_ids, unread_count
 from rosterchief.concurrency import run_in_background
 
 from .models import PushDevice
@@ -31,17 +35,20 @@ def push_configured() -> bool:
     return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or settings.APP_PUSH_SNS_APNS_ARN or settings.APP_PUSH_SNS_APNS_SANDBOX_ARN or settings.APP_PUSH_SNS_FCM_ARN)
 
 
-def recipient_user_ids(notification: Notification) -> set:
-    member = notification.member
-    user_ids = {member.user_id} if member.user_id else set()
-    user_ids |= set(member.guardians(notification.club).exclude(user__isnull=True).values_list("user_id", flat=True))
-    return user_ids
-
-
 def payload_data(notification: Notification) -> dict:
     source = notification_target(notification)
     target = {key: str(value) for key, value in source.items() if value is not None} if source else None
     return {"notification_id": str(notification.pk), "club_slug": notification.club.slug, "target": target}
+
+
+def total_unread(user) -> int:
+    """The app icon's badge: unread notifications across every club, for everyone this account
+    manages. One install serves all of an account's clubs, so the count is account-wide."""
+    me = Member.objects.filter(user=user).first()
+    if me is None:
+        return 0
+    club_ids = ClubMembership.objects.filter(member=me).values_list("club_id", flat=True).distinct()
+    return sum(unread_count(club, managed_people(me, club)) for club in Club.objects.filter(pk__in=club_ids))
 
 
 def deliver(notification_ids) -> int:
@@ -57,13 +64,16 @@ def deliver(notification_ids) -> int:
         return 0
 
     active_users = set(get_user_model().objects.filter(pk__in=per_user, is_active=True).values_list("pk", flat=True))
-    devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).exclude(endpoint_arn="")
+    devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).exclude(endpoint_arn="").select_related("user")
     gateway = get_gateway()
+    badges = {}
     sent = 0
     for device in devices:
+        if device.user_id not in badges:
+            badges[device.user_id] = total_unread(device.user)
         for notification in per_user[device.user_id].values():
             try:
-                alive = gateway.publish(device, title=str(notification.title), body=str(notification.body), data=payload_data(notification))
+                alive = gateway.publish(device, title=str(notification.title), body=str(notification.body), data=payload_data(notification), badge=badges[device.user_id])
             except Exception:
                 # Never fatal for the rest of the fan-out (throttling, a network blip).
                 logger.exception("app_push.publish_failed device=%s", device.pk)

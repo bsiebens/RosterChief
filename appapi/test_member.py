@@ -4,6 +4,7 @@ child (Kim) in Ajax United, current season, signed in through allauth headless."
 
 import datetime
 import io
+import json
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ from waffle import get_waffle_flag_model
 
 from appapi.presenters import game_status
 from appapi.scope import ClubScope
-from club.models import ClubMembership, OnboardingRequirement
+from club.models import Club, ClubMembership, OnboardingRequirement
 from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
 from events.services.agenda import member_agenda
 from events.services.attendance import notify_newly_invited
@@ -556,10 +557,12 @@ class ProfileTests(ClubApiTestCase):
 
 class RecordingPublisher(NullGateway):
     sent: list = []
+    badges: list = []
     dead: set = set()
 
-    def publish(self, device, *, title, body, data):
+    def publish(self, device, *, title, body, data, badge=None):
         RecordingPublisher.sent.append((device.installation_id, title, data))
+        RecordingPublisher.badges.append(badge)
         return device.installation_id not in RecordingPublisher.dead
 
 
@@ -568,6 +571,7 @@ class PushDeliveryTests(ClubApiTestCase):
     def setUp(self):
         super().setUp()
         RecordingPublisher.sent = []
+        RecordingPublisher.badges = []
         RecordingPublisher.dead = set()
         self.device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t", endpoint_arn="arn:1")
 
@@ -732,3 +736,81 @@ class WebPushDedupeTests(ClubApiTestCase):
             sent = send_push_to_user(self.club, self.user, title="Goal", body="1-0")
 
         self.assertEqual((sent, deliver_web.call_count), (0, 0))
+
+
+@override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
+class WebPushRecipientsTests(ClubApiTestCase):
+    """Web push reaches the same accounts the email and native push do -- a parent gets their
+    child's notification even though the child has no login -- once per distinct notification."""
+
+    def setUp(self):
+        super().setUp()
+        self.parent_subscription = PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/parent", p256dh="k", auth="a")
+
+    def pushes(self, notifications):
+        with patch("mobile.services.push._deliver") as deliver_web:
+            send_push_for_notifications(notifications)
+        return [call.args[0] for call in deliver_web.call_args_list]
+
+    def test_a_parent_is_pushed_their_childs_notification(self):
+        notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")
+
+        self.assertEqual(self.pushes([notification]), [self.parent_subscription])
+
+    def test_one_push_per_subscription_for_a_family_wide_notification(self):
+        second_child = Member.objects.create(first_name="Lou", last_name="Parent")
+        FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=second_child, role=FamilyMembership.FamilyRole.CHILD)
+        item = News.objects.create(club=self.club, title="News", slug="news", body="…", status=News.Status.PUBLISHED, published_at=timezone.now())
+        notifications = [Notification.objects.create(club=self.club, member=member, title="New article", body="Read it", source=item) for member in (self.member, self.child, second_child)]
+
+        self.assertEqual(self.pushes(notifications), [self.parent_subscription])
+
+    def test_a_subscription_in_another_club_is_not_used(self):
+        PushSubscription.objects.filter(pk=self.parent_subscription.pk).update(club=Club.objects.create(name="Rival FC", slug="rival-fc"))
+        notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")
+
+        self.assertEqual(self.pushes([notification]), [])
+
+
+class NativeBadgeTests(ClubApiTestCase):
+    @override_settings(APP_PUSH_GATEWAY="appapi.test_member.RecordingPublisher")
+    def test_the_push_carries_the_accounts_unread_total(self):
+        RecordingPublisher.sent = []
+        RecordingPublisher.badges = []
+        RecordingPublisher.dead = set()
+        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1")
+        Notification.objects.create(club=self.club, member=self.child, title="Earlier", body="…")  # unread, a child's
+        read = Notification.objects.create(club=self.club, member=self.member, title="Read", body="…")
+        Notification.objects.filter(pk=read.pk).update(read_at=timezone.now())
+        fresh = Notification.objects.create(club=self.club, member=self.member, title="New", body="…")
+
+        deliver([fresh.pk])
+
+        self.assertEqual(RecordingPublisher.badges, [2])  # the child's earlier one + the new one
+
+    def test_the_apns_message_includes_the_badge_only_when_given(self):
+        from .push import build_message
+
+        device = PushDevice(user=self.user, installation_id="p", platform="ios", push_token="t")
+        with_badge = json.loads(json.loads(build_message(device, title="t", body="b", data={}, badge=3))["APNS"])
+        without = json.loads(json.loads(build_message(device, title="t", body="b", data={}))["APNS"])
+
+        self.assertEqual(with_badge["aps"]["badge"], 3)
+        self.assertNotIn("badge", without["aps"])
+
+
+class AccountSettingsTests(AppApiTestCase):
+    def test_me_returns_the_email_setting_and_it_can_be_changed(self):
+        token = self.login()
+        self.assertEqual(self.api("get", "/me", token=token).json()["settings"], {"email_notifications": "always"})
+
+        response = self.api("patch", "/me/settings", token=token, data={"email_notifications": "unless_app"})
+
+        self.assertEqual(response.json(), {"email_notifications": "unless_app"})
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email_notifications, "unless_app")
+        self.assertEqual(self.api("get", "/me", token=token).json()["settings"]["email_notifications"], "unless_app")
+
+    def test_an_unknown_choice_is_rejected(self):
+        token = self.login()
+        self.assertEqual(self.api("patch", "/me/settings", token=token, data={"email_notifications": "never"}).status_code, 422)

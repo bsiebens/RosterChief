@@ -143,8 +143,17 @@ def add_external_official(event, name, *, assigned_by):
     return EventOfficial.objects.create(event=event, external_name=name, assigned_by=assigned_by)
 
 
+@transaction.atomic
 def remove_official(official):
+    """Staff taking an official off a game (management app) -- the officials counterpart
+    to referees.remove_referee: their sign-up is set to declined and they are told."""
+    event, member = official.event, official.member
     official.delete()
+    if member is None:
+        return
+    OfficialSignup.objects.filter(event=event, member=member).update(status=OfficialSignup.Status.DECLINED, responded_at=timezone.now())
+    body = _("You have been removed as an official for %(event)s.") % {"event": event.title}
+    notify_members([member], club=event.club, title=_("Official assignment removed"), body=body, source=event)
 
 
 def set_official_fee(official, *, fee=None, km=None, km_rate=None, no_fee=False):
@@ -162,11 +171,11 @@ def set_official_fee(official, *, fee=None, km=None, km_rate=None, no_fee=False)
     return official
 
 
-def sync_official_invites(event):
+def sync_official_invites(event, *, notify=True):
     """Invites every currently-eligible, not-yet-invited official to `event`
     -- wired from the same signal points as sync_referee_invites
     (events/signals.py's post_save(Event) and the Event.teams m2m).
-    Idempotent, same reasoning as sync_referee_invites.
+    Idempotent, same reasoning as sync_referee_invites (``notify=False`` likewise).
 
     Unlike every other function here, this one runs unconditionally on every
     event save/team change regardless of whether any officials view was ever
@@ -182,8 +191,9 @@ def sync_official_invites(event):
         return []
 
     OfficialSignup.objects.bulk_create([OfficialSignup(event=event, member=member) for member in new_members])
-    body = _("%(event)s needs a match official -- can you take it?") % {"event": event.title}
-    notify_members(new_members, club=event.club, title=_("Official needed"), body=body, source=event)
+    if notify:
+        body = _("%(event)s needs a match official -- can you take it?") % {"event": event.title}
+        notify_members(new_members, club=event.club, title=_("Official needed"), body=body, source=event)
     return new_members
 
 

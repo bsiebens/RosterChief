@@ -25,6 +25,7 @@ from django.views import View
 from django.views.generic import TemplateView
 from waffle import flag_is_active
 
+from authentication.models import User
 from bugs.forms import BugReportForm
 from bugs.models import BugReport
 from bugs.services import file_report
@@ -254,6 +255,30 @@ class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         set_followed_teams(request.user, request.club, request.POST.getlist("team"))
         notify(request, f"s|{_('Saved')}|{_('Your live game updates have been updated.')}")
         return redirect("mobile:live_game_updates")
+
+
+class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """The "Notification emails" row under Me -- whether notifications are also emailed to
+    this account (authentication.User.email_notifications), account-wide like the app
+    API's PATCH /me/settings."""
+
+    template_name = "mobile/notification_settings.html"
+    screen_title = _("Notification emails")
+    active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        kwargs.setdefault("choices", User.EmailNotifications.choices)
+        kwargs.setdefault("current", self.request.user.email_notifications)
+        return super().get_context_data(**kwargs)
+
+    def post(self, request, *args, **kwargs):
+        value = request.POST.get("email_notifications")
+        if value not in User.EmailNotifications.values:
+            return HttpResponseBadRequest("Unknown choice.")
+        request.user.email_notifications = value
+        request.user.save(update_fields=["email_notifications"])
+        notify(request, f"s|{_('Saved')}|{_('Your notification email setting has been updated.')}")
+        return redirect("mobile:notification_settings")
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1171,12 +1196,18 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:me"))
 
 
-def _notification_source_link(source):
-    """(label, url) for a notification's ``source`` when it's something this
-    app has a detail page for -- (None, None) otherwise. One place both
+def _notification_source_link(notification):
+    """(label, url) for a notification when it points at something this app has a
+    page for -- (None, None) otherwise: its ``source`` object, or, for one without
+    a source, its ``target_type`` (the calendar roll-up). One place both
     NotificationsView.get_context_data (the row's own label) and .post (the
-    tap-to-mark-read redirect target) read from, so a new source type only
-    needs adding here."""
+    tap-to-mark-read redirect target) read from, so a new target only needs
+    adding here."""
+    source = notification.source
+    if source is None and notification.target_type == "calendar":
+        return _("Calendar"), reverse("mobile:calendar")
+    if isinstance(source, Order):
+        return _("Order"), reverse("mobile:shop_order_detail", kwargs={"pk": source.pk})
     if isinstance(source, News):
         return _("Club news"), reverse("mobile:news_detail", kwargs={"slug": source.slug})
     if isinstance(source, Event):
@@ -1226,7 +1257,7 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             notifications = inbox_for(self.request.club, self.managed_people).select_related("member").prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all()])).order_by("-created")
 
             for notification in notifications:
-                source_label, _url = _notification_source_link(notification.source)
+                source_label, _url = _notification_source_link(notification)
                 row = {"notification": notification, "source_label": source_label}
 
                 created_date = timezone.localtime(notification.created).date()
@@ -1263,7 +1294,7 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # -- the plain-POST tap that marks it read also lands the member
             # there, no separate "next" field needed since the server already
             # has the source.
-            _label, url = _notification_source_link(notification.source)
+            _label, url = _notification_source_link(notification)
             return HttpResponseRedirect(url or reverse("mobile:notifications"))
 
         return HttpResponseBadRequest(_("Unknown action."))

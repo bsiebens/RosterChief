@@ -1,6 +1,41 @@
 {
   "components": {
     "schemas": {
+      "AccountSettingsIn": {
+        "properties": {
+          "email_notifications": {
+            "enum": [
+              "always",
+              "unless_app"
+            ],
+            "title": "Email Notifications",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_notifications"
+        ],
+        "title": "AccountSettingsIn",
+        "type": "object"
+      },
+      "AccountSettingsOut": {
+        "properties": {
+          "email_notifications": {
+            "description": "`always`: notifications are also emailed. `unless_app`: not emailed while this account has the app installed (mails with an attachment, such as an invoice, are always sent).",
+            "enum": [
+              "always",
+              "unless_app"
+            ],
+            "title": "Email Notifications",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email_notifications"
+        ],
+        "title": "AccountSettingsOut",
+        "type": "object"
+      },
       "AnswerOut": {
         "properties": {
           "can_drop_out": {
@@ -2278,6 +2313,9 @@
           "mfa": {
             "$ref": "#/components/schemas/MfaState"
           },
+          "settings": {
+            "$ref": "#/components/schemas/AccountSettingsOut"
+          },
           "user": {
             "$ref": "#/components/schemas/UserOut"
           }
@@ -2285,7 +2323,8 @@
         "required": [
           "user",
           "member",
-          "mfa"
+          "mfa",
+          "settings"
         ],
         "title": "MeOut",
         "type": "object"
@@ -6469,6 +6508,74 @@
           }
         ],
         "summary": "The signed-in account",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/me/settings": {
+      "patch": {
+        "description": "Account-wide, for every club. `email_notifications`: `always` (default) or `unless_app`\n-- skip the notification email while this account has the app installed.",
+        "operationId": "appapi_routers_account_update_settings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSettingsOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change the account's settings",
         "tags": [
           "account"
         ]

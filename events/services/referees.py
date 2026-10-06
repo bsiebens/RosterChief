@@ -173,8 +173,19 @@ def add_external_referee(event, name, *, assigned_by):
     return EventReferee.objects.create(event=event, external_name=name, assigned_by=assigned_by)
 
 
+@transaction.atomic
 def remove_referee(referee):
+    """Staff taking a referee off a game (management app). The person's own sign-up is
+    set to declined, so the game stops showing as a confirmed duty in their app (and isn't
+    re-offered by the automatic invite sync), and they are told. An external referee has
+    no account behind them: only the assignment goes."""
+    event, member = referee.event, referee.member
     referee.delete()
+    if member is None:
+        return
+    RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.DECLINED, responded_at=timezone.now())
+    body = _("You have been removed as a referee for %(event)s.") % {"event": event.title}
+    notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event)
 
 
 def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
@@ -193,14 +204,16 @@ def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
     return referee
 
 
-def sync_referee_invites(event):
+def sync_referee_invites(event, *, notify=True):
     """Invites every currently-eligible, not-yet-invited referee to `event` --
     the referee-facing counterpart to events.sync_event_attendances, wired
     from the same signal points (events/signals.py's post_save(Event) and
     the Event.teams m2m). Idempotent: only creates rows for members with no
     RefereeSignup at all yet for this event, so an unrelated edit (or a
     second team added later) never re-notifies someone who already
-    responded -- or re-invites someone who already said no."""
+    responded -- or re-invites someone who already said no. ``notify=False`` creates the
+    rows without the "Referee needed" notification (events.services.crew_invites sends one
+    summary per person instead of one per game)."""
     if not needs_referee_management(event):
         return []
 
@@ -210,8 +223,9 @@ def sync_referee_invites(event):
         return []
 
     RefereeSignup.objects.bulk_create([RefereeSignup(event=event, member=member) for member in new_members])
-    body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
-    notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
+    if notify:
+        body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
+        notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
     return new_members
 
 

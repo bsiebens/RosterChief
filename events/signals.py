@@ -21,6 +21,7 @@ recurring series is already scheduled.
 """
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models.signals import m2m_changed, post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -29,11 +30,12 @@ from django.utils.translation import gettext_lazy as _
 from club.models import ClubMembership
 from events.models import Attendance, Event, EventSeries
 from events.services import notify_newly_invited, sync_event_attendances
+from events.services.crew_invites import resync_upcoming_invites
 from events.services.game_moments import game_timeline_changed, record_moments
 from events.services.officials import sync_official_invites
 from events.services.referees import sync_referee_invites
 from members.models import Group, GroupMembership
-from teams.models import Team, TeamMembership
+from teams.models import OfficialLevel, OfficialProfile, RefereeLevel, RefereeProfile, Team, TeamMembership
 
 M2M_SYNC_ACTIONS = {"post_add", "post_remove", "post_clear"}
 
@@ -143,3 +145,31 @@ def sync_on_club_membership_change(sender, instance, **kwargs):
 
 
 game_timeline_changed.connect(record_moments, dispatch_uid="events.record_game_moments")
+
+
+# -- referee/official eligibility changed -------------------------------------------------
+# Invites are created per game (above), but who is eligible can change afterwards: a profile
+# added or edited, a level's teams, someone's excluded teams. Bring the upcoming games'
+# invites up to date (events.services.crew_invites) -- after the commit, so it sees the saved
+# state. A team switching to club-managed, or the officials flag being switched on, have no
+# signal of their own: the hourly sync_crew_invites job covers those.
+
+
+def _resync_after_commit(club):
+    transaction.on_commit(lambda: resync_upcoming_invites(club))
+
+
+@receiver(post_save, sender=RefereeProfile)
+@receiver(post_save, sender=OfficialProfile)
+@receiver(post_save, sender=RefereeLevel)
+@receiver(post_save, sender=OfficialLevel)
+def resync_invites_on_eligibility_change(sender, instance, **kwargs):
+    _resync_after_commit(instance.club)
+
+
+@receiver(m2m_changed, sender=RefereeLevel.teams.through)
+@receiver(m2m_changed, sender=OfficialLevel.teams.through)
+@receiver(m2m_changed, sender=RefereeProfile.excluded_teams.through)
+def resync_invites_on_eligibility_m2m_change(sender, instance, action, **kwargs):
+    if action in ("post_add", "post_remove", "post_clear"):
+        _resync_after_commit(instance.club)

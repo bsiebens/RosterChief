@@ -9,11 +9,22 @@ from .managers import UserManager
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+    class EmailNotifications(models.TextChoices):
+        ALWAYS = "always", _("Always")
+        UNLESS_APP = "unless_app", _("Not when the app can notify me")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_("email"), unique=True, db_index=True)
 
     is_staff = models.BooleanField(_("is staff?"), default=False)
     is_active = models.BooleanField(_("is active?"), default=True)
+    email_notifications = models.CharField(
+        _("email notifications"),
+        max_length=16,
+        choices=EmailNotifications.choices,
+        default=EmailNotifications.ALWAYS,
+        help_text=_('Whether notifications are also emailed to this account. "Not when the app can notify me" skips the email while the account has the mobile app installed; mails with an attachment (such as an invoice) are always sent.'),
+    )
 
     objects = UserManager()
 

@@ -12,14 +12,14 @@ import base64
 import binascii
 import json
 import logging
-from datetime import timedelta
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
+
+from notifications.services import recipient_user_ids, users_with_native_push
 
 from .. import models
 
@@ -34,25 +34,6 @@ PUSH_TIMEOUT = 10
 #: letting a subscription point the server at an arbitrary (e.g. internal) URL.
 ALLOWED_PUSH_HOSTS = frozenset({"fcm.googleapis.com", "web.push.apple.com"})
 ALLOWED_PUSH_HOST_SUFFIXES = (".push.services.mozilla.com", ".notify.windows.com")
-
-
-#: A native install that has checked in within this many days counts as the account's phone:
-#: its web push subscriptions are then skipped for notifications (below), so one event does not
-#: buzz the same person twice. Older installs stop suppressing, in case the token went stale
-#: without the push service ever reporting it dead.
-NATIVE_DEVICE_ACTIVE_DAYS = 60
-
-
-def users_with_native_push(user_ids) -> set:
-    """Of ``user_ids``, the accounts that currently receive native (iOS/Android) push: an enabled
-    device with a live SNS endpoint that has been seen recently."""
-    from appapi.models import PushDevice  # deferred: appapi imports back into mobile
-
-    user_ids = {user_id for user_id in user_ids if user_id}
-    if not user_ids:
-        return set()
-    cutoff = timezone.now() - timedelta(days=NATIVE_DEVICE_ACTIVE_DAYS)
-    return set(PushDevice.objects.filter(user_id__in=user_ids, enabled=True, last_seen__gte=cutoff).exclude(endpoint_arn="").values_list("user_id", flat=True))
 
 
 def is_allowed_push_endpoint(endpoint) -> bool:
@@ -162,29 +143,35 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") 
 
 
 def send_push_for_notifications(notifications, url: str = "/app/") -> None:
-    """Batched send_push_to_member for a whole notifications.services.
-    notify_members() fan-out at once: every notification's member's
-    PushSubscriptions are fetched in a single query instead of one query per
-    member (what a post_save-per-instance signal would otherwise cost),
-    still delivering each notification's own title/body."""
+    """Web push for a whole notifications.services.notify_members() fan-out at once.
+
+    Delivered to the same accounts the email and the native push reach
+    (notifications.services.recipient_user_ids: the member's own login plus every
+    parent/guardian's), through their PushSubscriptions in the notification's club -- so a
+    parent is told about their child's notification even though the child has no login. An
+    account gets one push per distinct notification even when it concerns several of its
+    children, and an account with an active native install is skipped: it gets this through
+    the native channel (appapi.delivery)."""
     if not settings.VAPID_PRIVATE_KEY or not notifications:
         return
 
-    member_ids = {notification.member_id for notification in notifications}
-    subscriptions = list(models.PushSubscription.objects.filter(member_id__in=member_ids).select_related("member"))
-    # An account with an active native install gets this through the native channel
-    # (appapi.delivery), so its web subscriptions sit this one out.
-    on_native = users_with_native_push(subscription.member.user_id for subscription in subscriptions)
-    subscriptions_by_member = {}
-    for subscription in subscriptions:
-        if subscription.member.user_id in on_native:
-            continue
-        subscriptions_by_member.setdefault(subscription.member_id, []).append(subscription)
+    recipients = {notification.pk: recipient_user_ids(notification) for notification in notifications}
+    all_user_ids = set().union(*recipients.values())
+    if not all_user_ids:
+        return
+    skip = users_with_native_push(all_user_ids)
 
+    subscriptions_by_account = {}
+    for subscription in models.PushSubscription.objects.filter(member__user_id__in=all_user_ids - skip, club_id__in={notification.club_id for notification in notifications}).select_related("member"):
+        subscriptions_by_account.setdefault((subscription.club_id, subscription.member.user_id), []).append(subscription)
+
+    sent = set()
     for notification in notifications:
-        subscriptions = subscriptions_by_member.get(notification.member_id)
-        if not subscriptions:
-            continue
+        dedupe_key = (notification.club_id, notification.content_type_id, notification.object_id, notification.title, notification.body)
         payload = json.dumps({"title": str(notification.title), "body": str(notification.body), "url": url})
-        for subscription in subscriptions:
-            _deliver(subscription, payload, label=subscription.member)
+        for user_id in recipients[notification.pk] - skip:
+            for subscription in subscriptions_by_account.get((notification.club_id, user_id), []):
+                if (subscription.pk, dedupe_key) in sent:
+                    continue
+                sent.add((subscription.pk, dedupe_key))
+                _deliver(subscription, payload, label=subscription.member)

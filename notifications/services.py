@@ -7,6 +7,8 @@ version of the same guardian-fallback logic club.services.invoicing.recipient_fo
 already established for dues invoices.
 """
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
@@ -18,19 +20,60 @@ from rosterchief.mail import send_message
 from .models import Notification
 from .signals import notifications_created
 
+#: A native install that has checked in within this many days counts as the account's phone
+#: (see users_with_native_push). Older installs stop counting, in case the token went stale
+#: without the push service ever reporting it dead.
+NATIVE_DEVICE_ACTIVE_DAYS = 60
 
-def recipient_emails(member, club) -> list[str]:
+
+def users_with_native_push(user_ids) -> set:
+    """Of ``user_ids``, the accounts that currently receive native (iOS/Android) push: an
+    enabled device with a live SNS endpoint that has been seen recently."""
+    from appapi.models import PushDevice  # deferred: appapi imports this module
+
+    user_ids = {user_id for user_id in user_ids if user_id}
+    if not user_ids:
+        return set()
+    cutoff = timezone.now() - timedelta(days=NATIVE_DEVICE_ACTIVE_DAYS)
+    return set(PushDevice.objects.filter(user_id__in=user_ids, enabled=True, last_seen__gte=cutoff).exclude(endpoint_arn="").values_list("user_id", flat=True))
+
+
+def recipient_user_ids(notification: Notification) -> set:
+    """The accounts a notification is for: the member's own login plus every parent/guardian's
+    in that club -- the same people recipient_emails() resolves, as accounts. Both push
+    channels deliver to these."""
+    member = notification.member
+    user_ids = {member.user_id} if member.user_id else set()
+    user_ids |= set(member.guardians(notification.club).exclude(user__isnull=True).values_list("user_id", flat=True))
+    return user_ids
+
+
+def recipient_emails(member, club, *, honor_preferences: bool = False) -> list[str]:
     """The member's own email if they hold a login, plus every parent/guardian's,
     always -- a child with their own account doesn't opt their parents out of
     also being told. De-duplicated, order-stable. Empty means nobody reachable
-    at all."""
-    seen, emails = set(), []
+    at all.
+
+    With ``honor_preferences``, an address that belongs to an account set to "not when the app
+    can notify me" (User.email_notifications) is left out while that account has an active
+    native install. Addresses with no account behind them (a guardian without a login) are
+    never dropped."""
+    candidates = []  # (email, account or None)
     if member.user_id and member.contact_email:
-        seen.add(member.contact_email)
-        emails.append(member.contact_email)
-    for guardian in member.guardians(club).order_by("last_name", "first_name"):
-        email = guardian.contact_email
-        if email and email not in seen:
+        candidates.append((member.contact_email, member.user))
+    for guardian in member.guardians(club).select_related("user").order_by("last_name", "first_name"):
+        if guardian.contact_email:
+            candidates.append((guardian.contact_email, guardian.user))
+
+    if honor_preferences:
+        opted_out = {user.pk for _email, user in candidates if user is not None and user.email_notifications == user.EmailNotifications.UNLESS_APP}
+        if opted_out:
+            quiet = users_with_native_push(opted_out)
+            candidates = [(email, user) for email, user in candidates if user is None or user.pk not in quiet]
+
+    seen, emails = set(), []
+    for email, _user in candidates:
+        if email not in seen:
             seen.add(email)
             emails.append(email)
     return emails
@@ -85,7 +128,8 @@ def notify_members(members, *, club, title: str, body: str, source=None, target_
     if send_email:
         sent = []
         for notification, member in zip(notifications, members, strict=True):
-            emails = recipient_emails(member, club)
+            # An attachment (an invoice) is a document, not a nudge: that mail is never skipped.
+            emails = recipient_emails(member, club, honor_preferences=not attachments)
             if emails:
                 _send_email(notification, emails, attachments=attachments)
                 notification.sent_at = timezone.now()

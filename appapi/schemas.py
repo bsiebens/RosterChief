@@ -41,6 +41,16 @@ class MfaState(Schema):
     types: list[str] = Field(description="Enrolled factor types: `totp`, `recovery_codes`, `webauthn`.")
 
 
+class AccountSettingsOut(Schema):
+    email_notifications: Literal["always", "unless_app"] = Field(
+        description="`always`: notifications are also emailed. `unless_app`: not emailed while this account has the app installed (mails with an attachment, such as an invoice, are always sent)."
+    )
+
+
+class AccountSettingsIn(Schema):
+    email_notifications: Literal["always", "unless_app"]
+
+
 class PersonOut(Schema):
     id: uuid.UUID
     first_name: str
@@ -56,6 +66,7 @@ class MeOut(Schema):
     user: UserOut
     member: PersonOut | None = Field(description="The account's own person record, shared by every club it belongs to.")
     mfa: MfaState
+    settings: AccountSettingsOut
 
 
 class ClubFeatures(Schema):

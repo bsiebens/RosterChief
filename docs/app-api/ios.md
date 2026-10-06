@@ -238,7 +238,13 @@ mark the notification read (`POST /notifications/{notification_id}/read`), then 
 (`GET /news/{slug}`, `GET /events/{id}`, `GET /shop/orders/{id}`, the Calendar tab for `calendar`;
 forms arrive in a later release). The inbox's `source` uses the same shape. The payload is only a pointer and never
 contains personal data. One account gets **one** push per notification even when it concerns
-several of its children.
+several of its children. The payload also carries `aps.badge`: the account's total unread count across
+all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
+
+**Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
+changes it: `always` (default) or `unless_app` (no notification email while this account has the app
+installed; mails with an attachment such as an invoice are always sent). Offer it as a toggle in the app's
+settings.
 
 A person who also has the web app installed with notifications on gets both for now.
 

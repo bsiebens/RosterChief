@@ -1,0 +1,34 @@
+{% extends "mobile/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Me -> "Notification emails": whether notifications are also emailed to this account
+    (mobile.views.NotificationSettingsView, authentication.User.email_notifications). One
+    choice, account-wide.
+{% endcomment %}
+
+{% block content %}
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Notification emails" %}</span>
+    </div>
+
+    <p class="text-sm text-muted">{% trans "Every notification also arrives by email. If you use the RosterChief app on your phone you may not need both." %}</p>
+
+    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line">
+        {% csrf_token %}
+        {% for value, label in choices %}
+            <label class="flex items-center gap-3 p-3.5">
+                <input type="radio" name="email_notifications" value="{{ value }}" class="h-5 w-5 shrink-0 accent-ink" {% if value == current %}checked{% endif %}>
+                <span class="flex-1 text-[15px] font-semibold text-ink">{{ label }}</span>
+            </label>
+        {% endfor %}
+        <div class="p-3.5">
+            <button class="btn btn-primary w-full" type="submit">{% trans "Save" %}</button>
+        </div>
+    </form>
+
+    <p class="text-xs text-dim">{% trans "Emails with an attachment, such as an invoice, are always sent. This applies to every club you belong to." %}</p>
+{% endblock content %}
