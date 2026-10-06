@@ -136,7 +136,7 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 
 ```json
 {"items": [{
-  "id": "…", "slug": "hc-example", "name": "HC Example",
+  "id": "…", "slug": "hc-example", "name": "HC Example", "sport_type": "ice_hockey",
   "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
   "public_api_base_url": "https://hc-example.rosterchief.app/api/v1",
   "logo_url": "https://…", "event_background_url": "https://…",
@@ -150,6 +150,9 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 * `relationship`: `member` (plays or is signed up), `guardian` (acts for children), `coach`
   (staffs a team this season), `staff` (club admin, editor or member admin). Ignore values you
   don't know; more may come.
+* `sport_type` (also on `GET /context` → `club`): the sport the club plays, `ice_hockey` or `other`.
+  More sports will come: treat any value you don't know as `other`. Use it for sport-specific
+  wording or icons, not to decide which features exist (that is `features`).
 * Exactly one club: open it. More: show a picker and remember the choice.
 * Use `api_base_url` for every club call. For public content (games with timelines, league
   standings, sponsors), `public_api_base_url` is the club's read-only public API: no token needed.
@@ -272,6 +275,11 @@ carries `member_id`, so label rows with that person's first name.
   each button row with that person's first name. All `rsvp_needed` cards come first, then
   `next_going`, each soonest first. Invitations whose reply deadline has passed are not shown as
   a card (they are still in the calendar).
+* Every card, hero and `needs_answer` row has two task counts for its event: `open_tasks`
+  (tasks that still have a free slot) and `total_tasks` (all its tasks), the same numbers the
+  calendar shows. Show "2 of 5 tasks open" straight from them (hide it when `total_tasks` is 0)
+  instead of fetching each event; the tasks themselves and claiming are on
+  `GET /events/{id}` → `tasks`.
 * `rsvp_needed` and `next_going`: the single-card form of the above (the family's soonest only).
   Kept for older app versions; new code should use `member_cards`.
 * `needs_answer` (+ `needs_answer_more`): other open asks, not repeating anything on a `rsvp_needed` card. `type` `rsvp` → answer the event;
@@ -293,6 +301,12 @@ every row; group by event only as a presentation choice, and then still list eac
 `official` rows only exist while the club has the officials feature (`features.officials` on
 `GET /context`). The same applies to `GET /events/{id}`: its `answers`, `referee_signups` and
 `official_signups` are the three roles for that one game.
+
+Every row also carries the event's task counts, so the list can show them without a call per
+event: `open_tasks` (how many of that event's tasks, such as bring fruit or drive, still have a
+free slot) and `total_tasks` (how many tasks it has in all), identical for each row of one event.
+"2 of 5 tasks open" is `open_tasks` of `total_tasks`; hide it when `total_tasks` is 0. Only
+fetch `GET /events/{id}` → `tasks` when the user opens the event to see or claim them.
 
 Row types:
 

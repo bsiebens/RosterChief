@@ -7,6 +7,7 @@ import datetime
 import uuid
 from typing import Annotated
 
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -38,10 +39,10 @@ MAX_CALENDAR_DAYS = 92
 EVENT_RELATED = ("location", "opponent")
 
 
-def _hero(attendance, *, closed=False) -> dict | None:
+def _hero(attendance, tasks, *, closed=False) -> dict | None:
     if attendance is None:
         return None
-    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed}
+    return {"event": event_out(attendance.event), "attendance": attendance_out(attendance), "rsvp_closed": closed, **_task_fields(tasks, attendance.event_id)}
 
 
 @router.get("/home", response={200: HomeOut, **ERRORS}, summary="Home screen")
@@ -53,10 +54,15 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
     scope = club_scope(request)
     summary = home_summary(scope.club, scope.people_for(member_id), officials_enabled=scope.feature("officials"), exclude_card_rows=True)
 
+    # One query for every event Home shows (the cards, the two heroes, the open asks).
+    shown = [card["event"] for card in summary["member_cards"]] + [row["event"] for row in summary["needs_answer"]]
+    shown += [attendance.event for attendance in (summary["hero_attendance"], summary["going_attendance"]) if attendance is not None]
+    tasks = task_counts([event.pk for event in shown])
+
     needs_answer = []
     for row in summary["needs_answer"]:
         source = row.get("attendance") or row.get("signup")
-        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None})
+        needs_answer.append({"type": row["kind"], "event": event_out(row["event"]), "member_id": row["member"].pk, "status": source.status, "signup_id": row["signup"].pk if "signup" in row else None, **_task_fields(tasks, row["event"].pk)})
 
     dues = []
     for row in summary["dues_rows"]:
@@ -74,9 +80,17 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
         )
 
     return {
-        "rsvp_needed": _hero(summary["hero_attendance"], closed=summary["rsvp_closed"]),
-        "next_going": _hero(summary["going_attendance"]),
-        "member_cards": [{"kind": card["kind"], "event": event_out(card["event"]), "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]]} for card in summary["member_cards"]],
+        "rsvp_needed": _hero(summary["hero_attendance"], tasks, closed=summary["rsvp_closed"]),
+        "next_going": _hero(summary["going_attendance"], tasks),
+        "member_cards": [
+            {
+                "kind": card["kind"],
+                "event": event_out(card["event"]),
+                "members": [{"member_id": row.member_id, "attendance": attendance_out(row)} for row in card["attendances"]],
+                **_task_fields(tasks, card["event"].pk),
+            }
+            for card in summary["member_cards"]
+        ],
         "needs_answer": needs_answer,
         "needs_answer_more": summary["needs_answer_total"] - len(summary["needs_answer"]),
         "open_tasks": [{"id": task.pk, "event_id": task.event_id, "event_title": task.event.title, "event_start": task.event.start, "title": task.title, "open_count": task.open_count} for task in summary["open_tasks"]],
@@ -85,6 +99,23 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
         "news": [news_summary(request, item) for item in summary["news_items"]],
         "forms_to_complete": [{"send_id": row["send"].pk, "title": row["send"].form.title, "member_id": row["member"].pk, "closes_at": row["send"].closes_at} for row in summary["forms_to_complete"]],
     }
+
+
+def task_counts(event_ids) -> dict:
+    """``{event_id: (open, total)}``: how many of an event's tasks still have a free slot
+    (fewer claims than the quantity needed -- the same "open" Home's open-tasks card uses),
+    and how many tasks it has in all. Events without tasks are absent."""
+    counts: dict = {}
+    tasks = EventTask.objects.filter(event_id__in=set(event_ids)).annotate(claim_count=Count("claims")).values_list("event_id", "claim_count", "needed_quantity")
+    for event_id, claims, needed in tasks:
+        open_count, total = counts.get(event_id, (0, 0))
+        counts[event_id] = (open_count + (claims < needed), total + 1)
+    return counts
+
+
+def _task_fields(counts, event_id) -> dict:
+    open_count, total = counts.get(event_id, (0, 0))
+    return {"open_tasks": open_count, "total_tasks": total}
 
 
 @router.get("/calendar", response={200: CalendarOut, **ERRORS, 422: ErrorOut}, summary="Agenda")
@@ -108,6 +139,7 @@ def calendar(
         raise ApiError(422, "validation_error", fields={"to": [_("Must be after “from” and at most %(days)d days later.") % {"days": MAX_CALENDAR_DAYS}]})
 
     rows = member_agenda(scope.club, scope.people_for(member_id), kind=kind if kind in KIND_FILTERS else None, officials_enabled=scope.feature("officials"), include_declined=True, start=start, end=end)
+    tasks = task_counts([row["event"].pk for row in rows])
     items = []
     for row in rows:
         source = row.get("attendance") or row.get("signup")
@@ -120,6 +152,7 @@ def calendar(
                 "status": source.status if source else None,
                 "signup_id": row["signup"].pk if "signup" in row else None,
                 "blocked_requirements": [requirement.name for requirement in row.get("requirements", [])],
+                **_task_fields(tasks, row["event"].pk),
             }
         )
     return {"items": items}

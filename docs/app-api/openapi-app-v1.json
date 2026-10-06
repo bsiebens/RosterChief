@@ -370,6 +370,11 @@
             "title": "Member Id",
             "type": "string"
           },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them. The same for every row of one event.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
           "signup_id": {
             "anyOf": [
               {
@@ -394,6 +399,11 @@
             "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.",
             "title": "Status"
           },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`. The same for every row of one event.",
+            "title": "Total Tasks",
+            "type": "integer"
+          },
           "type": {
             "description": "`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.",
             "title": "Type",
@@ -407,7 +417,9 @@
           "member_id",
           "status",
           "signup_id",
-          "blocked_requirements"
+          "blocked_requirements",
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "CalendarItemOut",
         "type": "object"
@@ -907,12 +919,18 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "sport_type": {
+            "description": "The sport this club plays: `ice_hockey` or `other`. More sports will be added: treat any value you do not know as `other`.",
+            "title": "Sport Type",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "slug",
           "name",
+          "sport_type",
           "api_base_url",
           "public_api_base_url",
           "logo_url",
@@ -981,12 +999,18 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "sport_type": {
+            "description": "The sport this club plays: `ice_hockey` or `other`. More sports will be added: treat any value you do not know as `other`.",
+            "title": "Sport Type",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "slug",
           "name",
+          "sport_type",
           "logo_url",
           "event_background_url",
           "primary_color",
@@ -2053,15 +2077,27 @@
           "event": {
             "$ref": "#/components/schemas/EventOut"
           },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
           "rsvp_closed": {
             "title": "Rsvp Closed",
             "type": "boolean"
+          },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
           }
         },
         "required": [
           "event",
           "attendance",
-          "rsvp_closed"
+          "rsvp_closed",
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "HeroOut",
         "type": "object"
@@ -2352,12 +2388,24 @@
             },
             "title": "Members",
             "type": "array"
+          },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
           }
         },
         "required": [
           "kind",
           "event",
-          "members"
+          "members",
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "MemberCardOut",
         "type": "object"
@@ -2443,6 +2491,11 @@
             "title": "Member Id",
             "type": "string"
           },
+          "open_tasks": {
+            "description": "How many of this event's tasks still have a free slot (a task wants several helpers and not enough have taken it); 0 when nothing is open. Open the event (`GET /events/{id}` -> `tasks`) to see and claim them.",
+            "title": "Open Tasks",
+            "type": "integer"
+          },
           "signup_id": {
             "anyOf": [
               {
@@ -2460,6 +2513,11 @@
             "title": "Status",
             "type": "string"
           },
+          "total_tasks": {
+            "description": "How many tasks the event has in all (taken or not); 0 when it has none. With `open_tasks` this gives \"2 of 5 tasks still open\" without a call to `GET /events/{id}`.",
+            "title": "Total Tasks",
+            "type": "integer"
+          },
           "type": {
             "description": "`rsvp` (answer with POST /events/{id}/rsvp), `referee` or `official` (answer the sign-up).",
             "title": "Type",
@@ -2471,7 +2529,9 @@
           "event",
           "member_id",
           "status",
-          "signup_id"
+          "signup_id",
+          "open_tasks",
+          "total_tasks"
         ],
         "title": "NeedsAnswerOut",
         "type": "object"

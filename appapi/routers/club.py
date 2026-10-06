@@ -30,6 +30,7 @@ def context(request):
             "id": club.pk,
             "slug": club.slug,
             "name": club.name,
+            "sport_type": club.sport_type,
             "logo_url": services.logo_url(request, club),
             "event_background_url": services.event_background_url(request, club),
             **services.club_colors(club),

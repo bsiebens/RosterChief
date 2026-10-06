@@ -657,6 +657,20 @@ class HomeSummaryCompatibilityTests(ClubApiTestCase):
         self.assertEqual([card["event"].title for card in api["member_cards"]], ["Kid's training", "Parent's meeting"])
 
 
+class ClubSportTypeTests(ClubApiTestCase):
+    def test_context_and_clubs_expose_the_clubs_sport(self):
+        Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.ICE_HOCKEY)
+
+        context = self.get("/context").json()["club"]
+        clubs = self.api("get", "/clubs", token=self.token).json()["items"]
+
+        self.assertEqual(context["sport_type"], "ice_hockey")
+        self.assertEqual([club["sport_type"] for club in clubs if club["slug"] == self.club.slug], ["ice_hockey"])
+
+    def test_a_club_without_a_chosen_sport_is_other(self):
+        self.assertEqual(self.get("/context").json()["club"]["sport_type"], "other")
+
+
 class NotificationTargetTests(ClubApiTestCase):
     """What the app opens: `target` in the push payload and `source` in the inbox share one shape."""
 
@@ -814,3 +828,77 @@ class AccountSettingsTests(AppApiTestCase):
     def test_an_unknown_choice_is_rejected(self):
         token = self.login()
         self.assertEqual(self.api("patch", "/me/settings", token=token, data={"email_notifications": "never"}).status_code, 422)
+
+
+class CalendarOpenTasksTests(ClubApiTestCase):
+    def counts(self, **params):
+        return {item["event"]["title"]: item["open_tasks"] for item in self.get("/calendar", **params).json()["items"]}
+
+    def totals(self, **params):
+        return {item["event"]["title"]: item["total_tasks"] for item in self.get("/calendar", **params).json()["items"]}
+
+    def test_calendar_rows_count_the_tasks_that_still_have_a_free_slot(self):
+        busy = self.event(title="Busy", start=self.soon)
+        quiet = self.event(title="Quiet", start=self.soon + datetime.timedelta(days=1))
+        for event in (busy, quiet):
+            self.invite(event)
+        fruit = EventTask.objects.create(event=busy, title="Fruit", needed_quantity=2)
+        EventTask.objects.create(event=busy, title="Lifts", needed_quantity=1)
+        taken = EventTask.objects.create(event=busy, title="Whistle", needed_quantity=1)
+        EventTaskClaim.objects.create(task=taken, member=self.child)
+        EventTaskClaim.objects.create(task=fruit, member=self.child)  # one of two slots: still open
+
+        self.assertEqual(self.counts(), {"Busy": 2, "Quiet": 0})
+        self.assertEqual(self.totals(), {"Busy": 3, "Quiet": 0})  # the full whistle task still counts in the total
+
+    def test_a_task_stops_counting_once_every_slot_is_taken(self):
+        event = self.event(title="Game")
+        self.invite(event)
+        task = EventTask.objects.create(event=event, title="Fruit", needed_quantity=2)
+        self.assertEqual(self.counts(), {"Game": 1})
+
+        EventTaskClaim.objects.create(task=task, member=self.child)
+        EventTaskClaim.objects.create(task=task, member=self.member)
+
+        self.assertEqual((self.counts(), self.totals()), ({"Game": 0}, {"Game": 1}))
+
+    def test_every_row_of_one_event_shows_the_same_count(self):
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        self.invite(game, member=self.child)
+        RefereeSignup.objects.create(event=game, member=self.member)
+        EventTask.objects.create(event=game, title="Fruit", needed_quantity=1)
+
+        items = self.get("/calendar").json()["items"]
+
+        self.assertEqual(sorted((item["type"], item["open_tasks"], item["total_tasks"]) for item in items), [("referee", 1, 1), ("rsvp", 1, 1)])
+
+
+class HomeOpenTasksTests(ClubApiTestCase):
+    """Every event Home shows carries how many of its tasks still have a free slot."""
+
+    def test_cards_heroes_and_open_asks_all_carry_the_open_task_count(self):
+        card_event = self.event(title="Card game", start=self.soon)
+        going_event = self.event(title="Party", start=self.soon + datetime.timedelta(days=1))
+        ask_event = self.event(title="Meeting", start=self.soon + datetime.timedelta(days=2))
+        self.invite(card_event, member=self.child)
+        self.invite(going_event, status=Attendance.AttendanceStatus.PRESENT)
+        self.invite(ask_event, status=Attendance.AttendanceStatus.MAYBE)
+        EventTask.objects.create(event=card_event, title="Fruit", needed_quantity=2)
+        EventTask.objects.create(event=card_event, title="Lifts", needed_quantity=1)
+        EventTask.objects.create(event=going_event, title="Drinks", needed_quantity=1)
+        full = EventTask.objects.create(event=ask_event, title="Whistle", needed_quantity=1)
+        EventTaskClaim.objects.create(task=full, member=self.child)
+
+        home = self.get("/home").json()
+
+        self.assertEqual({(card["kind"], card["event"]["title"]): (card["open_tasks"], card["total_tasks"]) for card in home["member_cards"]}, {("rsvp_needed", "Card game"): (2, 2), ("next_going", "Party"): (1, 1)})
+        self.assertEqual((home["rsvp_needed"]["open_tasks"], home["next_going"]["open_tasks"]), (2, 1))
+        self.assertEqual((home["rsvp_needed"]["total_tasks"], home["next_going"]["total_tasks"]), (2, 1))
+        self.assertEqual([(row["event"]["title"], row["open_tasks"], row["total_tasks"]) for row in home["needs_answer"]], [("Meeting", 0, 1)])
+
+    def test_an_event_without_tasks_counts_zero(self):
+        self.invite(self.event(title="Plain"), member=self.child)
+
+        home = self.get("/home").json()
+
+        self.assertEqual([(card["open_tasks"], card["total_tasks"]) for card in home["member_cards"]], [(0, 0)])
