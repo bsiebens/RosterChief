@@ -41,7 +41,13 @@ deploy/cut-release.sh hotfix 0.7.15 <commit>...      # ship main + these develop
 
 It shows what it's about to ship and asks before changing anything (`--yes` skips the prompt).
 It refuses a version that's already tagged or isn't newer than the latest release, and it won't
-run with uncommitted changes. It differs from the manual sequences in two ways:
+run with uncommitted changes. Before it changes anything it **audits the dependencies that would
+ship** -- `pip-audit` on `uv.lock` (as CI's `audit` job does, honouring
+`.github/pip-audit-ignore.txt`) and `npm audit` on the runtime JS. On a finding it prints the
+advisories and the update commands (`uv lock --upgrade-package <name>`, `npm audit fix
+--omit=dev`) and exits without touching anything: fix it on `development`, push, run it again.
+`--skip-audit` bypasses this when the advisory databases are unreachable or a hotfix can't wait.
+It differs from the manual sequences in two ways:
 
 - **The version bump is committed on `development` too**, so `development` stays on the
   current version. A release branch is just `development`'s tip after that bump.
