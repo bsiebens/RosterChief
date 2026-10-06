@@ -105,7 +105,7 @@ from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
-from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events_for_members, eligible_referees, needs_referee_management, remove_referee, set_referee_fee
+from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events_for_members, eligible_referees, needs_referee_management, remove_referee, retract_ineligible_invites, set_referee_fee
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
@@ -1113,7 +1113,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         family_groups, _ = group_by_family(family_scoped_members, self.request.club)
 
         is_admin = is_club_admin(self.request.user, self.request.club)
-        referee_profile = RefereeProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").first()
+        referee_profile = RefereeProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").prefetch_related("excluded_teams").first()
         officials_enabled = flag_is_active(self.request, "officials")
         official_profile = OfficialProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").first() if officials_enabled else None
         season = current_season(self.request.club)
@@ -1209,7 +1209,9 @@ class MemberRefereeEligibilityUpdateView(MemberAdminRequiredMixin, RedirectOnInv
 
     def form_valid(self, form):
         member = self.get_member()
-        form.save()
+        profile = form.save()
+        # Open invites for games they're no longer allowed to referee are withdrawn; accepted ones stay.
+        retract_ineligible_invites(profile)
         notify(self.request, f"s|{_('Referee eligibility updated')}|" + _("Updated which teams “%(member)s” can referee for.") % {"member": member})
         return redirect("management:member_detail", pk=member.pk)
 
@@ -1543,7 +1545,9 @@ class TeamDetailView(ClubStaffRequiredMixin, DetailView):
                     referee_profiles__club=club,
                     referee_profiles__level_id__in=[level.pk for level in RefereeLevel.objects.filter(club=club) if team.pk in level.eligible_team_ids()],
                     referee_profiles__valid_until__gte=timezone.localdate(),
-                ).order_by("last_name", "first_name")
+                )
+                .exclude(referee_profiles__club=club, referee_profiles__excluded_teams=team)
+                .order_by("last_name", "first_name")
                 if team.referee_management == Team.RefereeManagement.CLUB
                 else None
             ),
@@ -2414,7 +2418,9 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
         # can't cover anyway -- get_context_data precomputes it once per level
         # instead.
         members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(referee_profiles__club=self.request.club)
-        return members.prefetch_related(Prefetch("referee_profiles", queryset=RefereeProfile.objects.filter(club=self.request.club).select_related("level"), to_attr="_club_referee_profiles")).order_by("last_name", "first_name")
+        return members.prefetch_related(Prefetch("referee_profiles", queryset=RefereeProfile.objects.filter(club=self.request.club).select_related("level").prefetch_related("excluded_teams"), to_attr="_club_referee_profiles")).order_by(
+            "last_name", "first_name"
+        )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -2426,7 +2432,7 @@ class RefereeListView(ClubStaffRequiredMixin, ListView):
             # under the same name the template already reads (referee.referee_profile)
             # so this club-scoping stays invisible to it.
             profile = referee.referee_profile = referee._club_referee_profiles[0]
-            team_ids = team_ids_by_level.get(profile.level_id, set()) if profile.is_eligible else set()
+            team_ids = profile.eligible_team_ids(team_ids_by_level.get(profile.level_id, set()))
             profile.cached_eligible_teams = [teams_by_id[team_id] for team_id in team_ids if team_id in teams_by_id]
         return context
 

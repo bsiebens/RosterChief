@@ -347,6 +347,13 @@ class RefereeProfile(ClubScopedModel):
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_profiles", verbose_name=_("member"))
     level = models.ForeignKey(RefereeLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="referees", verbose_name=_("level"))
     valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the referee is not eligible for assignment until it's extended."))
+    excluded_teams = models.ManyToManyField(
+        Team,
+        related_name="referee_exclusions",
+        blank=True,
+        verbose_name=_("not allowed to referee"),
+        help_text=_("Teams this person must not referee even though their level qualifies them -- subtracted from what the level allows."),
+    )
 
     class Meta:
         verbose_name = _("referee profile")
@@ -375,15 +382,26 @@ class RefereeProfile(ClubScopedModel):
         level is set, and its validity hasn't passed."""
         return self.level_id is not None and self.is_currently_valid
 
+    def eligible_team_ids(self, level_team_ids=None):
+        """The ids of the teams this profile may referee: what the level allows
+        (including whatever it inherits, transitively -- RefereeLevel.eligible_team_ids)
+        minus the teams explicitly marked as not allowed. Empty whenever the profile
+        isn't currently eligible. Pass ``level_team_ids`` when it is already resolved
+        (RefereeLevel.eligible_team_ids_by_level) to skip walking the level's chain."""
+        if not self.is_eligible:
+            return set()
+        if level_team_ids is None:
+            level_team_ids = self.level.eligible_team_ids()
+        return set(level_team_ids) - {team.pk for team in self.excluded_teams.all()}
+
     @property
     def eligible_teams(self):
         """Teams this profile currently qualifies for -- empty whenever it
-        isn't currently eligible, regardless of what level is set. Includes
-        whatever the level inherits from, transitively -- see
-        RefereeLevel.eligible_team_ids."""
-        if not self.is_eligible:
-            return Team.objects.none()
-        return Team.objects.filter(id__in=self.level.eligible_team_ids())
+        isn't currently eligible, regardless of what level is set. The level's
+        teams (see RefereeLevel.eligible_team_ids) minus the explicitly excluded
+        ones (``excluded_teams``): the exclusion is the club saying "not this
+        team" even though the level would otherwise allow it."""
+        return Team.objects.filter(id__in=self.eligible_team_ids())
 
 
 class OfficialLevel(ClubScopedModel):

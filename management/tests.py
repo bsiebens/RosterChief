@@ -1934,6 +1934,17 @@ class RefereeListViewTests(ManagementTestBase):
         self.assertContains(response, "First Team")
         self.assertContains(response, "Valid")
 
+    def test_an_excluded_team_is_not_listed_as_eligible(self):
+        other_team = Team.objects.create(club=self.club, name="Reserves", short_name="Res")
+        self.level.teams.add(other_team)
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        profile.excluded_teams.add(other_team)
+
+        response = self.club_get("referee_list")
+
+        self.assertContains(response, "First Team")
+        self.assertNotContains(response, "Reserves")
+
     def test_shows_expired_status(self):
         RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
 
@@ -2810,6 +2821,45 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertEqual(profile.valid_until, self.future_date)
         self.assertEqual(set(profile.eligible_teams), {self.team, self.other_team})
 
+    def test_admin_can_rule_out_a_team_the_level_would_allow(self):
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"level": str(self.level.pk), "valid_until": self.future_date.isoformat(), "excluded_teams": [str(self.other_team.pk)]}, self.member.pk)
+
+        profile = RefereeProfile.objects.get(member=self.member)
+        self.assertEqual(set(profile.excluded_teams.all()), {self.other_team})
+        self.assertEqual(set(profile.eligible_teams), {self.team})
+
+    def test_clearing_the_exclusions_makes_the_team_allowed_again(self):
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
+        profile.excluded_teams.add(self.other_team)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"level": str(self.level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        self.assertEqual(set(profile.eligible_teams), {self.team, self.other_team})
+
+    def test_excluding_a_team_withdraws_the_open_invite_for_its_games(self):
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
+        game = Event.objects.create(club=self.club, title="Cup", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=3))
+        game.teams.add(self.other_team)
+        RefereeSignup.objects.update_or_create(event=game, member=self.member, defaults={"status": RefereeSignup.Status.INVITED})
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"level": str(profile.level_id), "valid_until": self.future_date.isoformat(), "excluded_teams": [str(self.other_team.pk)]}, self.member.pk)
+
+        self.assertFalse(RefereeSignup.objects.filter(event=game, member=self.member).exists())
+
+    def test_member_page_lists_the_teams_they_are_not_allowed_to_referee(self):
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
+        profile.excluded_teams.add(self.other_team)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertContains(response, "Not allowed to referee")
+        self.assertContains(response, "Second Team")
+
     def test_admin_can_update_an_existing_profile(self):
         other_level = RefereeLevel.objects.create(club=self.club, name="National")
         profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
@@ -2873,6 +2923,15 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         # dropdowns, which list every active club member regardless of referee
         # status -- assert on the eligible-referees panel's own empty state.
         RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=1))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("team_detail", self.team.pk)
+
+        self.assertContains(response, "No one yet.")
+
+    def test_team_page_leaves_out_a_referee_not_allowed_for_this_team(self):
+        profile = RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level, valid_until=self.future_date)
+        profile.excluded_teams.add(self.team)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("team_detail", self.team.pk)

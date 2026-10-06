@@ -80,6 +80,7 @@ from .services.referees import (
     eligible_referees,
     needs_referee_management,
     remove_referee,
+    retract_ineligible_invites,
     set_referee_fee,
     sync_referee_invites,
 )
@@ -2274,6 +2275,50 @@ class RefereeServiceTests(EventsTestBase):
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.alice)
 
         self.assertEqual(set(eligible_referees(game)), set())
+
+    def test_an_excluded_team_is_subtracted_from_what_the_level_allows(self):
+        game = self.make_home_game()
+        self.referee_profile.excluded_teams.add(self.team)
+
+        self.assertEqual(set(eligible_referees(game)), set())
+        self.assertEqual(set(self.referee_profile.eligible_teams), set())
+
+    def test_an_exclusion_only_affects_that_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        self.referee_profile.excluded_teams.add(self.team)
+
+        self.assertEqual(set(self.referee_profile.eligible_teams), {other_team})
+        self.assertEqual(set(eligible_referees(self.make_home_game(teams=other_team))), {self.referee})
+        self.assertEqual(set(eligible_referees(self.make_home_game())), set())
+
+    def test_a_game_with_several_teams_needs_one_allowed_team(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        self.referee_profile.excluded_teams.add(self.team)
+        game = self.make_home_game()
+        game.teams.add(other_team)
+
+        self.assertEqual(set(eligible_referees(game)), {self.referee})
+
+    def test_retracting_withdraws_open_invites_for_excluded_games_only(self):
+        other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        self.level.teams.add(other_team)
+        excluded_game = self.make_home_game()
+        allowed_game = self.make_home_game(teams=other_team)
+        accepted_game = self.make_home_game()
+        for game in (excluded_game, allowed_game):
+            RefereeSignup.objects.update_or_create(event=game, member=self.referee, defaults={"status": RefereeSignup.Status.INVITED})
+        RefereeSignup.objects.update_or_create(event=accepted_game, member=self.referee, defaults={"status": RefereeSignup.Status.ACCEPTED})
+        self.referee_profile.excluded_teams.add(self.team)
+
+        withdrawn = retract_ineligible_invites(self.referee_profile)
+
+        self.assertEqual(withdrawn, 1)
+        self.assertFalse(RefereeSignup.objects.filter(event=excluded_game, member=self.referee).exists())
+        self.assertTrue(RefereeSignup.objects.filter(event=allowed_game, member=self.referee).exists())
+        # A commitment already made is left for the club's managers to sort out.
+        self.assertEqual(RefereeSignup.objects.get(event=accepted_game, member=self.referee).status, RefereeSignup.Status.ACCEPTED)
 
     def test_eligible_referees_ignores_someone_not_eligible_for_this_team(self):
         other_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
