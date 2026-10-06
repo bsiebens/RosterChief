@@ -1006,7 +1006,7 @@ for you: it enters maintenance mode before the backup and migration, and once th
 healthy asks whether to reopen the platform (Enter = yes). Answering anything but `y` -- or a failed deploy,
 or no terminal -- leaves it closed and prints the command to reopen it (also available from
 the control panel). `NO_MAINTENANCE=1` skips the whole thing; `MAINTENANCE_MESSAGE="..."` sets
-what clubs see. A first deploy (no running web yet) has nothing to close and skips it.
+what clubs see. `deploy/deploy-prod.sh --reopen` (or `REOPEN_MAINTENANCE=1`) reopens the platform by itself once the deploy is healthy, with no prompt -- for unattended deploys; a failed deploy still leaves it closed. A first deploy (no running web yet) has nothing to close and skips it.
 
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
