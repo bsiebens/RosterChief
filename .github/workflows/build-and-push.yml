@@ -102,20 +102,6 @@ jobs:
         if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
-      # The CI database is thrown away with the job, so durability buys nothing: turning the disk
-      # syncs off makes every commit and every test-database clone much cheaper (the suite does
-      # thousands of them). Production's Postgres is untouched.
-      - name: Make Postgres fast (disposable CI database)
-        if: github.event_name != 'pull_request' || github.base_ref == 'main'
-        env:
-          PGPASSWORD: rosterchief
-        run: |
-          psql -h localhost -U rosterchief -d rosterchief \
-            -c "ALTER SYSTEM SET fsync = off" \
-            -c "ALTER SYSTEM SET synchronous_commit = off" \
-            -c "ALTER SYSTEM SET full_page_writes = off" \
-            -c "SELECT pg_reload_conf()"
-
       - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
