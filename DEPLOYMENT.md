@@ -1387,11 +1387,13 @@ event and the suite runs **once**, not twice:
 |---|---|
 | push to `main` or `development` | Postgres (`postgres:17`, compose.yaml's own major version) |
 | pull request into `main` (every release/hotfix) | Postgres — a Postgres-only break is caught *before* it merges |
+| nightly (`schedule`) | Postgres |
 | any other pull request (a feature branch into `development`) | sqlite — fast |
 
-The separate workflow `.github/workflows/test-postgres.yml` therefore only keeps a **nightly** run
-of the whole suite on Postgres (plus `workflow_dispatch`): it is what catches things that rot with
-no code change, like a date- or time-of-day-dependent test or a drifting dependency.
+The same workflow also runs **nightly** (05:00 UTC, on `main`), on Postgres, with the dependency audit
+and with no code change to trigger it: that is what catches things that rot on their own, like a date-
+or time-of-day-dependent test or a freshly published advisory. A scheduled run never builds, tags or
+deploys anything. There is no separate Postgres workflow.
 
 **`test` is a required status check on both `development` and `main`** —
 `deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the
