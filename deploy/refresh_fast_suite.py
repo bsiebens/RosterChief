@@ -3,9 +3,10 @@
 
     uv run python deploy/refresh_fast_suite.py          # ~2 minutes: runs the whole suite under coverage
 
-It runs the full suite serially under coverage.py with one dynamic context per test, then picks
-the smallest set of tests (greedily: always the test adding the most not-yet-covered lines) that
-covers every line the whole suite covers. Every other test adds no line coverage of its own, and
+It runs the full suite serially under coverage.py with one dynamic context per test (and
+timed, via `--durations`), then picks a set of tests that covers every line the whole suite
+covers, cheaply: greedily, always the test adding the most not-yet-covered lines PER SECOND. (Plain
+"most new lines" favours the big, slow integration tests; this keeps the fast tier fast.) Every other test adds no line coverage of its own, and
 goes in the skip file. Tests that ran no application code at all are never skipped, and neither is
 any test that is not in the file -- so a newly written test always runs, even in the fast tier.
 
@@ -21,6 +22,7 @@ Regenerate it now and then (and after big refactors): a stale list only makes th
 little less representative; it can never hide a test from a full run.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -54,14 +56,20 @@ HEADER = """# Tests `manage.py test --fast` skips: each adds no line coverage of
 """
 
 
-def run_suite_under_coverage(workdir: Path, name: str, *extra: str) -> Path:
+DURATION_LINE = re.compile(r"^([0-9.]+)s\s+\S+ \(([\w.]+)\)")
+
+
+def run_suite_under_coverage(workdir: Path, name: str, *extra: str) -> tuple[Path, dict[str, float]]:
+    """Run the suite (or, with ``--fast``, the fast tier) serially under per-test coverage.
+    Returns the coverage data file and ``{test id: seconds}`` from Django's ``--durations``."""
     data = workdir / f"{name}.db"
     rcfile = workdir / f"{name}.rc"
     rcfile.write_text(RCFILE.format(data=data))
-    command = ["coverage", "run", f"--rcfile={rcfile}", "manage.py", "test", "--parallel", "1", *extra]
+    command = ["coverage", "run", f"--rcfile={rcfile}", "manage.py", "test", "--parallel", "1", "--durations", "100000", *extra]
     print(f"Running the {'fast tier' if extra else 'whole suite'} under coverage...", flush=True)
-    subprocess.run(command, cwd=ROOT, check=True)
-    return data
+    result = subprocess.run(command, cwd=ROOT, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    durations = {match.group(2): float(match.group(1)) for line in result.stdout.splitlines() if (match := DURATION_LINE.match(line))}
+    return data, durations
 
 
 def lines_per_test(data_file: Path) -> dict[str, set]:
@@ -76,11 +84,17 @@ def lines_per_test(data_file: Path) -> dict[str, set]:
     return per_test
 
 
-def smallest_covering_set(per_test: dict[str, set]) -> set:
+#: Seconds every test costs whatever it does (set-up, the client, the transaction), added to its
+#: measured time so a test too quick to be timed still has a cost.
+PER_TEST_OVERHEAD = 0.002
+
+
+def cheapest_covering_set(per_test: dict[str, set], seconds: dict[str, float]) -> set:
+    """A set of tests covering every line any test covers, chosen greedily by new lines per second."""
     remaining = set().union(*per_test.values())
     chosen = set()
     while remaining:
-        best = max(per_test, key=lambda test: len(per_test[test] & remaining))
+        best = max(per_test, key=lambda test: len(per_test[test] & remaining) / (seconds.get(test, 0.0) + PER_TEST_OVERHEAD))
         if not per_test[best] & remaining:
             break
         chosen.add(best)
@@ -95,13 +109,15 @@ def write_skip_file(skipped) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
-        per_test = lines_per_test(run_suite_under_coverage(workdir, "full"))
+        data_file, seconds = run_suite_under_coverage(workdir, "full")
+        per_test = lines_per_test(data_file)
         everything = set().union(*per_test.values())
-        skipped = set(per_test) - smallest_covering_set(per_test)
+        skipped = set(per_test) - cheapest_covering_set(per_test, seconds)
 
         for attempt in range(1, 5):
             write_skip_file(skipped)
-            fast_lines = set().union(*lines_per_test(run_suite_under_coverage(workdir, f"fast{attempt}", "--fast")).values())
+            fast_data, _seconds = run_suite_under_coverage(workdir, f"fast{attempt}", "--fast")
+            fast_lines = set().union(*lines_per_test(fast_data).values())
             lost = everything - fast_lines
             print(f"Verification {attempt}: the fast tier misses {len(lost)} of {len(everything)} lines.", flush=True)
             if not lost:
@@ -115,7 +131,9 @@ def main() -> int:
             print("Could not verify the list after 4 attempts; not trusting it.", file=sys.stderr)
             return 1
 
-    print(f"{len(per_test)} tests ran application code; {len(per_test) - len(skipped)} are kept for the fast tier, {len(skipped)} skipped.")
+    kept = set(per_test) - skipped
+    print(f"{len(per_test)} tests ran application code; {len(kept)} are kept for the fast tier, {len(skipped)} skipped.")
+    print(f"Estimated serial time: {sum(seconds.get(t, 0) for t in kept):.0f}s of {sum(seconds.values()):.0f}s.")
     print(f"Wrote {OUTPUT.relative_to(ROOT)}.")
     return 0
 

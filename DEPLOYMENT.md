@@ -1389,13 +1389,13 @@ database that fits it (a small `plan` job decides):
 | pull request into `main` (every release/hotfix) | **full**, 4 shards | Postgres: a Postgres-only break is caught *before* it merges |
 | push to `main` | full, 4 shards | Postgres |
 | nightly (`schedule`, 05:00 UTC, on `main`) | full, 4 shards | Postgres |
-| push to `development` | **fast**, 1 job | Postgres |
-| any other pull request (a feature branch into `development`) | fast, 1 job | sqlite |
+| push to `development` | **fast**, 2 shards | Postgres |
+| any other pull request (a feature branch into `development`) | fast, 2 shards | sqlite |
 
 The **fast tier** (`manage.py test --fast`) skips the tests listed in
 `rosterchief/fast_suite_skip.txt`: those whose every covered line is also covered by another test.
-About a quarter of the suite then reproduces the whole suite's line coverage in about a third of the
-time, in a single job. Nothing is deleted, and a release can never reach `main` without the full suite
+Roughly a third of the suite then reproduces the whole suite's line coverage, in two jobs instead
+of four, which about halves the billed CI time of a feature-branch run. Nothing is deleted, and a release can never reach `main` without the full suite
 passing on its PR. The list is generated and **verified** by `deploy/refresh_fast_suite.py` (~5
 minutes: it runs the full suite under per-test coverage, picks a covering set, then runs the fast
 tier and checks it hits every line the full suite hit). A test that is not in the list always runs, so

@@ -54,8 +54,8 @@ jobs:
     # rule. Two tiers (the test files are the same; nothing is deleted):
     #   fast  a feature-branch PR (into development) and a push to development: the tests that add
     #         line coverage of their own (`manage.py test --fast`, rosterchief/fast_suite_skip.txt),
-    #         about a quarter of the suite, in ONE job -- at this size the fixed cost of extra jobs
-    #         (container start, database creation) would be more than the tests themselves.
+    #         roughly a third of the suite, over TWO jobs: one job made the wall-clock worse, and more
+    #         than two would spend more on fixed cost (container start, database creation) than they save.
     #   full  everything else: any PR into main (every release/hotfix), a push to main, the nightly
     #         run, a manual dispatch. All tests, split over four shards.
     # The fast list is a quick-feedback tier, not a substitute: a release can never reach main without
@@ -73,7 +73,7 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           if { [ "$EVENT" = pull_request ] && [ "$BASE_REF" != main ]; } || { [ "$EVENT" = push ] && [ "$REF" = refs/heads/development ]; }; then
-            { echo "fast=--fast"; echo "shards=[1]"; echo "count=1"; } >> "$GITHUB_OUTPUT"
+            { echo "fast=--fast"; echo "shards=[1,2]"; echo "count=2"; } >> "$GITHUB_OUTPUT"
           else
             { echo "fast="; echo "shards=[1,2,3,4]"; echo "count=4"; } >> "$GITHUB_OUTPUT"
           fi
