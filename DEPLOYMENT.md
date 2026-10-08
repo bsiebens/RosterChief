@@ -1379,21 +1379,31 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
    deploying `development`'s image in response to a `main` release would be wrong, not just
    redundant.
 
-**Which database the suite runs on.** Production runs Postgres, the quick feedback loop runs the
-in-memory sqlite `rosterchief/test_runner.py` uses locally, so the `test` shards pick one per
-event and the suite runs **once**, not twice:
+**How much of the suite, and on which database.** Production runs Postgres, the quick feedback
+loop runs the in-memory sqlite `rosterchief/test_runner.py` uses locally, and the full suite takes a
+few minutes on a hosted runner. So each event runs the suite **once**, in the tier and on the
+database that fits it (a small `plan` job decides):
 
-| Event | Database |
-|---|---|
-| push to `main` or `development` | Postgres (`postgres:17`, compose.yaml's own major version) |
-| pull request into `main` (every release/hotfix) | Postgres — a Postgres-only break is caught *before* it merges |
-| nightly (`schedule`) | Postgres |
-| any other pull request (a feature branch into `development`) | sqlite — fast |
+| Event | Tests | Database |
+|---|---|---|
+| pull request into `main` (every release/hotfix) | **full**, 4 shards | Postgres: a Postgres-only break is caught *before* it merges |
+| push to `main` | full, 4 shards | Postgres |
+| nightly (`schedule`, 05:00 UTC, on `main`) | full, 4 shards | Postgres |
+| push to `development` | **fast**, 1 job | Postgres |
+| any other pull request (a feature branch into `development`) | fast, 1 job | sqlite |
 
-The same workflow also runs **nightly** (05:00 UTC, on `main`), on Postgres, with the dependency audit
-and with no code change to trigger it: that is what catches things that rot on their own, like a date-
-or time-of-day-dependent test or a freshly published advisory. A scheduled run never builds, tags or
-deploys anything. There is no separate Postgres workflow.
+The **fast tier** (`manage.py test --fast`) skips the tests listed in
+`rosterchief/fast_suite_skip.txt`: those whose every covered line is also covered by another test.
+About a quarter of the suite then reproduces the whole suite's line coverage in about a third of the
+time, in a single job. Nothing is deleted, and a release can never reach `main` without the full suite
+passing on its PR. The list is generated and **verified** by `deploy/refresh_fast_suite.py` (~5
+minutes: it runs the full suite under per-test coverage, picks a covering set, then runs the fast
+tier and checks it hits every line the full suite hit). A test that is not in the list always runs, so
+a newly written test is never skipped; regenerate the list now and then and after big refactors. A
+stale list only makes the fast tier a little less representative. Caveat: line coverage says the code
+ran, not that every behaviour was asserted, which is why `main`, releases and the nightly run
+everything. A scheduled run never builds, tags or deploys anything, and there is no separate
+Postgres workflow.
 
 **`test` is a required status check on both `development` and `main`** —
 `deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the

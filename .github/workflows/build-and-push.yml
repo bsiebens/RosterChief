@@ -49,11 +49,40 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    # Decides how much of the suite this event needs, so the jobs below don't have to repeat the
+    # rule. Two tiers (the test files are the same; nothing is deleted):
+    #   fast  a feature-branch PR (into development) and a push to development: the tests that add
+    #         line coverage of their own (`manage.py test --fast`, rosterchief/fast_suite_skip.txt),
+    #         about a quarter of the suite, in ONE job -- at this size the fixed cost of extra jobs
+    #         (container start, database creation) would be more than the tests themselves.
+    #   full  everything else: any PR into main (every release/hotfix), a push to main, the nightly
+    #         run, a manual dispatch. All tests, split over four shards.
+    # The fast list is a quick-feedback tier, not a substitute: a release can never reach main without
+    # the full suite passing on its PR.
+    runs-on: ubuntu-latest
+    outputs:
+      fast: ${{ steps.tier.outputs.fast }}
+      shards: ${{ steps.tier.outputs.shards }}
+      count: ${{ steps.tier.outputs.count }}
+    steps:
+      - id: tier
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF: ${{ github.ref }}
+        run: |
+          if { [ "$EVENT" = pull_request ] && [ "$BASE_REF" != main ]; } || { [ "$EVENT" = push ] && [ "$REF" = refs/heads/development ]; }; then
+            { echo "fast=--fast"; echo "shards=[1]"; echo "count=1"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "fast="; echo "shards=[1,2,3,4]"; echo "count=4"; } >> "$GITHUB_OUTPUT"
+          fi
+
   test-shard:
-    # The suite, split over four jobs by test class (manage.py test --shard=I/N, see
-    # rosterchief/test_runner.py). A hosted runner only has a couple of cores, so one job
-    # took ~5 minutes; four in parallel each pay the ~30s setup/migrate once and run a
-    # quarter of the tests. Lint runs once, in the first shard.
+    # The suite (or its fast tier, see `plan`), split by test class over `count` jobs
+    # (manage.py test --shard=I/N, see rosterchief/test_runner.py). A hosted runner only has a
+    # couple of cores, so one job took ~5 minutes; four in parallel each pay the setup/migrate cost
+    # once and run a quarter of the tests. Lint runs once, in the first shard.
     #
     # Which database: production runs Postgres, the quick feedback loop runs in-memory sqlite.
     # The suite runs ONCE per event, on the database that matters for it -- Postgres for a push
@@ -61,12 +90,13 @@ jobs:
     # is caught before it merges, not after), sqlite for any other PR (a feature branch into
     # development), where speed matters more -- and on Postgres every night (see `schedule`).
     # There is deliberately no second, separate Postgres workflow.
-    name: test (${{ matrix.shard }}/4)
+    needs: plan
+    name: test (${{ matrix.shard }}/${{ needs.plan.outputs.count }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     # Always started (a few seconds, idle on sqlite runs); only used when "Use Postgres" below sets the URL.
     services:
       postgres:
@@ -102,7 +132,7 @@ jobs:
         if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
-      - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
+      - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }}
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
           # value, never used for anything real, exists only so Django will start.
@@ -115,11 +145,11 @@ jobs:
     # and `needs: test` don't have to know how many shards there are. `always()` so a
     # failed shard turns this red rather than skipped -- a skipped required check counts
     # as passing.
-    needs: test-shard
+    needs: [plan, test-shard]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test-shard.result }}" = success
+      - run: test "${{ needs.plan.result }}" = success && test "${{ needs.test-shard.result }}" = success
 
   audit:
     # Known-vulnerability scan of the production dependencies, on every push and PR. Separate

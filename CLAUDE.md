@@ -26,6 +26,8 @@ uv run python manage.py test                     # run all tests (Django test ru
 uv run python manage.py test <app>               # one app
 uv run python manage.py test <app>.tests.<Case>  # one TestCase
 uv run python manage.py test <app>.tests.<Case>.<method>  # one test
+uv run python manage.py test --fast                # quick tier: skips tests that add no coverage of their own (feature-branch CI runs this; main and releases run everything)
+uv run python deploy/refresh_fast_suite.py       # regenerate rosterchief/fast_suite_skip.txt (~5 min; verified)
 
 uv run ruff check .                  # lint
 uv run ruff check --fix .            # lint + autofix

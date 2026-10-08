@@ -68,6 +68,7 @@ Settings read the environment through python-decouple, with a local `.env` for d
 uv run python manage.py test                       # all tests
 uv run python manage.py test appapi                # one app
 uv run python manage.py test appapi.test_member.CalendarTests.test_game_status
+uv run python manage.py test --fast                 # quick tier, about a third of the time (CI runs it on feature branches; releases run everything)
 
 uv run ruff check .                                # lint
 uv run ruff format .                               # format

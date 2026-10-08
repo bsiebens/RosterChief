@@ -31,6 +31,15 @@ class so a class's ``setUpTestData`` still runs once. CI uses it to spread the s
 over several jobs; every class lands in exactly one slice, decided by a stable hash of
 its dotted name, so the N slices together are the whole suite.
 
+``--fast`` skips the tests listed in ``fast_suite_skip.txt`` (next to this file): the ones whose
+every covered line is also covered by another test, found by ``deploy/refresh_fast_suite.py``
+from per-test coverage. Roughly a quarter of the suite then reproduces the whole suite's line
+coverage in about a third of the time -- right for a quick local check and for feature-branch CI.
+It is a *quick* tier, not a replacement: line coverage says the code ran, not that every
+behaviour was asserted, so releases, ``main`` and the nightly run still run everything. Any test
+not in the file (every new test) runs in the fast tier too, so nothing new is ever skipped
+until the list is regenerated.
+
 ``--keepdb`` does nothing for local runs: the sqlite test database is in-memory and
 cannot survive the process. It only pays off against a real PostgreSQL
 ``DJANGO_DATABASE_URL``, where it skips the migrate step between runs.
@@ -40,6 +49,7 @@ import logging
 import tempfile
 import unittest
 import zlib
+from pathlib import Path
 
 from django.conf import settings
 from django.test.runner import DiscoverRunner, ParallelTestSuite, iter_test_cases
@@ -140,6 +150,19 @@ def _cached_template_loaders(templates):
     return patched
 
 
+FAST_SUITE_SKIP_FILE = Path(__file__).with_name("fast_suite_skip.txt")
+
+
+def read_fast_suite_skip(path=FAST_SUITE_SKIP_FILE) -> frozenset:
+    """The dotted ids of the tests ``--fast`` skips: one per line, ``#`` comments and blank lines
+    ignored. A missing file means nothing is skipped (``--fast`` then runs everything)."""
+    try:
+        lines = path.read_text().splitlines()
+    except FileNotFoundError:
+        return frozenset()
+    return frozenset(line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#"))
+
+
 class RosterChiefTestRunner(DiscoverRunner):
     """The project's test runner. See the module docstring for what it changes and why."""
 
@@ -157,9 +180,11 @@ class RosterChiefTestRunner(DiscoverRunner):
                 action.default = "auto"
                 break
         parser.add_argument("--shard", metavar="I/N", help="Run only slice I of N (1-based), split by test class. Used by CI to spread the suite over jobs.")
+        parser.add_argument("--fast", action="store_true", help="Skip the tests that add no coverage of their own (rosterchief/fast_suite_skip.txt): a quick tier for local checks and feature-branch CI. Releases, main and the nightly run everything.")
 
-    def __init__(self, *args, shard=None, **kwargs):
+    def __init__(self, *args, shard=None, fast=False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.skip = read_fast_suite_skip() if fast else frozenset()
         self.shard = None
         if shard:
             index, _sep, total = shard.partition("/")
@@ -170,13 +195,16 @@ class RosterChiefTestRunner(DiscoverRunner):
 
     def load_tests_for_label(self, label, discover_kwargs):
         tests = super().load_tests_for_label(label, discover_kwargs)
-        if self.shard is None:
+        if self.shard is None and not self.skip:
             return tests
+        # Load failures (_FailedTest) are always kept -- and, for a shard, kept in every slice --
+        # so a broken module fails the run instead of silently vanishing from it.
+        kept = [test for test in iter_test_cases(tests) if isinstance(test, unittest.loader._FailedTest) or test.id() not in self.skip]
+        if self.shard is None:
+            return unittest.TestSuite(kept)
         index, total = self.shard
         # Filtered per class, before Django partitions the suite over --parallel workers.
-        # Load failures (_FailedTest) are kept in every slice so a broken module fails
-        # every shard instead of silently vanishing from all but one.
-        return unittest.TestSuite(test for test in iter_test_cases(tests) if isinstance(test, unittest.loader._FailedTest) or zlib.crc32(f"{type(test).__module__}.{type(test).__qualname__}".encode()) % total == index)
+        return unittest.TestSuite(test for test in kept if isinstance(test, unittest.loader._FailedTest) or zlib.crc32(f"{type(test).__module__}.{type(test).__qualname__}".encode()) % total == index)
 
     def setup_test_environment(self, **kwargs):
         settings.PASSWORD_HASHERS = TEST_PASSWORD_HASHERS

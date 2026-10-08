@@ -553,3 +553,66 @@ class SecretKeySystemCheckTests(SimpleTestCase):
         from django.conf import settings
 
         self.assertEqual(settings.SILENCED_SYSTEM_CHECKS, ["security.W021"])
+
+
+class FastSuiteSample(SimpleTestCase):
+    """Two trivial tests the runner tests below load by label."""
+
+    def test_a(self):
+        pass
+
+    def test_b(self):
+        pass
+
+
+class FastSuiteRunnerTests(SimpleTestCase):
+    """`manage.py test --fast` (rosterchief.test_runner): skips the tests in fast_suite_skip.txt."""
+
+    SAMPLE = "rosterchief.tests.FastSuiteSample"
+
+    def ids(self, runner):
+        from django.test.runner import iter_test_cases
+
+        return sorted(test.id() for test in iter_test_cases(runner.load_tests_for_label(self.SAMPLE, {})))
+
+    def runner(self, **kwargs):
+        from .test_runner import RosterChiefTestRunner
+
+        return RosterChiefTestRunner(**kwargs)
+
+    def test_without_fast_nothing_is_skipped(self):
+        self.assertEqual(self.ids(self.runner()), [f"{self.SAMPLE}.test_a", f"{self.SAMPLE}.test_b"])
+
+    def test_fast_skips_the_listed_tests_and_keeps_every_other_one(self):
+        runner = self.runner()
+        runner.skip = frozenset({f"{self.SAMPLE}.test_a"})
+
+        self.assertEqual(self.ids(runner), [f"{self.SAMPLE}.test_b"])
+
+    def test_fast_combines_with_sharding(self):
+        runner = self.runner(shard="1/1")
+        runner.skip = frozenset({f"{self.SAMPLE}.test_b"})
+
+        self.assertEqual(self.ids(runner), [f"{self.SAMPLE}.test_a"])
+
+    def test_the_skip_file_ignores_comments_and_blank_lines(self):
+        from .test_runner import read_fast_suite_skip
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "skip.txt"
+            path.write_text("# generated\n\n  app.tests.A.test_one  \n# another comment\napp.tests.B.test_two\n")
+
+            self.assertEqual(read_fast_suite_skip(path), {"app.tests.A.test_one", "app.tests.B.test_two"})
+
+    def test_a_missing_skip_file_means_nothing_is_skipped(self):
+        from .test_runner import read_fast_suite_skip
+
+        self.assertEqual(read_fast_suite_skip(Path("/nonexistent/fast_suite_skip.txt")), frozenset())
+
+    def test_every_entry_in_the_real_skip_file_is_a_dotted_test_id(self):
+        from .test_runner import read_fast_suite_skip
+
+        skip = read_fast_suite_skip()
+
+        self.assertTrue(skip, "the fast-suite skip list is empty; regenerate it with deploy/refresh_fast_suite.py")
+        self.assertTrue(all(entry.count(".") >= 3 and " " not in entry for entry in skip))
