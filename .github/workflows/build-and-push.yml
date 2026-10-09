@@ -62,6 +62,7 @@ jobs:
     # the full suite passing on its PR.
     runs-on: ubuntu-latest
     outputs:
+      shuffle: ${{ steps.tier.outputs.shuffle }}
       fast: ${{ steps.tier.outputs.fast }}
       shards: ${{ steps.tier.outputs.shards }}
       count: ${{ steps.tier.outputs.count }}
@@ -72,6 +73,10 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           REF: ${{ github.ref }}
         run: |
+          # The nightly runs in a random order (Django prints the seed, so a failure can be reproduced
+          # with `--shuffle=<seed>`): a test that only passes because of what ran before it is caught
+          # within a day instead of lurking. Every other event keeps the stable order.
+          if [ "$EVENT" = schedule ]; then echo "shuffle=--shuffle" >> "$GITHUB_OUTPUT"; else echo "shuffle=" >> "$GITHUB_OUTPUT"; fi
           if { [ "$EVENT" = pull_request ] && [ "$BASE_REF" != main ]; } || { [ "$EVENT" = push ] && [ "$REF" = refs/heads/development ]; }; then
             { echo "fast=--fast"; echo "shards=[1,2]"; echo "count=2"; } >> "$GITHUB_OUTPUT"
           else
@@ -132,7 +137,7 @@ jobs:
         if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
-      - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }}
+      - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }} ${{ needs.plan.outputs.shuffle }}
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
           # value, never used for anything real, exists only so Django will start.

@@ -292,6 +292,15 @@ class PerfLoggingQueryTrackingTests(TestCase):
         self.assertEqual(queries, [])
         self.assertEqual(template_ms, 0.0)
 
+    def test_stopping_twice_is_still_empty_not_none(self):
+        from .perf_logging import start_tracking, stop_tracking
+
+        start_tracking()
+        stop_tracking()
+
+        # The thread-local now holds None, as it does after every request.
+        self.assertEqual(stop_tracking(), ([], 0.0))
+
     def test_records_each_query_inside_a_tracked_block(self):
         from django.contrib.auth import get_user_model
 
@@ -616,3 +625,29 @@ class FastSuiteRunnerTests(SimpleTestCase):
 
         self.assertTrue(skip, "the fast-suite skip list is empty; regenerate it with deploy/refresh_fast_suite.py")
         self.assertTrue(all(entry.count(".") >= 3 and " " not in entry for entry in skip))
+
+
+class CachesAreClearedBeforeEveryTestTests(SimpleTestCase):
+    """rosterchief.test_runner clears every cache before each test: the database is rolled back
+    after a test but the process-wide LocMemCache is not, so a cached feature flag or list used to
+    leak into whichever test ran next (the suite failed in reverse order)."""
+
+    def test_the_per_test_setup_empties_the_cache(self):
+        cache.set("left-behind-by-a-previous-test", "stale", 60)
+
+        SimpleTestCase._pre_setup()
+
+        self.assertIsNone(cache.get("left-behind-by-a-previous-test"))
+
+    def test_applying_the_override_twice_does_not_stack_or_recurse(self):
+        from .test_runner import _clear_caches_before_every_test
+
+        before = SimpleTestCase.__dict__["_pre_setup"]
+        _clear_caches_before_every_test()
+        _clear_caches_before_every_test()
+        cache.set("x", 1, 60)
+
+        SimpleTestCase._pre_setup()
+
+        self.assertIs(SimpleTestCase.__dict__["_pre_setup"], before)
+        self.assertIsNone(cache.get("x"))

@@ -104,6 +104,36 @@ def _apply_per_process_test_overrides(*args):
     settings.PRIVATE_MEDIA_ROOT = tempfile.mkdtemp(prefix="rosterchief-test-private-media-")
     setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
     settings.VAPID_PRIVATE_KEY = ""
+    _clear_caches_before_every_test()
+
+
+def _clear_caches_before_every_test():
+    """Every test starts with an empty cache.
+
+    The test cache (LocMemCache) lives for the whole process, while the database is rolled
+    back after each test. So anything cached from the database -- a waffle feature flag, a
+    sponsors list, the maintenance switch -- outlived the data it was read from, and a test's
+    result then depended on which test happened to run before it (run the suite in reverse and
+    eight tests failed; a test that "covered" the officials code did so only because an earlier
+    test had left the flag cached on). Clearing it in Django's own per-test setup makes every test
+    start from a known state, in the main process and in every parallel worker alike. Idempotent:
+    the override can be applied more than once per process.
+    """
+    from django.core.cache import caches
+    from django.test import SimpleTestCase
+
+    original = SimpleTestCase.__dict__["_pre_setup"].__func__  # a classmethod: keep the plain function
+    if getattr(original, "clears_caches", False):
+        return
+
+    @classmethod
+    def _pre_setup(cls):
+        original(cls)
+        for cache in caches.all():
+            cache.clear()
+
+    _pre_setup.__func__.clears_caches = True
+    SimpleTestCase._pre_setup = _pre_setup
 
 
 class RosterChiefParallelTestSuite(ParallelTestSuite):
