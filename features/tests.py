@@ -1,3 +1,4 @@
+import os
 import time
 from io import StringIO
 from unittest import mock
@@ -509,8 +510,8 @@ class LeaderElectionTests(TestCase):
 
 
 class SchedulerLifecycleTests(TestCase):
-    """start()/stop() -- the two entry points gunicorn.conf.py's when_ready/on_exit hooks
-    call. Runs the real leader thread rather than mocking it: what's worth proving here is
+    """start()/stop() -- the two entry points gunicorn.conf.py's post_worker_init/worker_exit
+    hooks call. Runs the real leader thread rather than mocking it: what's worth proving here is
     that the observable state (the lease, the running scheduler) ends up right, not that
     specific internal calls were made."""
 
@@ -542,6 +543,26 @@ class SchedulerLifecycleTests(TestCase):
 
         self.assertIsNone(scheduler_module._scheduler)
         self.assertIsNone(cache.get(scheduler_module.LEADER_CACHE_KEY))
+
+    def test_each_start_takes_a_fresh_lease_token(self):
+        # With --preload the module is imported once in the master and inherited by every worker:
+        # without a per-process token they would all hold the same one and each think it leads.
+        import_time_token = scheduler_module._TOKEN
+
+        scheduler_module.start()
+
+        self.assertNotEqual(scheduler_module._TOKEN, import_time_token)
+        self.assertIn(f":{os.getpid()}:", scheduler_module._TOKEN)
+
+    def test_two_workers_never_both_lead(self):
+        scheduler_module.start()
+        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
+        leader_token = scheduler_module._TOKEN
+
+        # A second worker has its own token and cannot take the lease the first one holds.
+        scheduler_module._TOKEN = scheduler_module._new_token()
+        self.assertFalse(scheduler_module._try_acquire_or_renew())
+        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), leader_token)
 
     def test_start_is_a_noop_if_already_started(self):
         scheduler_module.start()
@@ -595,6 +616,41 @@ class FlagPerUserGrantScopingTests(TestCase):
         self.flag.users.add(self.user)
 
         self.assertTrue(flag_is_active(self.request_for(None), "evaluations"))
+
+
+class GunicornConfigTests(TestCase):
+    """gunicorn.conf.py: the scheduler runs in the WORKERS. A master-side hook that starts a thread
+    makes every worker fork a gamble -- a lock the thread holds at that instant (the DNS resolver's,
+    a Redis pool's) is copied locked into the child, which then hangs forever on first use. That cost
+    a production worker (every thread stuck in getaddrinfo, ~half of all requests hanging)."""
+
+    def load_config(self):
+        import importlib.util
+        from pathlib import Path
+
+        spec = importlib.util.spec_from_file_location("gunicorn_conf_hooks_under_test", Path(__file__).resolve().parent.parent / "gunicorn.conf.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_no_hook_runs_code_in_the_master_that_could_start_a_thread(self):
+        config = self.load_config()
+
+        # when_ready fires in the master BEFORE the workers are forked; the others run in the master too.
+        for master_hook in ("when_ready", "on_starting", "on_reload", "on_exit", "pre_fork"):
+            self.assertFalse(hasattr(config, master_hook), f"gunicorn.conf.py defines {master_hook}: it runs in the process that forks the workers")
+
+    def test_the_scheduler_is_started_in_the_worker_and_stopped_when_it_exits(self):
+        config = self.load_config()
+        worker = mock.Mock()
+
+        with mock.patch("features.scheduler.start") as start, mock.patch("features.scheduler.stop") as stop:
+            config.post_worker_init(worker)
+            start.assert_called_once_with()
+            stop.assert_not_called()
+
+            config.worker_exit(server=None, worker=worker)
+            stop.assert_called_once_with()
 
 
 class GunicornPostForkTests(TestCase):

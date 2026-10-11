@@ -848,9 +848,14 @@ encrypted form.
 
 ## Scheduled jobs
 
-All fifteen platform jobs run from **one in-process scheduler thread inside `web` itself** —
-`features/scheduler.py`, an APScheduler `BackgroundScheduler` started by `gunicorn.conf.py`'s
-`when_ready` hook. There is no host cron, no `worker`/`beat`, and no separate poller
+All fifteen platform jobs run from **one in-process scheduler inside `web` itself** —
+`features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn
+**workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
+lease makes exactly one worker the one that runs the schedule, so a recycled worker hands it
+over within seconds. It must never live in the gunicorn *master*: the master forks every worker,
+and a lock held by any other thread at that instant is copied locked into the child — the
+reason one worker once swallowed half the node's requests (see "A wedged web worker" below).
+Without Redis (a dev box) every worker would lead. There is no host cron, no `worker`/`beat`, and no separate poller
 container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
 every image — nothing left to configure by hand on a new box. Each job is a
 `features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each one is
@@ -977,6 +982,31 @@ docker compose run --rm --no-deps -v "$PWD/photos:/import:ro" web \
   consent for the whole batch.
 - Photos go to private storage, which the nightly backup already covers. Delete `photos/`
   afterwards.
+
+### A wedged web worker
+
+**Symptom:** a share of requests hang until the client gives up (the rest answer in milliseconds),
+`docker compose ps` shows `web` **unhealthy**, and the access log goes quiet: gunicorn logs a
+request only when it *finishes*, so a hung request leaves no line. **Cause it has had:** a worker
+forked while another thread held a lock (the DNS resolver's `getaddrinfo`, a Redis pool's) came up
+with that lock stuck, and hung forever the first time it needed it — for the DNS lock, the first
+time a database connection expired (`CONN_MAX_AGE`, 60 s) and had to be reopened.
+
+**Check, from the server** (`docker compose exec -T web ...`; the image has no `ps`/`ss`):
+
+- Plain requests to `http://localhost:8000/healthz`: a healthy node answers every one with a 301 in
+  about 1 ms. Some answering and some timing out means one worker is wedged.
+- Sockets stuck in `CLOSE_WAIT` on `:8000` (read `/proc/net/tcp`, port `1F40`) are connections the
+  wedged worker accepted and never served; `/proc/<pid>/fd` says which worker owns them.
+- `gunicornc -s /tmp/.gunicorn/gunicorn.ctl -c "show workers"` shows the arbiter's view (it still
+  looked healthy). To see *what* the threads are blocked on, run
+  `python -c "import sys; sys.remote_exec(<worker pid>, '/tmp/dump.py')"` with a script that calls
+  `faulthandler.dump_traceback(file=..., all_threads=True)` (Python 3.14's safe remote debugging).
+
+**Fix:** `docker compose restart web` clears it. Do not start threads from a master-side gunicorn
+hook (`when_ready`, `on_starting`, `pre_fork`, …); `features.tests.GunicornConfigTests` fails if
+one appears. The database and Redis also have connect/read timeouts now, so a stalled backend fails
+a request instead of holding its thread.
 
 ## Maintenance mode
 

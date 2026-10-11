@@ -368,6 +368,11 @@ DATABASES["default"]["CONN_MAX_AGE"] = config("DJANGO_DB_CONN_MAX_AGE", default=
 # Check a reused connection is still alive before using it: after a database restart the
 # workers' persistent connections are dead, and without this they error until CONN_MAX_AGE runs out.
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# Never wait forever to reach Postgres: a connect that stalls (a firewall drop, a restarting database)
+# fails after this many seconds instead of holding a request thread for good. (It does not cover the
+# DNS lookup, which psycopg does itself before connecting -- see gunicorn.conf.py for that hazard.)
+if DATABASES["default"]["ENGINE"].endswith("postgresql"):
+    DATABASES["default"].setdefault("OPTIONS", {})["connect_timeout"] = config("DJANGO_DB_CONNECT_TIMEOUT", default=5, cast=int)
 
 
 # Request-level performance tracing (rosterchief/perf_logging.py, rosterchief/middleware.py)
@@ -434,7 +439,11 @@ USE_TZ = True
 
 REDIS_URL = config("DJANGO_REDIS_URL", default="")
 
-CACHES = {"default": {"BACKEND": "django_redis.cache.RedisCache", "LOCATION": REDIS_URL, "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"}} if REDIS_URL else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+CACHES = {
+    "default": {"BACKEND": "django_redis.cache.RedisCache", "LOCATION": REDIS_URL, "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient", "SOCKET_CONNECT_TIMEOUT": 5, "SOCKET_TIMEOUT": 5}}
+    if REDIS_URL
+    else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+}
 
 
 # Static files and uploads
