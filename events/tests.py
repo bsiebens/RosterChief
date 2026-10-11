@@ -4843,6 +4843,35 @@ class RecordGameMomentsTests(GameTimelineTestBase):
         moment = GameMoment.objects.create(event=game, key="goal_for:g1", kind=GameMoment.Kind.GOAL_FOR, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 2, "against": 1}})
 
         self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")
+
+    def goal(self, game, kind, assists):
+        return GameMoment.objects.create(event=game, key=f"{kind}:g", kind=kind, payload={"scorer": {"name": "Sam", "number": 9}, "assists": assists, "score": {"for": 2, "against": 1}})
+
+    def test_our_goal_names_the_assist(self):
+        game = self.make_event(kind=Event.EventKind.GAME)
+        moment = self.goal(game, GameMoment.Kind.GOAL_FOR, [{"name": "Ann", "number": 7}])
+
+        self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9) (assist: Ann (#7)), 2-1.")
+
+    def test_our_goal_names_both_assists(self):
+        game = self.make_event(kind=Event.EventKind.GAME)
+        moment = self.goal(game, GameMoment.Kind.GOAL_FOR, [{"name": "Ann", "number": 7}, {"name": "Lee"}])
+
+        self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9) (assists: Ann (#7), Lee), 2-1.")
+
+    def test_an_unassisted_goal_of_ours_reads_as_before(self):
+        game = self.make_event(kind=Event.EventKind.GAME)
+
+        for assists in ([], None, [{}, {"name": ""}]):
+            moment = self.goal(game, GameMoment.Kind.GOAL_FOR, assists)
+            self.assertEqual(game_moments.describe_moment(moment), "Goal for us by Sam (#9), 2-1.")
+            moment.delete()
+
+    def test_an_opponents_goal_never_names_assists(self):
+        game = self.make_event(kind=Event.EventKind.GAME)
+        moment = self.goal(game, GameMoment.Kind.GOAL_AGAINST, [{"name": "Ann", "number": 7}])
+
+        self.assertEqual(game_moments.describe_moment(moment), "Goal against by Sam (#9), 2-1.")
         penalty = GameMoment.objects.create(event=game, key="penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, payload={"player": {"name": "Max", "number": 17}, "description": "Checking To The Head", "kind": "game_misconduct"})
         self.assertEqual(game_moments.describe_moment(penalty), "Penalty for the opponent: Max (#17), Checking To The Head (game misconduct).")
 
@@ -4864,6 +4893,16 @@ class GamePushTests(GameTimelineTestBase):
         with mock.patch("events.services.game_push._send_native", return_value=1) as native, mock.patch("events.services.game_push._send_web", return_value=0) as web:
             reached = game_push.deliver_moments(game.pk, [moment.pk for moment in moments])
         return reached, native, web
+
+    def test_the_push_names_the_assists_on_our_goals_only(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        ours = self.moment(game, "goal_for:g1", assists=[{"name": "Ann", "number": 7}], seconds=60)
+        theirs = self.moment(game, "goal_against:g2", kind=GameMoment.Kind.GOAL_AGAINST, assists=[{"name": "Bo", "number": 3}], seconds=120)
+
+        _reached, native, _web = self.deliver(game, [ours, theirs])
+
+        self.assertEqual(native.call_args.kwargs["body"].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
 
     def test_followers_get_one_coalesced_push_and_others_none(self):
         game = self.make_game(is_live=True)

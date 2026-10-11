@@ -232,6 +232,8 @@ would call news, from the club's point of view (ours/theirs via `is_home_game`):
 | `period_ended` | added `period_end`, with the period score |
 | `game_final` | status → final, with the result and `decided_in` |
 
+The stored payload keeps the assists for both, but the *sentence* (management event page, live pushes) names them for **our** goals only ("Goal for us by Sam (#9) (assist: Ann (#7)), 2-1."); an opponent's goal is just "Goal against by …", and an unassisted goal reads as plain "Goal for us by …".
+
 Guards that keep this from becoming spam:
 
 - **`first_fetch` produces no moments.** The first snapshot of a game that's already under way (a
