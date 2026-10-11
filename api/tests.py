@@ -1104,3 +1104,45 @@ class SponsorApiTests(ApiTestBase):
         names = [s["name"] for s in self.api_get("/sponsors/").json()]
 
         self.assertEqual(names, ["Acme Corp", "Zulu Corp"])
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class PublicCacheHeaderTests(TestCase):
+    """GET /api/v1/teams/ can be cached by the caller for a minute; nothing else on the API can."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def get(self, path):
+        return self.client.get(path, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_the_team_list_may_be_cached_for_a_minute(self):
+        response = self.get("/api/v1/teams/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "public, max-age=60")
+
+    def test_the_team_list_response_shape_is_unchanged(self):
+        (team,) = self.get("/api/v1/teams/").json()
+
+        self.assertEqual(sorted(team), ["id", "name", "photo_url", "short_name"])
+
+    def test_live_data_is_not_given_a_public_cache_lifetime(self):
+        for path in ("/api/v1/games/live/", "/api/v1/news/", "/api/v1/sponsors/"):
+            with self.subTest(path=path):
+                self.assertNotIn("max-age=60", self.get(path).get("Cache-Control", ""))
+
+    def test_an_error_is_never_marked_cacheable(self):
+        response = self.client.get("/api/v1/teams/", HTTP_HOST="rosterchief.app")  # no club on the bare domain
+
+        self.assertNotEqual(response.status_code, 200)
+        self.assertNotIn("public", response.get("Cache-Control", ""))

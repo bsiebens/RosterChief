@@ -13,7 +13,7 @@
 #
 # No `worker`/`beat`, and no separate scheduler/poller container either -- every scheduled
 # platform job (the once-a-minute live-score poll included) runs from an in-process
-# APScheduler thread inside `web` itself, started by gunicorn.conf.py's when_ready hook. See
+# APScheduler thread inside a `web` worker (gunicorn.conf.py's post_worker_init hook; never the master). See
 # features/scheduler.py's own docstring for the full picture (and its history: Celery
 # worker/beat, then host cron + a lone poller container, then this) and DEPLOYMENT.md's
 # "Scheduled jobs" for the operational picture.

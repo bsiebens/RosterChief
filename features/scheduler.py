@@ -9,11 +9,17 @@ same features.commands.ScheduledJobCommand execute() path -- same JobRun row, sa
 JobToggle/Maintenance checks, same args (the two billing jobs' --commit included). Only
 *what triggers a run* changed, not what a run is.
 
-Runs as one APScheduler BackgroundScheduler thread, started from gunicorn.conf.py's
-when_ready hook -- which fires once, in the master process, after `--preload` has already
-forked the workers (see that file). That placement is what keeps this to exactly one
-scheduler thread per node regardless of --workers, without a single request-serving worker
-ever owning it.
+Runs as one APScheduler BackgroundScheduler thread inside a gunicorn WORKER, started from
+gunicorn.conf.py's post_worker_init hook (and stopped from worker_exit). Every worker starts
+the small leader-election loop below; the lease makes exactly one of them the one that runs
+the schedule, per node and fleet-wide alike. It deliberately does NOT live in the gunicorn
+master: the master forks every worker (at boot and on every recycle), and a fork copies only
+the calling thread -- a lock held by any other thread at that instant (the DNS resolver's, a
+Redis pool's, the logging lock) is copied locked into the child, which then deadlocks the
+first time it needs it. A scheduler thread in the master made exactly that happen: a worker
+whose `getaddrinfo` was copied locked hung forever on its first new database connection, and
+silently swallowed about half the node's requests. Workers never fork, so a thread in one
+cannot do this. (gunicorn calls when_ready BEFORE it spawns workers, whatever the name suggests.)
 
 **Leader election** (`_try_acquire_or_renew` below) is what keeps it to exactly one
 scheduler *fleet-wide* if this ever runs on more than one node -- the same "one scheduler"
@@ -60,7 +66,15 @@ RENEW_INTERVAL_SECONDS = 10
 #: behaviour of not "catching up" missed runs, just picking up from here.
 MISFIRE_GRACE_SECONDS = 300
 
-_TOKEN = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}"
+
+def _new_token() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}"
+
+
+#: This process's identity in the lease. Re-created by start(): with `--preload` the module is
+#: imported once in the gunicorn master and inherited by every worker, which would otherwise all
+#: hold the same token and each believe it was the leader.
+_TOKEN = _new_token()
 
 _scheduler = None
 _leader_thread = None
@@ -141,66 +155,22 @@ def _leader_loop():
         _stopping.wait(RENEW_INTERVAL_SECONDS)
 
 
-def _warm_cache_backend_import():
-    """Forces every module django_redis lazily imports via import_string to finish
-    importing now, synchronously, on whichever thread calls start() -- which
-    gunicorn.conf.py's when_ready hook does in the master's own main thread, before the
-    arbiter forks the initial workers (when_ready fires before that fork, not after,
-    despite the name).
-
-    Without this, _leader_loop's first cache.add() below is the *first* cache access
-    anywhere in this process's life (no app's ready() touches Redis eagerly, and no request
-    has been served yet) -- and it happens on a background thread, racing gunicorn's own
-    imminent fork of the initial workers. If that fork lands mid-import, the forked worker
-    inherits a half-initialized module already sitting in sys.modules (fork() copies it
-    as-is, in-progress or not) -- every later cache access in that worker then fails with
-    "module ... has no attribute 'X'" instead of finishing the import, because Python sees
-    the module already in sys.modules and never re-runs it. This bit exactly one of two
-    workers on first deploy (django_redis.client.DefaultClient), and again, one layer
-    deeper, on the very next deploy (django_redis.serializers.pickle.PickleSerializer, only
-    imported when DefaultClient is actually *constructed*, not merely referenced) --
-    /healthz (round-robined to the other worker) looked fine both times while everything
-    else 500'd.
-
-    That history is why this builds the real client instead of hand-picking import_string
-    calls to replay one at a time: django_redis's CLIENT_CLASS, SERIALIZER, COMPRESSOR, and
-    connection-factory classes (pool_cls/redis_client_cls) are each resolved lazily, from
-    three different modules, only once something actually constructs a DefaultClient --
-    missing any one of them leaves the same race for whichever request first exercises that
-    particular path. Accessing caches["default"].client constructs the real DefaultClient
-    (and its ConnectionFactory), which is what actually resolves all of them in one place --
-    the same object graph a real request would build, just built here first. What it
-    deliberately does NOT do is issue a command: redis-py's connection pool is itself lazy,
-    so nothing here opens an actual socket, which fork()-sharing into every worker would
-    otherwise corrupt (multiple processes issuing commands over one inherited TCP connection
-    corrupts Redis's own protocol framing) -- confirmed by reading the installed
-    django_redis/client/default.py and pool.py: DefaultClient.__init__ and
-    ConnectionFactory.__init__ only import and instantiate classes, no I/O.
-
-    A no-op on LocMemCache (dev/test, no DJANGO_REDIS_URL) -- it has no `.client` at all,
-    and none of this lazy-import machinery to race in the first place.
-    """
-    from django.core.cache import caches
-
-    getattr(caches["default"], "client", None)
-
-
 def start():
-    """Called once from gunicorn.conf.py's when_ready hook, in the master process only."""
-    global _leader_thread
+    """Called from gunicorn.conf.py's post_worker_init hook, once in each worker."""
+    global _leader_thread, _TOKEN
 
     if _leader_thread is not None:
         return
 
+    _TOKEN = _new_token()
     logger.info("scheduler.start pid=%s token=%s", os.getpid(), _TOKEN)
-    _warm_cache_backend_import()
     _stopping.clear()
     _leader_thread = threading.Thread(target=_leader_loop, name="rosterchief-scheduler", daemon=True)
     _leader_thread.start()
 
 
 def stop():
-    """Called from gunicorn.conf.py's on_exit hook. Best-effort: releases the lease
+    """Called from gunicorn.conf.py's worker_exit hook. Best-effort: releases the lease
     immediately (if we hold it) so a healthy replacement node doesn't wait out the full
     LEASE_SECONDS during a routine redeploy, then stops the local scheduler."""
     global _scheduler, _leader_thread
