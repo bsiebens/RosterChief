@@ -1,5 +1,5 @@
 # Test -> build -> push, strictly in that order. `test` (lint + the full suite) runs on
-# every push and every pull request; `build` only runs on a push to `development` or `main`,
+# every push, every pull request and nightly (on Postgres, see `test-shard`); `build` only runs on a push to `development` or `main`,
 # and only once `test` has passed -- see the `needs:`/`if:` on each job below. A red run on a
 # branch never produces an image, and nothing reaches ghcr.io that hasn't been linted and
 # tested first.
@@ -24,6 +24,13 @@ on:
   push:
     branches: [main, development]
   pull_request:
+  schedule:
+    # 05:00 UTC, daily, on main (scheduled workflows only run on the default branch): the suite on
+    # Postgres plus the dependency audit, with no code change to trigger them. That is what catches
+    # things that rot on their own -- a date- or time-of-day-dependent test, a freshly published
+    # advisory, a drifting service. Clear of the low-single-digits-UTC window compose.yaml's own
+    # scheduled jobs run in (see DEPLOYMENT.md's "Scheduled jobs"). Never builds or deploys: see `build`.
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 env:
@@ -42,17 +49,74 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    # Decides how much of the suite this event needs, so the jobs below don't have to repeat the
+    # rule. Two tiers (the test files are the same; nothing is deleted):
+    #   fast  a feature-branch PR (into development) and a push to development: the tests that add
+    #         line coverage of their own (`manage.py test --fast`, rosterchief/fast_suite_skip.txt),
+    #         roughly a third of the suite, over TWO jobs: one job made the wall-clock worse, and more
+    #         than two would spend more on fixed cost (container start, database creation) than they save.
+    #   full  everything else: any PR into main (every release/hotfix), a push to main, the nightly
+    #         run, a manual dispatch. All tests, split over four shards.
+    # The fast list is a quick-feedback tier, not a substitute: a release can never reach main without
+    # the full suite passing on its PR.
+    runs-on: ubuntu-latest
+    outputs:
+      shuffle: ${{ steps.tier.outputs.shuffle }}
+      fast: ${{ steps.tier.outputs.fast }}
+      shards: ${{ steps.tier.outputs.shards }}
+      count: ${{ steps.tier.outputs.count }}
+    steps:
+      - id: tier
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF: ${{ github.ref }}
+        run: |
+          # The nightly runs in a random order (Django prints the seed, so a failure can be reproduced
+          # with `--shuffle=<seed>`): a test that only passes because of what ran before it is caught
+          # within a day instead of lurking. Every other event keeps the stable order.
+          if [ "$EVENT" = schedule ]; then echo "shuffle=--shuffle" >> "$GITHUB_OUTPUT"; else echo "shuffle=" >> "$GITHUB_OUTPUT"; fi
+          if { [ "$EVENT" = pull_request ] && [ "$BASE_REF" != main ]; } || { [ "$EVENT" = push ] && [ "$REF" = refs/heads/development ]; }; then
+            { echo "fast=--fast"; echo "shards=[1,2]"; echo "count=2"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "fast="; echo "shards=[1,2,3,4]"; echo "count=4"; } >> "$GITHUB_OUTPUT"
+          fi
+
   test-shard:
-    # The suite, split over four jobs by test class (manage.py test --shard=I/N, see
-    # rosterchief/test_runner.py). A hosted runner only has a couple of cores, so one job
-    # took ~5 minutes; four in parallel each pay the ~30s setup/migrate once and run a
-    # quarter of the tests. Lint runs once, in the first shard.
-    name: test (${{ matrix.shard }}/4)
+    # The suite (or its fast tier, see `plan`), split by test class over `count` jobs
+    # (manage.py test --shard=I/N, see rosterchief/test_runner.py). A hosted runner only has a
+    # couple of cores, so one job took ~5 minutes; four in parallel each pay the setup/migrate cost
+    # once and run a quarter of the tests. Lint runs once, in the first shard.
+    #
+    # Which database: production runs Postgres, the quick feedback loop runs in-memory sqlite.
+    # The suite runs ONCE per event, on the database that matters for it -- Postgres for a push
+    # to main/development and for a PR into main (every release/hotfix, so a Postgres-only break
+    # is caught before it merges, not after), sqlite for any other PR (a feature branch into
+    # development), where speed matters more -- and on Postgres every night (see `schedule`).
+    # There is deliberately no second, separate Postgres workflow.
+    needs: plan
+    name: test (${{ matrix.shard }}/${{ needs.plan.outputs.count }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    # Always started (a few seconds, idle on sqlite runs); only used when "Use Postgres" below sets the URL.
+    services:
+      postgres:
+        image: postgres:17-alpine  # the major version compose.yaml pins in production
+        env:
+          POSTGRES_USER: rosterchief
+          POSTGRES_PASSWORD: rosterchief
+          POSTGRES_DB: rosterchief
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -69,7 +133,11 @@ jobs:
       - if: matrix.shard == 1
         run: uv run ruff check .
 
-      - run: uv run python manage.py test --shard=${{ matrix.shard }}/4
+      - name: Use Postgres
+        if: github.event_name != 'pull_request' || github.base_ref == 'main'
+        run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
+
+      - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }} ${{ needs.plan.outputs.shuffle }}
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
           # value, never used for anything real, exists only so Django will start.
@@ -82,11 +150,11 @@ jobs:
     # and `needs: test` don't have to know how many shards there are. `always()` so a
     # failed shard turns this red rather than skipped -- a skipped required check counts
     # as passing.
-    needs: test-shard
+    needs: [plan, test-shard]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test-shard.result }}" = success
+      - run: test "${{ needs.plan.result }}" = success && test "${{ needs.test-shard.result }}" = success
 
   audit:
     # Known-vulnerability scan of the production dependencies, on every push and PR. Separate
@@ -127,7 +195,7 @@ jobs:
     # branch is exercised by `test` alone until it merges (its own PR into `main` re-runs
     # `test` on the merge; the image that ships is the one `main` builds once it lands).
     # `workflow_dispatch` is exempt from the ref check so it can still force a rebuild by hand.
-    if: github.event_name != 'pull_request' && (github.event_name != 'push' || contains(fromJSON('["refs/heads/main", "refs/heads/development"]'), github.ref))
+    if: github.event_name != 'pull_request' && github.event_name != 'schedule' && (github.event_name != 'push' || contains(fromJSON('["refs/heads/main", "refs/heads/development"]'), github.ref))
     runs-on: ubuntu-latest
     permissions:
       contents: read

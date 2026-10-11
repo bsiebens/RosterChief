@@ -1379,11 +1379,31 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
    deploying `development`'s image in response to a `main` release would be wrong, not just
    redundant.
 
-A separate workflow, `.github/workflows/test-postgres.yml`, runs the identical suite against a
-real `postgres:17` service container (compose.yaml's own major version) on a daily schedule
-plus every push to `development`/`main` — the everyday `test` job above runs against the same
-in-memory sqlite `rosterchief/test_runner.py` uses locally, which is fast but isn't what
-production actually runs on.
+**How much of the suite, and on which database.** Production runs Postgres, the quick feedback
+loop runs the in-memory sqlite `rosterchief/test_runner.py` uses locally, and the full suite takes a
+few minutes on a hosted runner. So each event runs the suite **once**, in the tier and on the
+database that fits it (a small `plan` job decides):
+
+| Event | Tests | Database |
+|---|---|---|
+| pull request into `main` (every release/hotfix) | **full**, 4 shards | Postgres: a Postgres-only break is caught *before* it merges |
+| push to `main` | full, 4 shards | Postgres |
+| nightly (`schedule`, 05:00 UTC, on `main`) | full, 4 shards | Postgres |
+| push to `development` | **fast**, 2 shards | Postgres |
+| any other pull request (a feature branch into `development`) | fast, 2 shards | sqlite |
+
+The **fast tier** (`manage.py test --fast`) skips the tests listed in
+`rosterchief/fast_suite_skip.txt`: those whose every covered line is also covered by another test.
+Roughly a third of the suite then reproduces the whole suite's line coverage, in two jobs instead
+of four, which about halves the billed CI time of a feature-branch run. Nothing is deleted, and a release can never reach `main` without the full suite
+passing on its PR. The list is generated and **verified** by `deploy/refresh_fast_suite.py` (~5
+minutes: it runs the full suite under per-test coverage, picks a covering set, then runs the fast
+tier and checks it hits every line the full suite hit). A test that is not in the list always runs, so
+a newly written test is never skipped; regenerate the list now and then and after big refactors. A
+stale list only makes the fast tier a little less representative. Caveat: line coverage says the code
+ran, not that every behaviour was asserted, which is why `main`, releases and the nightly run
+everything. A scheduled run never builds, tags or deploys anything, and there is no separate
+Postgres workflow.
 
 **`test` is a required status check on both `development` and `main`** —
 `deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the

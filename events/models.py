@@ -633,6 +633,24 @@ class GameFollow(ClubScopedModel):
         return f"{self.user} -> {self.team}"
 
 
+class EventFollow(ClubScopedModel):
+    """An account following ONE game for live updates -- on Home while it is on, and the same live
+    pushes GameFollow gives a team's followers. The single-game counterpart to GameFollow (which
+    follows every game of a team); an account can have both, and a game it follows both ways
+    shows once. Per account, not per Member, for the same reason as GameFollow."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="event_follows", verbose_name=_("user"))
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="followers", verbose_name=_("event"))
+
+    class Meta:
+        verbose_name = _("followed game")
+        verbose_name_plural = _("followed games")
+        constraints = [models.UniqueConstraint(fields=["user", "event"], name="unique_event_follow_per_game")]
+
+    def __str__(self):
+        return f"{self.user} -> {self.event}"
+
+
 class Competition(models.Model):
     """A competition has a name with a specific URL to fetch data from. These are managed centrally."""
 

@@ -41,7 +41,10 @@ def start_tracking() -> None:
 
 
 def stop_tracking() -> tuple[list[tuple[float, str]], float]:
-    queries = getattr(_state, "queries", [])
+    """What was tracked since start_tracking(), and tracking is over. An empty result when nothing
+    was being tracked -- including after an earlier stop_tracking() left the thread-local at None,
+    which getattr's default does not cover (the attribute exists)."""
+    queries = getattr(_state, "queries", None) or []
     template_ms = getattr(_state, "template_ms", 0.0)
     _state.queries = None
     _state.template_ms = 0.0

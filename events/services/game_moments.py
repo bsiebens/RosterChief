@@ -28,6 +28,7 @@ import django.dispatch
 from django.db import IntegrityError, transaction
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy as _lazy
+from django.utils.translation import ngettext
 
 from events.models import GameMoment
 
@@ -186,9 +187,16 @@ def describe_moment(moment: GameMoment) -> str:
     score_text = f"{score.get('for', 0)}-{score.get('against', 0)}" if score else ""
     if moment.kind == GameMoment.Kind.GAME_STARTED:
         return _("The game started.")
-    if moment.kind in (GameMoment.Kind.GOAL_FOR, GameMoment.Kind.GOAL_AGAINST):
-        template = _("Goal for us by %(player)s, %(score)s.") if moment.kind == GameMoment.Kind.GOAL_FOR else _("Goal against by %(player)s, %(score)s.")
-        return template % {"player": _who(payload.get("scorer")) or "?", "score": score_text}
+    if moment.kind == GameMoment.Kind.GOAL_FOR:
+        # Our own goals name who assisted; an opponent's goal is just the scorer (below), and an
+        # unassisted one reads as it always has.
+        assists = [name for name in (_who(person) for person in payload.get("assists") or []) if name]
+        if assists:
+            template = ngettext("Goal for us by %(player)s (assist: %(assists)s), %(score)s.", "Goal for us by %(player)s (assists: %(assists)s), %(score)s.", len(assists))
+            return template % {"player": _who(payload.get("scorer")) or "?", "assists": ", ".join(assists), "score": score_text}
+        return _("Goal for us by %(player)s, %(score)s.") % {"player": _who(payload.get("scorer")) or "?", "score": score_text}
+    if moment.kind == GameMoment.Kind.GOAL_AGAINST:
+        return _("Goal against by %(player)s, %(score)s.") % {"player": _who(payload.get("scorer")) or "?", "score": score_text}
     if moment.kind == GameMoment.Kind.GOAL_CANCELLED:
         return _("A goal was taken back, %(score)s.") % {"score": score_text}
     if moment.kind in (GameMoment.Kind.PENALTY_FOR, GameMoment.Kind.PENALTY_AGAINST):

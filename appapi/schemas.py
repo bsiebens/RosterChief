@@ -323,7 +323,30 @@ class FormToCompleteOut(Schema):
     closes_at: datetime.datetime | None
 
 
+class GameSideOut(Schema):
+    name: str
+    score: int | None = Field(description="Null until there is a score.")
+
+
+class FollowedGameOut(Schema):
+    event: EventOut
+    via: list[str] = Field(description="Why it is here: `game` (followed directly), `team` (a followed team plays in it), or both. Ignore unknown values.")
+    status: str = Field(description="`scheduled`, `live` or `finished`.")
+    home: GameSideOut
+    away: GameSideOut
+    period: str | None = Field(description="While live: the period the federation reports (e.g. `3`), when it says. Null otherwise.")
+    clock: str | None = Field(description="While live: the game clock (e.g. `04:31`), when the federation reports one. Null otherwise.")
+    decided_in: str | None = Field(description="Once finished: `regulation`, `overtime` or `shootout`, when known. Null otherwise.")
+
+
 class HomeOut(Schema):
+    followed_games: list[FollowedGameOut] = Field(
+        description=(
+            "Games this account follows (directly, or through a followed team) that are live, start within the next day, or began in the last few hours: "
+            "live first, then soonest, then just finished; at most 5. Empty when it follows nothing or the club has no game timelines. "
+            "One card each, with both teams, the score, the location (`event.location`) and, while live, the period and clock."
+        )
+    )
     member_cards: list[MemberCardOut] = Field(
         description=(
             "At least one card for every person who has something: all `rsvp_needed` cards first, then `next_going`, each soonest first. "
@@ -410,6 +433,11 @@ class SquadSummaryOut(Schema):
     no_reply_count: int
 
 
+class FollowStateOut(Schema):
+    directly: bool = Field(description="The account follows this game itself.")
+    via_team: bool = Field(description="The account follows a team playing in it, so it follows all that team's games.")
+
+
 class EventDetailOut(Schema):
     event: EventOut
     rsvp_closed: bool
@@ -421,6 +449,7 @@ class EventDetailOut(Schema):
     official_signups: list[SignupOut]
     tasks: list[TaskOut]
     squad_summary: SquadSummaryOut | None = Field(description="Counts only, never who answered what.")
+    follow: FollowStateOut = Field(description="Whether this account follows the game (a game can be followed directly, through a team, or both; always false for anything but a game or without game timelines).")
     game_timeline: TimelineOut | None = Field(None, description="For a game, when the club has game timelines: goals, penalties, goalie changes and time-outs as the federation reported them, with player names.")
 
 
@@ -432,7 +461,8 @@ class GameFollowTeamOut(Schema):
 
 
 class GameFollowsOut(Schema):
-    teams: list[GameFollowTeamOut] = Field(description="Every team of the club, with whether this account follows it for live game pushes.")
+    teams: list[GameFollowTeamOut] = Field(description="Every team of the club, with whether this account follows it for live game pushes (all of that team's games).")
+    games: list[EventOut] = Field(description="Single games this account follows directly (`PUT /events/{id}/follow`): live, upcoming, or begun in the last few hours. Unfollow with `DELETE /events/{id}/follow`.")
 
 
 class GameFollowsIn(Schema):

@@ -1434,6 +1434,10 @@
           "event": {
             "$ref": "#/components/schemas/EventOut"
           },
+          "follow": {
+            "$ref": "#/components/schemas/FollowStateOut",
+            "description": "Whether this account follows the game (a game can be followed directly, through a team, or both; always false for anything but a game or without game timelines)."
+          },
           "game_timeline": {
             "anyOf": [
               {
@@ -1508,7 +1512,8 @@
           "referee_signups",
           "official_signups",
           "tasks",
-          "squad_summary"
+          "squad_summary",
+          "follow"
         ],
         "title": "EventDetailOut",
         "type": "object"
@@ -1672,6 +1677,100 @@
           "game_status"
         ],
         "title": "EventOut",
+        "type": "object"
+      },
+      "FollowStateOut": {
+        "properties": {
+          "directly": {
+            "description": "The account follows this game itself.",
+            "title": "Directly",
+            "type": "boolean"
+          },
+          "via_team": {
+            "description": "The account follows a team playing in it, so it follows all that team's games.",
+            "title": "Via Team",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "directly",
+          "via_team"
+        ],
+        "title": "FollowStateOut",
+        "type": "object"
+      },
+      "FollowedGameOut": {
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/GameSideOut"
+          },
+          "clock": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While live: the game clock (e.g. `04:31`), when the federation reports one. Null otherwise.",
+            "title": "Clock"
+          },
+          "decided_in": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Once finished: `regulation`, `overtime` or `shootout`, when known. Null otherwise.",
+            "title": "Decided In"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "home": {
+            "$ref": "#/components/schemas/GameSideOut"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While live: the period the federation reports (e.g. `3`), when it says. Null otherwise.",
+            "title": "Period"
+          },
+          "status": {
+            "description": "`scheduled`, `live` or `finished`.",
+            "title": "Status",
+            "type": "string"
+          },
+          "via": {
+            "description": "Why it is here: `game` (followed directly), `team` (a followed team plays in it), or both. Ignore unknown values.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Via",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "via",
+          "status",
+          "home",
+          "away",
+          "period",
+          "clock",
+          "decided_in"
+        ],
+        "title": "FollowedGameOut",
         "type": "object"
       },
       "FormAudienceOut": {
@@ -2030,8 +2129,16 @@
       },
       "GameFollowsOut": {
         "properties": {
+          "games": {
+            "description": "Single games this account follows directly (`PUT /events/{id}/follow`): live, upcoming, or begun in the last few hours. Unfollow with `DELETE /events/{id}/follow`.",
+            "items": {
+              "$ref": "#/components/schemas/EventOut"
+            },
+            "title": "Games",
+            "type": "array"
+          },
           "teams": {
-            "description": "Every team of the club, with whether this account follows it for live game pushes.",
+            "description": "Every team of the club, with whether this account follows it for live game pushes (all of that team's games).",
             "items": {
               "$ref": "#/components/schemas/GameFollowTeamOut"
             },
@@ -2040,9 +2147,36 @@
           }
         },
         "required": [
-          "teams"
+          "teams",
+          "games"
         ],
         "title": "GameFollowsOut",
+        "type": "object"
+      },
+      "GameSideOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until there is a score.",
+            "title": "Score"
+          }
+        },
+        "required": [
+          "name",
+          "score"
+        ],
+        "title": "GameSideOut",
         "type": "object"
       },
       "GuardianOut": {
@@ -2120,6 +2254,14 @@
             "title": "Dues",
             "type": "array"
           },
+          "followed_games": {
+            "description": "Games this account follows (directly, or through a followed team) that are live, start within the next day, or began in the last few hours: live first, then soonest, then just finished; at most 5. Empty when it follows nothing or the club has no game timelines. One card each, with both teams, the score, the location (`event.location`) and, while live, the period and clock.",
+            "items": {
+              "$ref": "#/components/schemas/FollowedGameOut"
+            },
+            "title": "Followed Games",
+            "type": "array"
+          },
           "forms_to_complete": {
             "items": {
               "$ref": "#/components/schemas/FormToCompleteOut"
@@ -2190,6 +2332,7 @@
           }
         },
         "required": [
+          "followed_games",
           "member_cards",
           "rsvp_needed",
           "next_going",
@@ -5584,6 +5727,162 @@
           }
         ],
         "summary": "One event",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/follow": {
+      "delete": {
+        "description": "Stop following this game directly. Safe to repeat. If a team playing in it is followed, the\ngame is still followed through that team (`via_team` in the answer): unfollow the team with\n`PUT /game-follows` for that.",
+        "operationId": "appapi_routers_member_unfollow_game",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowStateOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Stop following one game",
+        "tags": [
+          "member"
+        ]
+      },
+      "put": {
+        "description": "Follow this game for live updates: the same pushes a followed team gives (goals, penalties,\nthe result), and a card on Home while it is on. Safe to repeat. `422 not_a_game` for anything\nbut a game, `404 feature_disabled` without game timelines.",
+        "operationId": "appapi_routers_member_follow_game",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowStateOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Follow one game",
         "tags": [
           "member"
         ]
