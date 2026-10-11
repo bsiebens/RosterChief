@@ -11,6 +11,13 @@ from django.http import HttpResponse
 
 API_PATH_PREFIX = "/api/v1/"
 
+#: Endpoints whose data rarely changes and is the same for every visitor of one club's site, with how
+#: long a browser or a shared cache (Cloudflare) may reuse the answer. The server already caches these
+#: for 30 s (api/cache.py); this lets the caller skip even that round trip. Deliberately only the team
+#: list: live scores, fixtures and news must stay fresh. Per-host, so one club's answer is never
+#: served for another's subdomain.
+PUBLIC_MAX_AGE = {"/api/v1/teams/": 60}
+
 
 class PublicApiCorsMiddleware:
     def __init__(self, get_response):
@@ -24,6 +31,10 @@ class PublicApiCorsMiddleware:
             response = HttpResponse(status=204)
         else:
             response = self.get_response(request)
+
+        max_age = PUBLIC_MAX_AGE.get(request.path)
+        if max_age and request.method == "GET" and response.status_code == 200:
+            response["Cache-Control"] = f"public, max-age={max_age}"
 
         response["Access-Control-Allow-Origin"] = "*"
         response["Access-Control-Allow-Methods"] = "GET, OPTIONS"

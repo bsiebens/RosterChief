@@ -1,12 +1,13 @@
 """Gunicorn config for the app server -- sits alongside the CLI flags in Dockerfile's CMD
-(workers, threads, timeouts, etc). This file exists for exactly one thing CLI flags can't
-do: when_ready/on_exit hooks, which start and stop the in-process job scheduler
-(features/scheduler.py) -- see that module's own docstring for the full picture -- and the
-post_fork hook that keeps workers from inheriting the master's Redis connections. when_ready
-fires once, in the master process, after the Arbiter has already spawned the workers, which
-is what keeps the scheduler to exactly one thread per node regardless of --workers: any
-thread started here exists only in the (by then already forked-away) master, never in a
-worker.
+(workers, threads, timeouts, etc). This file exists for what CLI flags can't do: hooks.
+
+The in-process job scheduler (features/scheduler.py) is started in each WORKER (post_worker_init)
+and stopped when the worker exits (worker_exit); a Redis lease makes exactly one of them run the
+schedule. It must NOT be started from `when_ready` or any other master-side hook: those run in the
+process that forks the workers, and a thread there makes every fork a gamble -- whatever lock the
+thread holds at that instant (the DNS resolver's, a connection pool's) is copied locked into the
+new worker, which then hangs forever on its first use of it. See features/scheduler.py. A test
+(features.tests.GunicornConfigTests) fails if a master-side hook comes back.
 """
 
 import os
@@ -16,29 +17,36 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosterchief.settings")
 
 
-def when_ready(server):
-    # Idempotent -- with --preload (see Dockerfile's CMD), the Arbiter already imported the
-    # WSGI app in this same master process before this hook ever fires, which already called
-    # django.setup() once. Called again explicitly so this file doesn't silently depend on
-    # --preload always being the way this is run.
+def post_worker_init(worker):
+    """Runs in the worker, after it has loaded the app and before it serves anything. A worker
+    never forks again, so a thread started here cannot leave a lock held in a child."""
+    # Idempotent -- with --preload (see Dockerfile's CMD) the app was already imported, and
+    # django.setup() already called, in the master; this keeps the file independent of that.
     django.setup()
 
     from features.scheduler import start
 
     start()
-    server.log.info("rosterchief.scheduler started in master pid=%s", os.getpid())
+    worker.log.info("rosterchief.scheduler started in worker pid=%s", os.getpid())
+
+
+def worker_exit(server, worker):
+    """Runs in the worker as it exits (a recycle after --max-requests, a deploy): release the
+    scheduler lease at once so another worker takes over within seconds, not LEASE_SECONDS."""
+    from features.scheduler import stop
+
+    stop()
 
 
 def post_fork(server, worker):
     """Give every worker its own cache (Redis) connections, never the master's.
 
-    The master runs the scheduler thread, which uses Redis every tick (its leader lease), so
-    the master holds a live connection pool. A worker forked while that thread was inside the
-    pool inherits it with a lock stuck held by a thread that does not exist in the child (the
-    pool's own, which wedges redis-py's fork handling, which then gives up on every other
-    thread): every Redis call in that worker fails with redis.exceptions.ChildDeadlockedError
-    (the maintenance check runs first on every request, so the whole worker returns 500s)
-    until it is recycled.
+    History: when the scheduler thread lived in the master it used Redis every tick, so a worker
+    forked mid-call inherited the pool with a lock stuck held by a thread that does not exist in
+    the child, and every Redis call in that worker failed with
+    redis.exceptions.ChildDeadlockedError. The scheduler no longer lives in the master (see the
+    module docstring), which removes the cause; this stays as a cheap safety net so a worker can
+    never share the master's connections whatever else ends up there.
 
     Two things carry the inherited pool into the worker, and both are dropped here: django-redis
     keeps its pools in a process-global registry (ConnectionFactory._pools), and Django's cache
@@ -54,9 +62,3 @@ def post_fork(server, worker):
     else:
         ConnectionFactory._pools.clear()
     caches._connections = Local(caches.thread_critical)
-
-
-def on_exit(server):
-    from features.scheduler import stop
-
-    stop()
