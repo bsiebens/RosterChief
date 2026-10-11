@@ -19,15 +19,17 @@ commits, off the polling thread. Decisions behind the rules here (§9):
   push), each as best-effort as the rest of the app's pushes.
 """
 
+import datetime
 import logging
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from events.models import Event, GameFollow, GameMoment
+from events.models import Event, EventFollow, GameFollow, GameMoment
 from events.services.game_moments import describe_moment
 from rosterchief.concurrency import run_in_background
 
@@ -35,8 +37,10 @@ logger = logging.getLogger(__name__)
 
 
 def followers(event) -> list:
-    """Active accounts following any of our teams on ``event``."""
-    user_ids = GameFollow.objects.filter(club=event.club, team__in=event.teams.all()).values_list("user_id", flat=True).distinct()
+    """Active accounts following ``event``: any of our teams on it, or the game itself."""
+    team_followers = GameFollow.objects.filter(club=event.club, team__in=event.teams.all()).values_list("user_id", flat=True)
+    game_followers = EventFollow.objects.filter(club=event.club, event=event).values_list("user_id", flat=True)
+    user_ids = set(team_followers) | set(game_followers)
     return list(get_user_model().objects.filter(pk__in=user_ids, is_active=True))
 
 
@@ -131,3 +135,69 @@ def set_followed_teams(user, club, team_ids) -> set:
         existing = followed_team_ids(user, club)
         GameFollow.objects.bulk_create([GameFollow(club=club, user=user, team_id=team_id) for team_id in wanted - existing])
     return wanted
+
+
+# -- following one game, and what Home shows for the games an account follows -------------------
+
+#: A followed game is on Home from this long before it starts ...
+FOLLOWED_GAME_LOOKAHEAD = datetime.timedelta(hours=24)
+#: ... through the time it is live, until this long after its start (a game takes ~2 hours, so the
+#: result stays up for a few hours afterwards).
+FOLLOWED_GAME_LOOKBACK = datetime.timedelta(hours=6)
+#: At most this many followed-game cards on Home (the Calendar has everything).
+FOLLOWED_GAMES_LIMIT = 5
+
+
+def followed_event_ids(user, club) -> set:
+    """The games ``user`` follows directly (not counting the ones their followed teams play)."""
+    return set(EventFollow.objects.filter(club=club, user=user).values_list("event_id", flat=True))
+
+
+def follow_event(user, club, event) -> None:
+    """Idempotent."""
+    EventFollow.objects.get_or_create(club=club, user=user, event=event)
+
+
+def unfollow_event(user, club, event) -> None:
+    """Idempotent."""
+    EventFollow.objects.filter(club=club, user=user, event=event).delete()
+
+
+def follow_state(user, club, event) -> dict:
+    """``{"directly": bool, "via_team": bool}`` for ``user`` and ``event``."""
+    directly = EventFollow.objects.filter(club=club, user=user, event=event).exists()
+    via_team = GameFollow.objects.filter(club=club, user=user, team__in=event.teams.all()).exists()
+    return {"directly": directly, "via_team": via_team}
+
+
+def followed_games(user, club, *, now=None, limit=FOLLOWED_GAMES_LIMIT) -> list[dict]:
+    """Rows ``{"event", "via"}`` for the games ``user`` follows -- directly or through a followed
+    team -- that are worth a card on Home right now: live, starting within the next day, or begun
+    within the last few hours. ``via`` is ``["game"]``, ``["team"]`` or both. Live games first, then
+    what is coming up soonest, then what just finished (latest first); at most ``limit``."""
+    now = now or timezone.now()
+    direct_ids = followed_event_ids(user, club)
+    team_ids = followed_team_ids(user, club)
+    if not direct_ids and not team_ids:
+        return []
+
+    in_window = Q(is_live=True) | Q(start__gte=now - FOLLOWED_GAME_LOOKBACK, start__lte=now + FOLLOWED_GAME_LOOKAHEAD)
+    followed = Q(pk__in=direct_ids) | Q(teams__in=team_ids)
+    events = list(Event.objects.filter(club=club, kind=Event.EventKind.GAME, cancelled=False).filter(followed).filter(in_window).distinct().select_related("location", "opponent", "timeline").prefetch_related("teams"))
+
+    def order(event):
+        if event.is_live:
+            return (0, event.start)
+        if event.start > now:
+            return (1, event.start)
+        return (2, -event.start.timestamp())
+
+    rows = []
+    for event in sorted(events, key=order)[:limit]:
+        via = []
+        if event.pk in direct_ids:
+            via.append("game")
+        if any(team.pk in team_ids for team in event.teams.all()):
+            via.append("team")
+        rows.append({"event": event, "via": via})
+    return rows

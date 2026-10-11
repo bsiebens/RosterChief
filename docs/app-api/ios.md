@@ -268,6 +268,13 @@ carries `member_id`, so label rows with that person's first name.
 
 `GET /home?member_id=…`:
 
+* `followed_games`: a card for each game the account **follows** (see "Following games" below) that
+  is live, starts within the next day, or began in the last few hours; live first, then soonest,
+  then just finished; at most 5, empty when nothing is followed. Each has both teams with the
+  score (`home`/`away`: `{name, score}`, score null before there is one), the place
+  (`event.location`), `status` (`scheduled` / `live` / `finished`) and, while live, the `period`
+  and `clock` the federation reports (`decided_in` once finished). Show the live ones prominently;
+  refresh while one is live.
 * `member_cards`: the cards to show first. Every person who has something gets at least one:
   their next unanswered invitation (`kind: "rsvp_needed"`: show **In / Maybe / Out** buttons for
   each person in `members`, answered with `POST /events/{id}/rsvp`) and their next event they are
@@ -347,6 +354,25 @@ couldn't be accepted (e.g. full).
 
 **Tasks** ("bring fruit"): `POST` or `DELETE /events/{id}/tasks/{task_id}/claim`. A slot is
 taken by the account itself, not per child. Others see it as "<Family> family".
+
+
+### Following games
+
+An account can follow **one game** or **all games of a team**; either gets the live updates (the
+same goal / penalty / result pushes, `kind: "game_moment"` in the payload) and a card on Home while
+the game is on. Both need the club's `features.game_timeline`.
+
+| Action | Call |
+|---|---|
+| follow / unfollow one game | `PUT` / `DELETE /events/{id}/follow` (idempotent; answers `{directly, via_team}`; `422 not_a_game` for anything but a game) |
+| follow every game of a team | `PUT /game-follows` with the full set of `team_ids` (replaces the current set) |
+| what is followed | `GET /game-follows` → `teams` (each with `following`) and `games` (single games followed directly, to offer an unfollow) |
+| is *this* game followed? | `GET /events/{id}` → `follow: {directly, via_team}` |
+
+Show a Follow toggle on a game's page from `follow.directly`; when `follow.via_team` is true the
+game is followed regardless, and `DELETE` only removes the direct follow (the answer still says
+`via_team: true`), so offer unfollowing the team in the team list instead. A game followed both ways
+is one card on Home (`via: ["game", "team"]`).
 
 ### News
 

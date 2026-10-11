@@ -4,6 +4,7 @@ values, ids and timestamps; no CSS classes, reversed web URLs or display groupin
 import hashlib
 from decimal import Decimal
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from django.utils.translation import get_language
 
@@ -50,6 +51,39 @@ def game_status(event: Event) -> str | None:
         return "finished"
 
     return "scheduled"
+
+
+def followed_game_out(event: Event, via: list) -> dict:
+    """A followed game's Home card: both teams with the score, where it is played, and -- while it
+    is on -- the period and clock the federation reports (the stored timeline). The score is the
+    timeline's when there is one (it is what the live poll keeps current), else the event's own."""
+    try:
+        timeline = event.timeline
+    except ObjectDoesNotExist:
+        timeline = None
+    data = (timeline.data if timeline else None) or {}
+    status = game_status(event)
+
+    ours = ", ".join(team.name for team in event.teams.all()) or "?"
+    theirs = event.opponent.name if event.opponent_id else "?"
+    score = data.get("score") or {}
+    if score:
+        home_score, away_score = score.get("home"), score.get("away")
+    elif event.score_for is not None and event.score_against is not None:
+        home_score, away_score = (event.score_for, event.score_against) if event.is_home_game else (event.score_against, event.score_for)
+    else:
+        home_score = away_score = None
+
+    return {
+        "event": event_out(event),
+        "via": via,
+        "status": status,
+        "home": {"name": ours if event.is_home_game else theirs, "score": home_score},
+        "away": {"name": theirs if event.is_home_game else ours, "score": away_score},
+        "period": data.get("period") if status == "live" else None,
+        "clock": data.get("clock") if status == "live" else None,
+        "decided_in": data.get("decided_in") if status == "finished" else None,
+    }
 
 
 def event_out(event: Event) -> dict:

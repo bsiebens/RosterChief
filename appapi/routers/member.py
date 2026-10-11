@@ -7,7 +7,7 @@ import datetime
 import uuid
 from typing import Annotated
 
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -15,7 +15,7 @@ from ninja import Query, Router
 
 from events.models import Attendance, Event, EventTask, EventTaskClaim, GameTimeline, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS, member_agenda
-from events.services.game_push import followed_team_ids, set_followed_teams
+from events.services.game_push import FOLLOWED_GAME_LOOKBACK, follow_event, follow_state, followed_event_ids, followed_games, followed_team_ids, set_followed_teams, unfollow_event
 from events.services.game_timeline import timeline_for_api
 from events.services.member_view import event_tasks, member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
@@ -26,8 +26,8 @@ from mobile.services.home import home_summary
 from teams.models import Team
 
 from ..errors import ApiError
-from ..presenters import attendance_out, event_out, money, news_summary, season_out, signup_out, task_out
-from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, GameFollowsIn, GameFollowsOut, HomeOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
+from ..presenters import attendance_out, event_out, followed_game_out, money, news_summary, season_out, signup_out, task_out
+from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, FollowStateOut, GameFollowsIn, GameFollowsOut, HomeOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
 from ..scope import club_scope
 
 router = Router(tags=["member"])
@@ -80,7 +80,10 @@ def home(request, member_id: Annotated[str | None, Query(description=MEMBER_ID_H
             }
         )
 
+    followed = [followed_game_out(row["event"], row["via"]) for row in followed_games(request.user, scope.club)] if scope.feature("game_timeline") else []
+
     return {
+        "followed_games": followed,
         "rsvp_needed": _hero(summary["hero_attendance"], tasks, mine, closed=summary["rsvp_closed"]),
         "next_going": _hero(summary["going_attendance"], tasks, mine),
         "member_cards": [
@@ -220,6 +223,7 @@ def event_detail(request, event_id: uuid.UUID):
         "official_signups": [signup_out(signup) for signup in view["official_signups"]],
         "tasks": [task_out(task) for task in view["tasks"]],
         "squad_summary": {key: view["squad_summary"][key] for key in ("total", "responded", "in_count", "out_count", "no_reply_count")} if view["squad_summary"] else None,
+        "follow": follow_state(request.user, scope.club, event) if event.kind == Event.EventKind.GAME and scope.feature("game_timeline") else {"directly": False, "via_team": False},
         "game_timeline": _game_timeline(scope, event),
     }
 
@@ -237,7 +241,45 @@ def _game_timeline(scope, event):
 def _game_follows(scope, user) -> dict:
     following = followed_team_ids(user, scope.club)
     teams = Team.objects.filter(club=scope.club).order_by("name")
-    return {"teams": [{"id": team.pk, "name": team.name, "short_name": team.short_name, "following": team.pk in following} for team in teams]}
+    since = timezone.now() - FOLLOWED_GAME_LOOKBACK
+    direct = Event.objects.filter(club=scope.club, pk__in=followed_event_ids(user, scope.club), kind=Event.EventKind.GAME, cancelled=False).filter(Q(start__gte=since) | Q(is_live=True))
+    games = direct.select_related(*EVENT_RELATED).prefetch_related("teams").order_by("start")[:50]
+    return {
+        "teams": [{"id": team.pk, "name": team.name, "short_name": team.short_name, "following": team.pk in following} for team in teams],
+        "games": [event_out(game) for game in games],
+    }
+
+
+def _followable_game(scope, event_id) -> Event:
+    """A game of this club -- the only kind of event that can be followed -- in a club with game
+    timelines (the feature the live updates come from)."""
+    scope.require_feature("game_timeline")
+    event = _club_event(scope, event_id)
+    if event.kind != Event.EventKind.GAME:
+        raise ApiError(422, "not_a_game", _("Only games can be followed."))
+    return event
+
+
+@router.put("/events/{event_id}/follow", response={200: FollowStateOut, **ERRORS, 422: ErrorOut}, summary="Follow one game")
+def follow_game(request, event_id: uuid.UUID):
+    """Follow this game for live updates: the same pushes a followed team gives (goals, penalties,
+    the result), and a card on Home while it is on. Safe to repeat. `422 not_a_game` for anything
+    but a game, `404 feature_disabled` without game timelines."""
+    scope = club_scope(request)
+    event = _followable_game(scope, event_id)
+    follow_event(request.user, scope.club, event)
+    return follow_state(request.user, scope.club, event)
+
+
+@router.delete("/events/{event_id}/follow", response={200: FollowStateOut, **ERRORS, 422: ErrorOut}, summary="Stop following one game")
+def unfollow_game(request, event_id: uuid.UUID):
+    """Stop following this game directly. Safe to repeat. If a team playing in it is followed, the
+    game is still followed through that team (`via_team` in the answer): unfollow the team with
+    `PUT /game-follows` for that."""
+    scope = club_scope(request)
+    event = _followable_game(scope, event_id)
+    unfollow_event(request.user, scope.club, event)
+    return follow_state(request.user, scope.club, event)
 
 
 @router.get("/game-follows", response={200: GameFollowsOut, **ERRORS}, summary="Teams followed for live game updates")
