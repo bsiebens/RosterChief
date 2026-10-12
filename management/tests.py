@@ -2,6 +2,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import sys
 from decimal import Decimal
 from io import BytesIO
@@ -12973,6 +12974,14 @@ class OrderManagementTests(ShopTestBase):
         self.assertRedirects(response, reverse("management:order_detail", args=[order.pk]))
         order.refresh_from_db()
         self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
+
+    def test_a_cancelled_order_shows_cancelled_on_every_status(self):
+        order = self.make_order(payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        self.client.force_login(self.admin_user)
+
+        for response in (self.club_get("order_detail", order.pk), self.club_get("order_list", params={"show": "all"})):
+            self.assertEqual(len(re.findall(r">\s*Cancelled\s*</span>", response.content.decode())), 3, response.request["PATH_INFO"])
+            self.assertNotRegex(response.content.decode(), r">\s*Paid\s*</span>")
 
     def test_plain_staff_cannot_cancel_an_order(self):
         order = self.make_order()

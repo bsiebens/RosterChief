@@ -119,13 +119,17 @@
                             <td><a class="link link-hover font-mono text-xs" href="{% url 'management:order_detail' order.pk %}">{{ order.number }}</a></td>
                             <td class="font-semibold">{{ order.purchaser }}</td>
                             <td>
-                                <span class="badge badge-sm
-                                    {% if order.payment_status == "paid" %}badge-success
-                                    {% elif order.payment_status == "partially_paid" %}badge-warning
-                                    {% elif order.payment_status == "refunded" %}badge-error
-                                    {% else %}badge-neutral{% endif %}">
-                                    {{ order.get_payment_status_display }}
-                                </span>
+                                {% if order.fulfillment_status == "cancelled" %}
+                                    <span class="badge badge-sm badge-error">{% trans "Cancelled" %}</span>
+                                {% else %}
+                                    <span class="badge badge-sm
+                                        {% if order.payment_status == "paid" %}badge-success
+                                        {% elif order.payment_status == "partially_paid" %}badge-warning
+                                        {% elif order.payment_status == "refunded" %}badge-error
+                                        {% else %}badge-neutral{% endif %}">
+                                        {{ order.get_payment_status_display }}
+                                    </span>
+                                {% endif %}
                             </td>
                             <td>
                                 <span class="badge badge-sm
@@ -137,7 +141,9 @@
                                 </span>
                             </td>
                             <td>
-                                {% if order.has_production_line_items %}
+                                {% if order.fulfillment_status == "cancelled" %}
+                                    <span class="badge badge-sm badge-error">{% trans "Cancelled" %}</span>
+                                {% elif order.has_production_line_items %}
                                     <span class="badge badge-sm
                                         {% if order.production_status == "received" %}badge-success
                                         {% elif order.production_status == "in_production" %}badge-info
