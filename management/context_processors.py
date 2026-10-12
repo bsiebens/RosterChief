@@ -124,6 +124,7 @@ _NAV_SECTIONS = {
     "event_task_create": "event_list",
     "event_task_update": "event_list",
     "event_task_delete": "event_list",
+    "event_import": "event_list",
     "rbihf_import": "event_list",
     "rbihf_import_confirm": "event_list",
     "dfel_import": "event_list",

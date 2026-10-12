@@ -1,0 +1,50 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    EventImportChooserView: the screen between the calendar's single "Import"
+    button and each fixture importer. Only the sources this club has switched
+    on are offered (rbihf_enabled / dfel_enabled / ijnl_enabled).
+{% endcomment %}
+
+{% block panel_title %}{% trans "Import events" %}{% endblock panel_title %}
+{% block heading %}{% trans "Import events" %}{% endblock heading %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:event_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to events" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="mb-4 text-sm text-muted">{% trans "Choose where to import fixtures from. You'll get a preview before anything is created or changed." %}</p>
+
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {% if rbihf_enabled %}
+            <a class="card card-body gap-2" href="{% url 'management:rbihf_import' %}">
+                <h2 class="card-title">{% lucide "download" size=18 %} RBIHF</h2>
+                <p class="text-sm text-muted">{% trans "Import a team's fixtures from its RBIHF team page." %}</p>
+            </a>
+        {% endif %}
+        {% if dfel_enabled %}
+            <a class="card card-body gap-2" href="{% url 'management:dfel_import' %}">
+                <h2 class="card-title">{% lucide "download" size=18 %} DFEL</h2>
+                <p class="text-sm text-muted">{% trans "Import a team's fixtures from its DFEL team page." %}</p>
+            </a>
+        {% endif %}
+        {% if ijnl_enabled %}
+            <a class="card card-body gap-2" href="{% url 'management:ijnl_import' %}">
+                <h2 class="card-title">{% lucide "download" size=18 %} IJNL</h2>
+                <p class="text-sm text-muted">{% trans "Import a team's fixtures from its IJNL team page." %}</p>
+            </a>
+        {% endif %}
+        {% if fixture_import_enabled %}
+            <a class="card card-body gap-2" href="{% url 'management:fixture_recheck' %}">
+                <h2 class="card-title">{% lucide "refresh-cw" size=18 %} {% trans "Re-check imported fixtures" %}</h2>
+                <p class="text-sm text-muted">{% trans "Fetch every stored source again and preview what changed." %}</p>
+            </a>
+        {% endif %}
+    </div>
+
+    {% if not fixture_import_enabled %}
+        <p class="text-sm text-muted">{% trans "No importers are enabled for this club." %}</p>
+    {% endif %}
+{% endblock panel %}

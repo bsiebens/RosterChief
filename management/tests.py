@@ -9440,14 +9440,15 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from RBIHF")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:rbihf_import"))
 
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from RBIHF")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_button_hidden_from_a_non_admin_even_with_the_flag_active(self):
         self.activate_flag()
@@ -9455,7 +9456,7 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from RBIHF")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -9645,14 +9646,15 @@ class DFELImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from DFEL")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:dfel_import"))
 
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from DFEL")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -9781,14 +9783,15 @@ class IJNLImportViewTests(ManagementTestBase):
 
     def test_button_shows_only_with_the_flag_active(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), "Import from IJNL")
+        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
 
         self.activate_flag()
         cache.clear()
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from IJNL")
-        self.assertContains(response, "Re-check all imported fixtures")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:ijnl_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:fixture_recheck"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -10070,11 +10073,11 @@ class FixtureRecheckViewTests(FixtureImportTestMixin, ManagementTestBase):
 
     def test_event_list_button_follows_either_flag(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), "Re-check all imported fixtures")
+        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
 
         self.activate_flag("DFEL")
 
-        self.assertContains(self.club_get("event_list"), "Re-check all imported fixtures")
+        self.assertContains(self.club_get("event_list"), reverse("management:event_import"))
 
     @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
     def test_preview_namespaces_each_entrys_fields(self, mock_fetch):
@@ -12980,6 +12983,43 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
         self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
+
+
+class EventImportChooserTests(ManagementTestBase):
+    """The calendar's single "Import" button lands on a chooser listing only the
+    importers this club has switched on."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable(self, name):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name=name)
+        flag.clubs.add(self.club)
+
+    def test_lists_only_the_enabled_importers(self):
+        self.enable("DFEL")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_import")
+
+        self.assertContains(response, reverse("management:dfel_import"))
+        self.assertContains(response, reverse("management:fixture_recheck"))
+        self.assertNotContains(response, reverse("management:rbihf_import"))
+        self.assertNotContains(response, reverse("management:ijnl_import"))
+
+    def test_says_so_when_no_importer_is_enabled(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_import"), "No importers are enabled")
+
+    def test_is_admin_only(self):
+        self.enable("DFEL")
+        coach = User.objects.create_user(email="coach-chooser@example.com", password="pw-secret-123")
+        self.client.force_login(coach)
+
+        self.assertIn(self.club_get("event_import").status_code, (302, 403))
 
 
 class InventoryManagementTests(ShopTestBase):

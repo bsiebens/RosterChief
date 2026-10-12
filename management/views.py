@@ -4192,6 +4192,16 @@ DFEL_IMPORT_CONTEXT = {"source_name": "DFEL", "import_url_name": "management:dfe
 IJNL_IMPORT_CONTEXT = {"source_name": "IJNL", "import_url_name": "management:ijnl_import", "confirm_url_name": "management:ijnl_import_confirm", "show_game_ids": False}
 
 
+class EventImportChooserView(ClubAdminRequiredMixin, TemplateView):
+    """The one "Import" button on the calendar lands here: pick which fixture
+    importer to run (or re-check what's already imported) instead of the
+    calendar's header carrying a button per source. Which sources are offered
+    follows the same per-club flags as each importer's own view
+    (management.context_processors: rbihf_enabled, dfel_enabled, ijnl_enabled)."""
+
+    template_name = "management/event_import_chooser.html"
+
+
 class RBIHFImportView(FeatureRequiredMixin, View):
     """Step 1: paste an RBIHF team page URL, pick which of the club's teams it's
     for. Fetches and parses the page server-side, stashes the raw HTML (not

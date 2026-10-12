@@ -136,6 +136,7 @@ urlpatterns = [
     path("events/<uuid:pk>/tasks/create/", views.EventTaskCreateView.as_view(), name="event_task_create"),
     path("events/<uuid:pk>/tasks/<uuid:task_pk>/update/", views.EventTaskUpdateView.as_view(), name="event_task_update"),
     path("events/<uuid:pk>/tasks/<uuid:task_pk>/delete/", views.EventTaskDeleteView.as_view(), name="event_task_delete"),
+    path("events/import/", views.EventImportChooserView.as_view(), name="event_import"),
     path("events/rbihf-import/", views.RBIHFImportView.as_view(), name="rbihf_import"),
     path("events/rbihf-import/confirm/", views.RBIHFImportConfirmView.as_view(), name="rbihf_import_confirm"),
     path("events/dfel-import/", views.DFELImportView.as_view(), name="dfel_import"),
