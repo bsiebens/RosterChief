@@ -100,6 +100,21 @@ class Team(ClubScopedModel):
         default=False,
         help_text=_("Show who scored, assisted or got a penalty by name on the club's public website. When off, only jersey numbers are shown. Leave off for youth teams."),
     )
+    #: A team that only exists for tournaments (no league season). Purely a label
+    #: for consumers: the public /teams/ endpoint reports it and can leave these out.
+    tournament_only = models.BooleanField(
+        _("tournament only"),
+        default=False,
+        help_text=_("This team only plays in tournaments. The club's public website can hide tournament-only teams from its team list."),
+    )
+    #: Display order of the team lists (management, public API): teams with an order
+    #: come first, low to high, then the rest; ties and unordered teams by name.
+    ordering = models.PositiveSmallIntegerField(
+        _("order"),
+        null=True,
+        blank=True,
+        help_text=_("Teams with an order are listed first, lowest number first; teams without one follow alphabetically. Teams with the same order are sorted alphabetically."),
+    )
     #: Which team this one's players typically graduate to next season --
     #: an explicit, admin-set relationship rather than something inferred
     #: from age_min/age_max or team naming. Several teams can share the same
@@ -129,7 +144,7 @@ class Team(ClubScopedModel):
         constraints = [
             models.UniqueConstraint(fields=["club", "name"], name="unique_team_name_per_club"),
         ]
-        ordering = ["name"]
+        ordering = [models.F("ordering").asc(nulls_last=True), "name"]
 
     def __str__(self):
         return self.name

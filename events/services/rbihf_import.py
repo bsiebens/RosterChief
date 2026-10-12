@@ -147,7 +147,11 @@ def suggested_opponent(club, fixture: ScrapedFixture):
     name = fixture.opponent_name.strip()
     if not name:
         return None
-    return Opponent.objects.filter(club=club, name__iexact=name).first()
+    exact = Opponent.objects.filter(club=club, name__iexact=name).first()
+    if exact is not None:
+        return exact
+    # A spelling a previous import already mapped onto an opponent (Opponent.alternative_names).
+    return next((opponent for opponent in Opponent.objects.filter(club=club) if opponent.knows_name(name)), None)
 
 
 @dataclass
@@ -194,7 +198,9 @@ def _describe_changes(event, fixture: ScrapedFixture, competition_label: str) ->
     if event.start != fixture.start:
         changes["start"] = (event.start, fixture.start)
     existing_opponent = event.opponent.name if event.opponent_id else ""
-    if existing_opponent != fixture.opponent_name:
+    # A recorded alternative spelling of the opponent already on the game isn't a change.
+    known = event.opponent.knows_name(fixture.opponent_name) if event.opponent_id else False
+    if existing_opponent != fixture.opponent_name and not known:
         changes["opponent"] = (existing_opponent, fixture.opponent_name)
     # Surfaced here (rather than applied silently) so re-labelling an existing
     # competition, or a legacy pre-label import finally getting one, is
@@ -312,6 +318,9 @@ def apply_plan(plan: ImportPlan, locations_by_game_id: dict, opponents_by_game_i
         if opponent_id:
             opponent = opponents_by_id.get(str(opponent_id))
             if opponent is not None:
+                # Remember the federation's spelling so the next check/import doesn't
+                # report it as a change again.
+                opponent.remember_name(fixture.opponent_name)
                 return opponent
         opponent, _created = Opponent.objects.get_or_create(club=plan.club, name=fixture.opponent_name)
         return opponent

@@ -1563,6 +1563,19 @@ class RBIHFImportPlanTests(EventsTestBase):
         # Falls back to find-or-create by the scraped name, not the foreign row.
         self.assertEqual(event.opponent.name, "Amsterdam Tigers")
 
+    def test_a_mapped_opponent_name_is_remembered_and_no_longer_a_change(self):
+        renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
+        html = rbihf_sample_html([self.home_fixture_row()])
+        plan = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        apply_plan(plan, {}, {"5002": str(renamed.pk)})
+
+        renamed.refresh_from_db()
+        self.assertEqual(renamed.alternative_names, ["Amsterdam Tigers"])
+        again = build_plan(self.club, self.team, RBIHF_TEAM_ID, html)
+        self.assertEqual(again.to_update, [])
+        self.assertEqual(again.unchanged_count, 1)
+        self.assertEqual(suggested_opponent(self.club, again.to_update[0].fixture if again.to_update else parse_fixtures(html, RBIHF_TEAM_ID)[1][0]), renamed)
+
     def test_apply_plan_preserves_a_previously_chosen_opponent_on_update(self):
         renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
         html = rbihf_sample_html([self.home_fixture_row()])

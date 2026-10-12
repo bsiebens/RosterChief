@@ -29,6 +29,7 @@ class TeamOut(Schema):
     name: str
     short_name: str
     photo_url: str | None
+    tournament_only: bool
 
 
 class PlayerOut(Schema):
@@ -95,7 +96,7 @@ class TeamStandingsOut(Schema):
 
 def _to_team_out(team, request, photo=None) -> TeamOut:
     photo_url = request.build_absolute_uri(photo.image.url) if photo else None
-    return TeamOut(id=team.pk, name=team.name, short_name=team.short_name, photo_url=photo_url)
+    return TeamOut(id=team.pk, name=team.name, short_name=team.short_name, photo_url=photo_url, tournament_only=team.tournament_only)
 
 
 def _photo_url(member, request) -> str | None:
@@ -190,11 +191,15 @@ def build_standings(team, season, request) -> TeamStandingsOut:
 
 
 @router.get("/", response=list[TeamOut], summary="List teams")
-def list_teams(request):
+def list_teams(request, include_tournament_only: bool = True):
+    """`include_tournament_only=false` leaves out teams marked tournament-only (shown by default)."""
     club = require_club(request)
 
     def compute():
-        teams = list(Team.objects.filter(club=club).order_by("name"))
+        queryset = Team.objects.filter(club=club).order_by(F("ordering").asc(nulls_last=True), "name")
+        if not include_tournament_only:
+            queryset = queryset.filter(tournament_only=False)
+        teams = list(queryset)
 
         season = current_season(club)
         photos_by_team_id = {}
@@ -203,7 +208,7 @@ def list_teams(request):
 
         return [_to_team_out(team, request, photo=photos_by_team_id.get(team.pk)) for team in teams]
 
-    return cached_for_club(club.pk, "teams:list", compute)
+    return cached_for_club(club.pk, f"teams:list:{int(include_tournament_only)}", compute)
 
 
 @router.get("/{team_id}/roster/", response=RosterOut, summary="Current season's roster")

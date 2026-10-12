@@ -14,6 +14,7 @@
         <table class="table">
             <thead>
                 <tr>
+                    <th class="w-16">{% trans "Order" %}</th>
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Short name" %}</th>
                     <th>{% trans "Age group" %}</th>
@@ -22,9 +23,10 @@
                     <th></th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody{% if can_reorder %} id="team-rows" data-reorder-url="{% url 'management:team_reorder' %}"{% endif %}>
                 {% for team in teams %}
-                    <tr>
+                    <tr{% if can_reorder %} draggable="true" data-id="{{ team.pk }}" class="cursor-grab"{% endif %}>
+                        <td class="font-mono text-xs tabular-nums text-muted">{% if can_reorder %}{% lucide "grip-vertical" size=14 %} {% endif %}{{ team.ordering|default:"—" }}</td>
                         <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
                         <td class="font-mono text-xs text-muted">{{ team.short_name }}</td>
                         <td class="font-mono text-xs text-muted">{{ team.age_group_label|default:"—" }}</td>
@@ -41,7 +43,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="6" class="text-center text-muted">{% trans "No teams yet." %}</td>
+                        <td colspan="7" class="text-center text-muted">{% trans "No teams yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -49,6 +51,11 @@
     </div>
 
     {% include "management/_pagination.html" %}
+
+    {% if can_reorder %}
+        {% csrf_token %}
+        <p class="mt-2 text-xs text-muted">{% trans "Drag teams to change their order. It is saved immediately and used on the public website too." %}</p>
+    {% endif %}
 
     {% if is_club_admin %}
         {% trans "Delete team" as delete_team_title %}
@@ -60,3 +67,37 @@
         {% endfor %}
     {% endif %}
 {% endblock panel %}
+
+{% block extra_body %}
+    {% if can_reorder %}
+        <script>
+            (function () {
+                var body = document.getElementById("team-rows");
+                if (!body) return;
+                var dragged = null;
+                body.addEventListener("dragstart", function (e) {
+                    dragged = e.target.closest("tr");
+                    if (dragged) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragged.dataset.id); dragged.classList.add("opacity-50"); }
+                });
+                body.addEventListener("dragover", function (e) {
+                    if (!dragged) return;
+                    e.preventDefault();
+                    var over = e.target.closest("tr");
+                    if (!over || over === dragged) return;
+                    var after = e.clientY > over.getBoundingClientRect().top + over.offsetHeight / 2;
+                    body.insertBefore(dragged, after ? over.nextSibling : over);
+                });
+                body.addEventListener("dragend", function () {
+                    if (!dragged) return;
+                    dragged.classList.remove("opacity-50");
+                    dragged = null;
+                    var ids = Array.prototype.map.call(body.querySelectorAll("tr[data-id]"), function (row) { return row.dataset.id; });
+                    var token = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+                    fetch(body.dataset.reorderUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": token }, body: JSON.stringify({ ids: ids }) })
+                        .then(function (r) { if (!r.ok) throw new Error(); window.location.reload(); })
+                        .catch(function () { window.location.reload(); });
+                });
+            })();
+        </script>
+    {% endif %}
+{% endblock extra_body %}

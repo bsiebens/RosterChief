@@ -15,7 +15,6 @@ additive): the worst a bad run can do is send an unnecessary heads-up.
 
 import logging
 
-from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
@@ -29,24 +28,12 @@ from teams.models import Team
 
 logger = logging.getLogger(__name__)
 
-#: The management page where admins re-run a check and apply changes via the import
-#: button. Reversed defensively: the page ships separately from this job.
-RECHECK_URL_NAME = "management:fixture_recheck"
-
 
 def club_admins(club):
     """Every member holding the ADMIN role in ``club`` -- the same "club admins" the
     billing reminders write to (billing.services.reminders.admin_emails), as Members so
     notify_members can record an in-app row for each of them too."""
     return Member.objects.filter(roles__club=club, roles__role=ClubRole.Roles.ADMIN).distinct().order_by("last_name", "first_name")
-
-
-def recheck_path() -> str:
-    """The re-check page's path, or "" while that page doesn't exist (yet)."""
-    try:
-        return reverse(RECHECK_URL_NAME)
-    except NoReverseMatch:
-        return ""
 
 
 def describe_result(team, result: CheckResult) -> str:
@@ -77,11 +64,7 @@ def describe_result(team, result: CheckResult) -> str:
 
 def build_body(lines: list[str]) -> str:
     intro = _("This week's check of your imported fixture lists found differences with the federation's current schedule:")
-    path = recheck_path()
-    if path:
-        outro = _("Open the fixture re-check page in management (%(path)s), re-run the check and adjust the games via the import button.") % {"path": path}
-    else:
-        outro = _("Open the fixture re-check page in management, re-run the check and adjust the games via the import button.")
+    outro = _("Open the fixture re-check page in management, re-run the check and adjust the games via the import button.")
     bullets = "\n".join(f"- {line}" for line in lines)
     return f"{intro}\n\n{bullets}\n\n{outro}"
 
