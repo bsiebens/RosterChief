@@ -155,6 +155,17 @@ class TeamRefOut(Schema):
     short_name: str
 
 
+class StaffedTeamOut(TeamRefOut):
+    role: Literal["coach", "manager"] = Field(
+        description="`manager`: the account holds a management position on this team this season (or is a club admin who also staffs it). `coach`: any other staff position (assistant, physio, ...). Treat an unknown value as `coach`."
+    )
+    position: str = Field(description="The account's own position on this team, as the club names it (for example `Head coach`). Display only.")
+    can_manage_attendance: bool = Field(description="Check players in and remind silent players. Without it these answer `403 manager_required`; the attendance list is still readable.")
+    can_edit_events: bool = Field(description="Create, edit, delete and detach events and series, quick-create locations and opponents.")
+    can_publish_lineup: bool = Field(description="Change and publish the line-up. Reading it needs no flag.")
+    can_edit_roster: bool = Field(description="Add, edit and remove roster players and staff. Reading the roster needs no flag.")
+
+
 class PermissionsOut(Schema):
     has_management_access: bool = Field(description="Can use the club's web management pages. Management itself is not in the app API.")
     can_add_news: bool
@@ -182,7 +193,7 @@ class ContextOut(Schema):
     season: SeasonOut | None = Field(description="The club's current season, if one covers today.")
     me: PersonOut | None
     managed_people: list[ManagedPersonOut] = Field(description="Who the account acts for here: themselves first, then their children. Pass one of these ids as `member_id`.")
-    staffed_teams: list[TeamRefOut] = Field(description="Teams the account coaches or staffs this season (coach endpoints take a team id from here).")
+    staffed_teams: list[StaffedTeamOut] = Field(description="Teams the account coaches or staffs this season, with the account's role and what it may do on each. Coach endpoints take a team id from here; any other team is `404`.")
     permissions: PermissionsOut
     features: ClubFeatures
     unread_notifications: int = Field(description="Unread notifications across all managed people, for the app badge.")

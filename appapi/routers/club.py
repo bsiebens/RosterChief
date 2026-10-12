@@ -10,6 +10,7 @@ from notifications.services import unread_count
 
 from .. import services
 from ..auth import require_club_member
+from ..coach import staffed_team_out
 from ..schemas import ContextOut, ErrorOut
 
 router = Router(tags=["club"])
@@ -38,7 +39,7 @@ def context(request):
         "season": season,
         "me": me,
         "managed_people": [{"id": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_self": person.pk == me.pk} for person in people],
-        "staffed_teams": list(teams_staffed_by(user, club).order_by("name")),
+        "staffed_teams": staffed_team_out(user, club, list(teams_staffed_by(user, club).order_by("name"))),
         "permissions": {"has_management_access": has_management_access(user, club), "can_add_news": can_add_news(user, club), "can_manage_evaluations": can_manage_evaluations(user, club)},
         "features": services.club_features(club),
         "unread_notifications": unread_count(club, people),

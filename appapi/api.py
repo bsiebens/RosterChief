@@ -11,6 +11,7 @@ from .auth import app_auth
 from .errors import install_handlers
 from .routers.account import router as account_router
 from .routers.club import router as club_router
+from .routers.coach import router as coach_router
 from .routers.forms import router as forms_router
 from .routers.inbox import router as inbox_router
 from .routers.member import router as member_router
@@ -55,3 +56,4 @@ app_api.add_router("/", forms_router)
 app_api.add_router("/", support_router)
 app_api.add_router("/", shop_router)
 app_api.add_router("/", registration_router)
+app_api.add_router("/", coach_router)

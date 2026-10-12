@@ -132,6 +132,42 @@
         "title": "AppVersions",
         "type": "object"
       },
+      "AttendanceCountsOut": {
+        "properties": {
+          "checked_in": {
+            "description": "Rows with a recorded check-in (`showed_up` not null).",
+            "title": "Checked In",
+            "type": "integer"
+          },
+          "declined": {
+            "description": "`absent`, `excused` or `not_selected`.",
+            "title": "Declined",
+            "type": "integer"
+          },
+          "responded": {
+            "description": "`present`, `selected` or `maybe` -- the default list.",
+            "title": "Responded",
+            "type": "integer"
+          },
+          "silent": {
+            "title": "Silent",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "responded",
+          "silent",
+          "declined",
+          "checked_in"
+        ],
+        "title": "AttendanceCountsOut",
+        "type": "object"
+      },
       "AttendanceOut": {
         "properties": {
           "member_id": {
@@ -156,6 +192,125 @@
           "note"
         ],
         "title": "AttendanceOut",
+        "type": "object"
+      },
+      "AttendanceRowOut": {
+        "properties": {
+          "attendance_id": {
+            "description": "What a check-in refers to.",
+            "format": "uuid",
+            "title": "Attendance Id",
+            "type": "string"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "note": {
+            "description": "The reason the player gave with their answer.",
+            "title": "Note",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Same rule as the member photos: null when there is no photo or the account may not see it. Fetch it with the bearer token.",
+            "title": "Photo Url"
+          },
+          "position": {
+            "description": "The player's position on this team, empty when not set.",
+            "title": "Position",
+            "type": "string"
+          },
+          "showed_up": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The recorded check-in; null until one is recorded.",
+            "title": "Showed Up"
+          },
+          "status": {
+            "description": "`no_response`, `present`, `absent`, `maybe`, `selected`, `not_selected`, `excused`.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attendance_id",
+          "member_id",
+          "first_name",
+          "last_name",
+          "jersey_number",
+          "position",
+          "status",
+          "note",
+          "showed_up",
+          "photo_url"
+        ],
+        "title": "AttendanceRowOut",
+        "type": "object"
+      },
+      "AttendanceSheetOut": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AttendanceCountsOut",
+            "description": "Over all rows, whatever the filter."
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "filter": {
+            "description": "The filter applied: `responded`, `silent`, `declined` or `all`.",
+            "title": "Filter",
+            "type": "string"
+          },
+          "items": {
+            "description": "Ordered by last name, first name.",
+            "items": {
+              "$ref": "#/components/schemas/AttendanceRowOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "filter",
+          "counts",
+          "items"
+        ],
+        "title": "AttendanceSheetOut",
         "type": "object"
       },
       "AuthorOut": {
@@ -772,6 +927,51 @@
         "title": "CategoryOut",
         "type": "object"
       },
+      "CheckInItemIn": {
+        "properties": {
+          "attendance_id": {
+            "format": "uuid",
+            "title": "Attendance Id",
+            "type": "string"
+          },
+          "showed_up": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`true`/`false` records the check-in, `null` clears it.",
+            "title": "Showed Up"
+          }
+        },
+        "required": [
+          "attendance_id",
+          "showed_up"
+        ],
+        "title": "CheckInItemIn",
+        "type": "object"
+      },
+      "CheckInsIn": {
+        "properties": {
+          "items": {
+            "description": "Any subset of the event's rows. Sending the same item twice is harmless.",
+            "items": {
+              "$ref": "#/components/schemas/CheckInItemIn"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CheckInsIn",
+        "type": "object"
+      },
       "CheckoutIn": {
         "properties": {
           "discount_code": {
@@ -1062,9 +1262,9 @@
             "description": "The club's current season, if one covers today."
           },
           "staffed_teams": {
-            "description": "Teams the account coaches or staffs this season (coach endpoints take a team id from here).",
+            "description": "Teams the account coaches or staffs this season, with the account's role and what it may do on each. Coach endpoints take a team id from here; any other team is `404`.",
             "items": {
-              "$ref": "#/components/schemas/TeamRefOut"
+              "$ref": "#/components/schemas/StaffedTeamOut"
             },
             "title": "Staffed Teams",
             "type": "array"
@@ -2762,6 +2962,55 @@
         "title": "NeedsAnswerOut",
         "type": "object"
       },
+      "NeedsYouOut": {
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`silent_players`: how many players have not answered. `unpublished_lineup`: null.",
+            "title": "Count"
+          },
+          "event_id": {
+            "description": "The event to open: its attendance sheet for `silent_players`, its line-up for `unpublished_lineup`.",
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "Ignore types you do not know.",
+            "enum": [
+              "silent_players",
+              "unpublished_lineup"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "event_id",
+          "title",
+          "start",
+          "count"
+        ],
+        "title": "NeedsYouOut",
+        "type": "object"
+      },
       "NewsDetailOut": {
         "properties": {
           "author": {
@@ -4332,6 +4581,20 @@
         "title": "RegistrationVariantOut",
         "type": "object"
       },
+      "RemindSilentOut": {
+        "properties": {
+          "notified": {
+            "description": "Players who got the reminder; 0 when everybody has answered.",
+            "title": "Notified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "notified"
+        ],
+        "title": "RemindSilentOut",
+        "type": "object"
+      },
       "RsvpIn": {
         "properties": {
           "member_id": {
@@ -4484,6 +4747,70 @@
           "no_reply_count"
         ],
         "title": "SquadSummaryOut",
+        "type": "object"
+      },
+      "StaffedTeamOut": {
+        "properties": {
+          "can_edit_events": {
+            "description": "Create, edit, delete and detach events and series, quick-create locations and opponents.",
+            "title": "Can Edit Events",
+            "type": "boolean"
+          },
+          "can_edit_roster": {
+            "description": "Add, edit and remove roster players and staff. Reading the roster needs no flag.",
+            "title": "Can Edit Roster",
+            "type": "boolean"
+          },
+          "can_manage_attendance": {
+            "description": "Check players in and remind silent players. Without it these answer `403 manager_required`; the attendance list is still readable.",
+            "title": "Can Manage Attendance",
+            "type": "boolean"
+          },
+          "can_publish_lineup": {
+            "description": "Change and publish the line-up. Reading it needs no flag.",
+            "title": "Can Publish Lineup",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "The account's own position on this team, as the club names it (for example `Head coach`). Display only.",
+            "title": "Position",
+            "type": "string"
+          },
+          "role": {
+            "description": "`manager`: the account holds a management position on this team this season (or is a club admin who also staffs it). `coach`: any other staff position (assistant, physio, ...). Treat an unknown value as `coach`.",
+            "enum": [
+              "coach",
+              "manager"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "role",
+          "position",
+          "can_manage_attendance",
+          "can_edit_events",
+          "can_publish_lineup",
+          "can_edit_roster"
+        ],
+        "title": "StaffedTeamOut",
         "type": "object"
       },
       "SubmissionOut": {
@@ -5030,6 +5357,83 @@
           }
         },
         "title": "TimelinePlayerOut",
+        "type": "object"
+      },
+      "TodayOut": {
+        "properties": {
+          "closes_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`event`'s reply deadline (the same as `event.deadline`), null when it has none.",
+            "title": "Closes At"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The session to show: today's if there is one still current, otherwise the next one. Null when the team has nothing coming up."
+          },
+          "in_count": {
+            "description": "Players who are in for `event`: `present`, `selected` or `maybe`.",
+            "title": "In Count",
+            "type": "integer"
+          },
+          "is_today": {
+            "description": "Whether `event` starts today.",
+            "title": "Is Today",
+            "type": "boolean"
+          },
+          "needs_you": {
+            "description": "Silent players for `event`, then every upcoming game or tournament (the next five) whose line-up is not published.",
+            "items": {
+              "$ref": "#/components/schemas/NeedsYouOut"
+            },
+            "title": "Needs You",
+            "type": "array"
+          },
+          "out_count": {
+            "description": "Players who are out: `absent`, `excused` or `not_selected`.",
+            "title": "Out Count",
+            "type": "integer"
+          },
+          "silent_count": {
+            "description": "Players who have not answered (`no_response`).",
+            "title": "Silent Count",
+            "type": "integer"
+          },
+          "squad_count": {
+            "description": "Players on the team's roster this season.",
+            "title": "Squad Count",
+            "type": "integer"
+          },
+          "team": {
+            "$ref": "#/components/schemas/TeamRefOut"
+          }
+        },
+        "required": [
+          "team",
+          "squad_count",
+          "event",
+          "is_today",
+          "closes_at",
+          "in_count",
+          "out_count",
+          "silent_count",
+          "needs_you"
+        ],
+        "title": "TodayOut",
         "type": "object"
       },
       "UnreadCountOut": {
@@ -9389,6 +9793,368 @@
         "summary": "One product",
         "tags": [
           "shop"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/attendance": {
+      "get": {
+        "description": "One row per invited person. `filter`: `responded` (the default: in or maybe),\n`silent`, `declined`, or `all`. `counts` always cover everybody. Any staff of the team.",
+        "operationId": "appapi_routers_coach_attendance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "responded",
+              "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+              "enum": [
+                "responded",
+                "silent",
+                "declined",
+                "all"
+              ],
+              "title": "Filter",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceSheetOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Who is coming to an event",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/check-ins": {
+      "post": {
+        "description": "Sets `showed_up` for the listed rows, leaving the rest alone, and returns the sheet as\n`GET …/attendance` would (same `filter`). Repeating a call changes nothing. An id that is\nnot a row of this event fails the whole call with `422 unknown_attendance`. Managers only.",
+        "operationId": "appapi_routers_coach_check_ins",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "responded",
+              "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+              "enum": [
+                "responded",
+                "silent",
+                "declined",
+                "all"
+              ],
+              "title": "Filter",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckInsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceSheetOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Record who showed up",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/remind-silent": {
+      "post": {
+        "description": "Sends the in-app (and, if they have the app, push) reminder to everyone still on\n`no_response`. Accepts an `Idempotency-Key`: a retry does not remind twice. Managers only.",
+        "operationId": "appapi_routers_coach_remind",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemindSilentOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Nudge players who have not answered",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/today": {
+      "get": {
+        "description": "Squad size, the session to show (today's, else the next one) with in / out / silent\ncounts and its reply deadline, and what needs the coach: silent players for that session\nand every upcoming game or tournament without a published line-up. Any staff of the team.",
+        "operationId": "appapi_routers_coach_today",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The team's Today screen",
+        "tags": [
+          "coach"
         ]
       }
     }

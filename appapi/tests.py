@@ -228,7 +228,9 @@ class ContextTests(AppApiTestCase):
 
         body = self.api("get", "/context", token=self.login(), host=CLUB_HOST).json()
 
-        self.assertEqual(body["staffed_teams"], [{"id": str(team.pk), "name": "U16", "short_name": "U16"}])
+        self.assertEqual(
+            body["staffed_teams"], [{"id": str(team.pk), "name": "U16", "short_name": "U16", "role": "coach", "position": "Assistant", "can_manage_attendance": False, "can_edit_events": False, "can_publish_lineup": False, "can_edit_roster": False}]
+        )
 
     def test_other_club_is_not_a_member(self):
         make_club(name="Rival FC", slug="rival-fc")

@@ -671,6 +671,7 @@ class UnknownIdTests(ClubApiTestCase):
         "{member_id}": {},
         "{item_id}": {"quantity": 1},
         "live-activity": {"installation_id": "unknown-install", "activity_token": "x"},
+        "check-ins": {"items": []},
     }
 
     def test_unknown_ids_are_404_everywhere(self):

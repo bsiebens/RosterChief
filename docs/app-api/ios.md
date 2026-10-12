@@ -182,8 +182,11 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 
 ## 6. Two-factor enrolment
 
-Club staff (admins, editors, team managers, shop/evaluation managers) must have two-factor.
-Until they enrol, every app-API call answers **403 `mfa_enrollment_required`**. Show an enrolment
+Club staff with authority (admins, editors, member admins, shop/evaluation managers, and anyone
+with a **management position** on a team, such as a head coach or team manager) must have
+two-factor. A coach with another staff position (assistant, physio, ...) does not. Until the
+required account enrols, **every** app-API call answers **403 `mfa_enrollment_required`**,
+including `GET /context`: there is no way to see the coach screens first. Show an enrolment
 screen that uses the sign-in API:
 
 1. `GET /api/auth/app/v1/account/authenticators/totp`: returns `meta.secret` and
@@ -526,7 +529,71 @@ new link and the old one stops working (use it as "reset link" when one leaked).
 `GET /bug-reports` lists them with the RosterChief team's replies (`notes`) and `status`. Add the
 app version and iOS version to the description yourself.
 
-## 9. Other rules
+## 9. Coach screens
+
+The Manager switch of the app. Coach endpoints live on the club host under
+`/teams/{team_id}/…`. The team comes from `GET /context` → `staffed_teams`; the API keeps no
+"active team", so send the id on every call. **A team the account doesn't staff this season is
+`404 not_found`**, the same answer as a team that doesn't exist.
+
+### Who may do what
+
+Every `staffed_teams` item says what the account may do there. Hide a button when its flag is
+false; calling it anyway answers **`403 manager_required`**.
+
+| Field | Meaning |
+|---|---|
+| `role` | `manager`: a management position on the team (head coach, team manager, club admin who staffs it). `coach`: any other staff position (assistant, physio). |
+| `position` | The account's own position name, for display. |
+| `can_manage_attendance` | Check players in, remind silent players. |
+| `can_edit_events` | Create, edit, delete and detach events and series, quick-create locations and opponents. |
+| `can_publish_lineup` | Change and publish the line-up. |
+| `can_edit_roster` | Add, edit and remove players and staff. |
+
+Today all four equal `role == "manager"`. Read the flags, not the role, so a later split needs
+no app update. **Reading is open to every coach**: today, the attendance sheet, events, line-up
+and roster. Financial data is never returned to a coach.
+
+### Today
+
+`GET /teams/{team_id}/today`: `squad_count`; `event` (today's session if one is still current,
+else the next one, as `EventOut`) with `is_today`, `closes_at` (its reply deadline),
+`in_count` (present, selected or maybe), `out_count` (absent, excused, not selected) and
+`silent_count`; and `needs_you`, a list of `{type, event_id, title, start, count}`:
+
+* `silent_players`: `count` players haven't answered for `event_id`. Open its attendance sheet.
+* `unpublished_lineup`: the game or tournament `event_id` has no published line-up (`count` is
+  null). Checked for the team's next five games, not only `event`.
+
+Ignore a `type` you don't know.
+
+### Attendance
+
+`GET /teams/{team_id}/events/{event_id}/attendance?filter=responded|silent|declined|all` returns
+`{event, filter, counts, items}`. `counts` always cover everybody; `items` follow `filter`
+(default `responded`: in or maybe, the web default, since nobody expects a silent or declined
+player to show up). One row per person: `attendance_id`, `member_id`, `first_name`,
+`last_name`, `jersey_number`, `position`, `status`, `note` (the reason the player gave),
+`showed_up` (null until checked in) and `photo_url` (null when there is no photo or the account
+may not see it; fetch it with the bearer token like the member photos).
+
+`POST …/check-ins` `{"items": [{"attendance_id", "showed_up": true|false|null}]}` records the
+check-in (`null` clears it). Send only the rows that changed; repeating a call changes nothing.
+An `attendance_id` that isn't a row of this event fails the whole call with
+**`422 unknown_attendance`** (`fields.items` lists the ids) and saves nothing. The response is
+the sheet again; pass the same `filter` as a query parameter to get the list you are showing.
+**Managers only.**
+
+`POST …/remind-silent` sends the reminder to everyone still silent and answers
+`{"notified": n}` (0 when everybody answered). It notifies, so send an `Idempotency-Key`: a
+retry with the same key doesn't remind twice. **Managers only.**
+
+**Push to players for a reminder:** an ordinary inbox notification (`kind: "notification"`,
+`target: {"type": "event", "id": <event id>}`, `thread-id` = the club slug), titled with the
+event and worded "Reminder: Training on Tue 14 Oct, 18:30 still needs your answer.", in the
+device's language.
+
+## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a
   maintenance screen and retry later.
