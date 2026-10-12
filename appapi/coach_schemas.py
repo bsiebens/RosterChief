@@ -378,3 +378,31 @@ class RosterPatch(Schema):
     jersey_number: int | None = Field(default=None, ge=0, le=32767)
     is_captain: bool | None = None
     is_alternate_captain: bool | None = None
+
+
+# --- news ---------------------------------------------------------------------------------
+
+
+class NewsPhotoOut(Schema):
+    id: uuid.UUID
+    url: str = Field(description="Absolute URL of the image.")
+    is_main: bool = Field(description="The cover photo (the first one submitted).")
+
+
+class CoachNewsOut(Schema):
+    id: uuid.UUID
+    title: str
+    body: str = Field(description="Markdown, as written.")
+    status: Literal["draft", "pending_review", "published"] = Field(
+        description="`pending_review`: waiting for an editor. `published`: live (check `published_at`; a future date means scheduled). "
+        "`draft`: an editor took it back out of the review queue, or unpublished it; the app cannot resubmit it, ask the editor."
+    )
+    published_at: datetime.datetime | None
+    created: datetime.datetime
+    teams: list[TeamRefOut]
+    photos: list[NewsPhotoOut]
+
+
+class CoachNewsListOut(Schema):
+    items: list[CoachNewsOut]
+    next_cursor: str | None

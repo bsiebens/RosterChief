@@ -14,6 +14,7 @@ from .routers.club import router as club_router
 from .routers.coach import router as coach_router
 from .routers.coach_events import router as coach_events_router
 from .routers.coach_lineup import router as coach_lineup_router
+from .routers.coach_news import router as coach_news_router
 from .routers.coach_roster import router as coach_roster_router
 from .routers.forms import router as forms_router
 from .routers.inbox import router as inbox_router
@@ -63,3 +64,4 @@ app_api.add_router("/", coach_router)
 app_api.add_router("/", coach_events_router)
 app_api.add_router("/", coach_lineup_router)
 app_api.add_router("/", coach_roster_router)
+app_api.add_router("/", coach_news_router)

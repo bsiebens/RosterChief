@@ -718,6 +718,26 @@ have their own path (`/staff/{assignment_id}`).
 **Push:** adding a player invites them to the team's upcoming events; they get one inbox push "New
 events on your calendar" (`target: {"type": "calendar"}`). Nothing else is sent for roster changes.
 
+### News
+
+* `POST /teams/{team_id}/news` is `multipart/form-data`: `title`, `body` (Markdown) and any number of
+  `photos` files (at most 10; JPEG, PNG or WebP, each at most 10 MB; HEIC: convert to JPEG first).
+  The first photo is the cover. It answers **`201`** with the post and `status: "pending_review"`: an
+  editor publishes it, so it is **not live**, and the editors are told. It is internal (the team's
+  families, in the apps); an editor can widen it on the web. Send an `Idempotency-Key` so a retry
+  doesn't post twice. A bad file fails the whole call with `422` (`fields.photos` names the file) and
+  nothing is saved.
+* Who may post: `permissions.can_add_news` in `GET /context` (club admins, editors and team managers).
+  A team's physio or assistant gets `403 forbidden`: hide the button. Any staff of the team can read.
+* `GET /teams/{team_id}/news?cursor&limit` lists **your own** submissions for the team, newest first:
+  `{id, title, body, status, published_at, created, teams, photos}`. `status`:
+  * `pending_review`: show "waiting for review".
+  * `published`: live (a `published_at` in the future means scheduled).
+  * `draft`: an editor took it out of the queue or unpublished it. **There is no rejection reason**:
+    the web has no "send back with a note" step, so nothing is stored to return. Show "Not published;
+    ask the editor", not a reason. (Adding one is a web change first.)
+* Nothing is pushed to the coach when their post is published or returned.
+
 ## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a

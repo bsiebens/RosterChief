@@ -1970,6 +1970,105 @@
         "title": "CoachEventPatch",
         "type": "object"
       },
+      "CoachNewsListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CoachNewsOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "CoachNewsListOut",
+        "type": "object"
+      },
+      "CoachNewsOut": {
+        "properties": {
+          "body": {
+            "description": "Markdown, as written.",
+            "title": "Body",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/NewsPhotoOut"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "status": {
+            "description": "`pending_review`: waiting for an editor. `published`: live (check `published_at`; a future date means scheduled). `draft`: an editor took it back out of the review queue, or unpublished it; the app cannot resubmit it, ask the editor.",
+            "enum": [
+              "draft",
+              "pending_review",
+              "published"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "status",
+          "published_at",
+          "created",
+          "teams",
+          "photos"
+        ],
+        "title": "CoachNewsOut",
+        "type": "object"
+      },
       "ContextOut": {
         "properties": {
           "club": {
@@ -4252,29 +4351,26 @@
       },
       "NewsPhotoOut": {
         "properties": {
-          "focal_x": {
-            "description": "Focal point, 0-100 % from the left; crop around it.",
-            "title": "Focal X",
-            "type": "integer"
-          },
-          "focal_y": {
-            "title": "Focal Y",
-            "type": "integer"
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "is_main": {
+            "description": "The cover photo (the first one submitted).",
             "title": "Is Main",
             "type": "boolean"
           },
           "url": {
+            "description": "Absolute URL of the image.",
             "title": "Url",
             "type": "string"
           }
         },
         "required": [
+          "id",
           "url",
-          "is_main",
-          "focal_x",
-          "focal_y"
+          "is_main"
         ],
         "title": "NewsPhotoOut",
         "type": "object"
@@ -13217,6 +13313,217 @@
           }
         ],
         "summary": "Quick-create a location",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/news": {
+      "get": {
+        "description": "What the caller submitted for this team, newest first, with its `status` (waiting for\nreview, published, or taken back to draft). Any staff of the team.",
+        "operationId": "appapi_routers_coach_news_list_news",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachNewsListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Your own news submissions for the team",
+        "tags": [
+          "coach"
+        ]
+      },
+      "post": {
+        "description": "`multipart/form-data` with `title`, `body` (Markdown) and any number of `photos` files. The\npost is for this team, internal (the team's families, in the apps), and arrives as\n`pending_review`: an editor publishes it, so it is not live yet and the editors are told. Needs\n`permissions.can_add_news` (`403 forbidden` otherwise; a physio or assistant cannot post). Send an\n`Idempotency-Key`: a retry then does not post twice.",
+        "operationId": "appapi_routers_coach_news_submit_news",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "body": {
+                    "description": "Markdown.",
+                    "type": "string"
+                  },
+                  "photos": {
+                    "description": "Up to 10 JPEG, PNG or WebP images (HEIC: convert to JPEG first), each at most 10 MB. The first is the cover.",
+                    "items": {
+                      "format": "binary",
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "type": "array"
+                  },
+                  "title": {
+                    "maxLength": 255,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "body"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachNewsOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Submit a news post for review",
         "tags": [
           "coach"
         ]

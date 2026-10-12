@@ -1252,3 +1252,119 @@ class RosterWriteTests(CoachRosterTestCase):
         self.assertError(self.send("patch", self.url(f"/roster/{foreign.pk}"), {"jersey_number": 3}), 404, "not_found")
         self.assertError(self.send("delete", self.url(f"/roster/{foreign.pk}")), 404, "not_found")
         self.assertError(self.send("delete", self.url(f"/staff/{staff.pk}")), 404, "not_found")
+
+
+# --- slice 5: news -------------------------------------------------------------------------
+
+from django.core.files.uploadedfile import SimpleUploadedFile  # noqa: E402
+
+from news.models import News  # noqa: E402
+
+from .test_member import png_bytes  # noqa: E402
+
+
+class CoachNewsTests(CoachEventTestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = patch("appapi.routers.coach_news.dispatch_notify_editors_of_pending_review")  # a background thread would fight the test database
+        self.dispatch = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def submit(self, title="Great win", body="We **won** 5-2.", photos=(), team=None, **headers):
+        data = {"title": title, "body": body}
+        if photos:
+            data["photos"] = list(photos)
+        return self.client.post(f"/api/app/v1{self.url('/news', team=team)}", data=data, HTTP_HOST=CLUB_HOST, HTTP_AUTHORIZATION=f"Bearer {self.token}", **headers)
+
+    def image(self, name="a.png"):
+        return SimpleUploadedFile(name, png_bytes(), content_type="image/png")
+
+    def test_submits_for_review_with_photos_and_tells_the_editors(self):
+        response = self.submit(photos=[self.image("a.png"), self.image("b.png")])
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = response.json()
+        self.assertEqual((body["title"], body["status"], body["published_at"]), ("Great win", "pending_review", None))
+        self.assertEqual([team["id"] for team in body["teams"]], [str(self.team.pk)])
+        self.assertEqual([photo["is_main"] for photo in body["photos"]], [True, False])
+        self.assertTrue(body["photos"][0]["url"].startswith("http"))
+        item = News.objects.get(pk=body["id"])
+        self.assertEqual((item.created_by, item.visibility, item.status), (self.member, News.Visibility.INTERNAL, News.Status.PENDING_REVIEW))
+        self.dispatch.assert_called_once_with(item.pk)
+
+    def test_no_photos_is_fine(self):
+        self.assertEqual(self.submit().status_code, 201)
+
+    def test_title_and_body_are_required(self):
+        response = self.submit(title="", body="")
+
+        self.assertError(response, 422, "validation_error")
+        self.assertEqual(set(response.json()["error"]["fields"]), {"title", "body"})
+        self.assertFalse(News.objects.exists())
+
+    def test_a_file_that_is_not_an_image_is_refused_and_nothing_is_saved(self):
+        response = self.submit(photos=[self.image(), SimpleUploadedFile("evil.png", b"not an image", content_type="image/png")])
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("evil.png", response.json()["error"]["fields"]["photos"][0])
+        self.assertFalse(News.objects.exists())
+
+    def test_too_many_photos(self):
+        response = self.submit(photos=[self.image(f"{n}.png") for n in range(11)])
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("photos", response.json()["error"]["fields"])
+
+    def test_an_idempotency_key_posts_once(self):
+        first = self.submit(HTTP_IDEMPOTENCY_KEY="news-1")
+        second = self.submit(HTTP_IDEMPOTENCY_KEY="news-1")
+
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(News.objects.count(), 1)
+
+    def test_a_staff_member_who_may_not_post_is_forbidden(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        self.assertError(self.submit(), 403, "forbidden")
+        self.assertFalse(News.objects.exists())
+
+    def test_another_teams_news_is_404(self):
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+
+        self.assertError(self.submit(team=other), 404, "not_found")
+        self.assertError(self.send("get", self.url("/news", team=other)), 404, "not_found")
+
+    def test_lists_only_your_own_submissions_for_the_team_with_their_status(self):
+        mine = self.submit(title="Mine").json()
+        News.objects.filter(pk=mine["id"]).update(status=News.Status.PUBLISHED, published_at=timezone.now())
+        waiting = self.submit(title="Waiting").json()
+        returned = self.submit(title="Returned").json()
+        News.objects.filter(pk=returned["id"]).update(status=News.Status.DRAFT)
+        others = News.objects.create(club=self.club, title="Not mine", body="x", created_by=Member.objects.create(first_name="Ed", last_name="Editor"))
+        others.teams.add(self.team)
+        elsewhere = News.objects.create(club=self.club, title="Other team", body="x", created_by=self.member)
+
+        items = self.get(self.url("/news")).json()["items"]
+
+        self.assertEqual({item["title"]: item["status"] for item in items}, {"Mine": "published", "Waiting": "pending_review", "Returned": "draft"})
+        self.assertEqual(items[0]["id"], returned["id"])  # newest first
+        self.assertNotIn(str(others.pk), [item["id"] for item in items])
+        self.assertNotIn(str(elsewhere.pk), [item["id"] for item in items])
+        self.assertIsNotNone(next(item for item in items if item["title"] == "Mine")["published_at"])
+        self.assertIn(waiting["id"], [item["id"] for item in items])
+
+    def test_list_pages(self):
+        for n in range(3):
+            self.submit(title=f"Post {n}")
+
+        page = self.get(self.url("/news"), limit=2).json()
+        rest = self.get(self.url("/news"), limit=2, cursor=page["next_cursor"]).json()
+
+        self.assertEqual((len(page["items"]), len(rest["items"]), rest["next_cursor"]), (2, 1, None))
+
+    def test_any_staff_may_list(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        self.assertEqual(self.get(self.url("/news")).status_code, 200)
