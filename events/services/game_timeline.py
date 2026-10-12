@@ -261,13 +261,6 @@ def display_timeline(timeline: GameTimeline, event) -> dict:
     }
 
 
-def public_names_allowed(event) -> bool:
-    """Player names on the public API: only when every one of our teams on the
-    game has Team.show_player_names_publicly on (youth teams default to off)."""
-    teams = list(event.teams.all())
-    return bool(teams) and all(team.show_player_names_publicly for team in teams)
-
-
 def _api_player(person, show_names: bool) -> dict:
     person = person or {}
     result = {"number": person.get("number")}

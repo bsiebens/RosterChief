@@ -90,16 +90,6 @@ class Team(ClubScopedModel):
     #: Not used for anything programmatic -- see feeds_into below for that.
     age_min = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True)
     age_max = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True)
-    #: Game timelines (events.GameTimeline) name the players who scored, assisted
-    #: or took a penalty. The public API (the club's own website, no login) only
-    #: includes those names when every one of our teams on the game has this on --
-    #: off by default, since youth teams are minors; the member app (logged-in
-    #: members) always shows them. See GAME_TIMELINE.md §9.1.
-    show_player_names_publicly = models.BooleanField(
-        _("show player names publicly"),
-        default=False,
-        help_text=_("Show who scored, assisted or got a penalty by name on the club's public website. When off, only jersey numbers are shown. Leave off for youth teams."),
-    )
     #: A team that only exists for tournaments (no league season). Purely a label
     #: for consumers: the public /teams/ endpoint reports it and can leave these out.
     tournament_only = models.BooleanField(

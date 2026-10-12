@@ -7,6 +7,7 @@ DEPLOYMENT.md's "Scheduled jobs").
 """
 
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from formbuilder.models import FormSend
@@ -28,11 +29,13 @@ def notify_form_send(send_id):
     if not members:
         return "Skipped: no one to notify."
 
-    if send.closes_at is not None:
-        deadline = _(" by %(date)s") % {"date": timezone.localtime(send.closes_at).strftime("%d %b")}
-    else:
-        deadline = ""
-    body = _("Please complete “%(form)s”%(deadline)s.") % {"form": send.form.title, "deadline": deadline}
+    def body():
+        if send.closes_at is not None:
+            deadline = _(" by %(date)s") % {"date": date_format(timezone.localtime(send.closes_at), "d M")}
+        else:
+            deadline = ""
+        return _("Please complete “%(form)s”%(deadline)s.") % {"form": send.form.title, "deadline": deadline}
+
     notifications = notify_members(members, club=send.club, title=send.form.title, body=body, source=send)
     return f"Notified {len(notifications)} member(s)."
 

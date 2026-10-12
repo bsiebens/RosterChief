@@ -1,0 +1,26 @@
+# Dutch translation of RosterChief shop notifications.
+msgid ""
+msgstr ""
+"Project-Id-Version: RosterChief\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-12 12:00+0200\n"
+"PO-Revision-Date: 2026-10-12 12:00+0200\n"
+"Last-Translator: RosterChief\n"
+"Language-Team: Dutch\n"
+"Language: nl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Order %(number)s placed"
+msgstr "Bestelling %(number)s geplaatst"
+
+msgid "Your order is in — pay when you pick it up. Total: €%(total)s."
+msgstr "Je bestelling is binnen — je betaalt bij het ophalen. Totaal: €%(total)s."
+
+msgid "Order %(number)s is ready for pickup"
+msgstr "Bestelling %(number)s staat klaar om op te halen"
+
+msgid "Your order is ready to collect — pay when you pick it up."
+msgstr "Je bestelling staat klaar — je betaalt bij het ophalen."

@@ -233,6 +233,17 @@ class SendPublishNotificationTests(TestCase):
         self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
         self.assertEqual(len(notifications), 1)
 
+    def test_publish_notification_stores_both_languages_with_user_text_untouched(self):
+        member = self.make_member("Jamie", email="jamie@example.com")
+        news_item = News.objects.create(club=self.club, title="Big news", body="Something happened.", status=News.Status.PUBLISHED, published_at=timezone.now())
+
+        send_publish_notification(news_item)
+
+        translations = Notification.objects.get(member=member).translations
+        self.assertEqual(set(translations), {"en", "nl"})
+        self.assertEqual(translations["nl"]["title"], "Big news")
+        self.assertEqual(translations["en"], translations["nl"])
+
     def test_external_only_news_is_never_notified(self):
         # Mobile's own home/list views (mobile.views.HomeView/NewsListView)
         # exclude visibility=EXTERNAL, so notifying members about one would
@@ -461,6 +472,20 @@ class NotifyEditorsOfPendingReviewTests(TestCase):
         self.assertTrue(Notification.objects.filter(member=admin).exists())
         self.assertTrue(Notification.objects.filter(member=editor).exists())
         self.assertFalse(Notification.objects.filter(member=author).exists())
+
+    def test_stores_english_and_genuinely_dutch_translations(self):
+        admin = self.make_role("Ada", ClubRole.Roles.ADMIN)
+        author = self.make_role("Cara", ClubRole.Roles.MEMBER)
+        news_item = News.objects.create(club=self.club, title="Draft item", body="Body.", created_by=author)
+
+        notify_editors_of_pending_review(news_item)
+
+        notification = Notification.objects.get(member=admin)
+        self.assertEqual(notification.title, "“Draft item” is ready for review")
+        self.assertEqual(notification.translations["en"]["title"], "“Draft item” is ready for review")
+        self.assertEqual(notification.translations["nl"]["title"], "“Draft item” wacht op controle")
+        self.assertIn("ter controle ingediend", notification.translations["nl"]["body"])
+        self.assertIn("submitted this news item for review", notification.translations["en"]["body"])
 
     def test_sends_no_email(self):
         self.make_role("Ada", ClubRole.Roles.ADMIN)

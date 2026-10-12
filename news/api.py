@@ -46,8 +46,18 @@ class NewsPhotoOut(Schema):
     object_position: str
 
 
+class NewsTextOut(Schema):
+    title: str
+    excerpt: str
+    body: str
+
+
 class NewsItemOut(Schema):
-    """Both languages come back in one object -- title_nl/body_nl/excerpt_nl are
+    """Preferred: `translations`, a map keyed by language code (`en`, `nl`; new languages are
+    added as new keys) of {title, excerpt, body}. The flat title_*/excerpt_*/body_* fields below
+    carry the same values and are DEPRECATED -- kept only for existing consumers.
+
+    Both languages come back in one object -- title_nl/body_nl/excerpt_nl are
     the club's own-language text as authored; title_en/body_en/excerpt_en are the
     English text, falling back to the nl content when no translation was added
     (News.effective_title_en/effective_body_en) -- so these three are never blank,
@@ -62,6 +72,7 @@ class NewsItemOut(Schema):
     excerpt_en: str
     body_nl: str
     body_en: str
+    translations: dict[str, NewsTextOut]
     published_at: datetime
     teams: list[str]
     photos: list[NewsPhotoOut]
@@ -84,15 +95,18 @@ def _visible_news(club):
 
 
 def _to_news_item_out(item, request) -> NewsItemOut:
+    nl = NewsTextOut(title=item.title, excerpt=render_body_excerpt(item.body, words=EXCERPT_WORDS), body=render_body_html(item.body))
+    en = NewsTextOut(title=item.effective_title_en, excerpt=render_body_excerpt(item.effective_body_en, words=EXCERPT_WORDS), body=render_body_html(item.effective_body_en))
     return NewsItemOut(
         id=item.pk,
-        title_nl=item.title,
-        title_en=item.effective_title_en,
+        title_nl=nl.title,
+        title_en=en.title,
         slug=item.slug,
-        excerpt_nl=render_body_excerpt(item.body, words=EXCERPT_WORDS),
-        excerpt_en=render_body_excerpt(item.effective_body_en, words=EXCERPT_WORDS),
-        body_nl=render_body_html(item.body),
-        body_en=render_body_html(item.effective_body_en),
+        excerpt_nl=nl.excerpt,
+        excerpt_en=en.excerpt,
+        body_nl=nl.body,
+        body_en=en.body,
+        translations={"en": en, "nl": nl},
         published_at=item.published_at,
         teams=[team.name for team in item.teams.all()],
         photos=[NewsPhotoOut(url=request.build_absolute_uri(photo.image.url), is_main=photo.is_main, ordering=photo.ordering, focal_x=photo.focal_x, focal_y=photo.focal_y, object_position=photo.object_position) for photo in item.photos.all()],

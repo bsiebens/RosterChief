@@ -1,7 +1,7 @@
 # Game timelines — design
 
 Storing what happens *during* a game — goals and who scored them, penalties, goalie changes,
-time-outs, period results — next to the score we already keep, and using it for the public API
+time-outs, period results — next to the score we already keep, and using it for the member app
 and (later) push notifications.
 
 Today `poll_live_game_results` asks each game's competition for `is_live` + score and nothing
@@ -251,15 +251,8 @@ without being stored.
 
 ## 5. API
 
-**Public API (`/api/v1/`, club website):**
-
-- `GET /games/{id}/`: one game, the same fields as the list items plus `timeline` (the §2.2
-  document with `side` resolved to an extra `ours: bool` per event and on the score), `periods`
-  and `decided_in`. It goes through `cached_for_club` like everything else; 15 s for live games,
-  30 s otherwise.
-- The list endpoints (`/games/upcoming/`, `/past/`, `/live/`) get only the light parts:
-  `periods` and `decided_in`. They don't get `events`, which would bloat list responses.
-- `timeline_updated_at` on both, so a website polling a live game can skip unchanged responses.
+**Public API (`/api/v1/`, club website):** serves no timeline data. Games there carry only
+score and status; the timeline is for the native apps.
 
 **Member app API (`appapi`):** the same game-detail shape when the app gets a game screen. Push
 payloads stay pointers (`{target: game id}`), per `API.md` §9. The app fetches the timeline itself.
@@ -339,23 +332,15 @@ Deviations from §3.1, both to keep the score path untouched:
 
 ## 7b. Phase 2 as built
 
-- **Player names (§9.1, decided):** a per-team switch, `Team.show_player_names_publicly`, off
-  by default, editable on the management team form.
-  - **Public API:** names only when *every* one of our teams on the game has the switch on, so a
-    youth team sharing a game never leaks names. Otherwise each player is
-    `{"name": null, "number": 19}`. Opponent players follow the same rule.
-  - **Member app:** logged-in members always see names.
+- **Player names (§9.1, decided):** the timeline is only served to logged-in members (member
+  app), always with names. The public API serves no timeline, so the earlier per-team switch
+  (`Team.show_player_names_publicly`) was removed.
 - **Shared shape:** `events/timeline_schemas.py` (`TimelineOut` and its parts) is built by
-  `events.services.game_timeline.timeline_for_api`, so both APIs serve exactly the same
+  `events.services.game_timeline.timeline_for_api`, so the app API serves this
   structure. `ours` is resolved per event and on `our_side`. When a source doesn't say how the
   game was decided, `decided_in` is derived from the period labels once the game is final.
-- **Public API (`/api/v1/`):**
-  - `GET /games/{id}/` returns the game, as on the lists, plus `timeline` (404 for another club's
-    game or a non-game). It's cached for 15 s while the game is live, otherwise for the usual 30 s.
-  - Every game list (`upcoming`, `past`, `live`, `teams/{id}/games`) gains `periods`,
-    `decided_in` and `timeline_updated_at`, but never the events.
-  - Lists join the timeline but defer its `raw` payload. Timelines only appear while the club
-    has the `game_timeline` flag.
+- **Public API (`/api/v1/`):** no timeline fields (`periods`, `decided_in`, `timeline_updated_at`
+  and `timeline` were dropped); `GET /games/{id}/` returns the plain game.
 - **Member app API (`appapi`):**
   - `GET /events/{id}` gains `game_timeline`, filled only for games, with the club's
     `game_timeline` feature, and with names.
@@ -432,7 +417,8 @@ Decisions (§9.2–9.6):
    - show names as-is everywhere;
    - hide names for youth teams (`Team` would need an age-category signal);
    - per-club setting;
-   - numbers only in the public API, names only for authenticated members in `appapi`.
+   - numbers only in the public API, names only for authenticated members in `appapi`
+     (resolved: the public API serves no timeline at all).
 2. **Who gets pushes?** Team players and guardians by default with opt-out, opt-in only, or
    "followers" (anyone, including non-members via the PWA)? Which moments by default? The likely
    candidates are goals and the final result; penalties are probably opt-in.

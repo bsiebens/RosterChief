@@ -154,7 +154,7 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
   More sports will come: treat any value you don't know as `other`. Use it for sport-specific
   wording or icons, not to decide which features exist (that is `features`).
 * Exactly one club: open it. More: show a picker and remember the choice.
-* Use `api_base_url` for every club call. For public content (games with timelines, league
+* Use `api_base_url` for every club call. For public content (games and scores, league
   standings, sponsors), `public_api_base_url` is the club's read-only public API: no token needed.
 * Theme the club like the web app does: `primary_color` for the header and navigation bar,
   `secondary_color` for buttons, the active tab and highlights, and the matching

@@ -214,8 +214,13 @@ def notify_editors_of_pending_review(news_item):
     from notifications.services import notify_members
 
     editors = Member.objects.filter(roles__club=news_item.club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR]).distinct()
-    title = _("“%(news)s” is ready for review") % {"news": news_item.title}
-    body = _("%(author)s submitted this news item for review before it can go live.") % {"author": news_item.created_by or _("Someone")}
+
+    def title():
+        return _("“%(news)s” is ready for review") % {"news": news_item.title}
+
+    def body():
+        return _("%(author)s submitted this news item for review before it can go live.") % {"author": news_item.created_by or _("Someone")}
+
     return notify_members(editors, club=news_item.club, title=title, body=body, source=news_item, send_email=False)
 
 

@@ -83,7 +83,7 @@ class Command(ScheduledJobCommand):
                 continue
 
             enabled = {}
-            lines = []
+            changes = []  # (team, result): rendered per language when the notification is sent
             for team in Team.objects.filter(club=club).order_by("name"):
                 for entry in sources_for(team, season):
                     source = entry["source"]
@@ -102,9 +102,9 @@ class Command(ScheduledJobCommand):
                         logger.exception("check_fixture_sources.bookkeeping_failed club=%s team=%s source=%s", club.pk, team.pk, source)
                     if result.has_changes:
                         changed += 1
-                        lines.append(describe_result(team, result))
+                        changes.append((team, result))
 
-            if lines and self.notify(club, lines):
+            if changes and self.notify(club, changes):
                 clubs_notified += 1
 
         summary = f"Checked {checked} fixture source(s): {changed} with changes ({errors} could not be fetched); notified {clubs_notified} club(s)."
@@ -121,12 +121,18 @@ class Command(ScheduledJobCommand):
             self.stdout.write(self.style.ERROR(f"{club} / {team} / {entry.get('source')}: {error}"))
             return CheckResult(entry=entry, error=_("Unexpected error while checking this fixture list."))
 
-    def notify(self, club, lines: list[str]) -> bool:
+    def notify(self, club, changes: list) -> bool:
         admins = list(club_admins(club))
         if not admins:
             self.stdout.write(self.style.WARNING(f"{club}: fixture changes found but the club has no admins to notify."))
             return False
-        title = _("Fixture changes found for %(club)s") % {"club": club.name}
-        notify_members(admins, club=club, title=title, body=build_body(lines))
-        self.stdout.write(f"{club}: notified {len(admins)} admin(s) about {len(lines)} changed fixture source(s).")
+
+        def title():
+            return _("Fixture changes found for %(club)s") % {"club": club.name}
+
+        def body():
+            return build_body([describe_result(team, result) for team, result in changes])
+
+        notify_members(admins, club=club, title=title, body=body)
+        self.stdout.write(f"{club}: notified {len(admins)} admin(s) about {len(changes)} changed fixture source(s).")
         return True

@@ -59,7 +59,7 @@ class MemberForm(forms.ModelForm):
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
-        fields = ["name", "short_name", "referee_management", "pool", "age_min", "age_max", "feeds_into", "show_player_names_publicly", "tournament_only", "ordering"]
+        fields = ["name", "short_name", "referee_management", "pool", "age_min", "age_max", "feeds_into", "tournament_only", "ordering"]
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)

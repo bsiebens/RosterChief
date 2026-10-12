@@ -15,6 +15,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
@@ -349,8 +350,11 @@ class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View)
         members = list(Member.objects.filter(id__in=member_ids))
 
         if members:
-            when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
-            body = _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
+
+            def body():
+                when = date_format(timezone.localtime(event.start), "D d M, H:i")
+                return _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
+
             notify_members(members, club=event.club, title=event.title, body=body, source=event)
             notify(request, f"s|{_('Reminder sent')}|" + ngettext("%(count)d player nudged.", "%(count)d players nudged.", len(members)) % {"count": len(members)})
         else:

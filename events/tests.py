@@ -16,9 +16,10 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, connection
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _lazy
 from waffle import get_waffle_flag_model
 
 from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
@@ -54,10 +55,10 @@ from .services import (
     team_no_shows,
     timeline_parsers,
 )
-from .services.attendance import member_attendance_counts
+from .services.attendance import member_attendance_counts, notify_newly_invited
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.competitions import CompetitionFetchError, fetch_game_info
-from .services.crew_invites import resync_upcoming_invites
+from .services.crew_invites import _notify_new_invites, resync_upcoming_invites
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.officials import (
     OfficialAssignmentError,
@@ -4889,6 +4890,54 @@ class RecordGameMomentsTests(GameTimelineTestBase):
         self.assertEqual(game_moments.describe_moment(penalty), "Penalty for the opponent: Max (#17), Checking To The Head (game misconduct).")
 
 
+class NotificationTranslationTests(EventsTestBase):
+    """Event notifications are stored once per language (Notification.translations), so the app
+    API can serve the reader's own language."""
+
+    def test_new_events_notification_stores_english_and_dutch(self):
+        events = [self.make_event(title="Practice"), self.make_event(title="Practice 2")]
+
+        notify_newly_invited(self.alice, club=self.club, events=events)
+
+        translations = Notification.objects.get(member=self.alice).translations
+        self.assertEqual(translations["en"], {"title": "New events on your calendar", "body": "2 new events have been added to your calendar."})
+        self.assertEqual(translations["nl"], {"title": "Nieuwe afspraken in je agenda", "body": "Er zijn 2 nieuwe afspraken aan je agenda toegevoegd."})
+
+    def test_crew_invite_summary_is_plural_aware_in_both_languages(self):
+        referee_texts = {
+            "title": _lazy("Referee needed"),
+            "single": _lazy("%(event)s needs a referee -- can you take it?"),
+            "plural": ("%(count)d game needs a referee -- can you take it?", "%(count)d games need a referee -- can you take one?"),
+        }
+        one, two = self.make_event(title="Cup final"), self.make_event(title="Semi final")
+
+        _notify_new_invites(self.club, {self.alice: [one], self.bob: [one, two]}, **referee_texts)
+
+        alice = Notification.objects.get(member=self.alice).translations
+        bob = Notification.objects.get(member=self.bob).translations
+        self.assertEqual(alice["en"]["body"], "Cup final needs a referee -- can you take it?")
+        self.assertEqual(alice["nl"]["title"], "Scheidsrechter gezocht")
+        self.assertEqual(alice["nl"]["body"], "Voor Cup final is een scheidsrechter nodig -- kun jij het doen?")
+        self.assertEqual(bob["en"]["body"], "2 games need a referee -- can you take one?")
+        self.assertEqual(bob["nl"]["body"], "Voor 2 wedstrijden is een scheidsrechter nodig -- kun jij er een doen?")
+
+    def test_the_event_title_stays_as_written_in_every_language(self):
+        event = self.make_event(title="Zomerkamp", start=self.future)
+
+        from events.services.notifications import notify_new_event
+
+        Attendance.objects.filter(event=event).update(status=Attendance.AttendanceStatus.NO_RESPONSE)
+        event.teams.add(self.team)
+        Attendance.objects.get_or_create(event=event, member=self.alice, defaults={"status": Attendance.AttendanceStatus.NO_RESPONSE})
+        notify_new_event(event.pk)
+
+        translations = Notification.objects.filter(member=self.alice).latest("created").translations
+        self.assertEqual(translations["en"]["title"], "Zomerkamp")
+        self.assertEqual(translations["nl"]["title"], "Zomerkamp")
+        self.assertTrue(translations["nl"]["body"].startswith("Nieuw: "))
+        self.assertTrue(translations["en"]["body"].startswith("New "))
+
+
 class GamePushTests(GameTimelineTestBase):
     """events.services.game_push -- live game pushes to the accounts that
     follow one of the game's teams; one coalesced push per poll, no cap."""
@@ -4915,7 +4964,7 @@ class GamePushTests(GameTimelineTestBase):
 
         _reached, native, _web = self.deliver(game, [ours, theirs])
 
-        self.assertEqual(native.call_args.kwargs["body"].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
+        self.assertEqual(native.call_args.kwargs["texts"]("en")[1].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
 
     def test_followers_get_one_coalesced_push_and_others_none(self):
         game = self.make_game(is_live=True)
@@ -4928,9 +4977,9 @@ class GamePushTests(GameTimelineTestBase):
         self.assertEqual(reached, 1)
         native.assert_called_once()
         self.assertEqual(native.call_args.args[0], self.fan)
-        body = native.call_args.kwargs["body"]
+        body = native.call_args.kwargs["texts"]("en")[1]
         self.assertEqual(body.splitlines(), ["Goal for us by Sam (#9), 1-0.", "Penalty for the opponent: Rex, Tripping."])
-        self.assertEqual(native.call_args.kwargs["title"], "1st vs Olympia Heist")
+        self.assertEqual(native.call_args.kwargs["texts"]("en")[0], "1st vs Olympia Heist")
         self.assertEqual(native.call_args.kwargs["data"]["target"], {"type": "event", "id": str(game.pk)})
         web.assert_called_once()
         self.assertEqual(GameMoment.objects.filter(event=game, delivered_at__isnull=False).count(), 2)
@@ -4943,11 +4992,41 @@ class GamePushTests(GameTimelineTestBase):
 
         _reached, native, _web = self.deliver(game, [late, fresh])
         self.assertEqual(native.call_count, 1)
-        self.assertNotIn("old", native.call_args.kwargs["body"])
+        self.assertNotIn("old", native.call_args.kwargs["texts"]("en")[1])
 
         reached_again, native_again, _web = self.deliver(game, [fresh])
         self.assertEqual(reached_again, 0)
         native_again.assert_not_called()
+
+    def test_each_device_gets_the_push_in_its_own_language(self):
+        from appapi.models import PushDevice
+
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        for index, locale in enumerate(["nl-NL", "en-GB", "", "fr-FR"]):
+            PushDevice.objects.create(user=self.fan, installation_id=f"install-{index}", platform="ios", push_token="t", endpoint_arn=f"arn:{index}", locale=locale)
+        goal = self.moment(game, "goal_for:g1")
+        gateway = mock.Mock()
+        gateway.publish.return_value = True
+
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.push.get_gateway", return_value=gateway), mock.patch("events.services.game_push._send_web", return_value=0):
+            game_push.deliver_moments(game.pk, [goal.pk])
+
+        bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}
+        self.assertEqual(bodies["nl-NL"], "Doelpunt voor ons van Sam (#9), 1-0.")
+        self.assertEqual(bodies["en-GB"], "Goal for us by Sam (#9), 1-0.")
+        self.assertEqual(bodies[""], "Goal for us by Sam (#9), 1-0.")
+        self.assertEqual(bodies["fr-FR"], "Goal for us by Sam (#9), 1-0.")
+
+    def test_web_push_is_english(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        goal = self.moment(game, "goal_for:g1")
+
+        with mock.patch("mobile.services.push.send_push_to_user", return_value=0) as send:
+            game_push.deliver_moments(game.pk, [goal.pk])
+
+        self.assertEqual(send.call_args.kwargs["body"], "Goal for us by Sam (#9), 1-0.")
 
     def test_there_is_no_cap_per_game(self):
         game = self.make_game(is_live=True)

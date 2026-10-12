@@ -1,0 +1,208 @@
+# Dutch translations for the events notifications and live game pushes.
+msgid ""
+msgstr ""
+"Project-Id-Version: RosterChief events\n"
+"Language: nl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# -- referees / officials
+msgid "Referee assignment"
+msgstr "Scheidsrechter ingepland"
+
+msgid "You have been assigned as a referee for %(event)s on %(when)s."
+msgstr "Je bent ingepland als scheidsrechter voor %(event)s op %(when)s."
+
+msgid "Referee assignment removed"
+msgstr "Scheidsrechterstaak vervallen"
+
+msgid "You have been removed as a referee for %(event)s."
+msgstr "Je bent niet langer ingepland als scheidsrechter voor %(event)s."
+
+msgid "Referee needed"
+msgstr "Scheidsrechter gezocht"
+
+msgid "%(event)s needs a referee -- can you take it?"
+msgstr "Voor %(event)s is een scheidsrechter nodig -- kun jij het doen?"
+
+msgid "Referee dropped out"
+msgstr "Scheidsrechter afgehaakt"
+
+msgid "%(member)s can no longer referee %(event)s after all -- you may need to find a replacement."
+msgstr "%(member)s kan %(event)s toch niet fluiten -- misschien moet je een vervanger zoeken."
+
+msgid "Official assignment"
+msgstr "Official ingepland"
+
+msgid "You have been assigned as an official for %(event)s on %(when)s."
+msgstr "Je bent ingepland als official voor %(event)s op %(when)s."
+
+msgid "Official assignment removed"
+msgstr "Officialstaak vervallen"
+
+msgid "You have been removed as an official for %(event)s."
+msgstr "Je bent niet langer ingepland als official voor %(event)s."
+
+msgid "Official needed"
+msgstr "Official gezocht"
+
+msgid "%(event)s needs a match official -- can you take it?"
+msgstr "Voor %(event)s is een official nodig -- kun jij het doen?"
+
+msgid "Official dropped out"
+msgstr "Official afgehaakt"
+
+msgid "%(member)s can no longer act as an official for %(event)s after all -- you may need to find a replacement."
+msgstr "%(member)s kan toch niet als official optreden bij %(event)s -- misschien moet je een vervanger zoeken."
+
+msgid "%(count)d game needs a referee -- can you take it?"
+msgid_plural "%(count)d games need a referee -- can you take one?"
+msgstr[0] "Voor %(count)d wedstrijd is een scheidsrechter nodig -- kun jij die doen?"
+msgstr[1] "Voor %(count)d wedstrijden is een scheidsrechter nodig -- kun jij er een doen?"
+
+msgid "%(count)d game needs a match official -- can you take it?"
+msgid_plural "%(count)d games need a match official -- can you take one?"
+msgstr[0] "Voor %(count)d wedstrijd is een official nodig -- kun jij die doen?"
+msgstr[1] "Voor %(count)d wedstrijden is een official nodig -- kun jij er een doen?"
+
+# -- line-up
+msgid "Line-up published"
+msgstr "Opstelling bekend"
+
+msgid "You're in the line-up for %(event)s."
+msgstr "Je staat in de opstelling voor %(event)s."
+
+msgid "Line-up updated"
+msgstr "Opstelling gewijzigd"
+
+msgid "The line-up for %(event)s has changed -- you're not in it this time."
+msgstr "De opstelling voor %(event)s is gewijzigd -- je staat er deze keer niet in."
+
+msgid "Line-up dropout"
+msgstr "Afmelding na opstelling"
+
+msgid "%(member)s can no longer make it to %(event)s: “%(note)s”"
+msgstr "%(member)s kan toch niet naar %(event)s komen: “%(note)s”"
+
+# -- attendance / events
+msgid "New events on your calendar"
+msgstr "Nieuwe afspraken in je agenda"
+
+msgid "%(count)d new event has been added to your calendar."
+msgid_plural "%(count)d new events have been added to your calendar."
+msgstr[0] "Er is %(count)d nieuwe afspraak aan je agenda toegevoegd."
+msgstr[1] "Er zijn %(count)d nieuwe afspraken aan je agenda toegevoegd."
+
+msgid "New %(kind)s: %(when)s. Let us know if you can make it."
+msgstr "Nieuw: %(kind)s op %(when)s. Laat ons weten of je erbij kunt zijn."
+
+msgid "Reminder: %(kind)s on %(when)s still needs your answer."
+msgstr "Herinnering: voor %(kind)s op %(when)s wachten we nog op je antwoord."
+
+# -- fixture re-check
+msgid "%(team)s · %(source)s · %(competition)s"
+msgstr "%(team)s · %(source)s · %(competition)s"
+
+msgid "%(team)s · %(source)s"
+msgstr "%(team)s · %(source)s"
+
+msgid "%(heading)s: the fixture list could not be fetched (%(error)s)."
+msgstr "%(heading)s: de wedstrijdkalender kon niet worden opgehaald (%(error)s)."
+
+msgid "%(count)d game moved to another date or time"
+msgid_plural "%(count)d games moved to another date or time"
+msgstr[0] "%(count)d wedstrijd verplaatst naar een andere datum of tijd"
+msgstr[1] "%(count)d wedstrijden verplaatst naar een andere datum of tijd"
+
+msgid "%(count)d new game"
+msgid_plural "%(count)d new games"
+msgstr[0] "%(count)d nieuwe wedstrijd"
+msgstr[1] "%(count)d nieuwe wedstrijden"
+
+msgid "%(count)d game removed"
+msgid_plural "%(count)d games removed"
+msgstr[0] "%(count)d wedstrijd verwijderd"
+msgstr[1] "%(count)d wedstrijden verwijderd"
+
+msgid "%(heading)s: %(changes)s."
+msgstr "%(heading)s: %(changes)s."
+
+msgid ", "
+msgstr ", "
+
+msgid "This week's check of your imported fixture lists found differences with the federation's current schedule:"
+msgstr "De wekelijkse controle van je geïmporteerde wedstrijdkalenders vond verschillen met de huidige planning van de bond:"
+
+msgid "Open the fixture re-check page in management, re-run the check and adjust the games via the import button."
+msgstr "Open de pagina voor het opnieuw controleren van wedstrijden in het beheer, voer de controle opnieuw uit en pas de wedstrijden aan via de importknop."
+
+msgid "Unexpected error while checking this fixture list."
+msgstr "Onverwachte fout bij het controleren van deze wedstrijdkalender."
+
+msgid "Fixture changes found for %(club)s"
+msgstr "Wijzigingen in de wedstrijdkalender van %(club)s"
+
+# -- live game pushes
+msgid "%(ours)s vs %(opponent)s"
+msgstr "%(ours)s - %(opponent)s"
+
+msgid "The game started."
+msgstr "De wedstrijd is begonnen."
+
+msgid "Goal for us by %(player)s (assist: %(assists)s), %(score)s."
+msgid_plural "Goal for us by %(player)s (assists: %(assists)s), %(score)s."
+msgstr[0] "Doelpunt voor ons van %(player)s (assist: %(assists)s), %(score)s."
+msgstr[1] "Doelpunt voor ons van %(player)s (assists: %(assists)s), %(score)s."
+
+msgid "Goal for us by %(player)s, %(score)s."
+msgstr "Doelpunt voor ons van %(player)s, %(score)s."
+
+msgid "Goal against by %(player)s, %(score)s."
+msgstr "Doelpunt tegen van %(player)s, %(score)s."
+
+msgid "A goal was taken back, %(score)s."
+msgstr "Een doelpunt is teruggenomen, %(score)s."
+
+msgid "Penalty for us: %(player)s, %(reason)s."
+msgstr "Straf voor ons: %(player)s, %(reason)s."
+
+msgid "Penalty for the opponent: %(player)s, %(reason)s."
+msgstr "Straf voor de tegenstander: %(player)s, %(reason)s."
+
+msgid "%(reason)s (%(kind)s)"
+msgstr "%(reason)s (%(kind)s)"
+
+msgid "Penalty shot for us."
+msgstr "Strafworp voor ons."
+
+msgid "Penalty shot for the opponent."
+msgstr "Strafworp voor de tegenstander."
+
+msgid "Period %(period)s ended, %(score)s."
+msgstr "Periode %(period)s afgelopen, %(score)s."
+
+msgid "Final result %(score)s."
+msgstr "Eindstand %(score)s."
+
+msgid "Minor"
+msgstr "Kleine straf"
+
+msgid "Bench minor"
+msgstr "Kleine bankstraf"
+
+msgid "Double minor"
+msgstr "Dubbele kleine straf"
+
+msgid "Major"
+msgstr "Grote straf"
+
+msgid "Misconduct"
+msgstr "Tuchtstraf"
+
+msgid "Game misconduct"
+msgstr "Wedstrijdtuchtstraf"
+
+msgid "Match penalty"
+msgstr "Matchstraf"

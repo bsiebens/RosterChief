@@ -30,9 +30,10 @@ def _notify_new_invites(club, new_invites, *, single, plural, title):
     count that opens the calendar."""
     for member, events in new_invites.items():
         if len(events) == 1:
-            notify_members([member], club=club, title=title, body=single % {"event": events[0].title}, source=events[0])
+            notify_members([member], club=club, title=title, body=lambda event=events[0]: str(single) % {"event": event.title}, source=events[0])
         else:
-            notify_members([member], club=club, title=title, body=ngettext(*plural, len(events)) % {"count": len(events)}, target_type="calendar")
+            count = len(events)
+            notify_members([member], club=club, title=title, body=lambda count=count: ngettext(*plural, count) % {"count": count}, target_type="calendar")
 
 
 def resync_upcoming_invites(club=None, *, now=None) -> dict:

@@ -39,8 +39,13 @@ def notify_order_placed(order) -> None:
     """The purchaser, and only the purchaser (not every shop admin), told
     their order is in and payable on pickup -- app + email, invoice PDF
     attached to the email."""
-    title = _("Order %(number)s placed") % {"number": order.number}
-    body = _("Your order is in — pay when you pick it up. Total: €%(total)s.") % {"total": order.total}
+
+    def title():
+        return _("Order %(number)s placed") % {"number": order.number}
+
+    def body():
+        return _("Your order is in — pay when you pick it up. Total: €%(total)s.") % {"total": order.total}
+
     notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, attachments=_invoice_attachment(order))
 
 
@@ -64,10 +69,16 @@ def notify_order_ready_for_pickup(order) -> None:
     when set, is folded into the body rather than passed separately: it's
     exactly what the member needs to actually go collect the thing, not an
     aside."""
-    title = _("Order %(number)s is ready for pickup") % {"number": order.number}
-    body = _("Your order is ready to collect — pay when you pick it up.")
-    if order.pickup_instructions:
-        body = f"{body} {order.pickup_instructions}"
+
+    def title():
+        return _("Order %(number)s is ready for pickup") % {"number": order.number}
+
+    def body():
+        text = _("Your order is ready to collect — pay when you pick it up.")
+        if order.pickup_instructions:
+            text = f"{text} {order.pickup_instructions}"
+        return text
+
     notify_members([order.purchaser], club=order.club, title=title, body=body, source=order)
 
 

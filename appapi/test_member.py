@@ -327,7 +327,7 @@ class EventDetailTests(ClubApiTestCase):
         self.assertTrue(body["answers"][0]["can_drop_out"])
 
     def test_a_games_timeline_always_carries_names_for_members(self):
-        team = Team.objects.create(club=self.club, name="U12", short_name="U12")  # show_player_names_publicly stays off
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")
         game = self.event(title="Game", kind=Event.EventKind.GAME)
         game.teams.add(team)
         goal = {"id": "g1", "type": "goal", "side": "away", "period": "1", "seconds": 61, "time": "01:01", "goal": {"scorer": {"name": "Sam Scorer", "number": 9}, "assists": []}}

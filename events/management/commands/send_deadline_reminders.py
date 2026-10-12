@@ -2,6 +2,7 @@ import datetime
 
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from events.models import Attendance, Event
@@ -52,8 +53,11 @@ class Command(ScheduledJobCommand):
             member_ids = Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.NO_RESPONSE).values_list("member_id", flat=True)
             members = Member.objects.filter(id__in=member_ids)
             if members:
-                when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
-                body = _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
+                start = timezone.localtime(event.start)
+
+                def body(event=event, start=start):
+                    return _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": date_format(start, "D d M, H:i")}
+
                 notify_members(members, club=event.club, title=event.title, body=body, source=event)
                 members_notified += len(members)
 

@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
@@ -124,8 +125,11 @@ def assign_official(event, member, *, assigned_by):
     if assigned_by is not None:
         # A staff pick from the management app -- tell them. Self-service accepts pass
         # assigned_by=None: they just did it themselves.
-        when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
-        body = _("You have been assigned as an official for %(event)s on %(when)s.") % {"event": event.title, "when": when}
+        start = timezone.localtime(event.start)
+
+        def body():
+            return _("You have been assigned as an official for %(event)s on %(when)s.") % {"event": event.title, "when": date_format(start, "D d M, H:i")}
+
         notify_members([member], club=event.club, title=_("Official assignment"), body=body, source=event)
     return official
 
@@ -152,7 +156,10 @@ def remove_official(official):
     if member is None:
         return
     OfficialSignup.objects.filter(event=event, member=member).update(status=OfficialSignup.Status.DECLINED, responded_at=timezone.now())
-    body = _("You have been removed as an official for %(event)s.") % {"event": event.title}
+
+    def body():
+        return _("You have been removed as an official for %(event)s.") % {"event": event.title}
+
     notify_members([member], club=event.club, title=_("Official assignment removed"), body=body, source=event)
 
 
@@ -192,7 +199,10 @@ def sync_official_invites(event, *, notify=True):
 
     OfficialSignup.objects.bulk_create([OfficialSignup(event=event, member=member) for member in new_members])
     if notify:
-        body = _("%(event)s needs a match official -- can you take it?") % {"event": event.title}
+
+        def body():
+            return _("%(event)s needs a match official -- can you take it?") % {"event": event.title}
+
         notify_members(new_members, club=event.club, title=_("Official needed"), body=body, source=event)
     return new_members
 
@@ -227,7 +237,10 @@ def decline_official_signup(signup):
         manager_ids = StaffAssignment.objects.filter(team__in=signup.event.teams.all(), position__management_position=True, season=event_season(signup.event)).values_list("member_id", flat=True).distinct()
         managers = Member.objects.filter(pk__in=manager_ids)
         if managers:
-            body = _("%(member)s can no longer act as an official for %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+
+            def body():
+                return _("%(member)s can no longer act as an official for %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+
             notify_members(managers, club=signup.event.club, title=_("Official dropped out"), body=body, source=signup.event)
 
     return signup

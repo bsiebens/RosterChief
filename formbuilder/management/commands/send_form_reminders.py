@@ -1,4 +1,5 @@
 import datetime
+from functools import partial
 
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -13,6 +14,10 @@ from notifications.services import notify_members
 #: forms tend to be asked closer to their deadline than a scheduling
 #: decision is, so a week's notice is usually moot by the time one goes out.
 FORM_REMINDER_LEAD_TIME = datetime.timedelta(days=3)
+
+
+def _reminder_body(form_title):
+    return _("Reminder: “%(form)s” still needs your response.") % {"form": form_title}
 
 
 class Command(ScheduledJobCommand):
@@ -39,8 +44,7 @@ class Command(ScheduledJobCommand):
         for send in candidates:
             members = members_not_yet_submitted(send)
             if members:
-                body = _("Reminder: “%(form)s” still needs your response.") % {"form": send.form.title}
-                notify_members(members, club=send.club, title=send.form.title, body=body, source=send)
+                notify_members(members, club=send.club, title=send.form.title, body=partial(_reminder_body, send.form.title), source=send)
                 members_notified += len(members)
 
             # Marked processed even when nobody still needed a nudge -- same

@@ -183,8 +183,14 @@ def notify_newly_invited(member, *, club, events):
     preference over a flood, just per-recipient instead of cross-family."""
     if not events:
         return
-    title = _("New events on your calendar")
-    body = ngettext("%(count)d new event has been added to your calendar.", "%(count)d new events have been added to your calendar.", len(events)) % {"count": len(events)}
+    count = len(events)
+
+    def title():
+        return _("New events on your calendar")
+
+    def body():
+        return ngettext("%(count)d new event has been added to your calendar.", "%(count)d new events have been added to your calendar.", count) % {"count": count}
+
     notify_members([member], club=club, title=title, body=body, target_type="calendar")
 
 

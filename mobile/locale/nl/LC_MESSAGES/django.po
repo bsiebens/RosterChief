@@ -1,0 +1,17 @@
+# Dutch translation of RosterChief mobile notifications.
+msgid ""
+msgstr ""
+"Project-Id-Version: RosterChief\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-12 12:00+0200\n"
+"PO-Revision-Date: 2026-10-12 12:00+0200\n"
+"Last-Translator: RosterChief\n"
+"Language-Team: Dutch\n"
+"Language: nl\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Reminder: %(kind)s on %(when)s still needs your answer."
+msgstr "Herinnering: we wachten nog op jouw antwoord voor %(kind)s op %(when)s."
