@@ -27,6 +27,7 @@ from club.models import ClubMembership, Season
 from club.services.access import current_season
 from club.services.onboarding import blocked_member_ids_for_event, open_requirements_blocking
 from events.models import Attendance, Event
+from events.services.lineup import notify_coach_dropout
 from members.models import GroupMembership, Member
 from notifications.services import notify_members
 from teams.models import TeamMembership
@@ -201,6 +202,74 @@ def record_check_in(attendance, *, showed_up):
     be recorded the moment something does."""
     attendance.showed_up = showed_up
     attendance.save(update_fields=["showed_up"])
+
+
+COACH_ANSWERS = ("present", "absent", "maybe", "no_response")
+COACH_NOTE_MAX = 500
+
+
+class CoachAnswerError(Exception):
+    """Why a coach's change was refused: a stable ``code`` (the app API's error code) and a
+    translated message."""
+
+    def __init__(self, code: str, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def set_answer_as_coach(attendance, status, coach_note, *, coach, notify=False):
+    """A manager sets ``attendance``'s In/Out answer on the player's behalf and/or writes the
+    private coach note (``None`` leaves the note alone, ``""`` clears it).
+
+    Unlike the player's own RSVP (events.services.rsvp.submit_rsvp) the reply deadline and the
+    event's start don't stop it -- a coach corrects answers after the fact -- but a cancelled
+    event can't be changed. The rules:
+
+    * ``present`` / ``maybe`` / ``absent`` set that answer; ``no_response`` resets it (and the
+      "set by coach" mark with it). ``present`` drops the player's reason, as their own answer would.
+    * A player SELECTED in the published line-up can only be marked ``absent`` (the same
+      outcome as their own drop-out: ABSENT, the line-up pick itself stays for the coach to
+      swap, the event's *other* managers are told). ``present`` just keeps them in; anything
+      else is refused (``invalid_status``) rather than silently dropping them from the published line-up.
+    * The player is told only when ``notify`` is set, and never sees ``coach_note``.
+    """
+    Status = Attendance.AttendanceStatus
+    event = attendance.event
+    if status not in COACH_ANSWERS:
+        raise CoachAnswerError("invalid_status", _("Unknown status."))
+    if event.cancelled:
+        raise CoachAnswerError("event_cancelled", _("“%(title)s” is cancelled, so answers can no longer be changed.") % {"title": event.title})
+
+    was = attendance.status
+    in_lineup = was == Status.SELECTED
+    if in_lineup and status in ("maybe", "no_response"):
+        raise CoachAnswerError("invalid_status", _("This player is in the published line-up: remove them from it first, or mark them absent."))
+
+    if was in (Status.SELECTED, Status.NOT_SELECTED) and status == "present":
+        pass  # a published line-up already says they're available; keep its verdict
+    else:
+        attendance.status = status
+        if status in ("present", "no_response"):
+            attendance.note = ""
+        attendance.answered_by_coach = status != "no_response"
+    attendance.coach_set_by = coach
+    attendance.coach_set_at = timezone.now()
+    if coach_note is not None:
+        attendance.coach_note = coach_note.strip()
+    attendance.save()
+
+    if in_lineup and status == "absent":
+        notify_coach_dropout(event, attendance.member, coach)
+    changed = attendance.status != was
+    if notify and changed:
+        label = {"present": _("In"), "absent": _("Out"), "maybe": _("Maybe"), "no_response": _("No answer")}[status]
+
+        def body():
+            return _("Your coach set your answer for %(event)s to “%(answer)s”.") % {"event": event.title, "answer": label}
+
+        notify_members([attendance.member], club=event.club, title=_("Your answer was changed"), body=body, source=event)
+    return attendance
 
 
 def team_attendance_rate(team, season):

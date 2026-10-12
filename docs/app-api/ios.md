@@ -574,8 +574,15 @@ Ignore a `type` you don't know.
 (default `responded`: in or maybe, the web default, since nobody expects a silent or declined
 player to show up). One row per person: `attendance_id`, `member_id`, `first_name`,
 `last_name`, `jersey_number`, `position`, `status`, `note` (the reason the player gave),
-`showed_up` (null until checked in) and `photo_url` (null when there is no photo or the account
-may not see it; fetch it with the bearer token like the member photos).
+`showed_up` (null until checked in), `coach_note`, `answered_by_coach` and `photo_url` (null when
+there is no photo or the account may not see it; fetch it with the bearer token like the member
+photos).
+
+`coach_note` is the coaches' **private** note: a string (empty when none) for managers
+(`can_manage_attendance`), always `null` for any other coach, whatever it says. It is never shown to
+the player or their guardians, never in a member endpoint or the public API, and never in a
+notification, push or email. `answered_by_coach` is true while the current answer was set by a coach
+(show "set by coach"); the player answering themselves, or a reset, makes it false.
 
 `POST …/check-ins` `{"items": [{"attendance_id", "showed_up": true|false|null}]}` records the
 check-in (`null` clears it). Send only the rows that changed; repeating a call changes nothing.
@@ -583,6 +590,39 @@ An `attendance_id` that isn't a row of this event fails the whole call with
 **`422 unknown_attendance`** (`fields.items` lists the ids) and saves nothing. The response is
 the sheet again; pass the same `filter` as a query parameter to get the list you are showing.
 **Managers only.**
+
+`POST /teams/{team_id}/events/{event_id}/attendance/{attendance_id}/status` sets a player's In/Out
+answer and/or the private note, and answers the sheet (same `?filter=` as above, so replace your
+list with it). **Managers only**, accepts an `Idempotency-Key`.
+
+```json
+{"status": "absent", "coach_note": "Called in sick, back next week", "notify": false}
+```
+
+* `status`: `present`, `absent`, `maybe` or `no_response` (resets the answer). Anything else is
+  `422 invalid_status`. It works after the reply deadline and after the event started.
+* `coach_note`: up to 500 characters; leave it out or send `null` to keep it, `""` to clear it.
+* `notify` (default `false`): tell the player their answer was changed (an inbox notification,
+  push/email as usual: "Your coach set your answer for Derby to “Out”."). Without it the player is
+  not told. The coach note is never part of the text. A call that changes nothing never notifies.
+* The player's own `note` (their reason) stays as they wrote it, except that `present` and
+  `no_response` clear it, as the player's own In would.
+* **Published line-up:** a player who is `selected` can only be marked `absent`. That works like
+  their own drop-out: they become `absent`, their pick stays in the line-up for you to swap
+  (`PUT …/lineup`), and the event's *other* managers get a "Line-up dropout" notification. The
+  player is not notified unless you pass `notify`. `present` keeps them selected (only the note
+  changes); `maybe` and `no_response` are `422 invalid_status`.
+
+Errors: `403 manager_required` (not a manager of the team), `404 not_found` (not your team, not
+this event's row), `409 event_cancelled`, `422 invalid_status`, `422 validation_error` (note over
+500 characters).
+
+```json
+{"event": {…}, "filter": "responded", "counts": {"total": 14, "responded": 9, "silent": 2, "declined": 3, "checked_in": 0},
+ "items": [{"attendance_id": "…", "member_id": "…", "first_name": "Ann", "last_name": "Aal", "jersey_number": 7,
+            "position": "Forward", "status": "present", "note": "", "showed_up": null,
+            "coach_note": "Spoke to her mum", "answered_by_coach": true, "photo_url": null}]}
+```
 
 `POST …/remind-silent` sends the reminder to everyone still silent and answers
 `{"notified": n}` (0 when everybody answered). It notifies, so send an `Idempotency-Key`: a

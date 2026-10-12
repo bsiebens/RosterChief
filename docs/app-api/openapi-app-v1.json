@@ -241,11 +241,28 @@
       },
       "AttendanceRowOut": {
         "properties": {
+          "answered_by_coach": {
+            "description": "The current answer was set by a coach for the player (show \"set by coach\"). False when the player answered or the answer was reset.",
+            "title": "Answered By Coach",
+            "type": "boolean"
+          },
           "attendance_id": {
             "description": "What a check-in refers to.",
             "format": "uuid",
             "title": "Attendance Id",
             "type": "string"
+          },
+          "coach_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coaches' private note on this player for this event (empty string when none). Only the team's managers (`can_manage_attendance`) get the text: for any other coach it is always `null`, whatever the note says. It is never shown to the player or their guardians, never in the member endpoints or the public API, and never in a notification or email.",
+            "title": "Coach Note"
           },
           "first_name": {
             "title": "First Name",
@@ -321,6 +338,8 @@
           "status",
           "note",
           "showed_up",
+          "coach_note",
+          "answered_by_coach",
           "photo_url"
         ],
         "title": "AttendanceRowOut",
@@ -356,6 +375,39 @@
           "items"
         ],
         "title": "AttendanceSheetOut",
+        "type": "object"
+      },
+      "AttendanceStatusIn": {
+        "properties": {
+          "coach_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The private coach note: omitted or null leaves it as it is, an empty string clears it.",
+            "title": "Coach Note"
+          },
+          "notify": {
+            "default": false,
+            "description": "Tell the player their answer was changed (in-app, and push/email like any notification). Never includes the coach note. Default false.",
+            "title": "Notify",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "`present`, `absent`, `maybe` or `no_response` (resets the answer). Anything else is `422 invalid_status`.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "AttendanceStatusIn",
         "type": "object"
       },
       "AuthorOut": {
@@ -13224,6 +13276,143 @@
           }
         ],
         "summary": "Who is coming to an event",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/attendance/{attendance_id}/status": {
+      "post": {
+        "description": "Sets the player's In/Out answer and/or the private coach note, and returns the sheet as\n`GET …/attendance` would (same `filter`). Works after the reply deadline and after the\nevent started; the row is marked `answered_by_coach`. `no_response` resets the answer.\nA player in the published line-up can only be marked `absent` (like their own drop-out:\nthey become `absent`, the pick stays for you to swap, the event's other managers are told);\n`present` keeps them in, `maybe` / `no_response` are `422 invalid_status`. The player is\ntold only with `notify: true` and never sees `coach_note`. Errors: `403 manager_required`,\n`404 not_found`, `409 event_cancelled`, `422 invalid_status`. Accepts an `Idempotency-Key`.\nManagers only.",
+        "operationId": "appapi_routers_coach_set_attendance_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attendance_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Attendance Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "responded",
+              "description": "Which rows: `responded` (default), `silent`, `declined` or `all`.",
+              "enum": [
+                "responded",
+                "silent",
+                "declined",
+                "all"
+              ],
+              "title": "Filter",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendanceStatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceSheetOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Set a player's answer as a coach",
         "tags": [
           "coach"
         ]

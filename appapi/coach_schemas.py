@@ -52,6 +52,11 @@ class AttendanceRowOut(Schema):
     status: str = Field(description="`no_response`, `present`, `absent`, `maybe`, `selected`, `not_selected`, `excused`.")
     note: str = Field(description="The reason the player gave with their answer.")
     showed_up: bool | None = Field(description="The recorded check-in; null until one is recorded.")
+    coach_note: str | None = Field(
+        description="The coaches' private note on this player for this event (empty string when none). Only the team's managers (`can_manage_attendance`) get the text: for any other coach it is always `null`, whatever the note says. "
+        "It is never shown to the player or their guardians, never in the member endpoints or the public API, and never in a notification or email."
+    )
+    answered_by_coach: bool = Field(description='The current answer was set by a coach for the player (show "set by coach"). False when the player answered or the answer was reset.')
     photo_url: str | None = Field(description="Same rule as the member photos: null when there is no photo or the account may not see it. Fetch it with the bearer token.")
 
 
@@ -69,6 +74,12 @@ class CheckInItemIn(Schema):
 
 class CheckInsIn(Schema):
     items: list[CheckInItemIn] = Field(max_length=200, description="Any subset of the event's rows. Sending the same item twice is harmless.")
+
+
+class AttendanceStatusIn(Schema):
+    status: str = Field(description="`present`, `absent`, `maybe` or `no_response` (resets the answer). Anything else is `422 invalid_status`.")
+    coach_note: str | None = Field(None, max_length=500, description="The private coach note: omitted or null leaves it as it is, an empty string clears it.")
+    notify: bool = Field(False, description="Tell the player their answer was changed (in-app, and push/email like any notification). Never includes the coach note. Default false.")
 
 
 class RemindSilentOut(Schema):

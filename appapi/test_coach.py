@@ -4,17 +4,22 @@ AppApiTestCase) is staff of "U16": a plain coach by default, a manager with ``ma
 import datetime
 import uuid
 
+from allauth.account.models import EmailAddress
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from club.models import Season
-from events.models import Attendance, Event, Lineup
+from events.models import Attendance, Event, Lineup, LineupSelection
 from events.services import detach_occurrence, generate_occurrences, propagate_series
+from events.services.rsvp import submit_rsvp
 from members.models import Member
 from notifications.models import Notification
 from rosterchief.test_support import make_club
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
-from .tests import CLUB_HOST, AppApiTestCase
+from .tests import CLUB_HOST, PASSWORD, AppApiTestCase
+
+User = get_user_model()
 
 Status = Attendance.AttendanceStatus
 
@@ -218,6 +223,8 @@ class AttendanceTests(CoachApiTestCase):
                 "status": "present",
                 "note": "",
                 "showed_up": None,
+                "coach_note": None,  # this caller is a plain coach, not a manager
+                "answered_by_coach": False,
                 "photo_url": None,
             },
         )
@@ -259,6 +266,16 @@ class AttendanceTests(CoachApiTestCase):
 
     def test_a_coach_without_a_management_position_can_read(self):
         self.assertEqual(self.get(self.url(f"/events/{self.game.pk}/attendance")).status_code, 200)
+
+    def test_the_coach_note_is_null_for_a_coach_without_a_management_position(self):
+        Attendance.objects.filter(member=self.ann).update(coach_note="SECRET-NOTE")
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        response = self.get(self.url(f"/events/{self.game.pk}/attendance"), filter="all")
+
+        self.assertNotIn("SECRET-NOTE", response.content.decode())
+        self.assertEqual({row["coach_note"] for row in response.json()["items"]}, {None})
 
 
 class CheckInTests(CoachApiTestCase):
@@ -307,6 +324,160 @@ class CheckInTests(CoachApiTestCase):
 
         self.assertError(self.check_in((self.ann, True)), 403, "manager_required")
         self.assertIsNone(Attendance.objects.get(pk=self.rows[self.ann.pk].pk).showed_up)
+
+
+class CoachAnswerTests(CoachApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.manage()
+        self.game = self.event(title="Derby")
+        self.ann = self.player("Ann", "Aal", status=Status.NO_RESPONSE, event=self.game)
+        self.row = Attendance.objects.get(event=self.game, member=self.ann)
+
+    def set(self, status, coach_note=None, row=None, event=None, headers=None, notify=False, **params):
+        body = {"status": status, "notify": notify}
+        if coach_note is not None:
+            body["coach_note"] = coach_note
+        query = "&".join(f"{key}={value}" for key, value in params.items())
+        path = self.url(f"/events/{(event or self.game).pk}/attendance/{(row or self.row).pk}/status") + (f"?{query}" if query else "")
+        return self.send("post", path, body, **(headers or {}))
+
+    def fresh(self):
+        return Attendance.objects.get(pk=self.row.pk)
+
+    def test_sets_the_answer_records_the_coach_and_returns_the_sheet(self):
+        before = Notification.objects.count()
+        response = self.set("present", "Cleared by phone", filter="all")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        [item] = response.json()["items"]
+        self.assertEqual((item["status"], item["coach_note"], item["answered_by_coach"], item["note"]), ("present", "Cleared by phone", True, ""))
+        row = self.fresh()
+        self.assertEqual((row.coach_set_by, row.answered_by_coach), (self.member, True))
+        self.assertIsNotNone(row.coach_set_at)
+        self.assertEqual(Notification.objects.count(), before)  # the player isn't told by default
+
+    def test_works_after_the_deadline_and_the_start(self):
+        Event.objects.filter(pk=self.game.pk).update(deadline=timezone.now() - datetime.timedelta(days=1), start=timezone.now() - datetime.timedelta(hours=1))
+
+        self.assertEqual(self.set("absent").status_code, 200)
+        self.assertEqual(self.fresh().status, Status.ABSENT)
+
+    def test_absent_keeps_the_players_own_reason_and_present_drops_it(self):
+        Attendance.objects.filter(pk=self.row.pk).update(status=Status.MAYBE, note="Maybe the flu")
+
+        self.set("absent")
+        self.assertEqual(self.fresh().note, "Maybe the flu")
+        self.set("present")
+        self.assertEqual(self.fresh().note, "")
+
+    def test_no_response_resets_the_answer(self):
+        self.set("present")
+
+        response = self.set("no_response", filter="all")
+
+        item = response.json()["items"][0]
+        self.assertEqual((item["status"], item["answered_by_coach"]), ("no_response", False))
+
+    def test_the_note_can_be_cleared_left_alone_or_changed_without_the_answer(self):
+        self.set("present", "First")
+        self.set("present")
+        self.assertEqual(self.fresh().coach_note, "First")
+        self.set("present", "")
+        self.assertEqual(self.fresh().coach_note, "")
+
+    def test_a_note_over_500_characters_is_refused(self):
+        self.assertEqual(self.set("present", "x" * 501).status_code, 422)
+        self.assertEqual(self.fresh().status, Status.NO_RESPONSE)
+
+    def test_unknown_statuses_are_invalid(self):
+        for status in ("selected", "excused", "dropout", "nonsense"):
+            self.assertError(self.set(status), 422, "invalid_status")
+        self.assertEqual(self.fresh().status, Status.NO_RESPONSE)
+
+    def test_a_cancelled_event_is_refused(self):
+        Event.objects.filter(pk=self.game.pk).update(cancelled=True)
+
+        self.assertError(self.set("present"), 409, "event_cancelled")
+
+    def test_a_row_of_another_event_or_team_is_not_found(self):
+        other = self.event(title="Other")
+        self.assertError(self.set("present", event=other), 404, "not_found")
+        stranger = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        self.assertError(self.send("post", f"/teams/{stranger.pk}/events/{self.game.pk}/attendance/{self.row.pk}/status", {"status": "present"}), 404, "not_found")
+
+    def test_a_coach_without_a_management_position_is_refused(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        self.assertError(self.set("present", "x"), 403, "manager_required")
+        self.assertEqual(self.fresh().coach_note, "")
+
+    def test_a_player_in_the_published_line_up_going_absent_follows_the_dropout_rules(self):
+        Attendance.objects.filter(pk=self.row.pk).update(status=Status.SELECTED)
+        lineup = Lineup.objects.create(event=self.game, team=self.team, published_at=timezone.now())
+        LineupSelection.objects.create(lineup=lineup, member=self.ann)
+        boss = Member.objects.create(first_name="Other", last_name="Manager")
+        StaffAssignment.objects.create(team=self.team, member=boss, season=self.season, position=self.manager_position)
+        before = Notification.objects.count()
+
+        response = self.set("absent", "Hurt his ankle")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.fresh().status, Status.ABSENT)
+        self.assertTrue(LineupSelection.objects.filter(lineup=lineup, member=self.ann).exists())  # the coach swaps them
+        [told] = Notification.objects.exclude(pk__in=[]).order_by("-created")[: Notification.objects.count() - before]
+        self.assertEqual(told.member, boss)  # the other manager, not the actor and not the player
+        self.assertNotIn("ankle", told.body)
+
+    def test_a_player_in_the_line_up_cannot_be_made_maybe_or_reset_but_present_keeps_them_in(self):
+        Attendance.objects.filter(pk=self.row.pk).update(status=Status.SELECTED)
+
+        self.assertError(self.set("maybe"), 422, "invalid_status")
+        self.assertError(self.set("no_response"), 422, "invalid_status")
+        self.assertEqual(self.set("present", "Confirmed").status_code, 200)
+        self.assertEqual(self.fresh().status, Status.SELECTED)
+
+    def test_notify_tells_only_the_player_and_never_the_coach_note(self):
+        before = Notification.objects.count()
+
+        self.set("absent", "SECRET-NOTE", notify=True)
+
+        self.assertEqual(Notification.objects.count(), before + 1)
+        notification = Notification.objects.get(member=self.ann, title="Your answer was changed")
+        self.assertNotIn("SECRET-NOTE", notification.title + notification.body + str(notification.translations))
+
+    def test_a_retry_with_the_same_key_changes_and_notifies_once(self):
+        headers = {"HTTP_IDEMPOTENCY_KEY": "status-1"}
+        before = Notification.objects.count()
+
+        first = self.set("absent", notify=True, headers=headers)
+        second = self.set("absent", notify=True, headers=headers)
+
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(Notification.objects.count(), before + 1)
+
+    def test_the_players_own_answer_clears_the_coach_mark_and_the_note_stays_private(self):
+        self.set("absent", "SECRET-NOTE")
+
+        submit_rsvp(self.fresh(), "present")
+
+        row = self.fresh()
+        self.assertFalse(row.answered_by_coach)
+        self.assertEqual(row.coach_note, "SECRET-NOTE")  # kept, still private
+
+    def test_the_coach_note_is_in_no_member_facing_response(self):
+        Attendance.objects.filter(pk=self.row.pk).update(coach_note="SECRET-NOTE", answered_by_coach=True)
+        ann_user = User.objects.create_user(email="ann@example.com", password=PASSWORD)
+        EmailAddress.objects.create(user=ann_user, email=ann_user.email, verified=True, primary=True)
+        Member.objects.filter(pk=self.ann.pk).update(user=ann_user)
+        token = self.login("ann@example.com")
+
+        for path in (f"/events/{self.game.pk}", "/calendar", "/home"):
+            text = self.api("get", path, token=token, host=CLUB_HOST).content.decode()
+            self.assertNotIn("SECRET-NOTE", text, path)
+            self.assertNotIn("coach_note", text, path)
 
 
 class RemindSilentTests(CoachApiTestCase):

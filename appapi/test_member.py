@@ -672,6 +672,7 @@ class UnknownIdTests(ClubApiTestCase):
         "{item_id}": {"quantity": 1},
         "live-activity": {"installation_id": "unknown-install", "activity_token": "x"},
         "check-ins": {"items": []},
+        "/status": {"status": "present"},
         "{event_id}": {},
         "{series_id}": {},
         "{membership_id}": {},

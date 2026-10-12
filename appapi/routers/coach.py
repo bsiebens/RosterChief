@@ -17,12 +17,12 @@ from ninja import Query, Router
 
 from club.services.access import current_season, event_season
 from events.models import Attendance, Event, Lineup
-from events.services.attendance import record_check_in
+from events.services.attendance import CoachAnswerError, record_check_in, set_answer_as_coach
 from events.services.coach import IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, remind_silent, still_current_events
-from teams.models import TeamMembership
+from teams.models import StaffAssignment, TeamMembership
 
 from ..coach import CoachScope, coach_scope, photo_url_for
-from ..coach_schemas import AttendanceSheetOut, CheckInsIn, RemindSilentOut, TodayOut
+from ..coach_schemas import AttendanceSheetOut, AttendanceStatusIn, CheckInsIn, RemindSilentOut, TodayOut
 from ..errors import ApiError
 from ..idempotency import idempotent
 from ..presenters import event_out, team_ref
@@ -113,6 +113,8 @@ def _sheet(request, coach: CoachScope, event: Event, filter_name: str) -> dict:
                 "status": row.status,
                 "note": row.note,
                 "showed_up": row.showed_up,
+                "coach_note": row.coach_note if coach.is_manager else None,
+                "answered_by_coach": row.answered_by_coach,
                 "photo_url": photo_url_for(request, member, coach.club),
             }
         )
@@ -154,6 +156,37 @@ def check_ins(request, team_id: uuid.UUID, event_id: uuid.UUID, payload: CheckIn
         for pk, showed_up in wanted.items():
             record_check_in(rows[pk], showed_up=showed_up)
     return _sheet(request, coach, event, filter)
+
+
+@router.post(
+    "/teams/{team_id}/events/{event_id}/attendance/{attendance_id}/status",
+    response={200: AttendanceSheetOut, **ERRORS, 409: ErrorOut, 422: ErrorOut},
+    summary="Set a player's answer as a coach",
+)
+def set_attendance_status(request, team_id: uuid.UUID, event_id: uuid.UUID, attendance_id: uuid.UUID, payload: AttendanceStatusIn, filter: FilterQuery = "responded"):
+    """Sets the player's In/Out answer and/or the private coach note, and returns the sheet as
+    `GET …/attendance` would (same `filter`). Works after the reply deadline and after the
+    event started; the row is marked `answered_by_coach`. `no_response` resets the answer.
+    A player in the published line-up can only be marked `absent` (like their own drop-out:
+    they become `absent`, the pick stays for you to swap, the event's other managers are told);
+    `present` keeps them in, `maybe` / `no_response` are `422 invalid_status`. The player is
+    told only with `notify: true` and never sees `coach_note`. Errors: `403 manager_required`,
+    `404 not_found`, `409 event_cancelled`, `422 invalid_status`. Accepts an `Idempotency-Key`.
+    Managers only."""
+    coach = coach_scope(request, team_id, manager=True)
+    event = _team_event(coach, event_id)
+    actor = StaffAssignment.objects.filter(member__user=request.user, team=coach.team, season=event_season(event)).select_related("member").first()
+
+    def work():
+        with transaction.atomic():
+            attendance = get_object_or_404(Attendance.objects.select_for_update().select_related("event", "member"), pk=attendance_id, event=event)
+            try:
+                set_answer_as_coach(attendance, payload.status, payload.coach_note, coach=actor.member if actor else None, notify=payload.notify)
+            except CoachAnswerError as exc:
+                raise ApiError(422 if exc.code == "invalid_status" else 409, exc.code, exc.message) from exc
+        return 200, _sheet(request, coach, event, filter)
+
+    return idempotent(request, work)[1]
 
 
 @router.post("/teams/{team_id}/events/{event_id}/remind-silent", response={200: RemindSilentOut, **ERRORS}, summary="Nudge players who have not answered")

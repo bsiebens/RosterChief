@@ -136,6 +136,21 @@ def selected_members_by_position(lineup):
     return categories
 
 
+def notify_coach_dropout(event, member, coach):
+    """A manager marked ``member`` Out of a published line-up for them: the event's other
+    managers hear about it (the one who did it already knows), the way ``notify_dropout``
+    tells them about a player's own dropout. Nothing here goes to the player, and the coach's
+    private note is never part of the text."""
+    manager_ids = StaffAssignment.objects.filter(team__in=event.teams.all(), position__management_position=True, season=event_season(event)).values_list("member_id", flat=True).distinct()
+    managers = Member.objects.filter(pk__in=manager_ids).exclude(pk=coach.pk)
+    if managers:
+
+        def body():
+            return _("%(coach)s marked %(member)s as out of the line-up for %(event)s.") % {"coach": coach.get_full_name(), "member": member.get_full_name(), "event": event.title}
+
+        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event)
+
+
 def notify_dropout(event, member, note):
     """A player who was SELECTED in a published line-up reporting, after the
     fact, that they can no longer make it (mobile.views.EventDetailView.post's

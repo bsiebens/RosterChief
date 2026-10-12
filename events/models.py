@@ -245,6 +245,14 @@ class Attendance(UUIDModel):
         help_text=_("Recorded by a check-in, separate from the RSVP status above. Blank means no check-in has been recorded yet."),
     )
     note = models.TextField(_("note"), blank=True)
+    coach_note = models.TextField(
+        _("coach note"),
+        blank=True,
+        help_text=_("Private to the team's managers (the people who may manage attendance): never shown to the player or their guardians, in the member app, the public API, or in any notification."),
+    )
+    answered_by_coach = models.BooleanField(_("answered by a coach"), default=False, help_text=_("The current answer was set by a coach for the player. A reply from the player themselves, or a reset, clears this."))
+    coach_set_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("last changed by coach"))
+    coach_set_at = models.DateTimeField(_("last changed by a coach at"), null=True, blank=True)
 
     class Meta:
         verbose_name = _("attendance")
