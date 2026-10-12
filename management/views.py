@@ -1401,7 +1401,7 @@ class TeamReorderView(MemberAdminRequiredMixin, View):
         if len(set(ids)) != len(ids) or any(pk not in by_id for pk in ids):
             return JsonResponse({"error": "invalid"}, status=400)
         slots = sorted(teams.index(by_id[pk]) for pk in ids)
-        for slot, pk in zip(slots, ids):
+        for slot, pk in zip(slots, ids, strict=True):
             teams[slot] = by_id[pk]
         for number, team in enumerate(teams, start=1):
             team.ordering = number
