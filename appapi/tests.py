@@ -271,6 +271,15 @@ class DeviceTests(AppApiTestCase):
         device = PushDevice.objects.get()
         self.assertEqual((device.app_version, device.locale, device.enabled), ("1.0.1", "en", True))
 
+    def test_push_to_start_token_is_kept_unless_changed(self):
+        token = self.login()
+        self.api("post", "/devices", token=token, data=self.device(push_to_start_token="cc33"))
+        self.api("post", "/devices", token=token, data=self.device())
+        self.assertEqual(PushDevice.objects.get().push_to_start_token, "cc33")
+
+        self.api("post", "/devices", token=token, data=self.device(push_to_start_token=""))
+        self.assertEqual(PushDevice.objects.get().push_to_start_token, "")
+
     def test_install_moves_to_the_account_that_signs_in(self):
         other = User.objects.create_user(email="other@example.com", password=PASSWORD)
         EmailAddress.objects.create(user=other, email=other.email, verified=True, primary=True)

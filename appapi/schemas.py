@@ -115,6 +115,17 @@ class DeviceIn(Schema):
     push_token: str = Field(min_length=1, max_length=512, description="The APNs device token as a hex string (iOS) or the FCM registration token (Android).")
     app_version: str = Field("", max_length=32)
     locale: str = Field("", max_length=16, description="The app's language, e.g. `nl` or `en`; push texts are written in it.")
+    push_to_start_token: str | None = Field(None, max_length=512, description="iOS 17.2+: the ActivityKit push-to-start token (hex), so the server can start a Live Activity. Omit to leave the stored one unchanged; send an empty string to clear it.")
+
+
+class LiveActivityIn(Schema):
+    installation_id: str = Field(min_length=8, max_length=64, description="The install running the activity (the one registered with `POST /devices`).")
+    activity_token: str = Field(min_length=1, max_length=512, description="The activity's ActivityKit push token (hex). It changes over an activity's life: send it again whenever it does.")
+
+
+class LiveActivityOut(Schema):
+    event_id: uuid.UUID
+    installation_id: str
 
 
 class DeviceOut(Schema):

@@ -26,8 +26,9 @@ from mobile.services.home import home_summary
 from teams.models import Team
 
 from ..errors import ApiError
+from ..models import LiveActivity, PushDevice
 from ..presenters import attendance_out, event_out, followed_game_out, money, news_summary, season_out, signup_out, task_out
-from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, FollowStateOut, GameFollowsIn, GameFollowsOut, HomeOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
+from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, FollowStateOut, GameFollowsIn, GameFollowsOut, HomeOut, LiveActivityIn, LiveActivityOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
 from ..scope import club_scope
 
 router = Router(tags=["member"])
@@ -279,6 +280,30 @@ def unfollow_game(request, event_id: uuid.UUID):
     event = _followable_game(scope, event_id)
     unfollow_event(request.user, scope.club, event)
     return follow_state(request.user, scope.club, event)
+
+
+@router.post("/events/{event_id}/live-activity", response={200: LiveActivityOut, **ERRORS, 422: ErrorOut}, summary="Register a Live Activity's push token")
+def register_live_activity(request, event_id: uuid.UUID, payload: LiveActivityIn):
+    """Call when a Live Activity for this game starts, and again whenever its push token changes.
+    One activity per install and game: repeating the call replaces the token. `404 not_found` when
+    `installation_id` isn't one of the account's registered installs, `422 not_a_game` for anything
+    but a game, `404 feature_disabled` without game timelines."""
+    scope = club_scope(request)
+    event = _followable_game(scope, event_id)
+    device = PushDevice.objects.filter(installation_id=payload.installation_id, user=request.user).first()
+    if device is None:
+        raise ApiError(404, "not_found")
+    LiveActivity.objects.update_or_create(device=device, event=event, defaults={"club": scope.club, "token": payload.activity_token})
+    return {"event_id": event.pk, "installation_id": device.installation_id}
+
+
+@router.delete("/events/{event_id}/live-activity/{installation_id}", response={204: None, **ERRORS, 422: ErrorOut}, summary="Remove a Live Activity's push token")
+def end_live_activity(request, event_id: uuid.UUID, installation_id: str):
+    """Call when the activity ends or the user dismisses it. Safe to repeat."""
+    scope = club_scope(request)
+    event = _followable_game(scope, event_id)
+    LiveActivity.objects.filter(device__installation_id=installation_id, device__user=request.user, event=event).delete()
+    return 204, None
 
 
 @router.get("/game-follows", response={200: GameFollowsOut, **ERRORS}, summary="Teams followed for live game updates")

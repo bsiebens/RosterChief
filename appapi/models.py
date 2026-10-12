@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from rosterchief.base import UUIDModel
+from rosterchief.base import ClubScopedModel, UUIDModel
 
 
 class PushDevice(UUIDModel):
@@ -32,6 +32,9 @@ class PushDevice(UUIDModel):
     push_token = models.CharField(_("push token"), max_length=512)
     app_version = models.CharField(_("app version"), max_length=32, blank=True)
     locale = models.CharField(_("locale"), max_length=16, blank=True)
+    #: iOS 17.2+ ActivityKit "push to start" token: lets the server start a Live Activity on
+    #: this install without the app running. Blank until the app sends one.
+    push_to_start_token = models.CharField(_("push-to-start token"), max_length=512, blank=True)
     enabled = models.BooleanField(_("enabled"), default=True, help_text=_("Turned off when the push service reports the token as no longer valid."))
     last_seen = models.DateTimeField(_("last seen"), auto_now=True)
 
@@ -42,6 +45,24 @@ class PushDevice(UUIDModel):
 
     def __str__(self):
         return f"{self.get_platform_display()} {self.installation_id[:8]} ({self.user})"
+
+
+class LiveActivity(ClubScopedModel):
+    """A running Live Activity for one game on one install: the per-activity ActivityKit push
+    token the server updates it with. Registered by the app when the activity starts, removed
+    when it ends (or with the device, the game, or the club)."""
+
+    device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name="live_activities", verbose_name=_("device"))
+    event = models.ForeignKey("events.Event", on_delete=models.CASCADE, related_name="live_activities", verbose_name=_("event"))
+    token = models.CharField(_("activity push token"), max_length=512)
+
+    class Meta:
+        verbose_name = _("live activity")
+        verbose_name_plural = _("live activities")
+        constraints = [models.UniqueConstraint(fields=["device", "event"], name="unique_live_activity_per_device_and_game")]
+
+    def __str__(self):
+        return f"{self.device} -> {self.event}"
 
 
 class IdempotencyRecord(UUIDModel):

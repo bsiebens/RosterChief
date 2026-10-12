@@ -99,12 +99,16 @@ def register_device(request, payload: DeviceIn):
             installation_id=payload.installation_id,
             defaults={"user": request.user, "platform": payload.platform, "environment": payload.environment, "push_token": payload.push_token},
         )
+        if device.user_id != request.user.pk:
+            device.live_activities.all().delete()  # the previous account's activities are not this one's
         device.user = request.user
         device.platform = payload.platform
         device.environment = payload.environment
         device.push_token = payload.push_token
         device.app_version = payload.app_version
         device.locale = payload.locale
+        if payload.push_to_start_token is not None:
+            device.push_to_start_token = payload.push_to_start_token
         device.enabled = True  # a fresh registration revives a device disabled after a dead-token report
         device.save()
     return _device_out(device)

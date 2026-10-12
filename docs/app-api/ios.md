@@ -252,6 +252,12 @@ Title and body are rendered in the language of the `locale` the device last regi
 changes. Live-game pushes (`kind: "game_moment"`) carry `club_slug` and `target` but no
 `notification_id`: they are not stored in the inbox.
 
+**Live Activities (tokens only, no updates are sent yet):** send the ActivityKit push-to-start token
+(iOS 17.2+) as `push_to_start_token` on `POST /devices` (omit it to keep the stored one, `""` clears it).
+When an activity for a game starts, `POST /events/{id}/live-activity` with `{installation_id,
+activity_token}` (repeat when the token changes), and `DELETE /events/{id}/live-activity/{installation_id}`
+when it ends. The server stores them; sending activity updates comes later.
+
 **Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
 changes it: `always` (default) or `unless_app` (no notification email while this account has the app
 installed; mails with an attachment such as an invoice are always sent). Offer it as a toggle in the app's

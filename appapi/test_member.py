@@ -7,6 +7,7 @@ import io
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
@@ -33,7 +34,7 @@ from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
 from .delivery import deliver, on_notifications_created, payload_data
-from .models import PushDevice
+from .models import LiveActivity, PushDevice
 from .push import PushGateway
 from .tests import CLUB_HOST, AppApiTestCase, make_club
 
@@ -356,6 +357,36 @@ class EventDetailTests(ClubApiTestCase):
         self.assertEqual([(team["name"], team["following"]) for team in body["teams"]], [("Seniors", True), ("U12", False)])
         self.assertEqual([team["following"] for team in self.send("put", "/game-follows", {"team_ids": []}).json()["teams"]], [False, False])
 
+    def test_live_activity_tokens_are_registered_per_install_and_game(self):
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
+        body = {"installation_id": "parent-phone", "activity_token": "aa11"}
+
+        first = self.send("post", f"/events/{game.pk}/live-activity", body)
+        self.send("post", f"/events/{game.pk}/live-activity", {**body, "activity_token": "bb22"})
+
+        self.assertEqual(first.json(), {"event_id": str(game.pk), "installation_id": "parent-phone"})
+        self.assertEqual(list(LiveActivity.objects.values_list("token", "device", "club")), [("bb22", device.pk, self.club.pk)])
+        self.assertEqual(self.send("delete", f"/events/{game.pk}/live-activity/parent-phone").status_code, 204)
+        self.assertFalse(LiveActivity.objects.exists())
+
+    def test_live_activity_rules(self):
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        training = self.event(title="Training")
+        PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
+        other = get_user_model().objects.create_user(email="other@example.com", password="x")
+        PushDevice.objects.create(user=other, installation_id="someone-elses", platform="ios", push_token="t")
+        body = {"installation_id": "parent-phone", "activity_token": "aa11"}
+
+        self.assertError(self.send("post", f"/events/{game.pk}/live-activity", body), 404, "feature_disabled")
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        self.assertError(self.send("post", f"/events/{training.pk}/live-activity", body), 422, "not_a_game")
+        self.assertError(self.send("post", f"/events/{game.pk}/live-activity", {**body, "installation_id": "someone-elses"}), 404, "not_found")
+        self.assertEqual(self.send("delete", f"/events/{game.pk}/live-activity/nothing").status_code, 204)
+
     def test_another_clubs_event_is_404(self):
         rival = make_club(name="Rival FC", slug="rival-fc")
         event = Event.objects.create(club=rival, title="Theirs", start=self.soon)
@@ -634,7 +665,13 @@ class UnknownIdTests(ClubApiTestCase):
     id with the 404 envelope -- walked from the route table, so a new endpoint is
     covered without anyone remembering to add a test."""
 
-    BODIES = {"rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"}, "respond": {"response": "decline"}, "{member_id}": {}, "{item_id}": {"quantity": 1}}
+    BODIES = {
+        "rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"},
+        "respond": {"response": "decline"},
+        "{member_id}": {},
+        "{item_id}": {"quantity": 1},
+        "live-activity": {"installation_id": "unknown-install", "activity_token": "x"},
+    }
 
     def test_unknown_ids_are_404_everywhere(self):
         import re

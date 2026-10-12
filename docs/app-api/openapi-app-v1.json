@@ -1168,6 +1168,19 @@
             "title": "Platform",
             "type": "string"
           },
+          "push_to_start_token": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "iOS 17.2+: the ActivityKit push-to-start token (hex), so the server can start a Live Activity. Omit to leave the stored one unchanged; send an empty string to clear it.",
+            "title": "Push To Start Token"
+          },
           "push_token": {
             "description": "The APNs device token as a hex string (iOS) or the FCM registration token (Android).",
             "maxLength": 512,
@@ -2413,6 +2426,49 @@
           "categories"
         ],
         "title": "LineupOut",
+        "type": "object"
+      },
+      "LiveActivityIn": {
+        "properties": {
+          "activity_token": {
+            "description": "The activity's ActivityKit push token (hex). It changes over an activity's life: send it again whenever it does.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Activity Token",
+            "type": "string"
+          },
+          "installation_id": {
+            "description": "The install running the activity (the one registered with `POST /devices`).",
+            "maxLength": 64,
+            "minLength": 8,
+            "title": "Installation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "activity_token"
+        ],
+        "title": "LiveActivityIn",
+        "type": "object"
+      },
+      "LiveActivityOut": {
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "installation_id": {
+            "title": "Installation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "installation_id"
+        ],
+        "title": "LiveActivityOut",
         "type": "object"
       },
       "LocationOut": {
@@ -5912,6 +5968,176 @@
           }
         ],
         "summary": "Follow one game",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/live-activity": {
+      "post": {
+        "description": "Call when a Live Activity for this game starts, and again whenever its push token changes.\nOne activity per install and game: repeating the call replaces the token. `404 not_found` when\n`installation_id` isn't one of the account's registered installs, `422 not_a_game` for anything\nbut a game, `404 feature_disabled` without game timelines.",
+        "operationId": "appapi_routers_member_register_live_activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveActivityIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveActivityOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Register a Live Activity's push token",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/live-activity/{installation_id}": {
+      "delete": {
+        "description": "Call when the activity ends or the user dismisses it. Safe to repeat.",
+        "operationId": "appapi_routers_member_end_live_activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove a Live Activity's push token",
         "tags": [
           "member"
         ]
