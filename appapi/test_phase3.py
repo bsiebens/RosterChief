@@ -218,6 +218,83 @@ class ShopTests(ClubApiTestCase):
         self.assertEqual(items[0]["variants"], [{"id": str(self.medium.pk), "name": "M", "price": {"amount": "27.50", "currency": "EUR"}, "in_stock": True}])
         self.assertError(self.get("/shop/products/season-fee"), 404, "not_found")
 
+    # --- stock flags: product.in_stock follows its options, variant.in_stock stays per option ---
+
+    def stocked(self, name, *, options=(), managed=True, stock=None):
+        """A product (and active options) with stock given as ``{option name or None: units}``."""
+        from shop.models import Product, ProductVariant
+        from shop.services.inventory import receive_stock
+
+        product = Product.objects.create(club=self.club, name=name, slug=name.lower().replace(" ", "-"), price=Decimal("10.00"), inventory_managed=managed)
+        variants = {option: ProductVariant.objects.create(product=product, name=option) for option in options}
+        for option, units in (stock or {}).items():
+            if units:
+                receive_stock(self.club, {(product, variants.get(option)): units})
+        return product, variants
+
+    def flags(self, product):
+        data = self.get(f"/shop/products/{product.slug}").json()
+        return data["in_stock"], {variant["name"]: variant["in_stock"] for variant in data["variants"]}
+
+    def test_one_sold_out_option_leaves_the_product_in_stock(self):
+        product, _ = self.stocked("Scarf", options=("S", "M", "L"), stock={"M": 4, "L": 1})
+
+        self.assertEqual(self.flags(product), (True, {"S": False, "M": True, "L": True}))
+
+    def test_a_product_is_sold_out_only_when_every_option_is(self):
+        product, _ = self.stocked("Hat", options=("S", "M"), stock={})
+
+        self.assertEqual(self.flags(product), (False, {"S": False, "M": False}))
+
+    def test_a_product_without_options_follows_its_own_stock(self):
+        sold_out, _ = self.stocked("Mug", stock={})
+        available, _ = self.stocked("Cup", stock={None: 2})
+
+        self.assertEqual(self.flags(sold_out), (False, {}))
+        self.assertEqual(self.flags(available), (True, {}))
+
+    def test_an_unmanaged_product_is_always_in_stock(self):
+        product, _ = self.stocked("Flag", options=("S", "M"), managed=False)
+
+        self.assertEqual(self.flags(product), (True, {"S": True, "M": True}))
+
+    def test_inactive_options_do_not_affect_the_product_flag(self):
+        product, variants = self.stocked("Sock", options=("S", "M"), stock={"M": 3})
+        variants["M"].is_active = False
+        variants["M"].save()
+
+        # Only "S" is left (sold out): the stock on the withdrawn "M" doesn't count.
+        self.assertEqual(self.flags(product), (False, {"S": False}))
+
+    def test_the_catalogue_flags_match_the_product_endpoint(self):
+        product, _ = self.stocked("Scarf", options=("S", "M"), stock={"M": 4})
+
+        item = next(item for item in self.get("/shop/products").json()["items"] if item["slug"] == product.slug)
+
+        self.assertEqual((item["in_stock"], {variant["name"]: variant["in_stock"] for variant in item["variants"]}), (True, {"S": False, "M": True}))
+
+    def test_an_in_stock_option_can_be_ordered_while_another_is_sold_out(self):
+        product, variants = self.stocked("Scarf", options=("S", "M"), stock={"M": 4})
+
+        sold_out = self.send("post", "/shop/cart/items", {"product_id": str(product.pk), "variant_id": str(variants["S"].pk)})
+        self.assertError(sold_out, 409, "out_of_stock")
+
+        added = self.send("post", "/shop/cart/items", {"product_id": str(product.pk), "variant_id": str(variants["M"].pk)})
+        self.assertEqual(added.status_code, 201, added.content)
+
+    def test_only_the_sold_out_cart_line_is_unavailable(self):
+        product, variants = self.stocked("Scarf", options=("S", "M"), stock={"S": 2, "M": 2})
+        for option in ("S", "M"):
+            self.send("post", "/shop/cart/items", {"product_id": str(product.pk), "variant_id": str(variants[option].pk)})
+        from shop.services.inventory import set_stock
+
+        set_stock(self.club, product, variants["S"], 0)
+
+        lines = {line["variant"]["name"]: line for line in self.get("/shop/cart").json()["items"]}
+
+        self.assertEqual({name: line["unavailable"] for name, line in lines.items()}, {"S": True, "M": False})
+        self.assertEqual({name: line["variant"]["in_stock"] for name, line in lines.items()}, {"S": False, "M": True})
+
     def test_cart_and_checkout(self):
         added = self.add(variant_id=str(self.medium.pk), quantity=2, beneficiary_id=str(self.child.pk), personalization_number="7")
         self.assertEqual(added.status_code, 201, added.content)

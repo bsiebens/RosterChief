@@ -72,6 +72,16 @@ def annotate_availability(products):
     return products
 
 
+def annotate_cart_variants(items):
+    """Sets ``in_stock`` on the option of each cart item (per option, like
+    ``annotate_availability``) from one stock query -- the same flag the
+    catalogue shows for that option."""
+    items = [item for item in items if item.variant_id]
+    levels = stock_levels({item.product for item in items if item.product.inventory_managed})
+    for item in items:
+        item.variant.in_stock = not item.product.inventory_managed or levels.get((item.product_id, item.variant_id), 0) > 0
+
+
 def lock_products(product_ids):
     """Row-locks these products (inside the caller's transaction) so two orders
     or stock changes racing for the same stock are handled one at a time --

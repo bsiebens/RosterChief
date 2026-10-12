@@ -18,7 +18,7 @@ from rosterchief.client_ip import client_ip
 from shop.models import CartItem, Order, ProductCategory
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
-from shop.services.inventory import annotate_availability
+from shop.services.inventory import annotate_availability, annotate_cart_variants
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 
 from ..errors import ApiError
@@ -82,6 +82,7 @@ def product_detail(request, slug: str):
 
 def _cart(request, scope, code: str = "") -> dict:
     summary = cart_summary(scope.club, request.user, code=code, member=scope.me, ip=client_ip(request))
+    annotate_cart_variants(summary["items"])
     totals = summary["totals"]
     discount = summary["discount"]
     return {
