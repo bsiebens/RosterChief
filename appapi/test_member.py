@@ -674,6 +674,8 @@ class UnknownIdTests(ClubApiTestCase):
         "check-ins": {"items": []},
         "{event_id}": {},
         "{series_id}": {},
+        "/lineup": {"selected_member_ids": []},
+        "/lineup/publish": {"mode": "cancel"},
         "/events": {"kind": "training", "start": "2030-01-01T10:00:00Z"},
         "/series": {"title": "Training", "kind": "training", "dtstart": "2030-01-01T10:00:00Z", "frequency": "monthly"},
         "/locations": {"name": "Rink", "address": "1 Ice Rd", "city": "Antwerp", "zip_code": "2000"},
@@ -691,7 +693,7 @@ class UnknownIdTests(ClubApiTestCase):
         for path, method in routes:
             concrete = re.sub(r"\{(\w+)\}", lambda match: "unknown-slug" if match.group(1) in ("slug", "installation_id") else str(uuid_module.uuid4()), path)
             host = "rosterchief.app" if path.startswith("/devices") else CLUB_HOST
-            data = next((body for key, body in self.BODIES.items() if path.endswith(key)), None) if method in ("POST", "PATCH") else None
+            data = next((body for key, body in self.BODIES.items() if path.endswith(key)), None) if method in ("POST", "PATCH", "PUT") else None
             with self.subTest(method=method, path=path):
                 response = self.api(method.lower(), concrete, token=self.token, host=host, data=data)
                 self.assertError(response, 404, response.json()["error"]["code"] if response.status_code == 404 else "not_found")

@@ -22,6 +22,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 403 | `manager_required` | A coach action that needs a management position on the team. `GET /context` → `staffed_teams[].can_…` says so up front: hide the button. |
 | 404 | `not_found` | Doesn't exist, or you may not see it (another family's person, another club's event). |
 | 404 | `feature_disabled` | The club doesn't have this module (e.g. officials): hide it. `/clubs` → `features` says so up front. |
+| 409 | `lineup_empty` | Publishing a line-up nobody is picked in yet: ask the coach to pick players. |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still being processed: wait a moment and retry. |
 | 409 | `event_started` | RSVP after the event started: refresh the event; answers are read-only now. |
 | 409 | `rsvp_closed` | The reply deadline passed. Only a line-up `dropout` is still possible. |
@@ -35,6 +36,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 409 | `pdf_unavailable` | The invoice PDF can't be made right now: show `message`, try later. |
 | 409 | `conflict` and other specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
 | 422 | `validation_error` | Show `fields` next to the inputs. |
+| 422 | `invalid_selection` | A line-up pick is not invited or not available (`fields.selected_member_ids`). Nothing was saved: reload the line-up. |
 | 422 | `not_in_series` | `scope` other than `this`, or a detach, on an event that is not part of a series. |
 | 422 | `unknown_attendance` | A check-in named a row that isn't part of this event (`fields.items` lists them). Nothing was saved: reload the sheet. |
 | 422 | `note_required` | `absent`/`dropout` without a reason: ask for one (`fields.note`). |

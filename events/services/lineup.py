@@ -30,6 +30,15 @@ def toggle_selection(lineup, member) -> bool:
     return True
 
 
+def changes_on_publish(lineup) -> tuple[set, set]:
+    """``(newly_selected, newly_dropped)`` member ids: who publishing ``lineup`` now would tell
+    "you're in" and who "you're not in it this time" -- measured against who is SELECTED in the
+    attendance right now, i.e. what the last publish left behind."""
+    previously_selected = set(Attendance.objects.filter(event=lineup.event, status=Attendance.AttendanceStatus.SELECTED).values_list("member_id", flat=True))
+    selected = set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
+    return selected - previously_selected, previously_selected - selected
+
+
 def publish_lineup(lineup):
     """Marks the lineup published and writes it into the game record via
     Attendance -- the reason AttendanceStatus.SELECTED/NOT_SELECTED exist,

@@ -3268,50 +3268,272 @@
         "title": "LineupCategoryOut",
         "type": "object"
       },
+      "LineupChangesOut": {
+        "properties": {
+          "dropped_member_ids": {
+            "description": "Would be told \"you're not in it this time\" (they were in the last published line-up).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Dropped Member Ids",
+            "type": "array"
+          },
+          "selected_member_ids": {
+            "description": "Would be told \"you're in\".",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Selected Member Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_member_ids",
+          "dropped_member_ids"
+        ],
+        "title": "LineupChangesOut",
+        "type": "object"
+      },
+      "LineupIn": {
+        "properties": {
+          "selected_member_ids": {
+            "description": "The complete set of selected players. Anybody not listed is deselected.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Selected Member Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_member_ids"
+        ],
+        "title": "LineupIn",
+        "type": "object"
+      },
       "LineupMemberOut": {
         "properties": {
+          "attendance_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This season's turnout in percent (present of present + absent over past events); null before any reply.",
+            "title": "Attendance Rate"
+          },
+          "available": {
+            "description": "False for `absent`, `excused` and `no_response`: they cannot be picked.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "can_drop_out": {
+            "description": "Selected in a published line-up and the event has not started: the player can still pull out themselves.",
+            "title": "Can Drop Out",
+            "type": "boolean"
+          },
           "first_name": {
             "title": "First Name",
             "type": "string"
           },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
           },
           "last_name": {
             "title": "Last Name",
             "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "note": {
+            "description": "The reason the player gave with their answer.",
+            "title": "Note",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "position": {
+            "description": "The player's position on this team, empty when not set (a guest call-up).",
+            "title": "Position",
+            "type": "string"
+          },
+          "position_order": {
+            "description": "Sort key of the position (low first), so the app can group like the web does.",
+            "title": "Position Order",
+            "type": "integer"
+          },
+          "rsvp_status": {
+            "description": "`present`, `maybe`, `selected`, `not_selected` (available), or `absent`, `excused`, `no_response` (not available).",
+            "title": "Rsvp Status",
+            "type": "string"
+          },
+          "selected": {
+            "description": "In the line-up as it is saved now (published or not).",
+            "title": "Selected",
+            "type": "boolean"
           }
         },
         "required": [
-          "id",
+          "member_id",
           "first_name",
-          "last_name"
+          "last_name",
+          "jersey_number",
+          "position",
+          "position_order",
+          "rsvp_status",
+          "note",
+          "available",
+          "selected",
+          "can_drop_out",
+          "attendance_rate",
+          "photo_url"
         ],
         "title": "LineupMemberOut",
         "type": "object"
       },
       "LineupOut": {
         "properties": {
-          "categories": {
+          "event": {
+            "$ref": "#/components/schemas/EventOut"
+          },
+          "members": {
+            "description": "Everybody invited, ordered by position then name.",
             "items": {
-              "$ref": "#/components/schemas/LineupCategoryOut"
+              "$ref": "#/components/schemas/LineupMemberOut"
             },
-            "title": "Categories",
+            "title": "Members",
             "type": "array"
           },
+          "pending": {
+            "$ref": "#/components/schemas/LineupChangesOut",
+            "description": "Who publishing now would notify. Empty when the saved picks equal what players were last told."
+          },
           "published_at": {
-            "format": "date-time",
-            "title": "Published At",
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "scheduled_publish_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Publish At"
+          },
+          "selected_count": {
+            "title": "Selected Count",
+            "type": "integer"
+          },
+          "status": {
+            "description": "`none`: nobody has opened or saved one yet. `draft`: saved picks, never published. `scheduled`: publishes by itself at `scheduled_publish_at`. `published`: players have been told (edits since then are `pending`).",
+            "enum": [
+              "none",
+              "draft",
+              "scheduled",
+              "published"
+            ],
+            "title": "Status",
             "type": "string"
           }
         },
         "required": [
+          "event",
+          "status",
           "published_at",
-          "categories"
+          "scheduled_publish_at",
+          "selected_count",
+          "pending",
+          "members"
         ],
         "title": "LineupOut",
+        "type": "object"
+      },
+      "LineupPublishIn": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for `schedule`, in the future.",
+            "title": "At"
+          },
+          "mode": {
+            "description": "`now`: publish and notify. `schedule`: publish by itself at `at`. `cancel`: drop a scheduled publish.",
+            "enum": [
+              "now",
+              "schedule",
+              "cancel"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "LineupPublishIn",
+        "type": "object"
+      },
+      "LineupPublishOut": {
+        "properties": {
+          "lineup": {
+            "$ref": "#/components/schemas/LineupOut"
+          },
+          "notified": {
+            "$ref": "#/components/schemas/LineupChangesOut",
+            "description": "Who was told by this call; empty for `schedule` and `cancel`."
+          }
+        },
+        "required": [
+          "lineup",
+          "notified"
+        ],
+        "title": "LineupPublishOut",
         "type": "object"
       },
       "LiveActivityIn": {
@@ -12047,6 +12269,291 @@
           }
         ],
         "summary": "Stop an occurrence following its series",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/lineup": {
+      "get": {
+        "description": "Everybody invited with their answer, who is picked, and who a publish would notify. A pure\nread: asking for a line-up nobody has started creates nothing (`status: none`). Games and\ntournaments only (`404` for other kinds). Any staff of the team.",
+        "operationId": "appapi_routers_coach_lineup_get_lineup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineupOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A game's line-up",
+        "tags": [
+          "coach"
+        ]
+      },
+      "put": {
+        "description": "Replaces the set of selected players. Saving only stores the picks: nobody is told and\nnobody's answer changes until `…/lineup/publish`, also when the line-up is already published.\nOnly available players (`present`, `maybe`, `selected`, `not_selected`) can be picked; an id that\nis not invited, or is `absent`, `excused` or `no_response`, fails the call with `422\ninvalid_selection` and saves nothing. Managers only.",
+        "operationId": "appapi_routers_coach_lineup_put_lineup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineupIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineupOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Save the picks",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/lineup/publish": {
+      "post": {
+        "description": "`now` writes the picks into the players' answers (`selected` / `not_selected`) and tells the\nplayers whose situation changed since the last publish: newly selected ones \"you're in\", ones\ndropped since \"you're not in it this time\", nobody else. `notified` lists exactly who. The first\npublish of an empty line-up is `409 lineup_empty`. `schedule` (needs `at`, in the future) publishes\nby itself then; `cancel` drops the schedule. Send an `Idempotency-Key`. Managers only.",
+        "operationId": "appapi_routers_coach_lineup_publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineupPublishIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineupPublishOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Publish, schedule or cancel a scheduled publish",
         "tags": [
           "coach"
         ]

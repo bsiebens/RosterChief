@@ -19,14 +19,13 @@ from club.services.access import current_season, event_season
 from events.models import Attendance, Event, Lineup
 from events.services.attendance import record_check_in
 from events.services.coach import IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, remind_silent, still_current_events
-from members.services.photos import can_view_member_photo
 from teams.models import TeamMembership
 
-from ..coach import CoachScope, coach_scope
+from ..coach import CoachScope, coach_scope, photo_url_for
 from ..coach_schemas import AttendanceSheetOut, CheckInsIn, RemindSilentOut, TodayOut
 from ..errors import ApiError
 from ..idempotency import idempotent
-from ..presenters import event_out, member_photo_url, team_ref
+from ..presenters import event_out, team_ref
 from ..schemas import ErrorOut
 
 router = Router(tags=["coach"])
@@ -103,7 +102,6 @@ def _sheet(request, coach: CoachScope, event: Event, filter_name: str) -> dict:
     for row in shown:
         member = row.member
         membership = memberships.get(member.pk)
-        visible = bool(member.photo) and can_view_member_photo(request.user, member, coach.club)
         items.append(
             {
                 "attendance_id": row.pk,
@@ -115,7 +113,7 @@ def _sheet(request, coach: CoachScope, event: Event, filter_name: str) -> dict:
                 "status": row.status,
                 "note": row.note,
                 "showed_up": row.showed_up,
-                "photo_url": member_photo_url(request, member) if visible else None,
+                "photo_url": photo_url_for(request, member, coach.club),
             }
         )
     return {

@@ -253,3 +253,53 @@ class SeriesPatch(Schema):
     opponent_id: uuid.UUID | None = None
     invited_member_ids: list[uuid.UUID] | None = None
     excluded_member_ids: list[uuid.UUID] | None = None
+
+
+# --- lineup -------------------------------------------------------------------------------
+
+
+class LineupMemberOut(Schema):
+    member_id: uuid.UUID
+    first_name: str
+    last_name: str
+    jersey_number: int | None
+    position: str = Field(description="The player's position on this team, empty when not set (a guest call-up).")
+    position_order: int = Field(description="Sort key of the position (low first), so the app can group like the web does.")
+    rsvp_status: str = Field(description="`present`, `maybe`, `selected`, `not_selected` (available), or `absent`, `excused`, `no_response` (not available).")
+    note: str = Field(description="The reason the player gave with their answer.")
+    available: bool = Field(description="False for `absent`, `excused` and `no_response`: they cannot be picked.")
+    selected: bool = Field(description="In the line-up as it is saved now (published or not).")
+    can_drop_out: bool = Field(description="Selected in a published line-up and the event has not started: the player can still pull out themselves.")
+    attendance_rate: int | None = Field(description="This season's turnout in percent (present of present + absent over past events); null before any reply.")
+    photo_url: str | None
+
+
+class LineupChangesOut(Schema):
+    selected_member_ids: list[uuid.UUID] = Field(description='Would be told "you\'re in".')
+    dropped_member_ids: list[uuid.UUID] = Field(description='Would be told "you\'re not in it this time" (they were in the last published line-up).')
+
+
+class LineupOut(Schema):
+    event: EventOut
+    status: Literal["none", "draft", "scheduled", "published"] = Field(
+        description="`none`: nobody has opened or saved one yet. `draft`: saved picks, never published. `scheduled`: publishes by itself at `scheduled_publish_at`. `published`: players have been told (edits since then are `pending`)."
+    )
+    published_at: datetime.datetime | None
+    scheduled_publish_at: datetime.datetime | None
+    selected_count: int
+    pending: LineupChangesOut = Field(description="Who publishing now would notify. Empty when the saved picks equal what players were last told.")
+    members: list[LineupMemberOut] = Field(description="Everybody invited, ordered by position then name.")
+
+
+class LineupIn(Schema):
+    selected_member_ids: list[uuid.UUID] = Field(max_length=200, description="The complete set of selected players. Anybody not listed is deselected.")
+
+
+class LineupPublishIn(Schema):
+    mode: Literal["now", "schedule", "cancel"] = Field(description="`now`: publish and notify. `schedule`: publish by itself at `at`. `cancel`: drop a scheduled publish.")
+    at: datetime.datetime | None = Field(default=None, description="Required for `schedule`, in the future.")
+
+
+class LineupPublishOut(Schema):
+    lineup: LineupOut
+    notified: LineupChangesOut = Field(description="Who was told by this call; empty for `schedule` and `cancel`.")

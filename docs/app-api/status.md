@@ -14,6 +14,7 @@ What the app can use today, and what's next. The full plan is `API.md` in the re
 | Member: re-registration | **Available** |
 | Coach: today, attendance (check-ins, remind silent), per-team permissions in `/context` | **Available** |
 | Coach: events and series (create, edit with `scope`, delete, detach), location / opponent pickers | **Available** |
-| Coach: lineup, roster, news, evaluations | Next (phase 4, in slices) |
+| Coach: line-up (read, replace picks, publish / schedule / cancel) | **Available** |
+| Coach: roster, news, evaluations | Next (phase 4, in slices) |
 | Passkeys on iOS, "signed-in devices", universal links for password reset | Phase 5 |
 | Android | After iOS, on the same API |

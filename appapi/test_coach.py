@@ -788,3 +788,216 @@ class CoachNotificationTranslationTests(CoachEventTestCase):
         self.assertIn("gewijzigd", changed.translations["nl"]["body"])
         self.assertIn("changed", changed.translations["en"]["body"])
         self.assertIn("geannuleerd", cancelled.translations["nl"]["body"])
+
+
+# --- slice 3: lineup -----------------------------------------------------------------------
+
+
+class CoachLineupTestCase(CoachEventTestCase):
+    def setUp(self):
+        super().setUp()
+        self.game = self.event(kind="game", title="Derby", start=timezone.now() + datetime.timedelta(days=3))
+        self.ann = self.player("Ann", "Aal", jersey=7, status=Status.PRESENT, event=self.game)
+        self.bo = self.player("Bo", "Bos", jersey=9, status=Status.MAYBE, event=self.game)
+        self.cy = self.player("Cy", "Cox", status=Status.ABSENT, event=self.game)
+        self.di = self.player("Di", "Dam", status=Status.NO_RESPONSE, event=self.game)
+        self.path = self.url(f"/events/{self.game.pk}/lineup")
+
+    def put(self, *members):
+        return self.send("put", self.path, {"selected_member_ids": [str(member.pk) for member in members]})
+
+    def publish(self, mode="now", **extra):
+        return self.send("post", self.path + "/publish", {"mode": mode, **extra})
+
+    def rows(self, body):
+        return {row["first_name"]: row for row in body["members"]}
+
+
+class LineupReadTests(CoachLineupTestCase):
+    def test_reading_creates_nothing(self):
+        body = self.get(self.path).json()
+
+        self.assertEqual((body["status"], body["selected_count"], body["published_at"]), ("none", 0, None))
+        self.assertFalse(Lineup.objects.exists())
+
+    def test_every_invited_player_comes_with_their_answer(self):
+        rows = self.rows(self.get(self.path).json())
+
+        self.assertEqual(set(rows), {"Ann", "Bo", "Cy", "Di"})
+        ann = rows["Ann"]
+        self.assertEqual((ann["jersey_number"], ann["position"], ann["rsvp_status"], ann["available"], ann["selected"], ann["can_drop_out"]), (7, "Forward", "present", True, False, False))
+        self.assertEqual([rows[name]["available"] for name in ("Bo", "Cy", "Di")], [True, False, False])
+
+    def test_members_are_ordered_by_position_then_name(self):
+        TeamMembership.objects.filter(member=self.ann).update(position=None)
+
+        names = [row["first_name"] for row in self.get(self.path).json()["members"]]
+
+        self.assertEqual(names[-1], "Ann")  # no position sorts last
+
+    def test_a_coach_without_a_management_position_may_read(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        self.assertEqual(self.get(self.path).status_code, 200)
+
+    def test_other_kinds_and_other_teams_are_404(self):
+        practice = self.event(title="Practice")
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        foreign = Event.objects.create(club=self.club, title="Foreign", kind="game", start=self.soon)
+        foreign.teams.add(other)
+
+        for event in (practice, foreign):
+            with self.subTest(event=event.title):
+                self.assertError(self.get(self.url(f"/events/{event.pk}/lineup")), 404, "not_found")
+                self.assertError(self.send("put", self.url(f"/events/{event.pk}/lineup"), {"selected_member_ids": []}), 404, "not_found")
+                self.assertError(self.send("post", self.url(f"/events/{event.pk}/lineup/publish"), {"mode": "now"}), 404, "not_found")
+
+    def test_a_tournament_has_a_lineup_too(self):
+        tournament = self.event(kind="tournament", title="Cup")
+
+        self.assertEqual(self.get(self.url(f"/events/{tournament.pk}/lineup")).status_code, 200)
+
+
+class LineupSaveTests(CoachLineupTestCase):
+    def test_put_replaces_the_set_and_returns_the_saved_state(self):
+        first = self.put(self.ann, self.bo)
+        second = self.put(self.bo)
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.json()["selected_count"], 1)
+        rows = self.rows(second.json())
+        self.assertEqual((rows["Ann"]["selected"], rows["Bo"]["selected"]), (False, True))
+        self.assertEqual(second.json()["status"], "draft")
+        self.assertEqual(second.json()["pending"], {"selected_member_ids": [str(self.bo.pk)], "dropped_member_ids": []})
+
+    def test_saving_notifies_nobody_and_changes_no_answers(self):
+        before = Notification.objects.count()
+
+        self.put(self.ann)
+
+        self.assertEqual(Notification.objects.count(), before)
+        self.assertEqual(Attendance.objects.get(event=self.game, member=self.ann).status, Status.PRESENT)
+
+    def test_unavailable_or_uninvited_players_fail_the_whole_call(self):
+        stranger = Member.objects.create(first_name="Sue", last_name="Stranger")
+
+        response = self.put(self.ann, self.cy, self.di, stranger)
+
+        self.assertError(response, 422, "invalid_selection")
+        self.assertEqual(set(response.json()["error"]["fields"]["selected_member_ids"]), {str(self.cy.pk), str(self.di.pk), str(stranger.pk)})
+        self.assertFalse(Lineup.objects.exists())
+
+    def test_an_empty_list_clears_the_picks(self):
+        self.put(self.ann)
+
+        self.assertEqual(self.put().json()["selected_count"], 0)
+
+    def test_a_coach_without_a_management_position_is_refused(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        self.assertError(self.put(self.ann), 403, "manager_required")
+        self.assertError(self.publish(), 403, "manager_required")
+
+
+class LineupPublishTests(CoachLineupTestCase):
+    def test_publish_selects_and_deselects_and_says_who_was_told(self):
+        self.put(self.ann)
+        before = Notification.objects.count()
+
+        response = self.publish()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertEqual(body["notified"], {"selected_member_ids": [str(self.ann.pk)], "dropped_member_ids": []})
+        self.assertEqual(body["lineup"]["status"], "published")
+        self.assertEqual(body["lineup"]["pending"], {"selected_member_ids": [], "dropped_member_ids": []})
+        rows = self.rows(body["lineup"])
+        self.assertEqual((rows["Ann"]["rsvp_status"], rows["Bo"]["rsvp_status"], rows["Cy"]["rsvp_status"]), ("selected", "not_selected", "absent"))
+        self.assertTrue(rows["Ann"]["can_drop_out"])
+        self.assertFalse(rows["Bo"]["can_drop_out"])
+        notification = Notification.objects.filter(member=self.ann).latest("created")
+        self.assertEqual((Notification.objects.count(), notification.source), (before + 1, self.game))
+        self.assertIn("line-up", notification.body)
+
+    def test_a_republish_notifies_only_the_changes(self):
+        self.put(self.ann, self.bo)
+        self.publish()
+        self.put(self.bo)
+        preview = self.get(self.path).json()["pending"]
+        before = Notification.objects.count()
+
+        response = self.publish()
+
+        self.assertEqual(preview, {"selected_member_ids": [], "dropped_member_ids": [str(self.ann.pk)]})
+        self.assertEqual(response.json()["notified"], {"selected_member_ids": [], "dropped_member_ids": [str(self.ann.pk)]})
+        self.assertEqual(Notification.objects.count(), before + 1)
+        self.assertEqual(Notification.objects.latest("created").member, self.ann)
+
+    def test_publishing_twice_in_a_row_notifies_nobody_the_second_time(self):
+        self.put(self.ann)
+        self.publish()
+        before = Notification.objects.count()
+
+        self.assertEqual(self.publish().json()["notified"], {"selected_member_ids": [], "dropped_member_ids": []})
+        self.assertEqual(Notification.objects.count(), before)
+
+    def test_an_idempotency_key_replays(self):
+        self.put(self.ann)
+        before = Notification.objects.count()
+
+        first = self.send("post", self.path + "/publish", {"mode": "now"}, HTTP_IDEMPOTENCY_KEY="pub-1")
+        second = self.send("post", self.path + "/publish", {"mode": "now"}, HTTP_IDEMPOTENCY_KEY="pub-1")
+
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(Notification.objects.count(), before + 1)
+
+    def test_the_first_publish_of_an_empty_lineup_is_refused(self):
+        self.assertError(self.publish(), 409, "lineup_empty")
+        self.put()
+        self.assertError(self.publish(), 409, "lineup_empty")
+        self.assertEqual(Attendance.objects.get(event=self.game, member=self.bo).status, Status.MAYBE)
+
+    def test_schedule_and_cancel(self):
+        self.put(self.ann)
+        at = timezone.now() + datetime.timedelta(hours=5)
+
+        scheduled = self.publish("schedule", at=self.stamp(at))
+
+        self.assertEqual(scheduled.status_code, 200, scheduled.content)
+        self.assertEqual(scheduled.json()["lineup"]["status"], "scheduled")
+        self.assertEqual(Attendance.objects.get(event=self.game, member=self.ann).status, Status.PRESENT)
+        self.assertEqual(scheduled.json()["notified"], {"selected_member_ids": [], "dropped_member_ids": []})
+        cancelled = self.publish("cancel")
+        self.assertEqual((cancelled.json()["lineup"]["status"], cancelled.json()["lineup"]["scheduled_publish_at"]), ("draft", None))
+
+    def test_schedule_needs_a_future_time(self):
+        self.put(self.ann)
+
+        for extra in ({}, {"at": self.stamp(timezone.now() - datetime.timedelta(hours=1))}):
+            with self.subTest(extra=extra):
+                response = self.publish("schedule", **extra)
+                self.assertError(response, 422, "validation_error")
+                self.assertIn("at", response.json()["error"]["fields"])
+
+    def test_the_scheduled_sweep_publishes_it(self):
+        from django.core.management import call_command
+
+        self.put(self.ann)
+        self.publish("schedule", at=self.stamp(timezone.now() + datetime.timedelta(hours=1)))
+        Lineup.objects.update(scheduled_publish_at=timezone.now() - datetime.timedelta(minutes=1))
+
+        call_command("publish_scheduled_lineups")
+
+        self.assertEqual(self.rows(self.get(self.path).json())["Ann"]["rsvp_status"], "selected")
+
+    def test_a_dropout_afterwards_is_visible_as_absent(self):
+        self.put(self.ann)
+        self.publish()
+        from events.services.rsvp import submit_rsvp
+
+        submit_rsvp(Attendance.objects.get(event=self.game, member=self.ann), "dropout", "Injured")
+
+        rows = self.rows(self.get(self.path).json())
+        self.assertEqual((rows["Ann"]["rsvp_status"], rows["Ann"]["note"], rows["Ann"]["available"], rows["Ann"]["can_drop_out"]), ("absent", "Injured", False, False))

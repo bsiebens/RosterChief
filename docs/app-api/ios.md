@@ -645,6 +645,41 @@ in the background to everyone who still has to answer. A change (`notify` on `PA
 was kept, otherwise `{"type": "calendar"}` since the event is gone. A series never notifies per
 occurrence. Nothing is sent unless asked for, apart from a new single event.
 
+### Line-up
+
+For games and tournaments (`404` for other kinds). All under `/teams/{team_id}/events/{event_id}/lineup`.
+
+* `GET`: a **pure read**, any coach. Nothing is created by asking. `status` is `none` (nothing
+  saved), `draft`, `scheduled` (`scheduled_publish_at`) or `published` (`published_at`);
+  `selected_count`; `pending` (who publishing now would tell: `selected_member_ids`, `dropped_member_ids`;
+  empty when the saved picks equal what players were last told); and `members`, everybody invited,
+  ordered by `position_order`, then name. Each member: `first_name`, `last_name`, `jersey_number`,
+  `position`, `rsvp_status`, `note`, `available` (false for `absent`, `excused`, `no_response`: they
+  can't be picked), `selected`, `can_drop_out` (selected in a *published* line-up and the event has
+  not started: the player can still pull out in their own app), `attendance_rate` (percent, this
+  season; null before any reply) and `photo_url`.
+* `PUT {"selected_member_ids": [...]}`: replaces the whole set of picks and answers with the saved
+  state. **Saving only stores picks**: nobody is told and nobody's answer changes, even when the
+  line-up is already published. An id that isn't invited or isn't available fails the whole call
+  with `422 invalid_selection` (`fields.selected_member_ids` lists them). **Managers only**
+  (`can_publish_lineup`).
+* `POST …/publish {"mode": "now" | "schedule" | "cancel", "at"}`, **managers only**. Answers
+  `{lineup, notified}`.
+  * `now` writes the picks into the players' answers (`selected` / `not_selected`; players who were
+    `absent`, `excused` or silent stay as they are) and tells **only the players whose situation
+    changed since the last publish**; `notified` lists exactly who. A repeat publish with no changes
+    notifies nobody. The first publish with nobody picked is `409 lineup_empty`.
+  * `schedule` needs `at`, in the future (`422` with `fields.at` otherwise) and picks already saved;
+    the server publishes by itself at that time with the same rules.
+  * `cancel` drops a scheduled publish.
+  Send an `Idempotency-Key`.
+
+**Push to players:** an inbox push, `kind: "notification"`, `target: {"type": "event", "id"}`.
+Newly selected: title "Line-up published", "You're in the line-up for Derby." Dropped since the
+last publish: title "Line-up updated", "The line-up for Derby has changed -- you're not in it this
+time." (both in the device's language). When a selected player later pulls out (`dropout`), the
+event's managers get "Line-up dropout" the same way; reload the line-up when you see it.
+
 ## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a
