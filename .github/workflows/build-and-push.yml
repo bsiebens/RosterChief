@@ -137,6 +137,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.base_ref == 'main'
         run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
+      # Dutch strings behind the app API's notification texts: the .mo files are not committed.
+      - run: uv run python manage.py compilemessages
+
       - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }} ${{ needs.plan.outputs.shuffle }}
         env:
           # The only setting with no default (see rosterchief/settings.py) -- a throwaway
