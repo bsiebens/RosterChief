@@ -36,6 +36,51 @@
         "title": "AccountSettingsOut",
         "type": "object"
       },
+      "AddPlayersIn": {
+        "properties": {
+          "member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Member Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "member_ids"
+        ],
+        "title": "AddPlayersIn",
+        "type": "object"
+      },
+      "AddStaffIn": {
+        "properties": {
+          "member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "position_id": {
+            "description": "One staff position for all of them.",
+            "format": "uuid",
+            "title": "Position Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_ids",
+          "position_id"
+        ],
+        "title": "AddStaffIn",
+        "type": "object"
+      },
       "AnswerOut": {
         "properties": {
           "can_drop_out": {
@@ -593,6 +638,70 @@
           "items"
         ],
         "title": "CalendarOut",
+        "type": "object"
+      },
+      "CandidateListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "CandidateListOut",
+        "type": "object"
+      },
+      "CandidateOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          }
+        },
+        "required": [
+          "member_id",
+          "first_name",
+          "last_name",
+          "photo_url"
+        ],
+        "title": "CandidateOut",
         "type": "object"
       },
       "CardMemberOut": {
@@ -4889,6 +4998,41 @@
         "title": "PersonOut",
         "type": "object"
       },
+      "PositionOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "management_position": {
+            "description": "Staff positions only: the holder manages the team.",
+            "title": "Management Position",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ordering": {
+            "title": "Ordering",
+            "type": "integer"
+          },
+          "short_name": {
+            "title": "Short Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "short_name",
+          "ordering",
+          "management_position"
+        ],
+        "title": "PositionOut",
+        "type": "object"
+      },
       "ProductOut": {
         "properties": {
           "category_id": {
@@ -5657,6 +5801,274 @@
           "notified"
         ],
         "title": "RemindSilentOut",
+        "type": "object"
+      },
+      "RosterOut": {
+        "properties": {
+          "player_positions": {
+            "description": "What a player's `position_id` may be.",
+            "items": {
+              "$ref": "#/components/schemas/PositionOut"
+            },
+            "title": "Player Positions",
+            "type": "array"
+          },
+          "players": {
+            "description": "Ordered by position, then last name.",
+            "items": {
+              "$ref": "#/components/schemas/RosterPlayerOut"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "season_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The current season; the lists are empty without one.",
+            "title": "Season Id"
+          },
+          "staff": {
+            "description": "Ordered by position, then last name.",
+            "items": {
+              "$ref": "#/components/schemas/RosterStaffOut"
+            },
+            "title": "Staff",
+            "type": "array"
+          },
+          "staff_positions": {
+            "description": "What a staff member's `position_id` may be.",
+            "items": {
+              "$ref": "#/components/schemas/PositionOut"
+            },
+            "title": "Staff Positions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "season_id",
+          "players",
+          "staff",
+          "player_positions",
+          "staff_positions"
+        ],
+        "title": "RosterOut",
+        "type": "object"
+      },
+      "RosterPatch": {
+        "description": "Only what is sent changes. `jersey_number: null` clears it.",
+        "properties": {
+          "is_alternate_captain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Alternate Captain"
+          },
+          "is_captain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Captain"
+          },
+          "jersey_number": {
+            "anyOf": [
+              {
+                "maximum": 32767,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "position_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Id"
+          }
+        },
+        "title": "RosterPatch",
+        "type": "object"
+      },
+      "RosterPlayerOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "is_alternate_captain": {
+            "title": "Is Alternate Captain",
+            "type": "boolean"
+          },
+          "is_captain": {
+            "title": "Is Captain",
+            "type": "boolean"
+          },
+          "jersey_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jersey Number"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "membership_id": {
+            "description": "What `PATCH` and `DELETE …/roster/{membership_id}` take.",
+            "format": "uuid",
+            "title": "Membership Id",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "position": {
+            "description": "Empty until a position is set.",
+            "title": "Position",
+            "type": "string"
+          },
+          "position_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Id"
+          },
+          "sign_up_pending": {
+            "description": "The club has not approved this player's sign-up yet.",
+            "title": "Sign Up Pending",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "membership_id",
+          "member_id",
+          "first_name",
+          "last_name",
+          "position_id",
+          "position",
+          "jersey_number",
+          "is_captain",
+          "is_alternate_captain",
+          "sign_up_pending",
+          "photo_url"
+        ],
+        "title": "RosterPlayerOut",
+        "type": "object"
+      },
+      "RosterStaffOut": {
+        "properties": {
+          "assignment_id": {
+            "description": "What `DELETE …/staff/{assignment_id}` takes.",
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "is_manager": {
+            "description": "Holds a management position on the team.",
+            "title": "Is Manager",
+            "type": "boolean"
+          },
+          "is_me": {
+            "description": "The caller's own assignment: it cannot be removed here (`403 self_removal`).",
+            "title": "Is Me",
+            "type": "boolean"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          },
+          "position_id": {
+            "format": "uuid",
+            "title": "Position Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignment_id",
+          "member_id",
+          "first_name",
+          "last_name",
+          "position_id",
+          "position",
+          "is_manager",
+          "is_me",
+          "photo_url"
+        ],
+        "title": "RosterStaffOut",
         "type": "object"
       },
       "RsvpIn": {
@@ -12982,6 +13394,600 @@
         ]
       }
     },
+    "/api/app/v1/teams/{team_id}/roster": {
+      "get": {
+        "description": "This season's roster and staff with the positions each may take. Any staff of the team.",
+        "operationId": "appapi_routers_coach_roster_get_roster",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The team's players and staff",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/roster/candidates": {
+      "get": {
+        "description": "Active club members (not guardians) the team can take on, by last name. Any staff of the team.",
+        "operationId": "appapi_routers_coach_roster_candidates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Who to list: people not yet on the roster (`player`, default) or not yet on the staff (`staff`).",
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "default": "player",
+              "description": "Who to list: people not yet on the roster (`player`, default) or not yet on the staff (`staff`).",
+              "enum": [
+                "player",
+                "staff"
+              ],
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Players only. `suggested`: on this team last season or on a team that feeds into it. `no_team`: on no team and no staff this season.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "suggested",
+                    "no_team"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Players only. `suggested`: on this team last season or on a team that feeds into it. `no_team`: on no team and no staff this season.",
+              "title": "Filter"
+            }
+          },
+          {
+            "description": "First or last name contains.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "First or last name contains.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Who can be added",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/roster/players": {
+      "post": {
+        "description": "They start without a position or number. Anyone already on the roster is left alone, so a\nretry is harmless; anyone who is not a candidate fails the whole call with `422\nnot_a_candidate` (`fields.member_ids`) and nothing is added. Adding a player invites them to\nthe team's upcoming events (they get one \"New events on your calendar\" notification). Answers\nthe roster. Managers only.",
+        "operationId": "appapi_routers_coach_roster_add_players",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPlayersIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Add players to the roster",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/roster/staff": {
+      "post": {
+        "description": "All get the same staff `position_id` (add them in several calls for different roles). Same\nrules as adding players: staff already on the team are left alone, anyone else who is not a\ncandidate fails the call (`422 not_a_candidate`). Answers the roster. Managers only.",
+        "operationId": "appapi_routers_coach_roster_add_staff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddStaffIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Add staff",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/roster/{membership_id}": {
+      "delete": {
+        "description": "Removes this season's roster spot; the person stays a club member. Managers only.",
+        "operationId": "appapi_routers_coach_roster_remove_player",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "membership_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Membership Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove a player from the roster",
+        "tags": [
+          "coach"
+        ]
+      },
+      "patch": {
+        "description": "Only what is sent changes. Jersey rules are the web's: a number already taken by another\nplayer (or, for a team with a number pool, taken in the pool this season) is `422` with\n`fields.jersey_number`. A player must keep a position (`fields.position_id`). Answers the\nroster. Managers only.",
+        "operationId": "appapi_routers_coach_roster_update_player",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "membership_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Membership Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RosterPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change a player's position, number or captaincy",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
     "/api/app/v1/teams/{team_id}/series": {
       "post": {
         "description": "Generates the occurrences for the next 90 days now (nobody is notified per occurrence; the\ndaily reminders pick them up) and extends nightly. Send an `Idempotency-Key`. Managers only.",
@@ -13311,6 +14317,78 @@
           }
         ],
         "summary": "Change a recurring series",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/staff/{assignment_id}": {
+      "delete": {
+        "description": "Managers only. Removing **yourself** is `403 self_removal`: it would lock you out of the team\nyou are looking at; another manager or an admin does that on the web.",
+        "operationId": "appapi_routers_coach_roster_remove_staff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove a staff member",
         "tags": [
           "coach"
         ]

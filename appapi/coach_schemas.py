@@ -303,3 +303,78 @@ class LineupPublishIn(Schema):
 class LineupPublishOut(Schema):
     lineup: LineupOut
     notified: LineupChangesOut = Field(description="Who was told by this call; empty for `schedule` and `cancel`.")
+
+
+# --- roster -------------------------------------------------------------------------------
+
+
+class PositionOut(Schema):
+    id: uuid.UUID
+    name: str
+    short_name: str
+    ordering: int
+    management_position: bool = Field(description="Staff positions only: the holder manages the team.")
+
+
+class RosterPlayerOut(Schema):
+    membership_id: uuid.UUID = Field(description="What `PATCH` and `DELETE …/roster/{membership_id}` take.")
+    member_id: uuid.UUID
+    first_name: str
+    last_name: str
+    position_id: uuid.UUID | None
+    position: str = Field(description="Empty until a position is set.")
+    jersey_number: int | None
+    is_captain: bool
+    is_alternate_captain: bool
+    sign_up_pending: bool = Field(description="The club has not approved this player's sign-up yet.")
+    photo_url: str | None
+
+
+class RosterStaffOut(Schema):
+    assignment_id: uuid.UUID = Field(description="What `DELETE …/staff/{assignment_id}` takes.")
+    member_id: uuid.UUID
+    first_name: str
+    last_name: str
+    position_id: uuid.UUID
+    position: str
+    is_manager: bool = Field(description="Holds a management position on the team.")
+    is_me: bool = Field(description="The caller's own assignment: it cannot be removed here (`403 self_removal`).")
+    photo_url: str | None
+
+
+class RosterOut(Schema):
+    season_id: uuid.UUID | None = Field(description="The current season; the lists are empty without one.")
+    players: list[RosterPlayerOut] = Field(description="Ordered by position, then last name.")
+    staff: list[RosterStaffOut] = Field(description="Ordered by position, then last name.")
+    player_positions: list[PositionOut] = Field(description="What a player's `position_id` may be.")
+    staff_positions: list[PositionOut] = Field(description="What a staff member's `position_id` may be.")
+
+
+class CandidateOut(Schema):
+    member_id: uuid.UUID
+    first_name: str
+    last_name: str
+    photo_url: str | None
+
+
+class CandidateListOut(Schema):
+    items: list[CandidateOut]
+    next_cursor: str | None
+
+
+class AddPlayersIn(Schema):
+    member_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class AddStaffIn(Schema):
+    member_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    position_id: uuid.UUID = Field(description="One staff position for all of them.")
+
+
+class RosterPatch(Schema):
+    """Only what is sent changes. `jersey_number: null` clears it."""
+
+    position_id: uuid.UUID | None = None
+    jersey_number: int | None = Field(default=None, ge=0, le=32767)
+    is_captain: bool | None = None
+    is_alternate_captain: bool | None = None

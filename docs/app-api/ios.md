@@ -680,6 +680,44 @@ last publish: title "Line-up updated", "The line-up for Derby has changed -- you
 time." (both in the device's language). When a selected player later pulls out (`dropout`), the
 event's managers get "Line-up dropout" the same way; reload the line-up when you see it.
 
+### Roster
+
+Under `/teams/{team_id}`. Reading is open to every coach; **changes are managers only**
+(`can_edit_roster`). It is this season's roster: a past season's spots are not reachable.
+**No phone numbers, e-mail addresses or birth dates** are returned (API.md §8); the web's tap-to-call
+buttons have no equivalent here.
+
+* `GET …/roster` → `{season_id, players, staff, player_positions, staff_positions}`. A player:
+  `membership_id`, `member_id`, names, `position_id` / `position` (empty until set),
+  `jersey_number`, `is_captain`, `is_alternate_captain`, `sign_up_pending` (the club hasn't approved
+  the sign-up yet) and `photo_url`. A staff member: `assignment_id`, names, `position_id`,
+  `position`, `is_manager`, `is_me`, `photo_url`. The two position lists are what `position_id` may
+  be, for the pickers.
+* `GET …/roster/candidates?role=player|staff&filter=all|suggested|no_team&q&cursor&limit` →
+  `{items: [{member_id, first_name, last_name, photo_url}], next_cursor}` by last name: active club
+  members (not guardians) not yet on the roster (or, for `role=staff`, the staff). `suggested`: on
+  this team last season or on a team that feeds into it. `no_team`: on no team and no staff this
+  season. `filter` is for players only.
+* `POST …/roster/players {member_ids}`: adds them with no position or number. Anyone already on the
+  roster is left alone, so a retry is harmless. Anyone who is **not a candidate** fails the whole call
+  with `422 not_a_candidate` (`fields.member_ids`) and nothing is added. Answers the roster.
+* `POST …/roster/staff {member_ids, position_id}`: the same, with one staff position for all of them.
+  A position that isn't a staff position is `422` with `fields.position_id`.
+* `PATCH …/roster/{membership_id} {position_id, jersey_number, is_captain, is_alternate_captain}`:
+  only what is sent changes, `jersey_number: null` clears the number. A taken number (or one taken in
+  the team's number pool) is **`422` with `fields.jersey_number`**; a player must keep a position
+  (`fields.position_id`). Answers the roster.
+* `DELETE …/roster/{membership_id}` removes the spot (the person stays a club member). `DELETE
+  …/staff/{assignment_id}` removes a staff member: removing **yourself** is `403 self_removal`. Both
+  `204`.
+* `409 no_current_season` when the club has no season covering today.
+
+The plan listed one `DELETE …/roster/{id}` for both; players and staff are separate tables, so staff
+have their own path (`/staff/{assignment_id}`).
+
+**Push:** adding a player invites them to the team's upcoming events; they get one inbox push "New
+events on your calendar" (`target: {"type": "calendar"}`). Nothing else is sent for roster changes.
+
 ## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a

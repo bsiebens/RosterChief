@@ -6,6 +6,7 @@ import uuid
 
 from django.utils import timezone
 
+from club.models import Season
 from events.models import Attendance, Event, Lineup
 from events.services import detach_occurrence, generate_occurrences, propagate_series
 from members.models import Member
@@ -1001,3 +1002,253 @@ class LineupPublishTests(CoachLineupTestCase):
 
         rows = self.rows(self.get(self.path).json())
         self.assertEqual((rows["Ann"]["rsvp_status"], rows["Ann"]["note"], rows["Ann"]["available"], rows["Ann"]["can_drop_out"]), ("absent", "Injured", False, False))
+
+
+# --- slice 4: roster -----------------------------------------------------------------------
+
+from club.models import ClubMembership  # noqa: E402
+
+
+class CoachRosterTestCase(CoachEventTestCase):
+    def candidate(self, first, last, **kwargs):
+        member = Member.objects.create(first_name=first, last_name=last)
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=kwargs.pop("status", ClubMembership.StatusChoices.ACTIVE), kind=kwargs.pop("kind", ClubMembership.Kind.MEMBER))
+        return member
+
+    def roster(self):
+        return self.get(self.url("/roster")).json()
+
+
+class RosterReadTests(CoachRosterTestCase):
+    def test_roster_lists_players_staff_and_the_positions_to_choose_from(self):
+        ann = self.player("Ann", "Aal", jersey=7)
+        TeamMembership.objects.filter(member=ann).update(is_captain=True)
+        bo = self.candidate("Bo", "Bos")
+        TeamMembership.objects.create(team=self.team, member=bo, season=self.season)
+        ClubMembership.objects.filter(member=bo).update(status=ClubMembership.StatusChoices.PENDING)
+
+        body = self.roster()
+
+        self.assertEqual(body["season_id"], str(self.season.pk))
+        by_name = {row["first_name"]: row for row in body["players"]}
+        self.assertEqual((by_name["Ann"]["jersey_number"], by_name["Ann"]["position"], by_name["Ann"]["is_captain"], by_name["Ann"]["sign_up_pending"]), (7, "Forward", True, False))
+        self.assertEqual((by_name["Bo"]["position"], by_name["Bo"]["position_id"], by_name["Bo"]["sign_up_pending"]), ("", None, True))
+        [me] = body["staff"]
+        self.assertEqual((me["member_id"], me["position"], me["is_manager"], me["is_me"]), (str(self.member.pk), "Head coach", True, True))
+        self.assertEqual([p["name"] for p in body["player_positions"]], ["Forward"])
+        self.assertEqual({p["name"]: p["management_position"] for p in body["staff_positions"]}, {"Assistant": False, "Head coach": True})
+
+    def test_no_contact_details_or_birth_dates_are_returned(self):
+        self.player("Ann", "Aal")
+
+        text = self.get(self.url("/roster")).content.decode()
+
+        for word in ("phone", "date_of_birth", "email", "address"):
+            self.assertNotIn(word, text)
+
+    def test_any_staff_may_read_but_only_the_teams_own(self):
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+
+        self.assertEqual(self.get(self.url("/roster")).status_code, 200)
+        self.assertError(self.send("get", self.url("/roster", team=other)), 404, "not_found")
+        self.assertError(self.send("get", self.url("/roster/candidates", team=other)), 404, "not_found")
+
+    def test_players_of_a_past_season_are_not_listed(self):
+        old = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=35))
+        member = Member.objects.create(first_name="Old", last_name="Timer")
+        TeamMembership.objects.create(team=self.team, member=member, season=old)
+
+        self.assertEqual(self.roster()["players"], [])
+
+
+class RosterCandidateTests(CoachRosterTestCase):
+    def setUp(self):
+        super().setUp()
+        ClubMembership.objects.filter(member=self.child).update(status=ClubMembership.StatusChoices.CANCELLED)  # the fixture's child would be a candidate too
+
+    def test_lists_active_members_not_yet_on_the_team(self):
+        self.candidate("Cy", "Cox")
+        self.candidate("Di", "Dam", status=ClubMembership.StatusChoices.PENDING)
+        self.candidate("Ed", "Eek", kind=ClubMembership.Kind.GUARDIAN)
+        self.player("Ann", "Aal")
+
+        names = [item["first_name"] for item in self.get(self.url("/roster/candidates")).json()["items"]]
+
+        self.assertEqual(names, ["Cy"])
+
+    def test_search_filter_and_paging(self):
+        for first, last in (("Cy", "Cox"), ("Di", "Dam"), ("Ed", "Eek")):
+            self.candidate(first, last)
+
+        self.assertEqual([i["first_name"] for i in self.get(self.url("/roster/candidates"), q="dam").json()["items"]], ["Di"])
+        page = self.get(self.url("/roster/candidates"), limit=2).json()
+        self.assertEqual([i["first_name"] for i in page["items"]], ["Cy", "Di"])
+        rest = self.get(self.url("/roster/candidates"), limit=2, cursor=page["next_cursor"]).json()
+        self.assertEqual([i["first_name"] for i in rest["items"]], ["Ed"])
+
+    def test_no_team_leaves_out_people_on_another_team(self):
+        free = self.candidate("Free", "Agent")
+        busy = self.candidate("Busy", "Bee")
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        TeamMembership.objects.create(team=other, member=busy, season=self.season)
+
+        self.assertEqual({i["first_name"] for i in self.get(self.url("/roster/candidates")).json()["items"]}, {"Free", "Busy"})
+        self.assertEqual([i["member_id"] for i in self.get(self.url("/roster/candidates"), filter="no_team").json()["items"]], [str(free.pk)])
+
+    def test_suggested_are_last_seasons_players(self):
+        last = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=35))
+        returning = self.candidate("Back", "Again")
+        self.candidate("New", "Face")
+        TeamMembership.objects.create(team=self.team, member=returning, season=last)
+
+        items = self.get(self.url("/roster/candidates"), filter="suggested").json()["items"]
+
+        self.assertEqual([i["member_id"] for i in items], [str(returning.pk)])
+
+    def test_staff_candidates_are_those_not_on_the_staff(self):
+        player = self.candidate("Pla", "Yer")
+        TeamMembership.objects.create(team=self.team, member=player, season=self.season)
+
+        names = [i["first_name"] for i in self.get(self.url("/roster/candidates"), role="staff").json()["items"]]
+
+        self.assertEqual(names, ["Pla"])  # a player can also be staff
+
+
+class RosterWriteTests(CoachRosterTestCase):
+    def test_add_players_and_they_are_invited_to_upcoming_events(self):
+        cy = self.candidate("Cy", "Cox")
+        event = self.event()
+
+        response = self.send("post", self.url("/roster/players"), {"member_ids": [str(cy.pk)]})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        [row] = response.json()["players"]
+        self.assertEqual((row["first_name"], row["position_id"], row["jersey_number"]), ("Cy", None, None))
+        self.assertTrue(Attendance.objects.filter(event=event, member=cy).exists())
+
+    def test_adding_twice_is_harmless_and_a_non_candidate_fails_the_call(self):
+        cy = self.candidate("Cy", "Cox")
+        guardian = self.candidate("Gu", "Ardian", kind=ClubMembership.Kind.GUARDIAN)
+        self.send("post", self.url("/roster/players"), {"member_ids": [str(cy.pk)]})
+
+        again = self.send("post", self.url("/roster/players"), {"member_ids": [str(cy.pk)]})
+        bad = self.send("post", self.url("/roster/players"), {"member_ids": [str(cy.pk), str(guardian.pk)]})
+
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(len(again.json()["players"]), 1)
+        self.assertError(bad, 422, "not_a_candidate")
+        self.assertEqual(bad.json()["error"]["fields"], {"member_ids": [str(guardian.pk)]})
+        self.assertFalse(TeamMembership.objects.filter(member=guardian).exists())
+
+    def test_add_staff_with_one_position(self):
+        pla = self.candidate("Pla", "Yer")
+
+        response = self.send("post", self.url("/roster/staff"), {"member_ids": [str(pla.pk)], "position_id": str(self.coach_position.pk)})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual({row["first_name"]: row["position"] for row in response.json()["staff"]}, {"Pat": "Head coach", "Pla": "Assistant"})
+        assert StaffAssignment.objects.filter(member=pla, team=self.team).exists()
+
+    def test_staff_needs_a_staff_position(self):
+        pla = self.candidate("Pla", "Yer")
+
+        for position in (self.player_position.pk, uuid.uuid4()):
+            with self.subTest(position=position):
+                response = self.send("post", self.url("/roster/staff"), {"member_ids": [str(pla.pk)], "position_id": str(position)})
+                self.assertError(response, 422, "validation_error")
+                self.assertIn("position_id", response.json()["error"]["fields"])
+
+    def test_update_a_player(self):
+        ann = self.player("Ann", "Aal", jersey=7)
+        membership = TeamMembership.objects.get(member=ann)
+
+        response = self.send("patch", self.url(f"/roster/{membership.pk}"), {"jersey_number": 10, "is_captain": True})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()["players"][0]
+        self.assertEqual((row["jersey_number"], row["is_captain"], row["position"]), (10, True, "Forward"))
+
+    def test_jersey_clash_is_a_422_with_fields_never_a_500(self):
+        self.player("Ann", "Aal", jersey=7)
+        bo = self.player("Bo", "Bos", jersey=9)
+
+        response = self.send("patch", self.url(f"/roster/{TeamMembership.objects.get(member=bo).pk}"), {"jersey_number": 7})
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("jersey_number", response.json()["error"]["fields"])
+        self.assertEqual(TeamMembership.objects.get(member=bo).jersey_number, 9)
+
+    def test_a_number_pool_is_respected(self):
+        from teams.models import NumberPool
+
+        pool = NumberPool.objects.create(club=self.club, name="Juniors", min_number=1, max_number=30, min_age_gap_years=0)
+        self.team.pool = pool
+        self.team.save()
+        other_team = Team.objects.create(club=self.club, name="U14", short_name="U14", pool=pool)
+        taken = Member.objects.create(first_name="Tom", last_name="Taken")
+        TeamMembership.objects.create(team=other_team, member=taken, season=self.season, jersey_number=12)
+        ann = self.player("Ann", "Aal")
+
+        response = self.send("patch", self.url(f"/roster/{TeamMembership.objects.get(member=ann).pk}"), {"jersey_number": 12})
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("jersey_number", response.json()["error"]["fields"])
+
+    def test_a_player_keeps_a_position(self):
+        ann = self.player("Ann", "Aal")
+
+        response = self.send("patch", self.url(f"/roster/{TeamMembership.objects.get(member=ann).pk}"), {"position_id": None})
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("position_id", response.json()["error"]["fields"])
+
+    def test_clearing_a_number(self):
+        ann = self.player("Ann", "Aal", jersey=7)
+
+        row = self.send("patch", self.url(f"/roster/{TeamMembership.objects.get(member=ann).pk}"), {"jersey_number": None}).json()["players"][0]
+
+        self.assertIsNone(row["jersey_number"])
+
+    def test_remove_a_player_and_a_staff_member(self):
+        ann = self.player("Ann", "Aal")
+        other = StaffAssignment.objects.create(team=self.team, member=Member.objects.create(first_name="Sam", last_name="Staff"), season=self.season, position=self.coach_position)
+
+        self.assertEqual(self.send("delete", self.url(f"/roster/{TeamMembership.objects.get(member=ann).pk}")).status_code, 204)
+        self.assertEqual(self.send("delete", self.url(f"/staff/{other.pk}")).status_code, 204)
+
+        body = self.roster()
+        self.assertEqual((body["players"], [row["first_name"] for row in body["staff"]]), ([], ["Pat"]))
+        self.assertTrue(Member.objects.filter(pk=ann.pk).exists())
+
+    def test_removing_yourself_as_staff_is_forbidden(self):
+        self.assertError(self.send("delete", self.url(f"/staff/{self.assignment.pk}")), 403, "self_removal")
+        self.assertTrue(StaffAssignment.objects.filter(pk=self.assignment.pk).exists())
+
+    def test_a_coach_without_a_management_position_may_not_change_anything(self):
+        ann = self.player("Ann", "Aal")
+        membership = TeamMembership.objects.get(member=ann)
+        cy = self.candidate("Cy", "Cox")
+        self.assignment.position = self.coach_position
+        self.assignment.save()
+
+        for method, path, body in (
+            ("post", "/roster/players", {"member_ids": [str(cy.pk)]}),
+            ("post", "/roster/staff", {"member_ids": [str(cy.pk)], "position_id": str(self.coach_position.pk)}),
+            ("patch", f"/roster/{membership.pk}", {"jersey_number": 3}),
+            ("delete", f"/roster/{membership.pk}", None),
+            ("delete", f"/staff/{self.assignment.pk}", None),
+        ):
+            with self.subTest(path=path):
+                self.assertError(self.send(method, self.url(path), body), 403, "manager_required")
+
+    def test_another_teams_membership_is_404(self):
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        member = Member.objects.create(first_name="Far", last_name="Away")
+        foreign = TeamMembership.objects.create(team=other, member=member, season=self.season)
+        staff = StaffAssignment.objects.create(team=other, member=member, season=self.season, position=self.coach_position)
+
+        self.assertError(self.send("patch", self.url(f"/roster/{foreign.pk}"), {"jersey_number": 3}), 404, "not_found")
+        self.assertError(self.send("delete", self.url(f"/roster/{foreign.pk}")), 404, "not_found")
+        self.assertError(self.send("delete", self.url(f"/staff/{staff.pk}")), 404, "not_found")
