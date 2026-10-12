@@ -12,6 +12,7 @@ from .errors import install_handlers
 from .routers.account import router as account_router
 from .routers.club import router as club_router
 from .routers.coach import router as coach_router
+from .routers.coach_evaluations import router as coach_evaluations_router
 from .routers.coach_events import router as coach_events_router
 from .routers.coach_lineup import router as coach_lineup_router
 from .routers.coach_news import router as coach_news_router
@@ -65,3 +66,4 @@ app_api.add_router("/", coach_events_router)
 app_api.add_router("/", coach_lineup_router)
 app_api.add_router("/", coach_roster_router)
 app_api.add_router("/", coach_news_router)
+app_api.add_router("/", coach_evaluations_router)

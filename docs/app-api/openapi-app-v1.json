@@ -1081,6 +1081,66 @@
         "title": "CheckInsIn",
         "type": "object"
       },
+      "ChecklistListOut": {
+        "properties": {
+          "file_accept": {
+            "description": "Accepted file types for `file` fields.",
+            "title": "File Accept",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "file_accept",
+          "max_file_bytes"
+        ],
+        "title": "ChecklistListOut",
+        "type": "object"
+      },
+      "ChecklistOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "fields": {
+            "description": "The questions in order, to render exactly like a form. A rating scale is a `choice` field whose `options` are the steps (for example 1 to 5); there is no separate scale type. Ignore a field type you do not know.",
+            "items": {
+              "$ref": "#/components/schemas/FormFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "description": "What `POST …/evaluations` takes as `checklist_slug`.",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "fields"
+        ],
+        "title": "ChecklistOut",
+        "type": "object"
+      },
       "CheckoutIn": {
         "properties": {
           "discount_code": {
@@ -2472,6 +2532,163 @@
           "error"
         ],
         "title": "ErrorOut",
+        "type": "object"
+      },
+      "EvaluationDetailOut": {
+        "properties": {
+          "answers": {
+            "description": "Every question of the version the evaluation was scored against, in order; `value` is null where left blank.",
+            "items": {
+              "$ref": "#/components/schemas/AnswerValueOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "checklist": {
+            "$ref": "#/components/schemas/EvaluationRefOut"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "evaluator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluatorOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the evaluator has left the club."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "season_id": {
+            "format": "uuid",
+            "title": "Season Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "checklist",
+          "season_id",
+          "evaluator",
+          "created",
+          "answers"
+        ],
+        "title": "EvaluationDetailOut",
+        "type": "object"
+      },
+      "EvaluationListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "EvaluationListOut",
+        "type": "object"
+      },
+      "EvaluationRefOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "EvaluationRefOut",
+        "type": "object"
+      },
+      "EvaluationSummaryOut": {
+        "properties": {
+          "checklist": {
+            "$ref": "#/components/schemas/EvaluationRefOut"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "evaluator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluatorOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the evaluator has left the club."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "season_id": {
+            "format": "uuid",
+            "title": "Season Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "checklist",
+          "season_id",
+          "evaluator",
+          "created"
+        ],
+        "title": "EvaluationSummaryOut",
+        "type": "object"
+      },
+      "EvaluatorOut": {
+        "properties": {
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_name",
+          "last_name"
+        ],
+        "title": "EvaluatorOut",
         "type": "object"
       },
       "EventDetailOut": {
@@ -8322,6 +8539,64 @@
         ]
       }
     },
+    "/api/app/v1/evaluations/checklists": {
+      "get": {
+        "description": "Every active checklist that has questions, with the fields to render. Needs the club's\n`evaluations` module and the evaluation grant (`permissions.can_manage_evaluations`).",
+        "operationId": "appapi_routers_coach_evaluations_checklists",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The club's evaluation checklists",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
     "/api/app/v1/events/{event_id}": {
       "get": {
         "description": "The event as the account's family sees it: their answers, a published line-up,\nsign-ups (a declined one stays until the game starts, as in the calendar), tasks and the\nsquad's response counts.",
@@ -10918,6 +11193,312 @@
         "summary": "Registration invoice (PDF)",
         "tags": [
           "payments"
+        ]
+      }
+    },
+    "/api/app/v1/players/{member_id}/evaluations": {
+      "get": {
+        "description": "Everybody's evaluations of this player, newest first (several coaches may each file one per\nseason). Same gate as `GET /evaluations/checklists`; the player may be anyone in the club.",
+        "operationId": "appapi_routers_coach_evaluations_list_evaluations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A player's evaluations",
+        "tags": [
+          "coach"
+        ]
+      },
+      "post": {
+        "description": "Scores the player against one checklist; the evaluator is the signed-in account's member.\n`checklist_slug` is always required. `422` carries `fields` per question `key`; `404` for an\nunknown or inactive checklist; `409 checklist_not_configured` when it has no questions yet;\n`409 no_current_season` without a season covering today. Send an `Idempotency-Key`.",
+        "operationId": "appapi_routers_coach_evaluations_create_evaluation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "answers": {
+                    "description": "Field `key` → value, as for forms: string, number, `YYYY-MM-DD`, bool, or a list of option values for `multichoice`.",
+                    "type": "object"
+                  },
+                  "checklist_slug": {
+                    "description": "From `GET /evaluations/checklists`. Always explicit: the web's pick-the-only-checklist shortcut is a screen convenience.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "checklist_slug",
+                  "answers"
+                ],
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "Only needed for checklists with `file` fields: one part per field `key`, files as file parts.",
+                "properties": {
+                  "checklist_slug": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "checklist_slug"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationDetailOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "File an evaluation",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/players/{member_id}/evaluations/{evaluation_id}": {
+      "get": {
+        "description": "Every question of the version it was scored against, answered or not.",
+        "operationId": "appapi_routers_coach_evaluations_get_evaluation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Member Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationDetailOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One evaluation with its answers",
+        "tags": [
+          "coach"
         ]
       }
     },

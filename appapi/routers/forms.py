@@ -52,6 +52,19 @@ SUBMIT_BODY = {
 }
 
 
+def field_out(field) -> dict:
+    """One question as the app renders it (shared with the evaluation checklists)."""
+    return {
+        "key": field.key,
+        "label": field.label,
+        "type": field.field_type,
+        "required": field.required,
+        "help_text": field.help_text,
+        "section": field.section or "",
+        "options": [{"value": str(value), "label": str(label)} for value, label in field_choices(field)],
+    }
+
+
 def _open_send(scope, send_id) -> FormSend:
     # Not gated on the "formbuilder" flag, same as the member web app: the flag licenses
     # *creating* forms (management); a form already sent to the family stays answerable.
@@ -93,18 +106,7 @@ def form_detail(request, send_id: uuid.UUID):
     send = _open_send(scope, send_id)
     people = addressed_people(send, scope.people)
     counts = {person.pk: send.submissions.filter(member=person).count() for person in people}
-    fields = [
-        {
-            "key": field.key,
-            "label": field.label,
-            "type": field.field_type,
-            "required": field.required,
-            "help_text": field.help_text,
-            "section": field.section or "",
-            "options": [{"value": str(value), "label": str(label)} for value, label in field_choices(field)],
-        }
-        for field in send.form.fields.filter(is_active=True).order_by("order")
-    ]
+    fields = [field_out(field) for field in send.form.fields.filter(is_active=True).order_by("order")]
     return {
         "send_id": send.pk,
         "title": send.form.title,

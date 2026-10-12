@@ -16,7 +16,7 @@ What the app can use today, and what's next. The full plan is `API.md` in the re
 | Coach: events and series (create, edit with `scope`, delete, detach), location / opponent pickers | **Available** |
 | Coach: line-up (read, replace picks, publish / schedule / cancel) | **Available** |
 | Coach: roster (list, candidates, add players / staff, edit, remove) | **Available** |
-| Coach: news submission (with photos) and your own submissions | **Available** |
-| Coach: evaluations | Next (phase 4, last slice) |
+| Coach: news submission (with photos) and your own submissions | **Available**. No rejection reason yet (the web has no "send back with a note" step) |
+| Coach: evaluations (checklists, file, history) | **Available**. Club-wide, not per team |
 | Passkeys on iOS, "signed-in devices", universal links for password reset | Phase 5 |
 | Android | After iOS, on the same API |

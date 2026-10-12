@@ -23,6 +23,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 403 | `manager_required` | A coach action that needs a management position on the team. `GET /context` → `staffed_teams[].can_…` says so up front: hide the button. |
 | 404 | `not_found` | Doesn't exist, or you may not see it (another family's person, another club's event). |
 | 404 | `feature_disabled` | The club doesn't have this module (e.g. officials): hide it. `/clubs` → `features` says so up front. |
+| 409 | `checklist_not_configured` | The evaluation checklist has no questions yet: tell the user to ask an admin. |
 | 409 | `no_current_season` | The club has no season covering today, so there is no roster to change. |
 | 409 | `lineup_empty` | Publishing a line-up nobody is picked in yet: ask the coach to pick players. |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still being processed: wait a moment and retry. |

@@ -406,3 +406,50 @@ class CoachNewsOut(Schema):
 class CoachNewsListOut(Schema):
     items: list[CoachNewsOut]
     next_cursor: str | None
+
+
+# --- evaluations --------------------------------------------------------------------------
+
+from .schemas import AnswerValueOut, FormFieldOut  # noqa: E402
+
+
+class ChecklistOut(Schema):
+    slug: str = Field(description="What `POST …/evaluations` takes as `checklist_slug`.")
+    name: str
+    description: str
+    fields: list[FormFieldOut] = Field(
+        description="The questions in order, to render exactly like a form. A rating scale is a `choice` field whose `options` are the steps (for example 1 to 5); there is no separate scale type. Ignore a field type you do not know."
+    )
+
+
+class ChecklistListOut(Schema):
+    items: list[ChecklistOut]
+    file_accept: str = Field(description="Accepted file types for `file` fields.")
+    max_file_bytes: int
+
+
+class EvaluationRefOut(Schema):
+    slug: str
+    name: str
+
+
+class EvaluatorOut(Schema):
+    first_name: str
+    last_name: str
+
+
+class EvaluationSummaryOut(Schema):
+    id: uuid.UUID
+    checklist: EvaluationRefOut
+    season_id: uuid.UUID
+    evaluator: EvaluatorOut | None = Field(description="Null when the evaluator has left the club.")
+    created: datetime.datetime
+
+
+class EvaluationDetailOut(EvaluationSummaryOut):
+    answers: list[AnswerValueOut] = Field(description="Every question of the version the evaluation was scored against, in order; `value` is null where left blank.")
+
+
+class EvaluationListOut(Schema):
+    items: list[EvaluationSummaryOut]
+    next_cursor: str | None

@@ -417,6 +417,10 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 | News                                                       | `POST …/news` (submit for review, photos multipart; needs `can_add_news`)                                                                                                                                                                                                             |
 | Evaluations (flag `evaluations`, `can_manage_evaluations`) | `GET /evaluations/checklists`, `GET …/players/{member_id}/evaluations`, `POST …/players/{member_id}/evaluations` (requires an explicit `checklist_slug` — the web's "exactly one ⇒ auto-pick" is UI-only)                                                                             |
 
+> **As built (phase 4):** see `docs/app-api/ios.md` §9 for the real shapes. Differences from the table above: staff removal is `DELETE …/staff/{assignment_id}` (players keep `…/roster/{membership_id}`);
+> `PATCH …/events/{id}` takes `scope: this|this_and_following|all`; evaluations are club-wide, not under `/teams/{team_id}`: `GET /evaluations/checklists`, `GET|POST /players/{member_id}/evaluations`
+> (the evaluation grant is not tied to a team); `GET …/news` lists the caller's own submissions; every `staffed_teams` item in `GET /context` carries `role` and the `can_*` flags.
+
 ### 7.4 Deliberately not in v1
 
 Management screens, tournament brackets/scheduling (§14), shop/forms/registration *administration*, club branding editing, member import. Anything a coach can do only via `/manage` on the web stays there.

@@ -738,6 +738,35 @@ events on your calendar" (`target: {"type": "calendar"}`). Nothing else is sent 
     ask the editor", not a reason. (Adding one is a web change first.)
 * Nothing is pushed to the coach when their post is published or returned.
 
+### Evaluations
+
+Staff-only scoring of players against the club's checklists. **Not under `/teams/{team_id}`**: the web
+grants evaluations club-wide (`permissions.can_manage_evaluations`, the evaluation-manager grant, which a
+technical director can hold without staffing any team) and lets the holder evaluate anyone in the
+club, so a team in the path would wrongly 404 them. The gate: the club's `evaluations` module on
+(`features.evaluations`, else `404 feature_disabled`) and the grant (else `403 forbidden`). Show the
+entry point only when both hold. A player, parent or ordinary coach never receives evaluation data.
+
+* `GET /evaluations/checklists` → `{items: [{slug, name, description, fields}], file_accept,
+  max_file_bytes}`. Only active checklists that have questions. `fields` are the same objects as a
+  form's (`key`, `label`, `type`, `required`, `help_text`, `section`, `options`): render them like a
+  form, grouping by `section`. A **rating scale is a `choice` field** whose `options` are the steps; there
+  is no separate scale type.
+* `POST /players/{member_id}/evaluations` `{"checklist_slug", "answers": {key: value}}` (or multipart,
+  for checklists with `file` fields) → `201` with the evaluation. **`checklist_slug` is always
+  required**, even when the club has only one checklist (the web's auto-pick is a screen shortcut).
+  `422` carries `fields` per question `key`; `404` for an unknown or inactive checklist;
+  `409 checklist_not_configured` for one with no questions; `409 no_current_season`. The evaluator is
+  the signed-in account. Several coaches can each file one for the same player and season. Send an
+  `Idempotency-Key`.
+* `GET /players/{member_id}/evaluations?cursor&limit` → `{items: [{id, checklist, season_id, evaluator,
+  created}], next_cursor}`, everybody's, newest first. `GET …/evaluations/{id}` adds `answers`: every
+  question of the version the evaluation was scored against (not the checklist's current version),
+  answered or not (`value` null).
+* `member_id` can be anyone attached to the club; others are `404`.
+
+No push is sent for evaluations.
+
 ## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a

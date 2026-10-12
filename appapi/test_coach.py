@@ -1368,3 +1368,183 @@ class CoachNewsTests(CoachEventTestCase):
         self.assignment.save()
 
         self.assertEqual(self.get(self.url("/news")).status_code, 200)
+
+
+# --- slice 6: evaluations ------------------------------------------------------------------
+
+from club.models import EvaluationManager  # noqa: E402
+from evaluations.models import EvaluationChecklist, PlayerEvaluation  # noqa: E402
+from formbuilder.models import Field as FormField  # noqa: E402
+from formbuilder.models import Form  # noqa: E402
+
+
+class CoachEvaluationTestCase(CoachApiTestCase):
+    def setUp(self):
+        super().setUp()
+        from waffle import get_waffle_flag_model
+
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="evaluations", defaults={"everyone": None})
+        flag.clubs.add(self.club)
+        # A club-wide grant for someone who staffs no team at all.
+        self.assignment.delete()
+        EvaluationManager.objects.create(club=self.club, member=self.member)
+        self._token = self.login_with_totp()
+        self.form = Form.objects.create(club=self.club, title="U16 rubric")
+        FormField.objects.create(form=self.form, key="skating", label="Skating", field_type="choice", options=[{"value": "1", "label": "1"}, {"value": "5", "label": "5"}], order=1, section="Technical")
+        FormField.objects.create(form=self.form, key="notes", label="Notes", field_type="textarea", required=False, order=2)
+        self.checklist = EvaluationChecklist.objects.create(club=self.club, name="U16", form=self.form)
+        self.child_player = self.child
+        self.path = f"/players/{self.child.pk}/evaluations"
+
+    def post(self, answers, slug="u16", **extra):
+        return self.send("post", self.path, {"checklist_slug": slug, "answers": answers}, **extra)
+
+
+class EvaluationChecklistTests(CoachEvaluationTestCase):
+    def test_lists_the_fields_to_render(self):
+        EvaluationChecklist.objects.create(club=self.club, name="Empty")  # no questions yet: not offered
+        EvaluationChecklist.objects.create(club=self.club, name="Retired", form=self.form, is_active=False)
+
+        body = self.get("/evaluations/checklists").json()
+
+        [checklist] = body["items"]
+        self.assertEqual((checklist["slug"], checklist["name"]), ("u16", "U16"))
+        skating, notes = checklist["fields"]
+        self.assertEqual((skating["key"], skating["type"], skating["required"], skating["section"], [o["value"] for o in skating["options"]]), ("skating", "choice", True, "Technical", ["1", "5"]))
+        self.assertEqual((notes["type"], notes["required"]), ("textarea", False))
+        self.assertIn("max_file_bytes", body)
+
+    def test_a_coach_without_the_grant_is_forbidden(self):
+        EvaluationManager.objects.all().delete()
+
+        for path in ("/evaluations/checklists", self.path):
+            with self.subTest(path=path):
+                self.assertError(self.get(path), 403, "forbidden")
+        self.assertError(self.post({"skating": "5"}), 403, "forbidden")
+
+    def test_the_module_must_be_on(self):
+        from waffle import get_waffle_flag_model
+
+        get_waffle_flag_model().objects.get(name="evaluations").clubs.clear()
+
+        self.assertError(self.get("/evaluations/checklists"), 404, "feature_disabled")
+        self.assertError(self.post({"skating": "5"}), 404, "feature_disabled")
+
+    def test_context_says_whether_the_account_may(self):
+        permissions = self.get("/context").json()["permissions"]
+
+        self.assertTrue(permissions["can_manage_evaluations"])
+
+
+class EvaluationFilingTests(CoachEvaluationTestCase):
+    def test_files_an_evaluation_and_returns_it(self):
+        response = self.post({"skating": "5", "notes": "Quick feet"})
+
+        self.assertEqual(response.status_code, 201, response.content)
+        body = response.json()
+        self.assertEqual((body["checklist"], body["season_id"], body["evaluator"]), ({"slug": "u16", "name": "U16"}, str(self.season.pk), {"first_name": "Pat", "last_name": "Parent"}))
+        self.assertEqual([(a["key"], a["value"]) for a in body["answers"]], [("skating", "5"), ("notes", "Quick feet")])
+        evaluation = PlayerEvaluation.objects.get(pk=body["id"])
+        self.assertEqual((evaluation.player, evaluation.submission.member), (self.child, self.member))
+
+    def test_an_optional_question_may_be_left_out(self):
+        body = self.post({"skating": "1"}).json()
+
+        self.assertEqual([(a["key"], a["value"]) for a in body["answers"]], [("skating", "1"), ("notes", None)])
+
+    def test_validation_errors_are_per_question(self):
+        response = self.post({"skating": "9"})
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("skating", response.json()["error"]["fields"])
+        self.assertFalse(PlayerEvaluation.objects.exists())
+
+    def test_a_required_answer_is_needed(self):
+        response = self.post({"notes": "Only notes"})
+
+        self.assertError(response, 422, "validation_error")
+        self.assertIn("skating", response.json()["error"]["fields"])
+
+    def test_the_checklist_is_always_explicit_even_with_only_one(self):
+        self.assertError(self.send("post", self.path, {"answers": {"skating": "5"}}), 404, "not_found")
+        self.assertError(self.post({"skating": "5"}, slug="nope"), 404, "not_found")
+
+    def test_an_inactive_checklist_cannot_be_used(self):
+        EvaluationChecklist.objects.filter(pk=self.checklist.pk).update(is_active=False)
+
+        self.assertError(self.post({"skating": "5"}), 404, "not_found")
+
+    def test_answers_must_be_an_object(self):
+        self.assertError(self.send("post", self.path, {"checklist_slug": "u16", "answers": "5"}), 422, "validation_error")
+
+    def test_without_a_season_it_is_a_409(self):
+        Season.objects.update(start_date=timezone.localdate() - datetime.timedelta(days=400), end_date=timezone.localdate() - datetime.timedelta(days=40))
+
+        self.assertError(self.post({"skating": "5"}), 409, "no_current_season")
+
+    def test_an_idempotency_key_files_once(self):
+        first = self.post({"skating": "5"}, HTTP_IDEMPOTENCY_KEY="eval-1")
+        second = self.post({"skating": "5"}, HTTP_IDEMPOTENCY_KEY="eval-1")
+
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(PlayerEvaluation.objects.count(), 1)
+
+    def test_an_unknown_player_is_404(self):
+        self.assertError(self.send("post", f"/players/{uuid.uuid4()}/evaluations", {"checklist_slug": "u16", "answers": {"skating": "5"}}), 404, "not_found")
+        self.assertError(self.get(f"/players/{uuid.uuid4()}/evaluations"), 404, "not_found")
+
+    def test_a_person_outside_the_club_is_404(self):
+        stranger = Member.objects.create(first_name="Out", last_name="Sider")
+
+        self.assertError(self.get(f"/players/{stranger.pk}/evaluations"), 404, "not_found")
+
+
+class EvaluationHistoryTests(CoachEvaluationTestCase):
+    def test_lists_everyones_evaluations_newest_first_and_opens_one(self):
+        first = self.post({"skating": "1"}).json()
+        second = self.post({"skating": "5", "notes": "Better"}).json()
+        PlayerEvaluation.objects.filter(pk=first["id"]).update(created=timezone.now() - datetime.timedelta(days=30))
+
+        listing = self.get(self.path).json()
+        detail = self.get(f"{self.path}/{second['id']}").json()
+
+        self.assertEqual([item["id"] for item in listing["items"]], [second["id"], first["id"]])
+        self.assertNotIn("answers", listing["items"][0])
+        self.assertEqual([(a["key"], a["value"]) for a in detail["answers"]], [("skating", "5"), ("notes", "Better")])
+
+    def test_an_old_evaluation_keeps_the_questions_it_was_scored_against(self):
+        from evaluations.services import start_new_rubric_version
+
+        old = self.post({"skating": "5"}).json()
+        new_form = start_new_rubric_version(self.checklist)
+        new_form.fields.filter(key="notes").update(is_active=False)
+        new_form.fields.filter(key="skating").update(label="Skating v2")
+
+        detail = self.get(f"{self.path}/{old['id']}").json()
+        checklist_fields = self.get("/evaluations/checklists").json()["items"][0]["fields"]
+
+        self.assertEqual([a["label"] for a in detail["answers"]], ["Skating", "Notes"])
+        self.assertEqual([f["label"] for f in checklist_fields], ["Skating v2"])
+
+    def test_pages(self):
+        for _n in range(3):
+            self.post({"skating": "5"})
+
+        page = self.get(self.path, limit=2).json()
+        rest = self.get(self.path, limit=2, cursor=page["next_cursor"]).json()
+
+        self.assertEqual((len(page["items"]), len(rest["items"])), (2, 1))
+
+    def test_another_players_evaluation_is_404(self):
+        other = self.player("Ann", "Aal")
+        mine = self.post({"skating": "5"}).json()
+
+        self.assertError(self.get(f"/players/{other.pk}/evaluations/{mine['id']}"), 404, "not_found")
+
+    def test_evaluations_never_appear_in_member_endpoints(self):
+        self.post({"skating": "5", "notes": "Secret assessment"})
+        EvaluationManager.objects.all().delete()  # read the member side as a plain parent
+
+        for path in ("/home", f"/members/{self.child.pk}", "/forms", "/notifications"):
+            with self.subTest(path=path):
+                self.assertNotIn("Secret assessment", self.get(path).content.decode())
