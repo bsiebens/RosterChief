@@ -85,7 +85,7 @@ def clubs(request):
 
 
 def _device_out(device: PushDevice) -> dict:
-    return {"installation_id": device.installation_id, "platform": device.platform, "environment": device.environment, "push_enabled": device.enabled and bool(device.endpoint_arn)}
+    return {"installation_id": device.installation_id, "platform": device.platform, "environment": device.environment, "push_enabled": device.enabled and get_gateway().supports(device)}
 
 
 @router.post("/devices", response={200: DeviceOut, **ERRORS, 422: ErrorOut}, summary="Register this install for push")
@@ -102,13 +102,10 @@ def register_device(request, payload: DeviceIn):
         device.user = request.user
         device.platform = payload.platform
         device.environment = payload.environment
-        token_changed = device.push_token != payload.push_token
         device.push_token = payload.push_token
         device.app_version = payload.app_version
         device.locale = payload.locale
-        if token_changed or not device.endpoint_arn or not device.enabled:
-            device.endpoint_arn = get_gateway().register(device)
-            device.enabled = True
+        device.enabled = True  # a fresh registration revives a device disabled after a dead-token report
         device.save()
     return _device_out(device)
 
@@ -120,6 +117,5 @@ def unregister_device(request, installation_id: str):
     device = PushDevice.objects.filter(installation_id=installation_id, user=request.user).first()
     if device is None:
         raise ApiError(404, "not_found")
-    get_gateway().unregister(device)
     device.delete()
     return 204, None

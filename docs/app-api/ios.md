@@ -198,8 +198,8 @@ Then retry the call that failed.
 
 **Before you start:** in Xcode, add the **Push Notifications** capability to the app target.
 The bundle ID must be the one the server's push setup was made for. The server side (an APNs
-key and Amazon SNS) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
-push"](https://github.com/bsiebens/RosterChief/blob/development/DEPLOYMENT.md#native-app-push-amazon-sns).
+key, sent straight to Apple, no intermediary) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
+push"](https://github.com/bsiebens/RosterChief/blob/development/DEPLOYMENT.md#native-app-push-apns).
 Hand them the bundle ID; they need the team's APNs `.p8` key from the Apple Developer account.
 Until that's done, `POST /devices` answers `push_enabled: false` and no pushes arrive.
 
@@ -225,7 +225,7 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
    Use `"environment": "sandbox"` for debug builds run from Xcode; TestFlight and App Store builds
    are `production`. Call it again after every launch where the token may have changed. It's
    safe to repeat.
-4. The response's `push_enabled` is `false` until the server has push delivery set up. Don't show
+4. The response's `push_enabled` is `false` until the server has its APNs key set up. Don't show
    an error for that.
 
 **Payload** (arrives in `userInfo`): an `aps.alert` with the title and body, plus:
@@ -243,6 +243,9 @@ forms arrive in a later release). The inbox's `source` uses the same shape. The 
 contains personal data. One account gets **one** push per notification even when it concerns
 several of its children. The payload also carries `aps.badge`: the account's total unread count across
 all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
+
+`aps.thread-id` groups pushes on the lock screen: the club's slug for inbox pushes, the event id for
+live-game pushes (so one game's goals stack together).
 
 Title and body are rendered in the language of the `locale` the device last registered with
 (`nl` or `en`; anything else gets English), so call `POST /devices` again when the in-app language

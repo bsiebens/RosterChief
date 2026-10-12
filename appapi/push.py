@@ -1,32 +1,36 @@
-"""Native push through Amazon SNS Mobile Push (API.md §9).
+"""Native push straight to Apple's APNs over HTTP/2 with token-based auth (API.md §9).
 
-SNS holds the APNs (and later FCM) credentials as *platform applications* and gives each
-device token an *endpoint*; we store that endpoint's ARN on the PushDevice and publish to
-it. Everything talks to a ``PushGateway`` so tests (and a server without SNS) never touch
-the network:
+Everything talks to a ``PushGateway`` so tests (and a server without APNs credentials)
+never touch the network:
 
-* ``SnsGateway`` -- the real one, used when a platform application ARN is configured;
-* ``NullGateway`` -- no SNS configured: devices still register, nothing is sent;
+* ``ApnsGateway`` -- the real one, used when the APNs key is configured;
+* ``NullGateway`` -- nothing configured: devices still register, nothing is sent;
 * ``appapi.tests`` swaps in a fake via ``APP_PUSH_GATEWAY``.
 
-Settings (all optional; empty = that platform can't receive pushes yet)::
+Settings (all optional; empty = pushes can't be delivered yet)::
 
-    APP_PUSH_SNS_REGION
-    APP_PUSH_SNS_ACCESS_KEY_ID      # its own IAM user; empty = boto3's default chain
-    APP_PUSH_SNS_SECRET_ACCESS_KEY
-    APP_PUSH_SNS_APNS_ARN           # App Store / TestFlight builds
-    APP_PUSH_SNS_APNS_SANDBOX_ARN   # debug builds from Xcode
-    APP_PUSH_SNS_FCM_ARN            # Android, later
-    APP_PUSH_GATEWAY                # dotted path to override the gateway class
+    APP_PUSH_APNS_KEY_ID        # the .p8 key's id
+    APP_PUSH_APNS_TEAM_ID       # the Apple Developer team id
+    APP_PUSH_APNS_BUNDLE_ID     # the app's bundle id = the apns-topic
+    APP_PUSH_APNS_KEY           # the .p8 file's text ("\\n" for newlines in an env file)
+    APP_PUSH_APNS_KEY_FILE      # or the path of the .p8 file
+    APP_PUSH_GATEWAY            # dotted path to override the gateway class
 
-Payloads are pointers, never content (API.md §9): a localised title/body plus
-``{notification_id, club_slug, type, target}``; the app fetches the rest over the API.
+A device's ``environment`` picks the APNs host: ``sandbox`` -> api.sandbox.push.apple.com
+(debug builds from Xcode), ``production`` -> api.push.apple.com (TestFlight and the App
+Store). Android is not served yet. Payloads are pointers, never content (API.md §9): a
+localised title/body plus ``{kind, club_slug, target, ...}``; the app fetches the rest over
+the API.
 """
 
 import json
 import logging
-import re
+import threading
+import time
+from pathlib import Path
 
+import httpx
+import jwt
 from django.conf import settings
 from django.utils.module_loading import import_string
 
@@ -34,108 +38,130 @@ from .models import PushDevice
 
 logger = logging.getLogger(__name__)
 
-#: SNS reports "already exists with the same Token, but different attributes" and names the
-#: existing endpoint in the message; we reuse that endpoint instead of failing.
-_EXISTING_ENDPOINT = re.compile(r"Endpoint (arn:aws:sns:[^\s]+) already exists")
+APNS_HOSTS = {PushDevice.Environment.PRODUCTION: "https://api.push.apple.com", PushDevice.Environment.SANDBOX: "https://api.sandbox.push.apple.com"}
+
+#: Apple asks for a provider token to be refreshed no more often than every 20 minutes and
+#: rejects one older than an hour.
+TOKEN_REFRESH_SECONDS = 50 * 60
+
+#: APNs reasons that mean "this token will never work again": the device is disabled.
+DEAD_TOKEN_REASONS = {"BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"}
 
 
 class PushGateway:
-    def register(self, device: PushDevice) -> str:
-        """Create or refresh the device's endpoint; return its ARN ('' if none)."""
-        raise NotImplementedError
+    def supports(self, device: PushDevice) -> bool:
+        """Whether pushes can be delivered to ``device`` at all (what ``push_enabled`` reports)."""
+        return True
 
-    def unregister(self, device: PushDevice) -> None:
-        raise NotImplementedError
-
-    def publish(self, device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None) -> bool:
+    def publish(self, device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None, thread_id: str | None = None) -> bool:
         """Send one push. ``badge`` is the app icon's unread count (iOS); None leaves it as is.
-        False means the token is dead: the caller disables the device."""
+        ``thread_id`` groups notifications on the lock screen. False means the token is dead:
+        the caller disables the device."""
         raise NotImplementedError
 
 
 class NullGateway(PushGateway):
-    def register(self, device):
+    def supports(self, device):
+        return False
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+        return True
+
+
+def build_payload(*, title: str, body: str, data: dict, badge: int | None = None, thread_id: str | None = None) -> dict:
+    """The APNs JSON body: the ``aps`` dictionary next to the custom keys."""
+    aps = {"alert": {"title": title, "body": body}, "sound": "default", "mutable-content": 1}
+    if thread_id:
+        aps["thread-id"] = thread_id
+    if badge is not None:
+        aps["badge"] = badge
+    return {"aps": aps, **data}
+
+
+def apns_configured() -> bool:
+    return bool(settings.APP_PUSH_APNS_KEY_ID and settings.APP_PUSH_APNS_TEAM_ID and (settings.APP_PUSH_APNS_KEY or settings.APP_PUSH_APNS_KEY_FILE))
+
+
+def _private_key() -> str:
+    if settings.APP_PUSH_APNS_KEY:
+        return settings.APP_PUSH_APNS_KEY
+    return Path(settings.APP_PUSH_APNS_KEY_FILE).read_text()
+
+
+class ApnsGateway(PushGateway):
+    """One shared HTTP/2 connection pool per process, created on first use (so after gunicorn
+    forks) and a provider token reused for 50 minutes."""
+
+    def __init__(self, client=None):
+        self._client = client
+        self._lock = threading.Lock()
+        self._token = ""
+        self._token_issued = 0.0
+
+    @property
+    def client(self):
+        with self._lock:
+            if self._client is None:
+                self._client = httpx.Client(http2=True, timeout=10.0)
+            return self._client
+
+    def supports(self, device):
+        return device.platform == PushDevice.Platform.IOS
+
+    def _provider_token(self, *, refresh=False) -> str:
+        with self._lock:
+            now = time.time()
+            if refresh or not self._token or now - self._token_issued > TOKEN_REFRESH_SECONDS:
+                self._token = jwt.encode({"iss": settings.APP_PUSH_APNS_TEAM_ID, "iat": int(now)}, _private_key(), algorithm="ES256", headers={"kid": settings.APP_PUSH_APNS_KEY_ID})
+                self._token_issued = now
+            return self._token
+
+    def _post(self, device, payload, *, refresh=False):
+        headers = {
+            "authorization": f"bearer {self._provider_token(refresh=refresh)}",
+            "apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID,
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+        }
+        return self.client.post(f"{APNS_HOSTS[device.environment]}/3/device/{device.push_token}", content=json.dumps(payload), headers=headers)
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+        if device.platform != PushDevice.Platform.IOS:
+            return True
+        payload = build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id)
+        response = self._post(device, payload)
+        if response.status_code == 403 and _reason(response) == "ExpiredProviderToken":
+            response = self._post(device, payload, refresh=True)
+        if response.status_code == 200:
+            return True
+        reason = _reason(response)
+        if response.status_code == 410 or reason in DEAD_TOKEN_REASONS:
+            return False
+        # Throttling, a server error, a bad key: the caller logs it and carries on.
+        raise ApnsError(f"APNs answered {response.status_code} {reason}")
+
+
+class ApnsError(Exception):
+    pass
+
+
+def _reason(response) -> str:
+    try:
+        return response.json().get("reason", "")
+    except ValueError:
         return ""
 
-    def unregister(self, device):
-        return None
 
-    def publish(self, device, *, title, body, data, badge=None):
-        return True
-
-
-def _platform_application_arn(device: PushDevice) -> str:
-    if device.platform == PushDevice.Platform.IOS:
-        if device.environment == PushDevice.Environment.SANDBOX:
-            return settings.APP_PUSH_SNS_APNS_SANDBOX_ARN
-        return settings.APP_PUSH_SNS_APNS_ARN
-    return settings.APP_PUSH_SNS_FCM_ARN
-
-
-def build_message(device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None) -> str:
-    """The SNS ``MessageStructure=json`` message for ``device``'s platform."""
-    if device.platform == PushDevice.Platform.IOS:
-        aps = {"alert": {"title": title, "body": body}, "sound": "default", "mutable-content": 1}
-        if badge is not None:
-            aps["badge"] = badge
-        apns = {"aps": aps, **data}
-        key = "APNS_SANDBOX" if device.environment == PushDevice.Environment.SANDBOX else "APNS"
-        return json.dumps({"default": body, key: json.dumps(apns)})
-    # FCM data values must be strings: nested values travel as JSON.
-    fcm = {"notification": {"title": title, "body": body}, "data": {name: value if isinstance(value, str) else json.dumps(value) for name, value in data.items()}}
-    return json.dumps({"default": body, "GCM": json.dumps(fcm)})
-
-
-class SnsGateway(PushGateway):
-    def __init__(self, client=None):
-        if client is None:
-            import boto3
-
-            credentials = {}
-            if settings.APP_PUSH_SNS_ACCESS_KEY_ID:
-                credentials = {"aws_access_key_id": settings.APP_PUSH_SNS_ACCESS_KEY_ID, "aws_secret_access_key": settings.APP_PUSH_SNS_SECRET_ACCESS_KEY}
-            client = boto3.client("sns", region_name=settings.APP_PUSH_SNS_REGION or None, **credentials)
-        self.client = client
-
-    def register(self, device):
-        application_arn = _platform_application_arn(device)
-        if not application_arn:
-            return ""
-        if device.endpoint_arn:
-            try:
-                self.client.set_endpoint_attributes(EndpointArn=device.endpoint_arn, Attributes={"Token": device.push_token, "Enabled": "true", "CustomUserData": str(device.user_id)})
-                return device.endpoint_arn
-            except self.client.exceptions.NotFoundException:
-                pass  # deleted on the SNS side: create a new one below
-        try:
-            response = self.client.create_platform_endpoint(PlatformApplicationArn=application_arn, Token=device.push_token, CustomUserData=str(device.user_id))
-            return response["EndpointArn"]
-        except self.client.exceptions.InvalidParameterException as exc:
-            match = _EXISTING_ENDPOINT.search(str(exc))
-            if not match:
-                raise
-            endpoint_arn = match.group(1)
-            self.client.set_endpoint_attributes(EndpointArn=endpoint_arn, Attributes={"Token": device.push_token, "Enabled": "true", "CustomUserData": str(device.user_id)})
-            return endpoint_arn
-
-    def unregister(self, device):
-        if device.endpoint_arn:
-            self.client.delete_endpoint(EndpointArn=device.endpoint_arn)
-
-    def publish(self, device, *, title, body, data, badge=None):
-        if not device.endpoint_arn:
-            return True
-        try:
-            self.client.publish(TargetArn=device.endpoint_arn, MessageStructure="json", Message=build_message(device, title=title, body=body, data=data, badge=badge))
-        except self.client.exceptions.EndpointDisabledException, self.client.exceptions.NotFoundException:
-            return False
-        return True
+_gateway: PushGateway | None = None
 
 
 def get_gateway() -> PushGateway:
+    global _gateway
     override = getattr(settings, "APP_PUSH_GATEWAY", "")
     if override:
         return import_string(override)()
-    if settings.APP_PUSH_SNS_APNS_ARN or settings.APP_PUSH_SNS_APNS_SANDBOX_ARN or settings.APP_PUSH_SNS_FCM_ARN:
-        return SnsGateway()
+    if apns_configured():
+        if _gateway is None:
+            _gateway = ApnsGateway()
+        return _gateway
     return NullGateway()

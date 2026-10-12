@@ -67,7 +67,7 @@ def language_for_locale(locale) -> str:
     return code if code in {language for language, _name in settings.LANGUAGES} else "en"
 
 
-def _send_native(user, *, texts, data) -> int:
+def _send_native(user, *, texts, data, thread_id=None) -> int:
     """``texts(language)`` -> ``(title, body)``; each device gets its own locale's."""
     from appapi.delivery import push_configured  # deferred: appapi imports back into events
     from appapi.models import PushDevice
@@ -77,10 +77,12 @@ def _send_native(user, *, texts, data) -> int:
         return 0
     gateway = get_gateway()
     sent = 0
-    for device in PushDevice.objects.filter(user=user, enabled=True).exclude(endpoint_arn=""):
+    for device in PushDevice.objects.filter(user=user, enabled=True):
+        if not gateway.supports(device):
+            continue
         try:
             title, body = texts(language_for_locale(device.locale))
-            alive = gateway.publish(device, title=title, body=body, data=data)
+            alive = gateway.publish(device, title=title, body=body, data=data, thread_id=thread_id)
         except Exception:
             logger.exception("game_push.native_failed device=%s", device.pk)
             continue
@@ -126,7 +128,7 @@ def deliver_moments(event_id, moment_ids) -> int:
     url = _event_url(event)
     reached = 0
     for user in followers(event):
-        if _send_native(user, texts=texts, data=data) + _send_web(event.club, user, texts=texts, url=url):
+        if _send_native(user, texts=texts, data=data, thread_id=str(event.pk)) + _send_web(event.club, user, texts=texts, url=url):
             reached += 1
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached

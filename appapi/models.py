@@ -9,7 +9,7 @@ class PushDevice(UUIDModel):
     """One native-app install that can receive push notifications (API.md §9).
 
     Keyed per *install*, not per Member or club: one install serves every club the
-    account belongs to, and the SNS endpoint is per install. ``installation_id`` is a
+    account belongs to, and the APNs token is per install. ``installation_id`` is a
     random id the app generates once and keeps; registering it again (a new push token,
     a new app version, or another account signing in on the same phone) updates this row
     rather than adding a second one, so a device never gets the previous user's pushes.
@@ -30,8 +30,6 @@ class PushDevice(UUIDModel):
     platform = models.CharField(_("platform"), max_length=16, choices=Platform.choices)
     environment = models.CharField(_("push environment"), max_length=16, choices=Environment.choices, default=Environment.PRODUCTION)
     push_token = models.CharField(_("push token"), max_length=512)
-    #: The SNS platform endpoint for this token; blank until SNS is configured.
-    endpoint_arn = models.CharField(_("SNS endpoint ARN"), max_length=255, blank=True)
     app_version = models.CharField(_("app version"), max_length=32, blank=True)
     locale = models.CharField(_("locale"), max_length=16, blank=True)
     enabled = models.BooleanField(_("enabled"), default=True, help_text=_("Turned off when the push service reports the token as no longer valid."))

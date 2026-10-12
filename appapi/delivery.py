@@ -1,4 +1,4 @@
-"""Native push for new notifications (API.md §9): the SNS counterpart of the member web
+"""Native push for new notifications (API.md §9): the APNs counterpart of the member web
 app's Web Push (mobile.services.push). Both hang off notifications.signals.
 notifications_created, the one fan-out point, so a notification reaches every channel.
 
@@ -26,13 +26,13 @@ from rosterchief.concurrency import run_in_background
 
 from .models import PushDevice
 from .presenters import notification_target
-from .push import get_gateway
+from .push import apns_configured, get_gateway
 
 logger = logging.getLogger(__name__)
 
 
 def push_configured() -> bool:
-    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or settings.APP_PUSH_SNS_APNS_ARN or settings.APP_PUSH_SNS_APNS_SANDBOX_ARN or settings.APP_PUSH_SNS_FCM_ARN)
+    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or apns_configured())
 
 
 def payload_data(notification: Notification) -> dict:
@@ -65,18 +65,20 @@ def deliver(notification_ids) -> int:
     from events.services.game_push import language_for_locale  # deferred: events imports appapi lazily too
 
     active_users = set(get_user_model().objects.filter(pk__in=per_user, is_active=True).values_list("pk", flat=True))
-    devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).exclude(endpoint_arn="").select_related("user")
+    devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).select_related("user")
     gateway = get_gateway()
     badges = {}
     sent = 0
     for device in devices:
+        if not gateway.supports(device):
+            continue
         if device.user_id not in badges:
             badges[device.user_id] = total_unread(device.user)
         for notification in per_user[device.user_id].values():
             try:
                 # In the language the app registered with (PushDevice.locale), like game pushes.
                 text = notification.text_for(language_for_locale(device.locale))
-                alive = gateway.publish(device, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id])
+                alive = gateway.publish(device, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id], thread_id=notification.club.slug)
             except Exception:
                 # Never fatal for the rest of the fan-out (throttling, a network blip).
                 logger.exception("app_push.publish_failed device=%s", device.pk)

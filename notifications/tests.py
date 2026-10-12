@@ -215,7 +215,7 @@ class EmailPreferenceTests(TestCase):
     def phone(self, **kwargs):
         from appapi.models import PushDevice
 
-        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1", **kwargs)
+        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", **kwargs)
 
     def emails(self, **kwargs):
         return recipient_emails(self.child, self.club, honor_preferences=True, **kwargs)

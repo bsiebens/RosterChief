@@ -29,14 +29,14 @@ NATIVE_DEVICE_ACTIVE_DAYS = 60
 
 def users_with_native_push(user_ids) -> set:
     """Of ``user_ids``, the accounts that currently receive native (iOS/Android) push: an
-    enabled device with a live SNS endpoint that has been seen recently."""
+    enabled device that has been seen recently."""
     from appapi.models import PushDevice  # deferred: appapi imports this module
 
     user_ids = {user_id for user_id in user_ids if user_id}
     if not user_ids:
         return set()
     cutoff = timezone.now() - timedelta(days=NATIVE_DEVICE_ACTIVE_DAYS)
-    return set(PushDevice.objects.filter(user_id__in=user_ids, enabled=True, last_seen__gte=cutoff).exclude(endpoint_arn="").values_list("user_id", flat=True))
+    return set(PushDevice.objects.filter(user_id__in=user_ids, enabled=True, last_seen__gte=cutoff).values_list("user_id", flat=True))
 
 
 def recipient_user_ids(notification: Notification) -> set:

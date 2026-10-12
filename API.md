@@ -439,6 +439,10 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 
 ## 9. Push notifications (AWS-native)
 
+> **Superseded:** delivery was built straight against Apple's APNs (HTTP/2, token auth), with no SNS and no
+> `endpoint_arn`; Android is not served yet. The text below is the original design discussion. See
+> DEPLOYMENT.md "Native app push" and `appapi/push.py` for what runs.
+
 **Constraint from the product owner:** one platform that fans out to APNs and FCM, and — because production already runs on AWS — an **AWS service rather than introducing FCM directly**.
 
 **Recommendation: Amazon SNS Mobile Push.** One `Publish` per device endpoint; SNS holds the APNs and FCM credentials (as *platform applications*) and talks to both. It is the single fan-out platform the owner asked for, needs only `boto3` (already

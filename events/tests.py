@@ -5004,7 +5004,7 @@ class GamePushTests(GameTimelineTestBase):
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
         for index, locale in enumerate(["nl-NL", "en-GB", "", "fr-FR"]):
-            PushDevice.objects.create(user=self.fan, installation_id=f"install-{index}", platform="ios", push_token="t", endpoint_arn=f"arn:{index}", locale=locale)
+            PushDevice.objects.create(user=self.fan, installation_id=f"install-{index}", platform="ios", push_token="t", locale=locale)
         goal = self.moment(game, "goal_for:g1")
         gateway = mock.Mock()
         gateway.publish.return_value = True
@@ -5013,6 +5013,7 @@ class GamePushTests(GameTimelineTestBase):
             game_push.deliver_moments(game.pk, [goal.pk])
 
         bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}
+        self.assertEqual({call.kwargs["thread_id"] for call in gateway.publish.call_args_list}, {str(game.pk)})
         self.assertEqual(bodies["nl-NL"], "Doelpunt voor ons van Sam (#9), 1-0.")
         self.assertEqual(bodies["en-GB"], "Goal for us by Sam (#9), 1-0.")
         self.assertEqual(bodies[""], "Goal for us by Sam (#9), 1-0.")

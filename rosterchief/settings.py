@@ -265,17 +265,15 @@ HEADLESS_SPECIFICATION_TEMPLATE_NAME = "appapi/auth_spec.html"
 # required" screen below them. Raise when an old build would break against the API.
 APP_MIN_VERSION_IOS = config("APP_MIN_VERSION_IOS", default="1.0.0")
 APP_MIN_VERSION_ANDROID = config("APP_MIN_VERSION_ANDROID", default="1.0.0")
-# Push through Amazon SNS Mobile Push (appapi/push.py). Each ARN is an SNS platform
-# application holding that service's credentials; leave empty until it exists. SNS has its
-# own access key (an IAM user limited to these applications, DEPLOYMENT.md "Native app
-# push"): the AWS_* keys above belong to the upload storage, which needn't be AWS at all.
-# Left empty, boto3 falls back to its default chain (e.g. an instance role).
-APP_PUSH_SNS_REGION = config("APP_PUSH_SNS_REGION", default="")
-APP_PUSH_SNS_ACCESS_KEY_ID = config("APP_PUSH_SNS_ACCESS_KEY_ID", default="")
-APP_PUSH_SNS_SECRET_ACCESS_KEY = config("APP_PUSH_SNS_SECRET_ACCESS_KEY", default="")
-APP_PUSH_SNS_APNS_ARN = config("APP_PUSH_SNS_APNS_ARN", default="")
-APP_PUSH_SNS_APNS_SANDBOX_ARN = config("APP_PUSH_SNS_APNS_SANDBOX_ARN", default="")
-APP_PUSH_SNS_FCM_ARN = config("APP_PUSH_SNS_FCM_ARN", default="")
+# Native push straight to Apple's APNs (appapi/push.py), token-based auth with a .p8 key from
+# the Apple Developer account (DEPLOYMENT.md "Native app push"). Leave the key empty until it
+# exists: devices still register, nothing is sent. The key is the .p8 file's text; a literal
+# "\n" in an env file is turned back into a newline, or point KEY_FILE at the file instead.
+APP_PUSH_APNS_KEY_ID = config("APP_PUSH_APNS_KEY_ID", default="")
+APP_PUSH_APNS_TEAM_ID = config("APP_PUSH_APNS_TEAM_ID", default="")
+APP_PUSH_APNS_BUNDLE_ID = config("APP_PUSH_APNS_BUNDLE_ID", default="app.rosterchief.RosterChief")
+APP_PUSH_APNS_KEY = config("APP_PUSH_APNS_KEY", default="").replace("\\n", "\n")
+APP_PUSH_APNS_KEY_FILE = config("APP_PUSH_APNS_KEY_FILE", default="")
 APP_PUSH_GATEWAY = ""
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)

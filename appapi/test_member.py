@@ -4,7 +4,6 @@ child (Kim) in Ajax United, current season, signed in through allauth headless."
 
 import datetime
 import io
-import json
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -35,7 +34,7 @@ from teams.models import Position, Team, TeamMembership
 
 from .delivery import deliver, on_notifications_created, payload_data
 from .models import PushDevice
-from .push import NullGateway
+from .push import PushGateway
 from .tests import CLUB_HOST, AppApiTestCase, make_club
 
 
@@ -556,14 +555,16 @@ class ProfileTests(ClubApiTestCase):
         self.assertError(self.get(f"/members/{stranger.pk}/photo"), 404, "not_found")
 
 
-class RecordingPublisher(NullGateway):
+class RecordingPublisher(PushGateway):
     sent: list = []
     badges: list = []
+    threads: list = []
     dead: set = set()
 
-    def publish(self, device, *, title, body, data, badge=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
         RecordingPublisher.sent.append((device.installation_id, title, data))
         RecordingPublisher.badges.append(badge)
+        RecordingPublisher.threads.append(thread_id)
         return device.installation_id not in RecordingPublisher.dead
 
 
@@ -573,8 +574,9 @@ class PushDeliveryTests(ClubApiTestCase):
         super().setUp()
         RecordingPublisher.sent = []
         RecordingPublisher.badges = []
+        RecordingPublisher.threads = []
         RecordingPublisher.dead = set()
-        self.device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t", endpoint_arn="arn:1")
+        self.device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
 
     def test_one_push_per_account_for_a_family_wide_notification(self):
         second_child = Member.objects.create(first_name="Lou", last_name="Parent")
@@ -587,6 +589,7 @@ class PushDeliveryTests(ClubApiTestCase):
         installation, title, data = RecordingPublisher.sent[0]
         self.assertEqual((installation, title), ("parent-phone", "New article"))
         self.assertEqual(data["club_slug"], "ajax-united")
+        self.assertEqual(RecordingPublisher.threads, ["ajax-united"])
         self.assertEqual(data["target"], {"type": "news", "id": str(item.pk), "slug": "news"})
 
     def test_the_push_is_in_the_language_the_device_registered_with(self):
@@ -620,7 +623,7 @@ class PushDeliveryTests(ClubApiTestCase):
         background.assert_called_once_with(deliver, [notifications[0].pk])
 
     @override_settings(APP_PUSH_GATEWAY="")
-    def test_nothing_is_scheduled_without_sns(self):
+    def test_nothing_is_scheduled_without_apns(self):
         with patch("appapi.delivery.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
             on_notifications_created(None, notifications=[Notification(pk=1)])
         background.assert_not_called()
@@ -731,7 +734,7 @@ class WebPushDedupeTests(ClubApiTestCase):
         return deliver_web.call_count
 
     def native_device(self, **kwargs):
-        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1", **kwargs)
+        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", **kwargs)
 
     def test_web_push_goes_out_when_there_is_no_native_device(self):
         self.assertEqual(self.web_pushes(), 1)
@@ -743,11 +746,6 @@ class WebPushDedupeTests(ClubApiTestCase):
 
     def test_a_disabled_device_does_not_suppress_web_push(self):
         self.native_device(enabled=False)
-
-        self.assertEqual(self.web_pushes(), 1)
-
-    def test_a_device_without_an_sns_endpoint_does_not_suppress_web_push(self):
-        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="")
 
         self.assertEqual(self.web_pushes(), 1)
 
@@ -806,7 +804,7 @@ class NativeBadgeTests(ClubApiTestCase):
         RecordingPublisher.sent = []
         RecordingPublisher.badges = []
         RecordingPublisher.dead = set()
-        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1")
+        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t")
         Notification.objects.create(club=self.club, member=self.child, title="Earlier", body="…")  # unread, a child's
         read = Notification.objects.create(club=self.club, member=self.member, title="Read", body="…")
         Notification.objects.filter(pk=read.pk).update(read_at=timezone.now())
@@ -815,16 +813,6 @@ class NativeBadgeTests(ClubApiTestCase):
         deliver([fresh.pk])
 
         self.assertEqual(RecordingPublisher.badges, [2])  # the child's earlier one + the new one
-
-    def test_the_apns_message_includes_the_badge_only_when_given(self):
-        from .push import build_message
-
-        device = PushDevice(user=self.user, installation_id="p", platform="ios", push_token="t")
-        with_badge = json.loads(json.loads(build_message(device, title="t", body="b", data={}, badge=3))["APNS"])
-        without = json.loads(json.loads(build_message(device, title="t", body="b", data={}))["APNS"])
-
-        self.assertEqual(with_badge["aps"]["badge"], 3)
-        self.assertNotIn("badge", without["aps"])
 
 
 class AccountSettingsTests(AppApiTestCase):

@@ -121,7 +121,7 @@ class DeviceOut(Schema):
     installation_id: str
     platform: str
     environment: str
-    push_enabled: bool = Field(description="False until the server can deliver pushes to this device (SNS configured, token accepted).")
+    push_enabled: bool = Field(description="False while the server cannot deliver pushes to this device (APNs credentials not configured, a platform that is not served yet, or the token was reported dead -- registering again revives it).")
 
 
 # --- club plane ------------------------------------------------------------------------

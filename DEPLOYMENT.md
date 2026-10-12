@@ -350,7 +350,7 @@ has all but the rarely-needed last row, with comments.
 | `ROSTERCHIEF_BILLING_CONTACT_EMAIL`, `ROSTERCHIEF_CONTACT_EMAIL` | no | reply-to for billing mail; where "Book a demo" requests go (defaults to the maintainer's address) |
 | `DJANGO_VAPID_PUBLIC_KEY` / `DJANGO_VAPID_PRIVATE_KEY` / `DJANGO_VAPID_ADMIN_EMAIL` | no | Web Push for the mobile app; without a private key push is silently off. Generate a pair on your own machine with `uv run vapid --gen` |
 | `AWS_STORAGE_BUCKET_NAME` and the other `AWS_*` | no | uploads to S3-compatible storage — see "The five things…", 4 |
-| `APP_PUSH_SNS_*` | no | push for the native iOS/Android apps through Amazon SNS — see "Native app push". Without them the app works, just without pushes |
+| `APP_PUSH_APNS_*` | no | push for the native iOS app straight through Apple's APNs — see "Native app push". Without them the app works, just without pushes |
 | `APP_MIN_VERSION_IOS` / `APP_MIN_VERSION_ANDROID` | no (`1.0.0`) | oldest app version still allowed; older apps show "update required" |
 | `DJANGO_TIME_ZONE` | no (`Europe/Brussels`) | also the timezone of the job schedule |
 | `DJANGO_SESSION_COOKIE_DOMAIN`, `DJANGO_SERVER_EMAIL`, `DJANGO_EMAIL_USE_SSL`, `DJANGO_EMAIL_TIMEOUT`, `DJANGO_INTERNAL_IPS`, `DJANGO_DB_CONN_MAX_AGE` (60), `DJANGO_PERFORMANCE_LOGGING*` | no | rarely needed; see `rosterchief/settings.py` |
@@ -1041,104 +1041,51 @@ what clubs see. `deploy/deploy-prod.sh --reopen` (or `REOPEN_MAINTENANCE=1`) reo
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
 
-## Native app push (Amazon SNS)
+## Native app push (APNs)
 
-The native apps (iOS first, API.md §9) get their push notifications through **Amazon SNS
-Mobile Push**. SNS holds the Apple (APNs) credentials; the server only holds an access key
-that may publish to them. Nothing here is needed for the web app's own Web Push (the
-`DJANGO_VAPID_*` keys). Without this setup the app still signs in and registers, it just
-gets no pushes (`push_enabled: false` in `POST /devices`).
+The native iOS app gets its push notifications straight from **Apple's APNs**
+(token-based auth, HTTP/2) — no cloud intermediary. The server only needs one `.p8` key from
+the Apple Developer account. Android is not served yet.
 
-You need an Apple Developer account (the one the iOS app is published under) and an AWS
-account. Do it once per server: production and the test server each get **their own** SNS
-platform applications and access key. A phone that uses both servers would otherwise share
-one SNS endpoint, and signing out on one server would stop pushes from the other.
+Do it once per server: production and the test server share the same key and bundle ID, but
+each keeps its own `.env`. A phone registers with exactly one server (the base domain it
+signed in on), so pushes never double up.
 
-### Step 1 — Apple: an APNs key
+### Step 1 — Create the key
 
-In [developer.apple.com](https://developer.apple.com/account) → *Certificates, Identifiers &
-Profiles*:
+1. [developer.apple.com](https://developer.apple.com/account) → **Certificates, Identifiers
+   & Profiles** → **Keys** → **+**. Name it (e.g. `RosterChief push`), tick **Apple Push
+   Notifications service (APNs)** and download the `.p8` file. Apple lets you download it
+   **once**; keep it safe.
+2. Note the **Key ID** (10 characters, shown on the key) and your **Team ID** (top right of
+   the account page, or *Membership details*).
+3. The app's identifier must have the **Push Notifications** capability. The bundle ID is
+   `app.rosterchief.RosterChief` unless the app changes it.
 
-1. **Identifiers**: the app's App ID (e.g. `app.rosterchief.ios`) must have **Push
-   Notifications** ticked. The iOS developer sets the same bundle ID in Xcode.
-2. **Keys** → **+** → name it `RosterChief APNs`, tick **Apple Push Notifications service
-   (APNs)** → *Continue* → *Register* → **Download** the `.p8` file. It downloads **once**:
-   keep it in your password manager. Note the **Key ID** (10 characters) and your **Team ID**
-   (top right, under your name).
+One key works for both the sandbox and production APNs hosts.
 
-One key serves both the sandbox (debug builds from Xcode) and production (TestFlight and App
-Store), and every app of the team. It doesn't expire; revoke it here if it leaks.
+### Step 2 — Configure the server
 
-### Step 2 — AWS: two platform applications
-
-In the AWS console, pick one region and keep it (e.g. `eu-west-1`, Ireland) → **Amazon SNS**
-→ *Mobile* → *Push notifications* → **Create platform application**, twice:
-
-| Name (production server) | Push service | Tick "Used for development in sandbox" |
-|---|---|---|
-| `rosterchief-ios-prod` | Apple iOS/VoIP/Mac | no |
-| `rosterchief-ios-prod-sandbox` | Apple iOS/VoIP/Mac | **yes** |
-
-(For the test server: `rosterchief-ios-test` and `rosterchief-ios-test-sandbox`.) For both,
-choose **Token-based authentication**, upload the `.p8`, and enter the key ID, team ID and the
-app's bundle ID. Copy each application's **ARN**
-(`arn:aws:sns:eu-west-1:<account>:app/APNS/rosterchief-ios-prod` and
-`…:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox`).
-
-Optional but useful: on each application, *Edit* → **Delivery status logging** → success
-sample rate `0`, IAM roles "Create new service role". Failed deliveries then show up in
-CloudWatch Logs with Apple's reason.
-
-### Step 3 — AWS: an access key that can only push
-
-*IAM* → *Users* → **Create user** `rosterchief-push-prod` (no console access) → *Add
-permissions* → *Create inline policy* → JSON (fill in region, account id and names):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "sns:CreatePlatformEndpoint",
-      "Resource": [
-        "arn:aws:sns:eu-west-1:123456789012:app/APNS/rosterchief-ios-prod",
-        "arn:aws:sns:eu-west-1:123456789012:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["sns:SetEndpointAttributes", "sns:GetEndpointAttributes", "sns:DeleteEndpoint", "sns:Publish"],
-      "Resource": "arn:aws:sns:eu-west-1:123456789012:endpoint/APNS*/rosterchief-ios-prod*/*"
-    }
-  ]
-}
-```
-
-Then the user → *Security credentials* → **Create access key** ("Application running outside
-AWS") and copy the key id and secret. This key can't touch anything but these two
-applications. It's separate from the upload storage's `AWS_*` keys on purpose: those may not
-even be AWS.
-
-### Step 4 — The server
-
-Add to `.env.production` and redeploy (or `docker compose up -d web` to pick up the file):
+In `.env.production` (`.env.example` lists the names):
 
 ```bash
-APP_PUSH_SNS_REGION=eu-west-1
-APP_PUSH_SNS_ACCESS_KEY_ID=AKIA…
-APP_PUSH_SNS_SECRET_ACCESS_KEY=…
-APP_PUSH_SNS_APNS_ARN=arn:aws:sns:eu-west-1:123456789012:app/APNS/rosterchief-ios-prod
-APP_PUSH_SNS_APNS_SANDBOX_ARN=arn:aws:sns:eu-west-1:123456789012:app/APNS_SANDBOX/rosterchief-ios-prod-sandbox
+APP_PUSH_APNS_KEY_ID=ABC123DEFG
+APP_PUSH_APNS_TEAM_ID=1A2B3C4D5E
+APP_PUSH_APNS_BUNDLE_ID=app.rosterchief.RosterChief
+# The .p8 file's text on one line with \n for the line breaks ...
+APP_PUSH_APNS_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
+# ... or mount the file into the container and point at it instead:
+# APP_PUSH_APNS_KEY_FILE=/run/secrets/apns.p8
 ```
 
-Leave out an ARN you don't have yet: that kind of build then registers without push. Android
-later adds `APP_PUSH_SNS_FCM_ARN` the same way (a Firebase platform application).
+Redeploy (`deploy/deploy-prod.sh`). Phones that registered earlier start receiving pushes as
+soon as the app registers again, which it does on every launch.
 
-Phones that registered before this was set up start receiving pushes once the app registers
-again, which it does on every launch.
+A debug build run from Xcode sends `environment: "sandbox"` and is delivered through Apple's
+sandbox host; TestFlight and App Store builds use production. The server picks the host from
+that value, so nothing else needs configuring.
 
-### Step 5 — Check it
+### Step 3 — Check it
 
 Open the app on a phone, sign in and allow notifications. Then, on the server:
 
@@ -1148,7 +1095,7 @@ from appapi.models import PushDevice
 from appapi.push import get_gateway
 gateway = get_gateway()
 for device in PushDevice.objects.filter(user__email='you@example.com', enabled=True):
-    print(device.installation_id, device.environment, bool(device.endpoint_arn), gateway.publish(device, title='Test', body='Push works', data={}))
+    print(device.installation_id, device.environment, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))
 "
 ```
 
@@ -1156,17 +1103,16 @@ Each line should end in `True True` and the phone should buzz. What the output m
 
 | You see | Cause |
 |---|---|
-| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after a failed push. It re-registers on the next launch |
-| `False` in the third column | no ARN for that `environment` (a debug build needs the sandbox one), or SNS refused the token — see the `web` logs |
-| `True False` | SNS says the endpoint is disabled: usually a debug build's token sent to the production application or the other way round. Check the build and the "sandbox" tick in step 2 |
-| `True True` but nothing arrives | the app's bundle ID doesn't match the platform application's, or notifications are off for the app in iOS Settings. Delivery status logging (step 2) shows Apple's reason |
+| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after Apple reported its token dead. It re-registers on the next launch |
+| `False` in the third column | no APNs key configured (the gateway is the do-nothing one), or the device is not iOS |
+| `False` in the fourth column | Apple says the token is dead (`BadDeviceToken`/`Unregistered`): usually a debug build's token sent to the production host or the other way round. Check the build's `environment` |
+| an `ApnsError` | Apple refused the request: `InvalidProviderToken` = wrong Key ID/Team ID/key, `TopicDisallowed` = the bundle ID doesn't match the key's team, `TooManyProviderTokenUpdates` = restart loops |
+| `True True` but nothing arrives | notifications are off for the app in iOS Settings, or Focus is on |
 
 ### Rotating or revoking
 
-* **APNs key:** create a new key (step 1), upload it to both platform applications (*Edit*),
-  then revoke the old one. Nothing changes on the server.
-* **Access key:** create a second key on the IAM user, update `.env.production`, redeploy,
-  then delete the old key.
+Create a new key (step 1), put its Key ID and text in `.env.production`, redeploy, then
+revoke the old key on the Apple Developer site.
 
 ## Behind an existing Caddy (dev / test server)
 
