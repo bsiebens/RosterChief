@@ -23,6 +23,10 @@ class Notification(ClubScopedModel):
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="notifications", verbose_name=_("member"))
     title = models.CharField(_("title"), max_length=255)
     body = models.TextField(_("body"))
+    #: ``{language: {"title": ..., "body": ...}}`` for every language in settings.LANGUAGES,
+    #: filled by notify_members when the text is translatable. ``title``/``body`` above stay the
+    #: English rendering (what emails use). Empty on rows from before this existed.
+    translations = models.JSONField(_("translations"), default=dict, blank=True, editable=False)
 
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
     object_id = models.CharField(max_length=255, null=True, blank=True)  # noqa: DJ001 -- GenericForeignKey needs a real NULL, not "", for "no source"
@@ -60,3 +64,8 @@ class Notification(ClubScopedModel):
     @property
     def is_sent(self) -> bool:
         return self.sent_at is not None
+
+    def text_for(self, language: str) -> dict:
+        """``{"title", "body"}`` in ``language``; the stored English text when that language
+        has no translation (older rows, or untranslated user-written content)."""
+        return self.translations.get(language) or {"title": self.title, "body": self.body}

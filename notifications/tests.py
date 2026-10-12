@@ -269,3 +269,31 @@ class EmailPreferenceTests(TestCase):
         notify_members([self.child], club=self.club, title="Invoice", body="Attached", attachments=[("invoice.pdf", b"%PDF", "application/pdf")])
 
         self.assertEqual(len(mail.outbox), 1)
+
+
+class NotificationTranslationTests(TestCase):
+    """notify_members renders translatable text once per language in settings.LANGUAGES."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.member = Member.objects.create(first_name="Jamie", last_name="Doe")
+
+    def test_callables_are_rendered_per_language_and_english_is_the_stored_text(self):
+        from django.utils.translation import get_language
+
+        (notification,) = notify_members([self.member], club=self.club, title=lambda: f"title-{get_language()}", body=lambda: f"body-{get_language()}", send_email=False)
+
+        self.assertEqual((notification.title, notification.body), ("title-en", "body-en"))
+        self.assertEqual(notification.translations, {"en": {"title": "title-en", "body": "body-en"}, "nl": {"title": "title-nl", "body": "body-nl"}})
+        self.assertEqual(notification.text_for("nl")["title"], "title-nl")
+
+    def test_plain_text_is_the_same_in_every_language(self):
+        (notification,) = notify_members([self.member], club=self.club, title="New article", body="Read it", send_email=False)
+
+        self.assertEqual(notification.translations["nl"], {"title": "New article", "body": "Read it"})
+
+    def test_rows_without_translations_fall_back_to_english(self):
+        notification = Notification.objects.create(club=self.club, member=self.member, title="Old", body="Row")
+
+        self.assertEqual(notification.text_for("nl"), {"title": "Old", "body": "Row"})

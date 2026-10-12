@@ -229,9 +229,8 @@ def event_detail(request, event_id: uuid.UUID):
 
 
 def _game_timeline(scope, event):
-    """The game's timeline for a logged-in member -- always with player names
-    (the public API's Team.show_player_names_publicly gate is about anonymous
-    visitors). None for anything but a game, or without the club's feature."""
+    """The game's timeline for a logged-in member -- always with player names.
+    None for anything but a game, or without the club's feature."""
     if event.kind != Event.EventKind.GAME or not scope.feature("game_timeline"):
         return None
     timeline = GameTimeline.objects.filter(event=event).defer("raw").first()

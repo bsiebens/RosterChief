@@ -62,12 +62,18 @@ def publish_lineup(lineup):
 
     newly_selected = Member.objects.filter(pk__in=selected_member_ids - previously_selected_ids)
     if newly_selected:
-        body = _("You're in the line-up for %(event)s.") % {"event": lineup.event.title}
+
+        def body():
+            return _("You're in the line-up for %(event)s.") % {"event": lineup.event.title}
+
         notify_members(newly_selected, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
 
     newly_dropped = Member.objects.filter(pk__in=previously_selected_ids - selected_member_ids)
     if newly_dropped:
-        body = _("The line-up for %(event)s has changed -- you're not in it this time.") % {"event": lineup.event.title}
+
+        def body():
+            return _("The line-up for %(event)s has changed -- you're not in it this time.") % {"event": lineup.event.title}
+
         notify_members(newly_dropped, club=lineup.event.club, title=_("Line-up updated"), body=body, source=lineup.event)
 
     return lineup
@@ -131,5 +137,8 @@ def notify_dropout(event, member, note):
     manager_ids = StaffAssignment.objects.filter(team__in=event.teams.all(), position__management_position=True, season=event_season(event)).values_list("member_id", flat=True).distinct()
     managers = Member.objects.filter(pk__in=manager_ids)
     if managers:
-        body = _("%(member)s can no longer make it to %(event)s: “%(note)s”") % {"member": member.get_full_name(), "event": event.title, "note": note}
+
+        def body():
+            return _("%(member)s can no longer make it to %(event)s: “%(note)s”") % {"member": member.get_full_name(), "event": event.title, "note": note}
+
         notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event)

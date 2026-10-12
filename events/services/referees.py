@@ -26,6 +26,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 
 from club.services.access import event_season
@@ -153,8 +154,11 @@ def assign_referee(event, member, *, assigned_by):
     if assigned_by is not None:
         # A staff pick, made in the management app: the person didn't take this themselves, so
         # tell them. (Self-service accepts pass assigned_by=None -- they just did it.)
-        when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
-        body = _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": when}
+        start = timezone.localtime(event.start)
+
+        def body():
+            return _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": date_format(start, "D d M, H:i")}
+
         notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event)
     return referee
 
@@ -184,7 +188,10 @@ def remove_referee(referee):
     if member is None:
         return
     RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.DECLINED, responded_at=timezone.now())
-    body = _("You have been removed as a referee for %(event)s.") % {"event": event.title}
+
+    def body():
+        return _("You have been removed as a referee for %(event)s.") % {"event": event.title}
+
     notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event)
 
 
@@ -224,7 +231,10 @@ def sync_referee_invites(event, *, notify=True):
 
     RefereeSignup.objects.bulk_create([RefereeSignup(event=event, member=member) for member in new_members])
     if notify:
-        body = _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
+
+        def body():
+            return _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
+
         notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
     return new_members
 
@@ -264,7 +274,10 @@ def decline_referee_signup(signup):
         manager_ids = StaffAssignment.objects.filter(team__in=signup.event.teams.all(), position__management_position=True, season=event_season(signup.event)).values_list("member_id", flat=True).distinct()
         managers = Member.objects.filter(pk__in=manager_ids)
         if managers:
-            body = _("%(member)s can no longer referee %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+
+            def body():
+                return _("%(member)s can no longer referee %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
+
             notify_members(managers, club=signup.event.club, title=_("Referee dropped out"), body=body, source=signup.event)
 
     return signup

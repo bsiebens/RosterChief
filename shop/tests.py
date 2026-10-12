@@ -1039,6 +1039,17 @@ class OrderReadyForPickupNotificationTests(TestCase):
         self.assertIn("ready", notification.title.lower())
         self.assertEqual(notification.source, self.order)
 
+    def test_stores_english_and_dutch_translations(self):
+        self.order.pickup_instructions = "Ask at the desk."
+        self.order.save(update_fields=["pickup_instructions"])
+
+        notify_order_ready_for_pickup(self.order)
+
+        translations = Notification.objects.get(member=self.member).translations
+        self.assertEqual(translations["en"]["title"], f"Order {self.order.number} is ready for pickup")
+        self.assertEqual(translations["nl"]["title"], f"Bestelling {self.order.number} staat klaar om op te halen")
+        self.assertEqual(translations["nl"]["body"], "Je bestelling staat klaar — je betaalt bij het ophalen. Ask at the desk.")
+
     def test_emails_the_purchaser(self):
         notify_order_ready_for_pickup(self.order)
 

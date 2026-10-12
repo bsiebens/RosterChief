@@ -894,7 +894,7 @@
             "type": "string"
           },
           "public_api_base_url": {
-            "description": "Base URL of the club's public, read-only API (no token): news, teams and rosters, games with timelines, league standings, sponsors -- e.g. `https://hc-example.rosterchief.app/api/v1`. Its reference is at `<public_api_base_url>/docs`.",
+            "description": "Base URL of the club's public, read-only API (no token): news, teams and rosters, games and scores, league standings, sponsors -- e.g. `https://hc-example.rosterchief.app/api/v1`. Its reference is at `<public_api_base_url>/docs`.",
             "title": "Public Api Base Url",
             "type": "string"
           },
@@ -2922,6 +2922,7 @@
       "NotificationOut": {
         "properties": {
           "body": {
+            "description": "English; same as translations.en.body.",
             "title": "Body",
             "type": "string"
           },
@@ -2963,8 +2964,17 @@
             ]
           },
           "title": {
+            "description": "English; same as translations.en.title.",
             "title": "Title",
             "type": "string"
+          },
+          "translations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NotificationTextOut"
+            },
+            "description": "Title and body per language code (`en`, `nl`, ...). A language without a translation (older notifications, user-written text) carries the English text.",
+            "title": "Translations",
+            "type": "object"
           }
         },
         "required": [
@@ -2972,6 +2982,7 @@
           "member_id",
           "title",
           "body",
+          "translations",
           "created",
           "read_at",
           "source"
@@ -3046,6 +3057,24 @@
           "slug"
         ],
         "title": "NotificationSourceOut",
+        "type": "object"
+      },
+      "NotificationTextOut": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "title": "NotificationTextOut",
         "type": "object"
       },
       "OpenTaskOut": {
@@ -4928,7 +4957,7 @@
                 "type": "null"
               }
             ],
-            "description": "Left out on the public API unless every one of our teams on the game shows player names publicly (Team.show_player_names_publicly); always present in the member app.",
+            "description": "The player's name, when known.",
             "title": "Name"
           },
           "number": {

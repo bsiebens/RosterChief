@@ -677,6 +677,20 @@ class NotifyFormSendTests(FormbuilderTestBase):
         self.assertEqual(Notification.objects.filter(member=other).count(), 1)
         self.assertEqual(result, "Notified 2 member(s).")
 
+    def test_notification_is_stored_in_english_and_dutch(self):
+        self.send.closes_at = timezone.now() + timedelta(days=3)
+        self.send.save()
+
+        notify_form_send(str(self.send.pk))
+
+        notification = Notification.objects.get(member=self.member)
+        self.assertEqual(notification.translations["en"]["title"], self.form.title)
+        self.assertEqual(notification.translations["nl"]["title"], self.form.title)
+        self.assertIn("Please complete", notification.translations["en"]["body"])
+        self.assertIn("alsjeblieft in", notification.translations["nl"]["body"])
+        self.assertNotIn("Please complete", notification.translations["nl"]["body"])
+        self.assertIn(" voor ", notification.translations["nl"]["body"])
+
     def test_notification_source_points_at_the_send(self):
         notify_form_send(str(self.send.pk))
 

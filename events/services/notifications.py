@@ -9,6 +9,7 @@ discussion for why this was chosen over a synchronous call).
 """
 
 from django.utils import timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from events.models import Attendance, Event
@@ -39,8 +40,11 @@ def notify_new_event(event_id):
     if not members:
         return "Skipped: no one to notify."
 
-    when = timezone.localtime(event.start).strftime("%a %d %b, %H:%M")
-    body = _("New %(kind)s: %(when)s. Let us know if you can make it.") % {"kind": event.get_kind_display(), "when": when}
+    start = timezone.localtime(event.start)
+
+    def body():
+        return _("New %(kind)s: %(when)s. Let us know if you can make it.") % {"kind": event.get_kind_display(), "when": date_format(start, "D d M, H:i")}
+
     notifications = notify_members(members, club=event.club, title=event.title, body=body, source=event)
     return f"Notified {len(notifications)} member(s)."
 

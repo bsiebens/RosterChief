@@ -4,6 +4,7 @@ values, ids and timestamps; no CSS classes, reversed web URLs or display groupin
 import hashlib
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from django.utils.translation import get_language
@@ -176,6 +177,7 @@ def notification_out(notification) -> dict:
         "member_id": notification.member_id,
         "title": notification.title,
         "body": notification.body,
+        "translations": {code: notification.text_for(code) for code, _name in settings.LANGUAGES},
         "created": notification.created,
         "read_at": notification.read_at,
         "source": notification_target(notification),

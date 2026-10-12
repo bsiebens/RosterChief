@@ -85,7 +85,7 @@ class ClubOut(Schema):
     sport_type: str = Field(description="The sport this club plays: `ice_hockey` or `other`. More sports will be added: treat any value you do not know as `other`.")
     api_base_url: str = Field(description="Base URL for this club's resource endpoints, e.g. `https://hc-example.rosterchief.app/api/app/v1`.")
     public_api_base_url: str = Field(
-        description="Base URL of the club's public, read-only API (no token): news, teams and rosters, games with timelines, league standings, sponsors -- e.g."
+        description="Base URL of the club's public, read-only API (no token): news, teams and rosters, games and scores, league standings, sponsors -- e.g."
         " `https://hc-example.rosterchief.app/api/v1`. Its reference is at `<public_api_base_url>/docs`."
     )
     logo_url: str | None
@@ -506,11 +506,17 @@ class NotificationSourceOut(Schema):
     slug: str | None = Field(description="For `news`: open it with GET /news/{slug}.")
 
 
+class NotificationTextOut(Schema):
+    title: str
+    body: str
+
+
 class NotificationOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
-    title: str
-    body: str
+    title: str = Field(description="English; same as translations.en.title.")
+    body: str = Field(description="English; same as translations.en.body.")
+    translations: dict[str, NotificationTextOut] = Field(description="Title and body per language code (`en`, `nl`, ...). A language without a translation (older notifications, user-written text) carries the English text.")
     created: datetime.datetime
     read_at: datetime.datetime | None
     source: NotificationSourceOut | None

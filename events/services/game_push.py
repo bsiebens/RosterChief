@@ -22,11 +22,12 @@ commits, off the polling thread. Decisions behind the rules here (§9):
 import datetime
 import logging
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
 from events.models import Event, EventFollow, GameFollow, GameMoment
@@ -59,7 +60,15 @@ def _event_url(event) -> str:
         return "/app/"
 
 
-def _send_native(user, *, title, body, data) -> int:
+def language_for_locale(locale) -> str:
+    """The language in settings.LANGUAGES a device locale ("nl-NL", "nl_BE", "en") maps to, by its
+    first two letters; English when it is empty or not one we translate into."""
+    code = (locale or "").replace("_", "-").split("-")[0].lower()
+    return code if code in {language for language, _name in settings.LANGUAGES} else "en"
+
+
+def _send_native(user, *, texts, data) -> int:
+    """``texts(language)`` -> ``(title, body)``; each device gets its own locale's."""
     from appapi.delivery import push_configured  # deferred: appapi imports back into events
     from appapi.models import PushDevice
     from appapi.push import get_gateway
@@ -70,6 +79,7 @@ def _send_native(user, *, title, body, data) -> int:
     sent = 0
     for device in PushDevice.objects.filter(user=user, enabled=True).exclude(endpoint_arn=""):
         try:
+            title, body = texts(language_for_locale(device.locale))
             alive = gateway.publish(device, title=title, body=body, data=data)
         except Exception:
             logger.exception("game_push.native_failed device=%s", device.pk)
@@ -82,9 +92,11 @@ def _send_native(user, *, title, body, data) -> int:
     return sent
 
 
-def _send_web(club, user, *, title, body, url) -> int:
+def _send_web(club, user, *, texts, url) -> int:
     from mobile.services.push import send_push_to_user  # deferred: mobile imports back into events
 
+    # No language preference on accounts or subscriptions: web push goes out in English.
+    title, body = texts("en")
     return send_push_to_user(club, user, title=title, body=body, url=url)
 
 
@@ -101,12 +113,20 @@ def deliver_moments(event_id, moment_ids) -> int:
         return 0
     GameMoment.objects.filter(pk__in=[moment.pk for moment in moments]).update(delivered_at=timezone.now())
 
-    title, body = compose(event, moments)
+    composed: dict = {}
+
+    def texts(language):
+        """``compose`` once per distinct language, under that language's override."""
+        if language not in composed:
+            with translation.override(language):
+                composed[language] = compose(event, moments)
+        return composed[language]
+
     data = {"club_slug": event.club.slug, "target": {"type": "event", "id": str(event.pk)}, "kind": "game_moment"}
     url = _event_url(event)
     reached = 0
     for user in followers(event):
-        if _send_native(user, title=title, body=body, data=data) + _send_web(event.club, user, title=title, body=body, url=url):
+        if _send_native(user, texts=texts, data=data) + _send_web(event.club, user, texts=texts, url=url):
             reached += 1
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached

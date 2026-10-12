@@ -1,6 +1,5 @@
-"""Response schemas for a game's timeline, shared by the public API
-(events/api.py, the club's own website) and the member app API
-(appapi/routers/member.py) so both serve exactly the same shape -- built by
+"""Response schemas for a game's timeline, served by the member app API
+(appapi/routers/member.py) -- built by
 events.services.game_timeline.timeline_for_api from the stored document
 (GAME_TIMELINE.md §2.2).
 """
@@ -11,7 +10,7 @@ from ninja import Field, Schema
 
 
 class TimelinePlayerOut(Schema):
-    name: str | None = Field(None, description="Left out on the public API unless every one of our teams on the game shows player names publicly (Team.show_player_names_publicly); always present in the member app.")
+    name: str | None = Field(None, description="The player's name, when known.")
     number: int | None = Field(None, description="Jersey number, when the source gives one.")
 
 

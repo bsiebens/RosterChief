@@ -13,7 +13,8 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
-from django.utils import timezone
+from django.utils import timezone, translation
+from django.utils.functional import Promise
 
 from rosterchief.mail import send_message
 
@@ -99,6 +100,18 @@ def _send_email(notification: Notification, emails: list[str], attachments=None)
             continue
 
 
+def _text_in(value, language: str) -> str:
+    """``value`` rendered in ``language``: a callable is called, a lazy string evaluated, a plain
+    string (user-written content) returned as is -- all inside that language's override."""
+    with translation.override(language):
+        return str(value() if callable(value) and not isinstance(value, Promise) else value)
+
+
+def localized_texts(title, body) -> dict:
+    """``{language: {"title", "body"}}`` for every language the API serves."""
+    return {code: {"title": _text_in(title, code), "body": _text_in(body, code)} for code, _name in settings.LANGUAGES}
+
+
 def notify_members(members, *, club, title: str, body: str, source=None, target_type: str = "", send_email: bool = True, attachments=None) -> list[Notification]:
     """One Notification per member. Emailed to everyone recipient_emails()
     resolves for them, unless send_email is False -- e.g. a staff review
@@ -107,6 +120,11 @@ def notify_members(members, *, club, title: str, body: str, source=None, target_
     just the topbar/dashboard entry. Always creates the row, even when
     nobody was reachable or emailing was skipped -- that's still true
     history for the in-app feed, not a failure to silently drop.
+
+    ``title`` and ``body`` may be plain strings (user-written content, same in every language),
+    lazy translated strings, or zero-argument callables returning a string -- the latter two are
+    rendered once per language in settings.LANGUAGES and stored in ``Notification.translations``
+    for the app API. The stored ``title``/``body`` (and so the email) are the English rendering.
 
     ``target_type`` names a screen of the native app to open for a notification that has no
     ``source`` object to point at (e.g. ``"calendar"``); ignored when there is a source.
@@ -122,7 +140,9 @@ def notify_members(members, *, club, title: str, body: str, source=None, target_
     a delivery channel (mobile.services.push) needs the batch shape, not one
     row at a time."""
     members = list(members)
-    notifications = [Notification(club=club, member=member, title=title, body=body, source=source, target_type=target_type) for member in members]
+    translations = localized_texts(title, body)
+    english = translations["en"]
+    notifications = [Notification(club=club, member=member, title=english["title"], body=english["body"], translations=translations, source=source, target_type=target_type) for member in members]
     Notification.objects.bulk_create(notifications)
 
     if send_email:

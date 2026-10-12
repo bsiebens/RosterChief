@@ -893,11 +893,8 @@ update in `fetch_game_info`, and parsed by `events/services/timeline_parsers.py`
 `settle_game_timelines` (nightly) picks up post-game corrections, and `fetch_game_timelines` is
 the manual backfill.
 
-The public API serves timelines on `GET /api/v1/games/{id}/`, and the lists carry periods and
-`decided_in`. Player names appear there only when every one of our teams on the game has
-`Team.show_player_names_publicly` on (off by default, for youth teams); otherwise jersey numbers
-only. The member app's `GET /events/{id}` carries the same shape (`game_timeline`), always with
-names. A changed timeline also records "moments" (goal for/against, cancelled goal, penalties,
+The public API does not serve timelines (games there carry scores and status only). The
+member app's `GET /events/{id}` carries it (`game_timeline`), always with player names. A changed timeline also records "moments" (goal for/against, cancelled goal, penalties,
 period end, start, final) once each in `events.GameMoment`, via the `game_timeline_changed`
 signal. They're shown on the management event page and pushed (coalesced per poll, push only)
 to accounts that follow one of the game's teams (`events.GameFollow`, opt-in from the member
