@@ -1542,6 +1542,7 @@ class ProductForm(forms.ModelForm):
             "is_active",
             "is_public",
             "personalization_enabled",
+            "inventory_managed",
             "early_bird_discount_enabled",
             "early_bird_discount_deadline",
             "early_bird_discount_type",

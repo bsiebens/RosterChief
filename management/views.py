@@ -137,7 +137,8 @@ from registration.services.notifications import confirm_and_send_invoice, send_r
 from registration.services.pricing import team_number_pools, variant_prices
 from rosterchief.request_cache import cached_on_request
 from rosterchief.spreadsheet import safe_row
-from shop.models import Discount, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
+from shop.models import Discount, InventoryMovement, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
+from shop.services.inventory import InventoryError, inventory_overview, receive_stock, return_order_to_stock, set_stock, stock_levels, sync_line_stock
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from shop.services.notifications import dispatch_order_ready_for_pickup_notification
 from shop.services.payments import PaymentError, amount_due, sync_payment_status
@@ -4887,6 +4888,100 @@ class ShopToggleView(ShopManagerRequiredMixin, View):
         return redirect("management:product_list")
 
 
+class InventoryView(ShopManagerRequiredMixin, TemplateView):
+    """The stock screen for inventory-managed products (Product.inventory_managed):
+    what's on hand per product/variant, how much of it is already in open
+    orders, a "take in" box per row for a delivery (InventoryReceiveView) and a
+    recount per row (InventoryAdjustView). A product with no stock shows as out
+    of stock -- members can't order it until some is taken in."""
+
+    template_name = "management/inventory_list.html"
+
+    def get_context_data(self, **kwargs):
+        rows = inventory_overview(self.request.club)
+        for row in rows:
+            row.key = f"{row.product.pk}__{row.variant.pk if row.variant else 'none'}"
+        return super().get_context_data(rows=rows, out_of_stock_count=sum(1 for row in rows if row.on_hand <= 0), **kwargs)
+
+
+class InventoryReceiveView(ShopManagerRequiredMixin, View):
+    """Everything that just arrived, in one go -- a number in a row's "take in"
+    box adds that many to its stock, a blank box leaves it alone (same
+    entry shape as OrderReceiveProductionView)."""
+
+    def post(self, request):
+        rows = inventory_overview(request.club)
+        receipts = {}
+        for row in rows:
+            raw = request.POST.get(f"receive__{row.product.pk}__{row.variant.pk if row.variant else 'none'}", "").strip()
+            if not raw:
+                continue
+            try:
+                quantity = int(raw)
+            except ValueError:
+                quantity = 0
+            if quantity < 1:
+                notify(request, f"e|{_('Could not read a quantity')}|{_('“%(value)s” is not a positive whole number -- that row was skipped.') % {'value': raw}}")
+                continue
+            receipts[(row.product, row.variant)] = quantity
+
+        if not receipts:
+            notify(request, f"w|{_('Nothing entered')}|{_('Enter a quantity for at least one item.')}")
+            return redirect("management:inventory_list")
+
+        movements = receive_stock(request.club, receipts, note=request.POST.get("note", "").strip()[:255], user=request.user)
+        units = sum(movement.quantity for movement in movements)
+        body = ngettext("%(count)d item taken in.", "%(count)d items taken in.", units) % {"count": units}
+        notify(request, f"s|{_('Stock taken in')}|{body}")
+        return redirect("management:inventory_list")
+
+
+class InventoryAdjustView(ShopManagerRequiredMixin, View):
+    """Sets one row's count to what was actually counted on the shelf (a
+    recount, breakage, a miscounted delivery); the difference is recorded as
+    an adjustment so it shows in the history."""
+
+    def post(self, request, product_pk, variant_pk=None):
+        product = get_object_or_404(Product.objects.filter(club=request.club, inventory_managed=True), pk=product_pk)
+        variant = get_object_or_404(product.variants.all(), pk=variant_pk) if variant_pk else None
+        try:
+            counted = int(request.POST.get("counted", "").strip())
+        except ValueError:
+            notify(request, f"e|{_('Could not read a quantity')}|{_('Enter the counted quantity as a whole number.')}")
+            return redirect("management:inventory_list")
+
+        try:
+            movement = set_stock(request.club, product, variant, counted, note=request.POST.get("note", "").strip()[:255], user=request.user)
+        except InventoryError as error:
+            notify(request, f"e|{_('Count not saved')}|{error}")
+            return redirect("management:inventory_list")
+
+        if movement is None:
+            notify(request, f"i|{_('No change')}|{_('The count already matched.')}")
+        else:
+            notify(request, f"s|{_('Count corrected')}|{_('“%(item)s” is now %(count)d.') % {'item': product.name + (' (' + variant.name + ')' if variant else ''), 'count': counted}}")
+        return redirect("management:inventory_list")
+
+
+class InventoryHistoryView(ShopManagerRequiredMixin, ListView):
+    """Every stock movement -- deliveries, recounts, what orders took and what
+    cancelled orders gave back -- newest first, optionally for one product."""
+
+    template_name = "management/inventory_history.html"
+    context_object_name = "movements"
+    paginate_by = 50
+
+    def get_queryset(self):
+        movements = InventoryMovement.objects.filter(product__club=self.request.club).select_related("product", "variant", "order", "created_by")
+        if product_pk := self.request.GET.get("product"):
+            movements = movements.filter(product_id=product_pk)
+        return movements
+
+    def get_context_data(self, **kwargs):
+        products = Product.objects.filter(club=self.request.club, inventory_managed=True)
+        return super().get_context_data(products=products, selected_product=self.request.GET.get("product", ""), **kwargs)
+
+
 class ProductListView(ShopManagerRequiredMixin, ListView):
     template_name = "management/product_list.html"
     context_object_name = "products"
@@ -4901,8 +4996,10 @@ class ProductListView(ShopManagerRequiredMixin, ListView):
 
         context = super().get_context_data(categories=categories, category_form=ProductCategoryForm(), **kwargs)
         sold = quantity_sold_by_product(self.request.club)
+        stock = stock_levels([product for product in context["products"] if product.inventory_managed])
         for product in context["products"]:
             product.sold_count = sold.get(product.pk, 0)
+            product.stock_count = sum(count for (product_pk, _variant), count in stock.items() if product_pk == product.pk) if product.inventory_managed else None
         return context
 
 
@@ -5737,7 +5834,13 @@ class OrderLineUpdateView(ShopManagerRequiredMixin, RedirectOnInvalidMixin, Upda
         line = form.save(commit=False)
         line.unit_price = line.variant.effective_price if line.variant_id else line.product.price
         line.line_total = line.unit_price * line.quantity
-        line.save()
+        try:
+            with transaction.atomic():
+                line.save()
+                sync_line_stock(line, old_variant_id=form.initial.get("variant"), user=self.request.user)
+        except InventoryError as error:
+            notify(self.request, f"e|{_('Not enough stock')}|{error}")
+            return redirect("management:order_detail", pk=self.kwargs["order_pk"])
 
         order = line.order
         order.total = order_total(order)
@@ -5940,8 +6043,10 @@ class OrderMarkDeliveredView(ShopManagerRequiredMixin, View):
 class OrderCancelView(ShopManagerRequiredMixin, View):
     def post(self, request, pk):
         order = get_object_or_404(Order.objects.filter(club=request.club), pk=pk)
-        order.fulfillment_status = Order.FulfillmentStatus.CANCELLED
-        order.save(update_fields=["fulfillment_status"])
+        with transaction.atomic():
+            order.fulfillment_status = Order.FulfillmentStatus.CANCELLED
+            order.save(update_fields=["fulfillment_status"])
+            return_order_to_stock(order, user=request.user)
         notify(request, f"w|{_('Order cancelled')}|{_('Order %(number)s has been cancelled.') % {'number': order.number}}")
         return redirect("management:order_detail", pk=pk)
 

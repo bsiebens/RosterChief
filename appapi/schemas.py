@@ -746,6 +746,7 @@ class VariantOut(Schema):
     id: uuid.UUID
     name: str = Field(description="One free-text option, e.g. `M` or `Medium — Red`.")
     price: Money
+    in_stock: bool = Field(default=True, description="False when this option is inventory managed and sold out: it can't be added to the cart.")
 
 
 class ProductOut(Schema):
@@ -757,6 +758,7 @@ class ProductOut(Schema):
     price: Money = Field(description="Base price; a variant may have its own.")
     category_id: uuid.UUID | None
     personalization_enabled: bool = Field(description="Offer a number and/or name to print (e.g. on a jersey).")
+    in_stock: bool = Field(default=True, description="False when the product is inventory managed and sold out (every option, if it has options): it can't be added to the cart.")
     variants: list[VariantOut] = Field(description="Active options; when not empty, pick one.")
 
 
@@ -787,7 +789,7 @@ class CartItemOut(Schema):
     beneficiary_id: uuid.UUID | None = Field(description="The managed person it's for, if chosen.")
     personalization_number: str
     personalization_name: str
-    unavailable: bool = Field(description="Can't be ordered any more (product withdrawn or option gone): remove it before checking out.")
+    unavailable: bool = Field(description="Can't be ordered any more (product withdrawn, option gone or out of stock): remove it before checking out.")
 
 
 class CartDiscountOut(Schema):

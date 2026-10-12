@@ -42,7 +42,7 @@
         </div>
     </div>
 
-    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}', variant: '{{ variants.0.pk|default:"" }}' }">
+    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}', variant: '{{ first_in_stock_variant.pk|default:"" }}' }">
         {% csrf_token %}
 
         {% if variants %}
@@ -50,8 +50,8 @@
                 <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Option" %}</div>
                 <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
                     {% for option in variants %}
-                        <button type="button" class="person-chip pl-2.5" :class="variant === '{{ option.pk }}' && 'person-chip-active'" @click="variant = '{{ option.pk }}'">
-                            <span class="person-chip-label">{{ option.name }}{% if option.price is not None %} &middot; &euro;{{ option.price|floatformat:2 }}{% endif %}</span>
+                        <button type="button" class="person-chip pl-2.5{% if not option.in_stock %} opacity-50{% endif %}" :class="variant === '{{ option.pk }}' && 'person-chip-active'" {% if option.in_stock %}@click="variant = '{{ option.pk }}'"{% else %}disabled{% endif %}>
+                            <span class="person-chip-label{% if not option.in_stock %} line-through{% endif %}">{{ option.name }}{% if option.price is not None %} &middot; &euro;{{ option.price|floatformat:2 }}{% endif %}</span>{% if not option.in_stock %}<span class="ml-1 text-xs text-dim">{% trans "Out of stock" %}</span>{% endif %}
                         </button>
                     {% endfor %}
                 </div>
@@ -101,6 +101,10 @@
         </div>
         <input type="hidden" name="quantity" :value="qty">
 
-        <button type="submit" class="btn btn-primary w-full">{% trans "Add to cart" %}</button>
+        {% if product.in_stock %}
+            <button type="submit" class="btn btn-primary w-full">{% trans "Add to cart" %}</button>
+        {% else %}
+            <button type="button" class="btn btn-primary w-full opacity-50" disabled>{% trans "Out of stock" %}</button>
+        {% endif %}
     </form>
 {% endblock content %}

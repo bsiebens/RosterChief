@@ -51,7 +51,7 @@
                 {% endif %}
                 <div class="grid grid-cols-2 gap-3">
                     {% for product in group.products %}
-                        <a class="m-card block overflow-hidden" href="{% url "mobile:shop_product_detail" product.slug %}">
+                        <a class="m-card block overflow-hidden{% if not product.in_stock %} opacity-60{% endif %}" href="{% url "mobile:shop_product_detail" product.slug %}">
                             {% if product.image %}
                                 <img class="h-28 w-full object-cover" src="{{ product.image.url }}" alt="">
                             {% else %}
@@ -60,6 +60,7 @@
                             <div class="p-3">
                                 <div class="truncate text-sm font-semibold text-ink">{{ product.name }}</div>
                                 <div class="mt-1 font-display text-base font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
+                                {% if not product.in_stock %}<div class="mt-1 text-xs font-semibold text-dim">{% trans "Out of stock" %}</div>{% endif %}
                             </div>
                         </a>
                     {% endfor %}

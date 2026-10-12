@@ -5,6 +5,7 @@ from .models import (
     Cart,
     CartItem,
     Discount,
+    InventoryMovement,
     Invoice,
     Order,
     OrderLine,
@@ -189,6 +190,15 @@ class VoucherConsumptionAdmin(admin.ModelAdmin):
     list_filter = ["recorded_at"]
     search_fields = ["voucher__number", "note"]
     raw_id_fields = ["voucher", "recorded_by"]
+    readonly_fields = ["created", "modified"]
+
+
+@admin.register(InventoryMovement)
+class InventoryMovementAdmin(admin.ModelAdmin):
+    list_display = ["product", "variant", "quantity", "reason", "order", "created_by", "created"]
+    list_filter = ["reason", "product__club"]
+    search_fields = ["product__name", "note"]
+    raw_id_fields = ["product", "variant", "order", "created_by"]
     readonly_fields = ["created", "modified"]
 
 

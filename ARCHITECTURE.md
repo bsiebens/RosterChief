@@ -1172,6 +1172,26 @@ Flow & design notes:
 - **Money = `DecimalField`**, never float. Snapshot prices onto cart items / order lines /
   invoices so historical records stay correct when `Product.price` changes.
 
+#### 5.7.0 Inventory *(built)*
+
+Some merchandise is bought in bulk instead of made to order. `Product.inventory_managed`
+(merchandise only) marks it; its stock lives in `InventoryMovement` (`product`, `variant`
+null for a product without variants, signed `quantity`, `reason` = received / adjustment /
+order / order_returned, optional `order`, `note`, `created_by`). **On-hand = Σ quantity** —
+no stored counter to drift. Everything goes through `shop/services/inventory.py`.
+- **Ordering.** `place_order` row-locks the managed products, refuses a cart wanting more
+  than is on hand (same item on several lines counts together), books each managed line out
+  of stock and creates it `production_status=RECEIVED` — it never enters the production
+  flow; the order's rollup is resynced as usual.
+- **Out of stock** = nothing on hand for that product/variant: it can't be added to the cart
+  (web app + app API, which reports `in_stock`), and a cart line that sold out is
+  `unavailable` at checkout. New stock makes it orderable again.
+- **Keeping stock honest.** Cancelling an order returns what it holds (idempotent); editing a
+  managed order line's size/quantity moves the stock, refused if the new size lacks stock;
+  staff recount via "Correct count" (logged as an adjustment).
+- **UI** (`/manage/shop/inventory/`): stock per product/variant, units sitting in open orders,
+  bulk "take in" entry, per-row recount, and a movement history.
+
 #### 5.7.1 Discounts
 
 Two independent discount mechanisms, applied at different layers and computed by a single

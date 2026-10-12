@@ -61,6 +61,7 @@ from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
 from rosterchief.test_support import enrol_mfa, start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
+from shop.services.inventory import receive_stock, stock_for, take_for_order_lines
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -12979,6 +12980,111 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
         self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
+
+
+class InventoryManagementTests(ShopTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.scarf = Product.objects.create(club=cls.club, name="Scarf", price=Decimal("10.00"), inventory_managed=True)
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly@example.com")
+
+    def test_a_shop_manager_sees_stock_and_out_of_stock_rows(self):
+        receive_stock(self.club, {(self.scarf, None): 4})
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("inventory_list")
+
+        self.assertContains(response, "Scarf")
+        self.assertNotContains(response, "Jersey")
+
+    def test_plain_staff_cannot_open_the_inventory(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("inventory_list").status_code, 403)
+        self.assertEqual(self.club_post("inventory_receive", {}).status_code, 403)
+
+    def test_taking_in_stock_adds_to_the_count(self):
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": "12", "note": "Supplier A"})
+
+        self.assertEqual(stock_for(self.scarf), 12)
+        self.assertEqual(self.scarf.inventory_movements.get().note, "Supplier A")
+
+    def test_a_blank_or_invalid_quantity_takes_nothing_in(self):
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": "-3"})
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": ""})
+
+        self.assertEqual(stock_for(self.scarf), 0)
+
+    def test_correcting_a_count_records_the_difference(self):
+        receive_stock(self.club, {(self.scarf, None): 10})
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_adjust", {"counted": "8", "note": "Two damaged"}, self.scarf.pk)
+
+        self.assertEqual(stock_for(self.scarf), 8)
+        self.assertEqual(self.scarf.inventory_movements.get(reason="adjustment").quantity, -2)
+
+    def test_another_clubs_product_cannot_be_adjusted(self):
+        other = Club.objects.create(name="Other", slug="other-club")
+        theirs = Product.objects.create(club=other, name="Theirs", inventory_managed=True)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("inventory_adjust", {"counted": "5"}, theirs.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(stock_for(theirs), 0)
+
+    def test_the_history_lists_movements_and_filters_by_product(self):
+        hat = Product.objects.create(club=self.club, name="Hat", inventory_managed=True)
+        receive_stock(self.club, {(self.scarf, None): 3, (hat, None): 9})
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("inventory_history", params={"product": str(self.scarf.pk)})
+
+        self.assertEqual([movement.product for movement in response.context["movements"]], [self.scarf])
+
+    def test_cancelling_an_order_returns_its_stock(self):
+        receive_stock(self.club, {(self.scarf, None): 5})
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("20.00"))
+        line = OrderLine.objects.create(order=order, product=self.scarf, quantity=2, unit_price=Decimal("10.00"), line_total=Decimal("20.00"))
+        take_for_order_lines([line])
+        self.assertEqual(stock_for(self.scarf), 3)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("order_cancel", {}, order.pk)
+        self.club_post("order_cancel", {}, order.pk)
+
+        self.assertEqual(stock_for(self.scarf), 5)
+
+    def test_a_product_can_be_switched_to_inventory_managed(self):
+        self.assertFalse(self.product.inventory_managed)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post(
+            "product_update",
+            {
+                "name": "Home Jersey",
+                "product_type": "merchandise",
+                "price": "25.00",
+                "is_active": "on",
+                "inventory_managed": "on",
+                "registrant_discount_scope": "per_person",
+                "variants-TOTAL_FORMS": "0",
+                "variants-INITIAL_FORMS": "0",
+                "tiers-TOTAL_FORMS": "0",
+                "tiers-INITIAL_FORMS": "0",
+            },
+            self.product.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.inventory_managed)
 
 
 class PaymentManagementTests(ShopTestBase):

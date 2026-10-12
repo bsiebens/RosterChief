@@ -69,6 +69,7 @@ from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
+from shop.services.inventory import annotate_availability
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import StaffAssignment, Team, TeamMembership
 
@@ -1426,7 +1427,7 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         # (registration.services.pricing) -- excluded structurally here
         # regardless of is_public, not left to staff remembering to flag
         # each one.
-        products = list(catalog(self.request.club))
+        products = annotate_availability(catalog(self.request.club).prefetch_related("variants"))
         cart = open_cart(self.request.club, self.request.user)
         cart_item_count = cart.items.count() if cart is not None else 0
 
@@ -1470,9 +1471,10 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return get_object_or_404(catalog(self.request.club), slug=self.kwargs["slug"])
 
     def get(self, request, *args, **kwargs):
-        product = self._product()
-        variants = list(product.variants.filter(is_active=True))
-        return self.render_to_response(self.get_context_data(product=product, variants=variants))
+        product = annotate_availability([self._product()])[0]
+        variants = [variant for variant in product.variants.all() if variant.is_active]
+        first_in_stock_variant = next((variant for variant in variants if variant.in_stock), None)
+        return self.render_to_response(self.get_context_data(product=product, variants=variants, first_in_stock_variant=first_in_stock_variant))
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(screen_title=kwargs["product"].name, max_quantity=MAX_CART_QUANTITY, **kwargs)
@@ -1503,16 +1505,20 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
         # Personalisation only sticks on a product that offers it (shop.services.cart).
-        add_to_cart(
-            request.club,
-            request.user,
-            product,
-            quantity=quantity,
-            variant=variant,
-            beneficiary=beneficiary,
-            personalization_number=request.POST.get("personalization_number", ""),
-            personalization_name=request.POST.get("personalization_name", ""),
-        )
+        try:
+            add_to_cart(
+                request.club,
+                request.user,
+                product,
+                quantity=quantity,
+                variant=variant,
+                beneficiary=beneficiary,
+                personalization_number=request.POST.get("personalization_number", ""),
+                personalization_name=request.POST.get("personalization_name", ""),
+            )
+        except CheckoutError as error:
+            notify(request, f"w|{_('Not available')}|{error}")
+            return HttpResponseRedirect(request.path)
 
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}

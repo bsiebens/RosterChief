@@ -134,6 +134,14 @@ class Product(ClubScopedModel):
     #: manufacturer order export (management.shop_export).
     personalization_enabled = models.BooleanField(_("personalization enabled?"), default=False, help_text=_("Lets a member enter a number and/or a name to print on this item when ordering, e.g. for a jersey."))
 
+    #: Bought in bulk instead of made to order: orders draw down a counted stock
+    #: (InventoryMovement) rather than going through production, and the product
+    #: -- or a variant of it -- can't be ordered once its stock is gone. See
+    #: shop.services.inventory.
+    inventory_managed = models.BooleanField(
+        _("inventory managed?"), default=False, help_text=_("Bought in bulk and kept in stock. Orders take items from stock and skip production; an item with no stock left can't be ordered until new stock is taken in.")
+    )
+
     early_bird_discount_enabled = models.BooleanField(_("early bird discount enabled?"), default=False)
     early_bird_discount_deadline = models.DateField(_("early bird discount deadline"), blank=True, null=True)
     early_bird_discount_type = models.CharField(_("early bird discount type"), max_length=255, choices=DiscountType.choices, default=DiscountType.PERCENTAGE, blank=True)
@@ -173,6 +181,8 @@ class Product(ClubScopedModel):
 
     def clean(self):
         validate_club_scope(self, self.club_id, same_club_fields=("season", "staff_role", "category"))
+        if self.inventory_managed and self.product_type != self.ProductType.MERCHANDISE:
+            raise ValidationError({"inventory_managed": _("Only merchandise can be inventory managed.")})
 
 
 class ProductVariant(UUIDModel):
@@ -454,6 +464,48 @@ class OrderLine(UUIDModel):
     def clean(self):
         club_id = self.order.club_id if self.order_id else None
         validate_club_scope(self, club_id, same_club_fields=("product", "team"), member_fields=("beneficiary",))
+        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
+            raise ValidationError({"variant": _("Must be a variant of this product.")})
+
+
+class InventoryMovement(UUIDModel):
+    """One change to the stock of an inventory-managed product (or one of its
+    variants): the on-hand count is the sum of ``quantity`` over a product's
+    movements (shop.services.inventory.stock_levels), so the history is the
+    count -- there's no separate counter to drift out of step with it.
+
+    No club FK of its own -- scoped via ``product.club``, same shape as
+    ProductVariant/OrderLine. ``variant`` is null for a product without
+    variants."""
+
+    class Reason(models.TextChoices):
+        RECEIVED = "received", _("Stock taken in")
+        ADJUSTMENT = "adjustment", _("Count corrected")
+        ORDER = "order", _("Ordered")
+        ORDER_RETURNED = "order_returned", _("Order cancelled or changed")
+
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="inventory_movements", verbose_name=_("product"))
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, related_name="inventory_movements", verbose_name=_("variant"), blank=True, null=True)
+    #: Signed: positive adds to stock, negative takes from it.
+    quantity = models.IntegerField(_("quantity"))
+    reason = models.CharField(_("reason"), max_length=20, choices=Reason.choices)
+    note = models.CharField(_("note"), max_length=255, blank=True)
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, related_name="inventory_movements", verbose_name=_("order"), blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="+", verbose_name=_("created by"), blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("inventory movement")
+        verbose_name_plural = _("inventory movements")
+        ordering = ["-created"]
+        indexes = [models.Index(fields=["product", "variant"])]
+
+    def __str__(self):
+        suffix = f" ({self.variant.name})" if self.variant_id else ""
+        return f"{self.product}{suffix}: {self.quantity:+d}"
+
+    def clean(self):
+        club_id = self.product.club_id if self.product_id else None
+        validate_club_scope(self, club_id, same_club_fields=("order",))
         if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
             raise ValidationError({"variant": _("Must be a variant of this product.")})
 

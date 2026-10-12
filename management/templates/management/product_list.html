@@ -122,6 +122,7 @@
                     <th>{% trans "Season" %}</th>
                     <th>{% trans "Price" %}</th>
                     <th>{% trans "Sold" %}</th>
+                    <th>{% trans "Stock" %}</th>
                     <th>{% trans "Status" %}</th>
                     <th></th>
                 </tr>
@@ -143,6 +144,15 @@
                         <td class="font-mono text-xs tabular-nums">&euro; {{ product.price }}</td>
                         <td class="font-mono text-xs tabular-nums text-muted">{{ product.sold_count }}</td>
                         <td>
+                            {% if product.stock_count is None %}
+                                <span class="text-dim">—</span>
+                            {% elif product.stock_count > 0 %}
+                                <a class="link link-hover font-mono text-xs tabular-nums" href="{% url 'management:inventory_list' %}">{{ product.stock_count }}</a>
+                            {% else %}
+                                <a href="{% url 'management:inventory_list' %}"><span class="badge badge-warning badge-sm">{% trans "Out of stock" %}</span></a>
+                            {% endif %}
+                        </td>
+                        <td>
                             <span class="badge badge-sm {% if product.is_active %}badge-success{% else %}badge-neutral{% endif %}">
                                 {% if product.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
                             </span>
@@ -163,7 +173,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center text-dim">{% trans "No products yet." %}</td>
+                        <td colspan="10" class="text-center text-dim">{% trans "No products yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

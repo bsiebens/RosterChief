@@ -215,7 +215,7 @@ class ShopTests(ClubApiTestCase):
     def test_catalogue_leaves_out_membership_products(self):
         items = self.get("/shop/products").json()["items"]
         self.assertEqual([item["slug"] for item in items], ["home-jersey"])
-        self.assertEqual(items[0]["variants"], [{"id": str(self.medium.pk), "name": "M", "price": {"amount": "27.50", "currency": "EUR"}}])
+        self.assertEqual(items[0]["variants"], [{"id": str(self.medium.pk), "name": "M", "price": {"amount": "27.50", "currency": "EUR"}, "in_stock": True}])
         self.assertError(self.get("/shop/products/season-fee"), 404, "not_found")
 
     def test_cart_and_checkout(self):

@@ -1,0 +1,104 @@
+{% extends "management/base.html" %}
+{% load i18n lucide ui %}
+
+{% comment %}
+    The stock screen for inventory-managed products. Context: rows (shop.services.
+    inventory.StockRow, each with a ``key`` for dom ids), out_of_stock_count.
+    The "Take in" column posts everything entered to inventory_receive in one go;
+    the per-row "Correct count" dialogs (outside the form, so they don't nest
+    one) post a recount to inventory_adjust.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Inventory" %}{% endblock panel_title %}
+{% block heading %}{% trans "Inventory" %}{% endblock heading %}
+
+{% block topbar_context %}
+    {% if out_of_stock_count %}
+        <span class="badge badge-warning">{% blocktrans count counter=out_of_stock_count %}{{ counter }} out of stock{% plural %}{{ counter }} out of stock{% endblocktrans %}</span>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:inventory_history' %}">{% lucide "history" size=16 %} {% trans "History" %}</a>
+    <a class="btn btn-outline gap-2" href="{% url 'management:product_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to products" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    <p class="mb-4 text-sm text-muted">{% trans "Inventory-managed products are bought in bulk and kept in stock. Orders take items from stock and skip production; an item with no stock left can't be ordered until new stock is taken in. Enter what just arrived in the “Take in” column -- a blank field is left alone." %}</p>
+
+    <form method="post" action="{% url 'management:inventory_receive' %}">
+        {% csrf_token %}
+        <div class="card overflow-hidden">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Product" %}</th>
+                        <th>{% trans "Variant" %}</th>
+                        <th>{% trans "In stock" %}</th>
+                        <th>{% trans "In open orders" %}</th>
+                        <th>{% trans "Take in" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td class="font-semibold">
+                                <a class="link link-hover" href="{% url 'management:product_update' row.product.pk %}">{{ row.product.name }}</a>
+                                {% if not row.product.is_active %}<span class="badge badge-neutral badge-sm ml-1">{% trans "Inactive" %}</span>{% endif %}
+                            </td>
+                            <td>{{ row.variant.name|default:"—" }}</td>
+                            <td>
+                                {% if row.on_hand > 0 %}
+                                    <span class="font-mono tabular-nums">{{ row.on_hand }}</span>
+                                {% else %}
+                                    <span class="badge badge-warning badge-sm">{% trans "Out of stock" %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-mono tabular-nums text-muted">{{ row.committed }}</td>
+                            <td><input type="number" min="1" name="receive__{{ row.product.pk }}__{{ row.variant.pk|default:"none" }}" class="input w-24" placeholder="—" aria-label="{% trans 'Quantity to take in' %}"></td>
+                            <td class="text-right">
+                                <button class="btn btn-outline btn-xs gap-1" type="button" onclick="document.getElementById('{{ row.key|dom_id:"adjust_modal" }}').showModal()">{% lucide "pencil" size=12 %} {% trans "Correct count" %}</button>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="py-4 text-center text-dim">{% trans "No inventory-managed products yet. Switch “Inventory managed” on in a merchandise product to keep it in stock." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if rows %}
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+                <input type="text" name="note" maxlength="255" class="input w-64" placeholder="{% trans 'Note, e.g. supplier or delivery (optional)' %}" aria-label="{% trans 'Note' %}">
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "package-plus" size=16 %} {% trans "Take in entered quantities" %}</button>
+            </div>
+        {% endif %}
+    </form>
+
+    {% for row in rows %}
+        <dialog id="{{ row.key|dom_id:"adjust_modal" }}" class="modal">
+            <div class="modal-box">
+                <h3 class="text-lg font-bold">{% trans "Correct count" %}</h3>
+                <p class="py-2 text-sm opacity-70">{{ row.product.name }}{% if row.variant %} &middot; {{ row.variant.name }}{% endif %} &mdash; {% blocktrans with count=row.on_hand %}{{ count }} in stock on record. Enter what you actually counted; the difference is logged as a correction.{% endblocktrans %}</p>
+                <form method="post" id="{{ row.key|dom_id:"adjust_form" }}" action="{% if row.variant %}{% url 'management:inventory_adjust_variant' row.product.pk row.variant.pk %}{% else %}{% url 'management:inventory_adjust' row.product.pk %}{% endif %}">
+                    {% csrf_token %}
+                    <div class="flex flex-col gap-3">
+                        <input type="number" min="0" name="counted" value="{{ row.on_hand }}" class="input w-full" required aria-label="{% trans 'Counted quantity' %}">
+                        <input type="text" name="note" maxlength="255" class="input w-full" placeholder="{% trans 'Reason (optional)' %}" aria-label="{% trans 'Reason' %}">
+                    </div>
+                </form>
+                <div class="modal-action">
+                    <form method="dialog">
+                        <button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                    </form>
+                    <button class="btn btn-primary gap-2" type="submit" form="{{ row.key|dom_id:"adjust_form" }}">{% lucide "save" size=16 %} {% trans "Save count" %}</button>
+                </div>
+            </div>
+            <form method="dialog" class="modal-backdrop">
+                <button>close</button>
+            </form>
+        </dialog>
+    {% endfor %}
+{% endblock panel %}

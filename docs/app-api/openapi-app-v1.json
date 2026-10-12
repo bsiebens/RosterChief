@@ -841,7 +841,7 @@
             "type": "integer"
           },
           "unavailable": {
-            "description": "Can't be ordered any more (product withdrawn or option gone): remove it before checking out.",
+            "description": "Can't be ordered any more (product withdrawn, option gone or out of stock): remove it before checking out.",
             "title": "Unavailable",
             "type": "boolean"
           },
@@ -5380,6 +5380,12 @@
             ],
             "title": "Image Url"
           },
+          "in_stock": {
+            "default": true,
+            "description": "False when the product is inventory managed and sold out (every option, if it has options): it can't be added to the cart.",
+            "title": "In Stock",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -7861,6 +7867,12 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "in_stock": {
+            "default": true,
+            "description": "False when this option is inventory managed and sold out: it can't be added to the cart.",
+            "title": "In Stock",
+            "type": "boolean"
           },
           "name": {
             "description": "One free-text option, e.g. `M` or `Medium — Red`.",
