@@ -1,4 +1,6 @@
 import csv
+import json
+import uuid
 from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
@@ -1375,10 +1377,37 @@ class TeamListView(ClubStaffRequiredMixin, ListView):
         return teams.annotate(
             player_count=Count("roster", filter=Q(roster__season=season), distinct=True),
             staff_count=Count("staff_assignments", filter=Q(staff_assignments__season=season), distinct=True),
-        ).order_by("name")
+        ).order_by(F("ordering").asc(nulls_last=True), "name")
 
     def get_context_data(self, **kwargs):
-        return super().get_context_data(search=self.request.GET.get("q", ""), **kwargs)
+        # Dragging reorders the whole club's list, so it is only offered on an unfiltered
+        # view (a search shows a subset) and to admins.
+        can_reorder = can_manage_members(self.request.user, self.request.club) and not self.request.GET.get("q", "").strip()
+        return super().get_context_data(search=self.request.GET.get("q", ""), can_reorder=can_reorder, **kwargs)
+
+
+class TeamReorderView(MemberAdminRequiredMixin, View):
+    """Drag-and-drop on the team list: POST ``ids`` (the team ids of the page, in the order
+    now shown). The page's teams take the slots they occupied in the club's full order, in
+    the new sequence, then every team is numbered 1..N so the shown order is the stored one."""
+
+    def post(self, request):
+        try:
+            ids = [str(uuid.UUID(str(value))) for value in json.loads(request.body).get("ids", [])]
+        except ValueError, TypeError, AttributeError:
+            return JsonResponse({"error": "invalid"}, status=400)
+        teams = list(Team.objects.filter(club=request.club).order_by(F("ordering").asc(nulls_last=True), "name"))
+        by_id = {str(team.pk): team for team in teams}
+        if len(set(ids)) != len(ids) or any(pk not in by_id for pk in ids):
+            return JsonResponse({"error": "invalid"}, status=400)
+        slots = sorted(teams.index(by_id[pk]) for pk in ids)
+        for slot, pk in zip(slots, ids):
+            teams[slot] = by_id[pk]
+        for number, team in enumerate(teams, start=1):
+            team.ordering = number
+        with transaction.atomic():
+            Team.objects.bulk_update(teams, ["ordering"])
+        return JsonResponse({"ok": True})
 
 
 class TeamCreateView(MemberAdminRequiredMixin, CreateView):

@@ -556,6 +556,37 @@ class TeamManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Rival Team")
 
+    def test_team_list_is_sorted_by_order_then_name(self):
+        Team.objects.create(club=self.club, name="Aaa", short_name="A")
+        Team.objects.create(club=self.club, name="Zzz", short_name="Z", ordering=1)
+
+        names = [team.name for team in self.club_get("team_list").context["teams"]]
+
+        self.assertEqual(names.index("Zzz"), 0)
+        self.assertLess(names.index("Aaa"), len(names))
+        self.assertEqual(names[1:], sorted(names[1:]))
+
+    def test_reordering_numbers_every_team_in_the_shown_order(self):
+        a = Team.objects.create(club=self.club, name="Aaa", short_name="A")
+        b = Team.objects.create(club=self.club, name="Bbb", short_name="B")
+        c = Team.objects.create(club=self.club, name="Ccc", short_name="C")
+        others = list(Team.objects.filter(club=self.club).exclude(pk__in=[a.pk, b.pk, c.pk]).order_by("name"))
+
+        response = self.client.post(reverse("management:team_reorder"), {"ids": [str(c.pk), str(a.pk), str(b.pk)]}, content_type="application/json", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        shown = list(Team.objects.filter(club=self.club))
+        self.assertEqual([t.pk for t in shown if t.pk in (a.pk, b.pk, c.pk)], [c.pk, a.pk, b.pk])
+        self.assertEqual(sorted(t.ordering for t in shown), list(range(1, len(others) + 4)))
+
+    def test_reordering_rejects_teams_of_another_club(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        rival = Team.objects.create(club=other_club, name="Rival Team", short_name="RT")
+
+        response = self.client.post(reverse("management:team_reorder"), {"ids": [str(rival.pk)]}, content_type="application/json", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 400)
+
     def test_creating_a_team(self):
         response = self.club_post("team_create", {"name": "U15", "short_name": "U15", "referee_management": "club"})
 

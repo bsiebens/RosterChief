@@ -261,7 +261,31 @@ class TeamsApiTests(ApiTestBase):
     def test_list_teams(self):
         data = self.api_get("/teams/").json()
 
-        self.assertEqual(data, [{"id": str(self.team.pk), "name": "First Team", "short_name": "1st", "photo_url": None}])
+        self.assertEqual(data, [{"id": str(self.team.pk), "name": "First Team", "short_name": "1st", "photo_url": None, "tournament_only": False}])
+
+    def test_tournament_only_teams_are_reported_and_can_be_filtered(self):
+        cup = Team.objects.create(club=self.club, name="Cup Team", short_name="Cup", tournament_only=True)
+
+        everything = {team["id"]: team for team in self.api_get("/teams/").json()}
+        self.assertTrue(everything[str(cup.pk)]["tournament_only"])
+        self.assertFalse(everything[str(self.team.pk)]["tournament_only"])
+
+        explicit = self.api_get("/teams/?include_tournament_only=true").json()
+        self.assertEqual({team["id"] for team in explicit}, {str(self.team.pk), str(cup.pk)})
+
+        filtered = self.api_get("/teams/?include_tournament_only=false").json()
+        self.assertEqual([team["id"] for team in filtered], [str(self.team.pk)])
+
+    def test_teams_are_returned_in_their_order_then_alphabetically(self):
+        Team.objects.create(club=self.club, name="Zed", short_name="Z")
+        Team.objects.create(club=self.club, name="Alpha", short_name="A")
+        Team.objects.create(club=self.club, name="Second", short_name="S2", ordering=2)
+        Team.objects.create(club=self.club, name="Also second", short_name="S2b", ordering=2)
+        Team.objects.create(club=self.club, name="Top", short_name="T", ordering=1)
+
+        names = [team["name"] for team in self.api_get("/teams/").json()]
+
+        self.assertEqual(names, ["Top", "Also second", "Second", "Alpha", "First Team", "Zed"])
 
     def test_roster_groups_players_by_position(self):
         alice = Member.objects.create(first_name="Alice", last_name="Ash")
@@ -1131,10 +1155,10 @@ class PublicCacheHeaderTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "public, max-age=60")
 
-    def test_the_team_list_response_shape_is_unchanged(self):
+    def test_the_team_list_response_shape_is_stable(self):
         (team,) = self.get("/api/v1/teams/").json()
 
-        self.assertEqual(sorted(team), ["id", "name", "photo_url", "short_name"])
+        self.assertEqual(sorted(team), ["id", "name", "photo_url", "short_name", "tournament_only"])
 
     def test_live_data_is_not_given_a_public_cache_lifetime(self):
         for path in ("/api/v1/games/live/", "/api/v1/news/", "/api/v1/sponsors/"):
