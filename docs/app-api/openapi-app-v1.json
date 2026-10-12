@@ -1221,6 +1221,646 @@
         "title": "ClubRefOut",
         "type": "object"
       },
+      "CoachEventIn": {
+        "properties": {
+          "competition": {
+            "default": "",
+            "description": "A competition the club has switched on, by name; anything else is a validation error.",
+            "maxLength": 255,
+            "title": "Competition",
+            "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reply deadline.",
+            "title": "Deadline"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "excluded_member_ids": {
+            "description": "Roster players who are not invited.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Excluded Member Ids",
+            "type": "array"
+          },
+          "gathering": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When to be there, if earlier than the start.",
+            "title": "Gathering"
+          },
+          "invited_member_ids": {
+            "description": "People who are not on the roster but are invited.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Invited Member Ids",
+            "type": "array"
+          },
+          "is_friendly": {
+            "default": false,
+            "title": "Is Friendly",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "training",
+              "game",
+              "tournament",
+              "meeting"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "max_officials": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ignored unless the club uses the officials module.",
+            "title": "Max Officials"
+          },
+          "max_referees": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Referees"
+          },
+          "notify": {
+            "default": true,
+            "description": "Tell everybody invited, like the web app does: `New game: Tue 14 Oct, 18:30. Let us know if you can make it.`",
+            "title": "Notify",
+            "type": "boolean"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "Empty: a game gets its match-up (`U16 vs Ajax`) and every other kind its own name. Typing a title for a game is ignored once it has an opponent.",
+            "maxLength": 255,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "start"
+        ],
+        "title": "CoachEventIn",
+        "type": "object"
+      },
+      "CoachEventOut": {
+        "description": "What the coach edit screen needs on top of the member shape.",
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "competition": {
+            "title": "Competition",
+            "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reply deadline. After it, answers are closed (a line-up dropout still works).",
+            "title": "Deadline"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "excluded_member_ids": {
+            "description": "Roster players kept out of this event.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Excluded Member Ids",
+            "type": "array"
+          },
+          "external_game_id": {
+            "title": "External Game Id",
+            "type": "string"
+          },
+          "game_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For games: `scheduled`, `live`, `finished` or `cancelled`. Null for other kinds. Ignore unknown values.",
+            "title": "Game Status"
+          },
+          "gathering": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When to be there, if earlier than the start.",
+            "title": "Gathering"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "invited_member_ids": {
+            "description": "People invited on top of the team's roster.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Invited Member Ids",
+            "type": "array"
+          },
+          "is_friendly": {
+            "title": "Is Friendly",
+            "type": "boolean"
+          },
+          "is_home_game": {
+            "title": "Is Home Game",
+            "type": "boolean"
+          },
+          "is_live": {
+            "title": "Is Live",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "`training`, `game`, `tournament`, `meeting`, `social`, `other`.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "max_officials": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the club does not use the officials module.",
+            "title": "Max Officials"
+          },
+          "max_referees": {
+            "title": "Max Referees",
+            "type": "integer"
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opponent's name, for games.",
+            "title": "Opponent"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "score_against": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Against"
+          },
+          "score_for": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score For"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for a one-off event."
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/TeamRefOut"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "start",
+          "end",
+          "gathering",
+          "deadline",
+          "cancelled",
+          "location",
+          "opponent",
+          "is_home_game",
+          "teams",
+          "competition",
+          "score_for",
+          "score_against",
+          "is_live",
+          "game_status",
+          "series",
+          "location_id",
+          "opponent_id",
+          "is_friendly",
+          "external_game_id",
+          "max_referees",
+          "max_officials",
+          "invited_member_ids",
+          "excluded_member_ids"
+        ],
+        "title": "CoachEventOut",
+        "type": "object"
+      },
+      "CoachEventPatch": {
+        "description": "Only what is sent changes; `null` clears an optional field (`end`, `gathering`, `deadline`, `location_id`, `opponent_id`).",
+        "properties": {
+          "competition": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Competition"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "excluded_member_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded Member Ids"
+          },
+          "gathering": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gathering"
+          },
+          "invited_member_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited Member Ids"
+          },
+          "is_friendly": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Friendly"
+          },
+          "is_live": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Live"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "training",
+                  "game",
+                  "tournament",
+                  "meeting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "max_officials": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Officials"
+          },
+          "max_referees": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Referees"
+          },
+          "notify": {
+            "default": false,
+            "description": "Tell everybody invited that the event changed.",
+            "title": "Notify",
+            "type": "boolean"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "scope": {
+            "default": "this",
+            "description": "For an occurrence of a series. `this`: only this event (and it stops following the series, if the change touches a field the series sets). `this_and_following`: this and every later occurrence (the series is split in two). `all`: every upcoming occurrence that still follows the series. Fields the series does not set (`start`, `competition`, `is_friendly`, `max_*`, scores, `is_live`) always change this event only. `this_and_following` and `all` on a one-off event: `422 not_in_series`.",
+            "enum": [
+              "this",
+              "this_and_following",
+              "all"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "score_against": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Against"
+          },
+          "score_for": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score For"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CoachEventPatch",
+        "type": "object"
+      },
       "ContextOut": {
         "properties": {
           "club": {
@@ -1731,6 +2371,34 @@
         "title": "EventDetailOut",
         "type": "object"
       },
+      "EventListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CoachEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "EventListOut",
+        "type": "object"
+      },
       "EventOut": {
         "properties": {
           "cancelled": {
@@ -1890,6 +2558,24 @@
           "game_status"
         ],
         "title": "EventOut",
+        "type": "object"
+      },
+      "EventUpdateOut": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/CoachEventOut"
+          },
+          "occurrences_updated": {
+            "description": "Other occurrences of the series changed along with this one; 0 for scope `this`.",
+            "title": "Occurrences Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event",
+          "occurrences_updated"
+        ],
+        "title": "EventUpdateOut",
         "type": "object"
       },
       "FollowStateOut": {
@@ -2671,6 +3357,66 @@
         "title": "LiveActivityOut",
         "type": "object"
       },
+      "LocationIn": {
+        "properties": {
+          "address": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          },
+          "city": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "City",
+            "type": "string"
+          },
+          "country": {
+            "default": "BE",
+            "description": "ISO 3166-1 alpha-2 code.",
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Country",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "zip_code": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Zip Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address",
+          "city",
+          "zip_code"
+        ],
+        "title": "LocationIn",
+        "type": "object"
+      },
+      "LocationListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LocationRefOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LocationListOut",
+        "type": "object"
+      },
       "LocationOut": {
         "properties": {
           "address": {
@@ -2702,6 +3448,52 @@
           "is_home"
         ],
         "title": "LocationOut",
+        "type": "object"
+      },
+      "LocationRefOut": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "country": {
+            "description": "ISO 3166-1 alpha-2 code, e.g. `BE`.",
+            "title": "Country",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_home": {
+            "description": "The club's own ground. Set from the control panel, never through the app.",
+            "title": "Is Home",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "zip_code": {
+            "title": "Zip Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "address",
+          "city",
+          "zip_code",
+          "country",
+          "is_home"
+        ],
+        "title": "LocationRefOut",
         "type": "object"
       },
       "ManagedPersonOut": {
@@ -3422,6 +4214,56 @@
           "open_count"
         ],
         "title": "OpenTaskOut",
+        "type": "object"
+      },
+      "OpponentIn": {
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OpponentIn",
+        "type": "object"
+      },
+      "OpponentListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpponentRefOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpponentListOut",
+        "type": "object"
+      },
+      "OpponentRefOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "OpponentRefOut",
         "type": "object"
       },
       "OrderDiscountOut": {
@@ -4671,6 +5513,604 @@
           "end_date"
         ],
         "title": "SeasonOut",
+        "type": "object"
+      },
+      "SeriesIn": {
+        "properties": {
+          "deadline_minutes_before": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Minutes Before"
+          },
+          "dtstart": {
+            "description": "First occurrence. Its time of day is used for every occurrence.",
+            "format": "date-time",
+            "title": "Dtstart",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
+          },
+          "excluded_member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Excluded Member Ids",
+            "type": "array"
+          },
+          "frequency": {
+            "enum": [
+              "weekly",
+              "monthly"
+            ],
+            "title": "Frequency",
+            "type": "string"
+          },
+          "gathering_minutes_before": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gathering Minutes Before"
+          },
+          "interval": {
+            "default": 1,
+            "maximum": 52,
+            "minimum": 1,
+            "title": "Interval",
+            "type": "integer"
+          },
+          "invited_member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Invited Member Ids",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "training",
+              "game",
+              "tournament",
+              "meeting"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "title": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last moment an occurrence may start; null for open-ended (generated 90 days ahead and extended nightly).",
+            "title": "Until"
+          },
+          "weekdays": {
+            "description": "Required (at least one) for `weekly`; ignored for `monthly`, which repeats on `dtstart`'s day of the month.",
+            "items": {
+              "enum": [
+                "MO",
+                "TU",
+                "WE",
+                "TH",
+                "FR",
+                "SA",
+                "SU"
+              ],
+              "type": "string"
+            },
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "title",
+          "kind",
+          "dtstart",
+          "frequency"
+        ],
+        "title": "SeriesIn",
+        "type": "object"
+      },
+      "SeriesOut": {
+        "properties": {
+          "deadline_minutes_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Minutes Before"
+          },
+          "dtstart": {
+            "description": "First occurrence; its time of day is every occurrence's time.",
+            "format": "date-time",
+            "title": "Dtstart",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
+          },
+          "excluded_member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Excluded Member Ids",
+            "type": "array"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "enum": [
+                  "weekly",
+                  "monthly"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency"
+          },
+          "gathering_minutes_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gathering Minutes Before"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "interval": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval"
+          },
+          "invited_member_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Invited Member Ids",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "occurrences_created": {
+            "description": "Events generated by this call (create, and edit when the pattern now reaches further); 0 on a plain read.",
+            "title": "Occurrences Created",
+            "type": "integer"
+          },
+          "occurrences_updated": {
+            "description": "Upcoming occurrences that took the new template; 0 on create and read.",
+            "title": "Occurrences Updated",
+            "type": "integer"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "rrule": {
+            "title": "Rrule",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "weekdays": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "rrule",
+          "frequency",
+          "interval",
+          "weekdays",
+          "dtstart",
+          "until",
+          "duration_minutes",
+          "gathering_minutes_before",
+          "deadline_minutes_before",
+          "location_id",
+          "opponent_id",
+          "invited_member_ids",
+          "excluded_member_ids",
+          "occurrences_created",
+          "occurrences_updated"
+        ],
+        "title": "SeriesOut",
+        "type": "object"
+      },
+      "SeriesPatch": {
+        "description": "Only what is sent changes. The template reaches every upcoming occurrence that still follows the series; occurrences that no longer fit a changed pattern stay (delete them one by one).",
+        "properties": {
+          "deadline_minutes_before": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline Minutes Before"
+          },
+          "dtstart": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dtstart"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
+          },
+          "excluded_member_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded Member Ids"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "enum": [
+                  "weekly",
+                  "monthly"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency"
+          },
+          "gathering_minutes_before": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gathering Minutes Before"
+          },
+          "interval": {
+            "anyOf": [
+              {
+                "maximum": 52,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval"
+          },
+          "invited_member_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited Member Ids"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "training",
+                  "game",
+                  "tournament",
+                  "meeting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "opponent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "MO",
+                    "TU",
+                    "WE",
+                    "TH",
+                    "FR",
+                    "SA",
+                    "SU"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekdays"
+          }
+        },
+        "title": "SeriesPatch",
+        "type": "object"
+      },
+      "SeriesRefOut": {
+        "properties": {
+          "detached": {
+            "description": "This occurrence is edited on its own: series-wide changes skip it.",
+            "title": "Detached",
+            "type": "boolean"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "enum": [
+                  "weekly",
+                  "monthly"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the rule is one the app cannot edit (hand-written or imported): show `rrule` and do not offer to change the pattern.",
+            "title": "Frequency"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "interval": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval"
+          },
+          "rrule": {
+            "description": "The recurrence rule (RFC 5545).",
+            "title": "Rrule",
+            "type": "string"
+          },
+          "weekdays": {
+            "description": "`MO` … `SU`; only for `weekly`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Weekdays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "rrule",
+          "frequency",
+          "interval",
+          "weekdays",
+          "detached"
+        ],
+        "title": "SeriesRefOut",
         "type": "object"
       },
       "SignupOut": {
@@ -9796,6 +11236,519 @@
         ]
       }
     },
+    "/api/app/v1/teams/{team_id}/events": {
+      "get": {
+        "description": "Events the team is invited to, soonest first, cancelled ones included (`cancelled: true`).\nAny staff of the team.",
+        "operationId": "appapi_routers_coach_events_list_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Earliest start (default: now). Pass a past time to look back.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Earliest start (default: now). Pass a past time to look back.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Latest start, exclusive (default: no limit).",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Latest start, exclusive (default: no limit).",
+              "title": "To"
+            }
+          },
+          {
+            "description": "Only this kind.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this kind.",
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The team's events",
+        "tags": [
+          "coach"
+        ]
+      },
+      "post": {
+        "description": "The team is the audience (plus `invited_member_ids`, minus `excluded_member_ids`). Players\nstart as `no_response`. With `notify` (the default) everybody invited is told. Send an\n`Idempotency-Key`. Managers only.",
+        "operationId": "appapi_routers_coach_events_create_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachEventIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachEventOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Create an event for the team",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/events/{event_id}": {
+      "delete": {
+        "description": "A series occurrence is cancelled (the series will not regenerate it); a one-off event is\ndeleted with its attendance. Managers only.",
+        "operationId": "appapi_routers_coach_events_delete_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "For an occurrence of a series: keep it, marked `cancelled`, instead of removing it. A one-off event is always removed.",
+            "in": "query",
+            "name": "keep_record",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "For an occurrence of a series: keep it, marked `cancelled`, instead of removing it. A one-off event is always removed.",
+              "title": "Keep Record",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Tell everybody invited that it is cancelled. A removed event leaves a notification that opens the calendar.",
+            "in": "query",
+            "name": "notify",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Tell everybody invited that it is cancelled. A removed event leaves a notification that opens the calendar.",
+              "title": "Notify",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Delete or cancel an event",
+        "tags": [
+          "coach"
+        ]
+      },
+      "get": {
+        "operationId": "appapi_routers_coach_events_get_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachEventOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "One event, with what editing needs",
+        "tags": [
+          "coach"
+        ]
+      },
+      "patch": {
+        "description": "Only the fields sent change. For an occurrence of a series, `scope` says what happens to the\nrest of the series (see the field). Managers only.",
+        "operationId": "appapi_routers_coach_events_update_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachEventPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventUpdateOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change an event",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
     "/api/app/v1/teams/{team_id}/events/{event_id}/attendance": {
       "get": {
         "description": "One row per invited person. `filter`: `responded` (the default: in or maybe),\n`silent`, `declined`, or `all`. `counts` always cover everybody. Any staff of the team.",
@@ -10010,6 +11963,95 @@
         ]
       }
     },
+    "/api/app/v1/teams/{team_id}/events/{event_id}/detach": {
+      "post": {
+        "description": "Later series-wide changes skip it. Managers only.",
+        "operationId": "appapi_routers_coach_events_detach_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachEventOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Stop an occurrence following its series",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
     "/api/app/v1/teams/{team_id}/events/{event_id}/remind-silent": {
       "post": {
         "description": "Sends the in-app (and, if they have the app, push) reminder to everyone still on\n`no_response`. Accepts an `Idempotency-Key`: a retry does not remind twice. Managers only.",
@@ -10084,6 +12126,684 @@
           }
         ],
         "summary": "Nudge players who have not answered",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/locations": {
+      "get": {
+        "description": "For a picker: every location of the club by name, optionally narrowed by `q` (name or city).\n`{items: [...]}`, no pagination.",
+        "operationId": "appapi_routers_coach_events_list_locations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The club's locations",
+        "tags": [
+          "coach"
+        ]
+      },
+      "post": {
+        "description": "Managers only. Send an `Idempotency-Key`: a repeated tap otherwise makes a second one.",
+        "operationId": "appapi_routers_coach_events_create_location",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationRefOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Quick-create a location",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/opponents": {
+      "get": {
+        "description": "For a picker, by name; `q` narrows by name. `{items: [...]}`, no pagination.",
+        "operationId": "appapi_routers_coach_events_list_opponents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpponentListOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "The club's opponents",
+        "tags": [
+          "coach"
+        ]
+      },
+      "post": {
+        "description": "Managers only. Send an `Idempotency-Key`.",
+        "operationId": "appapi_routers_coach_events_create_opponent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpponentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpponentRefOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Quick-create an opponent",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/series": {
+      "post": {
+        "description": "Generates the occurrences for the next 90 days now (nobody is notified per occurrence; the\ndaily reminders pick them up) and extends nightly. Send an `Idempotency-Key`. Managers only.",
+        "operationId": "appapi_routers_coach_events_create_series",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesOut"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Create a recurring series",
+        "tags": [
+          "coach"
+        ]
+      }
+    },
+    "/api/app/v1/teams/{team_id}/series/{series_id}": {
+      "delete": {
+        "description": "Removes every occurrence, past ones with their attendance too. To keep history, stop it\ninstead: `PATCH` its `until`. Managers only.",
+        "operationId": "appapi_routers_coach_events_delete_series",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Delete a series and all its occurrences",
+        "tags": [
+          "coach"
+        ]
+      },
+      "get": {
+        "operationId": "appapi_routers_coach_events_get_series",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "A recurring series",
+        "tags": [
+          "coach"
+        ]
+      },
+      "patch": {
+        "description": "Only the fields sent change. The template (title, kind, place, opponent, durations, invited\nand excluded people) reaches every upcoming occurrence that still follows the series. A new\n`dtstart` or pattern only decides *future* dates: existing occurrences keep theirs, and ones that\nno longer fit stay until deleted. Managers only.",
+        "operationId": "appapi_routers_coach_events_update_series",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Team Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Series Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeriesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Change a recurring series",
         "tags": [
           "coach"
         ]

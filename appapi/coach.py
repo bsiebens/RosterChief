@@ -25,6 +25,7 @@ class CoachScope:
     club_scope: ClubScope
     team: Team
     is_manager: bool
+    user: object
 
     @property
     def club(self):
@@ -42,7 +43,7 @@ def coach_scope(request, team_id: uuid.UUID, *, manager: bool = False) -> CoachS
     team = teams_staffed_by(request.user, scope.club).filter(pk=team_id).first()
     if team is None:
         raise ApiError(404, "not_found")
-    coach = CoachScope(club_scope=scope, team=team, is_manager=teams_managed_by(request.user, scope.club).filter(pk=team.pk).exists())
+    coach = CoachScope(club_scope=scope, team=team, is_manager=teams_managed_by(request.user, scope.club).filter(pk=team.pk).exists(), user=request.user)
     if manager:
         coach.require_manager()
     return coach

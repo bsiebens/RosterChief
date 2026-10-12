@@ -59,3 +59,34 @@ def remind_silent(event) -> int:
 
     notify_members(members, club=event.club, title=event.title, body=body, source=event)
     return len(members)
+
+
+def notify_event_changed(event) -> int:
+    """Tell everybody invited to ``event`` that it changed (a coach asked for it). Returns how many
+    were notified."""
+    members = list(Member.objects.filter(attendances__event=event))
+    if not members:
+        return 0
+
+    def body():
+        when = date_format(timezone.localtime(event.start), "D d M, H:i")
+        return _("%(kind)s changed: it is now on %(when)s.") % {"kind": event.get_kind_display(), "when": when}
+
+    return len(notify_members(members, club=event.club, title=event.title, body=body, source=event))
+
+
+def notify_event_cancelled(event, *, keep_link: bool) -> int:
+    """Tell everybody invited to ``event`` that it is cancelled. When the event is about to be deleted
+    (``keep_link`` false) the notification points at the calendar instead of at it."""
+    members = list(Member.objects.filter(attendances__event=event))
+    if not members:
+        return 0
+
+    def body():
+        when = date_format(timezone.localtime(event.start), "D d M, H:i")
+        return _("%(kind)s on %(when)s has been cancelled.") % {"kind": event.get_kind_display(), "when": when}
+
+    title = event.title
+    if keep_link:
+        return len(notify_members(members, club=event.club, title=title, body=body, source=event))
+    return len(notify_members(members, club=event.club, title=title, body=body, target_type="calendar"))

@@ -672,6 +672,12 @@ class UnknownIdTests(ClubApiTestCase):
         "{item_id}": {"quantity": 1},
         "live-activity": {"installation_id": "unknown-install", "activity_token": "x"},
         "check-ins": {"items": []},
+        "{event_id}": {},
+        "{series_id}": {},
+        "/events": {"kind": "training", "start": "2030-01-01T10:00:00Z"},
+        "/series": {"title": "Training", "kind": "training", "dtstart": "2030-01-01T10:00:00Z", "frequency": "monthly"},
+        "/locations": {"name": "Rink", "address": "1 Ice Rd", "city": "Antwerp", "zip_code": "2000"},
+        "/opponents": {"name": "Ajax"},
     }
 
     def test_unknown_ids_are_404_everywhere(self):

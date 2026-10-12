@@ -35,6 +35,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 409 | `pdf_unavailable` | The invoice PDF can't be made right now: show `message`, try later. |
 | 409 | `conflict` and other specific codes (e.g. `shop_closed`) | State doesn't allow it right now; show `message`. |
 | 422 | `validation_error` | Show `fields` next to the inputs. |
+| 422 | `not_in_series` | `scope` other than `this`, or a detach, on an event that is not part of a series. |
 | 422 | `unknown_attendance` | A check-in named a row that isn't part of this event (`fields.items` lists them). Nothing was saved: reload the sheet. |
 | 422 | `note_required` | `absent`/`dropout` without a reason: ask for one (`fields.note`). |
 | 422 | `idempotency_key_reused` | Bug: one key was used for two different requests. |

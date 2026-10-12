@@ -4918,7 +4918,7 @@ class NotificationTranslationTests(EventsTestBase):
         bob = Notification.objects.get(member=self.bob).translations
         self.assertEqual(alice["en"]["body"], "Cup final needs a referee -- can you take it?")
         self.assertEqual(alice["nl"]["title"], "Scheidsrechter gezocht")
-        self.assertEqual(alice["nl"]["body"], "Voor Cup final is een scheidsrechter nodig -- kun jij het doen?")
+        self.assertEqual(alice["nl"]["body"], "Cup final heeft een scheidsrechter nodig -- kun jij het doen?")
         self.assertEqual(bob["en"]["body"], "2 games need a referee -- can you take one?")
         self.assertEqual(bob["nl"]["body"], "Voor 2 wedstrijden is een scheidsrechter nodig -- kun jij er een doen?")
 

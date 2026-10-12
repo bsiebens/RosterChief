@@ -101,6 +101,12 @@ msgstr "Nieuw: %(kind)s op %(when)s. Laat ons weten of je erbij kunt zijn."
 msgid "Reminder: %(kind)s on %(when)s still needs your answer."
 msgstr "Herinnering: voor %(kind)s op %(when)s wachten we nog op je antwoord."
 
+msgid "%(kind)s changed: it is now on %(when)s."
+msgstr "%(kind)s gewijzigd: het is nu op %(when)s."
+
+msgid "%(kind)s on %(when)s has been cancelled."
+msgstr "%(kind)s op %(when)s is geannuleerd."
+
 # -- fixture re-check
 msgid "%(team)s · %(source)s · %(competition)s"
 msgstr "%(team)s · %(source)s · %(competition)s"

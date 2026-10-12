@@ -593,6 +593,58 @@ retry with the same key doesn't remind twice. **Managers only.**
 event and worded "Reminder: Training on Tue 14 Oct, 18:30 still needs your answer.", in the
 device's language.
 
+### Events and series
+
+All under `/teams/{team_id}`. Reading is open to every coach; **writes are managers only**
+(`can_edit_events`, else `403 manager_required`). Events use the member app's `EventOut` plus
+what editing needs (`CoachEventOut`): `series` (`{id, rrule, frequency, interval, weekdays,
+detached}`, null for a one-off), `location_id`, `opponent_id`, `is_friendly`, `max_referees`,
+`max_officials` (null when the club doesn't use officials), `invited_member_ids` and
+`excluded_member_ids`.
+
+| Call | |
+|---|---|
+| `GET …/events?from&to&kind&cursor&limit` | The team's events, soonest first from `from` (default now; pass a past time to look back), cancelled ones included. `{items, next_cursor}`. |
+| `GET …/events/{id}` | One event. |
+| `POST …/events` | Create. `kind` is `training`, `game`, `tournament` or `meeting`. The audience is the team plus `invited_member_ids` minus `excluded_member_ids` (people from `GET …/roster` once that ships). `notify` (default true, as on the web) tells everyone invited. Send an `Idempotency-Key`. |
+| `PATCH …/events/{id}` | Send only what changes; `null` clears `end`, `gathering`, `deadline`, `location_id`, `opponent_id`. Also takes `score_for`, `score_against`, `is_live`. Answers `{event, occurrences_updated}`. |
+| `DELETE …/events/{id}?keep_record&notify` | A one-off event is deleted. An occurrence of a series is removed and not regenerated, or with `keep_record=true` kept and marked `cancelled`. `notify=true` tells everyone invited. `204`. |
+| `POST …/events/{id}/detach` | The occurrence stops following its series. |
+| `GET/POST …/series`, `GET/PATCH/DELETE …/series/{id}` | The recurrence itself: `frequency` (`weekly` or `monthly`), `interval`, `weekdays` (`MO`…`SU`), `dtstart`, `until`, `duration_minutes`, `gathering_minutes_before`, `deadline_minutes_before`, plus title, kind, location, opponent and the invited / excluded people. Creating generates the next 90 days; a nightly job extends it. Deleting removes every occurrence, past ones too: to keep history, `PATCH` `until`. |
+| `GET/POST …/locations`, `GET/POST …/opponents` | Pickers (`{items}`, `?q=`) and quick create. Send an `Idempotency-Key` on the create, or a double tap makes two. |
+
+**`scope` on `PATCH …/events/{id}`** decides what happens to the rest of a series:
+
+* `this` (default): only this event. If the change touches something the series sets (title,
+  kind, place, opponent, end / gathering / deadline, invited / excluded), the occurrence is
+  **detached** so the next series edit doesn't undo it (`series.detached` turns true).
+* `this_and_following`: this and every later occurrence. The series is split in two: the old one
+  stops just before this occurrence, a new one (with the change) takes over. Earlier occurrences
+  are untouched.
+* `all`: every upcoming occurrence that still follows the series (not detached ones, not past
+  ones); the series' template changes too.
+
+`start`, `competition`, `is_friendly`, `max_referees`, `max_officials`, the scores and `is_live`
+are never part of a series template, so they always change this event only. `all` or
+`this_and_following` on a one-off event: `422 not_in_series`. Changing `end`, `gathering` or
+`deadline` for a series sets its durations from *this* occurrence (minutes before / after its
+start). `PATCH …/series/{id}` is the way to change the pattern (weekdays, interval, `dtstart`): it
+only decides future dates, existing occurrences keep theirs, and ones that no longer fit stay until
+deleted.
+
+**Validation** is the web form's: a `422` lists `fields` named after the JSON keys
+(`location_id`, `invited_member_ids`, `competition`, …; `non_field_errors` for the rest). A game
+is called `<team> vs <opponent>` automatically (`<opponent> vs <team>` when the location is not
+the club's own ground); another kind with no `title` is called after its kind.
+
+**Push to players:** a new event (`notify`) is an inbox push, `kind: "notification"`, `target:
+{"type": "event", "id"}`: "New game: Tue 14 Oct, 18:30. Let us know if you can make it.", sent
+in the background to everyone who still has to answer. A change (`notify` on `PATCH`) says
+"Game changed: it is now on Tue 14 Oct, 18:30." with the same target. A cancel (`notify` on
+`DELETE`) says "Game on Tue 14 Oct, 18:30 has been cancelled."; its target is the event when it
+was kept, otherwise `{"type": "calendar"}` since the event is gone. A series never notifies per
+occurrence. Nothing is sent unless asked for, apart from a new single event.
+
 ## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a
