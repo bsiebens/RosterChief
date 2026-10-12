@@ -21,6 +21,10 @@ ASSUMED_EVENT_DURATION = datetime.timedelta(hours=2)
 class Opponent(ClubScopedModel):
     name = models.CharField(_("name"), max_length=255)
     logo = models.ImageField(_("logo"), upload_to="opponents", blank=True)
+    #: Other spellings a federation fixture list uses for this opponent, recorded when an
+    #: import maps a scraped name onto this opponent. A fixture carrying one of these (or
+    #: the name itself) is no longer reported as an opponent change. Never set by a form.
+    alternative_names = models.JSONField(_("alternative names"), default=list, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("opponent")
@@ -29,6 +33,20 @@ class Opponent(ClubScopedModel):
 
     def __str__(self):
         return self.name
+
+    def knows_name(self, name: str) -> bool:
+        """Whether ``name`` is this opponent's name or a recorded alternative (case-insensitive)."""
+        wanted = name.strip().casefold()
+        return wanted in {known.casefold() for known in [self.name, *self.alternative_names]}
+
+    def remember_name(self, name: str) -> bool:
+        """Records ``name`` as an alternative spelling unless already known. True if saved."""
+        name = name.strip()
+        if not name or self.knows_name(name):
+            return False
+        self.alternative_names = [*self.alternative_names, name]
+        self.save(update_fields=["alternative_names"])
+        return True
 
 
 class Location(ClubScopedModel):
