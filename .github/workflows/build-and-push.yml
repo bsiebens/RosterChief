@@ -138,7 +138,10 @@ jobs:
         run: echo "DJANGO_DATABASE_URL=postgres://rosterchief:rosterchief@localhost:5432/rosterchief" >> "$GITHUB_ENV"
 
       # Dutch strings behind the app API's notification texts: the .mo files are not committed.
-      - run: uv run python manage.py compilemessages
+      - name: Compile translations
+        run: |
+          sudo apt-get install -y --no-install-recommends gettext
+          uv run python manage.py compilemessages
         env:
           DJANGO_SECRET_KEY: ci-test-not-a-secret
 
