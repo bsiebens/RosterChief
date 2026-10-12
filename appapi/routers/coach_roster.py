@@ -4,14 +4,15 @@ Rules are the web coach screens': the candidate pool is ``teams.services.eligibl
 an edit goes through ``mobile.forms.CoachRosterEditForm`` (so the jersey rules and their messages
 are the same), and removing oneself as staff is refused. Reading is open to any staff of the team;
 changes need a management position (``can_edit_roster``). Nothing here returns contact details
-or birth dates (API.md §8).
+or birth dates (API.md §8); the candidates carry a birth *year* only.
 """
 
 import uuid
+from collections import defaultdict
 from typing import Annotated, Literal
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, CharField, Exists, IntegerField, OuterRef, Q, Value, When
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from ninja import Query, Router
@@ -27,7 +28,7 @@ from ..coach import CoachScope, coach_scope, photo_url_for
 from ..coach_events import form_error
 from ..coach_schemas import AddPlayersIn, AddStaffIn, CandidateListOut, RosterOut, RosterPatch
 from ..errors import ApiError
-from ..pagination import paginate
+from ..pagination import paginate_keyset
 from ..schemas import ErrorOut
 
 router = Router(tags=["coach"])
@@ -109,36 +110,96 @@ def _pool(coach: CoachScope, season, role: str):
     return eligible_roster_members(coach.club).exclude(pk__in=taken)
 
 
+def _age_signal(team, season):
+    """``(match, adjacent)`` Q objects on Member.date_of_birth for this team's age range, or
+    ``(None, None)`` when the team has none. Works on birth years: a team takes the birth years
+    ``season year - age_max`` to ``season year - age_min`` (the year the season starts, so a U12 for
+    2026-27 takes 2014-2015), a missing bound is open, and "adjacent" is the one birth year just
+    outside a bound that is set."""
+    if team.age_min is None and team.age_max is None:
+        return None, None
+    year = season.start_date.year
+    oldest = year - team.age_max if team.age_max is not None else None  # the earliest birth year
+    youngest = year - team.age_min if team.age_min is not None else None  # the latest birth year
+    match = Q(date_of_birth__isnull=False)
+    if oldest is not None:
+        match &= Q(date_of_birth__year__gte=oldest)
+    if youngest is not None:
+        match &= Q(date_of_birth__year__lte=youngest)
+    adjacent = Q()
+    if oldest is not None:
+        adjacent |= Q(date_of_birth__year=oldest - 1)
+    if youngest is not None:
+        adjacent |= Q(date_of_birth__year=youngest + 1)
+    return match, Q(date_of_birth__isnull=False) & adjacent
+
+
 @router.get("/teams/{team_id}/roster/candidates", response={200: CandidateListOut, **ERRORS}, summary="Who can be added")
 def candidates(
     request,
     team_id: uuid.UUID,
     role: Annotated[Literal["player", "staff"], Query(description="Who to list: people not yet on the roster (`player`, default) or not yet on the staff (`staff`).")] = "player",
-    filter: Annotated[Literal["all", "suggested", "no_team"] | None, Query(description="Players only. `suggested`: on this team last season or on a team that feeds into it. `no_team`: on no team and no staff this season.")] = None,
+    filter: Annotated[
+        Literal["all", "suggested", "no_team"] | None,
+        Query(
+            description="Players only. `suggested`: people with a `suggestion_reason`, best first (`age_match`, `previous_team`, `feeder_team`, `age_adjacent`), never anyone already on this team's roster. `no_team`: on no team's roster this season."
+        ),
+    ] = None,
     q: Annotated[str | None, Query(description="First or last name contains.")] = None,
     cursor: str | None = None,
     limit: int | None = None,
 ):
-    """Active club members (not guardians) the team can take on, by last name. Any staff of the team."""
+    """Active club members (not guardians) the team can take on. Sorted by last name, first name,
+    id; `filter=suggested` sorts the best `suggestion_reason` first, then the same. Any staff of
+    the team."""
     coach = coach_scope(request, team_id)
     season = current_season(coach.club)
     if season is None:
         return {"items": [], "next_cursor": None}
     pool = _pool(coach, season, role)
-    if role == "player" and filter == "no_team":
-        pool = pool.exclude(team_memberships__season=season).exclude(staff_assignments__season=season)
-    elif role == "player" and filter == "suggested":
-        ids = set()
+    on_a_roster = Exists(TeamMembership.objects.filter(member=OuterRef("pk"), season=season))
+    members = Member.objects.filter(pk__in=pool.values("pk"))
+    if role == "player":
         previous = Season.before(coach.club, season)
+        match, adjacent = _age_signal(coach.team, season)
+        signals = []  # (rank, reason, condition), best first
+        if match is not None:
+            signals.append((0, "age_match", match))
         if previous is not None:
-            ids.update(pool.filter(team_memberships__team=coach.team, team_memberships__season=previous).values_list("pk", flat=True))
-        ids.update(pool.filter(team_memberships__team__in=coach.team.feeder_teams.all(), team_memberships__season=season).values_list("pk", flat=True))
-        pool = pool.filter(pk__in=ids)
+            signals.append((1, "previous_team", Exists(TeamMembership.objects.filter(member=OuterRef("pk"), team=coach.team, season=previous))))
+        signals.append((2, "feeder_team", Exists(TeamMembership.objects.filter(member=OuterRef("pk"), team__in=coach.team.feeder_teams.all(), season=season))))
+        if adjacent is not None:
+            signals.append((3, "age_adjacent", adjacent))
+        members = members.annotate(
+            suggestion_rank=Case(*[When(condition, then=Value(rank)) for rank, _reason, condition in signals], default=Value(4), output_field=IntegerField()),
+            suggestion_reason=Case(*[When(condition, then=Value(reason)) for _rank, reason, condition in signals], default=Value(None), output_field=CharField()),
+        )
+        if filter == "no_team":
+            members = members.filter(~on_a_roster)
+        elif filter == "suggested":
+            members = members.filter(suggestion_rank__lt=4)
     if q and q.strip():
-        pool = pool.filter(Q(first_name__icontains=q.strip()) | Q(last_name__icontains=q.strip()))
-    page = paginate(Member.objects.filter(pk__in=pool.values("pk")), sort_field="last_name", cursor=cursor, limit=limit)
+        members = members.filter(Q(first_name__icontains=q.strip()) | Q(last_name__icontains=q.strip()))
+    ordering = ["suggestion_rank", "last_name", "first_name", "pk"] if role == "player" and filter == "suggested" else ["last_name", "first_name", "pk"]
+    page = paginate_keyset(members, fields=ordering, cursor=cursor, limit=limit)
+
+    teams_by_member = defaultdict(list)
+    memberships = TeamMembership.objects.filter(season=season, member_id__in=[member.pk for member in page.items]).select_related("team").order_by("team__name", "team_id")
+    for membership in memberships:
+        teams_by_member[membership.member_id].append({"id": membership.team_id, "name": membership.team.name})
     return {
-        "items": [{"member_id": member.pk, "first_name": member.first_name, "last_name": member.last_name, "photo_url": photo_url_for(request, member, coach.club)} for member in page.items],
+        "items": [
+            {
+                "member_id": member.pk,
+                "first_name": member.first_name,
+                "last_name": member.last_name,
+                "photo_url": photo_url_for(request, member, coach.club),
+                "suggestion_reason": getattr(member, "suggestion_reason", None),
+                "birth_year": member.date_of_birth.year if member.date_of_birth else None,
+                "current_teams": teams_by_member[member.pk],
+            }
+            for member in page.items
+        ],
         "next_cursor": page.next_cursor,
     }
 

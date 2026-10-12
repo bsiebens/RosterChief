@@ -694,10 +694,18 @@ buttons have no equivalent here.
   `position`, `is_manager`, `is_me`, `photo_url`. The two position lists are what `position_id` may
   be, for the pickers.
 * `GET …/roster/candidates?role=player|staff&filter=all|suggested|no_team&q&cursor&limit` →
-  `{items: [{member_id, first_name, last_name, photo_url}], next_cursor}` by last name: active club
-  members (not guardians) not yet on the roster (or, for `role=staff`, the staff). `suggested`: on
-  this team last season or on a team that feeds into it. `no_team`: on no team and no staff this
-  season. `filter` is for players only.
+  `{items: [{member_id, first_name, last_name, photo_url, suggestion_reason, birth_year,
+  current_teams: [{id, name}]}], next_cursor}`: active club members (not guardians) not yet on the
+  roster (or, for `role=staff`, the staff). Sorted by last name, first name, id; the cursor is stable
+  under that order. `suggested` lists only people with a `suggestion_reason`, best first, then by
+  name: `age_match` (born in a birth year the team's age range covers: season start year minus
+  `age_max` … minus `age_min`; a missing bound is open), `previous_team` (on this team last season),
+  `feeder_team` (on a team that feeds into this one this season), `age_adjacent` (the one birth year
+  just outside the range). Never anyone already on this team's roster. `no_team`: on no team's
+  roster this season (being staff does not count). `suggestion_reason` is also set under
+  `all`/`no_team` for players, null when nothing applies and for `role=staff`. `birth_year` is the
+  year only (null when unknown). `current_teams` are this season's rosters the person is on, by
+  name; empty means no team. `filter` is for players only.
 * `POST …/roster/players {member_ids}`: adds them with no position or number. Anyone already on the
   roster is left alone, so a retry is harmless. Anyone who is **not a candidate** fails the whole call
   with `422 not_a_candidate` (`fields.member_ids`) and nothing is added. Answers the roster.

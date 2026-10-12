@@ -350,11 +350,25 @@ class RosterOut(Schema):
     staff_positions: list[PositionOut] = Field(description="What a staff member's `position_id` may be.")
 
 
+class CandidateTeamOut(Schema):
+    id: uuid.UUID
+    name: str
+
+
 class CandidateOut(Schema):
     member_id: uuid.UUID
     first_name: str
     last_name: str
     photo_url: str | None
+    suggestion_reason: Literal["age_match", "previous_team", "feeder_team", "age_adjacent"] | None = Field(
+        description=(
+            "Why this person fits the team (players only, null otherwise), the best reason when several apply: "
+            "`age_match` born in a birth year the team's age range covers, `previous_team` on this team last season, "
+            "`feeder_team` on a team that feeds into this one this season, `age_adjacent` born the year just outside the range."
+        ),
+    )
+    birth_year: int | None = Field(description="Year of birth only, null when unknown.")
+    current_teams: list[CandidateTeamOut] = Field(description="Teams whose roster they are on this season, by name. Empty means no team.")
 
 
 class CandidateListOut(Schema):

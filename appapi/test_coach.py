@@ -1010,8 +1010,8 @@ from club.models import ClubMembership  # noqa: E402
 
 
 class CoachRosterTestCase(CoachEventTestCase):
-    def candidate(self, first, last, **kwargs):
-        member = Member.objects.create(first_name=first, last_name=last)
+    def candidate(self, first, last, born=None, **kwargs):
+        member = Member.objects.create(first_name=first, last_name=last, date_of_birth=datetime.date(born, 3, 1) if born else None)
         ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=kwargs.pop("status", ClubMembership.StatusChoices.ACTIVE), kind=kwargs.pop("kind", ClubMembership.Kind.MEMBER))
         return member
 
@@ -1106,6 +1106,109 @@ class RosterCandidateTests(CoachRosterTestCase):
         items = self.get(self.url("/roster/candidates"), filter="suggested").json()["items"]
 
         self.assertEqual([i["member_id"] for i in items], [str(returning.pk)])
+
+    def age_team(self, age_min=11, age_max=12):
+        Team.objects.filter(pk=self.team.pk).update(age_min=age_min, age_max=age_max)
+
+    def candidates(self, **params):
+        return self.get(self.url("/roster/candidates"), **params).json()
+
+    def test_all_and_no_team_sort_by_last_name_first_name_then_id(self):
+        for first, last in (("Zed", "Cox"), ("Amy", "Cox"), ("Bo", "Abe")):
+            self.candidate(first, last)
+
+        for params in ({}, {"filter": "all"}, {"filter": "no_team"}):
+            self.assertEqual([i["first_name"] for i in self.candidates(**params)["items"]], ["Bo", "Amy", "Zed"])
+
+    def test_same_names_are_ordered_by_id_and_paging_has_no_gaps_or_repeats(self):
+        twins = sorted((self.candidate("Same", "Name") for _ in range(5)), key=lambda m: str(m.pk))
+
+        seen, cursor = [], None
+        while True:
+            page = self.candidates(limit=2, **({"cursor": cursor} if cursor else {}))
+            seen += [i["member_id"] for i in page["items"]]
+            cursor = page["next_cursor"]
+            if not cursor:
+                break
+
+        self.assertEqual(seen, [str(m.pk) for m in twins])
+
+    def test_suggested_are_ranked_best_reason_first_then_by_name(self):
+        # season 2026-27 start year: a U11-U12 team takes birth years start-12 .. start-11
+        year = self.season.start_date.year
+        self.age_team(11, 12)
+        last = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=400), end_date=self.season.start_date - datetime.timedelta(days=35))
+        adjacent = self.candidate("Adj", "Aaa", born=year - 13)
+        returning = self.candidate("Ret", "Bbb", born=year - 20)
+        exact_z = self.candidate("Zed", "Zzz", born=year - 11)
+        exact_a = self.candidate("Amy", "Yyy", born=year - 12)
+        self.candidate("Out", "Ccc", born=year - 30)
+        self.candidate("Unknown", "Ddd")
+        TeamMembership.objects.create(team=self.team, member=returning, season=last)
+
+        items = self.candidates(filter="suggested")["items"]
+
+        self.assertEqual([i["member_id"] for i in items], [str(m.pk) for m in (exact_a, exact_z, returning, adjacent)])
+        self.assertEqual([i["suggestion_reason"] for i in items], ["age_match", "age_match", "previous_team", "age_adjacent"])
+
+    def test_suggested_cursor_is_stable_across_reasons(self):
+        year = self.season.start_date.year
+        self.age_team(11, 12)
+        expected = [self.candidate(f"M{n}", f"L{n}", born=year - 12).pk for n in range(2)] + [self.candidate("Adj", "Aaa", born=year - 10).pk]
+
+        first = self.candidates(filter="suggested", limit=2)
+        rest = self.candidates(filter="suggested", limit=2, cursor=first["next_cursor"])
+
+        self.assertEqual([i["member_id"] for i in first["items"] + rest["items"]], [str(pk) for pk in expected])
+        self.assertIsNone(rest["next_cursor"])
+
+    def test_feeder_team_players_are_suggested(self):
+        feeder = Team.objects.create(club=self.club, name="U10", short_name="U10", feeds_into=self.team)
+        kid = self.candidate("Kid", "Kay")
+        TeamMembership.objects.create(team=feeder, member=kid, season=self.season)
+
+        (item,) = self.candidates(filter="suggested")["items"]
+
+        self.assertEqual((item["suggestion_reason"], [t["name"] for t in item["current_teams"]]), ("feeder_team", ["U10"]))
+
+    def test_suggested_leaves_out_people_already_on_this_roster(self):
+        year = self.season.start_date.year
+        self.age_team(11, 12)
+        self.player("Ann", "Aal")
+        Member.objects.filter(first_name="Ann").update(date_of_birth=datetime.date(year - 12, 1, 1))
+
+        self.assertEqual(self.candidates(filter="suggested")["items"], [])
+
+    def test_no_team_means_on_no_roster_this_season_and_staff_do_not_count(self):
+        coach = self.candidate("Coach", "Cee")
+        busy = self.candidate("Busy", "Bee")
+        free = self.candidate("Free", "Fee")
+        other = Team.objects.create(club=self.club, name="U18", short_name="U18")
+        TeamMembership.objects.create(team=other, member=busy, season=self.season)
+        StaffAssignment.objects.create(team=other, member=coach, season=self.season, position=self.coach_position)
+
+        ids = [i["member_id"] for i in self.candidates(filter="no_team")["items"]]
+
+        self.assertEqual(ids, [str(coach.pk), str(free.pk)])
+
+    def test_items_carry_birth_year_and_current_teams_and_a_null_reason_outside_suggested(self):
+        busy = self.candidate("Busy", "Bee", born=2013)
+        free = self.candidate("Free", "Fee")
+        for name in ("U18", "U14"):
+            TeamMembership.objects.create(team=Team.objects.create(club=self.club, name=name, short_name=name), member=busy, season=self.season)
+
+        items = {i["first_name"]: i for i in self.candidates()["items"]}
+
+        self.assertEqual(items["Busy"]["birth_year"], 2013)
+        self.assertEqual([t["name"] for t in items["Busy"]["current_teams"]], ["U14", "U18"])
+        self.assertEqual(set(items["Busy"]["current_teams"][0]), {"id", "name"})
+        self.assertEqual((items["Free"]["birth_year"], items["Free"]["current_teams"], items["Free"]["suggestion_reason"]), (None, [], None))
+        self.assertEqual(free.pk.hex, items["Free"]["member_id"].replace("-", ""))
+
+    def test_a_cursor_from_another_shape_is_rejected(self):
+        self.candidate("Cy", "Cox")
+
+        self.assertError(self.send("get", self.url("/roster/candidates") + "?cursor=abc"), 400, "invalid_cursor")
 
     def test_staff_candidates_are_those_not_on_the_staff(self):
         player = self.candidate("Pla", "Yer")

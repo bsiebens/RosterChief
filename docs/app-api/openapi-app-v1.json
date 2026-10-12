@@ -670,6 +670,26 @@
       },
       "CandidateOut": {
         "properties": {
+          "birth_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Year of birth only, null when unknown.",
+            "title": "Birth Year"
+          },
+          "current_teams": {
+            "description": "Teams whose roster they are on this season, by name. Empty means no team.",
+            "items": {
+              "$ref": "#/components/schemas/CandidateTeamOut"
+            },
+            "title": "Current Teams",
+            "type": "array"
+          },
           "first_name": {
             "title": "First Name",
             "type": "string"
@@ -693,15 +713,55 @@
               }
             ],
             "title": "Photo Url"
+          },
+          "suggestion_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "age_match",
+                  "previous_team",
+                  "feeder_team",
+                  "age_adjacent"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why this person fits the team (players only, null otherwise), the best reason when several apply: `age_match` born in a birth year the team's age range covers, `previous_team` on this team last season, `feeder_team` on a team that feeds into this one this season, `age_adjacent` born the year just outside the range.",
+            "title": "Suggestion Reason"
           }
         },
         "required": [
           "member_id",
           "first_name",
           "last_name",
-          "photo_url"
+          "photo_url",
+          "suggestion_reason",
+          "birth_year",
+          "current_teams"
         ],
         "title": "CandidateOut",
+        "type": "object"
+      },
+      "CandidateTeamOut": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CandidateTeamOut",
         "type": "object"
       },
       "CardMemberOut": {
@@ -14365,7 +14425,7 @@
     },
     "/api/app/v1/teams/{team_id}/roster/candidates": {
       "get": {
-        "description": "Active club members (not guardians) the team can take on, by last name. Any staff of the team.",
+        "description": "Active club members (not guardians) the team can take on. Sorted by last name, first name,\nid; `filter=suggested` sorts the best `suggestion_reason` first, then the same. Any staff of\nthe team.",
         "operationId": "appapi_routers_coach_roster_candidates",
         "parameters": [
           {
@@ -14395,7 +14455,7 @@
             }
           },
           {
-            "description": "Players only. `suggested`: on this team last season or on a team that feeds into it. `no_team`: on no team and no staff this season.",
+            "description": "Players only. `suggested`: people with a `suggestion_reason`, best first (`age_match`, `previous_team`, `feeder_team`, `age_adjacent`), never anyone already on this team's roster. `no_team`: on no team's roster this season.",
             "in": "query",
             "name": "filter",
             "required": false,
@@ -14413,7 +14473,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Players only. `suggested`: on this team last season or on a team that feeds into it. `no_team`: on no team and no staff this season.",
+              "description": "Players only. `suggested`: people with a `suggestion_reason`, best first (`age_match`, `previous_team`, `feeder_team`, `age_adjacent`), never anyone already on this team's roster. `no_team`: on no team's roster this season.",
               "title": "Filter"
             }
           },
