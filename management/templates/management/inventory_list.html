@@ -19,6 +19,9 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    {% if rows %}
+        <button class="btn btn-primary gap-2" type="submit" form="inventory_receive_form">{% lucide "package-plus" size=16 %} {% trans "Take in entered quantities" %}</button>
+    {% endif %}
     <a class="btn btn-outline gap-2" href="{% url 'management:inventory_history' %}">{% lucide "history" size=16 %} {% trans "History" %}</a>
     <a class="btn btn-outline gap-2" href="{% url 'management:product_list' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to products" %}</a>
 {% endblock actions %}
@@ -26,7 +29,7 @@
 {% block panel %}
     <p class="mb-4 text-sm text-muted">{% trans "Inventory-managed products are bought in bulk and kept in stock. Orders take items from stock and skip production; an item with no stock left can't be ordered until new stock is taken in. Enter what just arrived in the “Take in” column -- a blank field is left alone." %}</p>
 
-    <form method="post" action="{% url 'management:inventory_receive' %}">
+    <form method="post" id="inventory_receive_form" action="{% url 'management:inventory_receive' %}">
         {% csrf_token %}
         <div class="card overflow-hidden">
             <table class="table">
@@ -70,9 +73,8 @@
             </table>
         </div>
         {% if rows %}
-            <div class="mt-4 flex flex-wrap items-center gap-3">
+            <div class="mt-4">
                 <input type="text" name="note" maxlength="255" class="input w-64" placeholder="{% trans 'Note, e.g. supplier or delivery (optional)' %}" aria-label="{% trans 'Note' %}">
-                <button class="btn btn-primary gap-2" type="submit">{% lucide "package-plus" size=16 %} {% trans "Take in entered quantities" %}</button>
             </div>
         {% endif %}
     </form>
