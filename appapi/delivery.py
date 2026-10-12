@@ -7,7 +7,7 @@ recipient_emails): the member's own login plus every parent/guardian's in that c
 install serves every club and child of its account, so an account gets one push per
 distinct notification even when it concerns several of its children (a club-wide news
 item makes a row per child). Pushes are pointers (API.md §9): the stored, already
-localised title/body and ``{notification_id, club_slug, target}``; the app fetches the
+localised title/body (the device's registered locale) and ``{kind, notification_id, club_slug, target}``; the app fetches the
 rest over the API.
 """
 
@@ -38,7 +38,7 @@ def push_configured() -> bool:
 def payload_data(notification: Notification) -> dict:
     source = notification_target(notification)
     target = {key: str(value) for key, value in source.items() if value is not None} if source else None
-    return {"notification_id": str(notification.pk), "club_slug": notification.club.slug, "target": target}
+    return {"kind": "notification", "notification_id": str(notification.pk), "club_slug": notification.club.slug, "target": target}
 
 
 def total_unread(user) -> int:
@@ -62,6 +62,7 @@ def deliver(notification_ids) -> int:
             per_user.setdefault(user_id, {}).setdefault(dedupe_key, notification)
     if not per_user:
         return 0
+    from events.services.game_push import language_for_locale  # deferred: events imports appapi lazily too
 
     active_users = set(get_user_model().objects.filter(pk__in=per_user, is_active=True).values_list("pk", flat=True))
     devices = PushDevice.objects.filter(user_id__in=active_users, enabled=True).exclude(endpoint_arn="").select_related("user")
@@ -73,7 +74,9 @@ def deliver(notification_ids) -> int:
             badges[device.user_id] = total_unread(device.user)
         for notification in per_user[device.user_id].values():
             try:
-                alive = gateway.publish(device, title=str(notification.title), body=str(notification.body), data=payload_data(notification), badge=badges[device.user_id])
+                # In the language the app registered with (PushDevice.locale), like game pushes.
+                text = notification.text_for(language_for_locale(device.locale))
+                alive = gateway.publish(device, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id])
             except Exception:
                 # Never fatal for the rest of the fan-out (throttling, a network blip).
                 logger.exception("app_push.publish_failed device=%s", device.pk)

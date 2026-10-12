@@ -25,7 +25,7 @@ msgid "Referee needed"
 msgstr "Scheidsrechter gezocht"
 
 msgid "%(event)s needs a referee -- can you take it?"
-msgstr "Voor %(event)s is een scheidsrechter nodig -- kun jij het doen?"
+msgstr "%(event)s heeft een scheidsrechter nodig -- kun jij het doen?"
 
 msgid "Referee dropped out"
 msgstr "Scheidsrechter afgehaakt"
@@ -49,7 +49,7 @@ msgid "Official needed"
 msgstr "Official gezocht"
 
 msgid "%(event)s needs a match official -- can you take it?"
-msgstr "Voor %(event)s is een official nodig -- kun jij het doen?"
+msgstr "%(event)s heeft een official nodig -- kun jij het doen?"
 
 msgid "Official dropped out"
 msgstr "Official afgehaakt"
@@ -175,10 +175,10 @@ msgid "%(reason)s (%(kind)s)"
 msgstr "%(reason)s (%(kind)s)"
 
 msgid "Penalty shot for us."
-msgstr "Strafworp voor ons."
+msgstr "Penalty schot voor ons."
 
 msgid "Penalty shot for the opponent."
-msgstr "Strafworp voor de tegenstander."
+msgstr "Penalty schot voor de tegenstander."
 
 msgid "Period %(period)s ended, %(score)s."
 msgstr "Periode %(period)s afgelopen, %(score)s."

@@ -12,6 +12,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
+from django.utils.translation import get_language
 from PIL import Image
 from waffle import get_waffle_flag_model
 
@@ -587,6 +588,19 @@ class PushDeliveryTests(ClubApiTestCase):
         self.assertEqual((installation, title), ("parent-phone", "New article"))
         self.assertEqual(data["club_slug"], "ajax-united")
         self.assertEqual(data["target"], {"type": "news", "id": str(item.pk), "slug": "news"})
+
+    def test_the_push_is_in_the_language_the_device_registered_with(self):
+        self.device.locale = "nl"
+        self.device.save()
+        with patch("appapi.delivery.run_in_background"):
+            (notification,) = notify_members([self.member], club=self.club, title=lambda: "Hello" if get_language() == "en" else "Hallo", body="Body", send_email=False)
+
+        deliver([notification.pk])
+
+        _installation, title, data = RecordingPublisher.sent[0]
+        self.assertEqual(title, "Hallo")
+        self.assertEqual(data["kind"], "notification")
+        self.assertEqual(data["notification_id"], str(notification.pk))
 
     def test_guardians_get_their_childs_notification(self):
         notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")

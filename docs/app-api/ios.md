@@ -231,7 +231,7 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
 **Payload** (arrives in `userInfo`): an `aps.alert` with the title and body, plus:
 
 ```json
-{"notification_id": "…", "club_slug": "hc-example",
+{"kind": "notification", "notification_id": "…", "club_slug": "hc-example",
  "target": {"type": "news", "id": "…", "slug": "welcome"}}
 ```
 
@@ -243,6 +243,11 @@ forms arrive in a later release). The inbox's `source` uses the same shape. The 
 contains personal data. One account gets **one** push per notification even when it concerns
 several of its children. The payload also carries `aps.badge`: the account's total unread count across
 all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
+
+Title and body are rendered in the language of the `locale` the device last registered with
+(`nl` or `en`; anything else gets English), so call `POST /devices` again when the in-app language
+changes. Live-game pushes (`kind: "game_moment"`) carry `club_slug` and `target` but no
+`notification_id`: they are not stored in the inbox.
 
 **Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
 changes it: `always` (default) or `unless_app` (no notification email while this account has the app
