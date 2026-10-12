@@ -252,11 +252,26 @@ Title and body are rendered in the language of the `locale` the device last regi
 changes. Live-game pushes (`kind: "game_moment"`) carry `club_slug` and `target` but no
 `notification_id`: they are not stored in the inbox.
 
-**Live Activities (tokens only, no updates are sent yet):** send the ActivityKit push-to-start token
-(iOS 17.2+) as `push_to_start_token` on `POST /devices` (omit it to keep the stored one, `""` clears it).
-When an activity for a game starts, `POST /events/{id}/live-activity` with `{installation_id,
-activity_token}` (repeat when the token changes), and `DELETE /events/{id}/live-activity/{installation_id}`
-when it ends. The server stores them; sending activity updates comes later.
+**Live Activities** (iOS 17.2+, for games the account follows, directly or through a team).
+Define an `ActivityAttributes` type named `GameAttributes` (or tell the server operator the name) with fixed
+data `{event_id, club_slug}` and a `ContentState` carrying `home`, `away`, `home_score`, `away_score`
+(numbers or null), `period`, `clock` (strings, empty when unknown) and `status` (`live` or `final`).
+Keys are snake_case: map them with `CodingKeys`.
+
+1. Send the push-to-start token as `push_to_start_token` on `POST /devices` (omit it to keep the stored one,
+   `""` clears it).
+2. When a followed game goes live, the server sends a `start` push to that token (with an alert in the
+   device's language). When the activity exists, register its own token: `POST /events/{id}/live-activity`
+   with `{installation_id, activity_token}` (repeat whenever that token changes). Until you do, the server
+   treats the activity as started and sends no second start.
+3. While the game is on, every change of the game feed (about once a minute) sends an `update` to the registered
+   activities. The clock is the federation's as of the last poll, so interpolate it yourself; an activity not
+   updated for 15 minutes is marked stale.
+4. When the game ends the server sends `end` (the activity stays on the lock screen for an hour) and forgets
+   the token. If your app ends the activity itself, call `DELETE /events/{id}/live-activity/{installation_id}`.
+
+A dead token is dropped server-side: a rejected push-to-start token is cleared (send it again with the next
+`POST /devices`), a rejected activity token is forgotten.
 
 **Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
 changes it: `always` (default) or `unless_app` (no notification email while this account has the app

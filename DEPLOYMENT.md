@@ -1081,6 +1081,10 @@ APP_PUSH_APNS_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY----
 Redeploy (`deploy/deploy-prod.sh`). Phones that registered earlier start receiving pushes as
 soon as the app registers again, which it does on every launch.
 
+Live Activities need nothing extra on the server (they use the same key; the `.push-type.liveactivity`
+topic is derived from the bundle ID). If the app's `ActivityAttributes` type is not called `GameAttributes`, set
+`APP_PUSH_APNS_ACTIVITY_ATTRIBUTES` to its name.
+
 A debug build run from Xcode sends `environment: "sandbox"` and is delivered through Apple's
 sandbox host; TestFlight and App Store builds use production. The server picks the host from
 that value, so nothing else needs configuring.

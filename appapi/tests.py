@@ -503,6 +503,28 @@ class ApnsGatewayTests(TestCase):
         with self.assertRaises(ApnsError):
             self.gateway().publish(self.device(), title="a", body="b", data={})
 
+    def test_live_activity_pushes_use_the_activity_topic_and_token(self):
+        gateway = self.gateway()
+        state = {"home": "Sharks", "away": "Rivals", "home_score": 1, "away_score": 0, "period": "2", "clock": "07:41", "status": "live"}
+
+        self.assertTrue(gateway.live_activity(self.device(), token="start-token", event="start", content_state=state, attributes={"event_id": "e1", "club_slug": "hc"}, alert={"title": "T", "body": "B"}, stale_at=2000))
+        self.assertTrue(gateway.live_activity(self.device(), token="activity-token", event="end", content_state=state, dismiss_at=3000))
+
+        start, end = self.requests
+        self.assertEqual(str(start.url), "https://api.push.apple.com/3/device/start-token")
+        self.assertEqual(start.headers["apns-push-type"], "liveactivity")
+        self.assertEqual(start.headers["apns-topic"], "app.rosterchief.RosterChief.push-type.liveactivity")
+        aps = json.loads(start.content)["aps"]
+        self.assertEqual((aps["event"], aps["attributes-type"], aps["attributes"], aps["alert"], aps["stale-date"], aps["content-state"]), ("start", "GameAttributes", {"event_id": "e1", "club_slug": "hc"}, {"title": "T", "body": "B"}, 2000, state))
+        end_aps = json.loads(end.content)["aps"]
+        self.assertEqual((end_aps["event"], end_aps["dismissal-date"]), ("end", 3000))
+        self.assertNotIn("attributes", end_aps)
+
+    def test_a_dead_activity_token_reports_false(self):
+        self.responses = [(410, {"reason": "Unregistered"})]
+
+        self.assertFalse(self.gateway().live_activity(self.device(), token="x", event="update", content_state={}))
+
     def test_android_is_not_served(self):
         gateway = self.gateway()
 

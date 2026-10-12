@@ -45,6 +45,7 @@ from .services import (
     generate_occurrences,
     ijnl_import,
     import_sources,
+    live_activity,
     occurrence_datetimes,
     player_attendance_rankings,
     players_who_missed_recent_practices,
@@ -4936,6 +4937,104 @@ class NotificationTranslationTests(EventsTestBase):
         self.assertEqual(translations["nl"]["title"], "Zomerkamp")
         self.assertTrue(translations["nl"]["body"].startswith("Nieuw: "))
         self.assertTrue(translations["en"]["body"].startswith("New "))
+
+
+class LiveActivityTests(GameTimelineTestBase):
+    """events.services.live_activity -- start, update and end pushes for Live Activities."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.fan = get_user_model().objects.create_user(email="fan@example.com", password="pw-secret-123")
+
+    def setUp(self):
+        from appapi.models import PushDevice
+
+        super().setUp()
+        self.game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        self.device = PushDevice.objects.create(user=self.fan, installation_id="phone-1", platform="ios", push_token="t", push_to_start_token="start-token", locale="nl")
+        self.set_timeline(status="live")
+        self.gateway = mock.Mock()
+        self.gateway.live_activity.return_value = True
+
+    def set_timeline(self, **data):
+        document = {"score": {"home": 1, "away": 0}, "period": "2", "clock": "07:41", **data}
+        GameTimeline.objects.update_or_create(event=self.game, defaults={"source": "X", "data": document})
+
+    def deliver(self, phase="live"):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.push.get_gateway", return_value=self.gateway):
+            return live_activity.deliver(self.game.pk, phase)
+
+    def test_a_live_game_starts_an_activity_on_followers_devices_in_their_language(self):
+        from appapi.models import LiveActivity
+
+        self.assertEqual(self.deliver(), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["token"], call.kwargs["event"]), ("start-token", "start"))
+        self.assertEqual(call.kwargs["content_state"], {"home": "1st", "away": "Olympia Heist", "home_score": 1, "away_score": 0, "period": "2", "clock": "07:41", "status": "live"})
+        self.assertEqual(call.kwargs["attributes"], {"event_id": str(self.game.pk), "club_slug": self.club.slug})
+        self.assertEqual(call.kwargs["alert"], {"title": "1st - Olympia Heist", "body": "De wedstrijd is begonnen."})
+        self.assertEqual(LiveActivity.objects.get().token, "")
+
+    def test_the_next_change_does_not_start_a_second_activity_and_updates_the_registered_one(self):
+        from appapi.models import LiveActivity
+
+        self.deliver()
+        self.gateway.live_activity.reset_mock()
+        self.assertEqual(self.deliver(), 0)  # started, token not registered yet: nothing to update
+        LiveActivity.objects.update(token="activity-token")
+        self.set_timeline(status="live", score={"home": 2, "away": 0})
+
+        self.assertEqual(self.deliver(), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["token"], call.kwargs["event"], call.kwargs["content_state"]["home_score"]), ("activity-token", "update", 2))
+
+    def test_a_final_game_ends_and_forgets_the_activities(self):
+        from appapi.models import LiveActivity
+
+        LiveActivity.objects.create(club=self.club, device=self.device, event=self.game, token="activity-token")
+        self.set_timeline(status="final")
+
+        self.assertEqual(self.deliver("end"), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["event"], call.kwargs["content_state"]["status"]), ("end", "final"))
+        self.assertIn("dismiss_at", call.kwargs)
+        self.assertFalse(LiveActivity.objects.exists())
+
+    def test_non_followers_and_devices_without_a_start_token_get_nothing(self):
+        self.device.push_to_start_token = ""
+        self.device.save()
+
+        self.assertEqual(self.deliver(), 0)
+        self.gateway.live_activity.assert_not_called()
+
+        self.device.push_to_start_token = "start-token"
+        self.device.save()
+        game_push.set_followed_teams(self.fan, self.club, [])
+        self.assertEqual(self.deliver(), 0)
+
+    def test_a_dead_push_to_start_token_is_cleared(self):
+        self.gateway.live_activity.return_value = False
+
+        self.assertEqual(self.deliver(), 0)
+
+        self.device.refresh_from_db()
+        self.assertEqual(self.device.push_to_start_token, "")
+
+    def test_the_timeline_signal_schedules_a_delivery_only_for_live_and_ending_games(self):
+        def fire(previous, status):
+            with mock.patch("events.services.live_activity.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+                live_activity.on_timeline_changed(None, event=self.game, previous=previous, current={"status": status}, first_fetch=False)
+            return [call.args[1:] for call in background.call_args_list]
+
+        self.assertEqual(fire({"status": "scheduled"}, "live"), [(self.game.pk, "live")])
+        self.assertEqual(fire({"status": "live"}, "final"), [(self.game.pk, "end")])
+        self.assertEqual(fire({"status": "final"}, "final"), [])
+        self.assertEqual(fire(None, "scheduled"), [])
 
 
 class GamePushTests(GameTimelineTestBase):

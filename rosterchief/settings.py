@@ -274,6 +274,8 @@ APP_PUSH_APNS_TEAM_ID = config("APP_PUSH_APNS_TEAM_ID", default="")
 APP_PUSH_APNS_BUNDLE_ID = config("APP_PUSH_APNS_BUNDLE_ID", default="app.rosterchief.RosterChief")
 APP_PUSH_APNS_KEY = config("APP_PUSH_APNS_KEY", default="").replace("\\n", "\n")
 APP_PUSH_APNS_KEY_FILE = config("APP_PUSH_APNS_KEY_FILE", default="")
+# The Swift ActivityAttributes type a started Live Activity is created as (the app defines it).
+APP_PUSH_APNS_ACTIVITY_ATTRIBUTES = config("APP_PUSH_APNS_ACTIVITY_ATTRIBUTES", default="GameAttributes")
 APP_PUSH_GATEWAY = ""
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)

@@ -14,6 +14,7 @@ Settings (all optional; empty = pushes can't be delivered yet)::
     APP_PUSH_APNS_BUNDLE_ID     # the app's bundle id = the apns-topic
     APP_PUSH_APNS_KEY           # the .p8 file's text ("\\n" for newlines in an env file)
     APP_PUSH_APNS_KEY_FILE      # or the path of the .p8 file
+    APP_PUSH_APNS_ACTIVITY_ATTRIBUTES   # the app's ActivityAttributes type name (Live Activity start)
     APP_PUSH_GATEWAY            # dotted path to override the gateway class
 
 A device's ``environment`` picks the APNs host: ``sandbox`` -> api.sandbox.push.apple.com
@@ -59,10 +60,18 @@ class PushGateway:
         the caller disables the device."""
         raise NotImplementedError
 
+    def live_activity(self, device: PushDevice, *, token: str, event: str, content_state: dict, attributes: dict | None = None, alert: dict | None = None, stale_at: int | None = None, dismiss_at: int | None = None, priority: int = 10) -> bool:
+        """Start (``event="start"``, sent to the device's push-to-start token), update or end (sent
+        to the activity's own token) one Live Activity. False means that token is dead."""
+        raise NotImplementedError
+
 
 class NullGateway(PushGateway):
     def supports(self, device):
         return False
+
+    def live_activity(self, device, **kwargs):
+        return True
 
     def publish(self, device, *, title, body, data, badge=None, thread_id=None):
         return True
@@ -76,6 +85,21 @@ def build_payload(*, title: str, body: str, data: dict, badge: int | None = None
     if badge is not None:
         aps["badge"] = badge
     return {"aps": aps, **data}
+
+
+def build_live_activity_payload(*, event: str, content_state: dict, attributes: dict | None = None, alert: dict | None = None, stale_at: int | None = None, dismiss_at: int | None = None, now: int | None = None) -> dict:
+    """The APNs JSON body of a Live Activity push: ``event`` is start, update or end."""
+    aps = {"timestamp": now or int(time.time()), "event": event, "content-state": content_state}
+    if event == "start":
+        aps["attributes-type"] = settings.APP_PUSH_APNS_ACTIVITY_ATTRIBUTES
+        aps["attributes"] = attributes or {}
+    if alert:
+        aps["alert"] = alert
+    if stale_at:
+        aps["stale-date"] = stale_at
+    if dismiss_at:
+        aps["dismissal-date"] = dismiss_at
+    return {"aps": aps}
 
 
 def apns_configured() -> bool:
@@ -116,22 +140,30 @@ class ApnsGateway(PushGateway):
                 self._token_issued = now
             return self._token
 
-    def _post(self, device, payload, *, refresh=False):
+    def _post(self, device, payload, *, token=None, push_type="alert", topic_suffix="", priority=10, refresh=False):
         headers = {
             "authorization": f"bearer {self._provider_token(refresh=refresh)}",
-            "apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID,
-            "apns-push-type": "alert",
-            "apns-priority": "10",
+            "apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID + topic_suffix,
+            "apns-push-type": push_type,
+            "apns-priority": str(priority),
         }
-        return self.client.post(f"{APNS_HOSTS[device.environment]}/3/device/{device.push_token}", content=json.dumps(payload), headers=headers)
+        return self.client.post(f"{APNS_HOSTS[device.environment]}/3/device/{token or device.push_token}", content=json.dumps(payload), headers=headers)
 
     def publish(self, device, *, title, body, data, badge=None, thread_id=None):
         if device.platform != PushDevice.Platform.IOS:
             return True
-        payload = build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id)
-        response = self._post(device, payload)
+        return self._send(device, build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id))
+
+    def live_activity(self, device, *, token, event, content_state, attributes=None, alert=None, stale_at=None, dismiss_at=None, priority=10):
+        if device.platform != PushDevice.Platform.IOS:
+            return True
+        payload = build_live_activity_payload(event=event, content_state=content_state, attributes=attributes, alert=alert, stale_at=stale_at, dismiss_at=dismiss_at)
+        return self._send(device, payload, token=token, push_type="liveactivity", topic_suffix=".push-type.liveactivity", priority=priority)
+
+    def _send(self, device, payload, **options):
+        response = self._post(device, payload, **options)
         if response.status_code == 403 and _reason(response) == "ExpiredProviderToken":
-            response = self._post(device, payload, refresh=True)
+            response = self._post(device, payload, refresh=True, **options)
         if response.status_code == 200:
             return True
         reason = _reason(response)
