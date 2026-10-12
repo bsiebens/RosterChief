@@ -139,6 +139,8 @@ jobs:
 
       # Dutch strings behind the app API's notification texts: the .mo files are not committed.
       - run: uv run python manage.py compilemessages
+        env:
+          DJANGO_SECRET_KEY: ci-test-not-a-secret
 
       - run: uv run python manage.py test --shard=${{ matrix.shard }}/${{ needs.plan.outputs.count }} ${{ needs.plan.outputs.fast }} ${{ needs.plan.outputs.shuffle }}
         env:
