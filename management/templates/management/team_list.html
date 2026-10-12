@@ -27,7 +27,7 @@
                 {% for team in teams %}
                     <tr{% if can_reorder %} draggable="true" data-id="{{ team.pk }}" class="cursor-grab"{% endif %}>
                         <td class="font-mono text-xs tabular-nums text-muted">{% if can_reorder %}{% lucide "grip-vertical" size=14 %} {% endif %}{{ team.ordering|default:"—" }}</td>
-                        <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a>{% if team.tournament_only %} <span class="badge badge-sm badge-warning ml-1">{% lucide "trophy" size=10 %} {% trans "Tournament" %}</span>{% endif %}</td>
                         <td class="font-mono text-xs text-muted">{{ team.short_name }}</td>
                         <td class="font-mono text-xs text-muted">{{ team.age_group_label|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">{{ team.player_count }}</td>

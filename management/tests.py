@@ -556,6 +556,13 @@ class TeamManagementTests(ManagementTestBase):
 
         self.assertNotContains(response, "Rival Team")
 
+    def test_tournament_only_teams_are_marked_on_the_list(self):
+        Team.objects.create(club=self.club, name="Cup Team", short_name="Cup", tournament_only=True)
+
+        response = self.club_get("team_list")
+
+        self.assertContains(response, "Tournament</span>", count=1)
+
     def test_team_list_is_sorted_by_order_then_name(self):
         Team.objects.create(club=self.club, name="Aaa", short_name="A")
         Team.objects.create(club=self.club, name="Zzz", short_name="Z", ordering=1)
