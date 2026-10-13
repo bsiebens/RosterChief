@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.db import transaction
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from club.models import Club
@@ -195,10 +195,13 @@ class ScheduleNotificationsTests(TestCase):
         dispatch.assert_called_once_with([str(notification.pk)], email=False)
 
 
-class RollbackTests(TransactionTestCase):
+class RollbackTests(TestCase):
+    """The entry lives in the caller's transaction: rolled back with it, and only kicked off after commit
+    (``captureOnCommitCallbacks`` stands in for the real commit; TransactionTestCase cannot flush on PostgreSQL here)."""
+
     @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
     def test_the_entry_rolls_back_with_its_transaction(self):
-        with patch("notifications.outbox.run_in_background") as background:
+        with patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
             try:
                 with transaction.atomic():
                     entry = outbox.enqueue(Kind.NOTIFICATIONS, {"n": 1})
@@ -211,7 +214,7 @@ class RollbackTests(TransactionTestCase):
 
     @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
     def test_committing_runs_it_in_the_background(self):
-        with patch("notifications.outbox.run_in_background") as background:
+        with patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
             with transaction.atomic():
                 entry = outbox.enqueue(Kind.NOTIFICATIONS, {"n": 1})
                 outbox.kick([entry.pk])
