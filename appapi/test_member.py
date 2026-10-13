@@ -4,14 +4,15 @@ child (Kim) in Ajax United, current season, signed in through allauth headless."
 
 import datetime
 import io
-import json
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
+from django.utils.translation import get_language
 from PIL import Image
 from waffle import get_waffle_flag_model
 
@@ -27,14 +28,15 @@ from members.models import Family, FamilyMembership, Member
 from mobile.models import PushSubscription
 from mobile.services.push import send_push_for_notifications, send_push_to_user
 from news.models import News
-from notifications.models import Notification
+from notifications import outbox
+from notifications.models import Notification, OutboxEntry
 from notifications.services import notify_members
 from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
-from .delivery import deliver, on_notifications_created, payload_data
-from .models import PushDevice
-from .push import NullGateway
+from .delivery import NativePushChannel, deliver, payload_data
+from .models import LiveActivity, PushDevice
+from .push import PushGateway
 from .tests import CLUB_HOST, AppApiTestCase, make_club
 
 
@@ -356,6 +358,36 @@ class EventDetailTests(ClubApiTestCase):
         self.assertEqual([(team["name"], team["following"]) for team in body["teams"]], [("Seniors", True), ("U12", False)])
         self.assertEqual([team["following"] for team in self.send("put", "/game-follows", {"team_ids": []}).json()["teams"]], [False, False])
 
+    def test_live_activity_tokens_are_registered_per_install_and_game(self):
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
+        body = {"installation_id": "parent-phone", "activity_token": "aa11"}
+
+        first = self.send("post", f"/events/{game.pk}/live-activity", body)
+        self.send("post", f"/events/{game.pk}/live-activity", {**body, "activity_token": "bb22"})
+
+        self.assertEqual(first.json(), {"event_id": str(game.pk), "installation_id": "parent-phone"})
+        self.assertEqual(list(LiveActivity.objects.values_list("token", "device", "club")), [("bb22", device.pk, self.club.pk)])
+        self.assertEqual(self.send("delete", f"/events/{game.pk}/live-activity/parent-phone").status_code, 204)
+        self.assertFalse(LiveActivity.objects.exists())
+
+    def test_live_activity_rules(self):
+        game = self.event(title="Game", kind=Event.EventKind.GAME)
+        training = self.event(title="Training")
+        PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
+        other = get_user_model().objects.create_user(email="other@example.com", password="x")
+        PushDevice.objects.create(user=other, installation_id="someone-elses", platform="ios", push_token="t")
+        body = {"installation_id": "parent-phone", "activity_token": "aa11"}
+
+        self.assertError(self.send("post", f"/events/{game.pk}/live-activity", body), 404, "feature_disabled")
+        get_waffle_flag_model().objects.get_or_create(name="game_timeline")[0].clubs.add(self.club)
+        cache.clear()
+        self.assertError(self.send("post", f"/events/{training.pk}/live-activity", body), 422, "not_a_game")
+        self.assertError(self.send("post", f"/events/{game.pk}/live-activity", {**body, "installation_id": "someone-elses"}), 404, "not_found")
+        self.assertEqual(self.send("delete", f"/events/{game.pk}/live-activity/nothing").status_code, 204)
+
     def test_another_clubs_event_is_404(self):
         rival = make_club(name="Rival FC", slug="rival-fc")
         event = Event.objects.create(club=rival, title="Theirs", start=self.soon)
@@ -539,30 +571,68 @@ class ProfileTests(ClubApiTestCase):
         self.assertError(response, 422, "validation_error")
         self.assertIn("phone", response.json()["error"]["fields"])
 
-    def test_photo_follows_the_website_rule(self):
-        self.child.photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
+    def test_profile_picture_is_served_and_outsiders_get_404(self):
+        self.child.profile_photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
         self.child.save()
         stranger = self.stranger()
-        stranger.photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
+        stranger.profile_photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
         stranger.save()
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider", profile_photo=SimpleUploadedFile("o.png", png_bytes(), content_type="image/png"))
 
-        photo_url = self.get(f"/members/{self.child.pk}").json()["photo_url"]
-        response = self.api("get", photo_url.split("/api/app/v1", 1)[1], token=self.token, host=CLUB_HOST)
+        body = self.get(f"/members/{self.child.pk}").json()
+        response = self.api("get", body["photo_url"].split("/api/app/v1", 1)[1], token=self.token, host=CLUB_HOST)
 
+        self.assertEqual(body["photo_url"], body["profile_photo_url"].replace("&kind=profile", ""))
+        self.assertIsNone(body["player_photo_url"])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertEqual(response["Cache-Control"], "private, max-age=3600")
-        self.assertError(self.get(f"/members/{stranger.pk}/photo"), 404, "not_found")
+        self.assertEqual(self.get(f"/members/{stranger.pk}/photo").status_code, 200)  # club-wide
+        self.assertError(self.get(f"/members/{outsider.pk}/photo"), 404, "not_found")
+
+    def test_teammate_sees_the_player_picture_as_fallback_but_not_directly(self):
+        stranger = self.stranger()
+        stranger.player_photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
+        stranger.save()
+
+        self.assertEqual(self.get(f"/members/{stranger.pk}/photo").status_code, 200)
+        self.assertError(self.get(f"/members/{stranger.pk}/photo?kind=player"), 404, "not_found")
+
+    def test_effective_picture_falls_back_to_the_player_picture(self):
+        self.child.player_photo = SimpleUploadedFile("official.png", png_bytes(), content_type="image/png")
+        self.child.save()
+
+        body = self.get(f"/members/{self.child.pk}").json()
+
+        self.assertIsNotNone(body["photo_url"])
+        self.assertIsNone(body["profile_photo_url"])
+        self.assertIn("kind=player", body["player_photo_url"])
+        self.assertEqual(self.get(f"/members/{self.child.pk}/photo").status_code, 200)
+        self.assertError(self.get(f"/members/{self.child.pk}/photo?kind=profile"), 404, "not_found")
+        self.assertEqual(self.get(f"/members/{self.child.pk}/photo?kind=player").status_code, 200)
+
+    def test_profile_picture_wins_over_the_player_picture(self):
+        self.child.player_photo = SimpleUploadedFile("official.png", png_bytes(), content_type="image/png")
+        self.child.profile_photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
+        self.child.save()
+
+        body = self.get(f"/members/{self.child.pk}").json()
+
+        self.assertNotIn("kind=", body["photo_url"])
+        self.assertIn("kind=profile", body["profile_photo_url"])
+        self.assertNotEqual(body["profile_photo_url"], body["player_photo_url"])
 
 
-class RecordingPublisher(NullGateway):
+class RecordingPublisher(PushGateway):
     sent: list = []
     badges: list = []
+    threads: list = []
     dead: set = set()
 
-    def publish(self, device, *, title, body, data, badge=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         RecordingPublisher.sent.append((device.installation_id, title, data))
         RecordingPublisher.badges.append(badge)
+        RecordingPublisher.threads.append(thread_id)
         return device.installation_id not in RecordingPublisher.dead
 
 
@@ -572,21 +642,36 @@ class PushDeliveryTests(ClubApiTestCase):
         super().setUp()
         RecordingPublisher.sent = []
         RecordingPublisher.badges = []
+        RecordingPublisher.threads = []
         RecordingPublisher.dead = set()
-        self.device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t", endpoint_arn="arn:1")
+        self.device = PushDevice.objects.create(user=self.user, installation_id="parent-phone", platform="ios", push_token="t")
 
     def test_one_push_per_account_for_a_family_wide_notification(self):
         second_child = Member.objects.create(first_name="Lou", last_name="Parent")
         FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=second_child, role=FamilyMembership.FamilyRole.CHILD)
         item = News.objects.create(club=self.club, title="News", slug="news", body="…", status=News.Status.PUBLISHED, published_at=timezone.now())
-        with patch("appapi.delivery.run_in_background"):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.outbox.run_in_background"):
             notifications = notify_members([self.member, self.child, second_child], club=self.club, title="New article", body="Read it", source=item, send_email=False)
 
         self.assertEqual(deliver([notification.pk for notification in notifications]), 1)
         installation, title, data = RecordingPublisher.sent[0]
         self.assertEqual((installation, title), ("parent-phone", "New article"))
         self.assertEqual(data["club_slug"], "ajax-united")
+        self.assertEqual(RecordingPublisher.threads, ["ajax-united"])
         self.assertEqual(data["target"], {"type": "news", "id": str(item.pk), "slug": "news"})
+
+    def test_the_push_is_in_the_language_the_device_registered_with(self):
+        self.device.locale = "nl"
+        self.device.save()
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.outbox.run_in_background"):
+            (notification,) = notify_members([self.member], club=self.club, title=lambda: "Hello" if get_language() == "en" else "Hallo", body="Body", send_email=False)
+
+        deliver([notification.pk])
+
+        _installation, title, data = RecordingPublisher.sent[0]
+        self.assertEqual(title, "Hallo")
+        self.assertEqual(data["kind"], "notification")
+        self.assertEqual(data["notification_id"], str(notification.pk))
 
     def test_guardians_get_their_childs_notification(self):
         notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")
@@ -600,16 +685,28 @@ class PushDeliveryTests(ClubApiTestCase):
         self.device.refresh_from_db()
         self.assertFalse(self.device.enabled)
 
+    @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
     def test_created_notifications_are_pushed_after_commit(self):
-        with patch("appapi.delivery.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+        with patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=False) as callbacks:
             notifications = notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)
-        background.assert_called_once_with(deliver, [notifications[0].pk])
+        background.assert_not_called()
+        self.assertEqual(RecordingPublisher.sent, [])
+        with patch("notifications.outbox.run_in_background") as background:
+            for callback in callbacks:
+                callback()
+        entry = OutboxEntry.objects.get()
+        self.assertEqual(entry.payload, {"ids": [str(notifications[0].pk)], "email": False})
+        background.assert_called_once_with(outbox._process_all, [entry.pk])
+
+    def test_eager_dispatch_pushes_straight_away(self):
+        notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)
+        self.assertEqual(len(RecordingPublisher.sent), 1)
 
     @override_settings(APP_PUSH_GATEWAY="")
-    def test_nothing_is_scheduled_without_sns(self):
-        with patch("appapi.delivery.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
-            on_notifications_created(None, notifications=[Notification(pk=1)])
-        background.assert_not_called()
+    def test_native_channel_does_nothing_without_a_gateway(self):
+        notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")
+        NativePushChannel().deliver_notifications([notification])
+        self.assertEqual(RecordingPublisher.sent, [])
 
 
 class UnknownIdTests(ClubApiTestCase):
@@ -617,7 +714,26 @@ class UnknownIdTests(ClubApiTestCase):
     id with the 404 envelope -- walked from the route table, so a new endpoint is
     covered without anyone remembering to add a test."""
 
-    BODIES = {"rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"}, "respond": {"response": "decline"}, "{member_id}": {}, "{item_id}": {"quantity": 1}}
+    BODIES = {
+        "rsvp": {"member_id": "00000000-0000-0000-0000-000000000000", "status": "present"},
+        "respond": {"response": "decline"},
+        "{member_id}": {},
+        "{item_id}": {"quantity": 1},
+        "live-activity": {"installation_id": "unknown-install", "activity_token": "x"},
+        "check-ins": {"items": []},
+        "/status": {"status": "present"},
+        "{event_id}": {},
+        "{series_id}": {},
+        "{membership_id}": {},
+        "/roster/players": {"member_ids": ["00000000-0000-0000-0000-000000000001"]},
+        "/roster/staff": {"member_ids": ["00000000-0000-0000-0000-000000000001"], "position_id": "00000000-0000-0000-0000-000000000002"},
+        "/lineup": {"selected_member_ids": []},
+        "/lineup/publish": {"mode": "cancel"},
+        "/events": {"kind": "training", "start": "2030-01-01T10:00:00Z"},
+        "/series": {"title": "Training", "kind": "training", "dtstart": "2030-01-01T10:00:00Z", "frequency": "monthly"},
+        "/locations": {"name": "Rink", "address": "1 Ice Rd", "city": "Antwerp", "zip_code": "2000"},
+        "/opponents": {"name": "Ajax"},
+    }
 
     def test_unknown_ids_are_404_everywhere(self):
         import re
@@ -630,7 +746,7 @@ class UnknownIdTests(ClubApiTestCase):
         for path, method in routes:
             concrete = re.sub(r"\{(\w+)\}", lambda match: "unknown-slug" if match.group(1) in ("slug", "installation_id") else str(uuid_module.uuid4()), path)
             host = "rosterchief.app" if path.startswith("/devices") else CLUB_HOST
-            data = next((body for key, body in self.BODIES.items() if path.endswith(key)), None) if method in ("POST", "PATCH") else None
+            data = next((body for key, body in self.BODIES.items() if path.endswith(key)), None) if method in ("POST", "PATCH", "PUT") else None
             with self.subTest(method=method, path=path):
                 response = self.api(method.lower(), concrete, token=self.token, host=host, data=data)
                 self.assertError(response, 404, response.json()["error"]["code"] if response.status_code == 404 else "not_found")
@@ -717,7 +833,7 @@ class WebPushDedupeTests(ClubApiTestCase):
         return deliver_web.call_count
 
     def native_device(self, **kwargs):
-        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1", **kwargs)
+        return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", **kwargs)
 
     def test_web_push_goes_out_when_there_is_no_native_device(self):
         self.assertEqual(self.web_pushes(), 1)
@@ -729,11 +845,6 @@ class WebPushDedupeTests(ClubApiTestCase):
 
     def test_a_disabled_device_does_not_suppress_web_push(self):
         self.native_device(enabled=False)
-
-        self.assertEqual(self.web_pushes(), 1)
-
-    def test_a_device_without_an_sns_endpoint_does_not_suppress_web_push(self):
-        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="")
 
         self.assertEqual(self.web_pushes(), 1)
 
@@ -792,7 +903,7 @@ class NativeBadgeTests(ClubApiTestCase):
         RecordingPublisher.sent = []
         RecordingPublisher.badges = []
         RecordingPublisher.dead = set()
-        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", endpoint_arn="arn:1")
+        PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t")
         Notification.objects.create(club=self.club, member=self.child, title="Earlier", body="…")  # unread, a child's
         read = Notification.objects.create(club=self.club, member=self.member, title="Read", body="…")
         Notification.objects.filter(pk=read.pk).update(read_at=timezone.now())
@@ -801,16 +912,6 @@ class NativeBadgeTests(ClubApiTestCase):
         deliver([fresh.pk])
 
         self.assertEqual(RecordingPublisher.badges, [2])  # the child's earlier one + the new one
-
-    def test_the_apns_message_includes_the_badge_only_when_given(self):
-        from .push import build_message
-
-        device = PushDevice(user=self.user, installation_id="p", platform="ios", push_token="t")
-        with_badge = json.loads(json.loads(build_message(device, title="t", body="b", data={}, badge=3))["APNS"])
-        without = json.loads(json.loads(build_message(device, title="t", body="b", data={}))["APNS"])
-
-        self.assertEqual(with_badge["aps"]["badge"], 3)
-        self.assertNotIn("badge", without["aps"])
 
 
 class AccountSettingsTests(AppApiTestCase):

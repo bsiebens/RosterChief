@@ -15,6 +15,7 @@ plain thread and not a task queue.
 
 from django.utils.translation import gettext_lazy as _
 
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from rosterchief.concurrency import run_in_background
 
@@ -46,7 +47,7 @@ def notify_order_placed(order) -> None:
     def body():
         return _("Your order is in — pay when you pick it up. Total: €%(total)s.") % {"total": order.total}
 
-    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, attachments=_invoice_attachment(order))
+    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, attachments=_invoice_attachment(order), category=NotificationCategory.SHOP)
 
 
 def _notify_order_placed_by_id(order_id) -> None:
@@ -79,7 +80,7 @@ def notify_order_ready_for_pickup(order) -> None:
             text = f"{text} {order.pickup_instructions}"
         return text
 
-    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order)
+    notify_members([order.purchaser], club=order.club, title=title, body=body, source=order, category=NotificationCategory.SHOP)
 
 
 def _notify_order_ready_for_pickup_by_id(order_id) -> None:

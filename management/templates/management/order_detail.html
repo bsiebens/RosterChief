@@ -27,13 +27,17 @@
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Total" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums text-ink">&euro;{{ order.total }}</div>
             <div class="mt-1 flex flex-wrap gap-1.5 text-[13px] text-muted">
-                <span class="badge badge-sm
-                    {% if order.payment_status == "paid" %}badge-success
-                    {% elif order.payment_status == "partially_paid" %}badge-warning
-                    {% elif order.payment_status == "refunded" %}badge-error
-                    {% else %}badge-neutral{% endif %}">
-                    {{ order.get_payment_status_display }}
-                </span>
+                {% if order.fulfillment_status == "cancelled" %}
+                    <span class="badge badge-sm badge-error">{% trans "Cancelled" %}</span>
+                {% else %}
+                    <span class="badge badge-sm
+                        {% if order.payment_status == "paid" %}badge-success
+                        {% elif order.payment_status == "partially_paid" %}badge-warning
+                        {% elif order.payment_status == "refunded" %}badge-error
+                        {% else %}badge-neutral{% endif %}">
+                        {{ order.get_payment_status_display }}
+                    </span>
+                {% endif %}
                 <span class="badge badge-sm
                     {% if order.fulfillment_status == "delivered" %}badge-success
                     {% elif order.fulfillment_status == "ready_for_pickup" %}badge-info
@@ -41,7 +45,9 @@
                     {% else %}badge-neutral{% endif %}">
                     {{ order.get_fulfillment_status_display }}
                 </span>
-                {% if order.has_production_lines %}
+                {% if order.fulfillment_status == "cancelled" %}
+                    <span class="badge badge-sm badge-error">{% trans "Cancelled" %}</span>
+                {% elif order.has_production_lines %}
                     <span class="badge badge-sm
                         {% if order.production_status == "received" %}badge-success
                         {% elif order.production_status == "in_production" %}badge-info

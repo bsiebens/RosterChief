@@ -2,11 +2,12 @@ import datetime
 import io
 import json
 from pathlib import Path
+from unittest import mock
 
+import httpx
 from allauth.account.models import EmailAddress
 from allauth.headless.tokens.strategies.jwt import internal as jwt_internal
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
-from botocore.stub import Stubber
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.models import Session
@@ -27,7 +28,7 @@ from .idempotency import idempotent
 from .management.commands.export_app_openapi import render_schema
 from .models import IdempotencyRecord, PushDevice
 from .pagination import paginate
-from .push import NullGateway, SnsGateway, build_message
+from .push import ApnsError, ApnsGateway, FcmError, FcmGateway, NullGateway, PlatformGateway, PushGateway, build_fcm_message, build_payload, get_gateway
 
 User = get_user_model()
 
@@ -39,17 +40,11 @@ PASSWORD = "correct horse battery staple"
 SNAPSHOT = Path(settings.BASE_DIR) / "docs" / "app-api" / "openapi-app-v1.json"
 
 
-class RecordingGateway(NullGateway):
-    """Test double: every install "gets" an endpoint; calls are recorded."""
+class RecordingGateway(PushGateway):
+    """Test double: every device can be reached; nothing is sent."""
 
-    calls: list = []
-
-    def register(self, device):
-        RecordingGateway.calls.append(("register", device.installation_id))
-        return f"arn:aws:sns:eu-west-1:1:endpoint/APNS/app/{device.installation_id}"
-
-    def unregister(self, device):
-        RecordingGateway.calls.append(("unregister", device.installation_id))
+    def publish(self, device, **kwargs):
+        return True
 
 
 def current_season(club):
@@ -234,7 +229,9 @@ class ContextTests(AppApiTestCase):
 
         body = self.api("get", "/context", token=self.login(), host=CLUB_HOST).json()
 
-        self.assertEqual(body["staffed_teams"], [{"id": str(team.pk), "name": "U16", "short_name": "U16"}])
+        self.assertEqual(
+            body["staffed_teams"], [{"id": str(team.pk), "name": "U16", "short_name": "U16", "role": "coach", "position": "Assistant", "can_manage_attendance": False, "can_edit_events": False, "can_publish_lineup": False, "can_edit_roster": False}]
+        )
 
     def test_other_club_is_not_a_member(self):
         make_club(name="Rival FC", slug="rival-fc")
@@ -254,10 +251,6 @@ class ContextTests(AppApiTestCase):
 
 @override_settings(APP_PUSH_GATEWAY="appapi.tests.RecordingGateway")
 class DeviceTests(AppApiTestCase):
-    def setUp(self):
-        super().setUp()
-        RecordingGateway.calls = []
-
     def device(self, **overrides):
         return {"installation_id": "4b7c1e0a-9f1b-4c1e-8f7a-1234567890ab", "platform": "ios", "push_token": "a1b2c3", "app_version": "1.0.0", "locale": "nl", **overrides}
 
@@ -271,15 +264,24 @@ class DeviceTests(AppApiTestCase):
 
         device = PushDevice.objects.get()
         self.assertEqual((device.push_token, device.environment, device.user), ("d4e5f6", "sandbox", self.user))
-        self.assertEqual([call for call, _id in RecordingGateway.calls], ["register", "register"])
 
-    def test_same_token_again_does_not_touch_sns(self):
+    def test_registering_again_updates_the_same_device_and_revives_it(self):
         token = self.login()
         self.api("post", "/devices", token=token, data=self.device())
-        self.api("post", "/devices", token=token, data=self.device(app_version="1.0.1"))
+        PushDevice.objects.update(enabled=False)
+        self.api("post", "/devices", token=token, data=self.device(app_version="1.0.1", locale="en"))
 
-        self.assertEqual(len(RecordingGateway.calls), 1)
-        self.assertEqual(PushDevice.objects.get().app_version, "1.0.1")
+        device = PushDevice.objects.get()
+        self.assertEqual((device.app_version, device.locale, device.enabled), ("1.0.1", "en", True))
+
+    def test_push_to_start_token_is_kept_unless_changed(self):
+        token = self.login()
+        self.api("post", "/devices", token=token, data=self.device(push_to_start_token="cc33"))
+        self.api("post", "/devices", token=token, data=self.device())
+        self.assertEqual(PushDevice.objects.get().push_to_start_token, "cc33")
+
+        self.api("post", "/devices", token=token, data=self.device(push_to_start_token=""))
+        self.assertEqual(PushDevice.objects.get().push_to_start_token, "")
 
     def test_install_moves_to_the_account_that_signs_in(self):
         other = User.objects.create_user(email="other@example.com", password=PASSWORD)
@@ -307,7 +309,7 @@ class DeviceTests(AppApiTestCase):
         self.assertEqual(list(PushDevice.objects.values_list("installation_id", flat=True)), ["someone-elses-install"])
 
     @override_settings(APP_PUSH_GATEWAY="")
-    def test_without_sns_registration_works_but_push_is_off(self):
+    def test_without_apns_credentials_registration_works_but_push_is_off(self):
         response = self.api("post", "/devices", token=self.login(), data=self.device())
 
         self.assertEqual(response.status_code, 200)
@@ -429,44 +431,112 @@ class PaginationTests(TestCase):
         self.assertIsNone(page.next_cursor)
 
 
-@override_settings(APP_PUSH_SNS_APNS_ARN="arn:aws:sns:eu-west-1:1:app/APNS/rosterchief", APP_PUSH_SNS_APNS_SANDBOX_ARN="arn:aws:sns:eu-west-1:1:app/APNS_SANDBOX/rosterchief")
-class SnsGatewayTests(TestCase):
+APNS_KEY = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgqmv6mXn5WqY2wm0n\naW1d6fL5q0m9q5KkN6qJ1S1XbTWhRANCAAQ5l0n7P0e0m3cQ3m8l3m8mJmQ0m8m1\n-----END PRIVATE KEY-----\n"
+
+
+def apns_key():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    return ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+
+
+@override_settings(APP_PUSH_APNS_KEY_ID="KEY123", APP_PUSH_APNS_TEAM_ID="TEAM123", APP_PUSH_APNS_BUNDLE_ID="app.rosterchief.RosterChief")
+class ApnsGatewayTests(TestCase):
     def setUp(self):
-        import boto3
-
         self.user = User.objects.create_user(email="parent@example.com", password=PASSWORD)
-        self.client_ = boto3.client("sns", region_name="eu-west-1", aws_access_key_id="x", aws_secret_access_key="x")
-        self.stub = Stubber(self.client_)
-        self.stub.activate()
-        self.addCleanup(self.stub.deactivate)
-        self.gateway = SnsGateway(client=self.client_)
-        self.device = PushDevice(user=self.user, installation_id="install-1", platform="ios", push_token="a1b2")
+        self.key = apns_key()
+        override = override_settings(APP_PUSH_APNS_KEY=self.key)
+        override.enable()
+        self.addCleanup(override.disable)
+        self.requests = []
+        self.responses = []
 
-    def test_register_creates_an_endpoint(self):
-        self.stub.add_response("create_platform_endpoint", {"EndpointArn": "arn:endpoint/1"}, {"PlatformApplicationArn": "arn:aws:sns:eu-west-1:1:app/APNS/rosterchief", "Token": "a1b2", "CustomUserData": str(self.user.pk)})
-        self.assertEqual(self.gateway.register(self.device), "arn:endpoint/1")
+    def gateway(self):
+        def handler(request):
+            self.requests.append(request)
+            status, body = self.responses.pop(0) if self.responses else (200, {})
+            return httpx.Response(status, json=body)
 
-    def test_sandbox_builds_use_the_sandbox_application(self):
-        self.device.environment = PushDevice.Environment.SANDBOX
-        self.stub.add_response("create_platform_endpoint", {"EndpointArn": "arn:endpoint/2"}, {"PlatformApplicationArn": "arn:aws:sns:eu-west-1:1:app/APNS_SANDBOX/rosterchief", "Token": "a1b2", "CustomUserData": str(self.user.pk)})
-        self.assertEqual(self.gateway.register(self.device), "arn:endpoint/2")
+        return ApnsGateway(client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    def test_existing_endpoint_for_the_token_is_reused(self):
-        existing = "arn:aws:sns:eu-west-1:1:endpoint/APNS/rosterchief/abc"
-        self.stub.add_client_error("create_platform_endpoint", "InvalidParameter", f"Invalid parameter: Token Reason: Endpoint {existing} already exists with the same Token, but different attributes.")
-        self.stub.add_response("set_endpoint_attributes", {}, {"EndpointArn": existing, "Attributes": {"Token": "a1b2", "Enabled": "true", "CustomUserData": str(self.user.pk)}})
-        self.assertEqual(self.gateway.register(self.device), existing)
+    def device(self, **kwargs):
+        return PushDevice(user=self.user, installation_id="install-1", platform="ios", push_token="a1b2", **kwargs)
 
-    def test_publish_to_a_disabled_endpoint_reports_dead(self):
-        self.device.endpoint_arn = "arn:endpoint/1"
-        self.stub.add_client_error("publish", "EndpointDisabled", "Endpoint is disabled")
-        self.assertFalse(self.gateway.publish(self.device, title="t", body="b", data={}))
+    def test_publish_posts_the_payload_to_the_environments_host(self):
+        gateway = self.gateway()
 
-    def test_apns_message_shape(self):
-        message = json.loads(build_message(self.device, title="New event", body="Training Tuesday", data={"club_slug": "ajax-united"}))
-        apns = json.loads(message["APNS"])
-        self.assertEqual(apns["aps"]["alert"], {"title": "New event", "body": "Training Tuesday"})
-        self.assertEqual(apns["club_slug"], "ajax-united")
+        self.assertTrue(gateway.publish(self.device(), title="Hi", body="There", data={"kind": "notification", "club_slug": "ajax-united"}, badge=2, thread_id="ajax-united"))
+        self.assertTrue(gateway.publish(self.device(environment="sandbox"), title="Hi", body="There", data={}))
+
+        production, sandbox = self.requests
+        self.assertEqual(str(production.url), "https://api.push.apple.com/3/device/a1b2")
+        self.assertEqual(str(sandbox.url), "https://api.sandbox.push.apple.com/3/device/a1b2")
+        self.assertEqual(production.headers["apns-topic"], "app.rosterchief.RosterChief")
+        self.assertEqual(production.headers["apns-push-type"], "alert")
+        self.assertEqual(json.loads(production.content), {"aps": {"alert": {"title": "Hi", "body": "There"}, "sound": "default", "mutable-content": 1, "thread-id": "ajax-united", "badge": 2}, "kind": "notification", "club_slug": "ajax-united"})
+
+    def test_the_provider_token_is_signed_with_the_key_and_reused(self):
+        import jwt
+
+        gateway = self.gateway()
+        gateway.publish(self.device(), title="a", body="b", data={})
+        gateway.publish(self.device(), title="a", body="b", data={})
+
+        first, second = (request.headers["authorization"] for request in self.requests)
+        self.assertEqual(first, second)
+        token = first.removeprefix("bearer ")
+        self.assertEqual(jwt.get_unverified_header(token), {"alg": "ES256", "typ": "JWT", "kid": "KEY123"})
+        self.assertEqual(jwt.decode(token, options={"verify_signature": False})["iss"], "TEAM123")
+
+    def test_a_dead_token_reports_false(self):
+        for status, reason in ((410, "Unregistered"), (400, "BadDeviceToken")):
+            self.responses = [(status, {"reason": reason})]
+            self.assertFalse(self.gateway().publish(self.device(), title="a", body="b", data={}))
+
+    def test_an_expired_provider_token_is_renewed_once(self):
+        self.responses = [(403, {"reason": "ExpiredProviderToken"}), (200, {})]
+
+        self.assertTrue(self.gateway().publish(self.device(), title="a", body="b", data={}))
+        self.assertEqual(len(self.requests), 2)
+
+    def test_other_errors_raise_for_the_caller_to_log(self):
+        self.responses = [(429, {"reason": "TooManyRequests"})]
+
+        with self.assertRaises(ApnsError):
+            self.gateway().publish(self.device(), title="a", body="b", data={})
+
+    def test_live_activity_pushes_use_the_activity_topic_and_token(self):
+        gateway = self.gateway()
+        state = {"home": "Sharks", "away": "Rivals", "home_score": 1, "away_score": 0, "period": "2", "clock": "07:41", "status": "live"}
+
+        self.assertTrue(gateway.live_activity(self.device(), token="start-token", event="start", content_state=state, attributes={"event_id": "e1", "club_slug": "hc"}, alert={"title": "T", "body": "B"}, stale_at=2000))
+        self.assertTrue(gateway.live_activity(self.device(), token="activity-token", event="end", content_state=state, dismiss_at=3000))
+
+        start, end = self.requests
+        self.assertEqual(str(start.url), "https://api.push.apple.com/3/device/start-token")
+        self.assertEqual(start.headers["apns-push-type"], "liveactivity")
+        self.assertEqual(start.headers["apns-topic"], "app.rosterchief.RosterChief.push-type.liveactivity")
+        aps = json.loads(start.content)["aps"]
+        self.assertEqual((aps["event"], aps["attributes-type"], aps["attributes"], aps["alert"], aps["stale-date"], aps["content-state"]), ("start", "GameAttributes", {"event_id": "e1", "club_slug": "hc"}, {"title": "T", "body": "B"}, 2000, state))
+        end_aps = json.loads(end.content)["aps"]
+        self.assertEqual((end_aps["event"], end_aps["dismissal-date"]), ("end", 3000))
+        self.assertNotIn("attributes", end_aps)
+
+    def test_a_dead_activity_token_reports_false(self):
+        self.responses = [(410, {"reason": "Unregistered"})]
+
+        self.assertFalse(self.gateway().live_activity(self.device(), token="x", event="update", content_state={}))
+
+    def test_android_is_not_served(self):
+        gateway = self.gateway()
+
+        self.assertFalse(gateway.supports(PushDevice(platform="android")))
+        self.assertTrue(gateway.publish(PushDevice(platform="android", push_token="x"), title="a", body="b", data={}))
+        self.assertEqual(self.requests, [])
+
+    def test_payload_without_badge_or_thread(self):
+        self.assertEqual(build_payload(title="t", body="b", data={"kind": "x"}), {"aps": {"alert": {"title": "t", "body": "b"}, "sound": "default", "mutable-content": 1}, "kind": "x"})
 
 
 @override_settings(**HOSTS)
@@ -505,24 +575,6 @@ class DocsTests(TestCase):
             target = Path(directory) / "spec.json"
             call_command("export_app_openapi", "--output", str(target), stdout=io.StringIO())
             self.assertEqual(json.loads(target.read_text())["info"]["title"], "RosterChief app API")
-
-
-class SnsCredentialsTests(TestCase):
-    @override_settings(APP_PUSH_SNS_REGION="eu-west-1", APP_PUSH_SNS_ACCESS_KEY_ID="AKIAPUSH", APP_PUSH_SNS_SECRET_ACCESS_KEY="secret")
-    def test_dedicated_key_is_used(self):
-        from unittest.mock import patch
-
-        with patch("boto3.client") as client:
-            SnsGateway()
-        client.assert_called_once_with("sns", region_name="eu-west-1", aws_access_key_id="AKIAPUSH", aws_secret_access_key="secret")
-
-    @override_settings(APP_PUSH_SNS_REGION="", APP_PUSH_SNS_ACCESS_KEY_ID="")
-    def test_without_a_key_boto_uses_its_default_chain(self):
-        from unittest.mock import patch
-
-        with patch("boto3.client") as client:
-            SnsGateway()
-        client.assert_called_once_with("sns", region_name=None)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="localhost", ALLOWED_HOSTS=["localhost", ".localhost"])
@@ -578,3 +630,143 @@ class EventBackgroundTests(AppApiTestCase):
         from_context = self.api("get", "/context", token=token, host=CLUB_HOST).json()["club"]["event_background_url"]
         self.assertTrue(from_clubs.startswith("http://") and from_clubs.endswith(".png"), from_clubs)
         self.assertEqual(from_clubs.rsplit("/", 1)[1], from_context.rsplit("/", 1)[1])
+
+
+class FakeCredentials:
+    """Stands in for a google-auth service-account credential: ``refresh`` mints the next token."""
+
+    def __init__(self):
+        self.valid = False
+        self.token = None
+        self.refreshes = 0
+
+    def refresh(self, request):
+        self.refreshes += 1
+        self.token = f"access-{self.refreshes}"
+        self.valid = True
+
+
+@override_settings(APP_PUSH_FCM_PROJECT_ID="rosterchief-test", APP_PUSH_FCM_CHANNEL_ID="notifications")
+class FcmGatewayTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="parent@example.com", password=PASSWORD)
+        self.requests = []
+        self.responses = []
+        self.credentials = FakeCredentials()
+        # Patched so the credentials never need Google's token endpoint.
+        patcher = mock.patch("google.auth.transport.requests.Request")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def gateway(self):
+        def handler(request):
+            self.requests.append(request)
+            status, body = self.responses.pop(0) if self.responses else (200, {"name": "projects/x/messages/1"})
+            return httpx.Response(status, json=body)
+
+        return FcmGateway(client=httpx.Client(transport=httpx.MockTransport(handler)), credentials=self.credentials)
+
+    def device(self, **kwargs):
+        return PushDevice(user=self.user, installation_id="install-2", platform="android", push_token="fcm-token", **kwargs)
+
+    def test_publish_posts_the_message_with_a_bearer_token(self):
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.publish(self.device(), title="Hi", body="There", data={"kind": "notification", "notification_id": "n1", "club_slug": "hc", "target": {"type": "event", "id": 7}}, badge=3, thread_id="hc"))
+
+        (request,) = self.requests
+        self.assertEqual(str(request.url), "https://fcm.googleapis.com/v1/projects/rosterchief-test/messages:send")
+        self.assertEqual(request.headers["authorization"], "Bearer access-1")
+        message = json.loads(request.content)["message"]
+        self.assertEqual(message["token"], "fcm-token")
+        self.assertEqual(message["notification"], {"title": "Hi", "body": "There"})
+        # FCM data values are strings: the target dictionary travels as JSON text.
+        self.assertEqual(message["data"], {"kind": "notification", "notification_id": "n1", "club_slug": "hc", "target": json.dumps({"type": "event", "id": 7})})
+        self.assertEqual(message["android"], {"priority": "HIGH", "notification": {"channel_id": "notifications", "tag": "hc"}})
+
+    def test_absent_data_values_are_left_out(self):
+        message = build_fcm_message(self.device(), title="t", body="b", data={"kind": "notification", "target": None})["message"]
+
+        self.assertEqual(message["data"], {"kind": "notification"})
+        self.assertNotIn("tag", message["android"]["notification"])
+
+    def test_the_access_token_is_reused_until_it_expires(self):
+        gateway = self.gateway()
+
+        gateway.publish(self.device(), title="a", body="b", data={})
+        gateway.publish(self.device(), title="a", body="b", data={})
+        self.assertEqual(self.credentials.refreshes, 1)
+
+        self.credentials.valid = False
+        gateway.publish(self.device(), title="a", body="b", data={})
+        self.assertEqual(self.credentials.refreshes, 2)
+
+    def test_a_rejected_access_token_is_refreshed_and_retried_once(self):
+        self.responses = [(401, {"error": {"status": "UNAUTHENTICATED"}}), (200, {})]
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.publish(self.device(), title="a", body="b", data={}))
+        self.assertEqual([request.headers["authorization"] for request in self.requests], ["Bearer access-1", "Bearer access-2"])
+
+    def test_a_dead_token_reports_false(self):
+        gateway = self.gateway()
+        for status, body in [
+            (404, {"error": {"status": "NOT_FOUND", "details": [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": "UNREGISTERED"}]}}),
+            (404, {"error": {"status": "NOT_FOUND"}}),
+            (400, {"error": {"status": "INVALID_ARGUMENT", "message": "The registration token is not a valid FCM registration token"}}),
+        ]:
+            self.responses = [(status, body)]
+            self.assertFalse(gateway.publish(self.device(), title="a", body="b", data={}))
+
+    def test_other_errors_raise(self):
+        gateway = self.gateway()
+        for status, body in [(429, {"error": {"status": "RESOURCE_EXHAUSTED"}}), (500, {"error": {"status": "INTERNAL"}}), (400, {"error": {"status": "INVALID_ARGUMENT", "message": "Invalid JSON payload"}})]:
+            self.responses = [(status, body)]
+            with self.assertRaises(FcmError):
+                gateway.publish(self.device(), title="a", body="b", data={})
+
+    def test_only_android_is_served(self):
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.supports(self.device()))
+        self.assertFalse(gateway.supports(PushDevice(platform="ios")))
+        self.assertTrue(gateway.publish(PushDevice(platform="ios", push_token="x"), title="a", body="b", data={}))
+        self.assertTrue(gateway.live_activity(self.device(), token="x", event="update", content_state={}))
+        self.assertEqual(self.requests, [])
+
+
+class PlatformGatewayTests(TestCase):
+    class Recorder(PushGateway):
+        def __init__(self, platform):
+            self.platform, self.sent = platform, []
+
+        def supports(self, device):
+            return device.platform == self.platform
+
+        def publish(self, device, **kwargs):
+            self.sent.append(device.push_token)
+            return True
+
+    def test_routes_by_platform_and_reports_unconfigured_ones_as_unsupported(self):
+        ios, android = self.Recorder("ios"), self.Recorder("android")
+        both = PlatformGateway(ios=ios, android=android)
+        ios_only = PlatformGateway(ios=ios)
+        iphone, pixel = PushDevice(platform="ios", push_token="i"), PushDevice(platform="android", push_token="a")
+
+        both.publish(iphone, title="t", body="b", data={})
+        both.publish(pixel, title="t", body="b", data={})
+        self.assertEqual((ios.sent, android.sent), (["i"], ["a"]))
+        self.assertTrue(both.supports(iphone) and both.supports(pixel))
+        self.assertTrue(ios_only.supports(iphone))
+        self.assertFalse(ios_only.supports(pixel))
+
+    @override_settings(APP_PUSH_GATEWAY="", APP_PUSH_APNS_KEY_ID="", APP_PUSH_FCM_CREDENTIALS="", APP_PUSH_FCM_CREDENTIALS_FILE="")
+    def test_get_gateway_without_credentials_is_the_null_gateway(self):
+        self.assertIsInstance(get_gateway(), NullGateway)
+
+    @override_settings(APP_PUSH_GATEWAY="", APP_PUSH_APNS_KEY_ID="", APP_PUSH_FCM_CREDENTIALS='{"project_id": "p"}')
+    def test_get_gateway_with_only_fcm_serves_android_only(self):
+        gateway = get_gateway()
+
+        self.assertTrue(gateway.supports(PushDevice(platform="android")))
+        self.assertFalse(gateway.supports(PushDevice(platform="ios")))

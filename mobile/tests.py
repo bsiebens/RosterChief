@@ -3319,6 +3319,43 @@ class EditProfileViewTests(TestCase):
         self.assertEqual(self.member.first_name, "Larsen")
         self.assertEqual(self.member.email, "larsen@example.com")
 
+    def test_uploading_a_picture_sets_the_profile_picture_only(self):
+        self.client.force_login(self.user)
+
+        response = self._post(
+            self.member,
+            {"first_name": "Lars", "last_name": "Bakker", "email": "lars@example.com", "phone": "", "emergency_phone": "", "profile_photo": make_image_file("me.png")},
+        )
+
+        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.member.refresh_from_db()
+        self.addCleanup(self.member.profile_photo.delete, save=False)
+        self.assertTrue(self.member.profile_photo)
+        self.assertFalse(self.member.player_photo)
+
+    def test_the_player_picture_cannot_be_changed_from_the_app(self):
+        self.member.player_photo.save("official.png", make_image_file("official.png"))
+        self.addCleanup(self.member.player_photo.delete, save=False)
+        official_name = self.member.player_photo.name
+        self.client.force_login(self.user)
+
+        self._post(
+            self.member,
+            {"first_name": "Lars", "last_name": "Bakker", "email": "lars@example.com", "phone": "", "emergency_phone": "", "player_photo": make_image_file("hack.png"), "player_photo-clear": "on"},
+        )
+
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.player_photo.name, official_name)
+
+    def test_the_form_offers_the_profile_picture_not_the_player_picture(self):
+        self.client.force_login(self.user)
+
+        response = self._get(self.member)
+
+        self.assertContains(response, 'name="profile_photo"')
+        self.assertNotContains(response, 'name="player_photo"')
+        self.assertContains(response, "Profile picture")
+
     def test_post_with_invalid_data_rerenders_with_errors_and_does_not_save(self):
         self.client.force_login(self.user)
 

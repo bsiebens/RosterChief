@@ -22,12 +22,14 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _lazy
 from waffle import get_waffle_flag_model
 
+from appapi.push import PushGateway
 from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
 from features.jobs import JOB_REGISTRY
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
-from notifications.models import Notification
+from notifications import outbox
+from notifications.models import Notification, NotificationCategory, OutboxEntry
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
@@ -45,6 +47,7 @@ from .services import (
     generate_occurrences,
     ijnl_import,
     import_sources,
+    live_activity,
     occurrence_datetimes,
     player_attendance_rankings,
     players_who_missed_recent_practices,
@@ -657,6 +660,7 @@ class LineupServiceTests(EventsTestBase):
         publish_lineup(lineup)
 
         notification = Notification.objects.get(member=self.alice)
+        self.assertEqual(notification.category, NotificationCategory.LINEUP)
         self.assertIn("in the line-up", notification.body)
 
     def test_republish_notifies_a_dropped_player_with_a_different_message(self):
@@ -682,6 +686,7 @@ class LineupServiceTests(EventsTestBase):
         notify_dropout(event, self.alice, "Twisted an ankle")
 
         notification = Notification.objects.get(member=manager)
+        self.assertEqual(notification.category, NotificationCategory.LINEUP)
         self.assertIn(self.alice.get_full_name(), notification.body)
         self.assertIn("Twisted an ankle", notification.body)
 
@@ -770,6 +775,7 @@ class RosterChangeSyncTests(EventsTestBase):
         TeamMembership.objects.create(team=self.team, member=dave, season=self.season, position=self.position)
 
         notification = Notification.objects.get(member=dave)
+        self.assertEqual(notification.category, NotificationCategory.EVENT)
         self.assertEqual(notification.title, "New events on your calendar")
         self.assertIn("1 new event", notification.body)
 
@@ -2439,6 +2445,7 @@ class RefereeServiceTests(EventsTestBase):
         assign_referee(game, self.referee, assigned_by=self.alice)
 
         notification = Notification.objects.get(member=self.referee, title="Referee assignment")
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertIn(game.title, notification.body)
         self.assertEqual(notification.source, game)
 
@@ -2834,6 +2841,7 @@ class OfficialServiceTests(OfficialsTestBase):
         assign_official(game, self.official, assigned_by=self.alice)
 
         notification = Notification.objects.get(member=self.official, title="Official assignment")
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertIn(game.title, notification.body)
         self.assertEqual(notification.source, game)
 
@@ -3350,6 +3358,19 @@ class SendDeadlineRemindersTests(EventsTestBase):
         self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
         self.assertTrue(Notification.objects.filter(member=self.bob, title=event.title).exists())
         self.assertIn("Reminded 2 member(s) across 1 event(s)", result)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.REMINDER})
+
+    def test_a_coach_nudge_and_a_coach_change_notice_use_their_own_categories(self):
+        from events.services.coach import notify_event_changed, remind_silent
+
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+
+        remind_silent(event)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.COACH})
+
+        Notification.objects.all().delete()
+        notify_event_changed(event)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.EVENT})
 
     def test_falls_back_to_the_event_start_when_no_deadline_is_set(self):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=6), deadline=None)
@@ -3983,6 +4004,7 @@ class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
             self.run_job()
 
         body = Notification.objects.get(member=self.admin).body
+        self.assertEqual(Notification.objects.get(member=self.admin).category, NotificationCategory.ADMIN)
         self.assertIn("First Team · RBIHF: the fixture list could not be fetched (Could not reach rbihf.be).", body)
         self.assertEqual(self.stored()[0]["last_check"]["error"], "Could not reach rbihf.be")
 
@@ -4917,7 +4939,7 @@ class NotificationTranslationTests(EventsTestBase):
         bob = Notification.objects.get(member=self.bob).translations
         self.assertEqual(alice["en"]["body"], "Cup final needs a referee -- can you take it?")
         self.assertEqual(alice["nl"]["title"], "Scheidsrechter gezocht")
-        self.assertEqual(alice["nl"]["body"], "Voor Cup final is een scheidsrechter nodig -- kun jij het doen?")
+        self.assertEqual(alice["nl"]["body"], "Cup final heeft een scheidsrechter nodig -- kun jij het doen?")
         self.assertEqual(bob["en"]["body"], "2 games need a referee -- can you take one?")
         self.assertEqual(bob["nl"]["body"], "Voor 2 wedstrijden is een scheidsrechter nodig -- kun jij er een doen?")
 
@@ -4938,6 +4960,114 @@ class NotificationTranslationTests(EventsTestBase):
         self.assertTrue(translations["en"]["body"].startswith("New "))
 
 
+class LiveActivityTests(GameTimelineTestBase):
+    """events.services.live_activity -- start, update and end pushes for Live Activities."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.fan = get_user_model().objects.create_user(email="fan@example.com", password="pw-secret-123")
+
+    def setUp(self):
+        from appapi.models import PushDevice
+
+        super().setUp()
+        self.game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        self.device = PushDevice.objects.create(user=self.fan, installation_id="phone-1", platform="ios", push_token="t", push_to_start_token="start-token", locale="nl")
+        self.set_timeline(status="live")
+        self.gateway = mock.Mock()
+        self.gateway.live_activity.return_value = True
+
+    def set_timeline(self, **data):
+        document = {"score": {"home": 1, "away": 0}, "period": "2", "clock": "07:41", **data}
+        GameTimeline.objects.update_or_create(event=self.game, defaults={"source": "X", "data": document})
+
+    def deliver(self, phase="live"):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.push.get_gateway", return_value=self.gateway):
+            return live_activity.deliver(self.game.pk, phase)
+
+    def test_a_live_game_starts_an_activity_on_followers_devices_in_their_language(self):
+        from appapi.models import LiveActivity
+
+        self.assertEqual(self.deliver(), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["token"], call.kwargs["event"]), ("start-token", "start"))
+        self.assertEqual(call.kwargs["content_state"], {"home": "1st", "away": "Olympia Heist", "home_score": 1, "away_score": 0, "period": "2", "clock": "07:41", "status": "live"})
+        self.assertEqual(call.kwargs["attributes"], {"event_id": str(self.game.pk), "club_slug": self.club.slug})
+        self.assertEqual(call.kwargs["alert"], {"title": "1st - Olympia Heist", "body": "De wedstrijd is begonnen."})
+        self.assertEqual(LiveActivity.objects.get().token, "")
+
+    def test_the_next_change_does_not_start_a_second_activity_and_updates_the_registered_one(self):
+        from appapi.models import LiveActivity
+
+        self.deliver()
+        self.gateway.live_activity.reset_mock()
+        self.assertEqual(self.deliver(), 0)  # started, token not registered yet: nothing to update
+        LiveActivity.objects.update(token="activity-token")
+        self.set_timeline(status="live", score={"home": 2, "away": 0})
+
+        self.assertEqual(self.deliver(), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["token"], call.kwargs["event"], call.kwargs["content_state"]["home_score"]), ("activity-token", "update", 2))
+
+    def test_a_final_game_ends_and_forgets_the_activities(self):
+        from appapi.models import LiveActivity
+
+        LiveActivity.objects.create(club=self.club, device=self.device, event=self.game, token="activity-token")
+        self.set_timeline(status="final")
+
+        self.assertEqual(self.deliver("end"), 1)
+
+        call = self.gateway.live_activity.call_args
+        self.assertEqual((call.kwargs["event"], call.kwargs["content_state"]["status"]), ("end", "final"))
+        self.assertIn("dismiss_at", call.kwargs)
+        self.assertFalse(LiveActivity.objects.exists())
+
+    def test_non_followers_and_devices_without_a_start_token_get_nothing(self):
+        self.device.push_to_start_token = ""
+        self.device.save()
+
+        self.assertEqual(self.deliver(), 0)
+        self.gateway.live_activity.assert_not_called()
+
+        self.device.push_to_start_token = "start-token"
+        self.device.save()
+        game_push.set_followed_teams(self.fan, self.club, [])
+        self.assertEqual(self.deliver(), 0)
+
+    def test_a_dead_push_to_start_token_is_cleared(self):
+        self.gateway.live_activity.return_value = False
+
+        self.assertEqual(self.deliver(), 0)
+
+        self.device.refresh_from_db()
+        self.assertEqual(self.device.push_to_start_token, "")
+
+    def test_the_timeline_signal_schedules_a_delivery_only_for_live_and_ending_games(self):
+        def fire(previous, status):
+            with mock.patch("events.services.live_activity.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+                live_activity.on_timeline_changed(None, event=self.game, previous=previous, current={"status": status}, first_fetch=False)
+            return [call.args[1:] for call in background.call_args_list]
+
+        self.assertEqual(fire({"status": "scheduled"}, "live"), [(self.game.pk, "live")])
+        self.assertEqual(fire({"status": "live"}, "final"), [(self.game.pk, "end")])
+        self.assertEqual(fire({"status": "final"}, "final"), [])
+        self.assertEqual(fire(None, "scheduled"), [])
+
+
+class RecordingGateway(PushGateway):
+    """An app push gateway that records what it publishes; the "gone" installation has a dead token."""
+
+    sent: list = []
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
+        RecordingGateway.sent.append((device, body))
+        return device.installation_id != "gone"
+
+
 class GamePushTests(GameTimelineTestBase):
     """events.services.game_push -- live game pushes to the accounts that
     follow one of the game's teams; one coalesced push per poll, no cap."""
@@ -4952,9 +5082,9 @@ class GamePushTests(GameTimelineTestBase):
         return GameMoment.objects.create(event=game, key=key, kind=kind, game_seconds=seconds, notifiable=notifiable, payload={"scorer": {"name": "Sam", "number": 9}, "score": {"for": 1, "against": 0}, **payload})
 
     def deliver(self, game, moments):
-        with mock.patch("events.services.game_push._send_native", return_value=1) as native, mock.patch("events.services.game_push._send_web", return_value=0) as web:
+        with mock.patch("events.services.game_push.dispatch_to_user", return_value=mock.Mock(total=1)) as dispatch:
             reached = game_push.deliver_moments(game.pk, [moment.pk for moment in moments])
-        return reached, native, web
+        return reached, dispatch
 
     def test_the_push_names_the_assists_on_our_goals_only(self):
         game = self.make_game(is_live=True)
@@ -4962,9 +5092,17 @@ class GamePushTests(GameTimelineTestBase):
         ours = self.moment(game, "goal_for:g1", assists=[{"name": "Ann", "number": 7}], seconds=60)
         theirs = self.moment(game, "goal_against:g2", kind=GameMoment.Kind.GOAL_AGAINST, assists=[{"name": "Bo", "number": 3}], seconds=120)
 
-        _reached, native, _web = self.deliver(game, [ours, theirs])
+        _reached, native = self.deliver(game, [ours, theirs])
 
         self.assertEqual(native.call_args.kwargs["texts"]("en")[1].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
+
+    def test_game_pushes_are_dispatched_in_the_game_category(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+
+        _reached, native = self.deliver(game, [self.moment(game, "goal_for:g1")])
+
+        self.assertEqual(native.call_args.kwargs["category"], "game")
 
     def test_followers_get_one_coalesced_push_and_others_none(self):
         game = self.make_game(is_live=True)
@@ -4972,16 +5110,17 @@ class GamePushTests(GameTimelineTestBase):
         goal = self.moment(game, "goal_for:g1")
         penalty = self.moment(game, "penalty_against:p1", kind=GameMoment.Kind.PENALTY_AGAINST, seconds=90, player={"name": "Rex"}, description="Tripping")
 
-        reached, native, web = self.deliver(game, [penalty, goal])
+        reached, native = self.deliver(game, [penalty, goal])
 
         self.assertEqual(reached, 1)
         native.assert_called_once()
-        self.assertEqual(native.call_args.args[0], self.fan)
+        self.assertEqual(native.call_args.kwargs["user"], self.fan)
+        self.assertEqual(native.call_args.kwargs["club"], self.club)
+        self.assertEqual(native.call_args.kwargs["thread_id"], str(game.pk))
         body = native.call_args.kwargs["texts"]("en")[1]
         self.assertEqual(body.splitlines(), ["Goal for us by Sam (#9), 1-0.", "Penalty for the opponent: Rex, Tripping."])
         self.assertEqual(native.call_args.kwargs["texts"]("en")[0], "1st vs Olympia Heist")
         self.assertEqual(native.call_args.kwargs["data"]["target"], {"type": "event", "id": str(game.pk)})
-        web.assert_called_once()
         self.assertEqual(GameMoment.objects.filter(event=game, delivered_at__isnull=False).count(), 2)
 
     def test_catch_ups_are_never_pushed_and_a_moment_is_pushed_once(self):
@@ -4990,11 +5129,11 @@ class GamePushTests(GameTimelineTestBase):
         late = self.moment(game, "goal_for:old", notifiable=False)
         fresh = self.moment(game, "goal_for:new")
 
-        _reached, native, _web = self.deliver(game, [late, fresh])
+        _reached, native = self.deliver(game, [late, fresh])
         self.assertEqual(native.call_count, 1)
         self.assertNotIn("old", native.call_args.kwargs["texts"]("en")[1])
 
-        reached_again, native_again, _web = self.deliver(game, [fresh])
+        reached_again, native_again = self.deliver(game, [fresh])
         self.assertEqual(reached_again, 0)
         native_again.assert_not_called()
 
@@ -5004,26 +5143,55 @@ class GamePushTests(GameTimelineTestBase):
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
         for index, locale in enumerate(["nl-NL", "en-GB", "", "fr-FR"]):
-            PushDevice.objects.create(user=self.fan, installation_id=f"install-{index}", platform="ios", push_token="t", endpoint_arn=f"arn:{index}", locale=locale)
+            PushDevice.objects.create(user=self.fan, installation_id=f"install-{index}", platform="ios", push_token="t", locale=locale)
         goal = self.moment(game, "goal_for:g1")
         gateway = mock.Mock()
         gateway.publish.return_value = True
 
-        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.push.get_gateway", return_value=gateway), mock.patch("events.services.game_push._send_web", return_value=0):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.delivery.get_gateway", return_value=gateway), mock.patch("mobile.channels.send_push_to_user", return_value=0):
             game_push.deliver_moments(game.pk, [goal.pk])
 
         bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}
+        self.assertEqual({call.kwargs["thread_id"] for call in gateway.publish.call_args_list}, {str(game.pk)})
         self.assertEqual(bodies["nl-NL"], "Doelpunt voor ons van Sam (#9), 1-0.")
         self.assertEqual(bodies["en-GB"], "Goal for us by Sam (#9), 1-0.")
         self.assertEqual(bodies[""], "Goal for us by Sam (#9), 1-0.")
         self.assertEqual(bodies["fr-FR"], "Goal for us by Sam (#9), 1-0.")
+
+    def test_an_android_device_is_reached_through_a_gateway_that_supports_it(self):
+        from appapi.models import PushDevice
+
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        PushDevice.objects.create(user=self.fan, installation_id="pixel", platform="android", push_token="t", locale="nl")
+        dead = PushDevice.objects.create(user=self.fan, installation_id="gone", platform="android", push_token="x", locale="en")
+        goal = self.moment(game, "goal_for:g1")
+        RecordingGateway.sent = []
+
+        with override_settings(APP_PUSH_GATEWAY="events.tests.RecordingGateway"), mock.patch("mobile.channels.send_push_to_user", return_value=0):
+            reached = game_push.deliver_moments(game.pk, [goal.pk])
+
+        self.assertEqual(reached, 1)
+        self.assertEqual({(device.installation_id, device.platform, body) for device, body in RecordingGateway.sent}, {("pixel", "android", "Doelpunt voor ons van Sam (#9), 1-0."), ("gone", "android", "Goal for us by Sam (#9), 1-0.")})
+        dead.refresh_from_db()
+        self.assertFalse(dead.enabled)  # the gateway reported its token dead
+        self.assertTrue(PushDevice.objects.get(installation_id="pixel").enabled)
+
+    def test_nothing_is_dispatched_for_accounts_that_follow_nothing(self):
+        game = self.make_game(is_live=True)
+        goal = self.moment(game, "goal_for:g1")
+
+        reached, dispatch = self.deliver(game, [goal])
+
+        self.assertEqual(reached, 0)
+        dispatch.assert_not_called()
 
     def test_web_push_is_english(self):
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
         goal = self.moment(game, "goal_for:g1")
 
-        with mock.patch("mobile.services.push.send_push_to_user", return_value=0) as send:
+        with mock.patch("mobile.channels.send_push_to_user", return_value=0) as send:
             game_push.deliver_moments(game.pk, [goal.pk])
 
         self.assertEqual(send.call_args.kwargs["body"], "Goal for us by Sam (#9), 1-0.")
@@ -5033,7 +5201,7 @@ class GamePushTests(GameTimelineTestBase):
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
 
         for number in range(15):
-            reached, _native, _web = self.deliver(game, [self.moment(game, f"goal_for:g{number}")])
+            reached, _native = self.deliver(game, [self.moment(game, f"goal_for:g{number}")])
             self.assertEqual(reached, 1)
 
     def test_recording_moments_schedules_delivery_after_commit(self):
@@ -5041,11 +5209,38 @@ class GamePushTests(GameTimelineTestBase):
         game_timeline.store(game, game_timeline.TimelineFetch(document={"events": []}))
 
         # Patch outermost: captured on-commit callbacks run when the capture block exits.
-        with mock.patch("events.services.game_push.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), mock.patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
             game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [goal_item("g1", "home", 60, 1, 0)]}))
 
-        func, event_id, ids = background.call_args.args
-        self.assertEqual((func, event_id, len(ids)), (game_push.deliver_moments, game.pk, 1))
+        entry = OutboxEntry.objects.get(kind=OutboxEntry.Kind.GAME_MOMENTS)
+        self.assertEqual((entry.payload["event_id"], len(entry.payload["moment_ids"])), (str(game.pk), 1))
+        background.assert_called_once_with(outbox._process_all, [entry.pk])
+
+    def test_moments_stay_undelivered_when_the_dispatch_raises_and_go_out_on_the_outbox_retry(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        goal = self.moment(game, "goal_for:g1")
+        entry = outbox.enqueue(OutboxEntry.Kind.GAME_MOMENTS, {"event_id": str(game.pk), "moment_ids": [str(goal.pk)]})
+
+        with mock.patch("events.services.game_push.dispatch_to_user", side_effect=RuntimeError("down")):
+            self.assertFalse(outbox.process(entry.pk))
+        goal.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertIsNone(goal.delivered_at)
+        self.assertEqual((entry.status, entry.attempts), (OutboxEntry.Status.PENDING, 1))
+
+        OutboxEntry.objects.filter(pk=entry.pk).update(available_at=timezone.now())
+        with mock.patch("events.services.game_push.dispatch_to_user", return_value=mock.Mock(total=1)) as dispatch:
+            self.assertTrue(outbox.process(entry.pk))
+        goal.refresh_from_db()
+        self.assertIsNotNone(goal.delivered_at)
+        self.assertEqual(dispatch.call_count, 1)
+
+        # Done: another pass (or a sweeper) neither claims it nor sends again.
+        with mock.patch("events.services.game_push.dispatch_to_user") as dispatch:
+            self.assertFalse(outbox.process(entry.pk))
+            game_push.deliver_moments(game.pk, [goal.pk])
+        dispatch.assert_not_called()
 
     def test_following_only_keeps_this_clubs_teams_and_replaces_the_set(self):
         other_club = Club.objects.create(name="Rival", slug="rival-push")
@@ -5170,6 +5365,7 @@ class CrewInviteResyncTests(OfficialsTestBase):
 
         self.assertEqual(RefereeSignup.objects.filter(event__in=games, member=self.person).count(), 3)
         notification = Notification.objects.get(member=self.person)
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertEqual(notification.title, "Referee needed")
         self.assertEqual(notification.target_type, "calendar")
         self.assertIn("3 games", notification.body)

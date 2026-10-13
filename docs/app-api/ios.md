@@ -182,8 +182,11 @@ After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
 
 ## 6. Two-factor enrolment
 
-Club staff (admins, editors, team managers, shop/evaluation managers) must have two-factor.
-Until they enrol, every app-API call answers **403 `mfa_enrollment_required`**. Show an enrolment
+Club staff with authority (admins, editors, member admins, shop/evaluation managers, and anyone
+with a **management position** on a team, such as a head coach or team manager) must have
+two-factor. A coach with another staff position (assistant, physio, ...) does not. Until the
+required account enrols, **every** app-API call answers **403 `mfa_enrollment_required`**,
+including `GET /context`: there is no way to see the coach screens first. Show an enrolment
 screen that uses the sign-in API:
 
 1. `GET /api/auth/app/v1/account/authenticators/totp`: returns `meta.secret` and
@@ -196,10 +199,12 @@ Then retry the call that failed.
 
 ## 7. Push notifications (APNs)
 
+_Android devices register through the same `POST /devices` endpoint (with `"platform": "android"` and the FCM registration token) and receive pushes through FCM. There, the `target` in the payload is JSON text, not an object: parse it. The payload otherwise matches the one below._
+
 **Before you start:** in Xcode, add the **Push Notifications** capability to the app target.
 The bundle ID must be the one the server's push setup was made for. The server side (an APNs
-key and Amazon SNS) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
-push"](https://github.com/bsiebens/RosterChief/blob/development/DEPLOYMENT.md#native-app-push-amazon-sns).
+key, sent straight to Apple, no intermediary) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
+push"](https://github.com/bsiebens/RosterChief/blob/development/DEPLOYMENT.md#native-app-push-apns).
 Hand them the bundle ID; they need the team's APNs `.p8` key from the Apple Developer account.
 Until that's done, `POST /devices` answers `push_enabled: false` and no pushes arrive.
 
@@ -225,13 +230,13 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
    Use `"environment": "sandbox"` for debug builds run from Xcode; TestFlight and App Store builds
    are `production`. Call it again after every launch where the token may have changed. It's
    safe to repeat.
-4. The response's `push_enabled` is `false` until the server has push delivery set up. Don't show
+4. The response's `push_enabled` is `false` until the server has its APNs key set up. Don't show
    an error for that.
 
 **Payload** (arrives in `userInfo`): an `aps.alert` with the title and body, plus:
 
 ```json
-{"notification_id": "…", "club_slug": "hc-example",
+{"kind": "notification", "notification_id": "…", "club_slug": "hc-example",
  "target": {"type": "news", "id": "…", "slug": "welcome"}}
 ```
 
@@ -244,10 +249,79 @@ contains personal data. One account gets **one** push per notification even when
 several of its children. The payload also carries `aps.badge`: the account's total unread count across
 all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
 
+The payload also carries a `category` key (`news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`,
+`admin`, `announcement`, `game`, `general`) so you can route or style it. The delivery headers are set by the server,
+you do nothing for them: `apns-expiration` (a push that can't be delivered in time is dropped: 7 days for news, 15
+minutes for live games), `apns-priority` (10 for events, line-ups, game pushes and anything critical; 5 for the rest) and
+`apns-collapse-id` (live-game pushes: a newer push for the same event replaces the one still shown).
+
+`aps.thread-id` groups pushes on the lock screen: the club's slug for inbox pushes, the event id for
+live-game pushes (so one game's goals stack together).
+
+Title and body are rendered in the language of the `locale` the device last registered with
+(`nl` or `en`; anything else gets English), so call `POST /devices` again when the in-app language
+changes. Live-game pushes (`kind: "game_moment"`) carry `club_slug` and `target` but no
+`notification_id`: they are not stored in the inbox.
+
+**Live Activities** (iOS 17.2+, for games the account follows, directly or through a team).
+Define an `ActivityAttributes` type named `GameAttributes` (or tell the server operator the name) with fixed
+data `{event_id, club_slug}` and a `ContentState` carrying `home`, `away`, `home_score`, `away_score`
+(numbers or null), `period`, `clock` (strings, empty when unknown) and `status` (`live` or `final`).
+Keys are snake_case: map them with `CodingKeys`.
+
+1. Send the push-to-start token as `push_to_start_token` on `POST /devices` (omit it to keep the stored one,
+   `""` clears it).
+2. When a followed game goes live, the server sends a `start` push to that token (with an alert in the
+   device's language). When the activity exists, register its own token: `POST /events/{id}/live-activity`
+   with `{installation_id, activity_token}` (repeat whenever that token changes). Until you do, the server
+   treats the activity as started and sends no second start.
+3. While the game is on, every change of the game feed (about once a minute) sends an `update` to the registered
+   activities. The clock is the federation's as of the last poll, so interpolate it yourself; an activity not
+   updated for 15 minutes is marked stale.
+4. When the game ends the server sends `end` (the activity stays on the lock screen for an hour) and forgets
+   the token. If your app ends the activity itself, call `DELETE /events/{id}/live-activity/{installation_id}`.
+
+A dead token is dropped server-side: a rejected push-to-start token is cleared (send it again with the next
+`POST /devices`), a rejected activity token is forgotten.
+
 **Email next to the push:** `GET /me` returns `settings.email_notifications` and `PATCH /me/settings`
 changes it: `always` (default) or `unless_app` (no notification email while this account has the app
 installed; mails with an attachment such as an invoice are always sent). Offer it as a toggle in the app's
 settings.
+
+**Which notifications at all:** `GET /me/notification-preferences` returns `categories` (`key`, `label` in the
+request language, optional `description`), `defaults` (the all-clubs switches, `{category: {push, email}}`) and,
+per club the account belongs to, `clubs[]` with `overrides` (only what that club changes) and `effective` (what
+applies there). No stored switch means on; the in-app inbox is never switchable. Render a category x (Push,
+Email) table for the defaults and one per club, showing `effective`.
+`PATCH /me/notification-preferences` with `{"club_slug": null | "<slug>", "changes": [{"category": "news",
+"push": false}]}` sets the named switches (`push` covers iOS, Android and web push; an omitted switch is left
+alone); `null` writes the defaults, a slug an override for that club. Repeating a call is harmless; an unknown
+category or a club the account does not belong to answers `422 validation_error` and saves nothing.
+`DELETE /me/notification-preferences?club_slug=<slug>&category=news` drops overrides again (back to inherited);
+leave `category` off to drop the whole scope, leave `club_slug` off for the defaults. PATCH and DELETE answer
+with the same body as GET, so the screen can simply re-render. The same switches are on the web app's
+notification settings screen. Android clients use the same endpoints.
+
+**Per person:** each entry of `clubs[]` also has `people` -- `[{member_id, name, is_self, overrides,
+effective}]` for the people the account manages in that club (itself, plus its children when it is a parent
+or guardian). Add `member_id` next to `club_slug` in the PATCH body (or `&member_id=` on DELETE) to switch
+notifications *about* that one person, e.g. just Lou's events. The person's switch beats the club's, which
+beats the defaults; `effective` of a person already merges all three. A `member_id` that is not one of the
+club's `people`, or without `club_slug`, answers `422 validation_error`. Only show a person picker when
+`people` has more than one entry.
+
+**Categories:** each category has a short `description` (request language) to show under its name.
+`android_channel_id` and `android_importance` are for the Android app (one system channel per category);
+iOS ignores them.
+
+**Quiet hours** (account-wide): `GET /me/quiet-hours` answers `{enabled, start: "22:00", end: "07:00",
+timezone, active_now, until}` (defaults when nothing is stored: off, 22:00-07:00, the server's zone; `until`
+is the end of the running window or `null`). `PUT /me/quiet-hours` with `{enabled, start, end, timezone}`
+(`HH:MM`, IANA zone name; `422 validation_error` per field otherwise) replaces it, `DELETE` removes it. During
+the window pushes are held and arrive when it ends; live game updates are dropped instead because they would be
+stale. Critical notifications (a cancelled or same-day changed event) and email ignore quiet hours. Show the
+zone as a picker defaulting to the device's zone.
 
 A person who also has the web app installed with notifications on gets both for now.
 
@@ -384,7 +458,8 @@ supports basic HTML, or a non-scripting `WKWebView`. Crop photos around `focal_x
 
 ### Notifications
 
-`GET /notifications?cursor=…&member_id=…` (newest first), `GET /notifications/unread-count`
+Each item carries `category` (see the push payload; treat unknown values as `general`) and `priority`
+(`normal` or `critical`). `GET /notifications?cursor=…&member_id=…` (newest first), `GET /notifications/unread-count`
 (set the app icon badge from it), `POST /notifications/{id}/read`,
 `POST /notifications/read-all`, and `DELETE /notifications` (clears the inbox for good).
 
@@ -398,10 +473,18 @@ club requirements. `PATCH /members/{id}` with only the fields that change (`firs
 `photo_url` (and `GET /members/{id}/photo`) needs the Bearer token, so load it with your own
 `URLRequest` (not `AsyncImage`). The URL changes when the photo does, so cache it by URL.
 
-**New photo:** `POST /members/{id}/photo` as `multipart/form-data` with a `photo` part (JPEG,
+A person has two pictures. `profile_photo_url` is the self-service profile picture (set from
+the app, visible to everyone in the club, never public); `player_photo_url` is the official
+player picture, which only club managers can change (read-only in the app). `photo_url` is the
+effective one: the profile picture, else the player picture. `GET /members/{id}/photo` serves
+the effective picture; add `?kind=profile` or `?kind=player` to fetch one directly (`player`
+keeps the stricter rule: the person, their guardians, staff, or anyone if public). Use
+`photo_url` for avatars.
+
+**New profile picture:** `POST /members/{id}/photo` as `multipart/form-data` with a `photo` part (JPEG,
 PNG or WebP, at most 10 MB; convert HEIC from the camera to JPEG and downscale to ~1600 px
-first) and optionally `photo_public_consent=true|false`. `DELETE /members/{id}/photo` removes
-it. Both return the updated profile.
+first) and optionally `photo_public_consent=true|false` (about the player picture on the public
+website). `DELETE /members/{id}/photo` removes the profile picture (the player picture stays). Both return the updated profile.
 
 ### Payments & dues
 
@@ -497,7 +580,293 @@ new link and the old one stops working (use it as "reset link" when one leaked).
 `GET /bug-reports` lists them with the RosterChief team's replies (`notes`) and `status`. Add the
 app version and iOS version to the description yourself.
 
-## 9. Other rules
+## 9. Coach screens
+
+The Manager switch of the app. Coach endpoints live on the club host under
+`/teams/{team_id}/…`. The team comes from `GET /context` → `staffed_teams`; the API keeps no
+"active team", so send the id on every call. **A team the account doesn't staff this season is
+`404 not_found`**, the same answer as a team that doesn't exist.
+
+### Who may do what
+
+Every `staffed_teams` item says what the account may do there. Hide a button when its flag is
+false; calling it anyway answers **`403 manager_required`**.
+
+| Field | Meaning |
+|---|---|
+| `role` | `manager`: a management position on the team (head coach, team manager, club admin who staffs it). `coach`: any other staff position (assistant, physio). |
+| `position` | The account's own position name, for display. |
+| `can_manage_attendance` | Check players in, remind silent players. |
+| `can_edit_events` | Create, edit, delete and detach events and series, quick-create locations and opponents. |
+| `can_publish_lineup` | Change and publish the line-up. |
+| `can_edit_roster` | Add, edit and remove players and staff. |
+
+Today all four equal `role == "manager"`. Read the flags, not the role, so a later split needs
+no app update. **Reading is open to every coach**: today, the attendance sheet, events, line-up
+and roster. Financial data is never returned to a coach.
+
+### Today
+
+`GET /teams/{team_id}/today`: `squad_count`; `event` (today's session if one is still current,
+else the next one, as `EventOut`) with `is_today`, `closes_at` (its reply deadline),
+`in_count` (present, selected or maybe), `out_count` (absent, excused, not selected) and
+`silent_count`; and `needs_you`, a list of `{type, event_id, title, start, count}`:
+
+* `silent_players`: `count` players haven't answered for `event_id`. Open its attendance sheet.
+* `unpublished_lineup`: the game or tournament `event_id` has no published line-up (`count` is
+  null). Checked for the team's next five games, not only `event`.
+
+Ignore a `type` you don't know.
+
+### Attendance
+
+`GET /teams/{team_id}/events/{event_id}/attendance?filter=responded|silent|declined|all` returns
+`{event, filter, counts, items}`. `counts` always cover everybody; `items` follow `filter`
+(default `responded`: in or maybe, the web default, since nobody expects a silent or declined
+player to show up). One row per person: `attendance_id`, `member_id`, `first_name`,
+`last_name`, `jersey_number`, `position`, `status`, `note` (the reason the player gave),
+`showed_up` (null until checked in), `coach_note`, `answered_by_coach` and `photo_url` (null when
+there is no photo or the account may not see it; fetch it with the bearer token like the member
+photos).
+
+`coach_note` is the coaches' **private** note: a string (empty when none) for managers
+(`can_manage_attendance`), always `null` for any other coach, whatever it says. It is never shown to
+the player or their guardians, never in a member endpoint or the public API, and never in a
+notification, push or email. `answered_by_coach` is true while the current answer was set by a coach
+(show "set by coach"); the player answering themselves, or a reset, makes it false.
+
+`POST …/check-ins` `{"items": [{"attendance_id", "showed_up": true|false|null}]}` records the
+check-in (`null` clears it). Send only the rows that changed; repeating a call changes nothing.
+An `attendance_id` that isn't a row of this event fails the whole call with
+**`422 unknown_attendance`** (`fields.items` lists the ids) and saves nothing. The response is
+the sheet again; pass the same `filter` as a query parameter to get the list you are showing.
+**Managers only.**
+
+`POST /teams/{team_id}/events/{event_id}/attendance/{attendance_id}/status` sets a player's In/Out
+answer and/or the private note, and answers the sheet (same `?filter=` as above, so replace your
+list with it). **Managers only**, accepts an `Idempotency-Key`.
+
+```json
+{"status": "absent", "coach_note": "Called in sick, back next week", "notify": false}
+```
+
+* `status`: `present`, `absent`, `maybe` or `no_response` (resets the answer). Anything else is
+  `422 invalid_status`. It works after the reply deadline and after the event started.
+* `coach_note`: up to 500 characters; leave it out or send `null` to keep it, `""` to clear it.
+* `notify` (default `false`): tell the player their answer was changed (an inbox notification,
+  push/email as usual: "Your coach set your answer for Derby to “Out”."). Without it the player is
+  not told. The coach note is never part of the text. A call that changes nothing never notifies.
+* The player's own `note` (their reason) stays as they wrote it, except that `present` and
+  `no_response` clear it, as the player's own In would.
+* **Published line-up:** a player who is `selected` can only be marked `absent`. That works like
+  their own drop-out: they become `absent`, their pick stays in the line-up for you to swap
+  (`PUT …/lineup`), and the event's *other* managers get a "Line-up dropout" notification. The
+  player is not notified unless you pass `notify`. `present` keeps them selected (only the note
+  changes); `maybe` and `no_response` are `422 invalid_status`.
+
+Errors: `403 manager_required` (not a manager of the team), `404 not_found` (not your team, not
+this event's row), `409 event_cancelled`, `422 invalid_status`, `422 validation_error` (note over
+500 characters).
+
+```json
+{"event": {…}, "filter": "responded", "counts": {"total": 14, "responded": 9, "silent": 2, "declined": 3, "checked_in": 0},
+ "items": [{"attendance_id": "…", "member_id": "…", "first_name": "Ann", "last_name": "Aal", "jersey_number": 7,
+            "position": "Forward", "status": "present", "note": "", "showed_up": null,
+            "coach_note": "Spoke to her mum", "answered_by_coach": true, "photo_url": null}]}
+```
+
+`POST …/remind-silent` sends the reminder to everyone still silent and answers
+`{"notified": n}` (0 when everybody answered). It notifies, so send an `Idempotency-Key`: a
+retry with the same key doesn't remind twice. **Managers only.**
+
+**Push to players for a reminder:** an ordinary inbox notification (`kind: "notification"`,
+`target: {"type": "event", "id": <event id>}`, `thread-id` = the club slug), titled with the
+event and worded "Reminder: Training on Tue 14 Oct, 18:30 still needs your answer.", in the
+device's language.
+
+### Events and series
+
+All under `/teams/{team_id}`. Reading is open to every coach; **writes are managers only**
+(`can_edit_events`, else `403 manager_required`). Events use the member app's `EventOut` plus
+what editing needs (`CoachEventOut`): `series` (`{id, rrule, frequency, interval, weekdays,
+detached}`, null for a one-off), `location_id`, `opponent_id`, `is_friendly`, `max_referees`,
+`max_officials` (null when the club doesn't use officials), `invited_member_ids` and
+`excluded_member_ids`.
+
+| Call | |
+|---|---|
+| `GET …/events?from&to&kind&cursor&limit` | The team's events, soonest first from `from` (default now; pass a past time to look back), cancelled ones included. `{items, next_cursor}`. |
+| `GET …/events/{id}` | One event. |
+| `POST …/events` | Create. `kind` is `training`, `game`, `tournament` or `meeting`. The audience is the team plus `invited_member_ids` minus `excluded_member_ids` (people from `GET …/roster` once that ships). `notify` (default true, as on the web) tells everyone invited. Send an `Idempotency-Key`. |
+| `PATCH …/events/{id}` | Send only what changes; `null` clears `end`, `gathering`, `deadline`, `location_id`, `opponent_id`. Also takes `score_for`, `score_against`, `is_live`. Answers `{event, occurrences_updated}`. |
+| `DELETE …/events/{id}?keep_record&notify` | A one-off event is deleted. An occurrence of a series is removed and not regenerated, or with `keep_record=true` kept and marked `cancelled`. `notify=true` tells everyone invited. `204`. |
+| `POST …/events/{id}/detach` | The occurrence stops following its series. |
+| `GET/POST …/series`, `GET/PATCH/DELETE …/series/{id}` | The recurrence itself: `frequency` (`weekly` or `monthly`), `interval`, `weekdays` (`MO`…`SU`), `dtstart`, `until`, `duration_minutes`, `gathering_minutes_before`, `deadline_minutes_before`, plus title, kind, location, opponent and the invited / excluded people. Creating generates the next 90 days; a nightly job extends it. Deleting removes every occurrence, past ones too: to keep history, `PATCH` `until`. |
+| `GET/POST …/locations`, `GET/POST …/opponents` | Pickers (`{items}`, `?q=`) and quick create. Send an `Idempotency-Key` on the create, or a double tap makes two. |
+
+**`scope` on `PATCH …/events/{id}`** decides what happens to the rest of a series:
+
+* `this` (default): only this event. If the change touches something the series sets (title,
+  kind, place, opponent, end / gathering / deadline, invited / excluded), the occurrence is
+  **detached** so the next series edit doesn't undo it (`series.detached` turns true).
+* `this_and_following`: this and every later occurrence. The series is split in two: the old one
+  stops just before this occurrence, a new one (with the change) takes over. Earlier occurrences
+  are untouched.
+* `all`: every upcoming occurrence that still follows the series (not detached ones, not past
+  ones); the series' template changes too.
+
+`start`, `competition`, `is_friendly`, `max_referees`, `max_officials`, the scores and `is_live`
+are never part of a series template, so they always change this event only. `all` or
+`this_and_following` on a one-off event: `422 not_in_series`. Changing `end`, `gathering` or
+`deadline` for a series sets its durations from *this* occurrence (minutes before / after its
+start). `PATCH …/series/{id}` is the way to change the pattern (weekdays, interval, `dtstart`): it
+only decides future dates, existing occurrences keep theirs, and ones that no longer fit stay until
+deleted.
+
+**Validation** is the web form's: a `422` lists `fields` named after the JSON keys
+(`location_id`, `invited_member_ids`, `competition`, …; `non_field_errors` for the rest). A game
+is called `<team> vs <opponent>` automatically (`<opponent> vs <team>` when the location is not
+the club's own ground); another kind with no `title` is called after its kind.
+
+**Push to players:** a new event (`notify`) is an inbox push, `kind: "notification"`, `target:
+{"type": "event", "id"}`: "New game: Tue 14 Oct, 18:30. Let us know if you can make it.", sent
+in the background to everyone who still has to answer. A change (`notify` on `PATCH`) says
+"Game changed: it is now on Tue 14 Oct, 18:30." with the same target. A cancel (`notify` on
+`DELETE`) says "Game on Tue 14 Oct, 18:30 has been cancelled."; its target is the event when it
+was kept, otherwise `{"type": "calendar"}` since the event is gone. A series never notifies per
+occurrence. Nothing is sent unless asked for, apart from a new single event.
+
+### Line-up
+
+For games and tournaments (`404` for other kinds). All under `/teams/{team_id}/events/{event_id}/lineup`.
+
+* `GET`: a **pure read**, any coach. Nothing is created by asking. `status` is `none` (nothing
+  saved), `draft`, `scheduled` (`scheduled_publish_at`) or `published` (`published_at`);
+  `selected_count`; `pending` (who publishing now would tell: `selected_member_ids`, `dropped_member_ids`;
+  empty when the saved picks equal what players were last told); and `members`, everybody invited,
+  ordered by `position_order`, then name. Each member: `first_name`, `last_name`, `jersey_number`,
+  `position`, `rsvp_status`, `note`, `available` (false for `absent`, `excused`, `no_response`: they
+  can't be picked), `selected`, `can_drop_out` (selected in a *published* line-up and the event has
+  not started: the player can still pull out in their own app), `attendance_rate` (percent, this
+  season; null before any reply) and `photo_url`.
+* `PUT {"selected_member_ids": [...]}`: replaces the whole set of picks and answers with the saved
+  state. **Saving only stores picks**: nobody is told and nobody's answer changes, even when the
+  line-up is already published. An id that isn't invited or isn't available fails the whole call
+  with `422 invalid_selection` (`fields.selected_member_ids` lists them). **Managers only**
+  (`can_publish_lineup`).
+* `POST …/publish {"mode": "now" | "schedule" | "cancel", "at"}`, **managers only**. Answers
+  `{lineup, notified}`.
+  * `now` writes the picks into the players' answers (`selected` / `not_selected`; players who were
+    `absent`, `excused` or silent stay as they are) and tells **only the players whose situation
+    changed since the last publish**; `notified` lists exactly who. A repeat publish with no changes
+    notifies nobody. The first publish with nobody picked is `409 lineup_empty`.
+  * `schedule` needs `at`, in the future (`422` with `fields.at` otherwise) and picks already saved;
+    the server publishes by itself at that time with the same rules.
+  * `cancel` drops a scheduled publish.
+  Send an `Idempotency-Key`.
+
+**Push to players:** an inbox push, `kind: "notification"`, `target: {"type": "event", "id"}`.
+Newly selected: title "Line-up published", "You're in the line-up for Derby." Dropped since the
+last publish: title "Line-up updated", "The line-up for Derby has changed -- you're not in it this
+time." (both in the device's language). When a selected player later pulls out (`dropout`), the
+event's managers get "Line-up dropout" the same way; reload the line-up when you see it.
+
+### Roster
+
+Under `/teams/{team_id}`. Reading is open to every coach; **changes are managers only**
+(`can_edit_roster`). It is this season's roster: a past season's spots are not reachable.
+**No phone numbers, e-mail addresses or birth dates** are returned (API.md §8); the web's tap-to-call
+buttons have no equivalent here.
+
+* `GET …/roster` → `{season_id, players, staff, player_positions, staff_positions}`. A player:
+  `membership_id`, `member_id`, names, `position_id` / `position` (empty until set),
+  `jersey_number`, `is_captain`, `is_alternate_captain`, `sign_up_pending` (the club hasn't approved
+  the sign-up yet) and `photo_url`. A staff member: `assignment_id`, names, `position_id`,
+  `position`, `is_manager`, `is_me`, `photo_url`. The two position lists are what `position_id` may
+  be, for the pickers.
+* `GET …/roster/candidates?role=player|staff&filter=all|suggested|no_team&q&cursor&limit` →
+  `{items: [{member_id, first_name, last_name, photo_url, suggestion_reason, birth_year,
+  current_teams: [{id, name}]}], next_cursor}`: active club members (not guardians) not yet on the
+  roster (or, for `role=staff`, the staff). Sorted by last name, first name, id; the cursor is stable
+  under that order. `suggested` lists only people with a `suggestion_reason`, best first, then by
+  name: `age_match` (born in a birth year the team's age range covers: season start year minus
+  `age_max` … minus `age_min`; a missing bound is open), `previous_team` (on this team last season),
+  `feeder_team` (on a team that feeds into this one this season), `age_adjacent` (the one birth year
+  just outside the range). Never anyone already on this team's roster. `no_team`: on no team's
+  roster this season (being staff does not count). `suggestion_reason` is also set under
+  `all`/`no_team` for players, null when nothing applies and for `role=staff`. `birth_year` is the
+  year only (null when unknown). `current_teams` are this season's rosters the person is on, by
+  name; empty means no team. `filter` is for players only.
+* `POST …/roster/players {member_ids}`: adds them with no position or number. Anyone already on the
+  roster is left alone, so a retry is harmless. Anyone who is **not a candidate** fails the whole call
+  with `422 not_a_candidate` (`fields.member_ids`) and nothing is added. Answers the roster.
+* `POST …/roster/staff {member_ids, position_id}`: the same, with one staff position for all of them.
+  A position that isn't a staff position is `422` with `fields.position_id`.
+* `PATCH …/roster/{membership_id} {position_id, jersey_number, is_captain, is_alternate_captain}`:
+  only what is sent changes, `jersey_number: null` clears the number. A taken number (or one taken in
+  the team's number pool) is **`422` with `fields.jersey_number`**; a player must keep a position
+  (`fields.position_id`). Answers the roster.
+* `DELETE …/roster/{membership_id}` removes the spot (the person stays a club member). `DELETE
+  …/staff/{assignment_id}` removes a staff member: removing **yourself** is `403 self_removal`. Both
+  `204`.
+* `409 no_current_season` when the club has no season covering today.
+
+The plan listed one `DELETE …/roster/{id}` for both; players and staff are separate tables, so staff
+have their own path (`/staff/{assignment_id}`).
+
+**Push:** adding a player invites them to the team's upcoming events; they get one inbox push "New
+events on your calendar" (`target: {"type": "calendar"}`). Nothing else is sent for roster changes.
+
+### News
+
+* `POST /teams/{team_id}/news` is `multipart/form-data`: `title`, `body` (Markdown) and any number of
+  `photos` files (at most 10; JPEG, PNG or WebP, each at most 10 MB; HEIC: convert to JPEG first).
+  The first photo is the cover. It answers **`201`** with the post and `status: "pending_review"`: an
+  editor publishes it, so it is **not live**, and the editors are told. It is internal (the team's
+  families, in the apps); an editor can widen it on the web. Send an `Idempotency-Key` so a retry
+  doesn't post twice. A bad file fails the whole call with `422` (`fields.photos` names the file) and
+  nothing is saved.
+* Who may post: `permissions.can_add_news` in `GET /context` (club admins, editors and team managers).
+  A team's physio or assistant gets `403 forbidden`: hide the button. Any staff of the team can read.
+* `GET /teams/{team_id}/news?cursor&limit` lists **your own** submissions for the team, newest first:
+  `{id, title, body, status, published_at, created, teams, photos}`. `status`:
+  * `pending_review`: show "waiting for review".
+  * `published`: live (a `published_at` in the future means scheduled).
+  * `draft`: an editor took it out of the queue or unpublished it. **There is no rejection reason**:
+    the web has no "send back with a note" step, so nothing is stored to return. Show "Not published;
+    ask the editor", not a reason. (Adding one is a web change first.)
+* Nothing is pushed to the coach when their post is published or returned.
+
+### Evaluations
+
+Staff-only scoring of players against the club's checklists. **Not under `/teams/{team_id}`**: the web
+grants evaluations club-wide (`permissions.can_manage_evaluations`, the evaluation-manager grant, which a
+technical director can hold without staffing any team) and lets the holder evaluate anyone in the
+club, so a team in the path would wrongly 404 them. The gate: the club's `evaluations` module on
+(`features.evaluations`, else `404 feature_disabled`) and the grant (else `403 forbidden`). Show the
+entry point only when both hold. A player, parent or ordinary coach never receives evaluation data.
+
+* `GET /evaluations/checklists` → `{items: [{slug, name, description, fields}], file_accept,
+  max_file_bytes}`. Only active checklists that have questions. `fields` are the same objects as a
+  form's (`key`, `label`, `type`, `required`, `help_text`, `section`, `options`): render them like a
+  form, grouping by `section`. A **rating scale is a `choice` field** whose `options` are the steps; there
+  is no separate scale type.
+* `POST /players/{member_id}/evaluations` `{"checklist_slug", "answers": {key: value}}` (or multipart,
+  for checklists with `file` fields) → `201` with the evaluation. **`checklist_slug` is always
+  required**, even when the club has only one checklist (the web's auto-pick is a screen shortcut).
+  `422` carries `fields` per question `key`; `404` for an unknown or inactive checklist;
+  `409 checklist_not_configured` for one with no questions; `409 no_current_season`. The evaluator is
+  the signed-in account. Several coaches can each file one for the same player and season. Send an
+  `Idempotency-Key`.
+* `GET /players/{member_id}/evaluations?cursor&limit` → `{items: [{id, checklist, season_id, evaluator,
+  created}], next_cursor}`, everybody's, newest first. `GET …/evaluations/{id}` adds `answers`: every
+  question of the version the evaluation was scored against (not the checklist's current version),
+  answered or not (`value` null).
+* `member_id` can be anyone attached to the club; others are `404`.
+
+No push is sent for evaluations.
+
+## 10. Other rules
 
 * **Maintenance:** any call can answer **503 `maintenance`** with `Retry-After`. Show a
   maintenance screen and retry later.

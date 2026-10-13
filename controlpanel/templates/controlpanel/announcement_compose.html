@@ -41,7 +41,9 @@
                         <dd>
                             {% if preview.club %}{{ preview.club.name }}{% else %}{% trans "Every club" %}{% endif %}
                             &middot;
-                            {% blocktrans count counter=audience %}{{ counter }} subscribed device will get a push{% plural %}{{ counter }} subscribed devices will get a push{% endblocktrans %}
+                            {{ audience_label }}
+                            &middot;
+                            {% blocktrans count counter=audience_count %}{{ counter }} person will be notified{% plural %}{{ counter }} people will be notified{% endblocktrans %}
                         </dd>
                     </div>
                     <div>
@@ -61,10 +63,12 @@
                     <input type="hidden" name="title" value="{{ form.title.value }}">
                     <input type="hidden" name="message" value="{{ form.message.value }}">
                     <input type="hidden" name="club" value="{{ form.club.value|default:"" }}">
+                    <input type="hidden" name="audience" value="{{ form.audience.value|default:"everyone" }}">
                     <input type="hidden" name="scheduled_for" value="{{ form.scheduled_for.value|default:"" }}">
                     <input type="hidden" name="confirmed" value="1">
                     <a class="btn btn-outline gap-2" href="{% url 'controlpanel:announcement_compose' %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
                     <button class="btn btn-primary gap-2" type="submit">{% lucide "send" size=16 %} {% trans "Confirm & push" %}</button>
+                    <button class="btn btn-outline gap-2" type="submit" name="test" value="1">{% lucide "mail" size=16 %} {% trans "Send a test to me" %}</button>
                 </form>
             {% else %}
                 <h2 class="card-title">{% lucide "megaphone" size=18 %} {% trans "New announcement" %}</h2>
@@ -77,9 +81,11 @@
                     {% form_field form.title %}
                     {% form_field form.message %}
                     {% form_field form.club %}
+                    {% form_field form.audience %}
                     {% form_field form.scheduled_for %}
                     <div class="card-actions justify-start">
                         <button class="btn btn-primary gap-2" type="submit">{% lucide "arrow-right" size=16 %} {% trans "Review" %}</button>
+                        <button class="btn btn-outline gap-2" type="submit" name="test" value="1">{% lucide "mail" size=16 %} {% trans "Send a test to me" %}</button>
                     </div>
                 </form>
             {% endif %}

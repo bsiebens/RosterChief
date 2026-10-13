@@ -10,10 +10,25 @@ from rosterchief.base import UUIDModel
 class Announcement(UUIDModel):
     """A one-off platform-wide (or single-club) message, pushed by a platform
     superuser from the control panel -- see announcements.services. Delivered two
-    ways once ``status`` is SENT: a real web push to every subscribed device
+    ways once ``status`` is SENT: a notification (inbox, native/web push, email) to every account holder
     (announcements.services.publish) and a one-time pop-up shown the next time
     each targeted, not-yet-shown user loads the management or mobile app (see
     AnnouncementSeen below, and announcements.views.PendingAnnouncementView).
+
+    Who is reached (``audience``, always limited to members holding a login, see
+    announcements.services.audience_members; "attached to a club" = a club membership row,
+    a team membership, a staff assignment or a club role, in any season):
+
+    * everyone -- every account-holder attached to the club.
+    * admins -- holders of a ClubRole of admin, editor or member admin in the club.
+    * staff -- members with a StaffAssignment on one of the club's teams in a season
+      covering today (the coaches, managers and other team staff).
+    * parents -- attached members with a FamilyMembership of role parent or guardian.
+    * players -- members on the roster (TeamMembership) of one of the club's teams in a
+      season covering today.
+
+    With ``club`` blank, a person in several clubs is notified once, in the first club
+    (by Club.created, then pk) whose audience contains them.
 
     Never created directly by the compose form -- announcements.services.
     create_and_confirm is the only path that creates a row, and only once a
@@ -26,12 +41,27 @@ class Announcement(UUIDModel):
         SENT = "sent", _("Sent")
         CANCELLED = "cancelled", _("Cancelled")
 
+    class Audience(models.TextChoices):
+        EVERYONE = "everyone", _("Everyone")
+        ADMINS = "admins", _("Club administrators")
+        STAFF = "staff", _("Coaches and staff")
+        PARENTS = "parents", _("Parents and guardians")
+        PLAYERS = "players", _("Players")
+
     title = models.CharField(_("title"), max_length=255)
     message = models.TextField(_("message"))
 
     #: Left blank to target every club on the platform. Set to target one club's
-    #: own people only -- see announcements.services.audience_subscriptions.
+    #: own people only -- see announcements.services.audience_members.
     club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="announcements", null=True, blank=True, verbose_name=_("club"), help_text=_("Leave blank to reach every club."))
+
+    audience = models.CharField(
+        _("audience"),
+        max_length=20,
+        choices=Audience.choices,
+        default=Audience.EVERYONE,
+        help_text=_("Who, within the chosen club(s), receives it. Only people with an account are reached."),
+    )
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
 

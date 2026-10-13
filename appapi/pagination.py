@@ -72,3 +72,40 @@ def paginate(queryset, *, sort_field: str, cursor: str | None = None, limit: int
     items = rows[:limit]
     next_cursor = _encode(getattr(items[-1], field), items[-1].pk) if len(rows) > limit else None
     return Page(items=items, next_cursor=next_cursor)
+
+
+def paginate_keyset(queryset, *, fields: list[str], cursor: str | None = None, limit: int | None = None) -> Page:
+    """Like ``paginate`` but over several ascending sort fields (the last should be unique, usually
+    ``pk``): rows come back ordered by ``fields`` and the cursor carries every field's value of the
+    last row, so the order stays stable however many rows share the leading values. Fields may be
+    annotations. Values must be JSON-serialisable (str/int)."""
+    limit = clamp_limit(limit)
+    queryset = queryset.order_by(*fields)
+    if cursor:
+        values = _decode_values(cursor, len(fields))
+        after = Q()
+        for index, field in enumerate(fields):
+            step = Q(**{f"{field}__gt": values[index]})
+            for earlier in range(index):
+                step &= Q(**{fields[earlier]: values[earlier]})
+            after |= step
+        queryset = queryset.filter(after)
+
+    rows = list(queryset[: limit + 1])
+    items = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = items[-1]
+        raw = json.dumps([str(getattr(last, field)) if field == "pk" else getattr(last, field) for field in fields], separators=(",", ":")).encode()
+        next_cursor = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return Page(items=items, next_cursor=next_cursor)
+
+
+def _decode_values(cursor: str, count: int) -> list:
+    try:
+        values = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except ValueError, TypeError:
+        values = None
+    if not isinstance(values, list) or len(values) != count:
+        raise ApiError(400, "invalid_cursor", _("This page link is no longer valid. Start from the first page.")) from None
+    return values

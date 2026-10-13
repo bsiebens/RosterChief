@@ -18,6 +18,7 @@ from rosterchief.client_ip import client_ip
 from shop.models import CartItem, Order, ProductCategory
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
+from shop.services.inventory import annotate_availability, annotate_cart_variants
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 
 from ..errors import ApiError
@@ -46,7 +47,7 @@ def _image(request, image) -> str | None:
 
 
 def _variant(variant) -> dict:
-    return {"id": variant.pk, "name": variant.name, "price": money(variant.effective_price)}
+    return {"id": variant.pk, "name": variant.name, "price": money(variant.effective_price), "in_stock": getattr(variant, "in_stock", True)}
 
 
 def _product(request, product) -> dict:
@@ -59,6 +60,7 @@ def _product(request, product) -> dict:
         "price": money(product.price),
         "category_id": product.category_id,
         "personalization_enabled": product.personalization_enabled,
+        "in_stock": getattr(product, "in_stock", True),
         "variants": [_variant(variant) for variant in product.variants.all() if variant.is_active],
     }
 
@@ -66,7 +68,7 @@ def _product(request, product) -> dict:
 @router.get("/shop/products", response={200: CatalogOut, **OPEN_ERRORS}, summary="Catalogue")
 def products(request):
     scope = _shop_scope(request)
-    items = list(catalog(scope.club).prefetch_related("variants").order_by("name"))
+    items = annotate_availability(catalog(scope.club).prefetch_related("variants").order_by("name"))
     used = {product.category_id for product in items}
     categories = [{"id": category.pk, "name": category.name} for category in ProductCategory.objects.filter(club=scope.club, pk__in=used).order_by("name")]
     return {"categories": categories, "items": [_product(request, product) for product in items]}
@@ -75,11 +77,12 @@ def products(request):
 @router.get("/shop/products/{slug}", response={200: ProductOut, **OPEN_ERRORS}, summary="One product")
 def product_detail(request, slug: str):
     scope = _shop_scope(request)
-    return _product(request, get_object_or_404(catalog(scope.club).prefetch_related("variants"), slug=slug))
+    return _product(request, annotate_availability([get_object_or_404(catalog(scope.club).prefetch_related("variants"), slug=slug)])[0])
 
 
 def _cart(request, scope, code: str = "") -> dict:
     summary = cart_summary(scope.club, request.user, code=code, member=scope.me, ip=client_ip(request))
+    annotate_cart_variants(summary["items"])
     totals = summary["totals"]
     discount = summary["discount"]
     return {
@@ -134,16 +137,19 @@ def add_item(request, payload: CartItemIn):
     beneficiary = scope.person(payload.beneficiary_id) if payload.beneficiary_id else None
 
     def work():
-        add_to_cart(
-            scope.club,
-            request.user,
-            product,
-            quantity=payload.quantity,
-            variant=variant,
-            beneficiary=beneficiary,
-            personalization_number=payload.personalization_number,
-            personalization_name=payload.personalization_name,
-        )
+        try:
+            add_to_cart(
+                scope.club,
+                request.user,
+                product,
+                quantity=payload.quantity,
+                variant=variant,
+                beneficiary=beneficiary,
+                personalization_number=payload.personalization_number,
+                personalization_name=payload.personalization_name,
+            )
+        except CheckoutError as error:
+            raise ApiError(409, "out_of_stock", str(error)) from error
         return 201, _cart(request, scope)
 
     return idempotent(request, work)

@@ -23,6 +23,7 @@ from club.models import Club, ClubRole, Season
 from events.services.import_sources import CheckResult, check_entry, source_enabled, sources_for, update_entry
 from features.commands import ScheduledJobCommand
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from teams.models import Team
 
@@ -133,6 +134,6 @@ class Command(ScheduledJobCommand):
         def body():
             return build_body([describe_result(team, result) for team, result in changes])
 
-        notify_members(admins, club=club, title=title, body=body)
+        notify_members(admins, club=club, title=title, body=body, category=NotificationCategory.ADMIN)
         self.stdout.write(f"{club}: notified {len(admins)} admin(s) about {len(changes)} changed fixture source(s).")
         return True

@@ -11,6 +11,12 @@ from .auth import app_auth
 from .errors import install_handlers
 from .routers.account import router as account_router
 from .routers.club import router as club_router
+from .routers.coach import router as coach_router
+from .routers.coach_evaluations import router as coach_evaluations_router
+from .routers.coach_events import router as coach_events_router
+from .routers.coach_lineup import router as coach_lineup_router
+from .routers.coach_news import router as coach_news_router
+from .routers.coach_roster import router as coach_roster_router
 from .routers.forms import router as forms_router
 from .routers.inbox import router as inbox_router
 from .routers.member import router as member_router
@@ -55,3 +61,9 @@ app_api.add_router("/", forms_router)
 app_api.add_router("/", support_router)
 app_api.add_router("/", shop_router)
 app_api.add_router("/", registration_router)
+app_api.add_router("/", coach_router)
+app_api.add_router("/", coach_events_router)
+app_api.add_router("/", coach_lineup_router)
+app_api.add_router("/", coach_roster_router)
+app_api.add_router("/", coach_news_router)
+app_api.add_router("/", coach_evaluations_router)

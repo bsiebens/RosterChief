@@ -51,6 +51,69 @@ class AccountSettingsIn(Schema):
     email_notifications: Literal["always", "unless_app"]
 
 
+class NotificationCategoryOut(Schema):
+    key: str = Field(description="Stable identifier, e.g. `news`. Use it in PATCH/DELETE.")
+    label: str = Field(description="Name for the switch, in the request language.")
+    description: str | None = Field(None, description="Short explanation of what this category covers, in the request language.")
+    android_channel_id: str | None = Field(None, description="Android only (ignored on iOS): id of the system notification channel for this category. Create one channel per category at startup.")
+    android_importance: str | None = Field(None, description="Android only (ignored on iOS): importance of that channel, `default` or `high`.")
+
+
+class NotificationOverridesOut(Schema):
+    push: bool | None = None
+    email: bool | None = None
+
+
+class NotificationPersonPreferencesOut(Schema):
+    member_id: uuid.UUID
+    name: str
+    is_self: bool = Field(description="The account holder; otherwise a child the account is a parent or guardian of in this club.")
+    overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches set for this person in this club (for notifications about them).")
+    effective: dict[str, dict[str, bool]] = Field(description="What applies for this person: the club's effective switches with the person's overrides on top.")
+
+
+class NotificationClubPreferencesOut(Schema):
+    club_slug: str
+    club_name: str
+    overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.")
+    effective: dict[str, dict[str, bool]] = Field(description="What applies in this club: the defaults with the overrides on top, `{category: {push, email}}`.")
+    people: list[NotificationPersonPreferencesOut] = Field(description="The people this account manages in this club (itself and its children), each with their own switches.")
+
+
+class NotificationPreferencesOut(Schema):
+    categories: list[NotificationCategoryOut]
+    defaults: dict[str, dict[str, bool]] = Field(description="The all-clubs switches, `{category: {push, email}}`. No stored row means on. The in-app inbox is never switchable.")
+    clubs: list[NotificationClubPreferencesOut]
+
+
+class NotificationChangeIn(Schema):
+    category: str
+    push: bool | None = Field(None, description="Omit to leave the push switch (iOS, Android and web push) as it is.")
+    email: bool | None = Field(None, description="Omit to leave the email switch as it is.")
+
+
+class NotificationPreferencesIn(Schema):
+    club_slug: str | None = Field(None, description="`null`: the all-clubs defaults. A club slug: an override for just that club.")
+    member_id: uuid.UUID | None = Field(None, description="With `club_slug`: a switch for notifications about just this person (one of `people` of that club). 422 for anyone else, or without `club_slug`.")
+    changes: list[NotificationChangeIn]
+
+
+class QuietHoursOut(Schema):
+    enabled: bool
+    start: str = Field(description="`HH:MM`, 24 hours, in `timezone`.")
+    end: str = Field(description="`HH:MM`. Earlier than `start` means the window crosses midnight (22:00 to 07:00).")
+    timezone: str = Field(description="IANA zone name, e.g. `Europe/Brussels`.")
+    active_now: bool = Field(description="The window is open right now.")
+    until: datetime.datetime | None = Field(None, description="When the current window ends (ISO-8601 with offset); null when not active.")
+
+
+class QuietHoursIn(Schema):
+    enabled: bool
+    start: str = Field(description="`HH:MM`.")
+    end: str = Field(description="`HH:MM`.")
+    timezone: str = Field(description="IANA zone name.")
+
+
 class PersonOut(Schema):
     id: uuid.UUID
     first_name: str
@@ -115,13 +178,24 @@ class DeviceIn(Schema):
     push_token: str = Field(min_length=1, max_length=512, description="The APNs device token as a hex string (iOS) or the FCM registration token (Android).")
     app_version: str = Field("", max_length=32)
     locale: str = Field("", max_length=16, description="The app's language, e.g. `nl` or `en`; push texts are written in it.")
+    push_to_start_token: str | None = Field(None, max_length=512, description="iOS 17.2+: the ActivityKit push-to-start token (hex), so the server can start a Live Activity. Omit to leave the stored one unchanged; send an empty string to clear it.")
+
+
+class LiveActivityIn(Schema):
+    installation_id: str = Field(min_length=8, max_length=64, description="The install running the activity (the one registered with `POST /devices`).")
+    activity_token: str = Field(min_length=1, max_length=512, description="The activity's ActivityKit push token (hex). It changes over an activity's life: send it again whenever it does.")
+
+
+class LiveActivityOut(Schema):
+    event_id: uuid.UUID
+    installation_id: str
 
 
 class DeviceOut(Schema):
     installation_id: str
     platform: str
     environment: str
-    push_enabled: bool = Field(description="False until the server can deliver pushes to this device (SNS configured, token accepted).")
+    push_enabled: bool = Field(description="False while the server cannot deliver pushes to this device (APNs credentials not configured, a platform that is not served yet, or the token was reported dead -- registering again revives it).")
 
 
 # --- club plane ------------------------------------------------------------------------
@@ -142,6 +216,17 @@ class TeamRefOut(Schema):
     id: uuid.UUID
     name: str
     short_name: str
+
+
+class StaffedTeamOut(TeamRefOut):
+    role: Literal["coach", "manager"] = Field(
+        description="`manager`: the account holds a management position on this team this season (or is a club admin who also staffs it). `coach`: any other staff position (assistant, physio, ...). Treat an unknown value as `coach`."
+    )
+    position: str = Field(description="The account's own position on this team, as the club names it (for example `Head coach`). Display only.")
+    can_manage_attendance: bool = Field(description="Check players in and remind silent players. Without it these answer `403 manager_required`; the attendance list is still readable.")
+    can_edit_events: bool = Field(description="Create, edit, delete and detach events and series, quick-create locations and opponents.")
+    can_publish_lineup: bool = Field(description="Change and publish the line-up. Reading it needs no flag.")
+    can_edit_roster: bool = Field(description="Add, edit and remove roster players and staff. Reading the roster needs no flag.")
 
 
 class PermissionsOut(Schema):
@@ -171,7 +256,7 @@ class ContextOut(Schema):
     season: SeasonOut | None = Field(description="The club's current season, if one covers today.")
     me: PersonOut | None
     managed_people: list[ManagedPersonOut] = Field(description="Who the account acts for here: themselves first, then their children. Pass one of these ids as `member_id`.")
-    staffed_teams: list[TeamRefOut] = Field(description="Teams the account coaches or staffs this season (coach endpoints take a team id from here).")
+    staffed_teams: list[StaffedTeamOut] = Field(description="Teams the account coaches or staffs this season, with the account's role and what it may do on each. Coach endpoints take a team id from here; any other team is `404`.")
     permissions: PermissionsOut
     features: ClubFeatures
     unread_notifications: int = Field(description="Unread notifications across all managed people, for the app badge.")
@@ -514,6 +599,13 @@ class NotificationTextOut(Schema):
 class NotificationOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
+    category: str = Field(
+        description=(
+            "What it is about: `news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`, `admin`, `announcement`, `game` or `general` (older rows: `general`). "
+            "Use it for an icon or a filter; unknown values should be treated as `general`."
+        )
+    )
+    priority: str = Field(description="`normal` or `critical` (a cancelled or same-day changed event).")
     title: str = Field(description="English; same as translations.en.title.")
     body: str = Field(description="English; same as translations.en.body.")
     translations: dict[str, NotificationTextOut] = Field(description="Title and body per language code (`en`, `nl`, ...). A language without a translation (older notifications, user-written text) carries the English text.")
@@ -558,8 +650,10 @@ class ProfileOut(Schema):
     email: str
     phone: str | None = Field(description="E.164, e.g. `+32470123456`.")
     emergency_phone: str | None
-    photo_url: str | None = Field(description="GET it with the Bearer token; null without a photo.")
-    photo_public_consent: bool = Field(description="The photo may appear on the club's public website.")
+    photo_url: str | None = Field(description="The effective picture: the profile picture, else the player picture. GET it with the Bearer token; null without a photo.")
+    profile_photo_url: str | None = Field(description="The self-service profile picture (set with `POST /members/{id}/photo`); visible to everyone in the club, never public. Null without one.")
+    player_photo_url: str | None = Field(description="The official player picture, set by club managers only (read-only here). Null without one.")
+    photo_public_consent: bool = Field(description="The player picture may appear on the club's public website (the profile picture never does).")
     guardians: list[GuardianOut]
     teams: list[ProfileTeamOut] = Field(description="Current season.")
     open_requirements: list[str] = Field(description="Club requirements still open this season (e.g. a medical form).")
@@ -724,6 +818,7 @@ class VariantOut(Schema):
     id: uuid.UUID
     name: str = Field(description="One free-text option, e.g. `M` or `Medium — Red`.")
     price: Money
+    in_stock: bool = Field(default=True, description="False when this option is inventory managed and sold out: it can't be added to the cart.")
 
 
 class ProductOut(Schema):
@@ -735,6 +830,7 @@ class ProductOut(Schema):
     price: Money = Field(description="Base price; a variant may have its own.")
     category_id: uuid.UUID | None
     personalization_enabled: bool = Field(description="Offer a number and/or name to print (e.g. on a jersey).")
+    in_stock: bool = Field(default=True, description="False when the product is inventory managed and sold out (every option, if it has options): it can't be added to the cart.")
     variants: list[VariantOut] = Field(description="Active options; when not empty, pick one.")
 
 
@@ -765,7 +861,7 @@ class CartItemOut(Schema):
     beneficiary_id: uuid.UUID | None = Field(description="The managed person it's for, if chosen.")
     personalization_number: str
     personalization_name: str
-    unavailable: bool = Field(description="Can't be ordered any more (product withdrawn or option gone): remove it before checking out.")
+    unavailable: bool = Field(description="Can't be ordered any more (product withdrawn, option gone or out of stock): remove it before checking out.")
 
 
 class CartDiscountOut(Schema):

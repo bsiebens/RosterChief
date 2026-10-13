@@ -73,7 +73,8 @@ def submit_rsvp(attendance: Attendance, status: str, note: str = "", *, now=None
 
     attendance.status = Attendance.AttendanceStatus.ABSENT if is_dropout else status
     attendance.note = note
-    attendance.save(update_fields=["status", "note", "modified"])
+    attendance.answered_by_coach = False  # the player's own word again
+    attendance.save(update_fields=["status", "note", "answered_by_coach", "modified"])
     if is_dropout:
         notify_dropout(event, attendance.member, note)
     return attendance

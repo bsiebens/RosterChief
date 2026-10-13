@@ -14,6 +14,7 @@
         <table class="table">
             <thead>
                 <tr>
+                    {% if can_reorder %}<th class="w-8"></th>{% endif %}
                     <th class="w-16">{% trans "Order" %}</th>
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Short name" %}</th>
@@ -26,8 +27,9 @@
             <tbody{% if can_reorder %} id="team-rows" data-reorder-url="{% url 'management:team_reorder' %}"{% endif %}>
                 {% for team in teams %}
                     <tr{% if can_reorder %} draggable="true" data-id="{{ team.pk }}" class="cursor-grab"{% endif %}>
-                        <td class="font-mono text-xs tabular-nums text-muted">{% if can_reorder %}{% lucide "grip-vertical" size=14 %} {% endif %}{{ team.ordering|default:"—" }}</td>
-                        <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a></td>
+                        {% if can_reorder %}<td class="w-8 text-muted" aria-hidden="true">{% lucide "grip-vertical" size=14 %}</td>{% endif %}
+                        <td class="font-mono text-xs tabular-nums text-muted">{{ team.ordering|default:"—" }}</td>
+                        <td><a class="link link-hover font-semibold" href="{% url 'management:team_detail' team.pk %}">{{ team.name }}</a>{% if team.tournament_only %} <span class="badge badge-sm badge-warning ml-1">{% lucide "trophy" size=10 %} {% trans "Tournament" %}</span>{% endif %}</td>
                         <td class="font-mono text-xs text-muted">{{ team.short_name }}</td>
                         <td class="font-mono text-xs text-muted">{{ team.age_group_label|default:"—" }}</td>
                         <td class="font-mono text-xs tabular-nums">{{ team.player_count }}</td>
@@ -43,7 +45,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center text-muted">{% trans "No teams yet." %}</td>
+                        <td colspan="{% if can_reorder %}8{% else %}7{% endif %}" class="text-center text-muted">{% trans "No teams yet." %}</td>
                     </tr>
                 {% endfor %}
             </tbody>

@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.base import Message
 from django.contrib.messages.storage.fallback import FallbackStorage
+from django.core import mail
 from django.core.cache import cache
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
@@ -27,7 +28,7 @@ from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
-from mobile.models import PushSubscription
+from notifications.models import Notification
 from rosterchief.test_support import enrol_mfa
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -2583,6 +2584,14 @@ class AnnouncementAccessTests(ControlPanelTestBase):
     def test_staff_cannot_reach_compose(self):
         self.assertEqual(self.client.get(reverse("controlpanel:announcement_compose")).status_code, 403)
 
+    def test_staff_cannot_send_a_test(self):
+        mail.outbox.clear()
+
+        response = self.client.post(reverse("controlpanel:announcement_compose"), {"title": "x", "message": "y", "test": "1"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(mail.outbox, [])
+
     def test_the_broadcast_tab_is_hidden_from_staff(self):
         self.assertNotContains(self.client.get(reverse("controlpanel:dashboard")), reverse("controlpanel:announcement_list"))
 
@@ -2609,19 +2618,17 @@ class AnnouncementManagementTests(TestCase):
         data.update(overrides)
         return self.client.post(reverse("controlpanel:announcement_compose"), data)
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_the_first_submission_only_previews_nothing_is_created_yet(self, send_push):
+    def test_the_first_submission_only_previews_nothing_is_created_yet(self):
         response = self.compose()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Review before pushing")
         self.assertEqual(Announcement.objects.count(), 0)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_creates_and_immediately_pushes(self, send_push):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example/1", p256dh="k", auth="a")
+    def test_confirming_creates_and_immediately_notifies(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe", user=User.objects.create_user(email="jane@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=member)
 
         self.compose(confirmed="1")
 
@@ -2629,29 +2636,66 @@ class AnnouncementManagementTests(TestCase):
         self.assertEqual(announcement.status, Announcement.Status.SENT)
         self.assertIsNotNone(announcement.sent_at)
         self.assertEqual(announcement.created_by, self.root)
-        send_push.assert_called_once_with(member, title="Heads up", body="Maintenance tonight.")
+        self.assertEqual([(n.member, n.title, n.body) for n in Notification.objects.all()], [(member, "Heads up", "Maintenance tonight.")])
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_a_future_schedule_leaves_it_pending_and_does_not_push(self, send_push):
+    def test_confirming_a_future_schedule_leaves_it_pending_and_does_not_push(self):
         when = (timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
         self.compose(confirmed="1", scheduled_for=when)
 
         announcement = Announcement.objects.get(title="Heads up")
         self.assertEqual(announcement.status, Announcement.Status.PENDING)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_targets_only_the_chosen_club(self, send_push):
+    def test_confirming_targets_only_the_chosen_club(self):
         other_club = Club.objects.create(name="Feyenoord")
-        in_scope = Member.objects.create(first_name="In", last_name="Scope")
-        out_of_scope = Member.objects.create(first_name="Out", last_name="Scope")
-        PushSubscription.objects.create(club=self.club, member=in_scope, endpoint="https://push.example/1", p256dh="k", auth="a")
-        PushSubscription.objects.create(club=other_club, member=out_of_scope, endpoint="https://push.example/2", p256dh="k", auth="a")
+        in_scope = Member.objects.create(first_name="In", last_name="Scope", user=User.objects.create_user(email="in@example.com", password="pw-secret-123"))
+        out_of_scope = Member.objects.create(first_name="Out", last_name="Scope", user=User.objects.create_user(email="out@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=in_scope)
+        ClubRole.objects.create(club=other_club, member=out_of_scope)
 
         self.compose(confirmed="1", club=str(self.club.pk))
 
-        send_push.assert_called_once_with(in_scope, title="Heads up", body="Maintenance tonight.")
+        self.assertEqual([n.member for n in Notification.objects.all()], [in_scope])
+
+    def test_the_audience_is_stored_shown_in_the_preview_and_the_list(self):
+        member = Member.objects.create(first_name="Ann", last_name="Admin", user=User.objects.create_user(email="ann@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.ADMIN)
+        plain = Member.objects.create(first_name="Pat", last_name="Plain", user=User.objects.create_user(email="pat@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=plain)
+
+        preview = self.compose(audience="admins")
+        self.assertContains(preview, "Club administrators")
+        self.assertEqual(preview.context["audience_count"], 1)
+
+        self.compose(audience="admins", confirmed="1")
+        announcement = Announcement.objects.get(title="Heads up")
+        self.assertEqual(announcement.audience, Announcement.Audience.ADMINS)
+        self.assertEqual(list(Notification.objects.values_list("member", flat=True)), [member.pk])
+        self.assertContains(self.client.get(reverse("controlpanel:announcement_list")), "Club administrators")
+
+    def test_send_a_test_goes_to_the_admin_only_and_creates_nothing(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe", user=User.objects.create_user(email="jane@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=member)
+        mail.outbox.clear()
+
+        response = self.compose(test="1", confirmed="1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Review before pushing")
+        self.assertEqual([m.to for m in mail.outbox], [["root@example.com"]])
+        self.assertTrue(mail.outbox[0].subject.startswith("[TEST] "))
+        self.assertEqual(Announcement.objects.count(), 0)
+        self.assertFalse(Notification.objects.exists())
+
+    def test_send_a_test_from_the_compose_stage(self):
+        mail.outbox.clear()
+
+        response = self.compose(test="1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(Announcement.objects.count(), 0)
 
     def test_cancelling_a_pending_announcement(self):
         announcement = Announcement.objects.create(title="Heads up", message="Body", scheduled_for=timezone.now() + datetime.timedelta(days=1))

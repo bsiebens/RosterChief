@@ -604,7 +604,9 @@ class AdminRegistrationSmokeTests(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_all_add_pages_load(self):
-        for model in django_admin.site._registry:
+        for model, model_admin in django_admin.site._registry.items():
+            if type(model_admin).has_add_permission is not django_admin.ModelAdmin.has_add_permission:
+                continue  # a read-only admin (e.g. the delivery log) has no add page by design
             url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_add")
             with self.subTest(model=model.__name__):
                 self.assertEqual(self.client.get(url).status_code, 200)

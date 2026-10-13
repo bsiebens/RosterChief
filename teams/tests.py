@@ -569,7 +569,7 @@ class RosterApiTests(TeamsTestCase):
         self.assertEqual([group.position for group in roster.players], ["Forward", ""])
 
     def test_a_players_photo_is_hidden_from_the_public_roster_without_consent(self):
-        member = Member.objects.create(first_name="Sam", last_name="Striker", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
+        member = Member.objects.create(first_name="Sam", last_name="Striker", player_photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
         TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=9)
 
         roster = build_roster(self.team, self.make_request())
@@ -577,20 +577,43 @@ class RosterApiTests(TeamsTestCase):
         self.assertIsNone(roster.players[0].players[0].photo_url)
 
     def test_a_players_photo_is_shown_on_the_public_roster_once_consent_is_given(self):
-        member = Member.objects.create(first_name="Sam", last_name="Striker", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        member = Member.objects.create(first_name="Sam", last_name="Striker", player_photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
         TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=9)
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn(reverse("members:photo", args=[member.pk]), roster.players[0].players[0].photo_url)
+        self.assertIn(reverse("members:player_photo", args=[member.pk]), roster.players[0].players[0].photo_url)
+
+    def test_a_profile_picture_never_reaches_the_public_roster(self):
+        member = Member.objects.create(first_name="Sam", last_name="Striker", profile_photo=SimpleUploadedFile("profile.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=9)
+
+        roster = build_roster(self.team, self.make_request())
+
+        self.assertIsNone(roster.players[0].players[0].photo_url)
+
+    def test_the_public_roster_returns_the_player_picture_even_with_a_profile_picture(self):
+        member = Member.objects.create(
+            first_name="Sam",
+            last_name="Striker",
+            player_photo=SimpleUploadedFile("player.jpg", b"fake-image-bytes", content_type="image/jpeg"),
+            profile_photo=SimpleUploadedFile("profile.jpg", b"fake-image-bytes", content_type="image/jpeg"),
+            photo_public_consent=True,
+        )
+        TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=9)
+
+        photo_url = build_roster(self.team, self.make_request()).players[0].players[0].photo_url
+
+        self.assertIn(reverse("members:player_photo", args=[member.pk]), photo_url)
+        self.assertNotIn("profile-photo", photo_url)
 
     def test_a_staff_members_photo_follows_the_same_consent_gate(self):
-        coach = Member.objects.create(first_name="Cam", last_name="Coach", photo=SimpleUploadedFile("coach.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        coach = Member.objects.create(first_name="Cam", last_name="Coach", player_photo=SimpleUploadedFile("coach.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
         StaffAssignment.objects.create(team=self.team, member=coach, season=self.season, position=self.forward)
 
         roster = build_roster(self.team, self.make_request())
 
-        self.assertIn(reverse("members:photo", args=[coach.pk]), roster.staff[0].photo_url)
+        self.assertIn(reverse("members:player_photo", args=[coach.pk]), roster.staff[0].photo_url)
 
 
 class NumberPoolModelTests(TeamsTestCase):

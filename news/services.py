@@ -146,6 +146,7 @@ def send_publish_notification(news_item):
     same reasoning as notify_editors_of_pending_review below. Returns the list of
     Notification rows created (possibly empty). Caller's responsibility to set
     News.notified_at afterwards -- this function only sends, doesn't mark done."""
+    from notifications.models import NotificationCategory
     from notifications.services import notify_members
 
     from .models import News
@@ -163,7 +164,7 @@ def send_publish_notification(news_item):
     if not members:
         return []
 
-    return notify_members(members, club=news_item.club, title=news_item.title, body=render_body_excerpt(news_item.body, words=_NOTIFICATION_EXCERPT_WORDS), source=news_item)
+    return notify_members(members, club=news_item.club, title=news_item.title, body=render_body_excerpt(news_item.body, words=_NOTIFICATION_EXCERPT_WORDS), source=news_item, category=NotificationCategory.NEWS)
 
 
 def _send_and_mark_notified(news_id):
@@ -211,6 +212,7 @@ def notify_editors_of_pending_review(news_item):
     so this was blocking the request thread on that network I/O regardless."""
     from club.models import ClubRole
     from members.models import Member
+    from notifications.models import NotificationCategory
     from notifications.services import notify_members
 
     editors = Member.objects.filter(roles__club=news_item.club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR]).distinct()
@@ -221,7 +223,7 @@ def notify_editors_of_pending_review(news_item):
     def body():
         return _("%(author)s submitted this news item for review before it can go live.") % {"author": news_item.created_by or _("Someone")}
 
-    return notify_members(editors, club=news_item.club, title=title, body=body, source=news_item, send_email=False)
+    return notify_members(editors, club=news_item.club, title=title, body=body, source=news_item, send_email=False, category=NotificationCategory.ADMIN)
 
 
 def _notify_editors_of_pending_review_by_id(news_id):

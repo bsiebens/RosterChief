@@ -15,7 +15,7 @@ from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from club.tenancy import reset_current_club, set_current_club
 from members.models import Member
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 from rosterchief.storage import invoice_cache_storage, write_cached_invoice_pdf
 from teams.models import Position, Team
 
@@ -36,7 +36,9 @@ from .models import (
     ProductVariant,
     Voucher,
 )
+from .services.cart import add_to_cart
 from .services.checkout import CheckoutError, find_discount, place_order
+from .services.inventory import InventoryError, annotate_availability, inventory_overview, receive_stock, return_order_to_stock, set_stock, stock_for, sync_line_stock
 from .services.invoices import ShopInvoicePDFError, create_invoice_for_order, invalidate_cached_invoice_pdf, render_invoice_pdf
 from .services.notifications import _notify_order_placed_by_id, notify_order_ready_for_pickup
 from .services.payments import PaymentError, amount_due, amount_paid, record_payment, sync_payment_status
@@ -994,6 +996,7 @@ class PlaceOrderTests(TestCase):
         notification = Notification.objects.get(member=self.member)
         self.assertIn(order.number, notification.title)
         self.assertEqual(notification.source, order)
+        self.assertEqual(notification.category, NotificationCategory.SHOP)
 
     def test_the_notification_email_has_the_invoice_pdf_attached(self):
         cart = self.make_cart()
@@ -1037,6 +1040,7 @@ class OrderReadyForPickupNotificationTests(TestCase):
         notification = Notification.objects.get(member=self.member)
         self.assertIn(self.order.number, notification.title)
         self.assertIn("ready", notification.title.lower())
+        self.assertEqual(notification.category, NotificationCategory.SHOP)
         self.assertEqual(notification.source, self.order)
 
     def test_stores_english_and_dutch_translations(self):
@@ -2234,3 +2238,200 @@ class ShopCartRepricingAndThrottleViewTests(TestCase):
 
         self.assertIn("Too many wrong codes", response.context["discount_error"])
         self.assertIsNone(response.context["discount"])
+
+
+class InventoryTests(TestCase):
+    """Inventory-managed products: stock is the sum of InventoryMovements, orders draw
+    it down and skip production, and a sold-out product/variant can't be ordered."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united", shop_open=True)
+        cls.user = User.objects.create_user(email="shopper@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Jane", last_name="Doe", email="shopper@example.com", user=cls.user)
+        cls.scarf = Product.objects.create(club=cls.club, name="Scarf", price=Decimal("10.00"), inventory_managed=True)
+        cls.jersey = Product.objects.create(club=cls.club, name="Jersey", price=Decimal("25.00"))
+        cls.small = ProductVariant.objects.create(product=cls.scarf, name="Small")
+
+    def setUp(self):
+        patcher = patch("shop.services.checkout.dispatch_order_placed_notification")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def stock(self, product, quantity, variant=None):
+        receive_stock(self.club, {(product, variant): quantity})
+
+    def cart_with(self, *items):
+        cart = Cart.objects.create(club=self.club, user=self.user)
+        for product, variant, quantity in items:
+            CartItem.objects.create(cart=cart, product=product, variant=variant, quantity=quantity, unit_price=product.price)
+        return cart
+
+    def test_only_merchandise_can_be_inventory_managed(self):
+        product = Product(club=self.club, name="Dues", product_type=Product.ProductType.MEMBERSHIP, inventory_managed=True)
+
+        with self.assertRaises(ValidationError) as caught:
+            product.full_clean(exclude=["slug"])
+
+        self.assertIn("inventory_managed", caught.exception.message_dict)
+
+    def test_stock_is_the_sum_of_movements(self):
+        self.stock(self.scarf, 10, self.small)
+        set_stock(self.club, self.scarf, self.small, 7)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 7)
+        self.assertEqual(stock_for(self.scarf, None), 0)
+
+    def test_receiving_skips_unmanaged_products_and_bad_quantities(self):
+        movements = receive_stock(self.club, {(self.jersey, None): 5, (self.scarf, self.small): 0})
+
+        self.assertEqual(movements, [])
+
+    def test_a_product_with_variants_is_stocked_per_variant(self):
+        self.assertEqual(receive_stock(self.club, {(self.scarf, None): 5}), [])
+        self.assertEqual(len(receive_stock(self.club, {(self.scarf, self.small): 5})), 1)
+
+    def test_a_correction_to_the_same_count_records_nothing(self):
+        self.stock(self.scarf, 4, self.small)
+
+        self.assertIsNone(set_stock(self.club, self.scarf, self.small, 4))
+
+    def test_a_negative_count_is_refused(self):
+        with self.assertRaises(InventoryError):
+            set_stock(self.club, self.scarf, self.small, -1)
+
+    def test_a_managed_order_takes_stock_and_is_received_without_production(self):
+        self.stock(self.scarf, 5, self.small)
+
+        order = place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+
+        [line] = order.order_items.all()
+        self.assertEqual(line.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(order.production_status, ProductionStatus.RECEIVED)
+        self.assertEqual(stock_for(self.scarf, self.small), 3)
+        self.assertFalse(pending_production_lines([self.scarf]).exists())
+
+    def test_an_unmanaged_line_still_goes_through_production(self):
+        self.stock(self.scarf, 5, self.small)
+
+        order = place_order(self.cart_with((self.scarf, self.small, 1), (self.jersey, None, 1)), purchaser=self.member)
+
+        statuses = {line.product.name: line.production_status for line in order.order_items.select_related("product")}
+        self.assertEqual(statuses, {"Scarf": ProductionStatus.RECEIVED, "Jersey": ProductionStatus.PENDING})
+        self.assertEqual(order.production_status, ProductionStatus.IN_PRODUCTION)
+
+    def test_a_sold_out_item_refuses_checkout_and_leaves_stock_alone(self):
+        self.stock(self.scarf, 1, self.small)
+
+        with self.assertRaises(CheckoutError):
+            place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 1)
+        self.assertFalse(Order.objects.exists())
+
+    def test_the_same_item_on_several_lines_is_counted_together(self):
+        self.stock(self.scarf, 3, self.small)
+        cart = self.cart_with((self.scarf, self.small, 2))
+        other = Member.objects.create(first_name="Kid", last_name="Doe")
+        CartItem.objects.create(cart=cart, product=self.scarf, variant=self.small, beneficiary=other, quantity=2, unit_price=self.scarf.price)
+
+        with self.assertRaises(CheckoutError):
+            place_order(cart, purchaser=self.member)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 3)
+
+    def test_the_last_item_can_be_ordered_and_then_nothing_is_left(self):
+        self.stock(self.scarf, 2, self.small)
+
+        place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 0)
+        with self.assertRaises(CheckoutError):
+            add_to_cart(self.club, self.user, self.scarf, variant=self.small)
+
+    def test_adding_to_the_cart_is_capped_at_what_is_in_stock(self):
+        self.stock(self.scarf, 3, self.small)
+
+        item = add_to_cart(self.club, self.user, self.scarf, quantity=5, variant=self.small)
+        self.assertEqual(item.quantity, 3)
+
+        with self.assertRaises(CheckoutError):
+            add_to_cart(self.club, self.user, self.scarf, quantity=1, variant=self.small)
+
+    def test_new_stock_makes_a_sold_out_item_orderable_again(self):
+        with self.assertRaises(CheckoutError):
+            add_to_cart(self.club, self.user, self.scarf, variant=self.small)
+
+        self.stock(self.scarf, 1, self.small)
+
+        self.assertEqual(add_to_cart(self.club, self.user, self.scarf, variant=self.small).quantity, 1)
+
+    def test_a_cart_line_that_sells_out_is_unavailable(self):
+        self.stock(self.scarf, 1, self.small)
+        cart = self.cart_with((self.scarf, self.small, 1))
+        set_stock(self.club, self.scarf, self.small, 0)
+
+        with self.assertRaises(CheckoutError) as caught:
+            place_order(cart, purchaser=self.member)
+
+        self.assertIn("Scarf", str(caught.exception))
+
+    def test_unmanaged_products_are_never_limited(self):
+        self.assertEqual(add_to_cart(self.club, self.user, self.jersey, quantity=50).quantity, 50)
+
+    def test_availability_is_annotated_per_variant(self):
+        large = ProductVariant.objects.create(product=self.scarf, name="Large")
+        self.stock(self.scarf, 1, large)
+
+        [scarf, jersey] = annotate_availability(Product.objects.filter(club=self.club).prefetch_related("variants").order_by("-name"))
+
+        self.assertEqual(scarf.name, "Scarf")
+        self.assertTrue(scarf.in_stock)
+        self.assertEqual({variant.name: variant.in_stock for variant in scarf.variants.all()}, {"Small": False, "Large": True})
+        self.assertTrue(jersey.in_stock)
+
+    def test_a_sold_out_product_without_variants_is_not_in_stock(self):
+        hat = Product.objects.create(club=self.club, name="Hat", inventory_managed=True)
+
+        self.assertFalse(annotate_availability(Product.objects.filter(pk=hat.pk).prefetch_related("variants"))[0].in_stock)
+
+    def test_cancelling_returns_stock_once(self):
+        self.stock(self.scarf, 5, self.small)
+        order = place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+
+        return_order_to_stock(order)
+        return_order_to_stock(order)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 5)
+
+    def test_editing_a_line_moves_stock_between_variants(self):
+        large = ProductVariant.objects.create(product=self.scarf, name="Large")
+        self.stock(self.scarf, 5, self.small)
+        self.stock(self.scarf, 5, large)
+        order = place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+        line = order.order_items.get()
+
+        line.variant, line.quantity = large, 3
+        sync_line_stock(line, old_variant_id=self.small.pk)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 5)
+        self.assertEqual(stock_for(self.scarf, large), 2)
+
+    def test_editing_a_line_beyond_stock_is_refused_and_changes_nothing(self):
+        self.stock(self.scarf, 3, self.small)
+        order = place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+        line = order.order_items.get()
+
+        line.quantity = 5
+        with self.assertRaises(InventoryError):
+            sync_line_stock(line, old_variant_id=self.small.pk)
+
+        self.assertEqual(stock_for(self.scarf, self.small), 1)
+
+    def test_the_overview_counts_what_open_orders_hold(self):
+        self.stock(self.scarf, 5, self.small)
+        place_order(self.cart_with((self.scarf, self.small, 2)), purchaser=self.member)
+
+        [row] = inventory_overview(self.club)
+
+        self.assertEqual((row.on_hand, row.committed), (3, 2))

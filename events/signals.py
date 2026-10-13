@@ -29,7 +29,7 @@ from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership
 from events.models import Attendance, Event, EventSeries
-from events.services import notify_newly_invited, sync_event_attendances
+from events.services import live_activity, notify_newly_invited, sync_event_attendances
 from events.services.crew_invites import resync_upcoming_invites
 from events.services.game_moments import game_timeline_changed, record_moments
 from events.services.officials import sync_official_invites
@@ -145,6 +145,7 @@ def sync_on_club_membership_change(sender, instance, **kwargs):
 
 
 game_timeline_changed.connect(record_moments, dispatch_uid="events.record_game_moments")
+game_timeline_changed.connect(live_activity.on_timeline_changed, dispatch_uid="events.live_activity")
 
 
 # -- referee/official eligibility changed -------------------------------------------------

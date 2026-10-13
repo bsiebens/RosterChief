@@ -2,6 +2,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import sys
 from decimal import Decimal
 from io import BytesIO
@@ -61,6 +62,7 @@ from registration.services.invoicing import active_batch_entries, batch_totals
 from registration.services.notifications import confirm_and_send_invoice
 from rosterchief.test_support import enrol_mfa, start_auto_mfa_enrolment, stop_auto_mfa_enrolment
 from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payment, Product, ProductCategory, ProductionStatus, ProductRegistrantDiscountTier, ProductVariant, Voucher, VoucherConsumption
+from shop.services.inventory import receive_stock, stock_for, take_for_order_lines
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
 from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -438,6 +440,55 @@ class MemberManagementTests(ManagementTestBase):
         self.assertEqual(member.first_name, "New")
 
 
+class MemberPlayerPhotoTests(ManagementTestBase):
+    """Member.player_photo (the official picture) is only editable in the management portal, by whoever may manage members."""
+
+    def _member(self):
+        member = Member.objects.create(first_name="Pic", last_name="Ture")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return member
+
+    def _data(self, **extra):
+        return {"first_name": "Pic", "last_name": "Ture", "kind": ClubMembership.Kind.MEMBER, "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.UNPAID, **extra}
+
+    def test_a_member_admin_can_upload_the_player_picture(self):
+        member = self._member()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("member_update", self._data(player_photo=make_image_file("player.png")), member.pk)
+
+        self.assertEqual(response.status_code, 302)
+        member.refresh_from_db()
+        self.addCleanup(member.player_photo.delete, save=False)
+        self.assertTrue(member.player_photo)
+        self.assertFalse(member.profile_photo)
+
+    def test_the_form_labels_the_picture_as_the_player_picture(self):
+        member = self._member()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_update", member.pk)
+
+        self.assertContains(response, "Player picture")
+        self.assertNotContains(response, "profile_photo")
+
+    def test_staff_without_member_rights_cannot_reach_the_edit_view(self):
+        member = self._member()
+        coach_user = User.objects.create_user(email="coach-pp@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cody", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U13", short_name="U13")
+        position = Position.objects.create(club=self.club, name="CoachPP", short_name="CP", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("member_update", member.pk).status_code, 403)
+        response = self.club_post("member_update", self._data(player_photo=make_image_file("player.png")), member.pk)
+
+        self.assertEqual(response.status_code, 403)
+        member.refresh_from_db()
+        self.assertFalse(member.player_photo)
+
+
 class MemberAttendanceSparklineTests(ManagementTestBase):
     """The D7-alike attendance card on member_detail.html --
     events.services.attendance.member_attendance_sparkline/_counts."""
@@ -555,6 +606,13 @@ class TeamManagementTests(ManagementTestBase):
         response = self.club_get("team_list")
 
         self.assertNotContains(response, "Rival Team")
+
+    def test_tournament_only_teams_are_marked_on_the_list(self):
+        Team.objects.create(club=self.club, name="Cup Team", short_name="Cup", tournament_only=True)
+
+        response = self.club_get("team_list")
+
+        self.assertContains(response, "Tournament</span>", count=1)
 
     def test_team_list_is_sorted_by_order_then_name(self):
         Team.objects.create(club=self.club, name="Aaa", short_name="A")
@@ -9432,14 +9490,15 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from RBIHF")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:rbihf_import"))
 
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from RBIHF")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_button_hidden_from_a_non_admin_even_with_the_flag_active(self):
         self.activate_flag()
@@ -9447,7 +9506,7 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from RBIHF")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -9637,14 +9696,15 @@ class DFELImportViewTests(ManagementTestBase):
 
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from DFEL")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:dfel_import"))
 
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
         response = self.club_get("event_list")
 
-        self.assertNotContains(response, "Import from DFEL")
+        self.assertNotContains(response, reverse("management:event_import"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -9773,14 +9833,15 @@ class IJNLImportViewTests(ManagementTestBase):
 
     def test_button_shows_only_with_the_flag_active(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), "Import from IJNL")
+        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
 
         self.activate_flag()
         cache.clear()
         response = self.club_get("event_list")
 
-        self.assertContains(response, "Import from IJNL")
-        self.assertContains(response, "Re-check all imported fixtures")
+        self.assertContains(response, reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:ijnl_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:fixture_recheck"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -10062,11 +10123,11 @@ class FixtureRecheckViewTests(FixtureImportTestMixin, ManagementTestBase):
 
     def test_event_list_button_follows_either_flag(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), "Re-check all imported fixtures")
+        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
 
         self.activate_flag("DFEL")
 
-        self.assertContains(self.club_get("event_list"), "Re-check all imported fixtures")
+        self.assertContains(self.club_get("event_list"), reverse("management:event_import"))
 
     @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
     def test_preview_namespaces_each_entrys_fields(self, mock_fetch):
@@ -12963,6 +13024,14 @@ class OrderManagementTests(ShopTestBase):
         order.refresh_from_db()
         self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.CANCELLED)
 
+    def test_a_cancelled_order_shows_cancelled_on_every_status(self):
+        order = self.make_order(payment_status=Order.PaymentStatus.PAID, fulfillment_status=Order.FulfillmentStatus.CANCELLED)
+        self.client.force_login(self.admin_user)
+
+        for response in (self.club_get("order_detail", order.pk), self.club_get("order_list", params={"show": "all"})):
+            self.assertEqual(len(re.findall(r">\s*Cancelled\s*</span>", response.content.decode())), 3, response.request["PATH_INFO"])
+            self.assertNotRegex(response.content.decode(), r">\s*Paid\s*</span>")
+
     def test_plain_staff_cannot_cancel_an_order(self):
         order = self.make_order()
         self.client.force_login(self.make_plain_staff())
@@ -12972,6 +13041,148 @@ class OrderManagementTests(ShopTestBase):
         self.assertEqual(response.status_code, 403)
         order.refresh_from_db()
         self.assertEqual(order.fulfillment_status, Order.FulfillmentStatus.NOT_READY)
+
+
+class EventImportChooserTests(ManagementTestBase):
+    """The calendar's single "Import" button lands on a chooser listing only the
+    importers this club has switched on."""
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def enable(self, name):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name=name)
+        flag.clubs.add(self.club)
+
+    def test_lists_only_the_enabled_importers(self):
+        self.enable("DFEL")
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_import")
+
+        self.assertContains(response, reverse("management:dfel_import"))
+        self.assertContains(response, reverse("management:fixture_recheck"))
+        self.assertNotContains(response, reverse("management:rbihf_import"))
+        self.assertNotContains(response, reverse("management:ijnl_import"))
+
+    def test_says_so_when_no_importer_is_enabled(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_import"), "No importers are enabled")
+
+    def test_is_admin_only(self):
+        self.enable("DFEL")
+        coach = User.objects.create_user(email="coach-chooser@example.com", password="pw-secret-123")
+        self.client.force_login(coach)
+
+        self.assertIn(self.club_get("event_import").status_code, (302, 403))
+
+
+class InventoryManagementTests(ShopTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.scarf = Product.objects.create(club=cls.club, name="Scarf", price=Decimal("10.00"), inventory_managed=True)
+        cls.purchaser = Member.objects.create(first_name="Olly", last_name="Orderer", email="olly@example.com")
+
+    def test_a_shop_manager_sees_stock_and_out_of_stock_rows(self):
+        receive_stock(self.club, {(self.scarf, None): 4})
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("inventory_list")
+
+        self.assertContains(response, "Scarf")
+        self.assertNotContains(response, "Jersey")
+
+    def test_plain_staff_cannot_open_the_inventory(self):
+        self.client.force_login(self.make_plain_staff())
+
+        self.assertEqual(self.club_get("inventory_list").status_code, 403)
+        self.assertEqual(self.club_post("inventory_receive", {}).status_code, 403)
+
+    def test_taking_in_stock_adds_to_the_count(self):
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": "12", "note": "Supplier A"})
+
+        self.assertEqual(stock_for(self.scarf), 12)
+        self.assertEqual(self.scarf.inventory_movements.get().note, "Supplier A")
+
+    def test_a_blank_or_invalid_quantity_takes_nothing_in(self):
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": "-3"})
+        self.club_post("inventory_receive", {f"receive__{self.scarf.pk}__none": ""})
+
+        self.assertEqual(stock_for(self.scarf), 0)
+
+    def test_correcting_a_count_records_the_difference(self):
+        receive_stock(self.club, {(self.scarf, None): 10})
+        self.client.force_login(self.make_shop_manager())
+
+        self.club_post("inventory_adjust", {"counted": "8", "note": "Two damaged"}, self.scarf.pk)
+
+        self.assertEqual(stock_for(self.scarf), 8)
+        self.assertEqual(self.scarf.inventory_movements.get(reason="adjustment").quantity, -2)
+
+    def test_another_clubs_product_cannot_be_adjusted(self):
+        other = Club.objects.create(name="Other", slug="other-club")
+        theirs = Product.objects.create(club=other, name="Theirs", inventory_managed=True)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post("inventory_adjust", {"counted": "5"}, theirs.pk)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(stock_for(theirs), 0)
+
+    def test_the_history_lists_movements_and_filters_by_product(self):
+        hat = Product.objects.create(club=self.club, name="Hat", inventory_managed=True)
+        receive_stock(self.club, {(self.scarf, None): 3, (hat, None): 9})
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_get("inventory_history", params={"product": str(self.scarf.pk)})
+
+        self.assertEqual([movement.product for movement in response.context["movements"]], [self.scarf])
+
+    def test_cancelling_an_order_returns_its_stock(self):
+        receive_stock(self.club, {(self.scarf, None): 5})
+        order = Order.objects.create(club=self.club, purchaser=self.purchaser, total=Decimal("20.00"))
+        line = OrderLine.objects.create(order=order, product=self.scarf, quantity=2, unit_price=Decimal("10.00"), line_total=Decimal("20.00"))
+        take_for_order_lines([line])
+        self.assertEqual(stock_for(self.scarf), 3)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("order_cancel", {}, order.pk)
+        self.club_post("order_cancel", {}, order.pk)
+
+        self.assertEqual(stock_for(self.scarf), 5)
+
+    def test_a_product_can_be_switched_to_inventory_managed(self):
+        self.assertFalse(self.product.inventory_managed)
+        self.client.force_login(self.make_shop_manager())
+
+        response = self.club_post(
+            "product_update",
+            {
+                "name": "Home Jersey",
+                "product_type": "merchandise",
+                "price": "25.00",
+                "is_active": "on",
+                "inventory_managed": "on",
+                "registrant_discount_scope": "per_person",
+                "variants-TOTAL_FORMS": "0",
+                "variants-INITIAL_FORMS": "0",
+                "tiers-TOTAL_FORMS": "0",
+                "tiers-INITIAL_FORMS": "0",
+            },
+            self.product.pk,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.inventory_managed)
 
 
 class PaymentManagementTests(ShopTestBase):

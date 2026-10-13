@@ -5,17 +5,15 @@ club/season plumbing already factored into club.services.access -- see
 mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
-import datetime
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Case, F, Q, When
+from django.db.models import Q
 from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
@@ -28,6 +26,7 @@ from events.models import Attendance, Event, EventSeries, EventTask, Lineup, Lin
 from events.services import detach_occurrence, generate_occurrences, propagate_series
 from events.services.attendance import member_attendance_counts, player_attendance_rankings, record_check_in
 from events.services.calendar import agenda_groups
+from events.services.coach import COACH_EVENT_KINDS, IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, remind_silent, still_current_events
 from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import needs_official_management, officials_enabled_for
@@ -37,30 +36,11 @@ from members.models import Member
 from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
 from news.services import dispatch_notify_editors_of_pending_review
-from notifications.services import notify_members
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 from teams.services import eligible_roster_members
 
 from .coach_mixins import CoachScopeMixin
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, CoachRosterEditForm
-
-#: RSVP states that count as "in" for the stat tile -- present/selected are an
-#: explicit yes, maybe is still a lean-in rather than silence.
-IN_STATUSES = [Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.MAYBE]
-
-#: An explicit no -- declined or, for a published line-up, not selected.
-#: Distinct from NO_RESPONSE ("silent"), which is a non-answer rather than a no.
-OUT_STATUSES = [Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED, Attendance.AttendanceStatus.NOT_SELECTED]
-
-#: The event kinds CoachCreateEventView's tile picker offers -- social/other
-#: stay desktop-only (management.forms.EventForm keeps the full list), since
-#: neither has a tile here.
-COACH_EVENT_KINDS = [Event.EventKind.TRAINING, Event.EventKind.GAME, Event.EventKind.TOURNAMENT, Event.EventKind.MEETING]
-
-#: Event kinds a line-up applies to -- a Tournament is a squad-selection event
-#: exactly like a Game (who's travelling/dressed), unlike Training/Meeting.
-#: Everywhere C3 (line-up) gating checks "is this a game", it means this set.
-LINEUP_EVENT_KINDS = [Event.EventKind.GAME, Event.EventKind.TOURNAMENT]
 
 
 class _LocationPickerForm(forms.Form):
@@ -118,26 +98,6 @@ def _styled_task_form(data=None, instance=None):
     return form
 
 
-#: How long an event stays "current" (CoachTodayView's session card, and the
-#: missing-line-up nudge) past the moment it starts -- events.start__gte=now
-#: alone would flip to the next session the instant this one begins, while
-#: the coach is still mid-practice/mid-game. Past end (when set) plus a grace
-#: window; past start plus an assumed length when it isn't (most training
-#: events carry no end time -- see Event.end's own help text).
-STILL_CURRENT_GRACE = datetime.timedelta(minutes=30)
-STILL_CURRENT_ASSUMED_DURATION = datetime.timedelta(minutes=90)
-
-
-def _still_current_events(team):
-    """Events for ``team`` that haven't yet reached their "still current"
-    cutoff -- see STILL_CURRENT_GRACE/STILL_CURRENT_ASSUMED_DURATION above."""
-    cutoff = Case(
-        When(end__isnull=False, then=F("end") + STILL_CURRENT_GRACE),
-        default=F("start") + STILL_CURRENT_ASSUMED_DURATION,
-    )
-    return Event.objects.filter(teams=team, cancelled=False).annotate(still_current_cutoff=cutoff).filter(still_current_cutoff__gte=timezone.now()).order_by("start")
-
-
 class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """C1 -- three stat tiles (Squad/In/Silent) for the active team's next
     upcoming session, a session card for it (today's, if there's one on the
@@ -183,7 +143,7 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if team is not None:
             squad_count = TeamMembership.objects.filter(team=team, season=season).count() if season is not None else 0
 
-            upcoming = _still_current_events(team)
+            upcoming = still_current_events(team)
             tonight_event = upcoming.filter(start__date=today).first()
             session_event = tonight_event or upcoming.first()
 
@@ -346,17 +306,10 @@ class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View)
             return HttpResponseForbidden()
 
         event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team)
-        member_ids = Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.NO_RESPONSE).values_list("member_id", flat=True)
-        members = list(Member.objects.filter(id__in=member_ids))
+        count = remind_silent(event)
 
-        if members:
-
-            def body():
-                when = date_format(timezone.localtime(event.start), "D d M, H:i")
-                return _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
-
-            notify_members(members, club=event.club, title=event.title, body=body, source=event)
-            notify(request, f"s|{_('Reminder sent')}|" + ngettext("%(count)d player nudged.", "%(count)d players nudged.", len(members)) % {"count": len(members)})
+        if count:
+            notify(request, f"s|{_('Reminder sent')}|" + ngettext("%(count)d player nudged.", "%(count)d players nudged.", count) % {"count": count})
         else:
             notify(request, f"w|{_('Nobody to remind')}|{_('Everyone has already responded.')}")
 

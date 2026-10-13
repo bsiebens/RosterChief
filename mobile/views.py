@@ -4,6 +4,7 @@ phase -- see the design handoff -- and has no
 routes here yet.
 """
 
+import datetime
 import json
 from collections import defaultdict
 from decimal import Decimal
@@ -52,6 +53,9 @@ from members.services.family import managed_people
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import live_news, localized_news, member_news, render_body_html
+from notifications import preferences as notification_preferences
+from notifications import quiet_hours
+from notifications.models import NotificationCategory, NotificationPreference
 from notifications.services import clear_all, inbox_for, mark_all_read, mark_read, unread_count
 from registration.models import RegistrationBatch
 from registration.services import (
@@ -69,6 +73,7 @@ from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
+from shop.services.inventory import annotate_availability
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import StaffAssignment, Team, TeamMembership
 
@@ -266,12 +271,61 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
     screen_title = _("Notification emails")
     active_tab = "me"
 
+    COMMON_ZONES = (
+        "Europe/Brussels",
+        "Europe/Amsterdam",
+        "Europe/London",
+        "Europe/Paris",
+        "Europe/Berlin",
+        "Europe/Madrid",
+        "Europe/Rome",
+        "Europe/Lisbon",
+        "America/New_York",
+        "America/Chicago",
+        "America/Denver",
+        "America/Los_Angeles",
+        "America/Toronto",
+        "Australia/Sydney",
+        "UTC",
+    )
+
+    def _notification_person(self, request):
+        """The child whose switches are shown/saved (``?person=<id>`` / the form's hidden ``person``); ``None`` =
+        the account holder, whose switches are the club's."""
+        wanted = request.POST.get("person") or request.GET.get("person")
+        for person in self.managed_people[1:]:
+            if str(person.pk) == wanted:
+                return person
+        return None
+
+    def _redirect_url(self, person):
+        url = reverse("mobile:notification_settings")
+        return f"{url}?person={person.pk}" if person else url
+
     def get_context_data(self, **kwargs):
+        club = self.request.club
+        person = self._notification_person(self.request)
+        effective = notification_preferences.matrix(self.request.user, club, person)
+        overridden = notification_preferences.overrides(self.request.user, club, person)
         kwargs.setdefault("choices", User.EmailNotifications.choices)
         kwargs.setdefault("current", self.request.user.email_notifications)
+        kwargs["category_rows"] = [{"key": key, "label": label, "push": effective[key]["push"], "email": effective[key]["email"], "overridden": key in overridden} for key, label in NotificationCategory.choices]
+        kwargs["selected_person"] = person
+        kwargs["children"] = self.managed_people[1:]
+        hours = quiet_hours.get(self.request.user)
+        zone = hours.timezone if hours else settings.TIME_ZONE
+        zones = list(dict.fromkeys([zone, settings.TIME_ZONE, *self.COMMON_ZONES]))
+        kwargs["quiet"] = {"enabled": bool(hours and hours.enabled), "start": f"{hours.start:%H:%M}" if hours else "22:00", "end": f"{hours.end:%H:%M}" if hours else "07:00", "timezone": zone}
+        kwargs["zones"] = zones
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
+        if "category_switches" in request.POST:
+            return self._save_categories(request)
+        if "reset_category" in request.POST:
+            return self._reset_category(request)
+        if "quiet_hours" in request.POST:
+            return self._save_quiet_hours(request)
         value = request.POST.get("email_notifications")
         if value not in User.EmailNotifications.values:
             return HttpResponseBadRequest("Unknown choice.")
@@ -279,6 +333,40 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         request.user.save(update_fields=["email_notifications"])
         notify(request, f"s|{_('Saved')}|{_('Your notification email setting has been updated.')}")
         return redirect("mobile:notification_settings")
+
+    def _save_categories(self, request):
+        """Writes rows only where a switch differs from what already applies here (for the chosen person)."""
+        person = self._notification_person(request)
+        effective = notification_preferences.matrix(request.user, request.club, person)
+        for category in NotificationCategory.values:
+            for channel in NotificationPreference.Channel.values:
+                wanted = f"{channel}__{category}" in request.POST
+                if wanted != effective[category][channel]:
+                    notification_preferences.set_preference(request.user, request.club, category, channel, wanted, member=person)
+        if person:
+            notify(request, f"s|{_('Saved')}|{_('Your notification switches for this person have been updated.')}")
+        else:
+            notify(request, f"s|{_('Saved')}|{_('Your notification switches for this club have been updated.')}")
+        return redirect(self._redirect_url(person))
+
+    def _reset_category(self, request):
+        category = request.POST["reset_category"]
+        if category not in NotificationCategory.values:
+            return HttpResponseBadRequest("Unknown category.")
+        person = self._notification_person(request)
+        notification_preferences.reset(request.user, request.club, category, member=person)
+        notify(request, f"s|{_('Saved')}|{_('This category follows your default again.')}")
+        return redirect(self._redirect_url(person))
+
+    def _save_quiet_hours(self, request):
+        try:
+            start = datetime.datetime.strptime(request.POST.get("start", ""), "%H:%M").time()
+            end = datetime.datetime.strptime(request.POST.get("end", ""), "%H:%M").time()
+            quiet_hours.set_quiet_hours(request.user, enabled="enabled" in request.POST, start=start, end=end, tz=request.POST.get("timezone", ""))
+        except ValueError:
+            return HttpResponseBadRequest("Invalid quiet hours.")
+        notify(request, f"s|{_('Saved')}|{_('Your quiet hours have been updated.')}")
+        return redirect(self._redirect_url(self._notification_person(request)))
 
 
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1426,7 +1514,7 @@ class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         # (registration.services.pricing) -- excluded structurally here
         # regardless of is_public, not left to staff remembering to flag
         # each one.
-        products = list(catalog(self.request.club))
+        products = annotate_availability(catalog(self.request.club).prefetch_related("variants"))
         cart = open_cart(self.request.club, self.request.user)
         cart_item_count = cart.items.count() if cart is not None else 0
 
@@ -1470,9 +1558,10 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         return get_object_or_404(catalog(self.request.club), slug=self.kwargs["slug"])
 
     def get(self, request, *args, **kwargs):
-        product = self._product()
-        variants = list(product.variants.filter(is_active=True))
-        return self.render_to_response(self.get_context_data(product=product, variants=variants))
+        product = annotate_availability([self._product()])[0]
+        variants = [variant for variant in product.variants.all() if variant.is_active]
+        first_in_stock_variant = next((variant for variant in variants if variant.in_stock), None)
+        return self.render_to_response(self.get_context_data(product=product, variants=variants, first_in_stock_variant=first_in_stock_variant))
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(screen_title=kwargs["product"].name, max_quantity=MAX_CART_QUANTITY, **kwargs)
@@ -1503,16 +1592,20 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
                 return HttpResponseBadRequest(_("You can't order for that person."))
 
         # Personalisation only sticks on a product that offers it (shop.services.cart).
-        add_to_cart(
-            request.club,
-            request.user,
-            product,
-            quantity=quantity,
-            variant=variant,
-            beneficiary=beneficiary,
-            personalization_number=request.POST.get("personalization_number", ""),
-            personalization_name=request.POST.get("personalization_name", ""),
-        )
+        try:
+            add_to_cart(
+                request.club,
+                request.user,
+                product,
+                quantity=quantity,
+                variant=variant,
+                beneficiary=beneficiary,
+                personalization_number=request.POST.get("personalization_number", ""),
+                personalization_name=request.POST.get("personalization_name", ""),
+            )
+        except CheckoutError as error:
+            notify(request, f"w|{_('Not available')}|{error}")
+            return HttpResponseRedirect(request.path)
 
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}

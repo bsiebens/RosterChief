@@ -330,6 +330,23 @@ class TeamsApiTests(ApiTestBase):
 
         self.assertNotIn("position", player)
 
+    def test_roster_returns_only_the_player_picture_and_only_with_consent(self):
+        def upload(name):
+            return SimpleUploadedFile(name, b"fake-image-bytes", content_type="image/jpeg")
+
+        alice = Member.objects.create(first_name="Alice", last_name="Ash", player_photo=upload("player.jpg"), profile_photo=upload("profile.jpg"), photo_public_consent=True)
+        bob = Member.objects.create(first_name="Bob", last_name="Birch", profile_photo=upload("profile.jpg"), photo_public_consent=True)
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar", player_photo=upload("player.jpg"))
+        for jersey, member in enumerate((alice, bob, carol), start=1):
+            TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=jersey)
+
+        players = {p["first_name"]: p for p in self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"]}
+
+        self.assertIn(f"/members/{alice.pk}/player-photo/", players["Alice"]["photo_url"])
+        self.assertNotIn("profile-photo", players["Alice"]["photo_url"])
+        self.assertIsNone(players["Bob"]["photo_url"])
+        self.assertIsNone(players["Carol"]["photo_url"])
+
     def test_roster_includes_staff(self):
         dana = Member.objects.create(first_name="Dana", last_name="Dean")
         StaffAssignment.objects.create(team=self.team, member=dana, season=self.season, position=self.coach_position)

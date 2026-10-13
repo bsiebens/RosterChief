@@ -14,9 +14,9 @@ commits, off the polling thread. Decisions behind the rules here (§9):
 - **How much:** the moments one poll detected go out as *one* push per
   account (coalesced: "Goal for us by ..., 4-2" and "Penalty ..." in one
   message). No cap per game -- every poll that found something sends one.
-- **Where:** push only -- no Notification/inbox row per goal. Native app
-  devices (appapi.push gateway) and web push subscriptions (mobile.services.
-  push), each as best-effort as the rest of the app's pushes.
+- **Where:** every channel through notifications.dispatch (native APNs/FCM
+  devices, web push) -- no Notification/inbox row per goal. Each channel is
+  as best-effort as the rest of the app's pushes.
 """
 
 import datetime
@@ -32,7 +32,8 @@ from django.utils.translation import gettext as _
 
 from events.models import Event, EventFollow, GameFollow, GameMoment
 from events.services.game_moments import describe_moment
-from rosterchief.concurrency import run_in_background
+from notifications.dispatch import dispatch_to_user
+from notifications.models import NotificationCategory
 
 logger = logging.getLogger(__name__)
 
@@ -67,43 +68,11 @@ def language_for_locale(locale) -> str:
     return code if code in {language for language, _name in settings.LANGUAGES} else "en"
 
 
-def _send_native(user, *, texts, data) -> int:
-    """``texts(language)`` -> ``(title, body)``; each device gets its own locale's."""
-    from appapi.delivery import push_configured  # deferred: appapi imports back into events
-    from appapi.models import PushDevice
-    from appapi.push import get_gateway
-
-    if not push_configured():
-        return 0
-    gateway = get_gateway()
-    sent = 0
-    for device in PushDevice.objects.filter(user=user, enabled=True).exclude(endpoint_arn=""):
-        try:
-            title, body = texts(language_for_locale(device.locale))
-            alive = gateway.publish(device, title=title, body=body, data=data)
-        except Exception:
-            logger.exception("game_push.native_failed device=%s", device.pk)
-            continue
-        if alive:
-            sent += 1
-        else:
-            device.enabled = False
-            device.save(update_fields=["enabled", "modified"])
-    return sent
-
-
-def _send_web(club, user, *, texts, url) -> int:
-    from mobile.services.push import send_push_to_user  # deferred: mobile imports back into events
-
-    # No language preference on accounts or subscriptions: web push goes out in English.
-    title, body = texts("en")
-    return send_push_to_user(club, user, title=title, body=body, url=url)
-
-
 def deliver_moments(event_id, moment_ids) -> int:
     """Pushes the given (just recorded) moments of one game to its followers.
-    Every notifiable moment is marked delivered whether or not anyone follows
-    the team, so nothing is ever retried later. Returns how many accounts got
+    Every notifiable moment is marked delivered -- after the dispatch -- whether
+    or not anyone follows the team. At-least-once: a crash mid-dispatch leaves
+    the batch unmarked, so the outbox retry sends it again. Returns how many accounts got
     a push."""
     event = Event.objects.select_related("club", "opponent", "location").filter(pk=event_id).first()
     if event is None:
@@ -111,7 +80,6 @@ def deliver_moments(event_id, moment_ids) -> int:
     moments = list(GameMoment.objects.filter(event=event, pk__in=moment_ids, notifiable=True, delivered_at__isnull=True).order_by("game_seconds", "created_at"))
     if not moments:
         return 0
-    GameMoment.objects.filter(pk__in=[moment.pk for moment in moments]).update(delivered_at=timezone.now())
 
     composed: dict = {}
 
@@ -122,22 +90,28 @@ def deliver_moments(event_id, moment_ids) -> int:
                 composed[language] = compose(event, moments)
         return composed[language]
 
-    data = {"club_slug": event.club.slug, "target": {"type": "event", "id": str(event.pk)}, "kind": "game_moment"}
+    data = {"club_slug": event.club.slug, "target": {"type": "event", "id": str(event.pk)}, "kind": "game_moment", "category": "game"}
     url = _event_url(event)
     reached = 0
     for user in followers(event):
-        if _send_native(user, texts=texts, data=data) + _send_web(event.club, user, texts=texts, url=url):
+        if dispatch_to_user(club=event.club, user=user, texts=texts, data=data, url=url, thread_id=str(event.pk), category=NotificationCategory.GAME).total:
             reached += 1
+    # Marked only now that the pushes went out: a crash before this repeats at most this batch
+    # (at-least-once) instead of dropping it for good.
+    GameMoment.objects.filter(pk__in=[moment.pk for moment in moments]).update(delivered_at=timezone.now())
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached
 
 
 def schedule_delivery(event, moment_ids) -> None:
-    """After the surrounding transaction commits (the rows must be visible to
-    the worker thread), off the polling thread -- like appapi.delivery."""
+    """Writes an outbox entry in the surrounding transaction (the moments and the work to push them
+    commit together) and works it off after commit, off the polling thread."""
     if moment_ids:
-        ids = list(moment_ids)
-        transaction.on_commit(lambda: run_in_background(deliver_moments, event.pk, ids))
+        from notifications import outbox
+        from notifications.models import OutboxEntry
+
+        entry = outbox.enqueue(OutboxEntry.Kind.GAME_MOMENTS, {"event_id": str(event.pk), "moment_ids": [str(pk) for pk in moment_ids]})
+        outbox.kick([entry.pk])
 
 
 def followed_team_ids(user, club) -> set:

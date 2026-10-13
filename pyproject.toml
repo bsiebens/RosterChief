@@ -1,6 +1,6 @@
 [project]
 name = "rosterchief"
-version = "0.8.12"
+version = "0.8.13"
 requires-python = ">=3.14"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
@@ -17,8 +17,6 @@ dependencies = [
     "django-phonenumber-field[phonenumbers]>=8.5.0",
     "django-redis>=7.0.0",
     "django-storages[s3]>=1.14.6",
-    # Direct, not only via django-storages: the app API's SNS push gateway uses it (appapi/push.py).
-    "boto3>=1.43",
     "django-waffle>=5.0.0",
     "gunicorn>=26.2.0",
     "icalendar>=6.1.0",
@@ -34,6 +32,10 @@ dependencies = [
     "requests>=2.34.2",
     "weasyprint>=69.0",
     "whitenoise>=6.12.0",
+    "httpx[http2]>=0.28",
+    "google-auth>=2.62.0",
+    "pyjwt>=2.15.1",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

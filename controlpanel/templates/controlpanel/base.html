@@ -97,6 +97,17 @@
 
         <main class="flex-1 overflow-y-auto">
             <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-7 py-6">
+                {% if sandbox_on %}
+                    <div class="flex items-center gap-3 rounded border-2 border-warn bg-white px-4 py-3 text-sm text-ink" role="status" data-testid="sandbox-banner-global">
+                        {% lucide "flask-conical" size=18 class="shrink-0" %}
+                        <div>
+                            <span class="font-display font-extrabold tracking-[.04em] uppercase">Sandbox mode: nothing is sent to users.</span>
+                            Pushes and notification emails are captured, not delivered.{% if sandbox_expires_at %} Switches back to live at {{ sandbox_expires_at|date:"H:i" }}.{% endif %}
+                            {% if user.is_superuser %}<a class="link link-hover font-semibold" href="{% url 'controlpanel:push_sandbox' %}">Open the sandbox</a>{% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+
                 {% if maintenance_on %}
                     <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert">
                         {% lucide "wrench" size=18 class="shrink-0" %}

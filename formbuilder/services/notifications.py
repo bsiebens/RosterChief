@@ -11,6 +11,7 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from formbuilder.models import FormSend
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from rosterchief.concurrency import run_in_background
 
@@ -36,7 +37,7 @@ def notify_form_send(send_id):
             deadline = ""
         return _("Please complete “%(form)s”%(deadline)s.") % {"form": send.form.title, "deadline": deadline}
 
-    notifications = notify_members(members, club=send.club, title=send.form.title, body=body, source=send)
+    notifications = notify_members(members, club=send.club, title=send.form.title, body=body, source=send, category=NotificationCategory.FORM)
     return f"Notified {len(notifications)} member(s)."
 
 

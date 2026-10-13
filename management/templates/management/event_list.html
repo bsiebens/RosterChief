@@ -4,17 +4,8 @@
 {% block heading %}{% trans "Events" %}{% endblock heading %}
 
 {% block actions %}
-    {% if is_club_admin and rbihf_enabled %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:rbihf_import' %}">{% lucide "download" size=16 %} {% trans "Import from RBIHF" %}</a>
-    {% endif %}
-    {% if is_club_admin and dfel_enabled %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:dfel_import' %}">{% lucide "download" size=16 %} {% trans "Import from DFEL" %}</a>
-    {% endif %}
-    {% if is_club_admin and ijnl_enabled %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:ijnl_import' %}">{% lucide "download" size=16 %} {% trans "Import from IJNL" %}</a>
-    {% endif %}
     {% if is_club_admin and fixture_import_enabled %}
-        <a class="btn btn-outline gap-2" href="{% url 'management:fixture_recheck' %}">{% lucide "refresh-cw" size=16 %} {% trans "Re-check all imported fixtures" %}</a>
+        <a class="btn btn-outline gap-2" href="{% url 'management:event_import' %}">{% lucide "download" size=16 %} {% trans "Import" %}</a>
     {% endif %}
     {% if can_create %}
         <a class="btn btn-outline gap-2" href="{% url 'management:event_series_create' %}">{% lucide "repeat" size=16 %} {% trans "New series" %}</a>

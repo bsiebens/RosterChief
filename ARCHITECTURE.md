@@ -295,6 +295,14 @@ assume a single member.
 
 `Member`, `Family`, `FamilyMembership` are tenant-scoped (`ClubScopedModel`).
 
+**Member pictures** — two private-storage images per `Member`: `player_photo` (the official picture;
+only editable in the management portal by whoever passes `can_manage_members`; the only picture a
+public surface may ever return, and only with `photo_public_consent`, via `Member.public_photo`) and
+`profile_photo` (self-service via the app/PWA; visible club-wide, never public). `Member.photo` /
+`photo_url` are read-only properties for the effective picture (profile, else player). Access rules
+live in `members.services.photos.can_view_member_photo(user, member, club, field=)`; routes
+`members:photo` (effective), `members:player_photo`, `members:profile_photo`.
+
 **`Member`** — a *person within one club*. `user` becomes a **`ForeignKey`** (was
 `OneToOneField`), still nullable (`on_delete=SET_NULL`), so one login maps to one member
 *per club* (`unique_together (club, user)`) and members can exist without logins (children,
@@ -318,7 +326,7 @@ and `members/services/invites.py` and every management path goes through them:
   member has a login, or any row owned by another club (membership, role, grant, family
   row, roster/staff spot, attendance, evaluation, shop record, …).
 - **Person fields are read-only** to a club while that is true: name, date of birth, email,
-  phones, photo and photo consent (`MemberForm(lock_person_fields=True)` disables them and
+  phones, player picture and photo consent (`MemberForm(lock_person_fields=True)` disables them and
   `MemberUpdateView` never saves them). Club-owned data (this season's `ClubMembership`,
   roles, teams) stays editable. A club also can't grant a login to such a record.
 - **Deletion** — a member is only hard-deleted when the record is the club's alone;
@@ -1172,6 +1180,26 @@ Flow & design notes:
 - **Money = `DecimalField`**, never float. Snapshot prices onto cart items / order lines /
   invoices so historical records stay correct when `Product.price` changes.
 
+#### 5.7.0 Inventory *(built)*
+
+Some merchandise is bought in bulk instead of made to order. `Product.inventory_managed`
+(merchandise only) marks it; its stock lives in `InventoryMovement` (`product`, `variant`
+null for a product without variants, signed `quantity`, `reason` = received / adjustment /
+order / order_returned, optional `order`, `note`, `created_by`). **On-hand = Σ quantity** —
+no stored counter to drift. Everything goes through `shop/services/inventory.py`.
+- **Ordering.** `place_order` row-locks the managed products, refuses a cart wanting more
+  than is on hand (same item on several lines counts together), books each managed line out
+  of stock and creates it `production_status=RECEIVED` — it never enters the production
+  flow; the order's rollup is resynced as usual.
+- **Out of stock** = nothing on hand for that product/variant: it can't be added to the cart
+  (web app + app API, which reports `in_stock`), and a cart line that sold out is
+  `unavailable` at checkout. New stock makes it orderable again.
+- **Keeping stock honest.** Cancelling an order returns what it holds (idempotent); editing a
+  managed order line's size/quantity moves the stock, refused if the new size lacks stock;
+  staff recount via "Correct count" (logged as an adjustment).
+- **UI** (`/manage/shop/inventory/`): stock per product/variant, units sitting in open orders,
+  bulk "take in" entry, per-row recount, and a movement history.
+
 #### 5.7.1 Discounts
 
 Two independent discount mechanisms, applied at different layers and computed by a single
@@ -1587,3 +1615,11 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
 `club/tenancy.py` (tenant context and middleware, §2.4),
 `authentication/managers.py` (`UserManager`), `authentication/services/` (service-layer
 pattern).
+
+### 8.6 Notifications & push
+
+- **`Notification`** (`notifications`): the in-app inbox row, one per member, written by `notifications.services.notify_members`. Email, native push and web push are *deliveries* of it, not separate records.
+- **`PushDevice`** (`appapi`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per `Member`, club-scoped.
+- **Dispatcher** (`notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `appapi`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
+- Native delivery goes through `appapi.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details: `API.md` §9.
+- **`NotificationDelivery`** (`notifications`, `notifications/delivery_log.py`): the delivery log, one row per send per channel target (status sent/retrying/failed/dead, attempts, last error, next attempt, and the channel's `payload` while retrying). A transient failure is retried by the `retry_failed_deliveries` job (every 2 min; backoff 1/5/30 min, 4 attempts) through `Channel.retry`; retention 14 days for sent, 60 for failed/dead. Logging never raises. Open items: `PUSH_FOLLOWUPS.md`.

@@ -2,6 +2,7 @@ import tempfile
 from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
@@ -80,12 +81,17 @@ class MemberModelTests(TestCase):
         self.assertIsNone(member.public_photo)
 
     def test_public_photo_is_none_without_consent(self):
-        member = Member.objects.create(first_name="Not", last_name="Consenting", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
+        member = Member.objects.create(first_name="Not", last_name="Consenting", player_photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"))
         self.assertIsNone(member.public_photo)
 
+    def test_public_photo_ignores_the_profile_picture(self):
+        member = Member.objects.create(first_name="Only", last_name="Profile", profile_photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        self.assertIsNone(member.public_photo)
+        self.assertTrue(member.photo)
+
     def test_public_photo_is_the_photo_once_consent_is_given(self):
-        member = Member.objects.create(first_name="Consents", last_name="Fully", photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
-        self.assertEqual(member.public_photo, member.photo)
+        member = Member.objects.create(first_name="Consents", last_name="Fully", player_photo=SimpleUploadedFile("photo.jpg", b"fake-image-bytes", content_type="image/jpeg"), photo_public_consent=True)
+        self.assertEqual(member.public_photo, member.player_photo)
 
 
 class FamilyNameOptionalTests(TestCase):
@@ -1158,8 +1164,8 @@ MEMBER_PHOTO_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"])
 class MemberPhotoAccessTests(TestCase):
-    """Member.photo lives in private storage and is only readable through
-    members:photo -- staff who may see the member (on that club's host), the
+    """Member.player_photo lives in private storage and is only readable through
+    members:player_photo -- staff who may see the member (on that club's host), the
     member themselves and their parents/guardians (any host). Teammates,
     other clubs and strangers get a 404."""
 
@@ -1222,13 +1228,13 @@ class MemberPhotoAccessTests(TestCase):
         cls.stranger_user, cls.stranger = person("stranger@example.com", "Stranger")
 
     def setUp(self):
-        self.kid.photo.save("kid.png", SimpleUploadedFile("kid.png", MEMBER_PHOTO_PNG, content_type="image/png"))
-        self.addCleanup(self.kid.photo.delete, save=False)
+        self.kid.player_photo.save("kid.png", SimpleUploadedFile("kid.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+        self.addCleanup(self.kid.player_photo.delete, save=False)
 
-    def fetch(self, user=None, host=CLUB_HOST, member=None):
+    def fetch(self, user=None, host=CLUB_HOST, member=None, route="members:player_photo"):
         if user is not None:
             self.client.force_login(user)
-        return self.client.get(reverse("members:photo", args=[(member or self.kid).pk]), HTTP_HOST=host)
+        return self.client.get(reverse(route, args=[(member or self.kid).pk]), HTTP_HOST=host)
 
     # --- storage ---
 
@@ -1237,13 +1243,14 @@ class MemberPhotoAccessTests(TestCase):
 
         from rosterchief.storage import PrivateStorage
 
-        self.assertIsInstance(self.kid.photo.storage, PrivateStorage)
-        self.assertTrue(self.kid.photo.storage.exists(self.kid.photo.name))
-        self.assertFalse(default_storage.exists(self.kid.photo.name))
+        self.assertIsInstance(self.kid.player_photo.storage, PrivateStorage)
+        self.assertTrue(self.kid.player_photo.storage.exists(self.kid.player_photo.name))
+        self.assertFalse(default_storage.exists(self.kid.player_photo.name))
 
     def test_photo_url_points_at_the_authorising_view(self):
         self.assertTrue(self.kid.photo_url.startswith(reverse("members:photo", args=[self.kid.pk])))
-        self.assertEqual(self.kid.photo.url, self.kid.photo_url)
+        self.assertTrue(self.kid.player_photo_url.startswith(reverse("members:player_photo", args=[self.kid.pk])))
+        self.assertEqual(self.kid.player_photo.url, self.kid.player_photo_url)
         self.assertNotIn("/media/", self.kid.photo_url)
 
     def test_photo_url_is_none_without_a_photo(self):
@@ -1301,8 +1308,8 @@ class MemberPhotoAccessTests(TestCase):
         self.assertEqual(self.fetch(self.admin_user, host=self.OTHER_HOST).status_code, 404)
 
     def test_a_member_admin_cannot_reach_a_member_outside_the_club(self):
-        self.stranger.photo.save("stranger.png", SimpleUploadedFile("stranger.png", MEMBER_PHOTO_PNG, content_type="image/png"))
-        self.addCleanup(self.stranger.photo.delete, save=False)
+        self.stranger.player_photo.save("stranger.png", SimpleUploadedFile("stranger.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+        self.addCleanup(self.stranger.player_photo.delete, save=False)
 
         self.assertEqual(self.fetch(self.member_admin_user, member=self.stranger).status_code, 404)
 
@@ -1326,8 +1333,75 @@ class MemberPhotoAccessTests(TestCase):
 
         for form_class in (MemberForm, MemberProfileForm):
             with self.subTest(form=form_class.__name__):
-                html = str(form_class(instance=self.kid)["photo"])
-                self.assertIn(reverse("members:photo", args=[self.kid.pk]), html)
+                field = "player_photo" if form_class is MemberForm else "profile_photo"
+                if field == "profile_photo":
+                    self.kid.profile_photo.save("kid-profile.png", SimpleUploadedFile("kid-profile.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+                    self.addCleanup(self.kid.profile_photo.delete, save=False)
+                html = str(form_class(instance=self.kid)[field])
+                self.assertIn(reverse(f"members:{field}", args=[self.kid.pk]), html)
+
+    # --- profile picture and effective picture ---
+
+    def add_profile_photo(self, member=None):
+        member = member or self.kid
+        member.profile_photo.save("profile.png", SimpleUploadedFile("profile.png", MEMBER_PHOTO_PNG, content_type="image/png"))
+        self.addCleanup(member.profile_photo.delete, save=False)
+
+    def test_the_effective_photo_is_the_profile_picture_else_the_player_picture(self):
+        self.assertEqual(self.kid.photo.name, self.kid.player_photo.name)
+        self.assertIsNone(self.kid.profile_photo_url)
+        self.add_profile_photo()
+        self.assertEqual(self.kid.photo.name, self.kid.profile_photo.name)
+        self.assertNotEqual(self.kid.photo.name, self.kid.player_photo.name)
+        self.assertEqual(self.kid.photo.url, self.kid.profile_photo_url)
+        self.assertIn(reverse("members:profile_photo", args=[self.kid.pk]), self.kid.profile_photo_url)
+        self.assertIn(reverse("members:photo", args=[self.kid.pk]), self.kid.photo_url)
+        self.assertFalse(self.teammate.photo)
+        self.assertIsNone(self.teammate.photo_url)
+
+    def test_the_profile_picture_is_visible_club_wide_to_teammates(self):
+        self.add_profile_photo()
+        for user in (self.teammate_user, self.coach_user, self.kid_user, self.parent_user, self.admin_user):
+            with self.subTest(user=user.email):
+                self.assertEqual(self.fetch(user, route="members:profile_photo").status_code, 200)
+
+    def test_the_profile_picture_is_denied_to_outsiders_and_never_public(self):
+        self.add_profile_photo()
+        Member.objects.filter(pk=self.kid.pk).update(photo_public_consent=True)
+        self.assertEqual(self.fetch(None, route="members:profile_photo").status_code, 404)
+        self.assertEqual(self.fetch(self.stranger_user, route="members:profile_photo").status_code, 404)
+        self.assertEqual(self.fetch(self.sibling_user, route="members:profile_photo").status_code, 404)
+        self.assertEqual(self.fetch(self.other_admin_user, host=self.OTHER_HOST, route="members:profile_photo").status_code, 404)
+        self.assertEqual(self.fetch(None, host=self.BASE_HOST, route="members:profile_photo").status_code, 404)
+
+    def test_a_missing_profile_picture_is_404(self):
+        self.assertEqual(self.fetch(self.kid_user, route="members:profile_photo").status_code, 404)
+
+    def test_the_player_picture_stays_strict_when_requested_directly(self):
+        self.add_profile_photo()
+        self.assertEqual(self.fetch(self.teammate_user, route="members:player_photo").status_code, 404)
+        self.assertEqual(self.fetch(self.coach_user, route="members:player_photo").status_code, 200)
+
+    def test_the_player_picture_as_fallback_is_visible_club_wide(self):
+        # No profile picture: the effective route falls back to the player picture for the whole club.
+        self.assertEqual(self.fetch(self.teammate_user, route="members:photo").status_code, 200)
+        self.assertEqual(self.fetch(self.stranger_user, route="members:photo").status_code, 404)
+        self.assertEqual(self.fetch(None, route="members:photo").status_code, 404)
+
+    def test_the_effective_route_serves_the_profile_picture_when_there_is_one(self):
+        self.add_profile_photo()
+        self.assertEqual(self.fetch(self.teammate_user, route="members:photo").status_code, 200)
+        self.assertEqual(self.fetch(self.stranger_user, route="members:photo").status_code, 404)
+
+    def test_can_view_member_photo_by_field(self):
+        from members.services.photos import can_view_member_photo
+
+        self.add_profile_photo()
+        self.assertTrue(can_view_member_photo(self.teammate_user, self.kid, self.club, field="profile_photo"))
+        self.assertFalse(can_view_member_photo(self.teammate_user, self.kid, self.club, field="player_photo"))
+        self.assertFalse(can_view_member_photo(self.stranger_user, self.kid, self.club, field="profile_photo"))
+        self.assertTrue(can_view_member_photo(self.teammate_user, self.kid, self.club))
+        self.assertFalse(can_view_member_photo(None, self.kid, self.club))
 
 
 class MovePhotosToPrivateStorageMigrationTests(TestCase):
@@ -1341,7 +1415,10 @@ class MovePhotosToPrivateStorageMigrationTests(TestCase):
         from django.apps import apps
 
         module = importlib.import_module("members.migrations.0012_move_member_photos_to_private_storage")
-        module.move_photos_to_private_storage(apps, None)
+        # The live Member model no longer has ``photo`` (0013 renamed it to ``player_photo``).
+        names = list(Member.objects.exclude(player_photo="").values_list("player_photo", flat=True).distinct())
+        with mock.patch.object(module, "_photo_names", return_value=names):
+            module.move_photos_to_private_storage(apps, None)
 
     def test_moves_a_public_file_into_private_storage(self):
         from django.core.files.base import ContentFile
@@ -1351,14 +1428,14 @@ class MovePhotosToPrivateStorageMigrationTests(TestCase):
 
         member = Member.objects.create(first_name="Old", last_name="Upload")
         name = default_storage.save(f"members/{member.pk}/old.png", ContentFile(MEMBER_PHOTO_PNG))
-        Member.objects.filter(pk=member.pk).update(photo=name)
+        Member.objects.filter(pk=member.pk).update(player_photo=name)
         self.addCleanup(private_storage.delete, name)
 
         self.run_migration()
         self.run_migration()
 
         member.refresh_from_db()
-        self.assertEqual(member.photo.name, name)
+        self.assertEqual(member.player_photo.name, name)
         self.assertTrue(private_storage.exists(name))
         self.assertFalse(default_storage.exists(name))
         with private_storage.open(name, "rb") as moved:
@@ -1366,12 +1443,12 @@ class MovePhotosToPrivateStorageMigrationTests(TestCase):
 
     def test_a_missing_source_file_is_skipped(self):
         member = Member.objects.create(first_name="Lost", last_name="File")
-        Member.objects.filter(pk=member.pk).update(photo=f"members/{member.pk}/gone.png")
+        Member.objects.filter(pk=member.pk).update(player_photo=f"members/{member.pk}/gone.png")
 
         self.run_migration()
 
         member.refresh_from_db()
-        self.assertEqual(member.photo.name, f"members/{member.pk}/gone.png")
+        self.assertEqual(member.player_photo.name, f"members/{member.pk}/gone.png")
 
 
 class PurgePublicMemberPhotosCommandTests(TestCase):

@@ -14,7 +14,7 @@ class AnnouncementComposeForm(forms.ModelForm):
 
     class Meta:
         model = Announcement
-        fields = ["title", "message", "club", "scheduled_for"]
+        fields = ["title", "message", "club", "audience", "scheduled_for"]
         widgets = {
             "message": forms.Textarea(attrs={"rows": 5}),
             "scheduled_for": forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -27,3 +27,7 @@ class AnnouncementComposeForm(forms.ModelForm):
         self.fields["club"].queryset = Club.objects.active().order_by("name")
         self.fields["club"].empty_label = _("All clubs")
         self.fields["scheduled_for"].required = False
+        self.fields["audience"].required = False
+
+    def clean_audience(self):
+        return self.cleaned_data.get("audience") or Announcement.Audience.EVERYONE

@@ -11,9 +11,11 @@ from django.utils.translation import gettext_lazy as _
 from rosterchief import throttle
 
 from ..models import AppliedDiscount, Cart, Discount, Order, OrderLine, Product
+from .inventory import InventoryError, check_available, is_in_stock, lock_products, take_for_order_lines
 from .invoices import create_invoice_for_order
 from .notifications import dispatch_order_placed_notification
 from .pricing import cart_totals
+from .production import sync_production_status
 
 #: Wrong discount codes allowed per member / per client IP before every code
 #: (even a right one) is refused for the rest of the window -- keeps anyone
@@ -78,11 +80,14 @@ def find_discount(club, code: str, *, member=None, ip: str | None = None, lock: 
 def is_orderable(item) -> bool:
     """Whether a cart line can still be bought: its product is active, in the
     member-facing shop (public, not a membership product) and in the cart's
-    own club, and its variant (if any) is still active."""
+    own club, its variant (if any) is still active and, for an inventory-managed
+    product, enough of it is in stock."""
     product = item.product
     if product.club_id != item.cart.club_id or not product.is_active or not product.is_public or product.product_type == Product.ProductType.MEMBERSHIP:
         return False
-    return item.variant is None or (item.variant.is_active and item.variant.product_id == product.pk)
+    if item.variant is not None and not (item.variant.is_active and item.variant.product_id == product.pk):
+        return False
+    return is_in_stock(product, item.variant, item.quantity)
 
 
 def current_unit_price(item):
@@ -136,7 +141,18 @@ def place_order(cart: Cart, *, purchaser, discount_code: str = "", ip: str | Non
         if not items:
             raise CheckoutError(_("Your cart is empty."))
 
+        # Stock is only trustworthy to read with its products locked: a
+        # concurrent order for the last items waits here, then sees them gone.
+        lock_products({item.product_id for item in items if item.product.inventory_managed})
+
         unavailable, repriced = reprice_cart_items(items)
+        try:
+            check_available(items)
+        except InventoryError as error:
+            # Each line fits on its own (else it'd be "unavailable" above) but
+            # together -- the same item for two people -- they don't.
+            if not unavailable:
+                raise CheckoutError(str(error)) from error
         if unavailable:
             problem = _("These items are no longer available: %(items)s. Remove them from your cart to place your order.") % {"items": ", ".join(_item_label(item) for item in unavailable)}
         elif repriced:
@@ -157,8 +173,9 @@ def _create_order(cart, items, *, purchaser, discount_code, ip):
     totals = cart_totals(cart, discount)
 
     order = Order.objects.create(club=cart.club, purchaser=purchaser, total=totals["total"])
+    lines = []
     for item in items:
-        OrderLine.objects.create(
+        line = OrderLine.objects.create(
             order=order,
             product=item.product,
             variant=item.variant,
@@ -170,6 +187,12 @@ def _create_order(cart, items, *, purchaser, discount_code, ip):
             personalization_number=item.personalization_number,
             personalization_name=item.personalization_name,
         )
+        lines.append(line)
+
+    # Inventory-managed lines come out of stock and are received on the spot
+    # -- they never go through production.
+    take_for_order_lines(lines)
+    sync_production_status(order)
 
     if discount is not None:
         AppliedDiscount.objects.create(

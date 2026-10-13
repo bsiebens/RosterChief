@@ -22,6 +22,7 @@ from django.utils.translation import ngettext
 from events.models import Event
 from events.services.officials import sync_official_invites
 from events.services.referees import sync_referee_invites
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
 
@@ -30,10 +31,10 @@ def _notify_new_invites(club, new_invites, *, single, plural, title):
     count that opens the calendar."""
     for member, events in new_invites.items():
         if len(events) == 1:
-            notify_members([member], club=club, title=title, body=lambda event=events[0]: str(single) % {"event": event.title}, source=events[0])
+            notify_members([member], club=club, title=title, body=lambda event=events[0]: str(single) % {"event": event.title}, source=events[0], category=NotificationCategory.CREW)
         else:
             count = len(events)
-            notify_members([member], club=club, title=title, body=lambda count=count: ngettext(*plural, count) % {"count": count}, target_type="calendar")
+            notify_members([member], club=club, title=title, body=lambda count=count: ngettext(*plural, count) % {"count": count}, target_type="calendar", category=NotificationCategory.CREW)
 
 
 def resync_upcoming_invites(club=None, *, now=None) -> dict:

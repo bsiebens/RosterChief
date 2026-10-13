@@ -175,6 +175,8 @@ def notification_out(notification) -> dict:
     return {
         "id": notification.pk,
         "member_id": notification.member_id,
+        "category": notification.category,
+        "priority": notification.priority,
         "title": notification.title,
         "body": notification.body,
         "translations": {code: notification.text_for(code) for code, _name in settings.LANGUAGES},
@@ -184,10 +186,15 @@ def notification_out(notification) -> dict:
     }
 
 
-def member_photo_url(request, member) -> str | None:
+def member_photo_url(request, member, kind: str | None = None) -> str | None:
     """The app API's own photo endpoint (token-authenticated), versioned like
-    Member.photo_url so a replaced photo is never served from the app's cache."""
-    if not member.photo:
+    Member.photo_url so a replaced photo is never served from the app's cache.
+    ``kind`` None is the effective picture (profile, else player); ``profile`` /
+    ``player`` address one picture directly."""
+    field = {None: None, "profile": "profile_photo", "player": "player_photo"}[kind]
+    stored = member.photo if field is None else getattr(member, field)
+    if not stored:
         return None
-    version = hashlib.sha256(member.photo.name.encode()).hexdigest()[:12]
-    return request.build_absolute_uri(f"/api/app/v1/members/{member.pk}/photo?v={version}")
+    version = hashlib.sha256(stored.name.encode()).hexdigest()[:12]
+    suffix = f"&kind={kind}" if kind else ""
+    return request.build_absolute_uri(f"/api/app/v1/members/{member.pk}/photo?v={version}{suffix}")

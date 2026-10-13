@@ -81,8 +81,8 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 ```
 
 ```python
-path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),  # -> /api/auth/app/v1/...
-path("api/app/v1/", app_api.urls),  # phase 1 (appapi)
+(path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),)  # -> /api/auth/app/v1/...
+(path("api/app/v1/", app_api.urls),)  # phase 1 (appapi)
 ```
 
 `base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
@@ -361,7 +361,7 @@ sizes hurt mobile networks.
 **Private media** (documents, invoices, private-storage files) are **never** exposed as public S3 URLs. Return an authenticated streaming endpoint (`GET …/invoice.pdf`, `Content-Type:
 application/pdf`, `Content-Disposition`) or, later, short-lived presigned URLs minted per request after the same authorization.
 
-**Member photos are private media now** (security audit, 0.7.9). `Member.photo` lives in private storage, and `Member.photo_url` points at `members:photo`, which checks
+**Member photos are private media now** (security audit, 0.7.9). `Member.player_photo` (official) and `Member.profile_photo` (self-service, club-wide, never public) live in private storage, and `Member.photo_url` points at `members:photo`, which checks
 `members.services.photos.can_view_member_photo`: the member, their parents/guardians, and staff who may see that member, plus anyone when `photo_public_consent` is on. The web view authenticates by session cookie, so the app API needs its own
 token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the same rule. Don't hand out the web URL.
 
@@ -417,6 +417,10 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 | News                                                       | `POST …/news` (submit for review, photos multipart; needs `can_add_news`)                                                                                                                                                                                                             |
 | Evaluations (flag `evaluations`, `can_manage_evaluations`) | `GET /evaluations/checklists`, `GET …/players/{member_id}/evaluations`, `POST …/players/{member_id}/evaluations` (requires an explicit `checklist_slug` — the web's "exactly one ⇒ auto-pick" is UI-only)                                                                             |
 
+> **As built (phase 4):** see `docs/app-api/ios.md` §9 for the real shapes. Differences from the table above: staff removal is `DELETE …/staff/{assignment_id}` (players keep `…/roster/{membership_id}`);
+> `PATCH …/events/{id}` takes `scope: this|this_and_following|all`; evaluations are club-wide, not under `/teams/{team_id}`: `GET /evaluations/checklists`, `GET|POST /players/{member_id}/evaluations`
+> (the evaluation grant is not tied to a team); `GET …/news` lists the caller's own submissions; every `staffed_teams` item in `GET /context` carries `role` and the `can_*` flags.
+
 ### 7.4 Deliberately not in v1
 
 Management screens, tournament brackets/scheduling (§14), shop/forms/registration *administration*, club branding editing, member import. Anything a coach can do only via `/manage` on the web stays there.
@@ -437,47 +441,92 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 
 ---
 
-## 9. Push notifications (AWS-native)
+## 9. Push notifications
 
-**Constraint from the product owner:** one platform that fans out to APNs and FCM, and — because production already runs on AWS — an **AWS service rather than introducing FCM directly**.
+Native push goes **straight to the platform providers**: Apple's APNs (HTTP/2, token auth) for iOS and
+Firebase Cloud Messaging (HTTP v1) for Android. There is no SNS or any other intermediary (the original
+SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `appapi/push.py` for the code.
 
-**Recommendation: Amazon SNS Mobile Push.** One `Publish` per device endpoint; SNS holds the APNs and FCM credentials (as *platform applications*) and talks to both. It is the single fan-out platform the owner asked for, needs only `boto3` (already
-reachable via the S3 storage stack — confirm it is a direct dependency) and IAM, and adds no third-party vendor beyond what APNs/FCM require anyway. (FCM is still *underneath* SNS for Android — SNS is the AWS-side abstraction, not a way to avoid
-Google's delivery network. That is unavoidable for Android.)
+**Gateways** (`appapi/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
+set), `FcmGateway` (Android, when a Firebase service account is set), and `PlatformGateway`, which
+`get_gateway()` returns and which routes a device to the gateway of its platform. A platform without
+credentials is simply not `supports()`-ed: its devices still register, nothing is sent. `NullGateway` covers
+"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `appapi/push.py`)
+says whether any platform can deliver.
 
-Alternatives considered:
+**Model.** `appapi.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
+locale, enabled, last_seen)`, keyed per `User` + install, not per Member/club: one install serves every club the user
+belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, also on token rotation); `DELETE
+/devices/{id}` and logout remove it. The PWA's `mobile.PushSubscription` is separate (per Member, per club).
 
-| Option                                         | Verdict                                                                                                                                                  |
-|------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **SNS Mobile Push**                            | **Recommended.** Simple, cheap, fits IAM/S3 footprint, pay-per-publish. No segmentation/campaign features (we don't need them: sends are transactional). |
-| AWS End User Messaging Push (ex-Pinpoint push) | Heavier, targets campaigns/segments/analytics; Pinpoint's original console is being wound down in favour of this. Overkill for transactional pushes.     |
-| FCM direct (+ APNs via FCM)                    | Rejected by the owner for adding a party.                                                                                                                |
-| Keep Web Push only                             | Doesn't work in native apps.                                                                                                                             |
+**Dispatcher** (`notifications/dispatch.py`). The `notifications_created` signal is gone. `notify_members` writes the
+`Notification` rows (the in-app inbox) and calls `schedule_notifications`, which, after the surrounding transaction
+commits and off the request thread (`run_in_background`), hands the batch to every registered *channel*. Channels
+register themselves in their `AppConfig.ready` via `register_channel` (idempotent per name), so `notifications` never
+imports `appapi`/`mobile`:
 
-**Design**
+| Channel  | Class                                | Does                                                         |
+|----------|--------------------------------------|--------------------------------------------------------------|
+| `email`  | `notifications.channels.EmailChannel` | plain notification mail to the member and guardians          |
+| `native` | `appapi.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
+| `web`    | `mobile.channels.WebPushChannel`      | Web Push to the PWA subscriptions                            |
 
-- **Model** (new, in `mobile` next to `PushSubscription`, or a new `push` app):
-  `PushDevice(user, installation_id UNIQUE, platform: ios|android, sns_endpoint_arn, app_version,
-  locale, enabled, last_seen, created)`. Keyed **per `User` + install**, not per Member/club: one install serves every club the user belongs to (the account plane, §4), and the SNS endpoint is per install. The current `PushSubscription` is
-  `ClubScopedModel` + per-`Member`; the *recipient resolution* (Member → which users get it, incl. guardians of children who have no login) should **reuse whatever `mobile.signals` does today for Web Push** rather than reinvent it — read that
-  receiver during implementation and mirror its member→user mapping (§16-4).
-- **Registration:** `POST /devices` with the APNs/FCM token → `sns.CreatePlatformEndpoint` (or update on token rotation; store `EndpointArn`, handle the `already exists with different
-  attributes` SNS quirk by `SetEndpointAttributes`) → row upsert. `DELETE /devices/{id}` and logout delete the endpoint.
-- **Send path:** a second receiver on the existing `notifications_created` signal (the single fan-out point; `notifications.services.notify_members` fires it), running **off the request thread** via the existing `run_in_background`/APScheduler
-  machinery (`features/scheduler.py`,
-  `rosterchief/concurrency.py`) so sends never block a web request. Per device: one SNS
-  `Publish` with a JSON envelope per platform (APNs alert + `mutable-content`; FCM `notification` +
-  `data`).
-- **Payload = pointer, not content.** `{notification_id, club_slug, type, target: {type, id}}` plus a localised title/short body (the recipient's `locale`). Anything sensitive is fetched by the app over the authenticated API after tap. Never put
-  minors' details or financial data in the push body.
-- **Live game pushes** (`events.services.game_push`, GAME_TIMELINE.md phase 4) are the one push that has no `Notification` row behind it: no `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. The title is "<our teams> vs <opponent>", and the body has one line per moment the poll detected, so a coalesced update can span several lines. Who gets them is opt-in per team: `GET/PUT /game-follows`.
-- **Delivery hygiene:** on SNS `EndpointDisabled`/`InvalidParameter`/`NotFound` (token no longer valid) → mark the device disabled and delete the endpoint; also enable SNS delivery-status logging to CloudWatch. Badge/unread count from
-  `GET /notifications/unread-count`.
-- **Preferences:** none per-type in v1 (mirrors Web Push today); a per-install `enabled` toggle only.
-- **Web Push remains** for the PWA; both receivers coexist. A user with both a PWA subscription and a native install may get two alerts — dedupe rule: skip Web Push for a user who has an enabled native device *and* was seen on it recently (decision
-  in §16).
-- **Infra:** two SNS platform applications (APNs prod/sandbox as needed, FCM) per environment; credentials in the same secrets mechanism as the rest of `DEPLOYMENT.md`; IAM policy scoped to
-  `sns:CreatePlatformEndpoint|SetEndpointAttributes|Publish|DeleteEndpoint` on those ARNs.
+A channel that raises is logged and never stops the others. `dispatch_to_user(club, user, texts, data, url,
+thread_id)` is the second entry point, for messages with no inbox row (live game pushes, `events.services.game_push`):
+every channel's `deliver_to_user`, returning how many devices/subscriptions each reached. With
+`NOTIFICATIONS_DISPATCH_EAGER` (on in the test suite) everything is delivered synchronously instead of after commit.
+
+**Recipients and dedupe.**
+- Recipients are *accounts*: the member's own login plus every parent/guardian's in that club (the `recipient_emails`
+  rule). One push per account per distinct notification, so a club-wide item doesn't buzz a parent once per child.
+- Web Push is skipped for an account with an enabled native device seen in the last 60 days
+  (`users_with_native_push`): the phone already got it.
+- An account set to "email unless the app can notify me" (`User.email_notifications`) gets no plain notification mail
+  while it has such a device. Mail **with attachments** (invoices) is a document, not a nudge: it is sent inline by
+  `notify_members` (once, never again by the email channel) and ignores that preference.
+- A device whose token the provider reports dead is disabled.
+
+**Payload = pointer, not content.** `{kind, notification_id, club_slug, target: {type, id, ...}}` plus a localised
+title and short body. Texts may be plain strings, lazy translations or callables; they are resolved per recipient in the
+language of the device's registered `locale` (Web Push has no language preference and goes out in English). On Android,
+`target` arrives as JSON text (FCM data values are strings). Anything sensitive is fetched by the app over the
+authenticated API after tap; never put minors' details or financial data in a push body.
+
+**Live game pushes** (`events.services.game_push`, GAME_TIMELINE.md phase 4) have no `Notification` row: no
+`notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. Who gets them is opt-in per team:
+`GET/PUT /game-follows`.
+
+**Push policy** (`notifications/policy.py`, one table for both providers). Each category maps to a TTL, whether a newer
+push replaces the older one (collapse), a priority and an Android channel. The server sets them on every send: APNs
+`apns-expiration` (now + TTL), `apns-priority`, `apns-collapse-id` (the event id, max 64 bytes); FCM `android.ttl`,
+`android.priority`, `android.collapse_key`, `android.notification.channel_id`. A `critical` notification is always
+priority 10 / high with a TTL of at least a day. A retry re-sends with the same policy and is dropped once the TTL has
+passed. The custom payload carries `category` (the category key) so the app can route and style.
+
+| Category       | TTL    | Collapse | Priority (APNs / FCM) | Android channel (importance) |
+|----------------|--------|----------|-----------------------|------------------------------|
+| `news`         | 7 days | no       | 5 / normal            | `rc_news` (default)          |
+| `event`        | 3 days | no       | 10 / high             | `rc_event` (high)            |
+| `reminder`     | 1 day  | no       | 5 / normal            | `rc_reminder` (default)      |
+| `lineup`       | 1 day  | no       | 10 / high             | `rc_lineup` (high)           |
+| `crew`         | 2 days | no       | 10 / high             | `rc_crew` (high)             |
+| `form`         | 3 days | no       | 5 / normal            | `rc_form` (default)          |
+| `shop`         | 2 days | no       | 5 / normal            | `rc_shop` (default)          |
+| `coach`        | 1 day  | no       | 10 / high             | `rc_coach` (high)            |
+| `admin`        | 3 days | no       | 5 / normal            | `rc_admin` (default)         |
+| `announcement` | 7 days | no       | 5 / normal            | `rc_announcement` (default)  |
+| `game`         | 15 min | yes, per event | 10 / high       | `rc_game` (high)             |
+| `general`      | 3 days | no       | 5 / normal            | `rc_general` (default)       |
+
+**Delivery log and retries** (`notifications.NotificationDelivery`, `notifications/delivery_log.py`). Every send on
+every channel is logged per target (install, subscription or address): sent, failed (refused), dead (target gone) or
+retrying. A transient failure (throttling, a 5xx, a network error) keeps its payload and is retried by the
+`retry_failed_deliveries` job (every 2 min) after 1, 5 and 30 minutes, 4 attempts in total, then it is marked failed.
+Rows are purged after 14 days (sent) or 60 days (failed/dead); retrying rows are never purged. Read-only in the Django
+admin. `PUSH_FOLLOWUPS.md` lists what is still open.
+
+**Preferences:** none per type in v1; a per-install `enabled` toggle only. Badge/unread count from
+`GET /notifications/unread-count`.
 
 ---
 
@@ -552,7 +601,7 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
    MFA → 403 `mfa_enrollment_required` on
    `/api/app/` but able to reach enrolment; **signup endpoint refuses** (closed); password change invalidates other app sessions.
 3. **Middleware interaction**: `RequireMFAMiddleware` does not redirect API paths; maintenance → 503 JSON; no CORS headers on the new prefixes.
-4. **Push**: SNS behind a small `PushGateway` interface with a fake in tests (no network); disabled- endpoint pruning; payload contains no PII.
+4. **Push**: APNs/FCM behind a small `PushGateway` interface with a fake in tests (no network); disabled- endpoint pruning; payload contains no PII.
 5. **Regression net**: the service extractions in §11 are refactors — `mobile/tests.py` must stay green at every step, and the new service functions get direct unit tests.
 6. **OpenAPI diff check in CI** (§15) so an accidental breaking change fails the build.
 
@@ -618,8 +667,8 @@ and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`
 `appapi.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
 an unknown id with the 404 envelope (§13).
 
-Push delivery (`appapi/delivery.py`): a second `notifications_created` receiver, after commit
-and off the request thread (`run_in_background`), only when SNS (or a test gateway) is
+Push delivery (`appapi/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
+and off the request thread, only when a gateway (APNs, FCM or a test gateway) is
 configured. Recipients are accounts: the member's own login plus their parents/guardians in that
 club (the `recipient_emails` rule, answering §16-4's mapping). One push per account per distinct
 notification, so a club-wide item doesn't buzz a parent once per child. Dead tokens disable the
@@ -637,7 +686,7 @@ people,support,shop,registration}.py`, tests in `appapi/test_phase3.py`). Servic
 - Forms: list, schema, `submit` (JSON, or multipart with files; idempotent; for one addressed
   managed person, §8), submitted response. Not flag-gated, like the PWA: `formbuilder` licenses
   creating forms.
-- Photos: `POST`/`DELETE /members/{id}/photo` via `MemberProfileForm`, 10 MB cap.
+- Photos: `POST`/`DELETE /members/{id}/photo` set/clear the *profile* picture (`Member.profile_photo`) via `MemberProfileForm`, 10 MB cap; the official `player_photo` is manager-only (web). `photo_url` is the effective picture (profile, else player); `ProfileOut` also has `profile_photo_url` and `player_photo_url`; `GET .../photo[?kind=profile|player]`.
 - Shop: catalogue, cart (re-priced, code preview), idempotent checkout (pay on pickup, §12),
   orders and invoice PDF. Unlicensed → 404 `feature_disabled`; closed → 409 `shop_closed` for
   catalogue/cart/checkout, orders stay readable.
@@ -665,7 +714,7 @@ has a `RegistrationDetails` row per child registered that way, and the child no 
   `HEADLESS_SPECIFICATION_TEMPLATE_NAME=None`).
 - **Client minimum version.** `GET /meta` returns `min_supported_app_version` per platform; the app sends `X-App-Version`/`X-App-Platform`; below-minimum → 426-style `upgrade_required` screen. The only defence against an old client that would break
   on a future v2 sunset.
-- **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); SNS delivery logs to CloudWatch; counters for 401/403/429 per route.
+- **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); push failures logged per device; counters for 401/403/429 per route.
 - **Caching.** Personalised routes: `Cache-Control: private, no-store`. Cheap conditional reads via
   `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `api/cache.py` layer is not reused — it caches by club, not by user.)
 - **Delta sync.** Most models have `created`/`modified`; list endpoints for
