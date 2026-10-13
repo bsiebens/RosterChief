@@ -33,6 +33,7 @@ from django.utils.translation import gettext as _
 from events.models import Event, EventFollow, GameFollow, GameMoment
 from events.services.game_moments import describe_moment
 from notifications.dispatch import dispatch_to_user
+from notifications.models import NotificationCategory
 from rosterchief.concurrency import run_in_background
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ def deliver_moments(event_id, moment_ids) -> int:
     url = _event_url(event)
     reached = 0
     for user in followers(event):
-        if dispatch_to_user(club=event.club, user=user, texts=texts, data=data, url=url, thread_id=str(event.pk)).total:
+        if dispatch_to_user(club=event.club, user=user, texts=texts, data=data, url=url, thread_id=str(event.pk), category=NotificationCategory.GAME).total:
             reached += 1
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached

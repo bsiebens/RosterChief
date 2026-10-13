@@ -318,7 +318,7 @@ class RecordingChannel(Channel):
             raise RuntimeError("boom")
         self.batches.append(([notification.pk for notification in notifications], email))
 
-    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None):
+    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None, category="general"):
         if self.fail:
             raise RuntimeError("boom")
         self.users.append((user, texts("en"), data, url, thread_id))

@@ -14,6 +14,7 @@ from django.utils.translation import gettext as _
 
 from events.models import Attendance, Event
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from rosterchief.concurrency import run_in_background
 
@@ -45,7 +46,7 @@ def notify_new_event(event_id):
     def body():
         return _("New %(kind)s: %(when)s. Let us know if you can make it.") % {"kind": event.get_kind_display(), "when": date_format(start, "D d M, H:i")}
 
-    notifications = notify_members(members, club=event.club, title=event.title, body=body, source=event)
+    notifications = notify_members(members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.EVENT)
     return f"Notified {len(notifications)} member(s)."
 
 

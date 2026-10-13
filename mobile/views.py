@@ -52,6 +52,8 @@ from members.services.family import managed_people
 from members.views import ClubScopedPublicMixin
 from news.models import News
 from news.services import live_news, localized_news, member_news, render_body_html
+from notifications import preferences as notification_preferences
+from notifications.models import NotificationCategory, NotificationPreference
 from notifications.services import clear_all, inbox_for, mark_all_read, mark_read, unread_count
 from registration.models import RegistrationBatch
 from registration.services import (
@@ -268,17 +270,44 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
     active_tab = "me"
 
     def get_context_data(self, **kwargs):
+        club = self.request.club
+        effective = notification_preferences.matrix(self.request.user, club)
+        overridden = notification_preferences.overrides(self.request.user, club)
         kwargs.setdefault("choices", User.EmailNotifications.choices)
         kwargs.setdefault("current", self.request.user.email_notifications)
+        kwargs["category_rows"] = [{"key": key, "label": label, "push": effective[key]["push"], "email": effective[key]["email"], "overridden": key in overridden} for key, label in NotificationCategory.choices]
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
+        if "category_switches" in request.POST:
+            return self._save_categories(request)
+        if "reset_category" in request.POST:
+            return self._reset_category(request)
         value = request.POST.get("email_notifications")
         if value not in User.EmailNotifications.values:
             return HttpResponseBadRequest("Unknown choice.")
         request.user.email_notifications = value
         request.user.save(update_fields=["email_notifications"])
         notify(request, f"s|{_('Saved')}|{_('Your notification email setting has been updated.')}")
+        return redirect("mobile:notification_settings")
+
+    def _save_categories(self, request):
+        """Writes this club's rows only where a switch differs from what already applies here."""
+        effective = notification_preferences.matrix(request.user, request.club)
+        for category in NotificationCategory.values:
+            for channel in NotificationPreference.Channel.values:
+                wanted = f"{channel}__{category}" in request.POST
+                if wanted != effective[category][channel]:
+                    notification_preferences.set_preference(request.user, request.club, category, channel, wanted)
+        notify(request, f"s|{_('Saved')}|{_('Your notification switches for this club have been updated.')}")
+        return redirect("mobile:notification_settings")
+
+    def _reset_category(self, request):
+        category = request.POST["reset_category"]
+        if category not in NotificationCategory.values:
+            return HttpResponseBadRequest("Unknown category.")
+        notification_preferences.reset(request.user, request.club, category)
+        notify(request, f"s|{_('Saved')}|{_('This category follows your default again.')}")
         return redirect("mobile:notification_settings")
 
 

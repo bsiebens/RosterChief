@@ -8,6 +8,24 @@ from members.models import Member
 from rosterchief.base import ClubScopedModel, validate_club_scope
 
 
+class NotificationCategory(models.TextChoices):
+    """What a notification is *about*: the unit a person switches on or off
+    (``NotificationPreference``). The value is stored and sent to the apps, the label is for people."""
+
+    NEWS = "news", _("News")
+    EVENT = "event", _("New and changed events")
+    REMINDER = "reminder", _("Reminders to respond")
+    LINEUP = "lineup", _("Line-ups")
+    CREW = "crew", _("Referee and official duties")
+    FORM = "form", _("Forms")
+    SHOP = "shop", _("Shop orders")
+    COACH = "coach", _("Messages from coaches")
+    ADMIN = "admin", _("Club administration")
+    ANNOUNCEMENT = "announcement", _("Platform announcements")
+    GAME = "game", _("Live game updates")
+    GENERAL = "general", _("Other")
+
+
 class Notification(ClubScopedModel):
     """One member's copy of a notification -- "this member should know about
     X" -- built for news publishing first (see news.tasks.notify_news_published),
@@ -22,6 +40,7 @@ class Notification(ClubScopedModel):
     """
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="notifications", verbose_name=_("member"))
+    category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices, default=NotificationCategory.GENERAL)
     title = models.CharField(_("title"), max_length=255)
     body = models.TextField(_("body"))
     #: ``{language: {"title": ..., "body": ...}}`` for every language in settings.LANGUAGES,
@@ -98,6 +117,10 @@ class NotificationDelivery(ClubScopedModel):
     #: What was sent to: a native install id, a web push subscription id, an email address.
     target = models.CharField(_("target"), max_length=255)
     status = models.CharField(_("status"), max_length=16, choices=Status.choices)
+    #: Who actually carried it: apns, fcm, webpush, email (monitoring groups by this).
+    provider = models.CharField(_("provider"), max_length=16, blank=True)
+    #: How long the provider took to answer, for monitoring.
+    duration_ms = models.PositiveIntegerField(_("duration (ms)"), null=True, blank=True)
     attempts = models.PositiveSmallIntegerField(_("attempts"), default=1)
     last_error = models.CharField(_("last error"), max_length=500, blank=True)
     next_attempt_at = models.DateTimeField(_("next attempt"), null=True, blank=True)
@@ -112,7 +135,39 @@ class NotificationDelivery(ClubScopedModel):
             models.Index(fields=["status", "next_attempt_at"]),
             models.Index(fields=["notification"]),
             models.Index(fields=["club", "created"]),
+            models.Index(fields=["created", "provider", "status"]),
         ]
 
     def __str__(self):
         return f"{self.get_channel_display()} → {self.target} ({self.get_status_display()})"
+
+
+class NotificationPreference(models.Model):
+    """One switch: "this account does (not) want ``category`` on ``channel``", for one club or --
+    with ``club`` empty -- for every club. Absence of a row means *on*: nothing is stored until
+    someone changes a default. A club-specific row beats the all-clubs row. The in-app inbox is
+    never switchable: the notification is always written, a preference only decides whether it
+    also buzzes a phone or lands in a mailbox."""
+
+    class Channel(models.TextChoices):
+        PUSH = "push", _("Push (app and browser)")
+        EMAIL = "email", _("Email")
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_preferences", verbose_name=_("account"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="notification_preferences", verbose_name=_("club"))
+    category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices)
+    channel = models.CharField(_("channel"), max_length=8, choices=Channel.choices)
+    enabled = models.BooleanField(_("enabled"), default=True)
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("notification preference")
+        verbose_name_plural = _("notification preferences")
+        constraints = [
+            models.UniqueConstraint(fields=["user", "club", "category", "channel"], name="unique_notification_preference"),
+            # NULL clubs never collide in a plain unique constraint: one all-clubs row per switch.
+            models.UniqueConstraint(fields=["user", "category", "channel"], condition=models.Q(club__isnull=True), name="unique_global_notification_preference"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} {self.category}/{self.channel}={'on' if self.enabled else 'off'}"

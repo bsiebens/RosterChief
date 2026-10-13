@@ -4772,6 +4772,114 @@
         "title": "NewsSummaryOut",
         "type": "object"
       },
+      "NotificationCategoryOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional longer explanation, in the request language.",
+            "title": "Description"
+          },
+          "key": {
+            "description": "Stable identifier, e.g. `news`. Use it in PATCH/DELETE.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "Name for the switch, in the request language.",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "NotificationCategoryOut",
+        "type": "object"
+      },
+      "NotificationChangeIn": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit to leave the email switch as it is.",
+            "title": "Email"
+          },
+          "push": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit to leave the push switch (iOS, Android and web push) as it is.",
+            "title": "Push"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "title": "NotificationChangeIn",
+        "type": "object"
+      },
+      "NotificationClubPreferencesOut": {
+        "properties": {
+          "club_name": {
+            "title": "Club Name",
+            "type": "string"
+          },
+          "club_slug": {
+            "title": "Club Slug",
+            "type": "string"
+          },
+          "effective": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            "description": "What applies in this club: the defaults with the overrides on top, `{category: {push, email}}`.",
+            "title": "Effective",
+            "type": "object"
+          },
+          "overrides": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NotificationOverridesOut"
+            },
+            "description": "Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.",
+            "title": "Overrides",
+            "type": "object"
+          }
+        },
+        "required": [
+          "club_slug",
+          "club_name",
+          "overrides",
+          "effective"
+        ],
+        "title": "NotificationClubPreferencesOut",
+        "type": "object"
+      },
       "NotificationOut": {
         "properties": {
           "body": {
@@ -4843,6 +4951,34 @@
         "title": "NotificationOut",
         "type": "object"
       },
+      "NotificationOverridesOut": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "push": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Push"
+          }
+        },
+        "title": "NotificationOverridesOut",
+        "type": "object"
+      },
       "NotificationPageOut": {
         "properties": {
           "items": {
@@ -4869,6 +5005,70 @@
           "next_cursor"
         ],
         "title": "NotificationPageOut",
+        "type": "object"
+      },
+      "NotificationPreferencesIn": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChangeIn"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "club_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null`: the all-clubs defaults. A club slug: an override for just that club.",
+            "title": "Club Slug"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "title": "NotificationPreferencesIn",
+        "type": "object"
+      },
+      "NotificationPreferencesOut": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationCategoryOut"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "clubs": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationClubPreferencesOut"
+            },
+            "title": "Clubs",
+            "type": "array"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            "description": "The all-clubs switches, `{category: {push, email}}`. No stored row means on. The in-app inbox is never switchable.",
+            "title": "Defaults",
+            "type": "object"
+          }
+        },
+        "required": [
+          "categories",
+          "defaults",
+          "clubs"
+        ],
+        "title": "NotificationPreferencesOut",
         "type": "object"
       },
       "NotificationSourceOut": {
@@ -10184,6 +10384,239 @@
           }
         ],
         "summary": "The signed-in account",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/me/notification-preferences": {
+      "delete": {
+        "description": "Drops the stored switches of one scope (`club_slug` empty: the all-clubs defaults, which go back\nto on; a slug: that club's overrides, which go back to the defaults). With `category` only that\ncategory's, otherwise all of them. Nothing stored is fine. Answers like GET.",
+        "operationId": "appapi_routers_account_reset_notification_preferences",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "club_slug",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Club Slug"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Back to the inherited notification switches",
+        "tags": [
+          "account"
+        ]
+      },
+      "get": {
+        "description": "Per category two switches: `push` (this account's phones and browsers) and `email`. The in-app\ninbox is never switchable. `defaults` are the all-clubs switches; each club in `clubs` can override\nthem (`overrides`), and `effective` is what applies there. No stored switch means on.",
+        "operationId": "appapi_routers_account_get_notification_preferences",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Which notifications reach this account",
+        "tags": [
+          "account"
+        ]
+      },
+      "patch": {
+        "description": "`club_slug: null` changes the all-clubs defaults, a slug writes overrides for that club only.\nEach change names a `category` and the `push` and/or `email` switch to set (an omitted one is left\nalone). Repeating a change is harmless. Nothing is saved when any change is invalid. Answers like GET.",
+        "operationId": "appapi_routers_account_update_notification_preferences",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferencesOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Switch notifications on or off",
         "tags": [
           "account"
         ]

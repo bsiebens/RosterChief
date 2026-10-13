@@ -283,6 +283,20 @@ changes it: `always` (default) or `unless_app` (no notification email while this
 installed; mails with an attachment such as an invoice are always sent). Offer it as a toggle in the app's
 settings.
 
+**Which notifications at all:** `GET /me/notification-preferences` returns `categories` (`key`, `label` in the
+request language, optional `description`), `defaults` (the all-clubs switches, `{category: {push, email}}`) and,
+per club the account belongs to, `clubs[]` with `overrides` (only what that club changes) and `effective` (what
+applies there). No stored switch means on; the in-app inbox is never switchable. Render a category x (Push,
+Email) table for the defaults and one per club, showing `effective`.
+`PATCH /me/notification-preferences` with `{"club_slug": null | "<slug>", "changes": [{"category": "news",
+"push": false}]}` sets the named switches (`push` covers iOS, Android and web push; an omitted switch is left
+alone); `null` writes the defaults, a slug an override for that club. Repeating a call is harmless; an unknown
+category or a club the account does not belong to answers `422 validation_error` and saves nothing.
+`DELETE /me/notification-preferences?club_slug=<slug>&category=news` drops overrides again (back to inherited);
+leave `category` off to drop the whole scope, leave `club_slug` off for the defaults. PATCH and DELETE answer
+with the same body as GET, so the screen can simply re-render. The same switches are on the web app's
+notification settings screen. Android clients use the same endpoints.
+
 A person who also has the web app installed with notifications on gets both for now.
 
 ## 8. Member screens

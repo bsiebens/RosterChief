@@ -43,7 +43,7 @@ class Channel:
         logs ``retry`` outcomes needn't implement this."""
         raise NotImplementedError
 
-    def deliver_to_user(self, *, club, user, texts, data: dict, url: str, thread_id: str | None = None) -> int:
+    def deliver_to_user(self, *, club, user, texts, data: dict, url: str, thread_id: str | None = None, category: str = "general") -> int:
         """Deliver one message to one account. ``texts(language)`` -> ``(title, body)`` in that
         language; ``data`` is the structured pointer native apps get, ``url`` the page a web
         notification opens. Returns how many devices/subscriptions it was handed to."""
@@ -100,12 +100,12 @@ class UserDelivery:
         return sum(self.reached.values())
 
 
-def dispatch_to_user(*, club, user, texts, data: dict, url: str, thread_id: str | None = None) -> UserDelivery:
+def dispatch_to_user(*, club, user, texts, data: dict, url: str, thread_id: str | None = None, category: str = "general") -> UserDelivery:
     """One message to one account on every channel (no inbox row). Never raises."""
     result = UserDelivery()
     for channel in channels():
         try:
-            result.reached[channel.name] = channel.deliver_to_user(club=club, user=user, texts=texts, data=data, url=url, thread_id=thread_id)
+            result.reached[channel.name] = channel.deliver_to_user(club=club, user=user, texts=texts, data=data, url=url, thread_id=thread_id, category=category)
         except Exception:
             logger.exception("notifications.channel_failed channel=%s", channel.name)
             result.reached[channel.name] = 0

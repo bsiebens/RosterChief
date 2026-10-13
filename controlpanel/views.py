@@ -3,6 +3,7 @@ import threading
 from contextlib import contextmanager
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connections
 from django.db.models import Count
@@ -96,6 +97,28 @@ class JobsView(PlatformStaffRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         jobs = job_overview()
         return super().get_context_data(nav="jobs", jobs=jobs, summary=job_summary(jobs), **kwargs)
+
+
+class PushMonitoringView(PlatformSuperuserRequiredMixin, TemplateView):
+    """Technical monitoring of push / email sends from the delivery log -- see
+    notifications/monitoring.py for the queries and the health rules. ``?window=1h|24h|7d``
+    (default 24h) and ``?club=<uuid>`` narrow it."""
+
+    template_name = "controlpanel/push_monitoring.html"
+
+    def get_context_data(self, **kwargs):
+        from notifications import monitoring
+
+        club = None
+        club_param = self.request.GET.get("club", "")
+        if club_param:
+            try:
+                club = Club.objects.filter(pk=club_param).first()
+            except ValueError, ValidationError:
+                club = None
+        data = monitoring.build(self.request.GET.get("window", monitoring.DEFAULT_WINDOW), club)
+        windows = [(key, label) for key, (label, _span, _step) in monitoring.WINDOWS.items()]
+        return super().get_context_data(nav="push", club=club, clubs=Club.objects.order_by("name"), windows=windows, **data, **kwargs)
 
 
 class JobToggleView(PlatformStaffRequiredMixin, View):

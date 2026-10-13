@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from club.models import Club, ClubMembership, Season
 from members.models import Group, GroupMembership, Member
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 from teams.models import Team, TeamMembership
 
 from .models import Answer, Field, Form, FormSend, Submission
@@ -676,6 +676,7 @@ class NotifyFormSendTests(FormbuilderTestBase):
         self.assertEqual(Notification.objects.filter(member=self.member).count(), 1)
         self.assertEqual(Notification.objects.filter(member=other).count(), 1)
         self.assertEqual(result, "Notified 2 member(s).")
+        self.assertEqual(Notification.objects.get(member=other).category, NotificationCategory.FORM)
 
     def test_notification_is_stored_in_english_and_dutch(self):
         self.send.closes_at = timezone.now() + timedelta(days=3)
@@ -742,6 +743,7 @@ class SendFormRemindersTests(FormbuilderTestBase):
 
         self.assertTrue(Notification.objects.filter(member=self.member, title=self.form.title).exists())
         self.assertIn("Reminded 1 member(s) across 1 send(s)", result)
+        self.assertEqual(Notification.objects.get(member=self.member).category, NotificationCategory.REMINDER)
 
     def test_does_not_remind_before_the_window_opens(self):
         self.send.closes_at = timezone.now() + timedelta(days=10)

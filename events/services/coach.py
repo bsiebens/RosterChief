@@ -11,6 +11,7 @@ from django.utils.translation import gettext as _
 
 from events.models import Attendance, Event
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
 #: RSVP states that count as "in" for the stat tile -- present/selected are an
@@ -57,7 +58,7 @@ def remind_silent(event) -> int:
         when = date_format(timezone.localtime(event.start), "D d M, H:i")
         return _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": when}
 
-    notify_members(members, club=event.club, title=event.title, body=body, source=event)
+    notify_members(members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.COACH)
     return len(members)
 
 
@@ -72,7 +73,7 @@ def notify_event_changed(event) -> int:
         when = date_format(timezone.localtime(event.start), "D d M, H:i")
         return _("%(kind)s changed: it is now on %(when)s.") % {"kind": event.get_kind_display(), "when": when}
 
-    return len(notify_members(members, club=event.club, title=event.title, body=body, source=event))
+    return len(notify_members(members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.EVENT))
 
 
 def notify_event_cancelled(event, *, keep_link: bool) -> int:
@@ -88,5 +89,5 @@ def notify_event_cancelled(event, *, keep_link: bool) -> int:
 
     title = event.title
     if keep_link:
-        return len(notify_members(members, club=event.club, title=title, body=body, source=event))
-    return len(notify_members(members, club=event.club, title=title, body=body, target_type="calendar"))
+        return len(notify_members(members, club=event.club, title=title, body=body, source=event, category=NotificationCategory.EVENT))
+    return len(notify_members(members, club=event.club, title=title, body=body, target_type="calendar", category=NotificationCategory.EVENT))

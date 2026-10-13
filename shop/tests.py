@@ -15,7 +15,7 @@ from authentication.models import User
 from club.models import Club, ClubMembership, Season
 from club.tenancy import reset_current_club, set_current_club
 from members.models import Member
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 from rosterchief.storage import invoice_cache_storage, write_cached_invoice_pdf
 from teams.models import Position, Team
 
@@ -996,6 +996,7 @@ class PlaceOrderTests(TestCase):
         notification = Notification.objects.get(member=self.member)
         self.assertIn(order.number, notification.title)
         self.assertEqual(notification.source, order)
+        self.assertEqual(notification.category, NotificationCategory.SHOP)
 
     def test_the_notification_email_has_the_invoice_pdf_attached(self):
         cart = self.make_cart()
@@ -1039,6 +1040,7 @@ class OrderReadyForPickupNotificationTests(TestCase):
         notification = Notification.objects.get(member=self.member)
         self.assertIn(self.order.number, notification.title)
         self.assertIn("ready", notification.title.lower())
+        self.assertEqual(notification.category, NotificationCategory.SHOP)
         self.assertEqual(notification.source, self.order)
 
     def test_stores_english_and_dutch_translations(self):

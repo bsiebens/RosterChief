@@ -1,8 +1,37 @@
 # Push & notifications: open items
 
 Collected while building the multi-channel push redesign (phase 1 FCM, phase 2 dispatcher, phase 3
-delivery log + retries, phase 4 categories + preferences). **None of this is scheduled**: it is
-the list to work through *after phase 4 is complete*. Each item says why it matters; pick by value.
+delivery log + retries, phase 4 categories + preferences + control panel push monitoring). **All
+four phases are done**; none of the items below is scheduled. Each says why it matters; pick by value.
+
+## Recommended next steps (in order)
+
+1. **Verify on real devices and providers.** Nothing has been sent to a real Android phone or real
+   FCM project yet, and the monitoring page has only been checked by tests, not in a browser.
+   Set up the Firebase project (`DEPLOYMENT.md`), send a test push, trigger a category mute and watch
+   `/push/` in the control panel. Then build the Android client against `docs/app-api/`.
+2. **Outbox for first sends** (section B): the one remaining way a notification can be lost
+   (restart between commit and dispatch), and the game push `delivered_at` ordering bug.
+3. **Alerting on the monitoring data**: the `/push/` page only helps when someone looks at it. Turn its
+   `down`/`stuck queue` states into a notification to platform admins (email + push), with a
+   cool-down so one outage is one alert.
+4. **Android channel per category + TTL/collapse per category** (sections B and C): now that categories
+   exist, users can tune them in system settings and live game updates stop arriving late.
+5. **Granular preferences** (section A): per child, per team, quiet hours, digests, priorities. Start
+   with *per child* and *quiet hours*, the most requested kind of control.
+6. **Announcement controls** (section C): audience filters, test send, merge duplicates for people in
+   several clubs, before the first platform-wide announcement goes out to everyone by email.
+7. Everything else in sections B to D.
+
+**Already done in phase 4** (so not open): categories on every notification, per-account
+push/email switches per club or for all clubs (API + PWA), enforcement in all channels, delivery
+log with provider and duration, and the control panel *Push monitoring* page.
+
+**Monitoring page follow-ups**: no alerting yet (step 3 above); no historical retention beyond the
+log's 14/60 days (add daily rollups if long-term trends matter); no per-club drill-down page; the
+success rate ignores dead tokens by design (a dead device is not the provider's fault) so a spike of
+dead tokens needs its own threshold; p50/p95 are computed from the 2000 most recent samples per
+provider, not the full window.
 
 How the system fits together today: `API.md` §9 and `ARCHITECTURE.md` §8.6.
 

@@ -51,6 +51,41 @@ class AccountSettingsIn(Schema):
     email_notifications: Literal["always", "unless_app"]
 
 
+class NotificationCategoryOut(Schema):
+    key: str = Field(description="Stable identifier, e.g. `news`. Use it in PATCH/DELETE.")
+    label: str = Field(description="Name for the switch, in the request language.")
+    description: str | None = Field(None, description="Optional longer explanation, in the request language.")
+
+
+class NotificationOverridesOut(Schema):
+    push: bool | None = None
+    email: bool | None = None
+
+
+class NotificationClubPreferencesOut(Schema):
+    club_slug: str
+    club_name: str
+    overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.")
+    effective: dict[str, dict[str, bool]] = Field(description="What applies in this club: the defaults with the overrides on top, `{category: {push, email}}`.")
+
+
+class NotificationPreferencesOut(Schema):
+    categories: list[NotificationCategoryOut]
+    defaults: dict[str, dict[str, bool]] = Field(description="The all-clubs switches, `{category: {push, email}}`. No stored row means on. The in-app inbox is never switchable.")
+    clubs: list[NotificationClubPreferencesOut]
+
+
+class NotificationChangeIn(Schema):
+    category: str
+    push: bool | None = Field(None, description="Omit to leave the push switch (iOS, Android and web push) as it is.")
+    email: bool | None = Field(None, description="Omit to leave the email switch as it is.")
+
+
+class NotificationPreferencesIn(Schema):
+    club_slug: str | None = Field(None, description="`null`: the all-clubs defaults. A club slug: an override for just that club.")
+    changes: list[NotificationChangeIn]
+
+
 class PersonOut(Schema):
     id: uuid.UUID
     first_name: str

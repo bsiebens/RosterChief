@@ -6,16 +6,19 @@ from allauth.mfa.utils import is_mfa_enabled
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from ninja import Router
 
 from members.models import Member
+from notifications import preferences
+from notifications.models import NotificationCategory, NotificationPreference
 
 from .. import services
 from ..auth import require_base_domain
 from ..errors import ApiError
 from ..models import PushDevice
 from ..push import get_gateway
-from ..schemas import AccountSettingsIn, AccountSettingsOut, ClubListOut, DeviceIn, DeviceOut, ErrorOut, MeOut, MetaOut
+from ..schemas import AccountSettingsIn, AccountSettingsOut, ClubListOut, DeviceIn, DeviceOut, ErrorOut, MeOut, MetaOut, NotificationPreferencesIn, NotificationPreferencesOut
 
 router = Router(tags=["account"])
 
@@ -56,6 +59,66 @@ def update_settings(request, payload: AccountSettingsIn):
     request.user.email_notifications = payload.email_notifications
     request.user.save(update_fields=["email_notifications"])
     return {"email_notifications": request.user.email_notifications}
+
+
+def _preferences_out(user) -> dict:
+    return {
+        "categories": [{"key": value, "label": str(label)} for value, label in NotificationCategory.choices],
+        "defaults": preferences.matrix(user),
+        "clubs": [{"club_slug": club.slug, "club_name": club.name, "overrides": preferences.overrides(user, club), "effective": preferences.matrix(user, club)} for club in services.clubs_for(user)],
+    }
+
+
+def _scope_club(user, club_slug: str | None):
+    """The club a preference call is about (``None`` = all clubs); only clubs the account belongs to."""
+    if club_slug is None:
+        return None
+    club = next((club for club in services.clubs_for(user) if club.slug == club_slug), None)
+    if club is None:
+        raise ApiError(422, "validation_error", fields={"club_slug": [_("Unknown club.")]})
+    return club
+
+
+@router.get("/me/notification-preferences", response={200: NotificationPreferencesOut, **ERRORS}, exclude_none=True, summary="Which notifications reach this account")
+def get_notification_preferences(request):
+    """Per category two switches: `push` (this account's phones and browsers) and `email`. The in-app
+    inbox is never switchable. `defaults` are the all-clubs switches; each club in `clubs` can override
+    them (`overrides`), and `effective` is what applies there. No stored switch means on."""
+    require_base_domain(request)
+    return _preferences_out(request.user)
+
+
+@router.patch("/me/notification-preferences", response={200: NotificationPreferencesOut, **ERRORS, 422: ErrorOut}, exclude_none=True, summary="Switch notifications on or off")
+def update_notification_preferences(request, payload: NotificationPreferencesIn):
+    """`club_slug: null` changes the all-clubs defaults, a slug writes overrides for that club only.
+    Each change names a `category` and the `push` and/or `email` switch to set (an omitted one is left
+    alone). Repeating a change is harmless. Nothing is saved when any change is invalid. Answers like GET."""
+    require_base_domain(request)
+    club = _scope_club(request.user, payload.club_slug)
+    valid = set(NotificationCategory.values)
+    unknown = sorted({change.category for change in payload.changes if change.category not in valid})
+    if unknown:
+        raise ApiError(422, "validation_error", fields={"changes": [_("Unknown category: %(category)s.") % {"category": ", ".join(unknown)}]})
+    with transaction.atomic():
+        for change in payload.changes:
+            if change.push is not None:
+                preferences.set_preference(request.user, club, change.category, NotificationPreference.Channel.PUSH, change.push)
+            if change.email is not None:
+                preferences.set_preference(request.user, club, change.category, NotificationPreference.Channel.EMAIL, change.email)
+    return _preferences_out(request.user)
+
+
+@router.delete("/me/notification-preferences", response={200: NotificationPreferencesOut, **ERRORS, 422: ErrorOut}, exclude_none=True, summary="Back to the inherited notification switches")
+def reset_notification_preferences(request, club_slug: str | None = None, category: str | None = None):
+    """Drops the stored switches of one scope (`club_slug` empty: the all-clubs defaults, which go back
+    to on; a slug: that club's overrides, which go back to the defaults). With `category` only that
+    category's, otherwise all of them. Nothing stored is fine. Answers like GET."""
+    require_base_domain(request)
+    club = _scope_club(request.user, club_slug or None)
+    if category and category not in NotificationCategory.values:
+        raise ApiError(422, "validation_error", fields={"category": [_("Unknown category.")]})
+    preferences.reset(request.user, club, category or None)
+    return _preferences_out(request.user)
 
 
 @router.get("/clubs", response={200: ClubListOut, **ERRORS}, summary="Clubs the account can use")

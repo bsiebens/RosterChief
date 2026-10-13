@@ -56,6 +56,7 @@ urlpatterns = [
     path("admins/add/", views.PlatformAdminAddView.as_view(), name="admin_add"),
     path("admins/<uuid:pk>/update/", views.PlatformAdminUpdateView.as_view(), name="admin_update"),
     path("admins/<uuid:pk>/revoke/", views.PlatformAdminRevokeView.as_view(), name="admin_revoke"),
+    path("push/", views.PushMonitoringView.as_view(), name="push_monitoring"),
     # Jobs (the in-process scheduler's platform jobs -- see controlpanel/services/jobs.py)
     path("jobs/", views.JobsView.as_view(), name="jobs"),
     path("jobs/<str:name>/toggle/", views.JobToggleView.as_view(), name="job_toggle"),

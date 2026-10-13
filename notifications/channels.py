@@ -2,6 +2,8 @@
 guardians, honouring each account's ``email_notifications`` preference. Mail with an attachment
 never comes through here (notify_members sends it inline)."""
 
+import time
+
 from . import delivery_log
 from .dispatch import Channel
 from .models import Notification
@@ -21,9 +23,10 @@ class EmailChannel(Channel):
         if notification is None:
             delivery_log.mark_dead(delivery, "notification no longer exists")
             return
+        started = time.monotonic()
         try:
             resend_email(notification, email)
         except OSError as error:
-            delivery_log.mark_failed(delivery, error, retryable=True)
+            delivery_log.mark_failed(delivery, error, retryable=True, provider="email", duration_ms=delivery_log.elapsed_ms(started))
             return
-        delivery_log.mark_sent(delivery)
+        delivery_log.mark_sent(delivery, provider="email", duration_ms=delivery_log.elapsed_ms(started))

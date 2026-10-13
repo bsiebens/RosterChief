@@ -21,6 +21,7 @@ from events.models import Event, EventOfficial, OfficialSignup
 from events.services.attendance import effective_members
 from events.services.referees import event_window
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from teams.models import OfficialLevel, StaffAssignment, Team
 
@@ -130,7 +131,7 @@ def assign_official(event, member, *, assigned_by):
         def body():
             return _("You have been assigned as an official for %(event)s on %(when)s.") % {"event": event.title, "when": date_format(start, "D d M, H:i")}
 
-        notify_members([member], club=event.club, title=_("Official assignment"), body=body, source=event)
+        notify_members([member], club=event.club, title=_("Official assignment"), body=body, source=event, category=NotificationCategory.CREW)
     return official
 
 
@@ -160,7 +161,7 @@ def remove_official(official):
     def body():
         return _("You have been removed as an official for %(event)s.") % {"event": event.title}
 
-    notify_members([member], club=event.club, title=_("Official assignment removed"), body=body, source=event)
+    notify_members([member], club=event.club, title=_("Official assignment removed"), body=body, source=event, category=NotificationCategory.CREW)
 
 
 def set_official_fee(official, *, fee=None, km=None, km_rate=None, no_fee=False):
@@ -203,7 +204,7 @@ def sync_official_invites(event, *, notify=True):
         def body():
             return _("%(event)s needs a match official -- can you take it?") % {"event": event.title}
 
-        notify_members(new_members, club=event.club, title=_("Official needed"), body=body, source=event)
+        notify_members(new_members, club=event.club, title=_("Official needed"), body=body, source=event, category=NotificationCategory.CREW)
     return new_members
 
 
@@ -241,6 +242,6 @@ def decline_official_signup(signup):
             def body():
                 return _("%(member)s can no longer act as an official for %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
 
-            notify_members(managers, club=signup.event.club, title=_("Official dropped out"), body=body, source=signup.event)
+            notify_members(managers, club=signup.event.club, title=_("Official dropped out"), body=body, source=signup.event, category=NotificationCategory.CREW)
 
     return signup

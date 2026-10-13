@@ -12,6 +12,7 @@ import base64
 import binascii
 import json
 import logging
+import time
 from urllib.parse import urlsplit
 
 import requests
@@ -21,7 +22,8 @@ from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
 from notifications import delivery_log
-from notifications.services import recipient_user_ids, users_with_native_push
+from notifications.preferences import is_enabled
+from notifications.services import muted_push_users, recipient_user_ids, users_with_native_push
 
 from .. import models
 
@@ -119,9 +121,11 @@ def _deliver(subscription, payload: str, *, label, notification=None) -> None:
         # Stored before endpoints were validated on subscribe: never sent to, and removed
         # so it doesn't linger (the browser re-subscribes with a valid one when it can).
         subscription.delete()
-        delivery_log.record(club=club, channel="web", target=pk, outcome="dead", notification=notification, user=user, error="unsupported push endpoint")
+        delivery_log.record(club=club, channel="web", target=pk, outcome="dead", notification=notification, user=user, error="unsupported push endpoint", provider="webpush")
         return
+    started = time.monotonic()
     outcome, error = _send(subscription, payload)
+    duration_ms = delivery_log.elapsed_ms(started)
     if outcome == "dead":
         # The browser's push service says this registration is gone for good --
         # not a transient failure, so keeping it around would only mean retrying
@@ -135,7 +139,7 @@ def _deliver(subscription, payload: str, *, label, notification=None) -> None:
             log_payload = {key: value for key, value in json.loads(payload).items() if key in ("title", "body", "url")}
         except ValueError:
             log_payload = {}
-    delivery_log.record(club=club, channel="web", target=pk, outcome=outcome, notification=notification, user=user, error=error, payload=log_payload)
+    delivery_log.record(club=club, channel="web", target=pk, outcome=outcome, notification=notification, user=user, error=error, payload=log_payload, provider="webpush", duration_ms=duration_ms)
 
 
 def send_push_to_member(member, *, title: str, body: str, url: str = "/app/", notification=None) -> None:
@@ -154,12 +158,14 @@ def send_push_to_member(member, *, title: str, body: str, url: str = "/app/", no
         _deliver(subscription, payload, label=member, notification=notification)
 
 
-def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") -> int:
+def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/", category: str = "general") -> int:
     """Web push to every subscription this account's people in ``club`` hold --
     for pushes that aren't a stored Notification (e.g. live game updates,
     events.services.game_push). Returns how many subscriptions it was sent to."""
     if not settings.VAPID_PRIVATE_KEY:
         return 0
+    if not is_enabled(user, club, category, "push"):
+        return 0  # push muted for this category: native and web alike
     if users_with_native_push([user.pk]):
         return 0  # the phone already got it (events.services.game_push sends native alongside this)
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
@@ -183,6 +189,9 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
         return
 
     recipients = {notification.pk: recipient_user_ids(notification) for notification in notifications}
+    # Push is one switch: an account that muted the category gets neither native nor web.
+    muted = muted_push_users(notifications, recipients)
+    recipients = {notification.pk: recipients[notification.pk] - muted[(notification.club_id, notification.category)] for notification in notifications}
     all_user_ids = set().union(*recipients.values())
     if not all_user_ids:
         return

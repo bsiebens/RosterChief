@@ -10,6 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from club.services.access import event_season
 from events.models import Attendance, LineupSelection
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from teams.models import StaffAssignment, TeamMembership
 
@@ -75,7 +76,7 @@ def publish_lineup(lineup):
         def body():
             return _("You're in the line-up for %(event)s.") % {"event": lineup.event.title}
 
-        notify_members(newly_selected, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event)
+        notify_members(newly_selected, club=lineup.event.club, title=_("Line-up published"), body=body, source=lineup.event, category=NotificationCategory.LINEUP)
 
     newly_dropped = Member.objects.filter(pk__in=previously_selected_ids - selected_member_ids)
     if newly_dropped:
@@ -83,7 +84,7 @@ def publish_lineup(lineup):
         def body():
             return _("The line-up for %(event)s has changed -- you're not in it this time.") % {"event": lineup.event.title}
 
-        notify_members(newly_dropped, club=lineup.event.club, title=_("Line-up updated"), body=body, source=lineup.event)
+        notify_members(newly_dropped, club=lineup.event.club, title=_("Line-up updated"), body=body, source=lineup.event, category=NotificationCategory.LINEUP)
 
     return lineup
 
@@ -148,7 +149,7 @@ def notify_coach_dropout(event, member, coach):
         def body():
             return _("%(coach)s marked %(member)s as out of the line-up for %(event)s.") % {"coach": coach.get_full_name(), "member": member.get_full_name(), "event": event.title}
 
-        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event)
+        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event, category=NotificationCategory.LINEUP)
 
 
 def notify_dropout(event, member, note):
@@ -165,4 +166,4 @@ def notify_dropout(event, member, note):
         def body():
             return _("%(member)s can no longer make it to %(event)s: “%(note)s”") % {"member": member.get_full_name(), "event": event.title, "note": note}
 
-        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event)
+        notify_members(managers, club=event.club, title=_("Line-up dropout"), body=body, source=event, category=NotificationCategory.LINEUP)

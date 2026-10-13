@@ -7,6 +7,7 @@ from django.utils.translation import gettext as _
 from features.commands import ScheduledJobCommand
 from formbuilder.models import FormSend
 from formbuilder.services.audience import members_not_yet_submitted
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
 #: How long before a send's closes_at this nudges whoever still hasn't
@@ -44,7 +45,7 @@ class Command(ScheduledJobCommand):
         for send in candidates:
             members = members_not_yet_submitted(send)
             if members:
-                notify_members(members, club=send.club, title=send.form.title, body=partial(_reminder_body, send.form.title), source=send)
+                notify_members(members, club=send.club, title=send.form.title, body=partial(_reminder_body, send.form.title), source=send, category=NotificationCategory.REMINDER)
                 members_notified += len(members)
 
             # Marked processed even when nobody still needed a nudge -- same

@@ -1,6 +1,7 @@
 """The Web Push channel (notifications.dispatch): the PWA's counterpart of the native push."""
 
 import json
+import time
 
 from django.core.exceptions import ValidationError
 
@@ -29,16 +30,18 @@ class WebPushChannel(Channel):
             subscription.delete()
             delivery_log.mark_dead(delivery, "unsupported push endpoint")
             return
+        started = time.monotonic()
         outcome, error = _send(subscription, json.dumps(delivery.payload))
+        timing = {"provider": "webpush", "duration_ms": delivery_log.elapsed_ms(started)}
         if outcome == "sent":
-            delivery_log.mark_sent(delivery)
+            delivery_log.mark_sent(delivery, **timing)
         elif outcome == "dead":
             subscription.delete()
-            delivery_log.mark_dead(delivery, error)
+            delivery_log.mark_dead(delivery, error, **timing)
         else:
-            delivery_log.mark_failed(delivery, error, retryable=outcome == "retry")
+            delivery_log.mark_failed(delivery, error, retryable=outcome == "retry", **timing)
 
-    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None):
+    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None, category="general"):
         # No language preference on accounts or subscriptions: web push goes out in English.
         title, body = texts("en")
-        return send_push_to_user(club, user, title=title, body=body, url=url)
+        return send_push_to_user(club, user, title=title, body=body, url=url, category=category)

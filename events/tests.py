@@ -28,7 +28,7 @@ from club.services.onboarding import mark_bypassed, mark_complete
 from features.jobs import JOB_REGISTRY
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
@@ -659,6 +659,7 @@ class LineupServiceTests(EventsTestBase):
         publish_lineup(lineup)
 
         notification = Notification.objects.get(member=self.alice)
+        self.assertEqual(notification.category, NotificationCategory.LINEUP)
         self.assertIn("in the line-up", notification.body)
 
     def test_republish_notifies_a_dropped_player_with_a_different_message(self):
@@ -684,6 +685,7 @@ class LineupServiceTests(EventsTestBase):
         notify_dropout(event, self.alice, "Twisted an ankle")
 
         notification = Notification.objects.get(member=manager)
+        self.assertEqual(notification.category, NotificationCategory.LINEUP)
         self.assertIn(self.alice.get_full_name(), notification.body)
         self.assertIn("Twisted an ankle", notification.body)
 
@@ -772,6 +774,7 @@ class RosterChangeSyncTests(EventsTestBase):
         TeamMembership.objects.create(team=self.team, member=dave, season=self.season, position=self.position)
 
         notification = Notification.objects.get(member=dave)
+        self.assertEqual(notification.category, NotificationCategory.EVENT)
         self.assertEqual(notification.title, "New events on your calendar")
         self.assertIn("1 new event", notification.body)
 
@@ -2441,6 +2444,7 @@ class RefereeServiceTests(EventsTestBase):
         assign_referee(game, self.referee, assigned_by=self.alice)
 
         notification = Notification.objects.get(member=self.referee, title="Referee assignment")
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertIn(game.title, notification.body)
         self.assertEqual(notification.source, game)
 
@@ -2836,6 +2840,7 @@ class OfficialServiceTests(OfficialsTestBase):
         assign_official(game, self.official, assigned_by=self.alice)
 
         notification = Notification.objects.get(member=self.official, title="Official assignment")
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertIn(game.title, notification.body)
         self.assertEqual(notification.source, game)
 
@@ -3352,6 +3357,19 @@ class SendDeadlineRemindersTests(EventsTestBase):
         self.assertTrue(Notification.objects.filter(member=self.alice, title=event.title).exists())
         self.assertTrue(Notification.objects.filter(member=self.bob, title=event.title).exists())
         self.assertIn("Reminded 2 member(s) across 1 event(s)", result)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.REMINDER})
+
+    def test_a_coach_nudge_and_a_coach_change_notice_use_their_own_categories(self):
+        from events.services.coach import notify_event_changed, remind_silent
+
+        event = self.make_event_with_roster(start=timezone.now() + timedelta(days=10), deadline=timezone.now() + timedelta(days=6))
+
+        remind_silent(event)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.COACH})
+
+        Notification.objects.all().delete()
+        notify_event_changed(event)
+        self.assertEqual(set(Notification.objects.filter(title=event.title).values_list("category", flat=True)), {NotificationCategory.EVENT})
 
     def test_falls_back_to_the_event_start_when_no_deadline_is_set(self):
         event = self.make_event_with_roster(start=timezone.now() + timedelta(days=6), deadline=None)
@@ -3985,6 +4003,7 @@ class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
             self.run_job()
 
         body = Notification.objects.get(member=self.admin).body
+        self.assertEqual(Notification.objects.get(member=self.admin).category, NotificationCategory.ADMIN)
         self.assertIn("First Team · RBIHF: the fixture list could not be fetched (Could not reach rbihf.be).", body)
         self.assertEqual(self.stored()[0]["last_check"]["error"], "Could not reach rbihf.be")
 
@@ -5076,6 +5095,14 @@ class GamePushTests(GameTimelineTestBase):
 
         self.assertEqual(native.call_args.kwargs["texts"]("en")[1].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
 
+    def test_game_pushes_are_dispatched_in_the_game_category(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+
+        _reached, native = self.deliver(game, [self.moment(game, "goal_for:g1")])
+
+        self.assertEqual(native.call_args.kwargs["category"], "game")
+
     def test_followers_get_one_coalesced_push_and_others_none(self):
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
@@ -5310,6 +5337,7 @@ class CrewInviteResyncTests(OfficialsTestBase):
 
         self.assertEqual(RefereeSignup.objects.filter(event__in=games, member=self.person).count(), 3)
         notification = Notification.objects.get(member=self.person)
+        self.assertEqual(notification.category, NotificationCategory.CREW)
         self.assertEqual(notification.title, "Referee needed")
         self.assertEqual(notification.target_type, "calendar")
         self.assertIn("3 games", notification.body)

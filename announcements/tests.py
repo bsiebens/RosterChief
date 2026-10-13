@@ -13,7 +13,7 @@ from authentication.models import User
 from club.models import Club, ClubRole
 from members.models import Member
 from mobile.models import PushSubscription
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 
 from .models import Announcement, AnnouncementSeen
 from .services import audience_member_count, cancel, consume_for, create_and_confirm, publish
@@ -82,6 +82,7 @@ class PublishTests(AnnouncementServiceTestBase):
         self.assertEqual({n.member_id for n in notifications}, {jane.pk, john.pk})
         for notification in notifications:
             self.assertEqual((notification.club, notification.title, notification.body, notification.source), (self.club, "Heads up", "Body", None))
+            self.assertEqual(notification.category, NotificationCategory.ANNOUNCEMENT)
 
     def test_a_member_without_a_login_gets_nothing(self):
         member = Member.objects.create(first_name="No", last_name="Login")

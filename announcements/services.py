@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from club.models import Club
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
 from .models import Announcement, AnnouncementSeen, live_announcements_query
@@ -54,7 +55,7 @@ def publish(announcement: Announcement) -> Announcement:
     for club in clubs:
         members = list(audience_members(club).select_related("user").order_by("pk"))
         for start in range(0, len(members), BATCH_SIZE):
-            notify_members(members[start : start + BATCH_SIZE], club=club, title=announcement.title, body=announcement.message, send_email=True)
+            notify_members(members[start : start + BATCH_SIZE], club=club, title=announcement.title, body=announcement.message, send_email=True, category=NotificationCategory.ANNOUNCEMENT)
 
     return announcement
 

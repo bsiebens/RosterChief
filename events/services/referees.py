@@ -33,6 +33,7 @@ from club.services.access import event_season
 from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSignup
 from events.services.attendance import effective_members
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from teams.models import RefereeLevel, RefereeProfile, StaffAssignment, Team
 
@@ -159,7 +160,7 @@ def assign_referee(event, member, *, assigned_by):
         def body():
             return _("You have been assigned as a referee for %(event)s on %(when)s.") % {"event": event.title, "when": date_format(start, "D d M, H:i")}
 
-        notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event)
+        notify_members([member], club=event.club, title=_("Referee assignment"), body=body, source=event, category=NotificationCategory.CREW)
     return referee
 
 
@@ -192,7 +193,7 @@ def remove_referee(referee):
     def body():
         return _("You have been removed as a referee for %(event)s.") % {"event": event.title}
 
-    notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event)
+    notify_members([member], club=event.club, title=_("Referee assignment removed"), body=body, source=event, category=NotificationCategory.CREW)
 
 
 def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
@@ -235,7 +236,7 @@ def sync_referee_invites(event, *, notify=True):
         def body():
             return _("%(event)s needs a referee -- can you take it?") % {"event": event.title}
 
-        notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event)
+        notify_members(new_members, club=event.club, title=_("Referee needed"), body=body, source=event, category=NotificationCategory.CREW)
     return new_members
 
 
@@ -278,6 +279,6 @@ def decline_referee_signup(signup):
             def body():
                 return _("%(member)s can no longer referee %(event)s after all -- you may need to find a replacement.") % {"member": signup.member.get_full_name(), "event": signup.event.title}
 
-            notify_members(managers, club=signup.event.club, title=_("Referee dropped out"), body=body, source=signup.event)
+            notify_members(managers, club=signup.event.club, title=_("Referee dropped out"), body=body, source=signup.event, category=NotificationCategory.CREW)
 
     return signup

@@ -29,6 +29,7 @@ from club.services.onboarding import blocked_member_ids_for_event, open_requirem
 from events.models import Attendance, Event
 from events.services.lineup import notify_coach_dropout
 from members.models import GroupMembership, Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 from teams.models import TeamMembership
 
@@ -192,7 +193,7 @@ def notify_newly_invited(member, *, club, events):
     def body():
         return ngettext("%(count)d new event has been added to your calendar.", "%(count)d new events have been added to your calendar.", count) % {"count": count}
 
-    notify_members([member], club=club, title=title, body=body, target_type="calendar")
+    notify_members([member], club=club, title=title, body=body, target_type="calendar", category=NotificationCategory.EVENT)
 
 
 def record_check_in(attendance, *, showed_up):
@@ -268,7 +269,7 @@ def set_answer_as_coach(attendance, status, coach_note, *, coach, notify=False):
         def body():
             return _("Your coach set your answer for %(event)s to “%(answer)s”.") % {"event": event.title, "answer": label}
 
-        notify_members([attendance.member], club=event.club, title=_("Your answer was changed"), body=body, source=event)
+        notify_members([attendance.member], club=event.club, title=_("Your answer was changed"), body=body, source=event, category=NotificationCategory.COACH)
     return attendance
 
 

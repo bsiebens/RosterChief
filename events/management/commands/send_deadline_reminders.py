@@ -8,6 +8,7 @@ from django.utils.translation import gettext as _
 from events.models import Attendance, Event
 from features.commands import ScheduledJobCommand
 from members.models import Member
+from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
 #: How long before an event's answer deadline (or, when it has none, its own
@@ -58,7 +59,7 @@ class Command(ScheduledJobCommand):
                 def body(event=event, start=start):
                     return _("Reminder: %(kind)s on %(when)s still needs your answer.") % {"kind": event.get_kind_display(), "when": date_format(start, "D d M, H:i")}
 
-                notify_members(members, club=event.club, title=event.title, body=body, source=event)
+                notify_members(members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.REMINDER)
                 members_notified += len(members)
 
             # Marked processed even when nobody was NO_RESPONSE at the time -- the

@@ -24,7 +24,7 @@ API. The web app (PWA) keeps working next to it.
 The app API has **two planes**:
 
 * **Account plane**, on the base domain (`https://rosterchief.app/api/app/v1`): `/meta`, `/me`,
-  `/clubs`, `/devices`.
+  `/clubs`, `/devices`, `/me/settings`, `/me/notification-preferences`.
 * **Club plane**, on each club's own host (`https://<club>.rosterchief.app/api/app/v1`):
   `/context` and the member screens (home, calendar, events, news, notifications, profiles);
   coach screens follow. Take each club's base URL

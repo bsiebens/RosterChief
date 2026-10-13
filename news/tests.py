@@ -13,7 +13,7 @@ from django.utils import timezone
 from club.models import Club, ClubMembership, ClubRole
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Family, FamilyMembership, Member
-from notifications.models import Notification
+from notifications.models import Notification, NotificationCategory
 from rosterchief.test_support import make_season
 from teams.models import Position, Team, TeamMembership
 
@@ -231,6 +231,7 @@ class SendPublishNotificationTests(TestCase):
         notifications = send_publish_notification(news_item)
 
         self.assertTrue(Notification.objects.filter(club=self.club, member=member, title="Big news").exists())
+        self.assertEqual(Notification.objects.get(member=member).category, NotificationCategory.NEWS)
         self.assertEqual(len(notifications), 1)
 
     def test_publish_notification_stores_both_languages_with_user_text_untouched(self):
@@ -482,6 +483,7 @@ class NotifyEditorsOfPendingReviewTests(TestCase):
 
         notification = Notification.objects.get(member=admin)
         self.assertEqual(notification.title, "“Draft item” is ready for review")
+        self.assertEqual(notification.category, NotificationCategory.ADMIN)
         self.assertEqual(notification.translations["en"]["title"], "“Draft item” is ready for review")
         self.assertEqual(notification.translations["nl"]["title"], "“Draft item” wacht op controle")
         self.assertIn("ter controle ingediend", notification.translations["nl"]["body"])

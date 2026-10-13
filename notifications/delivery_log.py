@@ -10,6 +10,7 @@ not stop a delivery.
 """
 
 import logging
+import time
 from datetime import timedelta
 
 from django.utils import timezone
@@ -32,9 +33,15 @@ def _truncate(error) -> str:
     return str(error)[:500]
 
 
-def record(*, club, channel: str, target, outcome: str, notification=None, user=None, error="", payload=None) -> NotificationDelivery | None:
+def elapsed_ms(started: float) -> int:
+    """Milliseconds since ``started`` (a ``time.monotonic()`` reading)."""
+    return max(0, round((time.monotonic() - started) * 1000))
+
+
+def record(*, club, channel: str, target, outcome: str, notification=None, user=None, error="", payload=None, provider: str = "", duration_ms: int | None = None) -> NotificationDelivery | None:
     """Log one send. ``outcome`` is ``sent``, ``failed`` (refused, don't retry), ``dead`` (the target is
-    gone for good) or ``retry`` (transient: tried again later, needs ``payload``)."""
+    gone for good) or ``retry`` (transient: tried again later, needs ``payload``). ``provider``
+    (apns/fcm/webpush/email) and ``duration_ms`` (how long the provider call took) are for monitoring."""
     try:
         status = {"sent": Status.SENT, "failed": Status.FAILED, "dead": Status.DEAD, "retry": Status.RETRYING}[outcome]
         retrying = status == Status.RETRYING
@@ -43,6 +50,8 @@ def record(*, club, channel: str, target, outcome: str, notification=None, user=
             notification=notification,
             user=user,
             channel=channel,
+            provider=provider,
+            duration_ms=duration_ms,
             target=str(target)[:255],
             status=status,
             last_error=_truncate(error),
@@ -54,32 +63,46 @@ def record(*, club, channel: str, target, outcome: str, notification=None, user=
         return None
 
 
-def mark_sent(delivery: NotificationDelivery) -> None:
-    _finish(delivery, Status.SENT, "")
+def _timing(delivery: NotificationDelivery, provider: str, duration_ms: int | None) -> list[str]:
+    """Update the monitoring fields from a retry when it knows them; returns the changed field names."""
+    fields = []
+    if provider and delivery.provider != provider:
+        delivery.provider = provider
+        fields.append("provider")
+    if duration_ms is not None:
+        delivery.duration_ms = duration_ms
+        fields.append("duration_ms")
+    return fields
 
 
-def mark_dead(delivery: NotificationDelivery, error="") -> None:
-    _finish(delivery, Status.DEAD, error)
+def mark_sent(delivery: NotificationDelivery, *, provider: str = "", duration_ms: int | None = None) -> None:
+    _finish(delivery, Status.SENT, "", provider, duration_ms)
 
 
-def mark_failed(delivery: NotificationDelivery, error="", *, retryable: bool = True) -> None:
+def mark_dead(delivery: NotificationDelivery, error="", *, provider: str = "", duration_ms: int | None = None) -> None:
+    _finish(delivery, Status.DEAD, error, provider, duration_ms)
+
+
+def mark_failed(delivery: NotificationDelivery, error="", *, retryable: bool = True, provider: str = "", duration_ms: int | None = None) -> None:
     """A retry did not work out: schedule the next one, or give up (not retryable, or out of attempts)."""
     if retryable and delivery.attempts < MAX_ATTEMPTS:
         delivery.attempts += 1
         delivery.status = Status.RETRYING
         delivery.last_error = _truncate(error)
         delivery.next_attempt_at = timezone.now() + RETRY_DELAYS[min(delivery.attempts - 1, len(RETRY_DELAYS) - 1)]
-        delivery.save(update_fields=["attempts", "status", "last_error", "next_attempt_at", "modified"])
+        extra = _timing(delivery, provider, duration_ms)
+        delivery.save(update_fields=["attempts", "status", "last_error", "next_attempt_at", "modified", *extra])
     else:
-        _finish(delivery, Status.FAILED, error)
+        _finish(delivery, Status.FAILED, error, provider, duration_ms)
 
 
-def _finish(delivery: NotificationDelivery, status: str, error) -> None:
+def _finish(delivery: NotificationDelivery, status: str, error, provider: str = "", duration_ms: int | None = None) -> None:
+    extra = _timing(delivery, provider, duration_ms)
     delivery.status = status
     delivery.last_error = _truncate(error)
     delivery.next_attempt_at = None
     delivery.payload = {}
-    delivery.save(update_fields=["status", "last_error", "next_attempt_at", "payload", "modified"])
+    delivery.save(update_fields=["status", "last_error", "next_attempt_at", "payload", "modified", *extra])
 
 
 def retry_due(now=None) -> int:
