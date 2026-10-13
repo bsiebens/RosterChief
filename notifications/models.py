@@ -276,6 +276,25 @@ class PushAlert(models.Model):
         return self.resolved_at is None
 
 
+class ProviderConfigState(models.Model):
+    """Whether a push provider's credentials were set the last time the health check looked (``apns``, ``fcm``,
+    ``webpush``). A provider that was never configured is not a problem -- many installs run without one --
+    but one that *was* and no longer is (a key dropped from the environment, a bad deploy) is: ``lost_at``
+    marks that moment and keeps the alert open until the credentials are back."""
+
+    provider = models.CharField(_("provider"), max_length=16, unique=True)
+    configured = models.BooleanField(_("configured"), default=False)
+    lost_at = models.DateTimeField(_("lost at"), null=True, blank=True)
+    changed_at = models.DateTimeField(_("changed at"), default=timezone.now)
+
+    class Meta:
+        verbose_name = _("provider configuration state")
+        verbose_name_plural = _("provider configuration states")
+
+    def __str__(self):
+        return f"{self.provider}: {'configured' if self.configured else 'not configured'}"
+
+
 class SandboxMessage(models.Model):
     """A push or email the platform *would* have sent, captured instead of handed to Apple, Google, a
     browser push service or the mail server (``settings.PUSH_SANDBOX``). Holds the exact request the real
