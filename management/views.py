@@ -432,8 +432,17 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         self.selected_unrostered = self.request.GET.get("unrostered", "")
         self.selected_docs = self.request.GET.get("docs", "")
 
-        if self.selected_status:
+        if self.selected_status == "all":
+            pass
+        elif self.selected_status:
             members = members.filter(member_of__season=season, member_of__status=self.selected_status)
+        else:
+            # Default: hide anyone whose current-season membership is lapsed or
+            # cancelled (a pk__in subquery rather than .exclude() across the
+            # to-many relation, and members with no current membership at all
+            # stay visible). ?status=all or a specific status brings them back.
+            ended = ClubMembership.objects.filter(club=self.request.club, season=season, status__in=[ClubMembership.StatusChoices.LAPSED, ClubMembership.StatusChoices.CANCELLED])
+            members = members.exclude(pk__in=ended.values("member_id"))
         if self.selected_fee_status:
             members = members.filter(member_of__season=season, member_of__fee_status=self.selected_fee_status)
         if self.selected_team:
@@ -7569,6 +7578,10 @@ class MemberRequirementDocumentView(ClubStaffRequiredMixin, View):
 # --- Sign-up (admin only) ----------------------------------------------------------
 
 
+#: Lapsed/cancelled memberships have nothing left for the Sign-up queue to do.
+SIGNUP_QUEUE_STATUSES = (ClubMembership.StatusChoices.PENDING, ClubMembership.StatusChoices.ACTIVE)
+
+
 def signup_queue_count(club, season):
     """How many current-season MEMBER-kind memberships still have something
     left for the Sign-up queue (SignupDashboardView below) to do -- the same
@@ -7580,7 +7593,7 @@ def signup_queue_count(club, season):
     just Sign-up's own."""
     if season is None:
         return 0
-    memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).exclude(pk__in=membership_ids_awaiting_confirmation(club)))
+    memberships = list(ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER, status__in=SIGNUP_QUEUE_STATUSES).exclude(pk__in=membership_ids_awaiting_confirmation(club)))
     annotate_onboarding_status(memberships)
     clean_fee_statuses = (ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED)
     return sum(1 for membership in memberships if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.onboarding_open == 0 and membership.fee_status in clean_fee_statuses))
@@ -7628,7 +7641,10 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
             # both), so it's a to-many relation: prefetch_related, not
             # select_related.
             memberships = list(
-                ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER).exclude(pk__in=membership_ids_awaiting_confirmation(club)).select_related("member").prefetch_related("registration_details__requested_team")
+                ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER, status__in=SIGNUP_QUEUE_STATUSES)
+                .exclude(pk__in=membership_ids_awaiting_confirmation(club))
+                .select_related("member")
+                .prefetch_related("registration_details__requested_team")
             )
             # Sorted in Python, not via .order_by("-status", ...): StatusChoices'
             # string values only put PENDING first alphabetically by accident, and
