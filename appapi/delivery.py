@@ -13,7 +13,6 @@ rest over the API.
 
 import logging
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
@@ -26,13 +25,9 @@ from rosterchief.concurrency import run_in_background
 
 from .models import PushDevice
 from .presenters import notification_target
-from .push import apns_configured, get_gateway
+from .push import get_gateway, push_configured
 
 logger = logging.getLogger(__name__)
-
-
-def push_configured() -> bool:
-    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or apns_configured())
 
 
 def payload_data(notification: Notification) -> dict:

@@ -33,6 +33,9 @@ dependencies = [
     "weasyprint>=69.0",
     "whitenoise>=6.12.0",
     "httpx[http2]>=0.28",
+    "google-auth>=2.62.0",
+    "pyjwt>=2.15.1",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

@@ -351,6 +351,7 @@ has all but the rarely-needed last row, with comments.
 | `DJANGO_VAPID_PUBLIC_KEY` / `DJANGO_VAPID_PRIVATE_KEY` / `DJANGO_VAPID_ADMIN_EMAIL` | no | Web Push for the mobile app; without a private key push is silently off. Generate a pair on your own machine with `uv run vapid --gen` |
 | `AWS_STORAGE_BUCKET_NAME` and the other `AWS_*` | no | uploads to S3-compatible storage — see "The five things…", 4 |
 | `APP_PUSH_APNS_*` | no | push for the native iOS app straight through Apple's APNs — see "Native app push". Without them the app works, just without pushes |
+| `APP_PUSH_FCM_*` | no | push for the native Android app through Firebase Cloud Messaging — see "Native app push". Without them Android works, just without pushes |
 | `APP_MIN_VERSION_IOS` / `APP_MIN_VERSION_ANDROID` | no (`1.0.0`) | oldest app version still allowed; older apps show "update required" |
 | `DJANGO_TIME_ZONE` | no (`Europe/Brussels`) | also the timezone of the job schedule |
 | `DJANGO_SESSION_COOKIE_DOMAIN`, `DJANGO_SERVER_EMAIL`, `DJANGO_EMAIL_USE_SSL`, `DJANGO_EMAIL_TIMEOUT`, `DJANGO_INTERNAL_IPS`, `DJANGO_DB_CONN_MAX_AGE` (60), `DJANGO_PERFORMANCE_LOGGING*` | no | rarely needed; see `rosterchief/settings.py` |
@@ -1041,15 +1042,32 @@ what clubs see. `deploy/deploy-prod.sh --reopen` (or `REOPEN_MAINTENANCE=1`) reo
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
 
-## Native app push (APNs)
+## Native app push (iOS and Android)
 
-The native iOS app gets its push notifications straight from **Apple's APNs**
-(token-based auth, HTTP/2) — no cloud intermediary. The server only needs one `.p8` key from
-the Apple Developer account. Android is not served yet.
+The native apps get their push notifications straight from the platform providers — **Apple's
+APNs** for iOS (token-based auth, HTTP/2) and **Firebase Cloud Messaging (FCM, HTTP v1)** for
+Android — with no other cloud intermediary. Each platform is independent: configure one, both
+or neither. A device on a platform without credentials still registers (`POST /devices`), it
+just reports `push_enabled: false` and nothing is sent to it.
 
-Do it once per server: production and the test server share the same key and bundle ID, but
-each keeps its own `.env`. A phone registers with exactly one server (the base domain it
-signed in on), so pushes never double up.
+**What you need, at a glance**
+
+| | iOS | Android |
+|---|---|---|
+| Account | Apple Developer Program | Firebase project (free Spark plan is enough) |
+| Credential | a `.p8` APNs key (+ Key ID, Team ID) | a service-account JSON key |
+| Server env vars | `APP_PUSH_APNS_KEY_ID`, `_TEAM_ID`, `_BUNDLE_ID`, `_KEY` or `_KEY_FILE` | `APP_PUSH_FCM_CREDENTIALS` or `_CREDENTIALS_FILE` (`_PROJECT_ID`, `_CHANNEL_ID` optional) |
+| In the app | Push Notifications capability; sends its APNs device token | `google-services.json` of the same Firebase project; sends its FCM registration token |
+| Register with | `POST /api/app/v1/devices` with `platform: "ios"` | `POST /api/app/v1/devices` with `platform: "android"` |
+
+Do it once per server: production and the test server may share the same keys, bundle ID /
+Firebase project, but each keeps its own `.env`. A phone registers with exactly one server (the
+base domain it signed in on), so pushes never double up.
+
+Web Push for the installable web app (PWA) is separate: see `DJANGO_VAPID_*` above. An account
+that has the native app installed gets the native push instead of the web push.
+
+## Native app push — iOS (APNs)
 
 ### Step 1 — Create the key
 
@@ -1108,7 +1126,7 @@ Each line should end in `True True` and the phone should buzz. What the output m
 | You see | Cause |
 |---|---|
 | no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after Apple reported its token dead. It re-registers on the next launch |
-| `False` in the third column | no APNs key configured (the gateway is the do-nothing one), or the device is not iOS |
+| `False` in the third column | no APNs key configured (the iOS side of the gateway is missing), or the device is not iOS |
 | `False` in the fourth column | Apple says the token is dead (`BadDeviceToken`/`Unregistered`): usually a debug build's token sent to the production host or the other way round. Check the build's `environment` |
 | an `ApnsError` | Apple refused the request: `InvalidProviderToken` = wrong Key ID/Team ID/key, `TopicDisallowed` = the bundle ID doesn't match the key's team, `TooManyProviderTokenUpdates` = restart loops |
 | `True True` but nothing arrives | notifications are off for the app in iOS Settings, or Focus is on |
@@ -1117,6 +1135,85 @@ Each line should end in `True True` and the phone should buzz. What the output m
 
 Create a new key (step 1), put its Key ID and text in `.env.production`, redeploy, then
 revoke the old key on the Apple Developer site.
+
+## Native app push — Android (FCM)
+
+### Step 1 — Create the Firebase project and the service account
+
+1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (or use
+   the project the Android app already belongs to). The app's package name must be registered
+   under **Project settings → General → Your apps → Add app → Android**; download that app's
+   `google-services.json` and put it in the Android app (that is the app team's step, not the server's).
+2. In the Google Cloud console for the same project, check that the **Firebase Cloud Messaging
+   API** is enabled (it is for new projects; the *legacy* "Cloud Messaging API" / server key is
+   shut down and is **not** used).
+3. **Project settings → Service accounts → Generate new private key** downloads a JSON file.
+   Google lets you generate it again later, but treat it as a secret: anyone holding it can send
+   pushes to your app. (The default `firebase-adminsdk-…` account has the needed *Firebase
+   Cloud Messaging API Admin* role; a custom account needs `cloudmessaging.messages.create`.)
+
+### Step 2 — Configure the server
+
+In `.env.production` (`.env.production.example` lists the names):
+
+```bash
+# The service-account JSON on one line (collapse it with: jq -c . service-account.json) ...
+APP_PUSH_FCM_CREDENTIALS={"type":"service_account","project_id":"my-project","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"firebase-adminsdk-xxxxx@my-project.iam.gserviceaccount.com", ...}
+# ... or mount the file into the container and point at it instead:
+# APP_PUSH_FCM_CREDENTIALS_FILE=/run/secrets/fcm.json
+# Only when the sending project differs from the service account's:
+# APP_PUSH_FCM_PROJECT_ID=my-project
+# The notification channel the Android app creates (default "notifications"):
+# APP_PUSH_FCM_CHANNEL_ID=notifications
+```
+
+Redeploy (`deploy/deploy-prod.sh`). Android phones that registered earlier start receiving
+pushes as soon as the app registers again, which it does on every launch. FCM has no sandbox:
+debug and release builds use the same endpoint, and the device's `environment` is ignored.
+
+### What the Android app must do
+
+- Create the notification channel named by `APP_PUSH_FCM_CHANNEL_ID` (default `notifications`)
+  at startup, and request the `POST_NOTIFICATIONS` runtime permission (Android 13+). Without the
+  channel Android 8+ drops the notification.
+- Send its FCM registration token with `POST /api/app/v1/devices` (`platform: "android"`) on every
+  launch and whenever FCM rotates it (`onNewToken`).
+- Payload: the visible title/body is a normal FCM notification message (shown by the system
+  even when the app is closed, in the language the device registered with). The `data` map holds
+  `kind`, `notification_id`, `club_slug` and `target`. FCM data values are strings, so `target`
+  arrives as **JSON text** (`{"type": "event", "id": "…"}`), or is absent. Notifications of one
+  club share a notification `tag` (the club slug), so they replace each other instead of stacking
+  endlessly. There is no badge count on Android, and Live Activities are iOS-only.
+
+### Step 3 — Check it
+
+Open the app on a phone, sign in and allow notifications. Then, on the server:
+
+```bash
+docker compose exec web python manage.py shell -c "
+from appapi.models import PushDevice
+from appapi.push import get_gateway
+gateway = get_gateway()
+for device in PushDevice.objects.filter(user__email='you@example.com', platform='android', enabled=True):
+    print(device.installation_id, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))
+"
+```
+
+Each line should end in `True True` and the phone should show the notification. What the output means:
+
+| You see | Cause |
+|---|---|
+| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after FCM reported its token dead. It re-registers on the next launch |
+| `False` in the second column | no FCM credentials configured (the Android side of the gateway is missing), or the device is not Android |
+| `False` in the third column | FCM says the token is dead (`UNREGISTERED`): the app was uninstalled or its data cleared, or the token belongs to another Firebase project than the service account's |
+| an `FcmError` | FCM refused the request. `403`/`PERMISSION_DENIED` = the Firebase Cloud Messaging API is off for the project or the service account lacks the role; `SENDER_ID_MISMATCH` = the app's `google-services.json` is from a different project; `QUOTA_EXCEEDED`/`429` = back off |
+| a `google.auth` error or a `KeyError: 'project_id'` | the credentials JSON is malformed (a lost `\n` in the private key, or a truncated one-line value) |
+| `True True` but nothing arrives | notifications are off for the app in Android settings, the channel was never created, or battery optimisation is killing a background-restricted app |
+
+### Rotating or revoking
+
+Generate a new service-account key (step 1), put it in `.env.production`, redeploy, then delete
+the old key under **Service accounts → Manage service account permissions → Keys** in Google Cloud.
 
 ## Behind an existing Caddy (dev / test server)
 

@@ -276,6 +276,15 @@ APP_PUSH_APNS_KEY = config("APP_PUSH_APNS_KEY", default="").replace("\\n", "\n")
 APP_PUSH_APNS_KEY_FILE = config("APP_PUSH_APNS_KEY_FILE", default="")
 # The Swift ActivityAttributes type a started Live Activity is created as (the app defines it).
 APP_PUSH_APNS_ACTIVITY_ATTRIBUTES = config("APP_PUSH_APNS_ACTIVITY_ATTRIBUTES", default="GameAttributes")
+# Native Android push through Firebase Cloud Messaging (HTTP v1), authenticated with a Firebase
+# service account (DEPLOYMENT.md "Native app push"). Empty until it exists: Android devices still
+# register, nothing is sent. The JSON is the service-account file's text, or point _FILE at the file.
+APP_PUSH_FCM_CREDENTIALS = config("APP_PUSH_FCM_CREDENTIALS", default="")
+APP_PUSH_FCM_CREDENTIALS_FILE = config("APP_PUSH_FCM_CREDENTIALS_FILE", default="")
+# Defaults to the project the service account belongs to.
+APP_PUSH_FCM_PROJECT_ID = config("APP_PUSH_FCM_PROJECT_ID", default="")
+# The Android notification channel id the app creates; pushes are posted to it.
+APP_PUSH_FCM_CHANNEL_ID = config("APP_PUSH_FCM_CHANNEL_ID", default="notifications")
 APP_PUSH_GATEWAY = ""
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)

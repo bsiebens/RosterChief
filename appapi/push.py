@@ -1,9 +1,13 @@
-"""Native push straight to Apple's APNs over HTTP/2 with token-based auth (API.md §9).
+"""Native push: straight to Apple's APNs over HTTP/2 with token-based auth for iOS, and to
+Firebase Cloud Messaging (HTTP v1) for Android (API.md §9).
 
-Everything talks to a ``PushGateway`` so tests (and a server without APNs credentials)
+Everything talks to a ``PushGateway`` so tests (and a server without credentials)
 never touch the network:
 
-* ``ApnsGateway`` -- the real one, used when the APNs key is configured;
+* ``ApnsGateway`` -- iOS, used when the APNs key is configured;
+* ``FcmGateway`` -- Android, used when a Firebase service account is configured;
+* ``PlatformGateway`` -- what ``get_gateway()`` returns: routes a device to the gateway of its
+  platform; a platform without credentials is simply not ``supports()``-ed;
 * ``NullGateway`` -- nothing configured: devices still register, nothing is sent;
 * ``appapi.tests`` swaps in a fake via ``APP_PUSH_GATEWAY``.
 
@@ -15,11 +19,15 @@ Settings (all optional; empty = pushes can't be delivered yet)::
     APP_PUSH_APNS_KEY           # the .p8 file's text ("\\n" for newlines in an env file)
     APP_PUSH_APNS_KEY_FILE      # or the path of the .p8 file
     APP_PUSH_APNS_ACTIVITY_ATTRIBUTES   # the app's ActivityAttributes type name (Live Activity start)
+    APP_PUSH_FCM_CREDENTIALS    # the Firebase service-account JSON (one line)
+    APP_PUSH_FCM_CREDENTIALS_FILE   # or the path of that JSON file
+    APP_PUSH_FCM_PROJECT_ID     # the Firebase project id (default: the one in the service account)
+    APP_PUSH_FCM_CHANNEL_ID     # the Android notification channel the app creates (default "notifications")
     APP_PUSH_GATEWAY            # dotted path to override the gateway class
 
 A device's ``environment`` picks the APNs host: ``sandbox`` -> api.sandbox.push.apple.com
 (debug builds from Xcode), ``production`` -> api.push.apple.com (TestFlight and the App
-Store). Android is not served yet. Payloads are pointers, never content (API.md §9): a
+Store). FCM has no sandbox: ``environment`` is ignored for Android. Payloads are pointers, never content (API.md §9): a
 localised title/body plus ``{kind, club_slug, target, ...}``; the app fetches the rest over
 the API.
 """
@@ -184,16 +192,149 @@ def _reason(response) -> str:
         return ""
 
 
-_gateway: PushGateway | None = None
+FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+FCM_SEND_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+
+#: FCM ``errorCode`` values that mean "this token will never work again".
+FCM_DEAD_TOKEN_CODES = {"UNREGISTERED"}
+
+
+def fcm_configured() -> bool:
+    return bool(settings.APP_PUSH_FCM_CREDENTIALS or settings.APP_PUSH_FCM_CREDENTIALS_FILE)
+
+
+def _fcm_service_account() -> dict:
+    if settings.APP_PUSH_FCM_CREDENTIALS:
+        return json.loads(settings.APP_PUSH_FCM_CREDENTIALS)
+    return json.loads(Path(settings.APP_PUSH_FCM_CREDENTIALS_FILE).read_text())
+
+
+def build_fcm_message(device: PushDevice, *, title: str, body: str, data: dict, thread_id: str | None = None) -> dict:
+    """The FCM HTTP v1 request body. FCM ``data`` values must be strings, so structured values
+    (the ``target`` dictionary) are sent as JSON text and absent ones left out. The visible
+    notification is shown by the system even when the app is closed; ``thread_id`` becomes the
+    notification ``tag`` so a club's notifications stack and replace instead of piling up."""
+    android = {"priority": "HIGH", "notification": {"channel_id": settings.APP_PUSH_FCM_CHANNEL_ID}}
+    if thread_id:
+        android["notification"]["tag"] = thread_id
+    payload = {value_key: value if isinstance(value, str) else json.dumps(value) for value_key, value in data.items() if value is not None}
+    return {"message": {"token": device.push_token, "notification": {"title": title, "body": body}, "data": payload, "android": android}}
+
+
+class FcmGateway(PushGateway):
+    """Android push through FCM HTTP v1. OAuth2 access tokens come from the service account
+    (``google-auth``) and are refreshed when they expire; one pooled ``httpx`` client per process."""
+
+    def __init__(self, client=None, credentials=None):
+        self._client = client
+        self._credentials = credentials
+        self._project_id = settings.APP_PUSH_FCM_PROJECT_ID
+        self._lock = threading.Lock()
+
+    @property
+    def client(self):
+        with self._lock:
+            if self._client is None:
+                self._client = httpx.Client(timeout=10.0)
+            return self._client
+
+    def supports(self, device):
+        return device.platform == PushDevice.Platform.ANDROID
+
+    def _access_token(self, *, refresh=False) -> str:
+        from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
+
+        with self._lock:
+            if self._credentials is None:
+                info = _fcm_service_account()
+                self._project_id = self._project_id or info["project_id"]
+                self._credentials = service_account.Credentials.from_service_account_info(info, scopes=[FCM_SCOPE])
+            if refresh or not self._credentials.valid:
+                self._credentials.refresh(Request())
+            return self._credentials.token
+
+    def _post(self, message, *, refresh=False):
+        token = self._access_token(refresh=refresh)
+        return self.client.post(FCM_SEND_URL.format(project_id=self._project_id), json=message, headers={"authorization": f"Bearer {token}"})
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+        if device.platform != PushDevice.Platform.ANDROID:
+            return True
+        message = build_fcm_message(device, title=title, body=body, data=data, thread_id=thread_id)
+        response = self._post(message)
+        if response.status_code == 401:
+            response = self._post(message, refresh=True)
+        if response.status_code == 200:
+            return True
+        code, text = _fcm_error(response)
+        if response.status_code == 404 or code in FCM_DEAD_TOKEN_CODES or (code == "INVALID_ARGUMENT" and "registration token" in text.lower()):
+            return False
+        # Quota, a server error, a misconfigured project: the caller logs it and carries on.
+        raise FcmError(f"FCM answered {response.status_code} {code}")
+
+    def live_activity(self, device, **kwargs):
+        return True  # Live Activities are iOS-only.
+
+
+class FcmError(Exception):
+    pass
+
+
+def _fcm_error(response) -> tuple[str, str]:
+    """``(errorCode, message)`` of an FCM error body: the specific ``errorCode`` sits in
+    ``error.details`` (``FcmError``), falling back to the generic ``error.status``."""
+    try:
+        error = response.json().get("error", {})
+    except ValueError:
+        return "", ""
+    for detail in error.get("details", []):
+        if detail.get("errorCode"):
+            return detail["errorCode"], error.get("message", "")
+    return error.get("status", ""), error.get("message", "")
+
+
+class PlatformGateway(PushGateway):
+    """Routes each device to the gateway of its platform. A platform without a gateway (not
+    configured) is not ``supports()``-ed, so ``push_enabled`` reports it honestly."""
+
+    def __init__(self, ios: PushGateway | None = None, android: PushGateway | None = None):
+        self.gateways = {PushDevice.Platform.IOS: ios, PushDevice.Platform.ANDROID: android}
+
+    def _for(self, device):
+        return self.gateways.get(device.platform)
+
+    def supports(self, device):
+        gateway = self._for(device)
+        return gateway is not None and gateway.supports(device)
+
+    def publish(self, device, **kwargs):
+        gateway = self._for(device)
+        return True if gateway is None else gateway.publish(device, **kwargs)
+
+    def live_activity(self, device, **kwargs):
+        gateway = self._for(device)
+        return True if gateway is None else gateway.live_activity(device, **kwargs)
+
+
+_apns_gateway: ApnsGateway | None = None
+_fcm_gateway: FcmGateway | None = None
+
+
+def push_configured() -> bool:
+    """Whether any platform can be pushed to (or a gateway override is set, as tests do)."""
+    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or apns_configured() or fcm_configured())
 
 
 def get_gateway() -> PushGateway:
-    global _gateway
+    global _apns_gateway, _fcm_gateway
     override = getattr(settings, "APP_PUSH_GATEWAY", "")
     if override:
         return import_string(override)()
-    if apns_configured():
-        if _gateway is None:
-            _gateway = ApnsGateway()
-        return _gateway
-    return NullGateway()
+    if not (apns_configured() or fcm_configured()):
+        return NullGateway()
+    if apns_configured() and _apns_gateway is None:
+        _apns_gateway = ApnsGateway()
+    if fcm_configured() and _fcm_gateway is None:
+        _fcm_gateway = FcmGateway()
+    return PlatformGateway(ios=_apns_gateway if apns_configured() else None, android=_fcm_gateway if fcm_configured() else None)

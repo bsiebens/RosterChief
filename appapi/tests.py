@@ -2,6 +2,7 @@ import datetime
 import io
 import json
 from pathlib import Path
+from unittest import mock
 
 import httpx
 from allauth.account.models import EmailAddress
@@ -27,7 +28,7 @@ from .idempotency import idempotent
 from .management.commands.export_app_openapi import render_schema
 from .models import IdempotencyRecord, PushDevice
 from .pagination import paginate
-from .push import ApnsError, ApnsGateway, PushGateway, build_payload
+from .push import ApnsError, ApnsGateway, FcmError, FcmGateway, NullGateway, PlatformGateway, PushGateway, build_fcm_message, build_payload, get_gateway
 
 User = get_user_model()
 
@@ -629,3 +630,143 @@ class EventBackgroundTests(AppApiTestCase):
         from_context = self.api("get", "/context", token=token, host=CLUB_HOST).json()["club"]["event_background_url"]
         self.assertTrue(from_clubs.startswith("http://") and from_clubs.endswith(".png"), from_clubs)
         self.assertEqual(from_clubs.rsplit("/", 1)[1], from_context.rsplit("/", 1)[1])
+
+
+class FakeCredentials:
+    """Stands in for a google-auth service-account credential: ``refresh`` mints the next token."""
+
+    def __init__(self):
+        self.valid = False
+        self.token = None
+        self.refreshes = 0
+
+    def refresh(self, request):
+        self.refreshes += 1
+        self.token = f"access-{self.refreshes}"
+        self.valid = True
+
+
+@override_settings(APP_PUSH_FCM_PROJECT_ID="rosterchief-test", APP_PUSH_FCM_CHANNEL_ID="notifications")
+class FcmGatewayTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="parent@example.com", password=PASSWORD)
+        self.requests = []
+        self.responses = []
+        self.credentials = FakeCredentials()
+        # Patched so the credentials never need Google's token endpoint.
+        patcher = mock.patch("google.auth.transport.requests.Request")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def gateway(self):
+        def handler(request):
+            self.requests.append(request)
+            status, body = self.responses.pop(0) if self.responses else (200, {"name": "projects/x/messages/1"})
+            return httpx.Response(status, json=body)
+
+        return FcmGateway(client=httpx.Client(transport=httpx.MockTransport(handler)), credentials=self.credentials)
+
+    def device(self, **kwargs):
+        return PushDevice(user=self.user, installation_id="install-2", platform="android", push_token="fcm-token", **kwargs)
+
+    def test_publish_posts_the_message_with_a_bearer_token(self):
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.publish(self.device(), title="Hi", body="There", data={"kind": "notification", "notification_id": "n1", "club_slug": "hc", "target": {"type": "event", "id": 7}}, badge=3, thread_id="hc"))
+
+        (request,) = self.requests
+        self.assertEqual(str(request.url), "https://fcm.googleapis.com/v1/projects/rosterchief-test/messages:send")
+        self.assertEqual(request.headers["authorization"], "Bearer access-1")
+        message = json.loads(request.content)["message"]
+        self.assertEqual(message["token"], "fcm-token")
+        self.assertEqual(message["notification"], {"title": "Hi", "body": "There"})
+        # FCM data values are strings: the target dictionary travels as JSON text.
+        self.assertEqual(message["data"], {"kind": "notification", "notification_id": "n1", "club_slug": "hc", "target": json.dumps({"type": "event", "id": 7})})
+        self.assertEqual(message["android"], {"priority": "HIGH", "notification": {"channel_id": "notifications", "tag": "hc"}})
+
+    def test_absent_data_values_are_left_out(self):
+        message = build_fcm_message(self.device(), title="t", body="b", data={"kind": "notification", "target": None})["message"]
+
+        self.assertEqual(message["data"], {"kind": "notification"})
+        self.assertNotIn("tag", message["android"]["notification"])
+
+    def test_the_access_token_is_reused_until_it_expires(self):
+        gateway = self.gateway()
+
+        gateway.publish(self.device(), title="a", body="b", data={})
+        gateway.publish(self.device(), title="a", body="b", data={})
+        self.assertEqual(self.credentials.refreshes, 1)
+
+        self.credentials.valid = False
+        gateway.publish(self.device(), title="a", body="b", data={})
+        self.assertEqual(self.credentials.refreshes, 2)
+
+    def test_a_rejected_access_token_is_refreshed_and_retried_once(self):
+        self.responses = [(401, {"error": {"status": "UNAUTHENTICATED"}}), (200, {})]
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.publish(self.device(), title="a", body="b", data={}))
+        self.assertEqual([request.headers["authorization"] for request in self.requests], ["Bearer access-1", "Bearer access-2"])
+
+    def test_a_dead_token_reports_false(self):
+        gateway = self.gateway()
+        for status, body in [
+            (404, {"error": {"status": "NOT_FOUND", "details": [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": "UNREGISTERED"}]}}),
+            (404, {"error": {"status": "NOT_FOUND"}}),
+            (400, {"error": {"status": "INVALID_ARGUMENT", "message": "The registration token is not a valid FCM registration token"}}),
+        ]:
+            self.responses = [(status, body)]
+            self.assertFalse(gateway.publish(self.device(), title="a", body="b", data={}))
+
+    def test_other_errors_raise(self):
+        gateway = self.gateway()
+        for status, body in [(429, {"error": {"status": "RESOURCE_EXHAUSTED"}}), (500, {"error": {"status": "INTERNAL"}}), (400, {"error": {"status": "INVALID_ARGUMENT", "message": "Invalid JSON payload"}})]:
+            self.responses = [(status, body)]
+            with self.assertRaises(FcmError):
+                gateway.publish(self.device(), title="a", body="b", data={})
+
+    def test_only_android_is_served(self):
+        gateway = self.gateway()
+
+        self.assertTrue(gateway.supports(self.device()))
+        self.assertFalse(gateway.supports(PushDevice(platform="ios")))
+        self.assertTrue(gateway.publish(PushDevice(platform="ios", push_token="x"), title="a", body="b", data={}))
+        self.assertTrue(gateway.live_activity(self.device(), token="x", event="update", content_state={}))
+        self.assertEqual(self.requests, [])
+
+
+class PlatformGatewayTests(TestCase):
+    class Recorder(PushGateway):
+        def __init__(self, platform):
+            self.platform, self.sent = platform, []
+
+        def supports(self, device):
+            return device.platform == self.platform
+
+        def publish(self, device, **kwargs):
+            self.sent.append(device.push_token)
+            return True
+
+    def test_routes_by_platform_and_reports_unconfigured_ones_as_unsupported(self):
+        ios, android = self.Recorder("ios"), self.Recorder("android")
+        both = PlatformGateway(ios=ios, android=android)
+        ios_only = PlatformGateway(ios=ios)
+        iphone, pixel = PushDevice(platform="ios", push_token="i"), PushDevice(platform="android", push_token="a")
+
+        both.publish(iphone, title="t", body="b", data={})
+        both.publish(pixel, title="t", body="b", data={})
+        self.assertEqual((ios.sent, android.sent), (["i"], ["a"]))
+        self.assertTrue(both.supports(iphone) and both.supports(pixel))
+        self.assertTrue(ios_only.supports(iphone))
+        self.assertFalse(ios_only.supports(pixel))
+
+    @override_settings(APP_PUSH_GATEWAY="", APP_PUSH_APNS_KEY_ID="", APP_PUSH_FCM_CREDENTIALS="", APP_PUSH_FCM_CREDENTIALS_FILE="")
+    def test_get_gateway_without_credentials_is_the_null_gateway(self):
+        self.assertIsInstance(get_gateway(), NullGateway)
+
+    @override_settings(APP_PUSH_GATEWAY="", APP_PUSH_APNS_KEY_ID="", APP_PUSH_FCM_CREDENTIALS='{"project_id": "p"}')
+    def test_get_gateway_with_only_fcm_serves_android_only(self):
+        gateway = get_gateway()
+
+        self.assertTrue(gateway.supports(PushDevice(platform="android")))
+        self.assertFalse(gateway.supports(PushDevice(platform="ios")))
