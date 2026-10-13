@@ -175,3 +175,30 @@ class NativeDeliveryLogTests(AppApiTestCase):
 
         delivery.refresh_from_db()
         self.assertEqual(delivery.status, Status.SENT)
+
+
+class DeviceCleanupTests(AppApiTestCase):
+    def test_purge_drops_long_disabled_and_long_unseen_devices(self):
+        from . import cleanup
+
+        now = timezone.now()
+        keep = PushDevice.objects.create(user=self.user, installation_id="keep", platform="ios", push_token="a")
+        PushDevice.objects.create(user=self.user, installation_id="recent-dead", platform="ios", push_token="b", enabled=False)
+        old_dead = PushDevice.objects.create(user=self.user, installation_id="old-dead", platform="ios", push_token="c", enabled=False)
+        unseen = PushDevice.objects.create(user=self.user, installation_id="unseen", platform="ios", push_token="d")
+        PushDevice.objects.filter(pk=old_dead.pk).update(last_seen=now - datetime.timedelta(days=31))
+        PushDevice.objects.filter(pk=unseen.pk).update(last_seen=now - datetime.timedelta(days=181))
+        PushDevice.objects.filter(pk=keep.pk).update(last_seen=now - datetime.timedelta(days=100))
+
+        self.assertEqual(cleanup.purge(now), 2)
+        self.assertEqual(set(PushDevice.objects.values_list("installation_id", flat=True)), {"keep", "recent-dead"})
+
+    def test_registering_a_token_drops_the_earlier_registration_of_it(self):
+        old = PushDevice.objects.create(user=self.user, installation_id="old-install-id", platform="ios", push_token="same-token")
+        other = PushDevice.objects.create(user=self.user, installation_id="other", platform="ios", push_token="different")
+        token = self.login()
+        response = self.api("post", "/devices", token=token, data={"installation_id": "new-install-id", "platform": "ios", "push_token": "same-token", "app_version": "1", "locale": "en"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(PushDevice.objects.filter(pk=old.pk).exists())
+        self.assertTrue(PushDevice.objects.filter(pk=other.pk).exists())
+        self.assertTrue(PushDevice.objects.filter(installation_id="new-install-id").exists())

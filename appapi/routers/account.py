@@ -20,6 +20,7 @@ from notifications.policy import android_channels
 
 from .. import services
 from ..auth import require_base_domain
+from ..cleanup import drop_superseded
 from ..errors import ApiError
 from ..models import PushDevice
 from ..push import get_gateway
@@ -269,6 +270,7 @@ def register_device(request, payload: DeviceIn):
             device.push_to_start_token = payload.push_to_start_token
         device.enabled = True  # a fresh registration revives a device disabled after a dead-token report
         device.save()
+        drop_superseded(device)
     return _device_out(device)
 
 

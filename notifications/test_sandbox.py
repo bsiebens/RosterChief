@@ -29,7 +29,7 @@ def _boom(*args, **kwargs):
     raise AssertionError("a real provider was touched while the sandbox is on")
 
 
-@override_settings(PUSH_SANDBOX=True, VAPID_PRIVATE_KEY="", EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend", APP_PUSH_APNS_BUNDLE_ID="app.example")
+@override_settings(DEBUG=True, PUSH_SANDBOX=True, VAPID_PRIVATE_KEY="", EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend", APP_PUSH_APNS_BUNDLE_ID="app.example")
 class SandboxTests(AppApiTestCase):
     def setUp(self):
         super().setUp()
@@ -219,3 +219,23 @@ class SandboxModeTests(AppApiTestCase):
 
         self.assertEqual([m.subject for m in mail.outbox], ["Reset", "Invoice"])
         self.assertFalse(SandboxMessage.objects.exists())
+
+
+class DeadScenarioGuardTests(AppApiTestCase):
+    """ "Target gone" disables the real devices it hits, so it is only available in DEBUG."""
+
+    @override_settings(DEBUG=False)
+    def test_unavailable_without_debug(self):
+        self.assertNotIn("dead", sandbox.available_scenarios())
+        with self.assertRaises(ValueError):
+            sandbox.set_scenario("dead")
+
+    @override_settings(DEBUG=False)
+    def test_stored_dead_scenario_acts_as_ok_without_debug(self):
+        with override_settings(DEBUG=True):
+            sandbox.set_scenario("dead")
+        self.assertEqual(sandbox.scenario()["name"], "ok")
+
+    @override_settings(DEBUG=True)
+    def test_available_in_debug(self):
+        self.assertIn("dead", sandbox.available_scenarios())

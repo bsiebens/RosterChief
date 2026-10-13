@@ -52,7 +52,7 @@
                 <input type="hidden" name="action" value="sandbox_on">
                 <input type="hidden" name="confirm" value="1">
                 <label class="block font-mono text-[11px] text-muted" for="expires-in">{% trans "Switch back to live automatically after" %}</label>
-                <select id="expires-in" name="expires_in" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                <select id="expires-in" name="expires_in" class="select select-sm w-auto">
                     {% for minutes, label in expiry_choices %}<option value="{{ minutes }}" {% if minutes == 60 %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </form>
@@ -78,13 +78,13 @@
             <input type="hidden" name="action" value="set_scenario">
             <div>
                 <label class="block font-mono text-[11px] text-muted" for="scenario-select">{% trans "Scenario" %}</label>
-                <select id="scenario-select" name="scenario" class="rounded border border-line bg-white px-2 py-1 text-sm" {% if not sandbox_on %}disabled{% endif %}>
+                <select id="scenario-select" name="scenario" class="select select-sm w-auto" {% if not sandbox_on %}disabled{% endif %}>
                     {% for name, label, text in scenarios %}<option value="{{ name }}" {% if name == scenario.name %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </div>
             <div>
                 <label class="block font-mono text-[11px] text-muted" for="latency-input">{% trans "Latency (ms)" %}</label>
-                <input id="latency-input" name="latency_ms" type="number" min="0" max="{{ max_latency }}" step="50" value="{{ scenario.latency_ms }}" class="w-28 rounded border border-line bg-white px-2 py-1 text-sm" {% if not sandbox_on %}disabled{% endif %}>
+                <input id="latency-input" name="latency_ms" type="number" min="0" max="{{ max_latency }}" step="50" value="{{ scenario.latency_ms }}" class="input input-sm w-28" {% if not sandbox_on %}disabled{% endif %}>
             </div>
             <button class="btn btn-sm btn-primary" type="submit" {% if not sandbox_on %}disabled{% endif %}>{% lucide "save" size=14 %} {% trans "Set scenario" %}</button>
         </form>
@@ -137,28 +137,28 @@
             <form method="get" class="flex flex-wrap items-end gap-2 px-4 pt-2">
                 <div>
                     <label class="block font-mono text-[11px] text-muted" for="f-channel">{% trans "Channel" %}</label>
-                    <select id="f-channel" name="channel" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                    <select id="f-channel" name="channel" class="select select-sm w-auto">
                         <option value="">{% trans "All" %}</option>
                         {% for value, label in channels %}<option value="{{ value }}" {% if filters.channel == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
                 </div>
                 <div>
                     <label class="block font-mono text-[11px] text-muted" for="f-provider">{% trans "Provider" %}</label>
-                    <select id="f-provider" name="provider" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                    <select id="f-provider" name="provider" class="select select-sm w-auto">
                         <option value="">{% trans "All" %}</option>
                         {% for value in providers %}<option value="{{ value }}" {% if filters.provider == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
                     </select>
                 </div>
                 <div>
                     <label class="block font-mono text-[11px] text-muted" for="f-outcome">{% trans "Outcome" %}</label>
-                    <select id="f-outcome" name="outcome" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                    <select id="f-outcome" name="outcome" class="select select-sm w-auto">
                         <option value="">{% trans "All" %}</option>
                         {% for value, label in outcomes %}<option value="{{ value }}" {% if filters.outcome == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
                 </div>
                 <div>
                     <label class="block font-mono text-[11px] text-muted" for="f-club">{% trans "Club" %}</label>
-                    <select id="f-club" name="club" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                    <select id="f-club" name="club" class="select select-sm w-auto">
                         <option value="">{% trans "All clubs" %}</option>
                         {% for c in clubs %}<option value="{{ c.pk }}" {% if filters.club == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
                     </select>
@@ -179,7 +179,15 @@
                                 <td class="font-mono text-xs whitespace-nowrap">{{ m.created|date:"d/m H:i:s" }}</td>
                                 <td class="font-mono text-xs">{{ m.get_channel_display }} / {{ m.provider }}</td>
                                 <td>{{ m.club.name|default:"—" }}</td>
-                                <td class="font-mono text-xs break-all">{{ m.target }}</td>
+                                <td class="font-mono text-xs break-all">
+                                    {% if m.device %}
+                                        <div class="font-sans text-sm" data-testid="device-label">{{ m.device.get_platform_display }} · {{ m.device.get_environment_display }}{% if m.device.app_version %} · v{{ m.device.app_version }}{% endif %}{% if not m.device.enabled %} · {% trans "disabled" %}{% endif %}</div>
+                                        <div class="font-sans text-xs text-muted">{% blocktrans with seen=m.device.last_seen|date:"d/m H:i" %}last seen {{ seen }}{% endblocktrans %}</div>
+                                    {% elif m.channel == "native" %}
+                                        <div class="font-sans text-xs text-muted">{% trans "device removed" %}</div>
+                                    {% endif %}
+                                    {{ m.target }}
+                                </td>
                                 <td>
                                     <details>
                                         <summary class="cursor-pointer">{{ m.title|default:"—" }}</summary>

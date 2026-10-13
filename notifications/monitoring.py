@@ -168,6 +168,7 @@ def time_series(since, window: str, club=None, now=None) -> list[dict]:
     buckets = [{"start": edges[i], "sent": totals[f"s{i}"], "failed": totals[f"f{i}"]} for i in range(count)]
     peak = max([b["sent"] + b["failed"] for b in buckets] + [1])
     for bucket in buckets:
+        bucket["peak"] = peak
         bucket["sent_pct"] = round(100 * bucket["sent"] / peak, 1)
         bucket["failed_pct"] = round(100 * bucket["failed"] / peak, 1)
     return buckets
@@ -221,12 +222,14 @@ def build(window: str, club=None, now=None) -> dict:
     if window not in WINDOWS:
         window = DEFAULT_WINDOW
     since = now - WINDOWS[window][1]
+    series = time_series(since, window, club, now)
     return {
         "window": window,
         "since": since,
         "health": provider_health(since, club, now),
         "queue": retry_queue(club, now),
-        "series": time_series(since, window, club, now),
+        "series": series,
+        "x_ticks": [series[0]["start"], series[len(series) // 2]["start"], now],
         "reasons": top_reasons(since, club),
         "problems": recent_problems(since, club),
         "config": configuration(),

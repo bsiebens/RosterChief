@@ -163,18 +163,25 @@ class PushSandboxView(PlatformSuperuserRequiredMixin, TemplateView):
         status = sandbox.status()
         enabled = status["enabled"]
         captured = list(messages_qs.select_related("club")[: self.LIMIT])
+        from appapi.models import PushDevice
+
+        devices = {device.installation_id: device for device in PushDevice.objects.filter(installation_id__in={m.target for m in captured if m.channel == "native"})}
         for message in captured:
+            message.device = devices.get(message.target) if message.channel == "native" else None
             message.pretty_request = json.dumps(message.request, indent=2, ensure_ascii=False, default=str)
             message.pretty_headers = json.dumps(message.headers, indent=2, ensure_ascii=False, default=str)
         descriptions = {
             "ok": _("The provider accepts everything. Pushes and emails count as delivered."),
             "throttle": _("The provider answers 429. Pushes are logged as waiting to retry and retried 1, 5 and 30 minutes later; switch back to OK to watch them go through."),
-            "dead": _("The provider says the device is gone. The device is disabled and no longer receives pushes."),
+            "dead": _(
+                "The provider says the device is gone. Warning: the device is really disabled in the database and no longer receives pushes until its app registers again. "
+                "Only offered in debug mode: use it on a development database, never on real members."
+            ),
             "error": _("The provider refuses the request. The delivery is logged as failed and not retried."),
             "timeout": _("The provider does not answer in time. Treated as a temporary failure: logged and retried later."),
         }
         labels = {"ok": _("OK"), "throttle": _("Throttle (429)"), "dead": _("Target gone"), "error": _("Refused"), "timeout": _("Timeout")}
-        scenarios = [(name, labels[name], descriptions[name]) for name in sandbox.SCENARIOS]
+        scenarios = [(name, labels[name], descriptions[name]) for name in sandbox.available_scenarios()]
         return super().get_context_data(
             nav="push",
             sandbox_on=enabled,
@@ -227,7 +234,7 @@ class PushSandboxView(PlatformSuperuserRequiredMixin, TemplateView):
             latency = int(request.POST.get("latency_ms") or 0)
         except ValueError:
             latency = -1
-        if name not in sandbox.SCENARIOS or not 0 <= latency <= sandbox.MAX_LATENCY_MS:
+        if name not in sandbox.available_scenarios() or not 0 <= latency <= sandbox.MAX_LATENCY_MS:
             notify(request, f"e|{_('Not saved')}|" + _("Choose a scenario and a latency between 0 and %(max)s ms.") % {"max": sandbox.MAX_LATENCY_MS})
             return redirect("controlpanel:push_sandbox")
         sandbox.set_scenario(name, latency, user=request.user)

@@ -56,6 +56,17 @@ class PushMonitoringViewTests(ControlPanelTestBase):
         self.assertEqual(self.card(response, "fcm")["state"], monitoring.QUIET)
         self.assertEqual(len(response.context["series"]), 24)
 
+    def test_chart_has_axes_and_hover_amounts(self):
+        for _i in range(3):
+            self.make()
+        self.make(status=S.FAILED)
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-testid="y-axis"')
+        self.assertContains(response, 'data-testid="x-axis"')
+        self.assertContains(response, 'role="tooltip"', count=24)
+        self.assertEqual(response.context["series"][0]["peak"], 4)
+        self.assertEqual(len(response.context["x_ticks"]), 3)
+
     def test_numbers_per_provider(self):
         for _i in range(8):
             self.make(provider="apns", duration=100)

@@ -125,12 +125,19 @@ class OnTests(SandboxTestBase):
         self.assertContains(response, "Special title")
         self.assertContains(response, "Send a sample push to myself")
 
+    @override_settings(DEBUG=False)
+    def test_dead_scenario_refused_and_hidden_without_debug(self):
+        self.client.post(self.url, {"action": "set_scenario", "scenario": "dead", "latency_ms": "0"})
+        self.assertEqual(sandbox.scenario()["name"], "ok")
+        self.assertNotContains(self.client.get(self.url), "Only offered in debug mode")
+
     def test_scenario_persists(self):
         response = self.client.post(self.url, {"action": "set_scenario", "scenario": "throttle", "latency_ms": "250"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(sandbox.scenario(), {"name": "throttle", "latency_ms": 250})
         self.assertContains(self.client.get(self.url), "Current: Throttle (429), latency 250 ms")
 
+    @override_settings(DEBUG=True)
     def test_invalid_rejected(self):
         sandbox.set_scenario("dead", 5)
         for data in ({"scenario": "bogus", "latency_ms": "0"}, {"scenario": "ok", "latency_ms": "10001"}, {"scenario": "ok", "latency_ms": "-1"}, {"scenario": "ok", "latency_ms": "abc"}):
@@ -176,3 +183,11 @@ class OnTests(SandboxTestBase):
         PushDevice.objects.create(user=self.root, installation_id="i1", platform="ios", push_token="tok")
         self.client.post(reverse("controlpanel:push_sandbox_sample"))
         self.assertEqual(Notification.objects.filter(member=member, club=self.club).count(), 1)
+
+    def test_captured_push_is_labelled_with_its_device(self):
+        PushDevice.objects.create(user=self.root, installation_id="phone-1", platform="ios", environment="sandbox", push_token="t", app_version="2.3.4")
+        SandboxMessage.objects.create(channel="native", provider="apns", target="phone-1", user=self.root, title="Hi")
+        SandboxMessage.objects.create(channel="native", provider="apns", target="gone-2", user=self.root, title="Hi")
+        response = self.client.get(self.url)
+        self.assertContains(response, "iOS · sandbox · v2.3.4")
+        self.assertContains(response, "device removed")

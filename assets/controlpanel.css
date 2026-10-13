@@ -719,6 +719,21 @@
         background-size: 1rem;
     }
 
+    /* Compact controls: same height as .btn-sm, so a filter bar of small buttons and fields lines up. */
+    .input-sm,
+    .select-sm {
+        height: 1.75rem;
+        padding-block: 0;
+        padding-inline: 0.625rem;
+        font-size: 0.75rem;
+    }
+
+    .select-sm {
+        padding-right: 1.75rem;
+        background-position: right 0.4rem center;
+        background-size: 0.875rem;
+    }
+
     .input:focus,
     .select:focus,
     .textarea:focus {

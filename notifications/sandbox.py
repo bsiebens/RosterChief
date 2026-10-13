@@ -36,6 +36,9 @@ SCENARIOS = {
     "error": Outcome.ERROR,
     "timeout": Outcome.TIMEOUT,
 }
+#: Scenarios with side effects on real data, offered only while DEBUG is on: "dead" disables the devices it hits,
+#: exactly as Apple's 410 does, which on a production database would silence real members' push until their app reopens.
+DEBUG_ONLY_SCENARIOS = {"dead"}
 MAX_LATENCY_MS = 10_000
 RETENTION_DAYS = 7
 
@@ -68,10 +71,16 @@ def enabled(now=None) -> bool:
     return snapshot["enabled"]
 
 
+def available_scenarios() -> dict:
+    """The scenarios that may be picked: all of them in DEBUG, the harmless ones otherwise."""
+    return {name: outcome for name, outcome in SCENARIOS.items() if settings.DEBUG or name not in DEBUG_ONLY_SCENARIOS}
+
+
 def scenario() -> dict:
-    """``{"name": "ok", "latency_ms": 0}`` -- what the sandbox "provider" currently does."""
+    """``{"name": "ok", "latency_ms": 0}`` -- what the sandbox "provider" currently does. A stored debug-only
+    scenario counts as "ok" when DEBUG is off (e.g. the database was copied from a dev machine)."""
     snapshot = _snapshot()
-    name = snapshot["scenario"] if snapshot["scenario"] in SCENARIOS else "ok"
+    name = snapshot["scenario"] if snapshot["scenario"] in available_scenarios() else "ok"
     return {"name": name, "latency_ms": int(snapshot["latency_ms"] or 0)}
 
 
@@ -108,7 +117,7 @@ def set_mode(user, *, on: bool, expires_in: timedelta | None = None) -> SandboxS
 
 
 def set_scenario(name: str, latency_ms: int = 0, user=None) -> dict:
-    if name not in SCENARIOS:
+    if name not in available_scenarios():
         raise ValueError(f"unknown scenario: {name}")
     latency = max(0, min(int(latency_ms), MAX_LATENCY_MS))
     _save(user, "scenario", f"{name}, {latency} ms", scenario=name, latency_ms=latency)
