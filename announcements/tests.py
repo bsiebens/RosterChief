@@ -1,15 +1,19 @@
 import datetime
 from unittest import mock
 
+from django.core import mail
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from appapi.models import PushDevice
+from appapi.push import PushGateway
 from authentication.models import User
-from club.models import Club
+from club.models import Club, ClubRole
 from members.models import Member
 from mobile.models import PushSubscription
+from notifications.models import Notification
 
 from .models import Announcement, AnnouncementSeen
 from .services import audience_member_count, cancel, consume_for, create_and_confirm, publish
@@ -27,93 +31,159 @@ class AnnouncementServiceTestBase(TestCase):
         cls.superuser = User.objects.create_user(email="root@example.com", password="pw-secret-123", is_staff=True, is_superuser=True)
 
 
-@mock.patch("announcements.services.send_push_to_member")
+def make_account_member(club, email, *, role=ClubRole.Roles.MEMBER, first_name="Jane"):
+    """A member with a login, attached to ``club`` through a club role (one of the ways
+    announcements.services.audience_members recognises attachment)."""
+    user = User.objects.create_user(email=email, password="pw-secret-123")
+    member = Member.objects.create(first_name=first_name, last_name="Doe", user=user)
+    ClubRole.objects.create(club=club, member=member, role=role)
+    return member
+
+
 class CreateAndConfirmTests(AnnouncementServiceTestBase):
-    def test_no_schedule_publishes_immediately(self, send_push):
+    def test_no_schedule_publishes_immediately(self):
         announcement = create_and_confirm(title="Heads up", message="Maintenance tonight.", club=None, scheduled_for=None, created_by=self.superuser)
 
         self.assertEqual(announcement.status, Announcement.Status.SENT)
         self.assertIsNotNone(announcement.sent_at)
 
-    def test_a_past_schedule_publishes_immediately_too(self, send_push):
+    def test_a_past_schedule_publishes_immediately_too(self):
         announcement = create_and_confirm(title="Heads up", message="Maintenance tonight.", club=None, scheduled_for=timezone.now() - datetime.timedelta(minutes=1), created_by=self.superuser)
 
         self.assertEqual(announcement.status, Announcement.Status.SENT)
 
-    def test_a_future_schedule_stays_pending(self, send_push):
+    def test_a_future_schedule_stays_pending(self):
+        make_account_member(self.club, "jane@example.com")
         announcement = create_and_confirm(title="Heads up", message="Maintenance tonight.", club=None, scheduled_for=timezone.now() + datetime.timedelta(days=1), created_by=self.superuser)
 
         self.assertEqual(announcement.status, Announcement.Status.PENDING)
         self.assertIsNone(announcement.sent_at)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
 
-@mock.patch("announcements.services.send_push_to_member")
+class RecordingPublisher(PushGateway):
+    sent: list = []
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+        RecordingPublisher.sent.append((device.installation_id, title, body))
+        return True
+
+
 class PublishTests(AnnouncementServiceTestBase):
-    def test_publish_pushes_to_every_member_with_a_subscription(self, send_push):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        make_subscription(self.club, member, "https://push.example/1")
-        announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
-
-        publish(announcement)
-
-        send_push.assert_called_once_with(member, title="Heads up", body="Body")
-
-    def test_one_send_per_member_even_with_multiple_devices(self, send_push):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        make_subscription(self.club, member, "https://push.example/1")
-        make_subscription(self.club, member, "https://push.example/2")
-        announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
-
-        publish(announcement)
-
-        self.assertEqual(send_push.call_count, 1)
-
-    def test_club_targeted_announcement_only_reaches_that_clubs_subscribers(self, send_push):
-        in_club = Member.objects.create(first_name="In", last_name="Club")
-        other_club_member = Member.objects.create(first_name="Other", last_name="Club")
-        make_subscription(self.club, in_club, "https://push.example/1")
-        make_subscription(self.other_club, other_club_member, "https://push.example/2")
+    def test_publish_creates_an_inbox_notification_per_account_holding_member(self):
+        jane = make_account_member(self.club, "jane@example.com")
+        john = make_account_member(self.club, "john@example.com", first_name="John")
+        make_account_member(self.other_club, "other@example.com", first_name="Other")
         announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
 
         publish(announcement)
 
-        send_push.assert_called_once_with(in_club, title="Heads up", body="Body")
+        notifications = Notification.objects.all()
+        self.assertEqual({n.member_id for n in notifications}, {jane.pk, john.pk})
+        for notification in notifications:
+            self.assertEqual((notification.club, notification.title, notification.body, notification.source), (self.club, "Heads up", "Body", None))
 
-    def test_publishing_twice_only_sends_once(self, send_push):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        make_subscription(self.club, member, "https://push.example/1")
+    def test_a_member_without_a_login_gets_nothing(self):
+        member = Member.objects.create(first_name="No", last_name="Login")
+        ClubRole.objects.create(club=self.club, member=member)
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
+
+        publish(announcement)
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_a_member_not_attached_to_the_club_gets_nothing(self):
+        user = User.objects.create_user(email="loose@example.com", password="pw-secret-123")
+        Member.objects.create(first_name="Loose", last_name="End", user=user)
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
+
+        publish(announcement)
+
+        self.assertFalse(Notification.objects.exists())
+
+    def test_platform_wide_covers_every_club(self):
+        jane = make_account_member(self.club, "jane@example.com")
+        other = make_account_member(self.other_club, "other@example.com", first_name="Other")
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
+
+        publish(announcement)
+
+        self.assertEqual({(n.club_id, n.member_id) for n in Notification.objects.all()}, {(self.club.pk, jane.pk), (self.other_club.pk, other.pk)})
+
+    def test_someone_in_two_clubs_gets_one_notification_per_club_on_a_platform_wide_announcement(self):
+        jane = make_account_member(self.club, "jane@example.com")
+        ClubRole.objects.create(club=self.other_club, member=jane)
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
+
+        publish(announcement)
+
+        self.assertEqual(Notification.objects.filter(member=jane).count(), 2)
+        self.assertEqual(audience_member_count(None), 1)
+
+    def test_publishing_twice_only_notifies_once(self):
+        make_account_member(self.club, "jane@example.com")
         announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
 
         publish(announcement)
         publish(announcement)
 
-        self.assertEqual(send_push.call_count, 1)
+        self.assertEqual(Notification.objects.count(), 1)
 
-    def test_a_cancelled_announcement_cannot_be_published(self, send_push):
+    def test_the_announcement_is_emailed(self):
+        make_account_member(self.club, "jane@example.com")
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
+
+        publish(announcement)
+
+        self.assertEqual([message.to for message in mail.outbox], [["jane@example.com"]])
+        self.assertIn("Heads up", mail.outbox[0].subject)
+
+    @override_settings(APP_PUSH_GATEWAY="announcements.tests.RecordingPublisher", VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
+    def test_a_member_with_the_native_app_gets_native_push_and_no_web_push(self):
+        RecordingPublisher.sent = []
+        jane = make_account_member(self.club, "jane@example.com")
+        PushDevice.objects.create(user=jane.user, installation_id="jane-phone", platform="ios", push_token="t")
+        make_subscription(self.club, jane, "https://fcm.googleapis.com/fcm/send/1")
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
+
+        with mock.patch("mobile.services.push.webpush") as webpush:
+            publish(announcement)
+
+        self.assertEqual(RecordingPublisher.sent, [("jane-phone", "Heads up", "Body")])
+        webpush.assert_not_called()
+
+    @override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com")
+    def test_a_member_with_only_a_web_subscription_gets_web_push(self):
+        jane = make_account_member(self.club, "jane@example.com")
+        make_subscription(self.club, jane, "https://fcm.googleapis.com/fcm/send/1")
+        announcement = Announcement.objects.create(title="Heads up", message="Body", club=self.club)
+
+        with mock.patch("mobile.services.push.webpush") as webpush:
+            publish(announcement)
+
+        webpush.assert_called_once()
+
+    def test_a_cancelled_announcement_cannot_be_published(self):
+        make_account_member(self.club, "jane@example.com")
         announcement = Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.CANCELLED)
 
         publish(announcement)
 
         announcement.refresh_from_db()
         self.assertEqual(announcement.status, Announcement.Status.CANCELLED)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
 
 class AudienceCountTests(AnnouncementServiceTestBase):
-    def test_counts_distinct_members_in_scope(self):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        make_subscription(self.club, member, "https://push.example/1")
-        make_subscription(self.club, member, "https://push.example/2")
+    def test_counts_distinct_account_holders_in_scope(self):
+        jane = make_account_member(self.club, "jane@example.com")
+        ClubRole.objects.create(club=self.other_club, member=jane)
+        make_account_member(self.club, "john@example.com", first_name="John")
+        Member.objects.create(first_name="No", last_name="Login")
 
-        self.assertEqual(audience_member_count(self.club), 1)
-        self.assertEqual(audience_member_count(None), 1)
-
-    def test_a_different_clubs_subscriptions_are_excluded(self):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        make_subscription(self.other_club, member, "https://push.example/1")
-
-        self.assertEqual(audience_member_count(self.club), 0)
+        self.assertEqual(audience_member_count(self.club), 2)
+        self.assertEqual(audience_member_count(self.other_club), 1)
+        self.assertEqual(audience_member_count(None), 2)
 
 
 class CancelTests(AnnouncementServiceTestBase):
@@ -207,8 +277,7 @@ class PendingAnnouncementViewTests(AnnouncementServiceTestBase):
 
 
 class PublishScheduledAnnouncementsCommandTests(AnnouncementServiceTestBase):
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_a_due_scheduled_announcement_is_published(self, send_push):
+    def test_a_due_scheduled_announcement_is_published(self):
         due = Announcement.objects.create(title="Due", message="Body", scheduled_for=timezone.now() - datetime.timedelta(minutes=1))
         not_due = Announcement.objects.create(title="Not due", message="Body", scheduled_for=timezone.now() + datetime.timedelta(days=1))
 

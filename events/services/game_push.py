@@ -14,9 +14,9 @@ commits, off the polling thread. Decisions behind the rules here (§9):
 - **How much:** the moments one poll detected go out as *one* push per
   account (coalesced: "Goal for us by ..., 4-2" and "Penalty ..." in one
   message). No cap per game -- every poll that found something sends one.
-- **Where:** push only -- no Notification/inbox row per goal. Native app
-  devices (appapi.push gateway) and web push subscriptions (mobile.services.
-  push), each as best-effort as the rest of the app's pushes.
+- **Where:** every channel through notifications.dispatch (native APNs/FCM
+  devices, web push) -- no Notification/inbox row per goal. Each channel is
+  as best-effort as the rest of the app's pushes.
 """
 
 import datetime
@@ -32,6 +32,7 @@ from django.utils.translation import gettext as _
 
 from events.models import Event, EventFollow, GameFollow, GameMoment
 from events.services.game_moments import describe_moment
+from notifications.dispatch import dispatch_to_user
 from rosterchief.concurrency import run_in_background
 
 logger = logging.getLogger(__name__)
@@ -67,41 +68,6 @@ def language_for_locale(locale) -> str:
     return code if code in {language for language, _name in settings.LANGUAGES} else "en"
 
 
-def _send_native(user, *, texts, data, thread_id=None) -> int:
-    """``texts(language)`` -> ``(title, body)``; each device gets its own locale's."""
-    from appapi.delivery import push_configured  # deferred: appapi imports back into events
-    from appapi.models import PushDevice
-    from appapi.push import get_gateway
-
-    if not push_configured():
-        return 0
-    gateway = get_gateway()
-    sent = 0
-    for device in PushDevice.objects.filter(user=user, enabled=True):
-        if not gateway.supports(device):
-            continue
-        try:
-            title, body = texts(language_for_locale(device.locale))
-            alive = gateway.publish(device, title=title, body=body, data=data, thread_id=thread_id)
-        except Exception:
-            logger.exception("game_push.native_failed device=%s", device.pk)
-            continue
-        if alive:
-            sent += 1
-        else:
-            device.enabled = False
-            device.save(update_fields=["enabled", "modified"])
-    return sent
-
-
-def _send_web(club, user, *, texts, url) -> int:
-    from mobile.services.push import send_push_to_user  # deferred: mobile imports back into events
-
-    # No language preference on accounts or subscriptions: web push goes out in English.
-    title, body = texts("en")
-    return send_push_to_user(club, user, title=title, body=body, url=url)
-
-
 def deliver_moments(event_id, moment_ids) -> int:
     """Pushes the given (just recorded) moments of one game to its followers.
     Every notifiable moment is marked delivered whether or not anyone follows
@@ -128,7 +94,7 @@ def deliver_moments(event_id, moment_ids) -> int:
     url = _event_url(event)
     reached = 0
     for user in followers(event):
-        if _send_native(user, texts=texts, data=data, thread_id=str(event.pk)) + _send_web(event.club, user, texts=texts, url=url):
+        if dispatch_to_user(club=event.club, user=user, texts=texts, data=data, url=url, thread_id=str(event.pk)).total:
             reached += 1
     logger.info("game_push.delivered event_id=%s moments=%s accounts=%s", event.pk, len(moments), reached)
     return reached

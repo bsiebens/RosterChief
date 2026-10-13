@@ -28,12 +28,13 @@ from members.models import Family, FamilyMembership, Member
 from mobile.models import PushSubscription
 from mobile.services.push import send_push_for_notifications, send_push_to_user
 from news.models import News
+from notifications.dispatch import dispatch_notifications
 from notifications.models import Notification
 from notifications.services import notify_members
 from shop.models import Order
 from teams.models import Position, Team, TeamMembership
 
-from .delivery import deliver, on_notifications_created, payload_data
+from .delivery import NativePushChannel, deliver, payload_data
 from .models import LiveActivity, PushDevice
 from .push import PushGateway
 from .tests import CLUB_HOST, AppApiTestCase, make_club
@@ -649,7 +650,7 @@ class PushDeliveryTests(ClubApiTestCase):
         second_child = Member.objects.create(first_name="Lou", last_name="Parent")
         FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=second_child, role=FamilyMembership.FamilyRole.CHILD)
         item = News.objects.create(club=self.club, title="News", slug="news", body="…", status=News.Status.PUBLISHED, published_at=timezone.now())
-        with patch("appapi.delivery.run_in_background"):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.dispatch.run_in_background"):
             notifications = notify_members([self.member, self.child, second_child], club=self.club, title="New article", body="Read it", source=item, send_email=False)
 
         self.assertEqual(deliver([notification.pk for notification in notifications]), 1)
@@ -662,7 +663,7 @@ class PushDeliveryTests(ClubApiTestCase):
     def test_the_push_is_in_the_language_the_device_registered_with(self):
         self.device.locale = "nl"
         self.device.save()
-        with patch("appapi.delivery.run_in_background"):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.dispatch.run_in_background"):
             (notification,) = notify_members([self.member], club=self.club, title=lambda: "Hello" if get_language() == "en" else "Hallo", body="Body", send_email=False)
 
         deliver([notification.pk])
@@ -684,16 +685,26 @@ class PushDeliveryTests(ClubApiTestCase):
         self.device.refresh_from_db()
         self.assertFalse(self.device.enabled)
 
+    @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
     def test_created_notifications_are_pushed_after_commit(self):
-        with patch("appapi.delivery.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+        with patch("notifications.dispatch.run_in_background") as background, self.captureOnCommitCallbacks(execute=False) as callbacks:
             notifications = notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)
-        background.assert_called_once_with(deliver, [notifications[0].pk])
+        background.assert_not_called()
+        self.assertEqual(RecordingPublisher.sent, [])
+        with patch("notifications.dispatch.run_in_background") as background:
+            for callback in callbacks:
+                callback()
+        background.assert_called_once_with(dispatch_notifications, [notifications[0].pk], email=False)
+
+    def test_eager_dispatch_pushes_straight_away(self):
+        notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)
+        self.assertEqual(len(RecordingPublisher.sent), 1)
 
     @override_settings(APP_PUSH_GATEWAY="")
-    def test_nothing_is_scheduled_without_apns(self):
-        with patch("appapi.delivery.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
-            on_notifications_created(None, notifications=[Notification(pk=1)])
-        background.assert_not_called()
+    def test_native_channel_does_nothing_without_a_gateway(self):
+        notification = Notification.objects.create(club=self.club, member=self.child, title="Hi", body="…")
+        NativePushChannel().deliver_notifications([notification])
+        self.assertEqual(RecordingPublisher.sent, [])
 
 
 class UnknownIdTests(ClubApiTestCase):

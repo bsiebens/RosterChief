@@ -10,7 +10,7 @@ from rosterchief.base import UUIDModel
 class Announcement(UUIDModel):
     """A one-off platform-wide (or single-club) message, pushed by a platform
     superuser from the control panel -- see announcements.services. Delivered two
-    ways once ``status`` is SENT: a real web push to every subscribed device
+    ways once ``status`` is SENT: a notification (inbox, native/web push, email) to every account holder
     (announcements.services.publish) and a one-time pop-up shown the next time
     each targeted, not-yet-shown user loads the management or mobile app (see
     AnnouncementSeen below, and announcements.views.PendingAnnouncementView).
@@ -30,7 +30,7 @@ class Announcement(UUIDModel):
     message = models.TextField(_("message"))
 
     #: Left blank to target every club on the platform. Set to target one club's
-    #: own people only -- see announcements.services.audience_subscriptions.
+    #: own people only -- see announcements.services.audience_members.
     club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="announcements", null=True, blank=True, verbose_name=_("club"), help_text=_("Leave blank to reach every club."))
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))

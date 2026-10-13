@@ -1615,3 +1615,10 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
 `club/tenancy.py` (tenant context and middleware, §2.4),
 `authentication/managers.py` (`UserManager`), `authentication/services/` (service-layer
 pattern).
+
+### 8.6 Notifications & push
+
+- **`Notification`** (`notifications`): the in-app inbox row, one per member, written by `notifications.services.notify_members`. Email, native push and web push are *deliveries* of it, not separate records.
+- **`PushDevice`** (`appapi`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per `Member`, club-scoped.
+- **Dispatcher** (`notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `appapi`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
+- Native delivery goes through `appapi.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details: `API.md` §9.

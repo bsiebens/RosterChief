@@ -1,14 +1,19 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from club.models import Club, ClubMembership
 from features.models import EmailSuppression
 from members.models import Family, FamilyMembership, Member
 from rosterchief.test_support import make_season
 
+from . import dispatch
+from .channels import EmailChannel
+from .dispatch import Channel
 from .models import Notification
 from .services import notify_members, recipient_emails
 
@@ -148,6 +153,7 @@ class NotifyMembersTests(TestCase):
 
         [notification] = notify_members([member], club=self.club, title="News", body="Body.")
 
+        notification.refresh_from_db()  # the email channel records on its own copy of the row
         self.assertIsNotNone(notification.sent_at)
         self.assertEqual(notification.sent_to_emails, ["jamie@example.com"])
         self.assertTrue(notification.is_sent)
@@ -297,3 +303,136 @@ class NotificationTranslationTests(TestCase):
         notification = Notification.objects.create(club=self.club, member=self.member, title="Old", body="Row")
 
         self.assertEqual(notification.text_for("nl"), {"title": "Old", "body": "Row"})
+
+
+class RecordingChannel(Channel):
+    def __init__(self, name, *, fail=False, reached=1):
+        self.name = name
+        self.fail = fail
+        self.reached = reached
+        self.batches = []
+        self.users = []
+
+    def deliver_notifications(self, notifications, *, email=True):
+        if self.fail:
+            raise RuntimeError("boom")
+        self.batches.append(([notification.pk for notification in notifications], email))
+
+    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None):
+        if self.fail:
+            raise RuntimeError("boom")
+        self.users.append((user, texts("en"), data, url, thread_id))
+        return self.reached
+
+
+class DispatcherTests(TestCase):
+    """notifications.dispatch: the channel registry and the fan-out of a notify_members batch."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        cls.user = User.objects.create_user(email="jamie@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(user=cls.user, first_name="Jamie", last_name="Doe", email="jamie@example.com")
+
+    def setUp(self):
+        saved = list(dispatch._channels)
+        self.addCleanup(lambda: dispatch._channels.__setitem__(slice(None), saved))
+        dispatch._channels[:] = []
+
+    def test_every_registered_channel_receives_the_batch(self):
+        first, second = RecordingChannel("first"), RecordingChannel("second")
+        dispatch.register_channel(first)
+        dispatch.register_channel(second)
+
+        notifications = notify_members([self.member], club=self.club, title="News", body="Body.")
+
+        ids = [notification.pk for notification in notifications]
+        self.assertEqual(first.batches, [(ids, True)])
+        self.assertEqual(second.batches, [(ids, True)])
+
+    def test_one_failing_channel_does_not_stop_the_others(self):
+        broken, healthy = RecordingChannel("broken", fail=True), RecordingChannel("healthy")
+        dispatch.register_channel(broken)
+        dispatch.register_channel(healthy)
+
+        with self.assertLogs("notifications.dispatch", level="ERROR"):
+            notify_members([self.member], club=self.club, title="News", body="Body.")
+
+        self.assertEqual(len(healthy.batches), 1)
+
+    def test_send_email_false_suppresses_email_but_not_push(self):
+        dispatch.register_channel(EmailChannel())
+        push = RecordingChannel("push")
+        dispatch.register_channel(push)
+
+        notify_members([self.member], club=self.club, title="News", body="Body.", send_email=False)
+
+        self.assertEqual(mail.outbox, [])
+        [(_ids, email)] = push.batches
+        self.assertFalse(email)
+
+    def test_email_channel_sends_plain_mail(self):
+        dispatch.register_channel(EmailChannel())
+
+        notify_members([self.member], club=self.club, title="News", body="Body.")
+
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_mail_with_attachments_goes_out_inline_exactly_once(self):
+        dispatch.register_channel(EmailChannel())
+        push = RecordingChannel("push")
+        dispatch.register_channel(push)
+
+        notify_members([self.member], club=self.club, title="Invoice", body="Attached.", attachments=[("invoice.pdf", b"%PDF-fake", "application/pdf")])
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(mail.outbox[0].attachments), 1)
+        [(_ids, email)] = push.batches  # push still goes; the channels are told not to mail again
+        self.assertFalse(email)
+
+    @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
+    def test_nothing_is_delivered_before_commit_when_not_eager(self):
+        dispatch.register_channel(EmailChannel())
+        push = RecordingChannel("push")
+        dispatch.register_channel(push)
+
+        with patch("notifications.dispatch.run_in_background", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)) as background:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                notify_members([self.member], club=self.club, title="News", body="Body.")
+            self.assertEqual(len(callbacks), 1)
+            background.assert_not_called()
+            self.assertEqual(mail.outbox, [])
+            self.assertEqual(push.batches, [])
+
+            callbacks[0]()
+
+        background.assert_called_once()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(push.batches), 1)
+
+    def test_native_and_web_channels_are_registered_by_their_apps(self):
+        from django.apps import apps
+
+        dispatch._channels[:] = []
+        for label in ("notifications", "appapi", "mobile"):
+            apps.get_app_config(label).ready()
+
+        self.assertEqual(sorted(channel.name for channel in dispatch.channels()), ["email", "native", "web"])
+
+    def test_dispatch_to_user_sums_channels_and_survives_a_failing_channel(self):
+        dispatch.register_channel(RecordingChannel("a", reached=2))
+        dispatch.register_channel(RecordingChannel("broken", fail=True))
+        dispatch.register_channel(RecordingChannel("b", reached=3))
+
+        with self.assertLogs("notifications.dispatch", level="ERROR"):
+            result = dispatch.dispatch_to_user(club=self.club, user=self.user, texts=lambda language: ("T", "B"), data={"kind": "x"}, url="/x", thread_id="t")
+
+        self.assertEqual(result.reached, {"a": 2, "broken": 0, "b": 3})
+        self.assertEqual(result.total, 5)
+
+    def test_register_channel_is_idempotent_per_name(self):
+        dispatch.register_channel(RecordingChannel("same"))
+        replacement = RecordingChannel("same")
+        dispatch.register_channel(replacement)
+
+        self.assertEqual(dispatch.channels(), [replacement])

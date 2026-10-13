@@ -41,7 +41,7 @@
                         <dd>
                             {% if preview.club %}{{ preview.club.name }}{% else %}{% trans "Every club" %}{% endif %}
                             &middot;
-                            {% blocktrans count counter=audience %}{{ counter }} subscribed device will get a push{% plural %}{{ counter }} subscribed devices will get a push{% endblocktrans %}
+                            {% blocktrans count counter=audience %}{{ counter }} person will be notified{% plural %}{{ counter }} people will be notified{% endblocktrans %}
                         </dd>
                     </div>
                     <div>

@@ -286,6 +286,9 @@ APP_PUSH_FCM_PROJECT_ID = config("APP_PUSH_FCM_PROJECT_ID", default="")
 # The Android notification channel id the app creates; pushes are posted to it.
 APP_PUSH_FCM_CHANNEL_ID = config("APP_PUSH_FCM_CHANNEL_ID", default="notifications")
 APP_PUSH_GATEWAY = ""
+# Deliver notifications on the calling thread instead of after commit on a background thread
+# (notifications.dispatch). Only the test runner turns this on.
+NOTIFICATIONS_DISPATCH_EAGER = False
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
 # under this key -- generate one with

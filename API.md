@@ -441,51 +441,63 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 
 ---
 
-## 9. Push notifications (AWS-native)
+## 9. Push notifications
 
-> **Superseded:** delivery was built straight against Apple's APNs (HTTP/2, token auth), with no SNS and no
-> `endpoint_arn`; Android is not served yet. The text below is the original design discussion. See
-> DEPLOYMENT.md "Native app push" and `appapi/push.py` for what runs.
+Native push goes **straight to the platform providers**: Apple's APNs (HTTP/2, token auth) for iOS and
+Firebase Cloud Messaging (HTTP v1) for Android. There is no SNS or any other intermediary (the original
+SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `appapi/push.py` for the code.
 
-**Constraint from the product owner:** one platform that fans out to APNs and FCM, and — because production already runs on AWS — an **AWS service rather than introducing FCM directly**.
+**Gateways** (`appapi/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
+set), `FcmGateway` (Android, when a Firebase service account is set), and `PlatformGateway`, which
+`get_gateway()` returns and which routes a device to the gateway of its platform. A platform without
+credentials is simply not `supports()`-ed: its devices still register, nothing is sent. `NullGateway` covers
+"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `appapi/push.py`)
+says whether any platform can deliver.
 
-**Recommendation: Amazon SNS Mobile Push.** One `Publish` per device endpoint; SNS holds the APNs and FCM credentials (as *platform applications*) and talks to both. It is the single fan-out platform the owner asked for, needs only `boto3` (already
-reachable via the S3 storage stack — confirm it is a direct dependency) and IAM, and adds no third-party vendor beyond what APNs/FCM require anyway. (FCM is still *underneath* SNS for Android — SNS is the AWS-side abstraction, not a way to avoid
-Google's delivery network. That is unavoidable for Android.)
+**Model.** `appapi.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
+locale, enabled, last_seen)`, keyed per `User` + install, not per Member/club: one install serves every club the user
+belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, also on token rotation); `DELETE
+/devices/{id}` and logout remove it. The PWA's `mobile.PushSubscription` is separate (per Member, per club).
 
-Alternatives considered:
+**Dispatcher** (`notifications/dispatch.py`). The `notifications_created` signal is gone. `notify_members` writes the
+`Notification` rows (the in-app inbox) and calls `schedule_notifications`, which, after the surrounding transaction
+commits and off the request thread (`run_in_background`), hands the batch to every registered *channel*. Channels
+register themselves in their `AppConfig.ready` via `register_channel` (idempotent per name), so `notifications` never
+imports `appapi`/`mobile`:
 
-| Option                                         | Verdict                                                                                                                                                  |
-|------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **SNS Mobile Push**                            | **Recommended.** Simple, cheap, fits IAM/S3 footprint, pay-per-publish. No segmentation/campaign features (we don't need them: sends are transactional). |
-| AWS End User Messaging Push (ex-Pinpoint push) | Heavier, targets campaigns/segments/analytics; Pinpoint's original console is being wound down in favour of this. Overkill for transactional pushes.     |
-| FCM direct (+ APNs via FCM)                    | Rejected by the owner for adding a party.                                                                                                                |
-| Keep Web Push only                             | Doesn't work in native apps.                                                                                                                             |
+| Channel  | Class                                | Does                                                         |
+|----------|--------------------------------------|--------------------------------------------------------------|
+| `email`  | `notifications.channels.EmailChannel` | plain notification mail to the member and guardians          |
+| `native` | `appapi.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
+| `web`    | `mobile.channels.WebPushChannel`      | Web Push to the PWA subscriptions                            |
 
-**Design**
+A channel that raises is logged and never stops the others. `dispatch_to_user(club, user, texts, data, url,
+thread_id)` is the second entry point, for messages with no inbox row (live game pushes, `events.services.game_push`):
+every channel's `deliver_to_user`, returning how many devices/subscriptions each reached. With
+`NOTIFICATIONS_DISPATCH_EAGER` (on in the test suite) everything is delivered synchronously instead of after commit.
 
-- **Model** (new, in `mobile` next to `PushSubscription`, or a new `push` app):
-  `PushDevice(user, installation_id UNIQUE, platform: ios|android, sns_endpoint_arn, app_version,
-  locale, enabled, last_seen, created)`. Keyed **per `User` + install**, not per Member/club: one install serves every club the user belongs to (the account plane, §4), and the SNS endpoint is per install. The current `PushSubscription` is
-  `ClubScopedModel` + per-`Member`; the *recipient resolution* (Member → which users get it, incl. guardians of children who have no login) should **reuse whatever `mobile.signals` does today for Web Push** rather than reinvent it — read that
-  receiver during implementation and mirror its member→user mapping (§16-4).
-- **Registration:** `POST /devices` with the APNs/FCM token → `sns.CreatePlatformEndpoint` (or update on token rotation; store `EndpointArn`, handle the `already exists with different
-  attributes` SNS quirk by `SetEndpointAttributes`) → row upsert. `DELETE /devices/{id}` and logout delete the endpoint.
-- **Send path:** a second receiver on the existing `notifications_created` signal (the single fan-out point; `notifications.services.notify_members` fires it), running **off the request thread** via the existing `run_in_background`/APScheduler
-  machinery (`features/scheduler.py`,
-  `rosterchief/concurrency.py`) so sends never block a web request. Per device: one SNS
-  `Publish` with a JSON envelope per platform (APNs alert + `mutable-content`; FCM `notification` +
-  `data`).
-- **Payload = pointer, not content.** `{notification_id, club_slug, type, target: {type, id}}` plus a localised title/short body (the recipient's `locale`). Anything sensitive is fetched by the app over the authenticated API after tap. Never put
-  minors' details or financial data in the push body.
-- **Live game pushes** (`events.services.game_push`, GAME_TIMELINE.md phase 4) are the one push that has no `Notification` row behind it: no `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. The title is "<our teams> vs <opponent>", and the body has one line per moment the poll detected, so a coalesced update can span several lines. Who gets them is opt-in per team: `GET/PUT /game-follows`.
-- **Delivery hygiene:** on SNS `EndpointDisabled`/`InvalidParameter`/`NotFound` (token no longer valid) → mark the device disabled and delete the endpoint; also enable SNS delivery-status logging to CloudWatch. Badge/unread count from
-  `GET /notifications/unread-count`.
-- **Preferences:** none per-type in v1 (mirrors Web Push today); a per-install `enabled` toggle only.
-- **Web Push remains** for the PWA; both receivers coexist. A user with both a PWA subscription and a native install may get two alerts — dedupe rule: skip Web Push for a user who has an enabled native device *and* was seen on it recently (decision
-  in §16).
-- **Infra:** two SNS platform applications (APNs prod/sandbox as needed, FCM) per environment; credentials in the same secrets mechanism as the rest of `DEPLOYMENT.md`; IAM policy scoped to
-  `sns:CreatePlatformEndpoint|SetEndpointAttributes|Publish|DeleteEndpoint` on those ARNs.
+**Recipients and dedupe.**
+- Recipients are *accounts*: the member's own login plus every parent/guardian's in that club (the `recipient_emails`
+  rule). One push per account per distinct notification, so a club-wide item doesn't buzz a parent once per child.
+- Web Push is skipped for an account with an enabled native device seen in the last 60 days
+  (`users_with_native_push`): the phone already got it.
+- An account set to "email unless the app can notify me" (`User.email_notifications`) gets no plain notification mail
+  while it has such a device. Mail **with attachments** (invoices) is a document, not a nudge: it is sent inline by
+  `notify_members` (once, never again by the email channel) and ignores that preference.
+- A device whose token the provider reports dead is disabled.
+
+**Payload = pointer, not content.** `{kind, notification_id, club_slug, target: {type, id, ...}}` plus a localised
+title and short body. Texts may be plain strings, lazy translations or callables; they are resolved per recipient in the
+language of the device's registered `locale` (Web Push has no language preference and goes out in English). On Android,
+`target` arrives as JSON text (FCM data values are strings). Anything sensitive is fetched by the app over the
+authenticated API after tap; never put minors' details or financial data in a push body.
+
+**Live game pushes** (`events.services.game_push`, GAME_TIMELINE.md phase 4) have no `Notification` row: no
+`notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. Who gets them is opt-in per team:
+`GET/PUT /game-follows`.
+
+**Preferences:** none per type in v1; a per-install `enabled` toggle only. Badge/unread count from
+`GET /notifications/unread-count`.
 
 ---
 
@@ -560,7 +572,7 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
    MFA → 403 `mfa_enrollment_required` on
    `/api/app/` but able to reach enrolment; **signup endpoint refuses** (closed); password change invalidates other app sessions.
 3. **Middleware interaction**: `RequireMFAMiddleware` does not redirect API paths; maintenance → 503 JSON; no CORS headers on the new prefixes.
-4. **Push**: SNS behind a small `PushGateway` interface with a fake in tests (no network); disabled- endpoint pruning; payload contains no PII.
+4. **Push**: APNs/FCM behind a small `PushGateway` interface with a fake in tests (no network); disabled- endpoint pruning; payload contains no PII.
 5. **Regression net**: the service extractions in §11 are refactors — `mobile/tests.py` must stay green at every step, and the new service functions get direct unit tests.
 6. **OpenAPI diff check in CI** (§15) so an accidental breaking change fails the build.
 
@@ -626,8 +638,8 @@ and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`
 `appapi.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
 an unknown id with the 404 envelope (§13).
 
-Push delivery (`appapi/delivery.py`): a second `notifications_created` receiver, after commit
-and off the request thread (`run_in_background`), only when SNS (or a test gateway) is
+Push delivery (`appapi/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
+and off the request thread, only when a gateway (APNs, FCM or a test gateway) is
 configured. Recipients are accounts: the member's own login plus their parents/guardians in that
 club (the `recipient_emails` rule, answering §16-4's mapping). One push per account per distinct
 notification, so a club-wide item doesn't buzz a parent once per child. Dead tokens disable the
@@ -673,7 +685,7 @@ has a `RegistrationDetails` row per child registered that way, and the child no 
   `HEADLESS_SPECIFICATION_TEMPLATE_NAME=None`).
 - **Client minimum version.** `GET /meta` returns `min_supported_app_version` per platform; the app sends `X-App-Version`/`X-App-Platform`; below-minimum → 426-style `upgrade_required` screen. The only defence against an old client that would break
   on a future v2 sunset.
-- **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); SNS delivery logs to CloudWatch; counters for 401/403/429 per route.
+- **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); push failures logged per device; counters for 401/403/429 per route.
 - **Caching.** Personalised routes: `Cache-Control: private, no-store`. Cheap conditional reads via
   `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `api/cache.py` layer is not reused — it caches by club, not by user.)
 - **Delta sync.** Most models have `created`/`modified`; list endpoints for

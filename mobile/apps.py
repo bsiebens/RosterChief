@@ -5,4 +5,8 @@ class MobileConfig(AppConfig):
     name = "mobile"
 
     def ready(self):
-        from . import signals  # noqa: F401
+        from notifications.dispatch import register_channel
+
+        from .channels import WebPushChannel
+
+        register_channel(WebPushChannel())

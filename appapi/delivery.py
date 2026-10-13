@@ -1,6 +1,5 @@
 """Native push for new notifications (API.md §9): the APNs counterpart of the member web
-app's Web Push (mobile.services.push). Both hang off notifications.signals.
-notifications_created, the one fan-out point, so a notification reaches every channel.
+app's Web Push (mobile.services.push). Both are channels of notifications.dispatch, the one fan-out point, so a notification reaches every channel.
 
 Recipients are *accounts*, resolved the way email already is (notifications.services.
 recipient_emails): the member's own login plus every parent/guardian's in that club. One
@@ -14,14 +13,13 @@ rest over the API.
 import logging
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
 
 from club.models import Club, ClubMembership
 from members.models import Member
 from members.services.family import managed_people
+from notifications.dispatch import Channel
 from notifications.models import Notification
 from notifications.services import recipient_user_ids, unread_count
-from rosterchief.concurrency import run_in_background
 
 from .models import PushDevice
 from .presenters import notification_target
@@ -86,10 +84,41 @@ def deliver(notification_ids) -> int:
     return sent
 
 
-def on_notifications_created(sender, notifications, **kwargs) -> None:
-    """Receiver for notifications_created: after the transaction commits (the rows must
-    be visible to the worker thread), off the request thread."""
-    if not notifications or not push_configured():
-        return
-    ids = [notification.pk for notification in notifications]
-    transaction.on_commit(lambda: run_in_background(deliver, ids))
+def deliver_to_user(user, *, texts, data, thread_id=None) -> int:
+    """One message, no inbox row (a live game update), to every enabled native device of ``user``;
+    ``texts(language)`` -> ``(title, body)`` and each device gets its own locale's. A device whose
+    token is dead is disabled. Returns how many devices it was handed to."""
+    from events.services.game_push import language_for_locale  # deferred: events imports appapi lazily too
+
+    if not push_configured():
+        return 0
+    gateway = get_gateway()
+    sent = 0
+    for device in PushDevice.objects.filter(user=user, enabled=True):
+        if not gateway.supports(device):
+            continue
+        try:
+            title, body = texts(language_for_locale(device.locale))
+            alive = gateway.publish(device, title=title, body=body, data=data, thread_id=thread_id)
+        except Exception:
+            logger.exception("app_push.publish_failed device=%s", device.pk)
+            continue
+        if alive:
+            sent += 1
+        else:
+            device.enabled = False
+            device.save(update_fields=["enabled", "modified"])
+    return sent
+
+
+class NativePushChannel(Channel):
+    """APNs (iOS) and FCM (Android), through appapi.push's gateway."""
+
+    name = "native"
+
+    def deliver_notifications(self, notifications, *, email=True):
+        if push_configured():
+            deliver([notification.pk for notification in notifications])
+
+    def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None):
+        return deliver_to_user(user, texts=texts, data=data, thread_id=thread_id)

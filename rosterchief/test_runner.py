@@ -104,6 +104,9 @@ def _apply_per_process_test_overrides(*args):
     settings.PRIVATE_MEDIA_ROOT = tempfile.mkdtemp(prefix="rosterchief-test-private-media-")
     setting_changed.send(sender=None, setting="STORAGES", value=settings.STORAGES, enter=True)
     settings.VAPID_PRIVATE_KEY = ""
+    # Notifications are dispatched (native push, web push, email) on the spot instead of on
+    # a thread after commit (notifications.dispatch.schedule_notifications).
+    settings.NOTIFICATIONS_DISPATCH_EAGER = True
     _clear_caches_before_every_test()
 
 

@@ -1065,7 +1065,7 @@ Firebase project, but each keeps its own `.env`. A phone registers with exactly 
 base domain it signed in on), so pushes never double up.
 
 Web Push for the installable web app (PWA) is separate: see `DJANGO_VAPID_*` above. An account
-that has the native app installed gets the native push instead of the web push.
+that has the native app installed gets the native push instead of the web push. Notifications (push and email) are delivered after the database commit, on a background thread, not inside the web request.
 
 ## Native app push — iOS (APNs)
 

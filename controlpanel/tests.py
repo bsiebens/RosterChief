@@ -27,7 +27,7 @@ from club.models import Club, ClubMembership, ClubRole, Season
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
-from mobile.models import PushSubscription
+from notifications.models import Notification
 from rosterchief.test_support import enrol_mfa
 from shop.models import Order
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -2609,19 +2609,17 @@ class AnnouncementManagementTests(TestCase):
         data.update(overrides)
         return self.client.post(reverse("controlpanel:announcement_compose"), data)
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_the_first_submission_only_previews_nothing_is_created_yet(self, send_push):
+    def test_the_first_submission_only_previews_nothing_is_created_yet(self):
         response = self.compose()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Review before pushing")
         self.assertEqual(Announcement.objects.count(), 0)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_creates_and_immediately_pushes(self, send_push):
-        member = Member.objects.create(first_name="Jane", last_name="Doe")
-        PushSubscription.objects.create(club=self.club, member=member, endpoint="https://push.example/1", p256dh="k", auth="a")
+    def test_confirming_creates_and_immediately_notifies(self):
+        member = Member.objects.create(first_name="Jane", last_name="Doe", user=User.objects.create_user(email="jane@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=member)
 
         self.compose(confirmed="1")
 
@@ -2629,29 +2627,27 @@ class AnnouncementManagementTests(TestCase):
         self.assertEqual(announcement.status, Announcement.Status.SENT)
         self.assertIsNotNone(announcement.sent_at)
         self.assertEqual(announcement.created_by, self.root)
-        send_push.assert_called_once_with(member, title="Heads up", body="Maintenance tonight.")
+        self.assertEqual([(n.member, n.title, n.body) for n in Notification.objects.all()], [(member, "Heads up", "Maintenance tonight.")])
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_a_future_schedule_leaves_it_pending_and_does_not_push(self, send_push):
+    def test_confirming_a_future_schedule_leaves_it_pending_and_does_not_push(self):
         when = (timezone.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
         self.compose(confirmed="1", scheduled_for=when)
 
         announcement = Announcement.objects.get(title="Heads up")
         self.assertEqual(announcement.status, Announcement.Status.PENDING)
-        send_push.assert_not_called()
+        self.assertFalse(Notification.objects.exists())
 
-    @mock.patch("announcements.services.send_push_to_member")
-    def test_confirming_targets_only_the_chosen_club(self, send_push):
+    def test_confirming_targets_only_the_chosen_club(self):
         other_club = Club.objects.create(name="Feyenoord")
-        in_scope = Member.objects.create(first_name="In", last_name="Scope")
-        out_of_scope = Member.objects.create(first_name="Out", last_name="Scope")
-        PushSubscription.objects.create(club=self.club, member=in_scope, endpoint="https://push.example/1", p256dh="k", auth="a")
-        PushSubscription.objects.create(club=other_club, member=out_of_scope, endpoint="https://push.example/2", p256dh="k", auth="a")
+        in_scope = Member.objects.create(first_name="In", last_name="Scope", user=User.objects.create_user(email="in@example.com", password="pw-secret-123"))
+        out_of_scope = Member.objects.create(first_name="Out", last_name="Scope", user=User.objects.create_user(email="out@example.com", password="pw-secret-123"))
+        ClubRole.objects.create(club=self.club, member=in_scope)
+        ClubRole.objects.create(club=other_club, member=out_of_scope)
 
         self.compose(confirmed="1", club=str(self.club.pk))
 
-        send_push.assert_called_once_with(in_scope, title="Heads up", body="Maintenance tonight.")
+        self.assertEqual([n.member for n in Notification.objects.all()], [in_scope])
 
     def test_cancelling_a_pending_announcement(self):
         announcement = Announcement.objects.create(title="Heads up", message="Body", scheduled_for=timezone.now() + datetime.timedelta(days=1))

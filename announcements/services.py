@@ -1,43 +1,48 @@
 """Creating, publishing and consuming platform announcements.
 
-Directly imports mobile.models/mobile.services.push rather than going through a
-signal the way mobile.signals listens for notifications.Notification -- unlike that
-generic, channel-agnostic activity log, an Announcement's entire reason to exist
-*is* "push this to the PWA", so there is no abstraction to protect by not naming
-the channel here.
+Publishing goes through the notification dispatcher (``notifications.services.notify_members``):
+every person in scope gets an inbox row, and the dispatcher fans it out to every channel
+(native push, web push, email) with its own de-duplication rules.
 """
 
+from django.db.models import Q
 from django.utils import timezone
 
+from club.models import Club
 from members.models import Member
-from mobile.models import PushSubscription
-from mobile.services.push import send_push_to_member
+from notifications.services import notify_members
 
 from .models import Announcement, AnnouncementSeen, live_announcements_query
 
+#: Members per notify_members call -- keeps one bulk insert / one dispatch batch reasonable.
+BATCH_SIZE = 500
 
-def audience_subscriptions(club):
-    """Every PushSubscription an announcement targeted at ``club`` (or every
-    club, if ``club`` is None) should reach."""
-    subscriptions = PushSubscription.objects.all()
-    if club is not None:
-        subscriptions = subscriptions.filter(club=club)
-    return subscriptions
+
+def audience_members(club):
+    """The members of ``club`` an announcement reaches: everyone who holds a login
+    (``Member.user`` set) and is attached to the club in any way, in any season -- a club
+    membership row, a team membership, a staff assignment or a club role. Mirrors
+    ``members.services.photos._attached_to_club``. Members without an account are skipped
+    (nobody to show an inbox row or push to)."""
+    attached = Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)
+    return Member.objects.filter(user__isnull=False).filter(attached).distinct()
 
 
 def audience_member_count(club) -> int:
-    """For the confirm screen -- how many distinct people currently have at
-    least one subscribed device in scope. Not a promise of delivery (a stale
-    or unreachable subscription still counts), just a sense of reach."""
-    return audience_subscriptions(club).values("member_id").distinct().count()
+    """For the confirm screen -- how many distinct people with an account an announcement
+    targeted at ``club`` (or every club, if None) reaches. A person in two clubs counts once
+    here, but gets one notification per club on an all-club announcement."""
+    if club is not None:
+        return audience_members(club).count()
+    return Member.objects.filter(pk__in=[pk for each in Club.objects.all() for pk in audience_members(each).values_list("pk", flat=True)]).count()
 
 
 def publish(announcement: Announcement) -> Announcement:
-    """Make an announcement live: flips it to SENT and pushes it to every
-    subscribed device in scope. Idempotent -- a PENDING check guards both the
-    immediate path (create_and_confirm calling straight through) and the
-    scheduled job (which only selects PENDING, due rows) from ever double-
-    sending the same announcement."""
+    """Make an announcement live: flips it to SENT and notifies every account-holding
+    member in scope (inbox row + every channel, see ``audience_members``). Idempotent -- a
+    PENDING check guards both the immediate path (create_and_confirm calling straight
+    through) and the scheduled job (which only selects PENDING, due rows) from ever
+    double-sending the same announcement."""
     if announcement.status != Announcement.Status.PENDING:
         return announcement
 
@@ -45,11 +50,11 @@ def publish(announcement: Announcement) -> Announcement:
     announcement.sent_at = timezone.now()
     announcement.save(update_fields=["status", "sent_at", "modified"])
 
-    # One send per member, not per subscription -- send_push_to_member already fans
-    # out to every one of that member's own subscribed devices on its own.
-    member_ids = audience_subscriptions(announcement.club).values_list("member_id", flat=True).distinct()
-    for member in Member.objects.filter(id__in=member_ids):
-        send_push_to_member(member, title=announcement.title, body=announcement.message)
+    clubs = [announcement.club] if announcement.club is not None else list(Club.objects.all())
+    for club in clubs:
+        members = list(audience_members(club).select_related("user").order_by("pk"))
+        for start in range(0, len(members), BATCH_SIZE):
+            notify_members(members[start : start + BATCH_SIZE], club=club, title=announcement.title, body=announcement.message, send_email=True)
 
     return announcement
 

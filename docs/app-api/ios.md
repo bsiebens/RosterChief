@@ -199,6 +199,8 @@ Then retry the call that failed.
 
 ## 7. Push notifications (APNs)
 
+_Android devices register through the same `POST /devices` endpoint (with `"platform": "android"` and the FCM registration token) and receive pushes through FCM. There, the `target` in the payload is JSON text, not an object: parse it. The payload otherwise matches the one below._
+
 **Before you start:** in Xcode, add the **Push Notifications** capability to the app target.
 The bundle ID must be the one the server's push setup was made for. The server side (an APNs
 key, sent straight to Apple, no intermediary) is set up by whoever runs the server, following [DEPLOYMENT.md "Native app
