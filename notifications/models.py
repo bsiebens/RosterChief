@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -69,3 +70,49 @@ class Notification(ClubScopedModel):
         """``{"title", "body"}`` in ``language``; the stored English text when that language
         has no translation (older rows, or untranslated user-written content)."""
         return self.translations.get(language) or {"title": self.title, "body": self.body}
+
+
+class NotificationDelivery(ClubScopedModel):
+    """One attempt trail for one send on one channel to one target -- "the native push of this
+    notification to that phone", "this email to that address". Written by the channels
+    (notifications.delivery_log), so there is a record of what went out, what failed and why,
+    instead of nothing. A transient failure (throttling, a server error, a network blip) stays
+    ``RETRYING`` with the ``payload`` kept, and the ``retry_failed_deliveries`` job tries again
+    with a growing delay; once it succeeds, is refused for good or runs out of attempts the
+    payload is dropped. Rows are purged after a retention period by the same job."""
+
+    class Channel(models.TextChoices):
+        NATIVE = "native", _("Native push")
+        WEB = "web", _("Web push")
+        EMAIL = "email", _("Email")
+
+    class Status(models.TextChoices):
+        SENT = "sent", _("Sent")
+        RETRYING = "retrying", _("Waiting to retry")
+        FAILED = "failed", _("Failed")
+        DEAD = "dead", _("Target gone")
+
+    notification = models.ForeignKey(Notification, on_delete=models.SET_NULL, null=True, blank=True, related_name="deliveries", verbose_name=_("notification"))
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
+    channel = models.CharField(_("channel"), max_length=16, choices=Channel.choices)
+    #: What was sent to: a native install id, a web push subscription id, an email address.
+    target = models.CharField(_("target"), max_length=255)
+    status = models.CharField(_("status"), max_length=16, choices=Status.choices)
+    attempts = models.PositiveSmallIntegerField(_("attempts"), default=1)
+    last_error = models.CharField(_("last error"), max_length=500, blank=True)
+    next_attempt_at = models.DateTimeField(_("next attempt"), null=True, blank=True)
+    #: What a retry needs to send again (channel-specific JSON); kept only while RETRYING.
+    payload = models.JSONField(_("payload"), default=dict, blank=True)
+
+    class Meta:
+        verbose_name = _("notification delivery")
+        verbose_name_plural = _("notification deliveries")
+        ordering = ["-created"]
+        indexes = [
+            models.Index(fields=["status", "next_attempt_at"]),
+            models.Index(fields=["notification"]),
+            models.Index(fields=["club", "created"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_channel_display()} → {self.target} ({self.get_status_display()})"

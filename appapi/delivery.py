@@ -17,13 +17,14 @@ from django.contrib.auth import get_user_model
 from club.models import Club, ClubMembership
 from members.models import Member
 from members.services.family import managed_people
+from notifications import delivery_log
 from notifications.dispatch import Channel
 from notifications.models import Notification
 from notifications.services import recipient_user_ids, unread_count
 
 from .models import PushDevice
 from .presenters import notification_target
-from .push import get_gateway, push_configured
+from .push import get_gateway, is_retryable, push_configured
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,26 @@ def total_unread(user) -> int:
         return 0
     club_ids = ClubMembership.objects.filter(member=me).values_list("club_id", flat=True).distinct()
     return sum(unread_count(club, managed_people(me, club)) for club in Club.objects.filter(pk__in=club_ids))
+
+
+def _publish_logged(gateway, device, *, club, notification, title, body, data, badge=None, thread_id=None) -> str:
+    """Hand one push to the gateway and log it. Returns ``sent``, ``dead`` (the token is gone; the
+    device is disabled) or ``failed`` (an exception, retried later when it looks transient)."""
+    try:
+        alive = gateway.publish(device, title=title, body=body, data=data, badge=badge, thread_id=thread_id)
+    except Exception as error:
+        logger.exception("app_push.publish_failed device=%s", device.pk)
+        retryable = is_retryable(error)
+        payload = {"title": title, "body": body, "data": data, "badge": badge, "thread_id": thread_id} if retryable else None
+        delivery_log.record(club=club, channel="native", target=device.installation_id, outcome="retry" if retryable else "failed", notification=notification, user=device.user, error=error, payload=payload)
+        return "failed"
+    if not alive:
+        device.enabled = False
+        device.save(update_fields=["enabled", "modified"])
+        delivery_log.record(club=club, channel="native", target=device.installation_id, outcome="dead", notification=notification, user=device.user)
+        return "dead"
+    delivery_log.record(club=club, channel="native", target=device.installation_id, outcome="sent", notification=notification, user=device.user)
+    return "sent"
 
 
 def deliver(notification_ids) -> int:
@@ -68,23 +89,19 @@ def deliver(notification_ids) -> int:
         if device.user_id not in badges:
             badges[device.user_id] = total_unread(device.user)
         for notification in per_user[device.user_id].values():
-            try:
-                # In the language the app registered with (PushDevice.locale), like game pushes.
-                text = notification.text_for(language_for_locale(device.locale))
-                alive = gateway.publish(device, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id], thread_id=notification.club.slug)
-            except Exception:
-                # Never fatal for the rest of the fan-out (throttling, a network blip).
-                logger.exception("app_push.publish_failed device=%s", device.pk)
-                continue
-            if not alive:
-                device.enabled = False
-                device.save(update_fields=["enabled", "modified"])
+            # In the language the app registered with (PushDevice.locale), like game pushes.
+            text = notification.text_for(language_for_locale(device.locale))
+            outcome = _publish_logged(
+                gateway, device, club=notification.club, notification=notification, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id], thread_id=notification.club.slug
+            )
+            if outcome == "dead":
                 break
-            sent += 1
+            if outcome == "sent":
+                sent += 1
     return sent
 
 
-def deliver_to_user(user, *, texts, data, thread_id=None) -> int:
+def deliver_to_user(user, *, texts, data, thread_id=None, club=None) -> int:
     """One message, no inbox row (a live game update), to every enabled native device of ``user``;
     ``texts(language)`` -> ``(title, body)`` and each device gets its own locale's. A device whose
     token is dead is disabled. Returns how many devices it was handed to."""
@@ -99,15 +116,11 @@ def deliver_to_user(user, *, texts, data, thread_id=None) -> int:
             continue
         try:
             title, body = texts(language_for_locale(device.locale))
-            alive = gateway.publish(device, title=title, body=body, data=data, thread_id=thread_id)
         except Exception:
             logger.exception("app_push.publish_failed device=%s", device.pk)
             continue
-        if alive:
+        if _publish_logged(gateway, device, club=club, notification=None, title=title, body=body, data=data, thread_id=thread_id) == "sent":
             sent += 1
-        else:
-            device.enabled = False
-            device.save(update_fields=["enabled", "modified"])
     return sent
 
 
@@ -121,4 +134,23 @@ class NativePushChannel(Channel):
             deliver([notification.pk for notification in notifications])
 
     def deliver_to_user(self, *, club, user, texts, data, url, thread_id=None):
-        return deliver_to_user(user, texts=texts, data=data, thread_id=thread_id)
+        return deliver_to_user(user, texts=texts, data=data, thread_id=thread_id, club=club)
+
+    def retry(self, delivery):
+        device = PushDevice.objects.filter(installation_id=delivery.target, user_id=delivery.user_id).select_related("user").first()
+        if device is None or not device.enabled:
+            return delivery_log.mark_dead(delivery, "device gone or disabled")
+        gateway = get_gateway()
+        if not gateway.supports(device):
+            return delivery_log.mark_failed(delivery, "push gateway does not support this device", retryable=False)
+        payload = delivery.payload
+        try:
+            alive = gateway.publish(device, title=payload["title"], body=payload["body"], data=payload["data"], badge=payload.get("badge"), thread_id=payload.get("thread_id"))
+        except Exception as error:
+            logger.exception("app_push.retry_failed device=%s", device.pk)
+            return delivery_log.mark_failed(delivery, error, retryable=is_retryable(error))
+        if alive:
+            return delivery_log.mark_sent(delivery)
+        device.enabled = False
+        device.save(update_fields=["enabled", "modified"])
+        return delivery_log.mark_dead(delivery, "push token no longer valid")

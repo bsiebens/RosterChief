@@ -10,6 +10,7 @@ already established for dues invoices.
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -18,6 +19,7 @@ from django.utils.functional import Promise
 
 from rosterchief.mail import send_message
 
+from . import delivery_log
 from .dispatch import schedule_notifications
 from .models import Notification
 
@@ -80,24 +82,59 @@ def recipient_emails(member, club, *, honor_preferences: bool = False) -> list[s
     return emails
 
 
-def _send_email(notification: Notification, emails: list[str], attachments=None) -> None:
+def _render_email(notification: Notification):
     context = {"club": notification.club, "notification": notification}
     subject = " ".join(render_to_string("notifications/email/notification_subject.txt", context).split())
     text_body = render_to_string("notifications/email/notification.txt", context).strip() + "\n"
     html_body = render_to_string("notifications/email/notification.html", context)
+    return subject, text_body, html_body
 
+
+def _build_message(subject, text_body, html_body, email, attachments=None):
+    message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [email])
+    message.attach_alternative(html_body, "text/html")
+    for filename, content, mimetype in attachments or []:
+        message.attach(filename, content, mimetype)
+    return message
+
+
+def _send_email(notification: Notification, emails: list[str], attachments=None) -> list[str]:
+    """Send to each address and log one delivery row per address; returns the addresses that went out.
+    A failed plain mail is logged for retry; one with attachments can't be re-sent later (the
+    attachments aren't stored), so it is logged as failed."""
+    subject, text_body, html_body = _render_email(notification)
+    users = {}
+    try:
+        users = {address.lower(): pk for address, pk in get_user_model().objects.filter(email__in=emails).values_list("email", "pk")}
+    except Exception:
+        pass
+
+    delivered = []
     for email in emails:
-        message = EmailMultiAlternatives(subject, text_body, settings.DEFAULT_FROM_EMAIL, [email])
-        message.attach_alternative(html_body, "text/html")
-        for filename, content, mimetype in attachments or []:
-            message.attach(filename, content, mimetype)
+        message = _build_message(subject, text_body, html_body, email, attachments)
+        user = None
+        if users.get(email.lower()):
+            user = get_user_model()(pk=users[email.lower()])
         try:
             send_message(message, fail_silently=False)
-        except OSError:
+        except OSError as error:
             # Never fatal -- the Notification row (and whichever other addresses
             # in this same batch do go out) stands either way, same reasoning as
             # every other branded send in this app.
+            if attachments:
+                delivery_log.record(club=notification.club, channel="email", target=email, outcome="failed", notification=notification, user=user, error=error)
+            else:
+                delivery_log.record(club=notification.club, channel="email", target=email, outcome="retry", notification=notification, user=user, error=error, payload={"notification": str(notification.pk), "email": email})
             continue
+        delivered.append(email)
+        delivery_log.record(club=notification.club, channel="email", target=email, outcome="sent", notification=notification, user=user)
+    return delivered
+
+
+def resend_email(notification: Notification, email: str) -> None:
+    """Send the notification mail to one address again (the email channel's retry). Raises OSError."""
+    subject, text_body, html_body = _render_email(notification)
+    send_message(_build_message(subject, text_body, html_body, email), fail_silently=False)
 
 
 def _text_in(value, language: str) -> str:
@@ -120,11 +157,12 @@ def send_notification_emails(notifications, *, attachments=None) -> None:
         # An attachment (an invoice) is a document, not a nudge: that mail is never skipped.
         emails = recipient_emails(notification.member, notification.club, honor_preferences=not attachments)
         if emails:
-            _send_email(notification, emails, attachments=attachments)
-            notification.sent_at = timezone.now()
-            notification.sent_to_emails = emails
-            notification.modified = timezone.now()
-            sent.append(notification)
+            delivered = _send_email(notification, emails, attachments=attachments)
+            if delivered:
+                notification.sent_at = timezone.now()
+                notification.sent_to_emails = delivered
+                notification.modified = timezone.now()
+                sent.append(notification)
     if sent:
         Notification.objects.bulk_update(sent, ["sent_at", "sent_to_emails", "modified"])
 

@@ -496,6 +496,13 @@ authenticated API after tap; never put minors' details or financial data in a pu
 `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. Who gets them is opt-in per team:
 `GET/PUT /game-follows`.
 
+**Delivery log and retries** (`notifications.NotificationDelivery`, `notifications/delivery_log.py`). Every send on
+every channel is logged per target (install, subscription or address): sent, failed (refused), dead (target gone) or
+retrying. A transient failure (throttling, a 5xx, a network error) keeps its payload and is retried by the
+`retry_failed_deliveries` job (every 2 min) after 1, 5 and 30 minutes, 4 attempts in total, then it is marked failed.
+Rows are purged after 14 days (sent) or 60 days (failed/dead); retrying rows are never purged. Read-only in the Django
+admin. `PUSH_FOLLOWUPS.md` lists what is still open.
+
 **Preferences:** none per type in v1; a per-install `enabled` toggle only. Badge/unread count from
 `GET /notifications/unread-count`.
 

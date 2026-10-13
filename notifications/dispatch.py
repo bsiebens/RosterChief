@@ -37,6 +37,12 @@ class Channel:
         """Deliver stored notifications (a ``notify_members`` batch). ``email`` is False when the
         caller asked for no email -- only the email channel looks at it."""
 
+    def retry(self, delivery) -> None:
+        """Send a ``RETRYING`` ``NotificationDelivery`` again from its stored ``payload`` and finish
+        it with ``delivery_log.mark_sent`` / ``mark_dead`` / ``mark_failed``. A channel that never
+        logs ``retry`` outcomes needn't implement this."""
+        raise NotImplementedError
+
     def deliver_to_user(self, *, club, user, texts, data: dict, url: str, thread_id: str | None = None) -> int:
         """Deliver one message to one account. ``texts(language)`` -> ``(title, body)`` in that
         language; ``data`` is the structured pointer native apps get, ``url`` the page a web

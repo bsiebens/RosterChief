@@ -154,4 +154,12 @@ JOB_REGISTRY = {
         "command": "send_form_reminders",
         "args": [],
     },
+    "notifications.tasks.retry_failed_deliveries": {
+        "label": _("Retry failed deliveries"),
+        "description": _("Sends push notifications and emails again that failed for a transient reason (throttling, a server or network error), with a growing delay, and purges old delivery-log rows."),
+        "schedule": _("Every 2 minutes"),
+        "trigger": {"trigger": "interval", "minutes": 2},
+        "command": "retry_failed_deliveries",
+        "args": [],
+    },
 }

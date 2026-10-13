@@ -14,11 +14,13 @@ import json
 import logging
 from urllib.parse import urlsplit
 
+import requests
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
+from notifications import delivery_log
 from notifications.services import recipient_user_ids, users_with_native_push
 
 from .. import models
@@ -79,12 +81,11 @@ def subscription_error(endpoint, p256dh, auth):
     return None
 
 
-def _deliver(subscription, payload: str, *, label) -> None:
-    if not is_allowed_push_endpoint(subscription.endpoint):
-        # Stored before endpoints were validated on subscribe: never sent to, and removed
-        # so it doesn't linger (the browser re-subscribes with a valid one when it can).
-        subscription.delete()
-        return
+def _send(subscription, payload: str) -> tuple[str, str]:
+    """One Web Push request and its classification, never raising: ``(outcome, error)`` where
+    outcome is ``sent``, ``dead`` (the push service says the registration is gone for good: 404/410),
+    ``retry`` (throttled, a server error, a timeout or connection error) or ``failed`` (refused, or
+    a stored key pywebpush rejects)."""
     try:
         webpush(
             subscription_info=subscription.as_subscription_info(),
@@ -96,22 +97,48 @@ def _deliver(subscription, payload: str, *, label) -> None:
     except WebPushException as exc:
         status = exc.response.status_code if exc.response is not None else None
         if status in (404, 410):
-            # The browser's push service says this registration is gone for good --
-            # not a transient failure, so keeping it around would only mean retrying
-            # a subscription that will never accept a push again.
-            subscription.delete()
-        else:
-            logger.warning("Push send failed for %s: %s", label, exc)
+            return "dead", str(exc)
+        if status is None or status == 429 or status >= 500:
+            return "retry", str(exc)
+        return "failed", str(exc)
+    except requests.RequestException as exc:
+        return "retry", str(exc)  # timeout / connection error
     except Exception as exc:
-        # Never fatal, whatever went wrong with this one subscription (network
-        # error/timeout, or e.g. a stored key pywebpush rejects with a ValueError) --
-        # the remaining subscriptions in the fan-out still get theirs. Same reasoning
-        # as every other branded send in this app (see e.g.
-        # notifications.services._send_email).
-        logger.warning("Push send failed for %s: %s", label, exc)
+        # Never fatal, whatever went wrong with this one subscription (e.g. a stored key
+        # pywebpush rejects with a ValueError) -- the remaining subscriptions in the fan-out
+        # still get theirs.
+        return "failed", str(exc)
+    return "sent", ""
 
 
-def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") -> None:
+def _deliver(subscription, payload: str, *, label, notification=None) -> None:
+    pk = subscription.pk
+    user = getattr(subscription.member, "user", None)
+    club = subscription.club
+    if not is_allowed_push_endpoint(subscription.endpoint):
+        # Stored before endpoints were validated on subscribe: never sent to, and removed
+        # so it doesn't linger (the browser re-subscribes with a valid one when it can).
+        subscription.delete()
+        delivery_log.record(club=club, channel="web", target=pk, outcome="dead", notification=notification, user=user, error="unsupported push endpoint")
+        return
+    outcome, error = _send(subscription, payload)
+    if outcome == "dead":
+        # The browser's push service says this registration is gone for good --
+        # not a transient failure, so keeping it around would only mean retrying
+        # a subscription that will never accept a push again.
+        subscription.delete()
+    elif outcome != "sent":
+        logger.warning("Push send failed for %s: %s", label, error)
+    log_payload = None
+    if outcome == "retry":
+        try:
+            log_payload = {key: value for key, value in json.loads(payload).items() if key in ("title", "body", "url")}
+        except ValueError:
+            log_payload = {}
+    delivery_log.record(club=club, channel="web", target=pk, outcome=outcome, notification=notification, user=user, error=error, payload=log_payload)
+
+
+def send_push_to_member(member, *, title: str, body: str, url: str = "/app/", notification=None) -> None:
     if not settings.VAPID_PRIVATE_KEY:
         # Dev/no-config default -- see the settings.py comment next to VAPID_PRIVATE_KEY.
         return
@@ -123,8 +150,8 @@ def send_push_to_member(member, *, title: str, body: str, url: str = "/app/") ->
     # one place this payload actually gets encoded, is simpler and safer than
     # auditing every caller across the app that builds a title/body.
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
-    for subscription in models.PushSubscription.objects.filter(member=member):
-        _deliver(subscription, payload, label=member)
+    for subscription in models.PushSubscription.objects.filter(member=member).select_related("member__user", "club"):
+        _deliver(subscription, payload, label=member, notification=notification)
 
 
 def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") -> int:
@@ -136,7 +163,7 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/") 
     if users_with_native_push([user.pk]):
         return 0  # the phone already got it (events.services.game_push sends native alongside this)
     payload = json.dumps({"title": str(title), "body": str(body), "url": url})
-    subscriptions = list(models.PushSubscription.objects.filter(club=club, member__user=user).select_related("member"))
+    subscriptions = list(models.PushSubscription.objects.filter(club=club, member__user=user).select_related("member__user", "club"))
     for subscription in subscriptions:
         _deliver(subscription, payload, label=subscription.member)
     return len(subscriptions)
@@ -162,7 +189,7 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     skip = users_with_native_push(all_user_ids)
 
     subscriptions_by_account = {}
-    for subscription in models.PushSubscription.objects.filter(member__user_id__in=all_user_ids - skip, club_id__in={notification.club_id for notification in notifications}).select_related("member"):
+    for subscription in models.PushSubscription.objects.filter(member__user_id__in=all_user_ids - skip, club_id__in={notification.club_id for notification in notifications}).select_related("member__user", "club"):
         subscriptions_by_account.setdefault((subscription.club_id, subscription.member.user_id), []).append(subscription)
 
     sent = set()
@@ -174,4 +201,4 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
                 if (subscription.pk, dedupe_key) in sent:
                     continue
                 sent.add((subscription.pk, dedupe_key))
-                _deliver(subscription, payload, label=subscription.member)
+                _deliver(subscription, payload, label=subscription.member, notification=notification)

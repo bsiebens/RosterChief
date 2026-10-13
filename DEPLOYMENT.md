@@ -849,7 +849,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All fifteen platform jobs run from **one in-process scheduler inside `web` itself** —
+All sixteen platform jobs run from **one in-process scheduler inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn
 **workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
 lease makes exactly one worker the one that runs the schedule, so a recycled worker hands it
@@ -880,6 +880,7 @@ class every one of them runs through.
 | `notify_published_news` | every 15 min | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet |
 | `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
 | `publish_scheduled_announcements` | every 5 min | pushes any platform announcement whose scheduled time has arrived |
+| `retry_failed_deliveries` | every 2 min | sends again the push/email deliveries that failed transiently (backoff 1/5/30 min, 4 attempts), then purges delivery-log rows (sent 14 days, failed/dead 60) |
 
 Cadences above are the human-readable label each job's `JOB_REGISTRY` entry carries (also
 shown on the control panel's **Jobs** tab); the actual trigger the scheduler runs from is that
@@ -1018,7 +1019,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the fifteen jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the sixteen jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually

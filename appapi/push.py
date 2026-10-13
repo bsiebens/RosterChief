@@ -178,11 +178,17 @@ class ApnsGateway(PushGateway):
         if response.status_code == 410 or reason in DEAD_TOKEN_REASONS:
             return False
         # Throttling, a server error, a bad key: the caller logs it and carries on.
-        raise ApnsError(f"APNs answered {response.status_code} {reason}")
+        raise ApnsError(f"APNs answered {response.status_code} {reason}", status_code=response.status_code)
 
 
 class ApnsError(Exception):
-    pass
+    """APNs refused the request. ``retryable``: throttling (429) or a server error (5xx) -- try
+    again later; anything else (a bad key, a malformed payload) will not fix itself."""
+
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = status_code is not None and (status_code == 429 or status_code >= 500)
 
 
 def _reason(response) -> str:
@@ -271,14 +277,19 @@ class FcmGateway(PushGateway):
         if response.status_code == 404 or code in FCM_DEAD_TOKEN_CODES or (code == "INVALID_ARGUMENT" and "registration token" in text.lower()):
             return False
         # Quota, a server error, a misconfigured project: the caller logs it and carries on.
-        raise FcmError(f"FCM answered {response.status_code} {code}")
+        raise FcmError(f"FCM answered {response.status_code} {code}", status_code=response.status_code)
 
     def live_activity(self, device, **kwargs):
         return True  # Live Activities are iOS-only.
 
 
 class FcmError(Exception):
-    pass
+    """FCM refused the request. ``retryable``: quota (429) or a server error (5xx)."""
+
+    def __init__(self, message, *, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = status_code is not None and (status_code == 429 or status_code >= 500)
 
 
 def _fcm_error(response) -> tuple[str, str]:
@@ -324,6 +335,14 @@ _fcm_gateway: FcmGateway | None = None
 def push_configured() -> bool:
     """Whether any platform can be pushed to (or a gateway override is set, as tests do)."""
     return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or apns_configured() or fcm_configured())
+
+
+def is_retryable(error: Exception) -> bool:
+    """Whether a gateway failure is worth another try later: an APNs/FCM throttle or server error, or
+    the network failing before an answer came back."""
+    if isinstance(error, ApnsError | FcmError):
+        return error.retryable
+    return isinstance(error, httpx.TransportError | httpx.TimeoutException)
 
 
 def get_gateway() -> PushGateway:
