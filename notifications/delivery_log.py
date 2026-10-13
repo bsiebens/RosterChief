@@ -16,6 +16,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from .models import NotificationDelivery
+from .policy import policy_for
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,14 @@ def elapsed_ms(started: float) -> int:
     return max(0, round((time.monotonic() - started) * 1000))
 
 
-def record(*, club, channel: str, target, outcome: str, notification=None, user=None, error="", payload=None, provider: str = "", duration_ms: int | None = None) -> NotificationDelivery | None:
+def record(*, club, channel: str, target, outcome: str, notification=None, user=None, error="", payload=None, provider: str = "", duration_ms: int | None = None, hold_until=None) -> NotificationDelivery | None:
     """Log one send. ``outcome`` is ``sent``, ``failed`` (refused, don't retry), ``dead`` (the target is
-    gone for good) or ``retry`` (transient: tried again later, needs ``payload``). ``provider``
+    gone for good), ``retry`` (transient: tried again later, needs ``payload``) or ``held`` (a push
+    kept back for the account's quiet hours: sent by ``retry_due`` from ``hold_until`` on, needs ``payload``). ``provider``
     (apns/fcm/webpush/email) and ``duration_ms`` (how long the provider call took) are for monitoring."""
     try:
-        status = {"sent": Status.SENT, "failed": Status.FAILED, "dead": Status.DEAD, "retry": Status.RETRYING}[outcome]
-        retrying = status == Status.RETRYING
+        status = {"sent": Status.SENT, "failed": Status.FAILED, "dead": Status.DEAD, "retry": Status.RETRYING, "held": Status.HELD}[outcome]
+        retrying = status in (Status.RETRYING, Status.HELD)
         return NotificationDelivery.objects.create(
             club=club,
             notification=notification,
@@ -55,7 +57,7 @@ def record(*, club, channel: str, target, outcome: str, notification=None, user=
             target=str(target)[:255],
             status=status,
             last_error=_truncate(error),
-            next_attempt_at=timezone.now() + RETRY_DELAYS[0] if retrying else None,
+            next_attempt_at=(hold_until if status == Status.HELD else timezone.now() + RETRY_DELAYS[0]) if retrying else None,
             payload=(payload or {}) if retrying else {},
         )
     except Exception:
@@ -105,18 +107,36 @@ def _finish(delivery: NotificationDelivery, status: str, error, provider: str = 
     delivery.save(update_fields=["status", "last_error", "next_attempt_at", "payload", "modified", *extra])
 
 
+def _still_worth_sending(delivery: NotificationDelivery, now) -> bool:
+    """A held push is not sent when it went stale in the meantime (past its category's time to live) or
+    was already read in the app; it is then finished as failed with a distinct reason."""
+    notification = delivery.notification
+    if notification is not None:
+        policy = policy_for(notification.category, notification.priority)
+        if now > delivery.created + timedelta(seconds=policy.ttl_seconds):
+            mark_failed(delivery, "expired in quiet hours", retryable=False)
+            return False
+        if notification.read_at is not None:
+            mark_failed(delivery, "read before release", retryable=False)
+            return False
+    return True
+
+
 def retry_due(now=None) -> int:
-    """Retry every ``RETRYING`` delivery whose time has come; returns how many were attempted.
+    """Retry every ``RETRYING`` delivery whose time has come, and release every ``HELD`` one whose quiet
+    hours have ended (the same ``channel.retry`` sends both); returns how many were attempted.
     A delivery whose channel is gone, or whose retry raises, is given the next backoff step."""
     from .dispatch import channels
 
     now = now or timezone.now()
     by_name = {channel.name: channel for channel in channels()}
     attempted = 0
-    for delivery in NotificationDelivery.objects.filter(status=Status.RETRYING, next_attempt_at__lte=now).select_related("club", "notification", "user").order_by("next_attempt_at")[:500]:
+    for delivery in NotificationDelivery.objects.filter(status__in=[Status.RETRYING, Status.HELD], next_attempt_at__lte=now).select_related("club", "notification", "user").order_by("next_attempt_at")[:500]:
         channel = by_name.get(delivery.channel)
         if channel is None:
             mark_failed(delivery, "channel not available", retryable=False)
+            continue
+        if delivery.status == Status.HELD and not _still_worth_sending(delivery, now):
             continue
         attempted += 1
         try:

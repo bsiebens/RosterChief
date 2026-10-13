@@ -21,6 +21,22 @@
 {% endblock breadcrumb %}
 
 {% block panel %}
+    {% if open_alerts %}
+        <div class="rounded border border-danger-border bg-danger-bg px-3.5 py-3" role="alert" data-testid="open-alerts">
+            <h2 class="font-display text-sm font-extrabold tracking-[.06em] text-club-dark uppercase">{% lucide "triangle-alert" size=14 class="inline -mt-0.5 mr-1" %}{% trans "Open alerts" %}</h2>
+            <ul class="mt-1.5 space-y-1 text-sm text-club-dark">
+                {% for alert in open_alerts %}
+                    <li data-alert="{{ alert.key }}">
+                        <span class="font-semibold">{{ alert.message }}</span>
+                        <span class="font-mono text-[11px]">
+                            · {% blocktrans with since=alert.first_seen|date:"d/m H:i" %}since {{ since }}{% endblocktrans %}
+                            · {% blocktrans count counter=alert.notifications_sent %}{{ counter }} email sent{% plural %}{{ counter }} emails sent{% endblocktrans %}
+                        </span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
     <div class="flex flex-wrap items-center gap-2">
         {% for key, label in windows %}
             <a class="btn btn-sm {% if key == window %}btn-primary{% else %}btn-outline{% endif %}" href="?window={{ key }}{% if club %}&amp;club={{ club.pk }}{% endif %}">{{ label }}</a>

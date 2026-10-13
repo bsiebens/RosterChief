@@ -162,4 +162,20 @@ JOB_REGISTRY = {
         "command": "retry_failed_deliveries",
         "args": [],
     },
+    "notifications.tasks.process_outbox": {
+        "label": _("Process the notification outbox"),
+        "description": _("Delivers notifications and live game pushes that a restart or crash interrupted, retrying with a growing delay, and purges old outbox entries."),
+        "schedule": _("Every minute"),
+        "trigger": {"trigger": "interval", "minutes": 1},
+        "command": "process_outbox",
+        "args": [],
+    },
+    "notifications.tasks.check_push_health": {
+        "label": _("Check push health"),
+        "description": _("Emails the platform admins when a push provider is down or degraded, the retry queue or the outbox is stuck, or a provider is not configured -- once per outage, with a reminder every 6 hours and a recovery notice."),
+        "schedule": _("Every 5 minutes"),
+        "trigger": {"trigger": "interval", "minutes": 5},
+        "command": "check_push_health",
+        "args": [],
+    },
 }

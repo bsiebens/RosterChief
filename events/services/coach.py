@@ -73,7 +73,11 @@ def notify_event_changed(event) -> int:
         when = date_format(timezone.localtime(event.start), "D d M, H:i")
         return _("%(kind)s changed: it is now on %(when)s.") % {"kind": event.get_kind_display(), "when": when}
 
-    return len(notify_members(members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.EVENT))
+    return len(
+        notify_members(
+            members, club=event.club, title=event.title, body=body, source=event, category=NotificationCategory.EVENT, priority="critical" if datetime.timedelta(0) <= event.start - timezone.now() <= datetime.timedelta(hours=24) else "normal"
+        )
+    )
 
 
 def notify_event_cancelled(event, *, keep_link: bool) -> int:
@@ -89,5 +93,5 @@ def notify_event_cancelled(event, *, keep_link: bool) -> int:
 
     title = event.title
     if keep_link:
-        return len(notify_members(members, club=event.club, title=title, body=body, source=event, category=NotificationCategory.EVENT))
-    return len(notify_members(members, club=event.club, title=title, body=body, target_type="calendar", category=NotificationCategory.EVENT))
+        return len(notify_members(members, club=event.club, title=title, body=body, source=event, category=NotificationCategory.EVENT, priority="critical"))
+    return len(notify_members(members, club=event.club, title=title, body=body, target_type="calendar", category=NotificationCategory.EVENT, priority="critical"))

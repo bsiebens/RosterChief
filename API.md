@@ -496,6 +496,28 @@ authenticated API after tap; never put minors' details or financial data in a pu
 `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. Who gets them is opt-in per team:
 `GET/PUT /game-follows`.
 
+**Push policy** (`notifications/policy.py`, one table for both providers). Each category maps to a TTL, whether a newer
+push replaces the older one (collapse), a priority and an Android channel. The server sets them on every send: APNs
+`apns-expiration` (now + TTL), `apns-priority`, `apns-collapse-id` (the event id, max 64 bytes); FCM `android.ttl`,
+`android.priority`, `android.collapse_key`, `android.notification.channel_id`. A `critical` notification is always
+priority 10 / high with a TTL of at least a day. A retry re-sends with the same policy and is dropped once the TTL has
+passed. The custom payload carries `category` (the category key) so the app can route and style.
+
+| Category       | TTL    | Collapse | Priority (APNs / FCM) | Android channel (importance) |
+|----------------|--------|----------|-----------------------|------------------------------|
+| `news`         | 7 days | no       | 5 / normal            | `rc_news` (default)          |
+| `event`        | 3 days | no       | 10 / high             | `rc_event` (high)            |
+| `reminder`     | 1 day  | no       | 5 / normal            | `rc_reminder` (default)      |
+| `lineup`       | 1 day  | no       | 10 / high             | `rc_lineup` (high)           |
+| `crew`         | 2 days | no       | 10 / high             | `rc_crew` (high)             |
+| `form`         | 3 days | no       | 5 / normal            | `rc_form` (default)          |
+| `shop`         | 2 days | no       | 5 / normal            | `rc_shop` (default)          |
+| `coach`        | 1 day  | no       | 10 / high             | `rc_coach` (high)            |
+| `admin`        | 3 days | no       | 5 / normal            | `rc_admin` (default)         |
+| `announcement` | 7 days | no       | 5 / normal            | `rc_announcement` (default)  |
+| `game`         | 15 min | yes, per event | 10 / high       | `rc_game` (high)             |
+| `general`      | 3 days | no       | 5 / normal            | `rc_general` (default)       |
+
 **Delivery log and retries** (`notifications.NotificationDelivery`, `notifications/delivery_log.py`). Every send on
 every channel is logged per target (install, subscription or address): sent, failed (refused), dead (target gone) or
 retrying. A transient failure (throttling, a 5xx, a network error) keeps its payload and is retried by the

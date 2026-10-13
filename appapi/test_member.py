@@ -28,8 +28,8 @@ from members.models import Family, FamilyMembership, Member
 from mobile.models import PushSubscription
 from mobile.services.push import send_push_for_notifications, send_push_to_user
 from news.models import News
-from notifications.dispatch import dispatch_notifications
-from notifications.models import Notification
+from notifications import outbox
+from notifications.models import Notification, OutboxEntry
 from notifications.services import notify_members
 from shop.models import Order
 from teams.models import Position, Team, TeamMembership
@@ -629,7 +629,7 @@ class RecordingPublisher(PushGateway):
     threads: list = []
     dead: set = set()
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         RecordingPublisher.sent.append((device.installation_id, title, data))
         RecordingPublisher.badges.append(badge)
         RecordingPublisher.threads.append(thread_id)
@@ -650,7 +650,7 @@ class PushDeliveryTests(ClubApiTestCase):
         second_child = Member.objects.create(first_name="Lou", last_name="Parent")
         FamilyMembership.objects.create(family=Family.objects.get(club=self.club), member=second_child, role=FamilyMembership.FamilyRole.CHILD)
         item = News.objects.create(club=self.club, title="News", slug="news", body="…", status=News.Status.PUBLISHED, published_at=timezone.now())
-        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.dispatch.run_in_background"):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.outbox.run_in_background"):
             notifications = notify_members([self.member, self.child, second_child], club=self.club, title="New article", body="Read it", source=item, send_email=False)
 
         self.assertEqual(deliver([notification.pk for notification in notifications]), 1)
@@ -663,7 +663,7 @@ class PushDeliveryTests(ClubApiTestCase):
     def test_the_push_is_in_the_language_the_device_registered_with(self):
         self.device.locale = "nl"
         self.device.save()
-        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.dispatch.run_in_background"):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), patch("notifications.outbox.run_in_background"):
             (notification,) = notify_members([self.member], club=self.club, title=lambda: "Hello" if get_language() == "en" else "Hallo", body="Body", send_email=False)
 
         deliver([notification.pk])
@@ -687,14 +687,16 @@ class PushDeliveryTests(ClubApiTestCase):
 
     @override_settings(NOTIFICATIONS_DISPATCH_EAGER=False)
     def test_created_notifications_are_pushed_after_commit(self):
-        with patch("notifications.dispatch.run_in_background") as background, self.captureOnCommitCallbacks(execute=False) as callbacks:
+        with patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=False) as callbacks:
             notifications = notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)
         background.assert_not_called()
         self.assertEqual(RecordingPublisher.sent, [])
-        with patch("notifications.dispatch.run_in_background") as background:
+        with patch("notifications.outbox.run_in_background") as background:
             for callback in callbacks:
                 callback()
-        background.assert_called_once_with(dispatch_notifications, [notifications[0].pk], email=False)
+        entry = OutboxEntry.objects.get()
+        self.assertEqual(entry.payload, {"ids": [str(notifications[0].pk)], "email": False})
+        background.assert_called_once_with(outbox._process_all, [entry.pk])
 
     def test_eager_dispatch_pushes_straight_away(self):
         notify_members([self.child], club=self.club, title="Hi", body="…", send_email=False)

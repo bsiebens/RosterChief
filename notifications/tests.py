@@ -396,7 +396,7 @@ class DispatcherTests(TestCase):
         push = RecordingChannel("push")
         dispatch.register_channel(push)
 
-        with patch("notifications.dispatch.run_in_background", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)) as background:
+        with patch("notifications.outbox.run_in_background", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)) as background:
             with self.captureOnCommitCallbacks(execute=False) as callbacks:
                 notify_members([self.member], club=self.club, title="News", body="Body.")
             self.assertEqual(len(callbacks), 1)

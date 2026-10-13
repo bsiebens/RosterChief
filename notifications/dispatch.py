@@ -20,11 +20,6 @@ Channels are best-effort and independent: one failing never stops the others.
 import logging
 from dataclasses import dataclass, field
 
-from django.conf import settings
-from django.db import transaction
-
-from rosterchief.concurrency import run_in_background
-
 logger = logging.getLogger(__name__)
 
 
@@ -77,16 +72,18 @@ def dispatch_notifications(notification_ids, *, email: bool = True) -> None:
 
 
 def schedule_notifications(notifications, *, email: bool = True) -> None:
-    """After the transaction commits (the rows must be visible to the worker thread), off the
-    request thread. ``NOTIFICATIONS_DISPATCH_EAGER`` (on in the test suite) delivers right away
-    instead, so tests don't race a thread."""
+    """Durable: an outbox entry is written in this transaction, then worked off after it commits (the
+    rows must be visible to the worker thread), off the request thread -- and by the
+    ``process_outbox`` job if a restart got in between. ``NOTIFICATIONS_DISPATCH_EAGER`` (on in the
+    test suite) delivers right away instead, so tests don't race a thread."""
     if not notifications:
         return
-    ids = [notification.pk for notification in notifications]
-    if getattr(settings, "NOTIFICATIONS_DISPATCH_EAGER", False):
-        dispatch_notifications(ids, email=email)
-        return
-    transaction.on_commit(lambda: run_in_background(dispatch_notifications, ids, email=email))
+    from . import outbox
+    from .models import OutboxEntry
+
+    ids = [str(notification.pk) for notification in notifications]
+    entry = outbox.enqueue(OutboxEntry.Kind.NOTIFICATIONS, {"ids": ids, "email": email})
+    outbox.kick([entry.pk])
 
 
 @dataclass

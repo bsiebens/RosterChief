@@ -1,7 +1,11 @@
+import datetime
+import uuid
+
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
@@ -26,6 +30,13 @@ class NotificationCategory(models.TextChoices):
     GENERAL = "general", _("Other")
 
 
+class NotificationPriority(models.TextChoices):
+    NORMAL = "normal", _("Normal")
+    #: Something people must not miss (a cancelled or same-day changed event): it is delivered
+    #: during a person's quiet hours too. Category switches still apply.
+    CRITICAL = "critical", _("Critical")
+
+
 class Notification(ClubScopedModel):
     """One member's copy of a notification -- "this member should know about
     X" -- built for news publishing first (see news.tasks.notify_news_published),
@@ -41,6 +52,7 @@ class Notification(ClubScopedModel):
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="notifications", verbose_name=_("member"))
     category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices, default=NotificationCategory.GENERAL)
+    priority = models.CharField(_("priority"), max_length=8, choices=NotificationPriority.choices, default=NotificationPriority.NORMAL)
     title = models.CharField(_("title"), max_length=255)
     body = models.TextField(_("body"))
     #: ``{language: {"title": ..., "body": ...}}`` for every language in settings.LANGUAGES,
@@ -108,6 +120,7 @@ class NotificationDelivery(ClubScopedModel):
     class Status(models.TextChoices):
         SENT = "sent", _("Sent")
         RETRYING = "retrying", _("Waiting to retry")
+        HELD = "held", _("Held until quiet hours end")
         FAILED = "failed", _("Failed")
         DEAD = "dead", _("Target gone")
 
@@ -155,6 +168,9 @@ class NotificationPreference(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_preferences", verbose_name=_("account"))
     club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="notification_preferences", verbose_name=_("club"))
+    #: Set for a switch about one person only (a parent's "everything for Lou, only results for Sam"):
+    #: it applies to notifications *about* that member and needs a club. Beats the club-wide row.
+    member = models.ForeignKey("members.Member", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("member"))
     category = models.CharField(_("category"), max_length=16, choices=NotificationCategory.choices)
     channel = models.CharField(_("channel"), max_length=8, choices=Channel.choices)
     enabled = models.BooleanField(_("enabled"), default=True)
@@ -164,10 +180,97 @@ class NotificationPreference(models.Model):
         verbose_name = _("notification preference")
         verbose_name_plural = _("notification preferences")
         constraints = [
-            models.UniqueConstraint(fields=["user", "club", "category", "channel"], name="unique_notification_preference"),
-            # NULL clubs never collide in a plain unique constraint: one all-clubs row per switch.
-            models.UniqueConstraint(fields=["user", "category", "channel"], condition=models.Q(club__isnull=True), name="unique_global_notification_preference"),
+            # Three scopes, each unique on its own (NULLs never collide in a plain unique constraint).
+            models.UniqueConstraint(fields=["user", "category", "channel"], condition=models.Q(club__isnull=True, member__isnull=True), name="unique_global_notification_preference"),
+            models.UniqueConstraint(fields=["user", "club", "category", "channel"], condition=models.Q(club__isnull=False, member__isnull=True), name="unique_club_notification_preference"),
+            models.UniqueConstraint(fields=["user", "club", "member", "category", "channel"], condition=models.Q(member__isnull=False), name="unique_member_notification_preference"),
+            models.CheckConstraint(condition=models.Q(member__isnull=True) | models.Q(club__isnull=False), name="member_preference_needs_club"),
         ]
 
     def __str__(self):
         return f"{self.user} {self.category}/{self.channel}={'on' if self.enabled else 'off'}"
+
+
+class QuietHours(models.Model):
+    """A daily window in which an account's *pushes* are held until it ends (``HELD`` deliveries),
+    or dropped for categories that go stale (live games). ``Critical`` notifications and email are
+    not affected. ``start`` > ``end`` crosses midnight (22:00 -> 07:00); ``start`` == ``end`` is no window."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quiet_hours", verbose_name=_("account"))
+    enabled = models.BooleanField(_("enabled"), default=True)
+    start = models.TimeField(_("from"), default=datetime.time(22, 0))
+    end = models.TimeField(_("until"), default=datetime.time(7, 0))
+    #: IANA name; the account's own, since the server serves several time zones.
+    timezone = models.CharField(_("time zone"), max_length=64, default="Europe/Brussels")
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("quiet hours")
+        verbose_name_plural = _("quiet hours")
+
+    def __str__(self):
+        return f"{self.user}: {self.start:%H:%M}-{self.end:%H:%M} ({'on' if self.enabled else 'off'})"
+
+
+class OutboxEntry(models.Model):
+    """Work still to dispatch, written in the same transaction as what it is about (a batch of
+    notifications, a game's new moments), so a restart between commit and delivery cannot lose it.
+    Worked off right after commit on a background thread, and by the ``process_outbox`` job for
+    anything left behind. At-least-once: an entry is claimed atomically, but a crash mid-dispatch
+    can repeat the sends that had not been marked yet."""
+
+    class Kind(models.TextChoices):
+        NOTIFICATIONS = "notifications", _("Notifications")
+        GAME_MOMENTS = "game_moments", _("Game moments")
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PROCESSING = "processing", _("Processing")
+        DONE = "done", _("Done")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(_("kind"), max_length=16, choices=Kind.choices)
+    payload = models.JSONField(_("payload"), default=dict)
+    status = models.CharField(_("status"), max_length=12, choices=Status.choices, default=Status.PENDING)
+    attempts = models.PositiveSmallIntegerField(_("attempts"), default=0)
+    available_at = models.DateTimeField(_("available at"), default=timezone.now)
+    locked_at = models.DateTimeField(_("locked at"), null=True, blank=True)
+    last_error = models.CharField(_("last error"), max_length=500, blank=True)
+    created = models.DateTimeField(_("created"), auto_now_add=True)
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("outbox entry")
+        verbose_name_plural = _("outbox entries")
+        ordering = ["created"]
+        indexes = [models.Index(fields=["status", "available_at"])]
+
+    def __str__(self):
+        return f"{self.kind} ({self.status})"
+
+
+class PushAlert(models.Model):
+    """An open (or resolved) problem the platform admins were told about -- a provider down, a stuck
+    retry queue, a configuration mismatch -- so one outage is one alert, a reminder every few hours
+    while it lasts, and a recovery notice, not an email per check. ``key`` is e.g. ``provider:apns``."""
+
+    key = models.CharField(_("key"), max_length=64, unique=True)
+    severity = models.CharField(_("severity"), max_length=16)
+    message = models.CharField(_("message"), max_length=500)
+    first_seen = models.DateTimeField(_("first seen"), default=timezone.now)
+    last_notified_at = models.DateTimeField(_("last notified"), null=True, blank=True)
+    notifications_sent = models.PositiveSmallIntegerField(_("alerts sent"), default=0)
+    resolved_at = models.DateTimeField(_("resolved"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("push alert")
+        verbose_name_plural = _("push alerts")
+        ordering = ["-first_seen"]
+
+    def __str__(self):
+        return f"{self.key} ({'open' if self.is_open else 'resolved'})"
+
+    @property
+    def is_open(self) -> bool:
+        return self.resolved_at is None

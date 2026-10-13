@@ -23,7 +23,9 @@ from rosterchief.mail import send_message
 from . import delivery_log
 from .dispatch import schedule_notifications
 from .models import Notification
-from .preferences import users_with_disabled
+from .policy import policy_for
+from .preferences import users_with_disabled, users_with_disabled_by_member
+from .quiet_hours import quiet_until
 
 #: A native install that has checked in within this many days counts as the account's phone
 #: (see users_with_native_push). Older installs stop counting, in case the token went stale
@@ -53,18 +55,53 @@ def recipient_user_ids(notification: Notification) -> set:
     return user_ids
 
 
+def preference_key(notification: Notification) -> tuple:
+    """The group a notification's switches are resolved in: (club, category, the member it is about)."""
+    return (notification.club_id, notification.category, notification.member_id)
+
+
 def muted_push_users(notifications, recipients=None) -> dict:
-    """``{(club_id, category): {user_id, ...}}``: of everyone the batch is for, the accounts that
-    switched push off for that category in that club -- one query per distinct (club, category).
-    ``recipients`` is ``{notification.pk: user ids}`` when the caller already resolved them."""
+    """``{(club_id, category, member_id): {user_id, ...}}`` (see ``preference_key``): of everyone the
+    batch is for, the accounts that switched push off for that category in that club -- for
+    notifications about that member (a per-child row beats the club row). One query per distinct
+    (club, category), however many members. ``recipients`` is ``{notification.pk: user ids}`` when
+    the caller already resolved them."""
     wanted: dict = {}
     clubs: dict = {}
     for notification in notifications:
         key = (notification.club_id, notification.category)
-        clubs[key] = notification.club
+        clubs[key] = notification.club_id
         ids = recipients[notification.pk] if recipients is not None else recipient_user_ids(notification)
-        wanted.setdefault(key, set()).update(ids)
-    return {key: users_with_disabled(user_ids, clubs[key], key[1], "push") for key, user_ids in wanted.items()}
+        users, members = wanted.setdefault(key, (set(), set()))
+        users.update(ids)
+        members.add(notification.member_id)
+    muted: dict = {}
+    for (club_id, category), (user_ids, member_ids) in wanted.items():
+        for member_id, disabled in users_with_disabled_by_member(user_ids, club_id, category, "push", member_ids).items():
+            muted[(club_id, category, member_id)] = disabled
+    return muted
+
+
+def quiet_decisions(notifications, recipients) -> dict:
+    """``{(notification.pk, user_id): ("hold", end) | ("drop", None)}`` for the pushes that must not
+    go out right now: the account is in its quiet hours and the notification is not critical.
+    A category that goes stale (``hold_in_quiet_hours`` False, live games) is dropped, the others held
+    until the window ends. Anything not in the result is sent. One query for the whole batch."""
+    user_ids = set()
+    for ids in recipients.values():
+        user_ids |= set(ids)
+    quiet = quiet_until(user_ids) if user_ids else {}
+    decisions = {}
+    if not quiet:
+        return decisions
+    for notification in notifications:
+        if notification.priority == "critical":
+            continue
+        hold = policy_for(notification.category, notification.priority).hold_in_quiet_hours
+        for user_id in recipients[notification.pk]:
+            if user_id in quiet:
+                decisions[(notification.pk, user_id)] = ("hold", quiet[user_id]) if hold else ("drop", None)
+    return decisions
 
 
 def _email_candidates(member, club) -> list:
@@ -112,7 +149,7 @@ def recipient_emails(member, club, *, honor_preferences: bool = False, category:
     candidates = _email_candidates(member, club)
     muted = frozenset()
     if honor_preferences and category:
-        muted = users_with_disabled({user.pk for _email, user in candidates if user is not None}, club, category, "email")
+        muted = users_with_disabled({user.pk for _email, user in candidates if user is not None}, club, category, "email", member=member)
     return _filter_candidates(candidates, honor_preferences=honor_preferences, muted=muted)
 
 
@@ -197,13 +234,16 @@ def send_notification_emails(notifications, *, attachments=None) -> None:
     # (an invoice) is a document, not a nudge: that mail is never skipped, by any preference.
     muted: dict = {}
     if not attachments:
+        wanted: dict = {}
         for notification in notifications:
-            key = (notification.club_id, notification.category)
-            muted.setdefault(key, set())
-            muted[key] |= {user.pk for _email, user in candidates[notification.pk] if user is not None}
-        muted = {(club_id, category): users_with_disabled(user_ids, club_id, category, "email") for (club_id, category), user_ids in muted.items()}
+            users, members = wanted.setdefault((notification.club_id, notification.category), (set(), set()))
+            users |= {user.pk for _email, user in candidates[notification.pk] if user is not None}
+            members.add(notification.member_id)
+        for (club_id, category), (user_ids, member_ids) in wanted.items():
+            for member_id, disabled in users_with_disabled_by_member(user_ids, club_id, category, "email", member_ids).items():
+                muted[(club_id, category, member_id)] = disabled
     for notification in notifications:
-        emails = _filter_candidates(candidates[notification.pk], honor_preferences=not attachments, muted=muted.get((notification.club_id, notification.category), frozenset()))
+        emails = _filter_candidates(candidates[notification.pk], honor_preferences=not attachments, muted=muted.get(preference_key(notification), frozenset()))
         if emails:
             delivered = _send_email(notification, emails, attachments=attachments)
             if delivered:
@@ -215,7 +255,7 @@ def send_notification_emails(notifications, *, attachments=None) -> None:
         Notification.objects.bulk_update(sent, ["sent_at", "sent_to_emails", "modified"])
 
 
-def notify_members(members, *, club, title: str, body: str, source=None, target_type: str = "", category: str = "general", send_email: bool = True, attachments=None) -> list[Notification]:
+def notify_members(members, *, club, title: str, body: str, source=None, target_type: str = "", category: str = "general", send_email: bool = True, attachments=None, priority: str = "normal") -> list[Notification]:
     """One Notification per member. Emailed to everyone recipient_emails()
     resolves for them, unless send_email is False -- e.g. a staff review
     queue (see news.services.notify_editors_of_pending_review), which is
@@ -232,6 +272,9 @@ def notify_members(members, *, club, title: str, body: str, source=None, target_
     ``category`` (notifications.models.NotificationCategory) is what the notification is about --
     the unit people switch on and off (notifications.preferences) for push and email.
 
+    ``priority`` (``"normal"`` / ``"critical"``): a critical notification (a cancelled event) is pushed
+    during quiet hours too; category/person switches still apply.
+
     ``target_type`` names a screen of the native app to open for a notification that has no
     ``source`` object to point at (e.g. ``"calendar"``); ignored when there is a source.
 
@@ -247,7 +290,7 @@ def notify_members(members, *, club, title: str, body: str, source=None, target_
     members = list(members)
     translations = localized_texts(title, body)
     english = translations["en"]
-    notifications = [Notification(club=club, member=member, category=category, title=english["title"], body=english["body"], translations=translations, source=source, target_type=target_type) for member in members]
+    notifications = [Notification(club=club, member=member, category=category, priority=priority, title=english["title"], body=english["body"], translations=translations, source=source, target_type=target_type) for member in members]
     Notification.objects.bulk_create(notifications)
 
     # An attachment (an invoice) is a document, not a nudge: mailed right here, never

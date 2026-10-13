@@ -23,7 +23,7 @@ from pywebpush import WebPushException, webpush
 
 from notifications import delivery_log
 from notifications.preferences import is_enabled
-from notifications.services import muted_push_users, recipient_user_ids, users_with_native_push
+from notifications.services import muted_push_users, preference_key, quiet_decisions, recipient_user_ids, users_with_native_push
 
 from .. import models
 
@@ -113,7 +113,7 @@ def _send(subscription, payload: str) -> tuple[str, str]:
     return "sent", ""
 
 
-def _deliver(subscription, payload: str, *, label, notification=None) -> None:
+def _deliver(subscription, payload: str, *, label, notification=None, hold_until=None) -> None:
     pk = subscription.pk
     user = getattr(subscription.member, "user", None)
     club = subscription.club
@@ -122,6 +122,14 @@ def _deliver(subscription, payload: str, *, label, notification=None) -> None:
         # so it doesn't linger (the browser re-subscribes with a valid one when it can).
         subscription.delete()
         delivery_log.record(club=club, channel="web", target=pk, outcome="dead", notification=notification, user=user, error="unsupported push endpoint", provider="webpush")
+        return
+    if hold_until is not None:
+        # Quiet hours: logged for delivery_log.retry_due to send once the window ends.
+        try:
+            held_payload = {key: value for key, value in json.loads(payload).items() if key in ("title", "body", "url")}
+        except ValueError:
+            held_payload = {}
+        delivery_log.record(club=club, channel="web", target=pk, outcome="held", notification=notification, user=user, payload=held_payload, provider="webpush", hold_until=hold_until)
         return
     started = time.monotonic()
     outcome, error = _send(subscription, payload)
@@ -191,7 +199,8 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     recipients = {notification.pk: recipient_user_ids(notification) for notification in notifications}
     # Push is one switch: an account that muted the category gets neither native nor web.
     muted = muted_push_users(notifications, recipients)
-    recipients = {notification.pk: recipients[notification.pk] - muted[(notification.club_id, notification.category)] for notification in notifications}
+    recipients = {notification.pk: recipients[notification.pk] - muted[preference_key(notification)] for notification in notifications}
+    quiet = quiet_decisions(notifications, recipients)
     all_user_ids = set().union(*recipients.values())
     if not all_user_ids:
         return
@@ -206,8 +215,11 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
         dedupe_key = (notification.club_id, notification.content_type_id, notification.object_id, notification.title, notification.body)
         payload = json.dumps({"title": str(notification.title), "body": str(notification.body), "url": url})
         for user_id in recipients[notification.pk] - skip:
+            action, hold_until = quiet.get((notification.pk, user_id), ("send", None))
+            if action == "drop":
+                continue  # stale by the time quiet hours end (live games)
             for subscription in subscriptions_by_account.get((notification.club_id, user_id), []):
                 if (subscription.pk, dedupe_key) in sent:
                     continue
                 sent.add((subscription.pk, dedupe_key))
-                _deliver(subscription, payload, label=subscription.member, notification=notification)
+                _deliver(subscription, payload, label=subscription.member, notification=notification, hold_until=hold_until)

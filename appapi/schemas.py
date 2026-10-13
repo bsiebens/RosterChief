@@ -54,7 +54,9 @@ class AccountSettingsIn(Schema):
 class NotificationCategoryOut(Schema):
     key: str = Field(description="Stable identifier, e.g. `news`. Use it in PATCH/DELETE.")
     label: str = Field(description="Name for the switch, in the request language.")
-    description: str | None = Field(None, description="Optional longer explanation, in the request language.")
+    description: str | None = Field(None, description="Short explanation of what this category covers, in the request language.")
+    android_channel_id: str | None = Field(None, description="Android only (ignored on iOS): id of the system notification channel for this category. Create one channel per category at startup.")
+    android_importance: str | None = Field(None, description="Android only (ignored on iOS): importance of that channel, `default` or `high`.")
 
 
 class NotificationOverridesOut(Schema):
@@ -62,11 +64,20 @@ class NotificationOverridesOut(Schema):
     email: bool | None = None
 
 
+class NotificationPersonPreferencesOut(Schema):
+    member_id: uuid.UUID
+    name: str
+    is_self: bool = Field(description="The account holder; otherwise a child the account is a parent or guardian of in this club.")
+    overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches set for this person in this club (for notifications about them).")
+    effective: dict[str, dict[str, bool]] = Field(description="What applies for this person: the club's effective switches with the person's overrides on top.")
+
+
 class NotificationClubPreferencesOut(Schema):
     club_slug: str
     club_name: str
     overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.")
     effective: dict[str, dict[str, bool]] = Field(description="What applies in this club: the defaults with the overrides on top, `{category: {push, email}}`.")
+    people: list[NotificationPersonPreferencesOut] = Field(description="The people this account manages in this club (itself and its children), each with their own switches.")
 
 
 class NotificationPreferencesOut(Schema):
@@ -83,7 +94,24 @@ class NotificationChangeIn(Schema):
 
 class NotificationPreferencesIn(Schema):
     club_slug: str | None = Field(None, description="`null`: the all-clubs defaults. A club slug: an override for just that club.")
+    member_id: uuid.UUID | None = Field(None, description="With `club_slug`: a switch for notifications about just this person (one of `people` of that club). 422 for anyone else, or without `club_slug`.")
     changes: list[NotificationChangeIn]
+
+
+class QuietHoursOut(Schema):
+    enabled: bool
+    start: str = Field(description="`HH:MM`, 24 hours, in `timezone`.")
+    end: str = Field(description="`HH:MM`. Earlier than `start` means the window crosses midnight (22:00 to 07:00).")
+    timezone: str = Field(description="IANA zone name, e.g. `Europe/Brussels`.")
+    active_now: bool = Field(description="The window is open right now.")
+    until: datetime.datetime | None = Field(None, description="When the current window ends (ISO-8601 with offset); null when not active.")
+
+
+class QuietHoursIn(Schema):
+    enabled: bool
+    start: str = Field(description="`HH:MM`.")
+    end: str = Field(description="`HH:MM`.")
+    timezone: str = Field(description="IANA zone name.")
 
 
 class PersonOut(Schema):
@@ -571,6 +599,10 @@ class NotificationTextOut(Schema):
 class NotificationOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
+    category: str = Field(
+        description="What it is about: `news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`, `admin`, `announcement`, `game` or `general` (older rows: `general`). Use it for an icon or a filter; unknown values should be treated as `general`."
+    )
+    priority: str = Field(description="`normal` or `critical` (a cancelled or same-day changed event).")
     title: str = Field(description="English; same as translations.en.title.")
     body: str = Field(description="English; same as translations.en.body.")
     translations: dict[str, NotificationTextOut] = Field(description="Title and body per language code (`en`, `nl`, ...). A language without a translation (older notifications, user-written text) carries the English text.")

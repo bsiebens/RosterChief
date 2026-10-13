@@ -42,7 +42,7 @@
                                 <div class="font-semibold text-ink">{{ announcement.title }}</div>
                                 <div class="text-xs text-muted">{{ announcement.message|truncatechars:80 }}</div>
                             </td>
-                            <td>{% if announcement.club %}{{ announcement.club.name }}{% else %}{% trans "Every club" %}{% endif %}</td>
+                            <td>{% if announcement.club %}{{ announcement.club.name }}{% else %}{% trans "Every club" %}{% endif %}<div class="text-xs text-muted">{{ announcement.get_audience_display }}</div></td>
                             <td>
                                 {% if announcement.status == "sent" %}
                                     <span class="badge badge-success gap-1">{% lucide "check" size=11 %} {% trans "Sent" %}</span>

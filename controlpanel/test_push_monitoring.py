@@ -144,3 +144,33 @@ class PushMonitoringViewTests(ControlPanelTestBase):
         with CaptureQueriesContext(connection) as queries:
             self.assertEqual(self.client.get(self.url).status_code, 200)
         self.assertLess(len(queries), 40)
+
+
+class PushAlertBannerTests(ControlPanelTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.root = User.objects.create_superuser(email="super@example.com", password="pw-secret-123")
+        enrol_mfa(cls.root)
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.root)
+        self.url = reverse("controlpanel:push_monitoring")
+
+    def test_banner_and_badge_hidden_without_open_alerts(self):
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'data-testid="open-alerts"')
+        self.assertNotContains(response, 'data-testid="push-alert-badge"')
+
+    def test_banner_and_badge_shown_with_an_open_alert(self):
+        from notifications.models import PushAlert
+
+        PushAlert.objects.create(key="provider:apns", severity="critical", message="APNs (iOS) is down", notifications_sent=2)
+        PushAlert.objects.create(key="provider:fcm", severity="critical", message="old one", resolved_at=timezone.now())
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-testid="open-alerts"')
+        self.assertContains(response, "APNs (iOS) is down")
+        self.assertContains(response, "2 emails sent")
+        self.assertNotContains(response, "old one")
+        self.assertContains(response, 'data-testid="push-alert-badge"')

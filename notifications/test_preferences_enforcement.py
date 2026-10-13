@@ -26,7 +26,7 @@ Category = NotificationCategory
 class RecordingGateway(PushGateway):
     published: list = []
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         RecordingGateway.published.append(device.installation_id)
         return True
 

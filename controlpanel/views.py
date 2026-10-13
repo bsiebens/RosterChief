@@ -19,7 +19,7 @@ from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from announcements.forms import AnnouncementComposeForm
 from announcements.models import Announcement
-from announcements.services import audience_member_count, create_and_confirm
+from announcements.services import audience_member_count, create_and_confirm, send_test
 from announcements.services import cancel as cancel_announcement
 from billing.models import Due, Plan, PlanPrice
 from billing.services import BillingError
@@ -118,7 +118,10 @@ class PushMonitoringView(PlatformSuperuserRequiredMixin, TemplateView):
                 club = None
         data = monitoring.build(self.request.GET.get("window", monitoring.DEFAULT_WINDOW), club)
         windows = [(key, label) for key, (label, _span, _step) in monitoring.WINDOWS.items()]
-        return super().get_context_data(nav="push", club=club, clubs=Club.objects.order_by("name"), windows=windows, **data, **kwargs)
+        from notifications.models import PushAlert
+
+        open_alerts = list(PushAlert.objects.filter(resolved_at__isnull=True).order_by("first_seen"))
+        return super().get_context_data(nav="push", club=club, clubs=Club.objects.order_by("name"), windows=windows, open_alerts=open_alerts, **data, **kwargs)
 
 
 class JobToggleView(PlatformStaffRequiredMixin, View):
@@ -1076,6 +1079,9 @@ class AnnouncementComposeView(PlatformSuperuserRequiredMixin, TemplateView):
     template_name = "controlpanel/announcement_compose.html"
 
     def get_context_data(self, **kwargs):
+        preview = kwargs.get("preview")
+        if preview:
+            kwargs["audience_label"] = Announcement.Audience(preview["audience"]).label
         return super().get_context_data(nav="announcements", form=kwargs.pop("form", None) or AnnouncementComposeForm(), **kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -1083,13 +1089,17 @@ class AnnouncementComposeView(PlatformSuperuserRequiredMixin, TemplateView):
         if not form.is_valid():
             return self.render_to_response(self.get_context_data(form=form))
 
+        if request.POST.get("test") == "1":
+            return self.send_test_to_me(request, form)
+
         if request.POST.get("confirmed") != "1":
-            return self.render_to_response(self.get_context_data(form=form, preview=form.cleaned_data, audience=audience_member_count(form.cleaned_data["club"])))
+            return self.render_to_response(self.get_context_data(form=form, preview=form.cleaned_data, audience_count=audience_member_count(form.cleaned_data["club"], form.cleaned_data["audience"])))
 
         announcement = create_and_confirm(
             title=form.cleaned_data["title"],
             message=form.cleaned_data["message"],
             club=form.cleaned_data["club"],
+            audience=form.cleaned_data["audience"],
             scheduled_for=form.cleaned_data["scheduled_for"],
             created_by=request.user,
         )
@@ -1098,3 +1108,16 @@ class AnnouncementComposeView(PlatformSuperuserRequiredMixin, TemplateView):
         else:
             notify(request, f"s|{_('Announcement scheduled')}|" + _("“%(title)s” will be pushed at %(when)s.") % {"title": announcement.title, "when": date_format(timezone.localtime(announcement.scheduled_for), "DATETIME_FORMAT")})
         return redirect("controlpanel:announcement_list")
+
+    def send_test_to_me(self, request, form):
+        """Send the announcement to the logged-in superuser only (no row, nobody else), then show
+        the same stage (review or compose) again so they can still confirm or edit."""
+        result = send_test(request.user, title=form.cleaned_data["title"], message=form.cleaned_data["message"])
+        if result.pushed is None:
+            body = _("A test email was sent to %(email)s. No push was sent: you do not belong to a club.") % {"email": request.user.email}
+        else:
+            body = _("A test email was sent to %(email)s and a push to %(count)s of your devices.") % {"email": request.user.email, "count": result.pushed}
+        notify(request, f"s|{_('Test sent')}|{body}")
+        if request.POST.get("confirmed") == "1":
+            return self.render_to_response(self.get_context_data(form=form, preview=form.cleaned_data, audience_count=audience_member_count(form.cleaned_data["club"], form.cleaned_data["audience"])))
+        return self.render_to_response(self.get_context_data(form=form))

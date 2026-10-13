@@ -43,6 +43,8 @@ import jwt
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+from notifications.policy import PushPolicy
+
 from .models import PushDevice
 
 logger = logging.getLogger(__name__)
@@ -62,9 +64,11 @@ class PushGateway:
         """Whether pushes can be delivered to ``device`` at all (what ``push_enabled`` reports)."""
         return True
 
-    def publish(self, device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None, thread_id: str | None = None) -> bool:
+    def publish(self, device: PushDevice, *, title: str, body: str, data: dict, badge: int | None = None, thread_id: str | None = None, policy: PushPolicy | None = None, collapse_id: str | None = None) -> bool:
         """Send one push. ``badge`` is the app icon's unread count (iOS); None leaves it as is.
-        ``thread_id`` groups notifications on the lock screen. False means the token is dead:
+        ``thread_id`` groups notifications on the lock screen. ``policy`` (notifications.policy) sets
+        the TTL, priority and Android channel; ``collapse_id`` names "the same thing" and is used
+        only when ``policy.collapse``: a newer push replaces the older one. False means the token is dead:
         the caller disables the device."""
         raise NotImplementedError
 
@@ -81,7 +85,7 @@ class NullGateway(PushGateway):
     def live_activity(self, device, **kwargs):
         return True
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         return True
 
 
@@ -108,6 +112,17 @@ def build_live_activity_payload(*, event: str, content_state: dict, attributes: 
     if dismiss_at:
         aps["dismissal-date"] = dismiss_at
     return {"aps": aps}
+
+
+def apns_policy_headers(policy: PushPolicy | None, collapse_id: str | None = None, *, now: float | None = None) -> dict:
+    """``apns-expiration`` (an absolute unix time: APNs drops a push it could not deliver by then)
+    and, for a collapsing policy, ``apns-collapse-id`` (max 64 bytes)."""
+    if policy is None:
+        return {}
+    headers = {"apns-expiration": str(int((time.time() if now is None else now) + policy.ttl_seconds))}
+    if policy.collapse and collapse_id:
+        headers["apns-collapse-id"] = collapse_id[:64]
+    return headers
 
 
 def apns_configured() -> bool:
@@ -148,19 +163,22 @@ class ApnsGateway(PushGateway):
                 self._token_issued = now
             return self._token
 
-    def _post(self, device, payload, *, token=None, push_type="alert", topic_suffix="", priority=10, refresh=False):
+    def _post(self, device, payload, *, token=None, push_type="alert", topic_suffix="", priority=10, refresh=False, extra_headers=None):
         headers = {
             "authorization": f"bearer {self._provider_token(refresh=refresh)}",
             "apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID + topic_suffix,
             "apns-push-type": push_type,
             "apns-priority": str(priority),
+            **(extra_headers or {}),
         }
         return self.client.post(f"{APNS_HOSTS[device.environment]}/3/device/{token or device.push_token}", content=json.dumps(payload), headers=headers)
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         if device.platform != PushDevice.Platform.IOS:
             return True
-        return self._send(device, build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id))
+        headers = apns_policy_headers(policy, collapse_id)
+        priority = policy.apns_priority if policy else 10
+        return self._send(device, build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id), priority=priority, extra_headers=headers)
 
     def live_activity(self, device, *, token, event, content_state, attributes=None, alert=None, stale_at=None, dismiss_at=None, priority=10):
         if device.platform != PushDevice.Platform.IOS:
@@ -215,12 +233,18 @@ def _fcm_service_account() -> dict:
     return json.loads(Path(settings.APP_PUSH_FCM_CREDENTIALS_FILE).read_text())
 
 
-def build_fcm_message(device: PushDevice, *, title: str, body: str, data: dict, thread_id: str | None = None) -> dict:
+def build_fcm_message(device: PushDevice, *, title: str, body: str, data: dict, thread_id: str | None = None, policy: PushPolicy | None = None, collapse_id: str | None = None) -> dict:
     """The FCM HTTP v1 request body. FCM ``data`` values must be strings, so structured values
     (the ``target`` dictionary) are sent as JSON text and absent ones left out. The visible
     notification is shown by the system even when the app is closed; ``thread_id`` becomes the
     notification ``tag`` so a club's notifications stack and replace instead of piling up."""
-    android = {"priority": "HIGH", "notification": {"channel_id": settings.APP_PUSH_FCM_CHANNEL_ID}}
+    if policy is None:
+        android = {"priority": "HIGH", "notification": {"channel_id": settings.APP_PUSH_FCM_CHANNEL_ID}}
+    else:
+        high = policy.android_importance == "high" or policy.apns_priority == 10
+        android = {"priority": "HIGH" if high else "NORMAL", "ttl": f"{policy.ttl_seconds}s", "notification": {"channel_id": policy.android_channel_id}}
+        if policy.collapse and collapse_id:
+            android["collapse_key"] = collapse_id
     if thread_id:
         android["notification"]["tag"] = thread_id
     payload = {value_key: value if isinstance(value, str) else json.dumps(value) for value_key, value in data.items() if value is not None}
@@ -264,10 +288,10 @@ class FcmGateway(PushGateway):
         token = self._access_token(refresh=refresh)
         return self.client.post(FCM_SEND_URL.format(project_id=self._project_id), json=message, headers={"authorization": f"Bearer {token}"})
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         if device.platform != PushDevice.Platform.ANDROID:
             return True
-        message = build_fcm_message(device, title=title, body=body, data=data, thread_id=thread_id)
+        message = build_fcm_message(device, title=title, body=body, data=data, thread_id=thread_id, policy=policy, collapse_id=collapse_id)
         response = self._post(message)
         if response.status_code == 401:
             response = self._post(message, refresh=True)

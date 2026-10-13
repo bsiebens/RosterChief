@@ -83,7 +83,9 @@ def _count(by_status, status):
 
 
 def _base(since, club):
-    queryset = NotificationDelivery.objects.filter(created__gte=since)
+    """Delivery rows in the window. HELD rows (a push waiting for the end of someone's quiet hours) are
+    not send attempts yet: leaving them out keeps success rates, charts and failure lists honest."""
+    queryset = NotificationDelivery.objects.filter(created__gte=since).exclude(status=Status.HELD)
     return queryset.filter(club=club) if club else queryset
 
 

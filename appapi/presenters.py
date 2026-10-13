@@ -175,6 +175,8 @@ def notification_out(notification) -> dict:
     return {
         "id": notification.pk,
         "member_id": notification.member_id,
+        "category": notification.category,
+        "priority": notification.priority,
         "title": notification.title,
         "body": notification.body,
         "translations": {code: notification.text_for(code) for code, _name in settings.LANGUAGES},

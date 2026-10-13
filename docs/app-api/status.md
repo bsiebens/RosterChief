@@ -8,7 +8,9 @@ What the app can use today, and what's next. The full plan is `API.md` in the re
 | Two-factor enrolment from the app (TOTP, recovery codes) | **Available** (sign-in API) |
 | `GET /meta`, `/me`, `/clubs`, `/context` | **Available** |
 | Push registration (`POST`/`DELETE /devices`) and delivery | **Available** once the server has its APNs key (iOS) or Firebase service account (Android) set up |
-| Notification switches per category (push, email), all clubs and per club: `/me/notification-preferences` | **Available** (iOS and Android) |
+| Push delivery policy (expiry, priority, collapse per category; `category` key in the payload), see `API.md` §9 | **Available** |
+| Notification switches per category (push, email), all clubs, per club and per person: `/me/notification-preferences` | **Available** (iOS and Android) |
+| Quiet hours for pushes: `/me/quiet-hours` | **Available** (iOS and Android) |
 | Member: home, calendar, events, RSVP, referee/official invites, tasks, news, notifications, profile (view/edit), member photos | **Available** |
 | Member: payments & invoices, forms, photo upload, bug reports, calendar subscription | **Available** |
 | Member: shop, cart, orders & invoices | **Available** |

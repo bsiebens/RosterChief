@@ -4774,6 +4774,30 @@
       },
       "NotificationCategoryOut": {
         "properties": {
+          "android_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Android only (ignored on iOS): id of the system notification channel for this category. Create one channel per category at startup.",
+            "title": "Android Channel Id"
+          },
+          "android_importance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Android only (ignored on iOS): importance of that channel, `default` or `high`.",
+            "title": "Android Importance"
+          },
           "description": {
             "anyOf": [
               {
@@ -4783,7 +4807,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional longer explanation, in the request language.",
+            "description": "Short explanation of what this category covers, in the request language.",
             "title": "Description"
           },
           "key": {
@@ -4869,13 +4893,22 @@
             "description": "Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.",
             "title": "Overrides",
             "type": "object"
+          },
+          "people": {
+            "description": "The people this account manages in this club (itself and its children), each with their own switches.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPersonPreferencesOut"
+            },
+            "title": "People",
+            "type": "array"
           }
         },
         "required": [
           "club_slug",
           "club_name",
           "overrides",
-          "effective"
+          "effective",
+          "people"
         ],
         "title": "NotificationClubPreferencesOut",
         "type": "object"
@@ -4885,6 +4918,11 @@
           "body": {
             "description": "English; same as translations.en.body.",
             "title": "Body",
+            "type": "string"
+          },
+          "category": {
+            "description": "What it is about: `news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`, `admin`, `announcement`, `game` or `general` (older rows: `general`). Use it for an icon or a filter; unknown values should be treated as `general`.",
+            "title": "Category",
             "type": "string"
           },
           "created": {
@@ -4900,6 +4938,11 @@
           "member_id": {
             "format": "uuid",
             "title": "Member Id",
+            "type": "string"
+          },
+          "priority": {
+            "description": "`normal` or `critical` (a cancelled or same-day changed event).",
+            "title": "Priority",
             "type": "string"
           },
           "read_at": {
@@ -4941,6 +4984,8 @@
         "required": [
           "id",
           "member_id",
+          "category",
+          "priority",
           "title",
           "body",
           "translations",
@@ -5007,6 +5052,52 @@
         "title": "NotificationPageOut",
         "type": "object"
       },
+      "NotificationPersonPreferencesOut": {
+        "properties": {
+          "effective": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            "description": "What applies for this person: the club's effective switches with the person's overrides on top.",
+            "title": "Effective",
+            "type": "object"
+          },
+          "is_self": {
+            "description": "The account holder; otherwise a child the account is a parent or guardian of in this club.",
+            "title": "Is Self",
+            "type": "boolean"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "overrides": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NotificationOverridesOut"
+            },
+            "description": "Only the switches set for this person in this club (for notifications about them).",
+            "title": "Overrides",
+            "type": "object"
+          }
+        },
+        "required": [
+          "member_id",
+          "name",
+          "is_self",
+          "overrides",
+          "effective"
+        ],
+        "title": "NotificationPersonPreferencesOut",
+        "type": "object"
+      },
       "NotificationPreferencesIn": {
         "properties": {
           "changes": {
@@ -5027,6 +5118,19 @@
             ],
             "description": "`null`: the all-clubs defaults. A club slug: an override for just that club.",
             "title": "Club Slug"
+          },
+          "member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `club_slug`: a switch for notifications about just this person (one of `people` of that club). 422 for anyone else, or without `club_slug`.",
+            "title": "Member Id"
           }
         },
         "required": [
@@ -6002,6 +6106,87 @@
           "jersey_number"
         ],
         "title": "ProfileTeamOut",
+        "type": "object"
+      },
+      "QuietHoursIn": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "`HH:MM`.",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "description": "`HH:MM`.",
+            "title": "Start",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA zone name.",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "start",
+          "end",
+          "timezone"
+        ],
+        "title": "QuietHoursIn",
+        "type": "object"
+      },
+      "QuietHoursOut": {
+        "properties": {
+          "active_now": {
+            "description": "The window is open right now.",
+            "title": "Active Now",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "`HH:MM`. Earlier than `start` means the window crosses midnight (22:00 to 07:00).",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "description": "`HH:MM`, 24 hours, in `timezone`.",
+            "title": "Start",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA zone name, e.g. `Europe/Brussels`.",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the current window ends (ISO-8601 with offset); null when not active.",
+            "title": "Until"
+          }
+        },
+        "required": [
+          "enabled",
+          "start",
+          "end",
+          "timezone",
+          "active_now"
+        ],
+        "title": "QuietHoursOut",
         "type": "object"
       },
       "QuoteLineOut": {
@@ -10425,6 +10610,23 @@
               ],
               "title": "Category"
             }
+          },
+          {
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member Id"
+            }
           }
         ],
         "responses": {
@@ -10617,6 +10819,196 @@
           }
         ],
         "summary": "Switch notifications on or off",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/api/app/v1/me/quiet-hours": {
+      "delete": {
+        "description": "Back to the defaults (off). Nothing stored is fine. Answers like GET.",
+        "operationId": "appapi_routers_account_delete_quiet_hours",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietHoursOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Remove quiet hours",
+        "tags": [
+          "account"
+        ]
+      },
+      "get": {
+        "description": "The daily window in which pushes to this account are held. Defaults when nothing is stored:\noff, 22:00 to 07:00 in the server's zone. **Critical** notifications (a cancelled or same-day changed\nevent) and **email** ignore quiet hours. Held pushes arrive when the window ends; live game updates\nare dropped instead (stale by then). `until` is when the running window ends.",
+        "operationId": "appapi_routers_account_get_quiet_hours",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietHoursOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Quiet hours for pushes",
+        "tags": [
+          "account"
+        ]
+      },
+      "put": {
+        "description": "Replaces the quiet hours. `start`/`end` are `HH:MM` (end before start crosses midnight; equal\nmeans no window), `timezone` an IANA zone name. Answers like GET.",
+        "operationId": "appapi_routers_account_put_quiet_hours",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuietHoursIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuietHoursOut"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Set quiet hours",
         "tags": [
           "account"
         ]

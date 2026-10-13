@@ -28,7 +28,8 @@ from club.services.onboarding import mark_bypassed, mark_complete
 from features.jobs import JOB_REGISTRY
 from features.models import JobRun, JobToggle, Maintenance
 from members.models import Group, GroupMembership, Member
-from notifications.models import Notification, NotificationCategory
+from notifications import outbox
+from notifications.models import Notification, NotificationCategory, OutboxEntry
 from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 from .admin import EventAdminForm
@@ -5062,7 +5063,7 @@ class RecordingGateway(PushGateway):
 
     sent: list = []
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         RecordingGateway.sent.append((device, body))
         return device.installation_id != "gone"
 
@@ -5208,11 +5209,38 @@ class GamePushTests(GameTimelineTestBase):
         game_timeline.store(game, game_timeline.TimelineFetch(document={"events": []}))
 
         # Patch outermost: captured on-commit callbacks run when the capture block exits.
-        with mock.patch("events.services.game_push.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
+        with override_settings(NOTIFICATIONS_DISPATCH_EAGER=False), mock.patch("notifications.outbox.run_in_background") as background, self.captureOnCommitCallbacks(execute=True):
             game_timeline.store(game, game_timeline.TimelineFetch(document={"events": [goal_item("g1", "home", 60, 1, 0)]}))
 
-        func, event_id, ids = background.call_args.args
-        self.assertEqual((func, event_id, len(ids)), (game_push.deliver_moments, game.pk, 1))
+        entry = OutboxEntry.objects.get(kind=OutboxEntry.Kind.GAME_MOMENTS)
+        self.assertEqual((entry.payload["event_id"], len(entry.payload["moment_ids"])), (str(game.pk), 1))
+        background.assert_called_once_with(outbox._process_all, [entry.pk])
+
+    def test_moments_stay_undelivered_when_the_dispatch_raises_and_go_out_on_the_outbox_retry(self):
+        game = self.make_game(is_live=True)
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        goal = self.moment(game, "goal_for:g1")
+        entry = outbox.enqueue(OutboxEntry.Kind.GAME_MOMENTS, {"event_id": str(game.pk), "moment_ids": [str(goal.pk)]})
+
+        with mock.patch("events.services.game_push.dispatch_to_user", side_effect=RuntimeError("down")):
+            self.assertFalse(outbox.process(entry.pk))
+        goal.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertIsNone(goal.delivered_at)
+        self.assertEqual((entry.status, entry.attempts), (OutboxEntry.Status.PENDING, 1))
+
+        OutboxEntry.objects.filter(pk=entry.pk).update(available_at=timezone.now())
+        with mock.patch("events.services.game_push.dispatch_to_user", return_value=mock.Mock(total=1)) as dispatch:
+            self.assertTrue(outbox.process(entry.pk))
+        goal.refresh_from_db()
+        self.assertIsNotNone(goal.delivered_at)
+        self.assertEqual(dispatch.call_count, 1)
+
+        # Done: another pass (or a sweeper) neither claims it nor sends again.
+        with mock.patch("events.services.game_push.dispatch_to_user") as dispatch:
+            self.assertFalse(outbox.process(entry.pk))
+            game_push.deliver_moments(game.pk, [goal.pk])
+        dispatch.assert_not_called()
 
     def test_following_only_keeps_this_clubs_teams_and_replaces_the_set(self):
         other_club = Club.objects.create(name="Rival", slug="rival-push")

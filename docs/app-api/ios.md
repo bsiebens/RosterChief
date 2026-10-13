@@ -249,6 +249,12 @@ contains personal data. One account gets **one** push per notification even when
 several of its children. The payload also carries `aps.badge`: the account's total unread count across
 all its clubs (set it as the icon badge; the app keeps it current itself as notifications are read).
 
+The payload also carries a `category` key (`news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`,
+`admin`, `announcement`, `game`, `general`) so you can route or style it. The delivery headers are set by the server,
+you do nothing for them: `apns-expiration` (a push that can't be delivered in time is dropped: 7 days for news, 15
+minutes for live games), `apns-priority` (10 for events, line-ups, game pushes and anything critical; 5 for the rest) and
+`apns-collapse-id` (live-game pushes: a newer push for the same event replaces the one still shown).
+
 `aps.thread-id` groups pushes on the lock screen: the club's slug for inbox pushes, the event id for
 live-game pushes (so one game's goals stack together).
 
@@ -296,6 +302,26 @@ category or a club the account does not belong to answers `422 validation_error`
 leave `category` off to drop the whole scope, leave `club_slug` off for the defaults. PATCH and DELETE answer
 with the same body as GET, so the screen can simply re-render. The same switches are on the web app's
 notification settings screen. Android clients use the same endpoints.
+
+**Per person:** each entry of `clubs[]` also has `people` -- `[{member_id, name, is_self, overrides,
+effective}]` for the people the account manages in that club (itself, plus its children when it is a parent
+or guardian). Add `member_id` next to `club_slug` in the PATCH body (or `&member_id=` on DELETE) to switch
+notifications *about* that one person, e.g. just Lou's events. The person's switch beats the club's, which
+beats the defaults; `effective` of a person already merges all three. A `member_id` that is not one of the
+club's `people`, or without `club_slug`, answers `422 validation_error`. Only show a person picker when
+`people` has more than one entry.
+
+**Categories:** each category has a short `description` (request language) to show under its name.
+`android_channel_id` and `android_importance` are for the Android app (one system channel per category);
+iOS ignores them.
+
+**Quiet hours** (account-wide): `GET /me/quiet-hours` answers `{enabled, start: "22:00", end: "07:00",
+timezone, active_now, until}` (defaults when nothing is stored: off, 22:00-07:00, the server's zone; `until`
+is the end of the running window or `null`). `PUT /me/quiet-hours` with `{enabled, start, end, timezone}`
+(`HH:MM`, IANA zone name; `422 validation_error` per field otherwise) replaces it, `DELETE` removes it. During
+the window pushes are held and arrive when it ends; live game updates are dropped instead because they would be
+stale. Critical notifications (a cancelled or same-day changed event) and email ignore quiet hours. Show the
+zone as a picker defaulting to the device's zone.
 
 A person who also has the web app installed with notifications on gets both for now.
 
@@ -432,7 +458,8 @@ supports basic HTML, or a non-scripting `WKWebView`. Crop photos around `focal_x
 
 ### Notifications
 
-`GET /notifications?cursor=…&member_id=…` (newest first), `GET /notifications/unread-count`
+Each item carries `category` (see the push payload; treat unknown values as `general`) and `priority`
+(`normal` or `critical`). `GET /notifications?cursor=…&member_id=…` (newest first), `GET /notifications/unread-count`
 (set the app icon badge from it), `POST /notifications/{id}/read`,
 `POST /notifications/read-all`, and `DELETE /notifications` (clears the inbox for good).
 

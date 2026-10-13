@@ -15,6 +15,6 @@
     {# Superusers only, exactly as the view is gated: a tab staff cannot follow is a lie. #}
     <a class="flex h-full items-center px-3.5 {% if nav == 'admins' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:admins' %}">admins</a>
     <a class="flex h-full items-center px-3.5 {% if nav == 'announcements' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:announcement_list' %}">broadcast</a>
-    <a class="flex h-full items-center px-3.5 {% if nav == 'push' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:push_monitoring' %}">push</a>
+    <a class="flex h-full items-center px-3.5 {% if nav == 'push' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:push_monitoring' %}">push{% if open_push_alerts %}<span class="badge badge-error badge-xs ml-1.5" data-testid="push-alert-badge" title="open push alerts">{{ open_push_alerts }}</span>{% endif %}</a>
 {% endif %}
 <a class="flex h-full items-center px-3.5 {% if nav == 'jobs' %}bg-steel text-white border-b-2 border-ice{% else %}text-on-dark-dim hover:text-white{% endif %}" href="{% url 'controlpanel:jobs' %}">jobs</a>

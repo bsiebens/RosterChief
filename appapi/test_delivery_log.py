@@ -23,7 +23,7 @@ class ScriptedGateway(PushGateway):
     outcomes: list = []
     published: list = []
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         ScriptedGateway.published.append((device.installation_id, title, body, data, badge, thread_id))
         outcome = ScriptedGateway.outcomes.pop(0) if ScriptedGateway.outcomes else True
         if isinstance(outcome, Exception):

@@ -849,7 +849,7 @@ encrypted form.
 
 ## Scheduled jobs
 
-All sixteen platform jobs run from **one in-process scheduler inside `web` itself** —
+All eighteen platform jobs run from **one in-process scheduler inside `web` itself** —
 `features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn
 **workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
 lease makes exactly one worker the one that runs the schedule, so a recycled worker hands it
@@ -881,6 +881,8 @@ class every one of them runs through.
 | `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
 | `publish_scheduled_announcements` | every 5 min | pushes any platform announcement whose scheduled time has arrived |
 | `retry_failed_deliveries` | every 2 min | sends again the push/email deliveries that failed transiently (backoff 1/5/30 min, 4 attempts), then purges delivery-log rows (sent 14 days, failed/dead 60) |
+| `process_outbox` | every minute | delivers the notification / live-game-push outbox entries a restart or crash left behind (backoff 1/5/30 min, 5 attempts, at-least-once), returns entries stuck in processing > 5 min, purges done (3 days) and failed (30) entries |
+| `check_push_health` | every 5 min | emails the platform admins when push is unhealthy (provider down/degraded, retry queue or outbox stuck, provider not configured) — once per outage, reminder every 6 h, recovery notice; see "Push health alerts" |
 
 Cadences above are the human-readable label each job's `JOB_REGISTRY` entry carries (also
 shown on the control panel's **Jobs** tab); the actual trigger the scheduler runs from is that
@@ -1019,7 +1021,7 @@ Control panel → **Features → Maintenance mode**. While it is on:
   you with no way to turn it back off;
 - `/healthz` keeps answering on every host, or the load balancer would take the node out of
   rotation and the control panel with it;
-- the **scheduled jobs stand down** — the sixteen jobs in the "Scheduled jobs" table, plus
+- the **scheduled jobs stand down** — the eighteen jobs in the "Scheduled jobs" table, plus
   `import_members_csv` when run by hand.
 
 `migrate` and `collectstatic` are deliberately **not** blocked. Maintenance is usually
@@ -1067,6 +1069,16 @@ base domain it signed in on), so pushes never double up.
 
 Web Push for the installable web app (PWA) is separate: see `DJANGO_VAPID_*` above. An account
 that has the native app installed gets the native push instead of the web push. Notifications (push and email) are delivered after the database commit, on a background thread, not inside the web request.
+
+**Push health alerts.** The `check_push_health` job (every 5 minutes) looks at the same data as the
+control panel's **Push monitoring** page and emails every active superuser with an email address
+when something breaks: a provider that is down or degraded over the last hour, a stuck retry
+queue, devices registered for a provider without credentials, or an outbox backlog older than 5
+minutes. One outage is one email; while it lasts there is a reminder at most every 6 hours, and
+a "recovered" email when it clears. The mail goes out through email (never push) and honours the
+"pause automated email" switch. Open alerts show as a banner on the Push monitoring page and a
+badge on its tab. To silence an alert, fix the cause; to stop the checks altogether, pause the job
+on the control panel's **Jobs** page.
 
 ## Native app push — iOS (APNs)
 

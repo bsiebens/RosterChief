@@ -10,13 +10,14 @@ from django.utils import timezone
 from appapi.models import PushDevice
 from appapi.push import PushGateway
 from authentication.models import User
-from club.models import Club, ClubRole
-from members.models import Member
+from club.models import Club, ClubRole, Season
+from members.models import Family, FamilyMembership, Member
 from mobile.models import PushSubscription
 from notifications.models import Notification, NotificationCategory
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from .models import Announcement, AnnouncementSeen
-from .services import audience_member_count, cancel, consume_for, create_and_confirm, publish
+from .services import audience_member_count, audience_members, cancel, consume_for, create_and_confirm, publish, send_test
 
 
 def make_subscription(club, member, endpoint):
@@ -64,7 +65,7 @@ class CreateAndConfirmTests(AnnouncementServiceTestBase):
 class RecordingPublisher(PushGateway):
     sent: list = []
 
-    def publish(self, device, *, title, body, data, badge=None, thread_id=None):
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
         RecordingPublisher.sent.append((device.installation_id, title, body))
         return True
 
@@ -111,15 +112,18 @@ class PublishTests(AnnouncementServiceTestBase):
 
         self.assertEqual({(n.club_id, n.member_id) for n in Notification.objects.all()}, {(self.club.pk, jane.pk), (self.other_club.pk, other.pk)})
 
-    def test_someone_in_two_clubs_gets_one_notification_per_club_on_a_platform_wide_announcement(self):
+    def test_someone_in_two_clubs_gets_exactly_one_notification_on_a_platform_wide_announcement(self):
         jane = make_account_member(self.club, "jane@example.com")
         ClubRole.objects.create(club=self.other_club, member=jane)
         announcement = Announcement.objects.create(title="Heads up", message="Body", club=None)
 
         publish(announcement)
 
-        self.assertEqual(Notification.objects.filter(member=jane).count(), 2)
+        notifications = Notification.objects.filter(member=jane)
+        self.assertEqual(notifications.count(), 1)
+        self.assertEqual(notifications.get().club, self.club)  # the earlier-created club
         self.assertEqual(audience_member_count(None), 1)
+        self.assertEqual(audience_member_count(None), Notification.objects.count())
 
     def test_publishing_twice_only_notifies_once(self):
         make_account_member(self.club, "jane@example.com")
@@ -288,3 +292,133 @@ class PublishScheduledAnnouncementsCommandTests(AnnouncementServiceTestBase):
         not_due.refresh_from_db()
         self.assertEqual(due.status, Announcement.Status.SENT)
         self.assertEqual(not_due.status, Announcement.Status.PENDING)
+
+
+class AudienceFilterTests(AnnouncementServiceTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=30))
+        cls.old_season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=800), end_date=today - datetime.timedelta(days=400))
+        cls.team = Team.objects.create(club=cls.club, name="First", short_name="1st")
+        cls.forward = Position.objects.create(club=cls.club, name="Forward", short_name="FW")
+        cls.coach_position = Position.objects.create(club=cls.club, name="Coach", short_name="HC", staff_position=True)
+
+        cls.admin = make_account_member(cls.club, "admin@example.com", role=ClubRole.Roles.ADMIN, first_name="Admin")
+        cls.editor = make_account_member(cls.club, "editor@example.com", role=ClubRole.Roles.EDITOR, first_name="Editor")
+        cls.plain = make_account_member(cls.club, "plain@example.com", first_name="Plain")
+        cls.player = make_account_member(cls.club, "player@example.com", first_name="Player")
+        TeamMembership.objects.create(team=cls.team, member=cls.player, season=cls.season, position=cls.forward)
+        cls.ex_player = make_account_member(cls.club, "ex@example.com", first_name="Ex")
+        TeamMembership.objects.create(team=cls.team, member=cls.ex_player, season=cls.old_season, position=cls.forward)
+        cls.coach = make_account_member(cls.club, "coach@example.com", first_name="Coach")
+        StaffAssignment.objects.create(team=cls.team, member=cls.coach, season=cls.season, position=cls.coach_position)
+        cls.ex_coach = make_account_member(cls.club, "excoach@example.com", first_name="ExCoach")
+        StaffAssignment.objects.create(team=cls.team, member=cls.ex_coach, season=cls.old_season, position=cls.coach_position)
+        cls.parent = make_account_member(cls.club, "parent@example.com", first_name="Parent")
+        cls.guardian = make_account_member(cls.club, "guardian@example.com", first_name="Guardian")
+        cls.sibling = make_account_member(cls.club, "sibling@example.com", first_name="Sibling")
+        family = Family.objects.create(club=cls.club, name="Doe")
+        FamilyMembership.objects.create(family=family, member=cls.parent, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=cls.guardian, role=FamilyMembership.FamilyRole.GUARDIAN)
+        FamilyMembership.objects.create(family=family, member=cls.sibling, role=FamilyMembership.FamilyRole.CHILD)
+        cls.other_admin = make_account_member(cls.other_club, "otheradmin@example.com", role=ClubRole.Roles.ADMIN, first_name="OtherAdmin")
+
+    def members(self, club, audience):
+        return set(audience_members(club, audience))
+
+    def test_everyone(self):
+        self.assertEqual(
+            self.members(self.club, Announcement.Audience.EVERYONE),
+            {self.admin, self.editor, self.plain, self.player, self.ex_player, self.coach, self.ex_coach, self.parent, self.guardian, self.sibling},
+        )
+
+    def test_admins_are_admin_type_club_roles_only(self):
+        self.assertEqual(self.members(self.club, Announcement.Audience.ADMINS), {self.admin, self.editor})
+
+    def test_staff_needs_a_current_season_assignment(self):
+        self.assertEqual(self.members(self.club, Announcement.Audience.STAFF), {self.coach})
+
+    def test_parents_are_parent_or_guardian_family_members(self):
+        self.assertEqual(self.members(self.club, Announcement.Audience.PARENTS), {self.parent, self.guardian})
+
+    def test_players_need_a_current_season_roster_spot(self):
+        self.assertEqual(self.members(self.club, Announcement.Audience.PLAYERS), {self.player})
+
+    def test_filter_and_club_combination(self):
+        self.assertEqual(self.members(self.other_club, Announcement.Audience.ADMINS), {self.other_admin})
+        self.assertEqual(self.members(self.other_club, Announcement.Audience.PLAYERS), set())
+        self.assertEqual(audience_member_count(None, Announcement.Audience.ADMINS), 3)
+        self.assertEqual(audience_member_count(self.club, Announcement.Audience.ADMINS), 2)
+
+    def test_publish_notifies_only_the_filtered_audience(self):
+        publish(Announcement.objects.create(title="Coaches", message="Body", club=None, audience=Announcement.Audience.STAFF))
+
+        self.assertEqual({n.member for n in Notification.objects.all()}, {self.coach})
+
+    def test_a_person_in_two_clubs_counts_once_per_filter(self):
+        ClubRole.objects.create(club=self.other_club, member=self.admin, role=ClubRole.Roles.ADMIN)
+
+        self.assertEqual(audience_member_count(None, Announcement.Audience.ADMINS), 3)
+        publish(Announcement.objects.create(title="Admins", message="Body", club=None, audience=Announcement.Audience.ADMINS))
+        self.assertEqual(Notification.objects.count(), 3)
+        self.assertEqual(Notification.objects.filter(member=self.admin).count(), 1)
+
+    def test_the_audience_defaults_to_everyone(self):
+        self.assertEqual(Announcement.objects.create(title="x", message="y").audience, Announcement.Audience.EVERYONE)
+
+
+class SendTestTests(AnnouncementServiceTestBase):
+    def test_emails_only_the_user_and_creates_nothing(self):
+        make_account_member(self.club, "jane@example.com")
+        admin = make_account_member(self.club, "admin@example.com", first_name="Admin")
+        mail.outbox.clear()
+
+        result = send_test(admin.user, title="Heads up", message="Body")
+
+        self.assertTrue(result.email)
+        self.assertEqual(result.pushed, 0)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["admin@example.com"])
+        self.assertTrue(mail.outbox[0].subject.startswith("[TEST] "))
+        self.assertFalse(Notification.objects.exists())
+        self.assertFalse(Announcement.objects.exists())
+
+    def test_a_user_without_a_member_or_club_gets_only_the_email(self):
+        mail.outbox.clear()
+
+        result = send_test(self.superuser, title="Heads up", message="Body")
+
+        self.assertTrue(result.email)
+        self.assertIsNone(result.pushed)
+        self.assertEqual([m.to for m in mail.outbox], [["root@example.com"]])
+
+
+class ConsumeForAudienceTests(TestCase):
+    """The one-time pop-up only shows a filtered announcement to people inside its audience."""
+
+    def test_a_coaches_only_announcement_does_not_pop_up_for_a_player(self):
+        from datetime import timedelta
+
+        from django.contrib.auth import get_user_model
+
+        from club.models import ClubMembership, Season
+        from members.models import Member
+        from rosterchief.test_support import make_club
+        from teams.models import Team, TeamMembership
+
+        club = make_club(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        season = Season.objects.create(club=club, start_date=today - timedelta(days=30), end_date=today + timedelta(days=30))
+        team = Team.objects.create(club=club, name="First")
+        user = get_user_model().objects.create_user(email="player@example.com", password="x")
+        member = Member.objects.create(user=user, first_name="Pla", last_name="Yer")
+        ClubMembership.objects.create(club=club, member=member, season=season)
+        TeamMembership.objects.create(team=team, member=member, season=season)
+        Announcement.objects.create(club=club, title="Coaches", message="Only coaches", status=Announcement.Status.SENT, sent_at=timezone.now(), audience=Announcement.Audience.STAFF)
+
+        self.assertIsNone(consume_for(user, club))
+
+        everyone = Announcement.objects.create(club=club, title="All", message="Everyone", status=Announcement.Status.SENT, sent_at=timezone.now() - timedelta(minutes=1))
+        self.assertEqual(consume_for(user, club), everyone)

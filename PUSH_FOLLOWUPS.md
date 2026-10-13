@@ -4,36 +4,40 @@ Collected while building the multi-channel push redesign (phase 1 FCM, phase 2 d
 delivery log + retries, phase 4 categories + preferences + control panel push monitoring). **All
 four phases are done**; none of the items below is scheduled. Each says why it matters; pick by value.
 
-## Recommended next steps (in order)
+## Status and what is left
 
-1. **Verify on real devices and providers.** Nothing has been sent to a real Android phone or real
-   FCM project yet, and the monitoring page has only been checked by tests, not in a browser.
-   Set up the Firebase project (`DEPLOYMENT.md`), send a test push, trigger a category mute and watch
-   `/push/` in the control panel. Then build the Android client against `docs/app-api/`.
-2. **Outbox for first sends** (section B): the one remaining way a notification can be lost
-   (restart between commit and dispatch), and the game push `delivered_at` ordering bug.
-3. **Alerting on the monitoring data**: the `/push/` page only helps when someone looks at it. Turn its
-   `down`/`stuck queue` states into a notification to platform admins (email + push), with a
-   cool-down so one outage is one alert.
-4. **Android channel per category + TTL/collapse per category** (sections B and C): now that categories
-   exist, users can tune them in system settings and live game updates stop arriving late.
-5. **Granular preferences** (section A): per child, per team, quiet hours, digests, priorities. Start
-   with *per child* and *quiet hours*, the most requested kind of control.
-6. **Announcement controls** (section C): audience filters, test send, merge duplicates for people in
-   several clubs, before the first platform-wide announcement goes out to everyone by email.
-7. Everything else in sections B to D.
+**Done (phases 1-4 plus the follow-up round):** FCM, dispatcher + channels, delivery log + retries,
+categories + preferences (API, PWA), control panel *Push monitoring*, and in the follow-up round:
+the **outbox** (durable dispatch, game push ordering fixed), **health alerts** to platform admins,
+**per-category TTL / collapse / Android channels** (`notifications/policy.py`), **per-child switches,
+quiet hours and critical priority**, and **announcement controls** (audience filters, test send, one
+notification per person across clubs).
 
-**Already done in phase 4** (so not open): categories on every notification, per-account
-push/email switches per club or for all clubs (API + PWA), enforcement in all channels, delivery
-log with provider and duration, and the control panel *Push monitoring* page.
+**Next, in order:**
 
-**Monitoring page follow-ups**: no alerting yet (step 3 above); no historical retention beyond the
-log's 14/60 days (add daily rollups if long-term trends matter); no per-club drill-down page; the
-success rate ignores dead tokens by design (a dead device is not the provider's fault) so a spike of
-dead tokens needs its own threshold; p50/p95 are computed from the 2000 most recent samples per
-provider, not the full window.
+1. **Verify on real devices and providers** (still never done): a real Android phone + Firebase
+   project, a real iPhone, quiet hours across midnight, a held push released on time, the `/push/`
+   page in a browser (layout never seen), and the new quiet-hours card in the PWA (`rounded-lg
+   border-line p-2` classes were not confirmed to exist in the pre-built CSS: run
+   `npm run build:mobile` / `build:mobile-desktop` if it looks off).
+2. **Update the iOS app** (`docs/app-api/ios-update-prompt.md`) and build the Android client
+   (`docs/app-api/android.md`).
+3. **Alert on FAILED outbox entries** (they only show in the admin today) and on a spike of dead tokens.
+4. **Remaining granular controls** (section A): per team, per game-follow level, digests, snooze,
+   per device, per role, club-level defaults and locks, one-click "stop notifications like this".
+5. Everything else in sections B to D.
 
-How the system fits together today: `API.md` §9 and `ARCHITECTURE.md` §8.6.
+**Known rough edges from the follow-up round:**
+- Held pushes (quiet hours) are not shown on the monitoring page at all (excluded on purpose: they are
+  not send attempts); a "held now" counter would help support questions.
+- Per-person quiet hours / time zones: one window per account; the zone is chosen by the client.
+- The outbox is at-least-once: a crash mid-dispatch can repeat a batch (channels do not mark per
+  notification).
+- `monitoring.retry_queue` treats "the retry job has never run" as stuck, so a fresh install can open
+  a `retry_queue` alert until the job has run once.
+- The held-push payload duplicates the retry payload keys in `appapi/delivery.py`; keep them in sync.
+- An announcement's pop-up and inbox rows are now audience-filtered, but the *count* on the confirm
+  screen does not subtract people who muted the Announcement category.
 
 ## A. Granular control over what a person receives
 
