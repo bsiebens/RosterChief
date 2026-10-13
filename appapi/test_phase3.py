@@ -144,16 +144,37 @@ class PhotoUploadTests(ClubApiTestCase):
     def upload(self, **data):
         return self.client.post(f"/api/app/v1/members/{self.child.pk}/photo", data, HTTP_HOST=CLUB_HOST, HTTP_AUTHORIZATION=f"Bearer {self.token}")
 
-    def test_upload_replace_and_delete(self):
+    def test_upload_sets_the_profile_picture_and_delete_clears_it(self):
         response = self.upload(photo=SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png"), photo_public_consent="true")
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertIsNotNone(response.json()["photo_url"])
-        self.assertTrue(response.json()["photo_public_consent"])
+        body = response.json()
+        self.assertIsNotNone(body["photo_url"])
+        self.assertIsNotNone(body["profile_photo_url"])
+        self.assertIsNone(body["player_photo_url"])
+        self.assertTrue(body["photo_public_consent"])
+        self.child.refresh_from_db()
+        self.assertTrue(self.child.profile_photo)
+        self.assertFalse(self.child.player_photo)
 
         removed = self.send("delete", f"/members/{self.child.pk}/photo")
         self.assertIsNone(removed.json()["photo_url"])
+        self.assertIsNone(removed.json()["profile_photo_url"])
         self.assertTrue(removed.json()["photo_public_consent"])
+
+    def test_the_player_picture_is_untouched_by_upload_and_delete(self):
+        self.child.player_photo = SimpleUploadedFile("official.png", png_bytes(), content_type="image/png")
+        self.child.save()
+        official = self.child.player_photo.name
+
+        self.upload(photo=SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png"))
+        self.send("delete", f"/members/{self.child.pk}/photo")
+        # A player_photo part is ignored: only the profile picture is settable here.
+        self.upload(player_photo=SimpleUploadedFile("x.png", png_bytes(), content_type="image/png"))
+
+        self.child.refresh_from_db()
+        self.assertEqual(self.child.player_photo.name, official)
+        self.assertFalse(self.child.profile_photo)
 
     def test_not_an_image(self):
         response = self.upload(photo=SimpleUploadedFile("kim.png", b"not an image", content_type="image/png"))

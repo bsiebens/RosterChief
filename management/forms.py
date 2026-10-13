@@ -44,9 +44,9 @@ class MemberForm(forms.ModelForm):
 
     class Meta:
         model = Member
-        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
+        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "player_photo", "photo_public_consent"]
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
-        labels = {"photo_public_consent": _("Show this photo on the club's public website")}
+        labels = {"photo_public_consent": _("Show the player picture on the club's public website")}
 
     def __init__(self, *args, lock_person_fields=False, **kwargs):
         super().__init__(*args, **kwargs)

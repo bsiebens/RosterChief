@@ -39,8 +39,8 @@ class ImportMemberPhotosTests(TestCase):
         output = self._run()
 
         self.member.refresh_from_db()
-        self.assertTrue(self.member.photo)
-        self.assertEqual(self.member.photo.read(), _png_bytes())
+        self.assertTrue(self.member.player_photo)
+        self.assertEqual(self.member.player_photo.read(), _png_bytes())
         self.assertFalse(self.member.photo_public_consent)
         self.assertIn("Stored 1 photo(s)", output)
 
@@ -55,7 +55,7 @@ class ImportMemberPhotosTests(TestCase):
         self.member.refresh_from_db()
         skipped.refresh_from_db()
         self.assertTrue(self.member.photo_public_consent)
-        self.assertEqual(self.member.public_photo, self.member.photo)
+        self.assertEqual(self.member.public_photo, self.member.player_photo)
         self.assertFalse(skipped.photo_public_consent)
 
     def test_dry_run_with_public_changes_nothing(self):
@@ -64,7 +64,7 @@ class ImportMemberPhotosTests(TestCase):
         self._run("--dry-run", "--public")
 
         self.member.refresh_from_db()
-        self.assertFalse(self.member.photo)
+        self.assertFalse(self.member.player_photo)
         self.assertFalse(self.member.photo_public_consent)
 
     def test_dry_run_stores_nothing(self):
@@ -73,23 +73,23 @@ class ImportMemberPhotosTests(TestCase):
         output = self._run("--dry-run")
 
         self.member.refresh_from_db()
-        self.assertFalse(self.member.photo)
+        self.assertFalse(self.member.player_photo)
         self.assertIn("Would store 1 photo(s)", output)
 
     def test_existing_photo_is_kept_unless_replace(self):
         (self.directory / "12345.png").write_bytes(_png_bytes("red"))
         self._run()
         self.member.refresh_from_db()
-        first_name = self.member.photo.name
+        first_name = self.member.player_photo.name
 
         (self.directory / "12345.png").write_bytes(_png_bytes("blue"))
-        self.assertIn("already has a photo", self._run())
+        self.assertIn("already has a player picture", self._run())
         self.member.refresh_from_db()
-        self.assertEqual(self.member.photo.name, first_name)
+        self.assertEqual(self.member.player_photo.name, first_name)
 
         self._run("--replace")
         self.member.refresh_from_db()
-        self.assertEqual(self.member.photo.read(), _png_bytes("blue"))
+        self.assertEqual(self.member.player_photo.read(), _png_bytes("blue"))
 
     def test_unknown_ambiguous_and_broken_files_are_reported_not_stored(self):
         other = Member.objects.create(first_name="Eva", last_name="Janssens")
@@ -109,7 +109,7 @@ class ImportMemberPhotosTests(TestCase):
         self.assertIn("Stored 0 photo(s); 1 skipped; 3 problem(s).", output)
         for member in (self.member, other, third):
             member.refresh_from_db()
-            self.assertFalse(member.photo)
+            self.assertFalse(member.player_photo)
 
     def test_licence_from_another_club_does_not_match(self):
         elsewhere = make_club(name="Other", slug="other")
@@ -119,7 +119,7 @@ class ImportMemberPhotosTests(TestCase):
 
         self.assertIn("no member with licence '555'", self._run())
         stranger.refresh_from_db()
-        self.assertFalse(stranger.photo)
+        self.assertFalse(stranger.player_photo)
 
     def test_unknown_club_is_an_error(self):
         with self.assertRaises(CommandError):

@@ -5608,7 +5608,7 @@
             "title": "Phone"
           },
           "photo_public_consent": {
-            "description": "The photo may appear on the club's public website.",
+            "description": "The player picture may appear on the club's public website (the profile picture never does).",
             "title": "Photo Public Consent",
             "type": "boolean"
           },
@@ -5621,8 +5621,32 @@
                 "type": "null"
               }
             ],
-            "description": "GET it with the Bearer token; null without a photo.",
+            "description": "The effective picture: the profile picture, else the player picture. GET it with the Bearer token; null without a photo.",
             "title": "Photo Url"
+          },
+          "player_photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The official player picture, set by club managers only (read-only here). Null without one.",
+            "title": "Player Photo Url"
+          },
+          "profile_photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The self-service profile picture (set with `POST /members/{id}/photo`); visible to everyone in the club, never public. Null without one.",
+            "title": "Profile Photo Url"
           },
           "teams": {
             "description": "Current season.",
@@ -5642,6 +5666,8 @@
           "phone",
           "emergency_phone",
           "photo_url",
+          "profile_photo_url",
+          "player_photo_url",
           "photo_public_consent",
           "guardians",
           "teams",
@@ -10449,13 +10475,13 @@
             "AppAuth": []
           }
         ],
-        "summary": "Remove the photo",
+        "summary": "Remove the profile picture",
         "tags": [
           "people"
         ]
       },
       "get": {
-        "description": "The same rule as the website: the member, their parents/guardians, staff who may\nsee them, or anyone when the photo is public. Anyone else gets `404`.",
+        "description": "Without `kind`: the effective picture (the profile picture, else the player picture), visible to\neveryone in the club. `kind=profile` is the profile picture only (club-wide); `kind=player` the official\nplayer picture (the member, their guardians, staff who may see them, or anyone when it is public).\nAnyone else gets `404`. `v` is only a cache-busting version.",
         "operationId": "appapi_routers_people_photo",
         "parameters": [
           {
@@ -10466,6 +10492,42 @@
               "format": "uuid",
               "title": "Member Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "player",
+                    "profile"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "v",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "V"
             }
           }
         ],
@@ -10518,7 +10580,7 @@
         ]
       },
       "post": {
-        "description": "Replaces the managed person's photo. Returns the profile with the new `photo_url`.\nThe photo stays private (family and club staff) unless `photo_public_consent` is on.",
+        "description": "Replaces the managed person's *profile* picture (the form part stays called `photo`). Returns the\nprofile with the new `photo_url` / `profile_photo_url`. The profile picture is visible to the club's\nmembers, never public. The official player picture can only be changed by club managers.",
         "operationId": "appapi_routers_people_upload_photo",
         "parameters": [
           {
@@ -10543,7 +10605,7 @@
                     "type": "string"
                   },
                   "photo_public_consent": {
-                    "description": "Optional: also set whether it may appear on the club's public website.",
+                    "description": "Optional: also set whether the player picture may appear on the club's public website.",
                     "type": "boolean"
                   }
                 },
@@ -10613,7 +10675,7 @@
             "AppAuth": []
           }
         ],
-        "summary": "Upload a photo",
+        "summary": "Upload the profile picture",
         "tags": [
           "people"
         ]

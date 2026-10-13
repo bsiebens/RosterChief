@@ -4,6 +4,7 @@ host. Editing goes through mobile.forms.MemberProfileForm, the member web app's 
 
 import mimetypes
 import uuid
+from typing import Literal
 
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
@@ -60,6 +61,8 @@ def _profile(request, club, member: Member) -> dict:
         "phone": str(member.phone) if member.phone else None,
         "emergency_phone": str(member.emergency_phone) if member.emergency_phone else None,
         "photo_url": member_photo_url(request, member),
+        "profile_photo_url": member_photo_url(request, member, "profile"),
+        "player_photo_url": member_photo_url(request, member, "player"),
         "photo_public_consent": member.photo_public_consent,
         "guardians": [{"first_name": row.member.first_name, "last_name": row.member.last_name, "role": row.role} for row in guardians],
         "teams": teams,
@@ -110,7 +113,8 @@ def update_profile(request, member_id: uuid.UUID, payload: ProfilePatchIn):
 def _save_profile_form(request, scope, member, data, files=None):
     form = MemberProfileForm(data, files, instance=member)
     if not form.is_valid():
-        fields = {name: [str(message) for message in messages] for name, messages in form.errors.items()}
+        # The upload part is still called `photo` on the wire.
+        fields = {("photo" if name == "profile_photo" else name): [str(message) for message in messages] for name, messages in form.errors.items()}
         raise ApiError(422, "validation_error", fields=fields)
     form.save()
     member.refresh_from_db()
@@ -127,7 +131,7 @@ PHOTO_BODY = {
                     "required": ["photo"],
                     "properties": {
                         "photo": {"type": "string", "format": "binary", "description": "JPEG, PNG or WebP (HEIC: convert to JPEG first), at most 10 MB."},
-                        "photo_public_consent": {"type": "boolean", "description": "Optional: also set whether it may appear on the club's public website."},
+                        "photo_public_consent": {"type": "boolean", "description": "Optional: also set whether the player picture may appear on the club's public website."},
                     },
                 }
             }
@@ -136,10 +140,11 @@ PHOTO_BODY = {
 }
 
 
-@router.post("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS, 422: ErrorOut}, summary="Upload a photo", openapi_extra=PHOTO_BODY)
+@router.post("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS, 422: ErrorOut}, summary="Upload the profile picture", openapi_extra=PHOTO_BODY)
 def upload_photo(request, member_id: uuid.UUID):
-    """Replaces the managed person's photo. Returns the profile with the new `photo_url`.
-    The photo stays private (family and club staff) unless `photo_public_consent` is on."""
+    """Replaces the managed person's *profile* picture (the form part stays called `photo`). Returns the
+    profile with the new `photo_url` / `profile_photo_url`. The profile picture is visible to the club's
+    members, never public. The official player picture can only be changed by club managers."""
     scope = club_scope(request)
     member = scope.person(member_id)
     upload = request.FILES.get("photo")
@@ -153,31 +158,35 @@ def upload_photo(request, member_id: uuid.UUID):
         data.pop("photo_public_consent", None)
         if consent.lower() in ("true", "1", "on", "yes"):
             data["photo_public_consent"] = "on"
-    return _save_profile_form(request, scope, member, data, {"photo": upload})
+    return _save_profile_form(request, scope, member, data, {"profile_photo": upload})
 
 
-@router.delete("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS}, summary="Remove the photo")
+@router.delete("/members/{member_id}/photo", response={200: ProfileOut, **ERRORS}, summary="Remove the profile picture")
 def delete_photo(request, member_id: uuid.UUID):
     scope = club_scope(request)
     member = scope.person(member_id)
     data = _form_data(member)
-    data["photo-clear"] = "on"
+    data["profile_photo-clear"] = "on"
     return _save_profile_form(request, scope, member, data)
 
 
 @router.get("/members/{member_id}/photo", response={200: None, **ERRORS}, summary="A member's photo", openapi_extra={"responses": {200: {"description": "The image.", "content": {"image/*": {}}}}})
-def photo(request, member_id: uuid.UUID):
-    """The same rule as the website: the member, their parents/guardians, staff who may
-    see them, or anyone when the photo is public. Anyone else gets `404`."""
+def photo(request, member_id: uuid.UUID, kind: Literal["player", "profile"] | None = None, v: str | None = None):
+    """Without `kind`: the effective picture (the profile picture, else the player picture), visible to
+    everyone in the club. `kind=profile` is the profile picture only (club-wide); `kind=player` the official
+    player picture (the member, their guardians, staff who may see them, or anyone when it is public).
+    Anyone else gets `404`. `v` is only a cache-busting version."""
     scope = club_scope(request)
     member = get_object_or_404(Member, pk=member_id)
-    if not member.photo or not can_view_member_photo(request.user, member, scope.club):
+    field = {None: None, "profile": "profile_photo", "player": "player_photo"}[kind]
+    stored = member.photo if field is None else getattr(member, field)
+    if not stored or not can_view_member_photo(request.user, member, scope.club, field=field):
         raise ApiError(404, "not_found")
     try:
-        handle = member.photo.open("rb")
+        handle = stored.open("rb")
     except FileNotFoundError as error:
         raise ApiError(404, "not_found") from error
-    content_type = mimetypes.guess_type(member.photo.name)[0] or "application/octet-stream"
+    content_type = mimetypes.guess_type(stored.name)[0] or "application/octet-stream"
     if not content_type.startswith("image/") or content_type == "image/svg+xml":
         content_type = "application/octet-stream"
     response = FileResponse(handle, content_type=content_type)

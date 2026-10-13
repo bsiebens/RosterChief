@@ -1,11 +1,11 @@
-"""Bulk-attach member photos from a directory of ``<licence>.<ext>`` files.
+"""Bulk-attach player pictures (``Member.player_photo``) from a directory of ``<licence>.<ext>`` files.
 
 Each file's name (without extension) is matched against ``ClubMembership.license``
 in the given club, any season. A licence that matches no member, or more than one
-member, is reported and skipped. A member who already has a photo is skipped
+member, is reported and skipped. A member who already has a player picture is skipped
 unless ``--replace`` is given. Every file is checked with Pillow before anything is
-stored. ``photo_public_consent`` is left as it is unless ``--public`` is given,
-which turns it on for every member whose photo this run stores -- only use it
+stored. The self-service profile picture is never touched. ``photo_public_consent`` is left as it is unless ``--public`` is given,
+which turns it on for every member whose player picture this run stores -- only use it
 when the club has that consent for the whole batch.
 
 On a Docker deployment the command runs inside the ``web`` container, so mount the
@@ -42,11 +42,11 @@ class Command(MaintenanceAwareCommand):
     def add_arguments(self, parser):
         parser.add_argument("club", help="The club's slug (its subdomain).")
         parser.add_argument("directory", help="Directory holding the photos, named <licence>.png/.jpg/.jpeg/.webp/.gif.")
-        parser.add_argument("--replace", action="store_true", help="Replace a photo the member already has. Without it, those members are skipped.")
+        parser.add_argument("--replace", action="store_true", help="Replace a player picture the member already has. Without it, those members are skipped.")
         parser.add_argument(
             "--public",
             action="store_true",
-            help="Also turn on 'show this photo on the public website' for every member whose photo is stored. Only when the club has that consent for all of them.",
+            help="Also turn on 'show the player picture on the public website' for every member whose photo is stored. Only when the club has that consent for all of them.",
         )
         parser.add_argument("--dry-run", action="store_true", help="Report what would happen without storing anything.")
 
@@ -86,8 +86,8 @@ class Command(MaintenanceAwareCommand):
             return "problems", f"licence {licence!r} is on {len(member_ids)} different members -- fix the memberships first"
 
         member = Member.objects.get(pk=member_ids.pop())
-        if member.photo and not replace:
-            return "skipped", f"{member} already has a photo (use --replace)"
+        if member.player_photo and not replace:
+            return "skipped", f"{member} already has a player picture (use --replace)"
         if not _is_valid_image(path):
             return "problems", "not a readable image"
 
@@ -95,14 +95,14 @@ class Command(MaintenanceAwareCommand):
         if dry_run:
             return "stored", f"would attach to {member}{visibility}"
 
-        old_name = member.photo.name if member.photo else None
+        old_name = member.player_photo.name if member.player_photo else None
         with path.open("rb") as handle:
-            member.photo.save(f"{licence}{path.suffix.lower()}", File(handle), save=False)
-        update_fields = ["photo"]
+            member.player_photo.save(f"{licence}{path.suffix.lower()}", File(handle), save=False)
+        update_fields = ["player_photo"]
         if public:
             member.photo_public_consent = True
             update_fields.append("photo_public_consent")
         member.save(update_fields=update_fields)
-        if old_name and old_name != member.photo.name:
-            member.photo.storage.delete(old_name)
+        if old_name and old_name != member.player_photo.name:
+            member.player_photo.storage.delete(old_name)
         return "stored", f"attached to {member}{visibility}"

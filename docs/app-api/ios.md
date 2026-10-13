@@ -430,10 +430,18 @@ club requirements. `PATCH /members/{id}` with only the fields that change (`firs
 `photo_url` (and `GET /members/{id}/photo`) needs the Bearer token, so load it with your own
 `URLRequest` (not `AsyncImage`). The URL changes when the photo does, so cache it by URL.
 
-**New photo:** `POST /members/{id}/photo` as `multipart/form-data` with a `photo` part (JPEG,
+A person has two pictures. `profile_photo_url` is the self-service profile picture (set from
+the app, visible to everyone in the club, never public); `player_photo_url` is the official
+player picture, which only club managers can change (read-only in the app). `photo_url` is the
+effective one: the profile picture, else the player picture. `GET /members/{id}/photo` serves
+the effective picture; add `?kind=profile` or `?kind=player` to fetch one directly (`player`
+keeps the stricter rule: the person, their guardians, staff, or anyone if public). Use
+`photo_url` for avatars.
+
+**New profile picture:** `POST /members/{id}/photo` as `multipart/form-data` with a `photo` part (JPEG,
 PNG or WebP, at most 10 MB; convert HEIC from the camera to JPEG and downscale to ~1600 px
-first) and optionally `photo_public_consent=true|false`. `DELETE /members/{id}/photo` removes
-it. Both return the updated profile.
+first) and optionally `photo_public_consent=true|false` (about the player picture on the public
+website). `DELETE /members/{id}/photo` removes the profile picture (the player picture stays). Both return the updated profile.
 
 ### Payments & dues
 

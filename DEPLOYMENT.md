@@ -952,7 +952,7 @@ the process gunicorn's master already runs, not a new process — cheaper than e
 
 ## Bulk-importing member photos
 
-`import_member_photos` attaches a directory of photos named after the licence on the club's
+`import_member_photos` attaches a directory of player pictures (`Member.player_photo`; a member's self-service profile picture is never touched) named after the licence on the club's
 memberships (`12345.png`, `12345.jpg`, …) to the matching members. Copy the files to the
 server, then run it in a one-off `web` container with the directory mounted read-only. The
 running `web` container can't see host paths, and its root filesystem is read-only:
@@ -972,11 +972,11 @@ docker compose run --rm --no-deps -v "$PWD/photos:/import:ro" web \
   in front of the command: `IMAGE_TAG=v0.7.12 docker compose run …`.
 - `<club-slug>` is the club's subdomain. Licences are matched in that club only, across every
   season, ignoring case.
-- A member who already has a photo is skipped unless you add `--replace`.
+- A member who already has a player picture is skipped unless you add `--replace`.
 - Files whose licence matches nobody, or more than one member, and files that aren't readable
   images are listed and skipped. The rest are still imported, so fix those files and run it
   again; members already done are skipped the second time.
-- By default it leaves **Show this photo on the club's public website** alone, so imported
+- By default it leaves **Show the player picture on the club's public website** alone, so imported
   photos are visible to the member, their family and staff only. Add `--public` to turn it on
   for every member whose photo the run stores. Only do that when the club has public-photo
   consent for the whole batch.

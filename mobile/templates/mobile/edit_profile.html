@@ -31,13 +31,13 @@
         {% endif %}
 
         <div>
-            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Photo" %}</div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Profile picture" %}</div>
             <div class="m-card overflow-hidden">
                 <div class="flex items-center gap-3 p-3.5">
                     {% include "mobile/_avatar.html" with person=member size_class="h-14 w-14" text_class="text-xl" %}
                     <div class="min-w-0 flex-1">
-                        {{ form.photo }}
-                        {% for error in form.photo.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        {{ form.profile_photo }}
+                        {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                     </div>
                 </div>
                 <div class="h-px bg-rule"></div>

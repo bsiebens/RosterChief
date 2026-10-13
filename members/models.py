@@ -32,7 +32,7 @@ class MemberPhotoFieldFile(ImageFieldFile):
     @property
     def url(self):
         self._require_file()
-        return self.instance.photo_url
+        return self.instance.photo_url_for(self.field.name)
 
 
 class MemberPhotoField(models.ImageField):
@@ -87,9 +87,16 @@ class Member(UUIDModel):
     phone = PhoneNumberField(_("phone number"), null=True, blank=True)
     emergency_phone = PhoneNumberField(_("emergency phone number"), null=True, blank=True)
 
-    #: Private storage: readable only through members.views.MemberPhotoView,
-    #: which applies members.services.photos.can_view_member_photo.
-    photo = MemberPhotoField(_("photo"), upload_to=member_photo_path, storage=get_private_storage, blank=True)
+    #: The official player picture. Private storage: readable only through
+    #: members.views.MemberPhotoView, which applies
+    #: members.services.photos.can_view_member_photo. Only changeable in the
+    #: management portal by whoever may edit member data; the only picture
+    #: the public API can ever return (see ``public_photo``).
+    player_photo = MemberPhotoField(_("player picture"), upload_to=member_photo_path, storage=get_private_storage, blank=True)
+    #: Self-service picture, set by the member (or their guardian) in the
+    #: app/PWA and used inside the club's apps in preference to the player
+    #: picture. Never exposed publicly.
+    profile_photo = MemberPhotoField(_("profile picture"), upload_to=member_photo_path, storage=get_private_storage, blank=True)
     #: Gates the *public* surfaces (a club's public website/API roster): once
     #: on, members.views.MemberPhotoView serves the photo to anyone. Without
     #: it, only staff who may see this member, the member themselves and their
@@ -97,7 +104,7 @@ class Member(UUIDModel):
     #: in-app use (e.g. a parent picking their own kid out of a roster list)
     #: shouldn't become world-visible without a separate, explicit opt-in --
     #: this matters most for underage players.
-    photo_public_consent = models.BooleanField(_("show this photo on the public website/API"), default=False)
+    photo_public_consent = models.BooleanField(_("show the player picture on the public website/API"), default=False)
 
     class Meta:
         verbose_name = _("member")
@@ -115,22 +122,47 @@ class Member(UUIDModel):
         return self.first_name
 
     @property
-    def photo_url(self):
-        """The authorising view's URL for this member's photo, or None without
-        one. The ``v`` parameter changes whenever the stored file does, so a
-        browser's private cache never shows a replaced photo."""
-        if not self.photo:
+    def photo(self):
+        """The picture the club's apps show: the profile picture, else the player picture."""
+        return self.profile_photo or self.player_photo
+
+    def photo_url_for(self, field_name):
+        """The authorising view's URL for one of this member's pictures
+        (``player_photo``/``profile_photo``), or None without one. The ``v``
+        parameter changes whenever the stored file does, so a browser's private
+        cache never shows a replaced picture."""
+        f = getattr(self, field_name)
+        if not f:
             return None
-        version = hashlib.sha256(self.photo.name.encode()).hexdigest()[:12]
+        version = hashlib.sha256(f.name.encode()).hexdigest()[:12]
+        route = {"player_photo": "members:player_photo", "profile_photo": "members:profile_photo"}[field_name]
+        return f"{reverse(route, args=[self.pk])}?v={version}"
+
+    @property
+    def player_photo_url(self):
+        return self.photo_url_for("player_photo")
+
+    @property
+    def profile_photo_url(self):
+        return self.photo_url_for("profile_photo")
+
+    @property
+    def photo_url(self):
+        """URL of the effective picture (profile, else player)."""
+        f = self.photo
+        if not f:
+            return None
+        version = hashlib.sha256(f.name.encode()).hexdigest()[:12]
         return f"{reverse('members:photo', args=[self.pk])}?v={version}"
 
     @property
     def public_photo(self):
-        """``self.photo``, but only once ``photo_public_consent`` says it can
-        leave the club's own app/staff views -- the one gate every public
+        """The *player* picture, but only once ``photo_public_consent`` says it
+        can leave the club's own app/staff views -- the one gate every public
         surface (teams.api's roster endpoints, a club's public website) must
-        go through, so consent can't be forgotten at a new call site."""
-        return self.photo if self.photo and self.photo_public_consent else None
+        go through, so consent can't be forgotten at a new call site. The
+        profile picture is never public."""
+        return self.player_photo if self.player_photo and self.photo_public_consent else None
 
     @property
     def contact_email(self):

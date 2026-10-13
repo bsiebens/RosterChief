@@ -77,8 +77,8 @@ def staffed_team_out(user, club, teams) -> list[dict]:
 
 
 def photo_url_for(request, member, club) -> str | None:
-    """The member's photo URL, or None when there is no photo or the caller may not see it (same rule as
-    the member photos: ``members.services.photos.can_view_member_photo``)."""
+    """The member's effective photo URL (profile picture, else player picture), or None when there is no
+    photo or the caller may not see it (``members.services.photos.can_view_member_photo``)."""
     from members.services.photos import can_view_member_photo
 
     from .presenters import member_photo_url

@@ -37,14 +37,14 @@ class MemberProfileForm(forms.ModelForm):
 
     class Meta:
         model = Member
-        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "photo", "photo_public_consent"]
+        fields = ["first_name", "last_name", "date_of_birth", "email", "phone", "emergency_phone", "profile_photo", "photo_public_consent"]
         # Same date widget as management.forms.MemberForm. phone/emergency_phone
         # deliberately keep django-phonenumber-field's own RegionalPhoneNumberWidget
         # (national-format display, region-aware parsing) rather than being
         # swapped for a plain TextInput here -- __init__ below only adds a CSS
         # class to whatever widget each field already has, never replaces it.
         widgets = {"date_of_birth": forms.DateInput(attrs={"type": "date"})}
-        labels = {"photo_public_consent": _("Show this photo on the club's public website")}
+        labels = {"photo_public_consent": _("Show the official player picture on the club's public website")}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -54,10 +54,10 @@ class MemberProfileForm(forms.ModelForm):
         # classes _DYNAMIC_WIDGET_CLASSES uses for formbuilder's own file/
         # checkbox fields, so a file input or a checkbox never looks
         # different depending on which form put it on the page.
-        self.fields["photo"].widget.attrs["class"] = dict(_DYNAMIC_WIDGET_CLASSES)[forms.ClearableFileInput]
+        self.fields["profile_photo"].widget.attrs["class"] = dict(_DYNAMIC_WIDGET_CLASSES)[forms.ClearableFileInput]
         self.fields["photo_public_consent"].widget.attrs["class"] = dict(_DYNAMIC_WIDGET_CLASSES)[forms.CheckboxInput]
         for name, field in self.fields.items():
-            if name not in ("photo", "photo_public_consent"):
+            if name not in ("profile_photo", "photo_public_consent"):
                 field.widget.attrs["class"] = _INPUT_CLASSES
 
 

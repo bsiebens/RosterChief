@@ -57,22 +57,26 @@ class FamilyInviteAcceptView(ClubScopedPublicMixin, LoginRequiredMixin, View):
 
 
 class MemberPhotoView(View):
-    """Streams ``Member.photo`` from private storage to whoever
+    """Streams a member picture (``player_photo``/``profile_photo``) from private storage to whoever
     members.services.photos.can_view_member_photo allows -- staff authority is
     taken from ``request.club`` (so it only counts on that club's own host),
     while the member themselves and their parents/guardians are allowed on any
     host. Everyone else gets a 404, which doesn't confirm the member exists."""
 
+    #: ``player_photo``/``profile_photo``, or None for the effective picture.
+    field = None
+
     def get(self, request, pk):
         member = get_object_or_404(Member, pk=pk)
-        if not member.photo or not can_view_member_photo(request.user, member, getattr(request, "club", None)):
+        photo_file = getattr(member, self.field) if self.field else member.photo
+        if not photo_file or not can_view_member_photo(request.user, member, getattr(request, "club", None), field=self.field):
             raise Http404("No such photo.")
         try:
-            photo = member.photo.open("rb")
+            photo = photo_file.open("rb")
         except FileNotFoundError as error:
             raise Http404("No such photo.") from error
 
-        content_type = mimetypes.guess_type(member.photo.name)[0] or "application/octet-stream"
+        content_type = mimetypes.guess_type(photo_file.name)[0] or "application/octet-stream"
         if not content_type.startswith("image/") or content_type == "image/svg+xml":
             content_type = "application/octet-stream"
         response = FileResponse(photo, content_type=content_type)

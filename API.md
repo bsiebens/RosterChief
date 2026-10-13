@@ -81,8 +81,8 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 ```
 
 ```python
-path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),  # -> /api/auth/app/v1/...
-path("api/app/v1/", app_api.urls),  # phase 1 (appapi)
+(path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),)  # -> /api/auth/app/v1/...
+(path("api/app/v1/", app_api.urls),)  # phase 1 (appapi)
 ```
 
 `base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
@@ -361,7 +361,7 @@ sizes hurt mobile networks.
 **Private media** (documents, invoices, private-storage files) are **never** exposed as public S3 URLs. Return an authenticated streaming endpoint (`GET …/invoice.pdf`, `Content-Type:
 application/pdf`, `Content-Disposition`) or, later, short-lived presigned URLs minted per request after the same authorization.
 
-**Member photos are private media now** (security audit, 0.7.9). `Member.photo` lives in private storage, and `Member.photo_url` points at `members:photo`, which checks
+**Member photos are private media now** (security audit, 0.7.9). `Member.player_photo` (official) and `Member.profile_photo` (self-service, club-wide, never public) live in private storage, and `Member.photo_url` points at `members:photo`, which checks
 `members.services.photos.can_view_member_photo`: the member, their parents/guardians, and staff who may see that member, plus anyone when `photo_public_consent` is on. The web view authenticates by session cookie, so the app API needs its own
 token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the same rule. Don't hand out the web URL.
 
@@ -645,7 +645,7 @@ people,support,shop,registration}.py`, tests in `appapi/test_phase3.py`). Servic
 - Forms: list, schema, `submit` (JSON, or multipart with files; idempotent; for one addressed
   managed person, §8), submitted response. Not flag-gated, like the PWA: `formbuilder` licenses
   creating forms.
-- Photos: `POST`/`DELETE /members/{id}/photo` via `MemberProfileForm`, 10 MB cap.
+- Photos: `POST`/`DELETE /members/{id}/photo` set/clear the *profile* picture (`Member.profile_photo`) via `MemberProfileForm`, 10 MB cap; the official `player_photo` is manager-only (web). `photo_url` is the effective picture (profile, else player); `ProfileOut` also has `profile_photo_url` and `player_photo_url`; `GET .../photo[?kind=profile|player]`.
 - Shop: catalogue, cart (re-priced, code preview), idempotent checkout (pay on pickup, §12),
   orders and invoice PDF. Unlicensed → 404 `feature_disabled`; closed → 409 `shop_closed` for
   catalogue/cart/checkout, orders stay readable.

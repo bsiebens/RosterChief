@@ -580,8 +580,10 @@ class ProfileOut(Schema):
     email: str
     phone: str | None = Field(description="E.164, e.g. `+32470123456`.")
     emergency_phone: str | None
-    photo_url: str | None = Field(description="GET it with the Bearer token; null without a photo.")
-    photo_public_consent: bool = Field(description="The photo may appear on the club's public website.")
+    photo_url: str | None = Field(description="The effective picture: the profile picture, else the player picture. GET it with the Bearer token; null without a photo.")
+    profile_photo_url: str | None = Field(description="The self-service profile picture (set with `POST /members/{id}/photo`); visible to everyone in the club, never public. Null without one.")
+    player_photo_url: str | None = Field(description="The official player picture, set by club managers only (read-only here). Null without one.")
+    photo_public_consent: bool = Field(description="The player picture may appear on the club's public website (the profile picture never does).")
     guardians: list[GuardianOut]
     teams: list[ProfileTeamOut] = Field(description="Current season.")
     open_requirements: list[str] = Field(description="Club requirements still open this season (e.g. a medical form).")

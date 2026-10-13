@@ -570,20 +570,56 @@ class ProfileTests(ClubApiTestCase):
         self.assertError(response, 422, "validation_error")
         self.assertIn("phone", response.json()["error"]["fields"])
 
-    def test_photo_follows_the_website_rule(self):
-        self.child.photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
+    def test_profile_picture_is_served_and_outsiders_get_404(self):
+        self.child.profile_photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
         self.child.save()
         stranger = self.stranger()
-        stranger.photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
+        stranger.profile_photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
         stranger.save()
+        outsider = Member.objects.create(first_name="Olga", last_name="Outsider", profile_photo=SimpleUploadedFile("o.png", png_bytes(), content_type="image/png"))
 
-        photo_url = self.get(f"/members/{self.child.pk}").json()["photo_url"]
-        response = self.api("get", photo_url.split("/api/app/v1", 1)[1], token=self.token, host=CLUB_HOST)
+        body = self.get(f"/members/{self.child.pk}").json()
+        response = self.api("get", body["photo_url"].split("/api/app/v1", 1)[1], token=self.token, host=CLUB_HOST)
 
+        self.assertEqual(body["photo_url"], body["profile_photo_url"].replace("&kind=profile", ""))
+        self.assertIsNone(body["player_photo_url"])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertEqual(response["Cache-Control"], "private, max-age=3600")
-        self.assertError(self.get(f"/members/{stranger.pk}/photo"), 404, "not_found")
+        self.assertEqual(self.get(f"/members/{stranger.pk}/photo").status_code, 200)  # club-wide
+        self.assertError(self.get(f"/members/{outsider.pk}/photo"), 404, "not_found")
+
+    def test_teammate_sees_the_player_picture_as_fallback_but_not_directly(self):
+        stranger = self.stranger()
+        stranger.player_photo = SimpleUploadedFile("sam.png", png_bytes(), content_type="image/png")
+        stranger.save()
+
+        self.assertEqual(self.get(f"/members/{stranger.pk}/photo").status_code, 200)
+        self.assertError(self.get(f"/members/{stranger.pk}/photo?kind=player"), 404, "not_found")
+
+    def test_effective_picture_falls_back_to_the_player_picture(self):
+        self.child.player_photo = SimpleUploadedFile("official.png", png_bytes(), content_type="image/png")
+        self.child.save()
+
+        body = self.get(f"/members/{self.child.pk}").json()
+
+        self.assertIsNotNone(body["photo_url"])
+        self.assertIsNone(body["profile_photo_url"])
+        self.assertIn("kind=player", body["player_photo_url"])
+        self.assertEqual(self.get(f"/members/{self.child.pk}/photo").status_code, 200)
+        self.assertError(self.get(f"/members/{self.child.pk}/photo?kind=profile"), 404, "not_found")
+        self.assertEqual(self.get(f"/members/{self.child.pk}/photo?kind=player").status_code, 200)
+
+    def test_profile_picture_wins_over_the_player_picture(self):
+        self.child.player_photo = SimpleUploadedFile("official.png", png_bytes(), content_type="image/png")
+        self.child.profile_photo = SimpleUploadedFile("kim.png", png_bytes(), content_type="image/png")
+        self.child.save()
+
+        body = self.get(f"/members/{self.child.pk}").json()
+
+        self.assertNotIn("kind=", body["photo_url"])
+        self.assertIn("kind=profile", body["profile_photo_url"])
+        self.assertNotEqual(body["profile_photo_url"], body["player_photo_url"])
 
 
 class RecordingPublisher(PushGateway):

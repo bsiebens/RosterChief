@@ -295,6 +295,14 @@ assume a single member.
 
 `Member`, `Family`, `FamilyMembership` are tenant-scoped (`ClubScopedModel`).
 
+**Member pictures** — two private-storage images per `Member`: `player_photo` (the official picture;
+only editable in the management portal by whoever passes `can_manage_members`; the only picture a
+public surface may ever return, and only with `photo_public_consent`, via `Member.public_photo`) and
+`profile_photo` (self-service via the app/PWA; visible club-wide, never public). `Member.photo` /
+`photo_url` are read-only properties for the effective picture (profile, else player). Access rules
+live in `members.services.photos.can_view_member_photo(user, member, club, field=)`; routes
+`members:photo` (effective), `members:player_photo`, `members:profile_photo`.
+
 **`Member`** — a *person within one club*. `user` becomes a **`ForeignKey`** (was
 `OneToOneField`), still nullable (`on_delete=SET_NULL`), so one login maps to one member
 *per club* (`unique_together (club, user)`) and members can exist without logins (children,
@@ -318,7 +326,7 @@ and `members/services/invites.py` and every management path goes through them:
   member has a login, or any row owned by another club (membership, role, grant, family
   row, roster/staff spot, attendance, evaluation, shop record, …).
 - **Person fields are read-only** to a club while that is true: name, date of birth, email,
-  phones, photo and photo consent (`MemberForm(lock_person_fields=True)` disables them and
+  phones, player picture and photo consent (`MemberForm(lock_person_fields=True)` disables them and
   `MemberUpdateView` never saves them). Club-owned data (this season's `ClubMembership`,
   roles, teams) stays editable. A club also can't grant a login to such a record.
 - **Deletion** — a member is only hard-deleted when the record is the club's alone;

@@ -10,7 +10,7 @@ regardless of what a Django view's own permission check says).
 only way to read a file stored here is through an authenticated Django view that
 streams it explicitly: management.views.MemberRequirementDocumentView for
 MemberRequirementStatus.document (e.g. an uploaded medical certificate),
-members.views.MemberPhotoView for Member.photo, and the authorised invoice
+members.views.MemberPhotoView for Member.player_photo/profile_photo, and the authorised invoice
 download views for the rendered-invoice PDF cache (InvoiceCacheStorage below).
 
 Deliberately local disk only, not S3, regardless of AWS_STORAGE_BUCKET_NAME -- unlike

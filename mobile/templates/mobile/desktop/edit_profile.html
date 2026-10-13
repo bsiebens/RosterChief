@@ -16,12 +16,12 @@
         {% endif %}
 
         <div class="card">
-            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Photo" %}</span></div>
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Profile picture" %}</span></div>
             <div class="flex items-center gap-3 border-b border-rule p-4.5">
                 {% include "mobile/_avatar.html" with person=member size_class="h-16 w-16" text_class="text-2xl" %}
                 <div class="min-w-0 flex-1">
-                    {{ form.photo }}
-                    {% for error in form.photo.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                    {{ form.profile_photo }}
+                    {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
                 </div>
             </div>
             <label class="flex items-center gap-2.5 p-4.5 text-[15px] text-ink">

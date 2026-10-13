@@ -440,6 +440,55 @@ class MemberManagementTests(ManagementTestBase):
         self.assertEqual(member.first_name, "New")
 
 
+class MemberPlayerPhotoTests(ManagementTestBase):
+    """Member.player_photo (the official picture) is only editable in the management portal, by whoever may manage members."""
+
+    def _member(self):
+        member = Member.objects.create(first_name="Pic", last_name="Ture")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        return member
+
+    def _data(self, **extra):
+        return {"first_name": "Pic", "last_name": "Ture", "kind": ClubMembership.Kind.MEMBER, "status": ClubMembership.StatusChoices.ACTIVE, "fee_status": ClubMembership.FeeStatus.UNPAID, **extra}
+
+    def test_a_member_admin_can_upload_the_player_picture(self):
+        member = self._member()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("member_update", self._data(player_photo=make_image_file("player.png")), member.pk)
+
+        self.assertEqual(response.status_code, 302)
+        member.refresh_from_db()
+        self.addCleanup(member.player_photo.delete, save=False)
+        self.assertTrue(member.player_photo)
+        self.assertFalse(member.profile_photo)
+
+    def test_the_form_labels_the_picture_as_the_player_picture(self):
+        member = self._member()
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_update", member.pk)
+
+        self.assertContains(response, "Player picture")
+        self.assertNotContains(response, "profile_photo")
+
+    def test_staff_without_member_rights_cannot_reach_the_edit_view(self):
+        member = self._member()
+        coach_user = User.objects.create_user(email="coach-pp@example.com", password="pw-secret-123")
+        coach_member = Member.objects.create(user=coach_user, first_name="Cody", last_name="Coach")
+        team = Team.objects.create(club=self.club, name="U13", short_name="U13")
+        position = Position.objects.create(club=self.club, name="CoachPP", short_name="CP", staff_position=True, management_position=True)
+        StaffAssignment.objects.create(team=team, member=coach_member, season=self.season, position=position)
+        self.client.force_login(coach_user)
+
+        self.assertEqual(self.club_get("member_update", member.pk).status_code, 403)
+        response = self.club_post("member_update", self._data(player_photo=make_image_file("player.png")), member.pk)
+
+        self.assertEqual(response.status_code, 403)
+        member.refresh_from_db()
+        self.assertFalse(member.player_photo)
+
+
 class MemberAttendanceSparklineTests(ManagementTestBase):
     """The D7-alike attendance card on member_detail.html --
     events.services.attendance.member_attendance_sparkline/_counts."""

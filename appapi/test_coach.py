@@ -247,8 +247,8 @@ class AttendanceTests(CoachApiTestCase):
         self.assertEqual(row["position"], "")
 
     def test_photo_url_only_when_the_account_may_see_it(self):
-        Member.objects.filter(pk=self.ann.pk).update(photo="members/ann.jpg", photo_public_consent=True)
-        Member.objects.filter(pk=self.cy.pk).update(photo="members/cy.jpg")
+        Member.objects.filter(pk=self.ann.pk).update(player_photo="members/ann.jpg", photo_public_consent=True)
+        Member.objects.filter(pk=self.cy.pk).update(player_photo="members/cy.jpg")
 
         silent = self.rows(filter="silent")["items"][0]
         responded = self.rows()["items"][0]
@@ -257,7 +257,7 @@ class AttendanceTests(CoachApiTestCase):
         self.assertIn(f"/api/app/v1/members/{self.cy.pk}/photo?v=", silent["photo_url"])  # team staff may see their players
 
     def test_photo_url_is_null_for_someone_the_account_may_not_see(self):
-        guest = Member.objects.create(first_name="Gus", last_name="Guest", photo="members/gus.jpg")
+        guest = Member.objects.create(first_name="Gus", last_name="Guest", player_photo="members/gus.jpg")
         Attendance.objects.create(event=self.game, member=guest, status=Status.PRESENT)
 
         row = next(row for row in self.rows()["items"] if row["first_name"] == "Gus")
