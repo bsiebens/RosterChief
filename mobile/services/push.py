@@ -21,7 +21,7 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
-from notifications import delivery_log
+from notifications import delivery_log, sandbox
 from notifications.preferences import is_enabled
 from notifications.services import muted_push_users, preference_key, quiet_decisions, recipient_user_ids, users_with_native_push
 
@@ -88,6 +88,8 @@ def _send(subscription, payload: str) -> tuple[str, str]:
     outcome is ``sent``, ``dead`` (the push service says the registration is gone for good: 404/410),
     ``retry`` (throttled, a server error, a timeout or connection error) or ``failed`` (refused, or
     a stored key pywebpush rejects)."""
+    if sandbox.enabled():
+        return _sandbox_send(subscription, payload)
     try:
         webpush(
             subscription_info=subscription.as_subscription_info(),
@@ -111,6 +113,26 @@ def _send(subscription, payload: str) -> tuple[str, str]:
         # still get theirs.
         return "failed", str(exc)
     return "sent", ""
+
+
+def _sandbox_send(subscription, payload: str) -> tuple[str, str]:
+    """``_send`` under the sending sandbox: the push is stored (payload + endpoint host) instead of sent."""
+    try:
+        parsed = json.loads(payload)
+    except ValueError:
+        parsed = {"raw": payload}
+    request = {**(parsed if isinstance(parsed, dict) else {"payload": parsed}), "endpoint": urlsplit(subscription.endpoint).hostname or ""}
+    outcome = sandbox.capture(
+        channel="web", provider="webpush", target=subscription.pk, title=request.get("title", ""), body=request.get("body", ""), request=request, user=getattr(subscription.member, "user", None), club=subscription.club
+    )
+    Outcome = sandbox.Outcome
+    if outcome == Outcome.DELIVERED:
+        return "sent", ""
+    if outcome == Outcome.DEAD:
+        return "dead", "sandbox: subscription gone (410)"
+    if outcome in (Outcome.THROTTLED, Outcome.TIMEOUT):
+        return "retry", "sandbox: throttled (429)" if outcome == Outcome.THROTTLED else "sandbox: timed out"
+    return "failed", "sandbox: push service refused the request (400)"
 
 
 def _deliver(subscription, payload: str, *, label, notification=None, hold_until=None) -> None:
@@ -151,7 +173,7 @@ def _deliver(subscription, payload: str, *, label, notification=None, hold_until
 
 
 def send_push_to_member(member, *, title: str, body: str, url: str = "/app/", notification=None) -> None:
-    if not settings.VAPID_PRIVATE_KEY:
+    if not (settings.VAPID_PRIVATE_KEY or sandbox.enabled()):
         # Dev/no-config default -- see the settings.py comment next to VAPID_PRIVATE_KEY.
         return
 
@@ -170,7 +192,7 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/", 
     """Web push to every subscription this account's people in ``club`` hold --
     for pushes that aren't a stored Notification (e.g. live game updates,
     events.services.game_push). Returns how many subscriptions it was sent to."""
-    if not settings.VAPID_PRIVATE_KEY:
+    if not (settings.VAPID_PRIVATE_KEY or sandbox.enabled()):
         return 0
     if not is_enabled(user, club, category, "push"):
         return 0  # push muted for this category: native and web alike
@@ -193,7 +215,7 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     account gets one push per distinct notification even when it concerns several of its
     children, and an account with an active native install is skipped: it gets this through
     the native channel (appapi.delivery)."""
-    if not settings.VAPID_PRIVATE_KEY or not notifications:
+    if not (settings.VAPID_PRIVATE_KEY or sandbox.enabled()) or not notifications:
         return
 
     recipients = {notification.pk: recipient_user_ids(notification) for notification in notifications}

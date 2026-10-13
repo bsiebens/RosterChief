@@ -14,9 +14,13 @@ def job_health(request):
         return {}
 
     # A count, not the queryset: every consumer only ever shows the number.
-    context = {"failed_jobs": recent_job_failures().count(), "failure_window_hours": FAILURE_WINDOW_HOURS}
+    from notifications import sandbox
+
+    context = {"sandbox_on": sandbox.enabled(), "failed_jobs": recent_job_failures().count(), "failure_window_hours": FAILURE_WINDOW_HOURS}
     # Only for the superusers who see the Push tab: one cheap count of unresolved alerts.
     user = getattr(request, "user", None)
+    if context["sandbox_on"]:
+        context["sandbox_expires_at"] = sandbox.status()["expires_at"]
     if user is not None and user.is_superuser:
         from notifications.models import PushAlert
 

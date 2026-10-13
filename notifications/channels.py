@@ -7,7 +7,7 @@ import time
 from . import delivery_log
 from .dispatch import Channel
 from .models import Notification
-from .services import resend_email, send_notification_emails
+from .services import MailboxRefused, resend_email, send_notification_emails
 
 
 class EmailChannel(Channel):
@@ -26,6 +26,9 @@ class EmailChannel(Channel):
         started = time.monotonic()
         try:
             resend_email(notification, email)
+        except MailboxRefused as error:
+            delivery_log.mark_failed(delivery, error, retryable=False, provider="email", duration_ms=delivery_log.elapsed_ms(started))
+            return
         except OSError as error:
             delivery_log.mark_failed(delivery, error, retryable=True, provider="email", duration_ms=delivery_log.elapsed_ms(started))
             return

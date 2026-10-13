@@ -13,6 +13,16 @@ the **outbox** (durable dispatch, game push ordering fixed), **health alerts** t
 quiet hours and critical priority**, and **announcement controls** (audience filters, test send, one
 notification per person across clubs).
 
+**Also built: the sending sandbox** (control panel > Push monitoring > Sending sandbox). A runtime
+live/sandbox switch (works in production, audited, optional auto-switch-back, banner on every control
+panel page, health alert) that captures pushes and notification mail instead of sending them, with a
+failure scenario (ok / throttle / target gone / refused / timeout + latency) to exercise retries, the
+delivery log, monitoring and alerts. It tests the sending side only; account mail and invoices are never
+sandboxed. Ideas left: scope the sandbox to chosen clubs or accounts (a "canary" so only test users are
+sandboxed while everyone else stays live), per-provider scenarios, a scripted scenario ("throttle for 10
+minutes, then recover"), and a fake *receiver* (a tiny page that acknowledges captured pushes as
+"received" to test read/badge flows).
+
 **Next, in order:**
 
 1. **Verify on real devices and providers** (still never done): a real Android phone + Firebase

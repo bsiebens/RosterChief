@@ -289,6 +289,10 @@ APP_PUSH_GATEWAY = ""
 # Deliver notifications on the calling thread instead of after commit on a background thread
 # (notifications.dispatch). Only the test runner turns this on.
 NOTIFICATIONS_DISPATCH_EAGER = False
+# The sending-side sandbox (notifications/sandbox.py): push and email are captured in the database instead
+# of reaching Apple, Google, browsers or the mail server, and a failure scenario can be injected from the
+# control panel. For development and test servers only: NEVER on in production.
+PUSH_SANDBOX = config("PUSH_SANDBOX", default=False, cast=bool)
 
 # TOTP secrets and recovery-code seeds are Fernet-encrypted at rest (authentication/crypto.py)
 # under this key -- generate one with

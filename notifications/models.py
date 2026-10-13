@@ -274,3 +274,78 @@ class PushAlert(models.Model):
     @property
     def is_open(self) -> bool:
         return self.resolved_at is None
+
+
+class SandboxMessage(models.Model):
+    """A push or email the platform *would* have sent, captured instead of handed to Apple, Google, a
+    browser push service or the mail server (``settings.PUSH_SANDBOX``). Holds the exact request the real
+    provider would have received, plus what the sandbox's failure scenario made of it, so the sending side
+    -- payloads, headers, policy, retries, the delivery log, monitoring and alerts -- can be tested
+    without devices. Nothing here says anything about the receiving end."""
+
+    class Outcome(models.TextChoices):
+        DELIVERED = "delivered", _("Delivered")
+        THROTTLED = "throttled", _("Throttled (429)")
+        DEAD = "dead", _("Target gone")
+        ERROR = "error", _("Refused")
+        TIMEOUT = "timeout", _("Timed out")
+
+    created = models.DateTimeField(_("created"), auto_now_add=True, db_index=True)
+    channel = models.CharField(_("channel"), max_length=16, choices=NotificationDelivery.Channel.choices)
+    provider = models.CharField(_("provider"), max_length=16)
+    target = models.CharField(_("target"), max_length=255)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
+    club = models.ForeignKey("club.Club", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("club"))
+    title = models.CharField(_("title"), max_length=255, blank=True)
+    body = models.TextField(_("body"), blank=True)
+    #: The request body exactly as the provider would have got it (APNs JSON, the FCM message, the web push payload, the mail's parts).
+    request = models.JSONField(_("request"), default=dict, blank=True)
+    #: The HTTP headers it would have carried (apns-expiration, apns-priority, collapse id, ...), without secrets.
+    headers = models.JSONField(_("headers"), default=dict, blank=True)
+    outcome = models.CharField(_("outcome"), max_length=12, choices=Outcome.choices, default=Outcome.DELIVERED)
+
+    class Meta:
+        verbose_name = _("sandbox message")
+        verbose_name_plural = _("sandbox messages")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.provider} → {self.target} ({self.outcome})"
+
+
+class SandboxState(models.Model):
+    """The sandbox switch and scenario, one row (``pk=1``), editable from the control panel so the
+    platform can be flipped between *live* and *sandbox* without a deploy -- in production too. ``enabled``
+    ``None`` follows ``settings.PUSH_SANDBOX`` (the default, off). ``expires_at`` switches it back to live
+    on its own, so a forgotten sandbox cannot silently swallow every push."""
+
+    enabled = models.BooleanField(_("sandbox on"), null=True, blank=True, default=None, help_text=_("Empty follows the PUSH_SANDBOX setting."))
+    scenario = models.CharField(_("scenario"), max_length=12, default="ok")
+    latency_ms = models.PositiveIntegerField(_("latency (ms)"), default=0)
+    expires_at = models.DateTimeField(_("switches back to live at"), null=True, blank=True)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("changed by"))
+    changed_at = models.DateTimeField(_("changed at"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("sandbox state")
+        verbose_name_plural = _("sandbox state")
+
+    def __str__(self):
+        return f"sandbox {self.enabled} ({self.scenario})"
+
+
+class SandboxEvent(models.Model):
+    """Append-only audit trail of who switched the sandbox or its scenario, and when -- shown on the control panel."""
+
+    at = models.DateTimeField(_("at"), auto_now_add=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("account"))
+    action = models.CharField(_("action"), max_length=32)
+    detail = models.CharField(_("detail"), max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = _("sandbox event")
+        verbose_name_plural = _("sandbox events")
+        ordering = ["-at"]
+
+    def __str__(self):
+        return f"{self.at:%Y-%m-%d %H:%M} {self.action}"

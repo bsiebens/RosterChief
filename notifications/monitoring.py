@@ -17,6 +17,7 @@ from django.db.models import Count, Max, Min, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from . import sandbox
 from .models import NotificationDelivery
 
 Status = NotificationDelivery.Status
@@ -198,7 +199,7 @@ def configuration() -> dict:
         bucket["enabled" if row["enabled"] else "disabled"] += row["n"]
         bucket["stale"] += row["stale"]
     apns, fcm = apns_configured(), fcm_configured()
-    vapid = bool(settings.VAPID_PRIVATE_KEY)
+    vapid = bool(settings.VAPID_PRIVATE_KEY) or sandbox.enabled()
     subscriptions = PushSubscription.objects.count()
     for platform, configured in (("ios", apns), ("android", fcm)):
         devices[platform]["mismatch"] = not configured and (devices[platform]["enabled"] + devices[platform]["disabled"]) > 0

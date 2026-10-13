@@ -57,6 +57,30 @@ class PushAlertTests(TestCase):
         self.assertIn("[RosterChief] Push problem: APNs (iOS) is down", mail.outbox[0].subject)
         self.assertIn("/control/push/", mail.outbox[0].body)
 
+    def test_the_sandbox_being_on_is_an_alert_until_it_is_switched_back(self):
+        from notifications import sandbox
+
+        sandbox.set_mode(self.root, on=True)
+        alerts.evaluate()
+
+        self.assertTrue(PushAlert.objects.get(key="sandbox").is_open)
+        self.assertEqual(self.recipients(), {"root@example.com", "root2@example.com"})
+
+        sandbox.set_mode(self.root, on=False)
+        alerts.evaluate()
+
+        self.assertFalse(PushAlert.objects.get(key="sandbox").is_open)
+
+    def test_a_sandbox_period_that_ran_out_is_recorded_and_resolved(self):
+        from notifications import sandbox
+        from notifications.models import SandboxEvent
+
+        sandbox.set_mode(self.root, on=True, expires_in=timedelta(minutes=30))
+        alerts.evaluate(now=timezone.now() + timedelta(hours=1))
+
+        self.assertFalse(sandbox.enabled())
+        self.assertTrue(SandboxEvent.objects.filter(action="expired").exists())
+
     def test_quiet_provider_below_min_volume_is_not_an_alert(self):
         self.fail(3)
         alerts.evaluate()

@@ -20,7 +20,7 @@ from django.utils.functional import Promise
 
 from rosterchief.mail import send_message
 
-from . import delivery_log
+from . import delivery_log, sandbox
 from .dispatch import schedule_notifications
 from .models import Notification
 from .policy import policy_for
@@ -169,6 +169,39 @@ def _build_message(subject, text_body, html_body, email, attachments=None):
     return message
 
 
+class MailboxRefused(ValueError):
+    """The sending sandbox's "the mail server refused this message for good" (a dead or refusing mailbox):
+    deliberately not an ``OSError``, so it is logged ``failed`` and never retried."""
+
+
+def _send_notification_message(message) -> bool:
+    """``send_message`` for notification mail. Under the sending sandbox each recipient's copy is stored instead
+    of sent (the EmailSuppression pause still applies); throttled/timeout raise ``OSError`` (retryable),
+    dead/error raise ``MailboxRefused``. Account, invoice and billing mail never come through here."""
+    if not sandbox.enabled():
+        return send_message(message, fail_silently=False)
+    from features.models import EmailSuppression
+
+    if EmailSuppression.is_on():
+        return False
+    html = next((content for content, mimetype in getattr(message, "alternatives", []) if mimetype == "text/html"), "")
+    attachments = [attachment[0] if isinstance(attachment, tuple) else attachment.get_filename() for attachment in message.attachments]
+    request = {"to": list(message.to), "from": message.from_email, "subject": message.subject, "text": message.body, "html": html, "attachments": attachments}
+    Outcome = sandbox.Outcome
+    failure = None
+    for recipient in [*message.to, *message.cc, *message.bcc]:
+        outcome = sandbox.capture(channel="email", provider="email", target=recipient, title=message.subject, body=message.body, request=request)
+        if outcome == Outcome.THROTTLED:
+            failure = failure or OSError("sandbox: mail server throttled the message (451)")
+        elif outcome == Outcome.TIMEOUT:
+            failure = failure or TimeoutError("sandbox: mail server timed out")
+        elif outcome in (Outcome.DEAD, Outcome.ERROR):
+            failure = failure or MailboxRefused("sandbox: mailbox refused the message (550)")
+    if failure is not None:
+        raise failure
+    return True
+
+
 def _send_email(notification: Notification, emails: list[str], attachments=None) -> list[str]:
     """Send to each address and log one delivery row per address; returns the addresses that went out.
     A failed plain mail is logged for retry; one with attachments can't be re-sent later (the
@@ -188,7 +221,10 @@ def _send_email(notification: Notification, emails: list[str], attachments=None)
             user = get_user_model()(pk=users[email.lower()])
         started = time.monotonic()
         try:
-            send_message(message, fail_silently=False)
+            _send_notification_message(message)
+        except MailboxRefused as error:  # permanent (sandbox: dead/refusing mailbox): logged failed, never retried
+            delivery_log.record(club=notification.club, channel="email", target=email, outcome="failed", notification=notification, user=user, error=error, provider="email", duration_ms=delivery_log.elapsed_ms(started))
+            continue
         except OSError as error:
             duration_ms = delivery_log.elapsed_ms(started)
             # Never fatal -- the Notification row (and whichever other addresses
@@ -209,7 +245,7 @@ def _send_email(notification: Notification, emails: list[str], attachments=None)
 def resend_email(notification: Notification, email: str) -> None:
     """Send the notification mail to one address again (the email channel's retry). Raises OSError."""
     subject, text_body, html_body = _render_email(notification)
-    send_message(_build_message(subject, text_body, html_body, email), fail_silently=False)
+    _send_notification_message(_build_message(subject, text_body, html_body, email))
 
 
 def _text_in(value, language: str) -> str:

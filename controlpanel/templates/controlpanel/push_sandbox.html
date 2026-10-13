@@ -1,0 +1,211 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    The sending sandbox (settings.PUSH_SANDBOX, notifications/sandbox.py): pick what the fake provider
+    answers, see what was captured. View: controlpanel.views.PushSandboxView. State is always shown as
+    text as well as colour.
+{% endcomment %}
+
+{% block panel_title %}{% trans "Sending sandbox" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="hover:text-ink" href="{% url 'controlpanel:push_monitoring' %}">{% trans "push" %}</a>
+    <span class="text-edge">|</span>
+    <span class="text-ink">{% trans "sandbox" %}</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="flex justify-end">
+        <a class="btn btn-sm btn-outline" href="{% url 'controlpanel:push_monitoring' %}">{% lucide "arrow-left" size=14 %} {% trans "Push monitoring" %}</a>
+    </div>
+
+    {# --- Mode ----------------------------------------------------------- #}
+    <div class="card p-4 {% if sandbox_on %}border-2 border-warn{% endif %}" data-testid="mode-panel">
+        {% if sandbox_on %}
+            <h2 class="font-display text-lg font-extrabold tracking-[.06em] text-ink uppercase" data-testid="mode-sandbox">{% lucide "flask-conical" size=18 class="inline -mt-0.5 mr-1" %}{% trans "Sandbox mode: nothing is sent to users" %}</h2>
+            <p class="mt-1 text-sm text-slate">{% trans "Pushes and notification emails are captured below instead of being sent." %}</p>
+            <p class="mt-1 font-mono text-[11px] text-muted">
+                {% if sandbox_status.expires_at %}{% blocktrans with at=sandbox_status.expires_at|date:"d/m H:i" %}Switches back to live at {{ at }}.{% endblocktrans %}{% else %}{% trans "Stays on until you switch back to live." %}{% endif %}
+                {% if sandbox_status.changed_by %}{% blocktrans with who=sandbox_status.changed_by at=sandbox_status.changed_at|date:"d/m H:i" %}Last changed by {{ who }} at {{ at }}.{% endblocktrans %}{% endif %}
+            </p>
+            <form method="post" action="{% url 'controlpanel:push_sandbox' %}" class="mt-3">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="live">
+                <button class="btn btn-sm btn-primary" type="submit" data-testid="switch-live">{% lucide "radio" size=14 %} {% trans "Switch back to live" %}</button>
+            </form>
+        {% else %}
+            <h2 class="font-display text-lg font-extrabold tracking-[.06em] text-ink uppercase" data-testid="mode-live">{% lucide "radio" size=18 class="inline -mt-0.5 mr-1" %}{% trans "Live: pushes and emails are sent for real" %}</h2>
+            <p class="mt-1 text-sm text-slate">{% trans "Switch to sandbox mode to capture pushes and notification emails instead of sending them, and to simulate provider failures." %}</p>
+            {% if sandbox_status.changed_by %}<p class="mt-1 font-mono text-[11px] text-muted">{% blocktrans with who=sandbox_status.changed_by at=sandbox_status.changed_at|date:"d/m H:i" %}Last changed by {{ who }} at {{ at }}.{% endblocktrans %}</p>{% endif %}
+            <button class="btn btn-sm btn-outline mt-3" type="button" onclick="document.getElementById('sandbox_on_modal').showModal()" data-testid="switch-sandbox">{% lucide "flask-conical" size=14 %} {% trans "Switch to sandbox" %}</button>
+        {% endif %}
+        <p class="mt-3 text-xs text-muted">{% trans "The sandbox only affects the notification pipeline: pushes and notification emails. Account emails (password reset, verification) and invoices are not affected." %}</p>
+    </div>
+
+    <dialog id="sandbox_on_modal" class="modal">
+        <div class="modal-box">
+            <h3 class="text-lg font-bold">{% trans "Switch to sandbox mode?" %}</h3>
+            <p class="py-2 text-sm opacity-70">{% trans "Nobody will receive push notifications or notification emails until you switch back; account emails and invoices are not affected." %}</p>
+            <form method="post" action="{% url 'controlpanel:push_sandbox' %}" id="sandbox_on_modal-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="sandbox_on">
+                <input type="hidden" name="confirm" value="1">
+                <label class="block font-mono text-[11px] text-muted" for="expires-in">{% trans "Switch back to live automatically after" %}</label>
+                <select id="expires-in" name="expires_in" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                    {% for minutes, label in expiry_choices %}<option value="{{ minutes }}" {% if minutes == 60 %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </form>
+            <div class="modal-action">
+                <form method="dialog"><button class="btn btn-outline gap-2">{% lucide "x" size=16 %} {% trans "Cancel" %}</button></form>
+                <button class="btn btn-error gap-2" type="submit" form="sandbox_on_modal-form">{% lucide "flask-conical" size=16 %} {% trans "Switch to sandbox" %}</button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
+
+    {# --- Scenario ------------------------------------------------------- #}
+    <div class="card p-4" data-testid="scenario">
+        <div class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Provider scenario" %}</div>
+        {% if not sandbox_on %}<p class="mt-1 text-sm text-slate" data-testid="scenario-disabled-note">{% trans "The scenario only applies while the sandbox is on. Switch to sandbox mode to change it." %}</p>{% endif %}
+        <p class="mt-1 text-sm" data-testid="current-scenario">
+            {% for name, label, text in scenarios %}{% if name == scenario.name %}
+                {% blocktrans with label=label ms=scenario.latency_ms %}Current: {{ label }}, latency {{ ms }} ms{% endblocktrans %}
+            {% endif %}{% endfor %}
+        </p>
+        <form method="post" action="{% url 'controlpanel:push_sandbox' %}" class="mt-3 flex flex-wrap items-end gap-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_scenario">
+            <div>
+                <label class="block font-mono text-[11px] text-muted" for="scenario-select">{% trans "Scenario" %}</label>
+                <select id="scenario-select" name="scenario" class="rounded border border-line bg-white px-2 py-1 text-sm" {% if not sandbox_on %}disabled{% endif %}>
+                    {% for name, label, text in scenarios %}<option value="{{ name }}" {% if name == scenario.name %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block font-mono text-[11px] text-muted" for="latency-input">{% trans "Latency (ms)" %}</label>
+                <input id="latency-input" name="latency_ms" type="number" min="0" max="{{ max_latency }}" step="50" value="{{ scenario.latency_ms }}" class="w-28 rounded border border-line bg-white px-2 py-1 text-sm" {% if not sandbox_on %}disabled{% endif %}>
+            </div>
+            <button class="btn btn-sm btn-primary" type="submit" {% if not sandbox_on %}disabled{% endif %}>{% lucide "save" size=14 %} {% trans "Set scenario" %}</button>
+        </form>
+        <dl class="mt-3 space-y-1 text-sm">
+            {% for name, label, text in scenarios %}
+                <div><dt class="inline font-semibold text-ink">{{ label }}:</dt> <dd class="inline text-slate">{{ text }}</dd></div>
+            {% endfor %}
+        </dl>
+    </div>
+
+    {# --- Audit trail ---------------------------------------------------- #}
+    <div class="card" data-testid="audit-trail">
+        <div class="px-4 pt-3 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Audit trail" %}</div>
+        <div class="overflow-x-auto">
+            <table class="table">
+                <thead><tr><th>{% trans "Time" %}</th><th>{% trans "Who" %}</th><th>{% trans "Action" %}</th><th>{% trans "Detail" %}</th></tr></thead>
+                <tbody>
+                    {% for event in events %}
+                        <tr>
+                            <td class="font-mono text-xs whitespace-nowrap">{{ event.at|date:"d/m H:i:s" }}</td>
+                            <td class="font-mono text-xs">{% if event.user %}{{ event.user.get_username }}{% else %}{% trans "system" %}{% endif %}</td>
+                            <td class="font-mono text-xs">{{ event.action }}</td>
+                            <td class="font-mono text-xs">{{ event.detail|default:"—" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="text-center text-muted">{% trans "Nobody has changed the sandbox yet." %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if sandbox_on %}
+        {# --- Sample --------------------------------------------------------- #}
+        <div class="card flex flex-wrap items-center gap-3 p-4">
+            <form method="post" action="{% url 'controlpanel:push_sandbox_sample' %}">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-outline" type="submit" data-testid="sample-push">{% lucide "send" size=14 %} {% trans "Send a sample push to myself" %}</button>
+            </form>
+            <p class="text-sm text-slate">{% trans "Runs the whole pipeline once for your own account in your first club. You also get the email capture; a push appears only if you have a device registered." %}</p>
+        </div>
+    {% endif %}
+
+        {# --- Captured ------------------------------------------------------- #}
+        <div class="card" data-testid="captured">
+            <div class="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
+                <div class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Captured messages" %}</div>
+                <button class="btn btn-sm btn-outline" type="button" onclick="document.getElementById('sandbox_clear_modal').showModal()">{% lucide "trash-2" size=14 %} {% trans "Clear all" %}</button>
+            </div>
+            <form method="get" class="flex flex-wrap items-end gap-2 px-4 pt-2">
+                <div>
+                    <label class="block font-mono text-[11px] text-muted" for="f-channel">{% trans "Channel" %}</label>
+                    <select id="f-channel" name="channel" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                        <option value="">{% trans "All" %}</option>
+                        {% for value, label in channels %}<option value="{{ value }}" {% if filters.channel == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-mono text-[11px] text-muted" for="f-provider">{% trans "Provider" %}</label>
+                    <select id="f-provider" name="provider" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                        <option value="">{% trans "All" %}</option>
+                        {% for value in providers %}<option value="{{ value }}" {% if filters.provider == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-mono text-[11px] text-muted" for="f-outcome">{% trans "Outcome" %}</label>
+                    <select id="f-outcome" name="outcome" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                        <option value="">{% trans "All" %}</option>
+                        {% for value, label in outcomes %}<option value="{{ value }}" {% if filters.outcome == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-mono text-[11px] text-muted" for="f-club">{% trans "Club" %}</label>
+                    <select id="f-club" name="club" class="rounded border border-line bg-white px-2 py-1 text-sm">
+                        <option value="">{% trans "All clubs" %}</option>
+                        {% for c in clubs %}<option value="{{ c.pk }}" {% if filters.club == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <button class="btn btn-sm btn-outline" type="submit">{% trans "Filter" %}</button>
+            </form>
+            <ul class="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 font-mono text-[11px] text-slate" data-testid="outcome-counts">
+                {% for value, label, count in outcome_counts %}<li data-outcome="{{ value }}">{{ label }}: <span class="tabular-nums">{{ count }}</span></li>{% endfor %}
+            </ul>
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr><th>{% trans "Time" %}</th><th>{% trans "Channel / provider" %}</th><th>{% trans "Club" %}</th><th>{% trans "Target" %}</th><th>{% trans "Title" %}</th><th>{% trans "Outcome" %}</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for m in captured %}
+                            <tr data-message="{{ m.pk }}">
+                                <td class="font-mono text-xs whitespace-nowrap">{{ m.created|date:"d/m H:i:s" }}</td>
+                                <td class="font-mono text-xs">{{ m.get_channel_display }} / {{ m.provider }}</td>
+                                <td>{{ m.club.name|default:"—" }}</td>
+                                <td class="font-mono text-xs break-all">{{ m.target }}</td>
+                                <td>
+                                    <details>
+                                        <summary class="cursor-pointer">{{ m.title|default:"—" }}</summary>
+                                        <div class="mt-2 space-y-2 text-xs">
+                                            <div class="font-semibold">{% trans "Body" %}</div>
+                                            <pre class="overflow-x-auto rounded bg-white p-2 whitespace-pre-wrap">{{ m.body }}</pre>
+                                            <div class="font-semibold">{% trans "Headers" %}</div>
+                                            <pre class="overflow-x-auto rounded bg-white p-2">{{ m.pretty_headers }}</pre>
+                                            <div class="font-semibold">{% trans "Request" %}</div>
+                                            <pre class="overflow-x-auto rounded bg-white p-2">{{ m.pretty_request }}</pre>
+                                        </div>
+                                    </details>
+                                </td>
+                                <td><span class="badge badge-sm {% if m.outcome == 'delivered' %}badge-success{% elif m.outcome == 'throttled' or m.outcome == 'timeout' %}badge-warning{% else %}badge-error{% endif %}">{{ m.get_outcome_display }}</span></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="6" class="text-center text-muted">{% trans "Nothing captured yet." %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="px-4 pb-3 font-mono text-[11px] text-muted">{% trans "Latest 100 messages, newest first. Captured messages contain real recipients' data; they are deleted after 7 days or with Clear all." %}</p>
+        </div>
+        {% trans "Clear all captured messages" as clear_title %}
+        {% trans "Every captured message is deleted. This cannot be undone." as clear_body %}
+        {% trans "Clear all" as clear_label %}
+        {% url 'controlpanel:push_sandbox_clear' as clear_url %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id="sandbox_clear_modal" title=clear_title body=clear_body action_url=clear_url submit_label=clear_label %}
+{% endblock panel %}

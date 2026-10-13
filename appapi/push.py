@@ -43,6 +43,7 @@ import jwt
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+from notifications import sandbox
 from notifications.policy import PushPolicy
 
 from .models import PushDevice
@@ -126,6 +127,8 @@ def apns_policy_headers(policy: PushPolicy | None, collapse_id: str | None = Non
 
 
 def apns_configured() -> bool:
+    if sandbox.enabled():
+        return True
     return bool(settings.APP_PUSH_APNS_KEY_ID and settings.APP_PUSH_APNS_TEAM_ID and (settings.APP_PUSH_APNS_KEY or settings.APP_PUSH_APNS_KEY_FILE))
 
 
@@ -224,6 +227,8 @@ FCM_DEAD_TOKEN_CODES = {"UNREGISTERED"}
 
 
 def fcm_configured() -> bool:
+    if sandbox.enabled():
+        return True
     return bool(settings.APP_PUSH_FCM_CREDENTIALS or settings.APP_PUSH_FCM_CREDENTIALS_FILE)
 
 
@@ -352,13 +357,72 @@ class PlatformGateway(PushGateway):
         return True if gateway is None else gateway.live_activity(device, **kwargs)
 
 
+def _sandbox_club(data: dict | None):
+    """The club a pushed ``club_slug`` names, for the sandbox's inbox (None when absent)."""
+    slug = (data or {}).get("club_slug")
+    if not slug:
+        return None
+    from club.models import Club
+
+    return Club.objects.filter(slug=slug).first()
+
+
+class SandboxGateway(PushGateway):
+    """``settings.PUSH_SANDBOX``: builds the exact APNs/FCM request, stores it as a ``SandboxMessage`` instead
+    of sending it, and answers as the active failure scenario dictates (notifications.sandbox)."""
+
+    def supports(self, device):
+        return device.platform in (PushDevice.Platform.IOS, PushDevice.Platform.ANDROID)
+
+    def _outcome(self, outcome, error_class, provider):
+        Outcome = sandbox.Outcome
+        if outcome == Outcome.DELIVERED:
+            return True
+        if outcome == Outcome.DEAD:
+            return False  # the caller disables the device, as for a real dead token
+        if outcome == Outcome.THROTTLED:
+            raise error_class(f"{provider} sandbox: throttled", status_code=429)
+        if outcome == Outcome.TIMEOUT:
+            raise httpx.ConnectTimeout(f"{provider} sandbox: timed out")
+        raise error_class(f"{provider} sandbox: request refused", status_code=400)
+
+    def _apns(self, device, payload, *, title, body, headers, club):
+        outcome = sandbox.capture(channel="native", provider="apns", target=device.installation_id, title=title, body=body, request=payload, headers=headers, user=device.user, club=club)
+        return self._outcome(outcome, ApnsError, "APNs")
+
+    def publish(self, device, *, title, body, data, badge=None, thread_id=None, policy=None, collapse_id=None):
+        club = _sandbox_club(data)
+        if device.platform == PushDevice.Platform.IOS:
+            headers = {
+                "apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID,
+                "apns-push-type": "alert",
+                "apns-priority": str(policy.apns_priority if policy else 10),
+                **apns_policy_headers(policy, collapse_id),
+            }
+            payload = build_payload(title=title, body=body, data=data, badge=badge, thread_id=thread_id)
+            return self._apns(device, payload, title=title, body=body, headers=headers, club=club)
+        if device.platform == PushDevice.Platform.ANDROID:
+            message = build_fcm_message(device, title=title, body=body, data=data, thread_id=thread_id, policy=policy, collapse_id=collapse_id)
+            outcome = sandbox.capture(channel="native", provider="fcm", target=device.installation_id, title=title, body=body, request=message, user=device.user, club=club)
+            return self._outcome(outcome, FcmError, "FCM")
+        return True
+
+    def live_activity(self, device, *, token, event, content_state, attributes=None, alert=None, stale_at=None, dismiss_at=None, priority=10):
+        if device.platform != PushDevice.Platform.IOS:
+            return True
+        payload = build_live_activity_payload(event=event, content_state=content_state, attributes=attributes, alert=alert, stale_at=stale_at, dismiss_at=dismiss_at)
+        headers = {"apns-topic": settings.APP_PUSH_APNS_BUNDLE_ID + ".push-type.liveactivity", "apns-push-type": "liveactivity", "apns-priority": str(priority)}
+        title = (alert or {}).get("title", "") or f"Live Activity {event}"
+        return self._apns(device, payload, title=str(title), body=str((alert or {}).get("body", "")), headers=headers, club=None)
+
+
 _apns_gateway: ApnsGateway | None = None
 _fcm_gateway: FcmGateway | None = None
 
 
 def push_configured() -> bool:
-    """Whether any platform can be pushed to (or a gateway override is set, as tests do)."""
-    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or apns_configured() or fcm_configured())
+    """Whether any platform can be pushed to (or a gateway override is set, as tests do, or the sandbox is on)."""
+    return bool(getattr(settings, "APP_PUSH_GATEWAY", "") or sandbox.enabled() or apns_configured() or fcm_configured())
 
 
 def is_retryable(error: Exception) -> bool:
@@ -374,6 +438,8 @@ def get_gateway() -> PushGateway:
     override = getattr(settings, "APP_PUSH_GATEWAY", "")
     if override:
         return import_string(override)()
+    if sandbox.enabled():
+        return SandboxGateway()
     if not (apns_configured() or fcm_configured()):
         return NullGateway()
     if apns_configured() and _apns_gateway is None:

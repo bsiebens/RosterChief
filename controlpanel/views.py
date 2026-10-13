@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from contextlib import contextmanager
@@ -122,6 +123,151 @@ class PushMonitoringView(PlatformSuperuserRequiredMixin, TemplateView):
 
         open_alerts = list(PushAlert.objects.filter(resolved_at__isnull=True).order_by("first_seen"))
         return super().get_context_data(nav="push", club=club, clubs=Club.objects.order_by("name"), windows=windows, open_alerts=open_alerts, **data, **kwargs)
+
+
+class PushSandboxView(PlatformSuperuserRequiredMixin, TemplateView):
+    """The sending sandbox (``settings.PUSH_SANDBOX``, see notifications/sandbox.py): choose what the fake
+    provider answers, inspect what was captured. The page is also the live/sandbox switch (it works in production):
+    POST ``action`` is ``sandbox_on`` (needs ``confirm=1``; optional ``expires_in`` minutes), ``live`` or ``set_scenario``."""
+
+    EXPIRY_CHOICES = [(30, _("30 minutes")), (60, _("1 hour")), (240, _("4 hours")), (1440, _("24 hours")), (0, _("never"))]
+
+    template_name = "controlpanel/push_sandbox.html"
+    LIMIT = 100
+
+    def get_context_data(self, **kwargs):
+        from notifications import sandbox
+        from notifications.models import NotificationDelivery, SandboxEvent, SandboxMessage
+
+        params = self.request.GET
+        messages_qs = SandboxMessage.objects.all()
+        filters = {"channel": params.get("channel", ""), "provider": params.get("provider", ""), "outcome": params.get("outcome", ""), "club": params.get("club", "")}
+        if filters["channel"] in NotificationDelivery.Channel.values:
+            messages_qs = messages_qs.filter(channel=filters["channel"])
+        else:
+            filters["channel"] = ""
+        if filters["outcome"] in SandboxMessage.Outcome.values:
+            messages_qs = messages_qs.filter(outcome=filters["outcome"])
+        else:
+            filters["outcome"] = ""
+        if filters["provider"]:
+            messages_qs = messages_qs.filter(provider=filters["provider"])
+        if filters["club"]:
+            try:
+                messages_qs = messages_qs.filter(club_id=filters["club"])
+            except ValueError, ValidationError:
+                filters["club"] = ""
+        counts = dict(messages_qs.order_by().values_list("outcome").annotate(n=Count("pk")))
+        outcome_counts = [(value, label, counts.get(value, 0)) for value, label in SandboxMessage.Outcome.choices]
+        sandbox.expire_if_due()
+        status = sandbox.status()
+        enabled = status["enabled"]
+        captured = list(messages_qs.select_related("club")[: self.LIMIT])
+        for message in captured:
+            message.pretty_request = json.dumps(message.request, indent=2, ensure_ascii=False, default=str)
+            message.pretty_headers = json.dumps(message.headers, indent=2, ensure_ascii=False, default=str)
+        descriptions = {
+            "ok": _("The provider accepts everything. Pushes and emails count as delivered."),
+            "throttle": _("The provider answers 429. Pushes are logged as waiting to retry and retried 1, 5 and 30 minutes later; switch back to OK to watch them go through."),
+            "dead": _("The provider says the device is gone. The device is disabled and no longer receives pushes."),
+            "error": _("The provider refuses the request. The delivery is logged as failed and not retried."),
+            "timeout": _("The provider does not answer in time. Treated as a temporary failure: logged and retried later."),
+        }
+        labels = {"ok": _("OK"), "throttle": _("Throttle (429)"), "dead": _("Target gone"), "error": _("Refused"), "timeout": _("Timeout")}
+        scenarios = [(name, labels[name], descriptions[name]) for name in sandbox.SCENARIOS]
+        return super().get_context_data(
+            nav="push",
+            sandbox_on=enabled,
+            sandbox_status=status,
+            expiry_choices=self.EXPIRY_CHOICES,
+            events=list(SandboxEvent.objects.select_related("user")[:20]),
+            scenario={"name": status["name"], "latency_ms": status["latency_ms"]},
+            scenarios=scenarios,
+            max_latency=sandbox.MAX_LATENCY_MS,
+            captured=captured,
+            outcome_counts=outcome_counts,
+            filters=filters,
+            channels=NotificationDelivery.Channel.choices,
+            outcomes=SandboxMessage.Outcome.choices,
+            providers=list(SandboxMessage.objects.order_by().values_list("provider", flat=True).distinct()),
+            clubs=Club.objects.order_by("name"),
+            **kwargs,
+        )
+
+    def post(self, request, *args, **kwargs):
+        from datetime import timedelta
+
+        from notifications import sandbox
+
+        action = request.POST.get("action", "set_scenario")
+        if action == "sandbox_on":
+            if request.POST.get("confirm") != "1":
+                notify(request, f"e|{_('Not switched')}|" + _("Confirm the switch to sandbox mode first."))
+                return redirect("controlpanel:push_sandbox")
+            try:
+                minutes = int(request.POST.get("expires_in", "60"))
+            except ValueError:
+                minutes = -1
+            if minutes not in dict(self.EXPIRY_CHOICES):
+                notify(request, f"e|{_('Not switched')}|" + _("Choose when the sandbox should switch back to live."))
+                return redirect("controlpanel:push_sandbox")
+            sandbox.set_mode(request.user, on=True, expires_in=timedelta(minutes=minutes) if minutes else None)
+            notify(request, f"w|{_('Sandbox mode on')}|" + _("Nobody receives push notifications or notification emails until you switch back to live."))
+            return redirect("controlpanel:push_sandbox")
+        if action == "live":
+            sandbox.set_mode(request.user, on=False)
+            notify(request, f"s|{_('Back to live')}|" + _("Pushes and notification emails are sent to people again."))
+            return redirect("controlpanel:push_sandbox")
+        if action != "set_scenario":
+            return HttpResponse(_("Unknown action."), status=400, content_type="text/plain; charset=utf-8")
+        if not sandbox.enabled():
+            return HttpResponse(_("The scenario only applies while the sandbox is on."), status=403, content_type="text/plain; charset=utf-8")
+        name = request.POST.get("scenario", "")
+        try:
+            latency = int(request.POST.get("latency_ms") or 0)
+        except ValueError:
+            latency = -1
+        if name not in sandbox.SCENARIOS or not 0 <= latency <= sandbox.MAX_LATENCY_MS:
+            notify(request, f"e|{_('Not saved')}|" + _("Choose a scenario and a latency between 0 and %(max)s ms.") % {"max": sandbox.MAX_LATENCY_MS})
+            return redirect("controlpanel:push_sandbox")
+        sandbox.set_scenario(name, latency, user=request.user)
+        notify(request, f"s|{_('Scenario set')}|" + _("The sandbox provider now answers as chosen (latency %(ms)s ms).") % {"ms": latency})
+        return redirect("controlpanel:push_sandbox")
+
+
+class PushSandboxClearView(PlatformSuperuserRequiredMixin, View):
+    def post(self, request):
+        from notifications.models import SandboxMessage
+
+        count, _deleted = SandboxMessage.objects.all().delete()
+        notify(request, f"w|{_('Captured messages cleared')}|" + ngettext("%(count)s message deleted.", "%(count)s messages deleted.", count) % {"count": count})
+        return redirect("controlpanel:push_sandbox")
+
+
+class PushSandboxSampleView(PlatformSuperuserRequiredMixin, View):
+    """Run the whole pipeline once for the signed-in superuser: a General notification, emailed and pushed.
+    Only while the sandbox is on (live, it would be a real send)."""
+
+    def post(self, request):
+        from notifications import sandbox
+
+        if not sandbox.enabled():
+            return HttpResponse(_("Switch to sandbox mode first."), status=403, content_type="text/plain; charset=utf-8")
+        from announcements.services import audience_members
+        from members.models import Member
+        from notifications.models import NotificationCategory
+        from notifications.services import notify_members
+
+        member = Member.objects.filter(user=request.user).first()
+        club = None
+        if member is not None:
+            club = next((each for each in Club.objects.order_by("created", "pk") if audience_members(each).filter(pk=member.pk).exists()), None)
+        if club is None:
+            notify(request, f"w|{_('No sample sent')}|" + _("You do not belong to a club, so there is no one to send a sample to. Join a club first."))
+            return redirect("controlpanel:push_sandbox")
+        notify_members([member], club=club, title=_("Sandbox sample"), body=_("This is a sample notification sent from the sending sandbox."), category=NotificationCategory.GENERAL, send_email=True)
+        notify(request, f"s|{_('Sample sent')}|" + _("A sample was sent to you in %(club)s. The email is captured below; a push appears only if you have a device registered.") % {"club": club.name})
+        return redirect("controlpanel:push_sandbox")
 
 
 class JobToggleView(PlatformStaffRequiredMixin, View):

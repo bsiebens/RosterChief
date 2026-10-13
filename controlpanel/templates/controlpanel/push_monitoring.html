@@ -21,6 +21,9 @@
 {% endblock breadcrumb %}
 
 {% block panel %}
+    <div class="flex justify-end">
+        <a class="btn btn-sm btn-outline" href="{% url 'controlpanel:push_sandbox' %}" data-testid="sandbox-link">{% lucide "flask-conical" size=14 %} {% trans "Sending sandbox" %}</a>
+    </div>
     {% if open_alerts %}
         <div class="rounded border border-danger-border bg-danger-bg px-3.5 py-3" role="alert" data-testid="open-alerts">
             <h2 class="font-display text-sm font-extrabold tracking-[.06em] text-club-dark uppercase">{% lucide "triangle-alert" size=14 class="inline -mt-0.5 mr-1" %}{% trans "Open alerts" %}</h2>

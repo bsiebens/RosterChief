@@ -1,5 +1,5 @@
 from features.commands import ScheduledJobCommand
-from notifications import delivery_log
+from notifications import delivery_log, sandbox
 
 
 class Command(ScheduledJobCommand):
@@ -9,4 +9,5 @@ class Command(ScheduledJobCommand):
     def handle(self, *args, **options):
         retried = delivery_log.retry_due()
         purged = delivery_log.purge()
+        sandbox.purge()
         return f"Retried {retried} delivery(ies), purged {purged} old log row(s)."

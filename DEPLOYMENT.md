@@ -1080,6 +1080,27 @@ a "recovered" email when it clears. The mail goes out through email (never push)
 badge on its tab. To silence an alert, fix the cause; to stop the checks altogether, pause the job
 on the control panel's **Jobs** page.
 
+### Sending sandbox
+
+The sending sandbox swaps the real providers (APNs, FCM, browser push services and the mail server) for a
+capture, so the whole sending side can be exercised and monitored without Apple, Google, browsers or a mail
+server. It is a runtime switch on the control panel's sandbox page (`PUSH_SANDBOX` in the environment only
+sets the initial default, before anyone has flipped it). It works in production too: the switch can be given
+an auto-expiry so a forgotten sandbox ends by itself, every change is recorded in an audit trail, and a banner
+plus a health alert make it impossible to miss.
+
+While it is on, nothing in the **notification pipeline** leaves the server: native pushes, web pushes and
+notification emails are stored with the exact request they would have sent (payload and APNs headers, FCM
+message, mail headers and body). Account mail (sign-up, password reset), invoices, billing mail and every other
+email stay real. A failure scenario decides what the fake provider answers: `ok`, `throttle` (429, retried
+later), `dead` (the device is disabled, the subscription removed), `error` (refused, not retried) or `timeout`
+(retried later), optionally after an artificial delay. The real code (delivery log, retry job, held pushes,
+monitoring and alerts) runs unchanged around it. Captured messages are purged after 7 days by the retry job.
+
+While it is on in production, real users receive no notifications. It also does not test the receiving end:
+real tokens, certificates, entitlements, the app's handling of a push and the phone's delivery are only
+proven with a real device.
+
 ## Native app push — iOS (APNs)
 
 ### Step 1 — Create the key

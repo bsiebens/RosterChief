@@ -99,9 +99,24 @@ def _outbox_problems(now) -> list[Problem]:
     return [Problem("outbox", CRITICAL, _("The notification outbox is backed up"), [_("%(count)s entries have been waiting for more than 5 minutes; the outbox job may not be running.") % {"count": count}])]
 
 
+def _sandbox_problems(now) -> list[Problem]:
+    """While the sandbox is on nothing reaches anybody: an admin must know it is not a quiet day."""
+    from . import sandbox
+
+    if not sandbox.enabled(now):
+        return []
+    state = sandbox.status(now)
+    details = [_("Pushes and notification emails are captured instead of sent. Switch back to live on the control panel (Push monitoring > Sending sandbox).")]
+    if state["expires_at"]:
+        details.append(_("It switches back to live by itself at %(when)s.") % {"when": timezone.localtime(state["expires_at"]).strftime("%d/%m/%Y %H:%M")})
+    if state["changed_by"]:
+        details.append(_("Switched on by %(who)s.") % {"who": state["changed_by"]})
+    return [Problem("sandbox", WARNING, _("The sending sandbox is on: nothing is delivered to users"), details)]
+
+
 def current_problems(now=None) -> list[Problem]:
     now = now or timezone.now()
-    return [*_provider_problems(now), *_queue_problems(now), *_config_problems(), *_outbox_problems(now)]
+    return [*_provider_problems(now), *_queue_problems(now), *_config_problems(), *_outbox_problems(now), *_sandbox_problems(now)]
 
 
 def recipients() -> list[str]:
@@ -142,7 +157,10 @@ def _send_alert(alert: PushAlert, problem: Problem, *, reminder: bool, now) -> N
 
 def evaluate(now=None) -> dict:
     """Reconcile the current problems with the PushAlert rows; returns counts for the job log."""
+    from . import sandbox
+
     now = now or timezone.now()
+    sandbox.expire_if_due(now)  # a sandbox period that ran out is recorded and ends here
     problems = {problem.key: problem for problem in current_problems(now)}
     open_alerts = {alert.key: alert for alert in PushAlert.objects.filter(resolved_at__isnull=True)}
     counts = {"opened": 0, "reminded": 0, "escalated": 0, "resolved": 0}
