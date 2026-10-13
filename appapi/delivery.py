@@ -119,8 +119,17 @@ def deliver(notification_ids) -> int:
             # In the language the app registered with (PushDevice.locale), like game pushes.
             text = notification.text_for(language_for_locale(device.locale))
             outcome = _publish_logged(
-                gateway, device, club=notification.club, notification=notification, title=str(text["title"]), body=str(text["body"]), data=payload_data(notification), badge=badges[device.user_id],
-                thread_id=notification.club.slug, category=notification.category, priority=notification.priority,
+                gateway,
+                device,
+                club=notification.club,
+                notification=notification,
+                title=str(text["title"]),
+                body=str(text["body"]),
+                data=payload_data(notification),
+                badge=badges[device.user_id],
+                thread_id=notification.club.slug,
+                category=notification.category,
+                priority=notification.priority,
                 hold_until=_held_until(quiet, notification, device.user_id),
             )
             if outcome == "dead":

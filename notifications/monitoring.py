@@ -199,12 +199,14 @@ def configuration() -> dict:
         bucket = devices.setdefault(row["platform"], {"enabled": 0, "disabled": 0, "stale": 0})
         bucket["enabled" if row["enabled"] else "disabled"] += row["n"]
         bucket["stale"] += row["stale"]
-    apns, fcm = apns_configured(), fcm_configured()
-    vapid = bool(settings.VAPID_PRIVATE_KEY) or sandbox.enabled()
+    # What is really set: the sandbox reports everything as configured so sends can run, which would hide a missing key here.
+    apns, fcm = apns_configured(real=True), fcm_configured(real=True)
+    vapid = bool(settings.VAPID_PRIVATE_KEY)
     subscriptions = PushSubscription.objects.count()
     for platform, configured in (("ios", apns), ("android", fcm)):
         devices[platform]["mismatch"] = not configured and (devices[platform]["enabled"] + devices[platform]["disabled"]) > 0
     return {
+        "sandbox": sandbox.enabled(),
         "apns": apns,
         "fcm": fcm,
         "vapid": vapid,

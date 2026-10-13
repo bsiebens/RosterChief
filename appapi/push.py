@@ -126,8 +126,9 @@ def apns_policy_headers(policy: PushPolicy | None, collapse_id: str | None = Non
     return headers
 
 
-def apns_configured() -> bool:
-    if sandbox.enabled():
+def apns_configured(*, real: bool = False) -> bool:
+    """Whether APNs can be used: the key, key id and team id are set -- or the sandbox is on (``real=True`` ignores that)."""
+    if sandbox.enabled() and not real:
         return True
     return bool(settings.APP_PUSH_APNS_KEY_ID and settings.APP_PUSH_APNS_TEAM_ID and (settings.APP_PUSH_APNS_KEY or settings.APP_PUSH_APNS_KEY_FILE))
 
@@ -226,8 +227,9 @@ FCM_SEND_URL = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:sen
 FCM_DEAD_TOKEN_CODES = {"UNREGISTERED"}
 
 
-def fcm_configured() -> bool:
-    if sandbox.enabled():
+def fcm_configured(*, real: bool = False) -> bool:
+    """Whether FCM can be used: service-account credentials are set -- or the sandbox is on (``real=True`` ignores that)."""
+    if sandbox.enabled() and not real:
         return True
     return bool(settings.APP_PUSH_FCM_CREDENTIALS or settings.APP_PUSH_FCM_CREDENTIALS_FILE)
 
