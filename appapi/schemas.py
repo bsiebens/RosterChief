@@ -600,7 +600,10 @@ class NotificationOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
     category: str = Field(
-        description="What it is about: `news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`, `admin`, `announcement`, `game` or `general` (older rows: `general`). Use it for an icon or a filter; unknown values should be treated as `general`."
+        description=(
+            "What it is about: `news`, `event`, `reminder`, `lineup`, `crew`, `form`, `shop`, `coach`, `admin`, `announcement`, `game` or `general` (older rows: `general`). "
+            "Use it for an icon or a filter; unknown values should be treated as `general`."
+        )
     )
     priority: str = Field(description="`normal` or `critical` (a cancelled or same-day changed event).")
     title: str = Field(description="English; same as translations.en.title.")
