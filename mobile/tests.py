@@ -9091,7 +9091,7 @@ class CalendarFeedTokenMigrationTests(TransactionTestCase):
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class MeLanguagePickerTests(TestCase):
-    """Me -> "Language": a django set_language POST (cookie only, no per-user field)."""
+    """Me -> "Language": a set_language POST (cookie; the saved Member.language is covered by MemberLanguageTests)."""
 
     HOST = "ajax-united.rosterchief.app"
 
@@ -9128,3 +9128,52 @@ class MeLanguagePickerTests(TestCase):
         with translation.override("nl"):
             html = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST, HTTP_ACCEPT_LANGUAGE="nl").content.decode()
         self.assertIn("Taal", html)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MemberLanguageTests(TestCase):
+    """Member.language: saved by the Language picker, applied without a cookie, used for web push."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="taal@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Tess", last_name="Taal", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def test_choosing_a_language_saves_it_on_the_member(self):
+        self.client.post(reverse("set_language"), {"language": "nl", "next": reverse("mobile:me")}, HTTP_HOST=self.HOST)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.language, "nl")
+
+    def test_an_unknown_language_is_not_saved(self):
+        self.client.post(reverse("set_language"), {"language": "xx"}, HTTP_HOST=self.HOST)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.language, "")
+
+    def test_saved_language_applies_without_a_cookie(self):
+        Member.objects.filter(pk=self.member.pk).update(language="nl")
+        page = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(page, "Persoonlijke gegevens")
+
+    def test_web_push_is_sent_in_the_subscribers_language(self):
+        from mobile.services.push import send_push_for_notifications
+        from notifications.models import Notification
+
+        Member.objects.filter(pk=self.member.pk).update(language="nl")
+        PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/lang", p256dh="k", auth="a")
+        notification = Notification.objects.create(
+            club=self.club, member=self.member, title="Practice moved", body="See the calendar.", translations={"en": {"title": "Practice moved", "body": "See the calendar."}, "nl": {"title": "Training verplaatst", "body": "Zie de kalender."}}
+        )
+        with override_settings(VAPID_PRIVATE_KEY="x"), patch("mobile.services.push._deliver") as deliver:
+            send_push_for_notifications([notification])
+        payload = json.loads(deliver.call_args.args[1])
+        self.assertEqual(payload["title"], "Training verplaatst")
+        self.assertEqual(payload["body"], "Zie de kalender.")

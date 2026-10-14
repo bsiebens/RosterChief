@@ -22,6 +22,7 @@ from api.urls import api
 from appapi.api import app_api
 from appapi.docs import docs_page
 from club.views import root, signup_closed
+from members.language import set_language
 
 from .admin_host import base_domain_only, base_domain_only_urls
 from .health import healthz
@@ -41,7 +42,8 @@ urlpatterns = [
     # (django.views.i18n.set_language) -- not i18n_patterns()-wrapped, since this is a
     # multi-tenant, subdomain-routed project and a /en/ or /nl/ URL prefix on every
     # path would fight that everywhere else.
-    path("i18n/", include("django.conf.urls.i18n")),
+    # members.language.set_language also saves the choice on the signed-in member.
+    path("i18n/", set_language, name="set_language"),
     path("", include("members.urls")),
     path("register/", include("registration.urls")),
     path("forms/", include("formbuilder.urls")),

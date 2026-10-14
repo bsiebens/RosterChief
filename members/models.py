@@ -106,6 +106,10 @@ class Member(UUIDModel):
     #: this matters most for underage players.
     photo_public_consent = models.BooleanField(_("show the player picture on the public website/API"), default=False)
 
+    #: Preferred language (one of settings.LANGUAGES), set from the app's Language picker. Blank = no
+    #: preference: the browser/club default applies and push falls back to the stored English text.
+    language = models.CharField(_("language"), max_length=8, blank=True, choices=settings.LANGUAGES)
+
     class Meta:
         verbose_name = _("member")
         verbose_name_plural = _("members")

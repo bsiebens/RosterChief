@@ -277,10 +277,12 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
                 if (subscription.pk, dedupe_key) in sent:
                     continue
                 sent.add((subscription.pk, dedupe_key))
+                # The subscriber's own language (Member.language); the stored English text when they have none.
+                text = notification.text_for(subscription.member.language) if subscription.member.language else {"title": str(notification.title), "body": str(notification.body)}
                 payload = json.dumps(
                     {
-                        "title": str(notification.title),
-                        "body": str(notification.body),
+                        "title": text["title"],
+                        "body": text["body"],
                         "url": extras["url"] or url,
                         "notification_id": str(notification.pk),
                         "target": extras["target"],
