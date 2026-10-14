@@ -2,27 +2,28 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Shop tab landing, like the native app: a header row with "My orders" and the cart (item-count badge), "All" + category filter chips (Alpine, client-side -- every product is in the DOM and the chips just hide the others), then a two-column grid of square-photo cards. A product with options at different prices reads "From EUR x"; a sold-out one gets a dimmed photo, a badge and "Sold out" instead of its price. While the club has the shop closed the page still loads, with a closed state that keeps "My orders" reachable.
+    Shop tab landing, like the native app: a header (same navy title row as News and Calendar) with "My orders" and the cart (item-count badge), "All" + category filter chips (Alpine, client-side -- every product is in the DOM and the chips just hide the others), then a two-column grid of square-photo cards. A product with options at different prices reads "From EUR x"; a sold-out one gets a dimmed photo, a badge and "Sold out" instead of its price. While the club has the shop closed the page still loads, with a closed state that keeps "My orders" reachable.
 {% endcomment %}
 
 {% block main_attrs %}data-refreshable{% endblock main_attrs %}
 
-{% block content %}
-    <div class="flex items-center justify-between">
-        <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Shop" %}</span>
-        <div class="flex items-center gap-1">
-            <a class="icon-btn pressable text-ink" href="{% url "mobile:shop_orders" %}" aria-label="{% trans "My orders" %}">{% lucide "package" size=20 %}</a>
-            {% if not shop_closed %}
-                <a class="icon-btn pressable relative text-ink" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
-                    {% lucide "shopping-cart" size=20 %}
-                    {% if cart_item_count %}
-                        <span class="absolute top-1.5 right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-club px-1 text-[10px] font-extrabold text-club-content">{% if cart_item_count > 99 %}99+{% else %}{{ cart_item_count }}{% endif %}</span>
-                    {% endif %}
-                </a>
-            {% endif %}
-        </div>
+{% block header_extra %}
+    <div class="mt-3 flex items-center gap-2">
+        <span class="font-display text-2xl font-extrabold text-white uppercase">{% trans "Shop" %}</span>
+        <div class="flex-1"></div>
+        <a class="icon-btn pressable flex items-center justify-center text-white" href="{% url "mobile:shop_orders" %}" aria-label="{% trans "My orders" %}">{% lucide "package" size=20 %}</a>
+        {% if not shop_closed %}
+            <a class="icon-btn pressable relative flex items-center justify-center text-white" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
+                {% lucide "shopping-cart" size=20 %}
+                {% if cart_item_count %}
+                    <span class="absolute top-1.5 right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-club px-1 text-[10px] font-extrabold text-club-content">{% if cart_item_count > 99 %}99+{% else %}{{ cart_item_count }}{% endif %}</span>
+                {% endif %}
+            </a>
+        {% endif %}
     </div>
+{% endblock header_extra %}
 
+{% block content %}
     {% if shop_closed %}
         {% trans "The shop is closed" as closed_title %}
         {% trans "Ordering is closed right now. You can still see your orders." as closed_text %}

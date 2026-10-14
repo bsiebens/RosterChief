@@ -3464,14 +3464,17 @@ class ReRegisterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_get_shows_a_row_per_managed_person(self):
+    def test_get_shows_an_empty_list_and_the_editor_offers_every_managed_person(self):
         self.client.force_login(self.user)
 
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Lars")
-        self.assertContains(response, "Noor")
+        self.assertContains(response, "Add a registration")
+        self.assertEqual(response.context["entry_cards"], [])
+        editor = self.client.post(self._url(), {**self.formset_management(0), "action": "add"}, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(editor, "Lars")
+        self.assertContains(editor, "Noor")
 
     def test_no_registration_products_shows_an_empty_state(self):
         self.product.is_active = False
@@ -3664,33 +3667,8 @@ class ReRegisterViewTests(TestCase):
         self.assertEqual(child_membership.status, ClubMembership.StatusChoices.PENDING)
         self.assertEqual(child_membership.fee_amount, Decimal("80.00"))
 
-    def test_each_persons_card_offers_add_another_registration(self):
-        self.client.force_login(self.user)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Add another registration")
-        self.assertContains(response, f'data-person="{self.member.pk}"')
-        self.assertContains(response, f'data-person="{self.child.pk}"')
-
-    def test_the_add_another_registration_template_row_is_styled_the_same_as_the_default_row(self):
-        # entry_formset.empty_form is a fresh, unstyled Form instance on every
-        # access (BaseFormSet's own plain @property, not cached) -- the
-        # #subrow-template clone source must be a separately-styled instance
-        # or its "Registering as" select renders bare next to an
-        # already-styled default row.
-        self.client.force_login(self.user)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, 'id="subrow-template"')
-        template_start = response.content.decode().index('id="subrow-template"')
-        template_html = response.content.decode()[template_start : template_start + 2000]
-        self.assertIn('name="entries-__prefix__-entry_kind" class="h-11', template_html)
-
     def test_an_additional_registration_row_for_an_already_registered_person_adds_to_the_fee(self):
-        # Submitted via the "Add another registration" row under Noor's own
-        # card (mobile-reregister-rows.js), not their default row -- proof
+        # A second entry for the same person (the list's "Add a registration") -- proof
         # a person can carry more than one entry in the same submission.
         first_membership = ClubMembership.objects.create(
             club=self.club, member=self.child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("80.00"), fee_status=ClubMembership.FeeStatus.PAID, amount_paid=Decimal("80.00")
@@ -4538,7 +4516,7 @@ class CoachRosterMemberViewTests(TestCase):
         response = self._get()
 
         self.assertIsNotNone(response.context["form"])
-        self.assertContains(response, "Remove from roster")
+        self.assertContains(response, "Remove from the roster")
 
     def test_switching_team_links_to_that_teams_home_not_a_bare_query_string(self):
         # A path-relative "?team=<pk>" kept the URL on this page's own path
@@ -4566,7 +4544,7 @@ class CoachRosterMemberViewTests(TestCase):
         response = self._get()
 
         self.assertIsNone(response.context["form"])
-        self.assertNotContains(response, "Remove from roster")
+        self.assertNotContains(response, "Remove from the roster")
 
     def test_a_membership_from_another_team_is_not_reachable(self):
         other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
@@ -4948,7 +4926,7 @@ class CoachScheduleViewTests(TestCase):
 
         self.assertNotContains(response, "Friendly")
 
-    def test_past_and_cancelled_events_are_excluded(self):
+    def test_past_events_excluded_and_cancelled_upcoming_shown_with_pill(self):
         past = Event.objects.create(club=self.club, title="Old practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=2))
         past.teams.add(self.team)
         cancelled = Event.objects.create(club=self.club, title="Cancelled game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), cancelled=True)
@@ -4957,9 +4935,9 @@ class CoachScheduleViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["this_week"], [])
-        self.assertEqual(response.context["next_week"], [])
-        self.assertEqual(response.context["later_months"], [])
+        self.assertNotContains(response, "Old practice")
+        self.assertContains(response, "Cancelled game")
+        self.assertContains(response, "Cancelled</span>")
 
     def test_no_staff_assignment_404s(self):
         # A club member who isn't on any team's staff this season has no Coach mode.
@@ -5142,8 +5120,8 @@ class CoachAttendanceViewTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, "Goalies")
-        self.assertContains(response, "Responded")
-        self.assertContains(response, "Declined")
+        self.assertContains(response, "No reply")
+        self.assertContains(response, "Out")
 
     def test_silent_rows_have_no_special_background(self):
         silent_member = Member.objects.create(first_name="Ben", last_name="Silent")

@@ -1,0 +1,70 @@
+{% load i18n %}
+{% comment %}
+    The editor sheet's content (iOS: the registration entry editor): Person or "Someone new" with name + date of birth, Role, Option, Team preference and, once the team has a number pool, the jersey number ("Keep #n"). A change to the person, role or team re-renders this fragment through htmx (the options and numbers follow the choice); "Save" is an ordinary post that validates the entry server-side and puts it back in the list. It carries the whole draft list as hidden inputs, so it works as a plain page too.
+{% endcomment %}
+{% with form=editor.form %}
+    <form method="post" action="{{ request.path }}" id="registration-editor-form" class="flex flex-col gap-4 pb-4" hx-boost="false">
+        {% csrf_token %}
+        <input type="hidden" name="season" value="{{ registration_season.pk }}">
+        <input type="hidden" name="editor_index" value="{% if editor.index is not None %}{{ editor.index }}{% endif %}">
+        {% include "mobile/_registration_state_fields.html" %}
+        <h2 class="font-display text-xl font-extrabold text-ink uppercase">{% if editor.index is not None %}{% trans "Edit registration" %}{% else %}{% trans "Add a registration" %}{% endif %}</h2>
+        {% for error in form.non_field_errors %}<p class="text-sm text-club">{{ error }}</p>{% endfor %}
+
+        <div>
+            <label class="mb-1 block text-xs text-muted" for="{{ form.existing_member.id_for_label }}">{{ form.existing_member.label }}</label>
+            {{ form.existing_member }}
+        </div>
+
+        {% if not form.existing_member.value %}
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.first_name.id_for_label }}">{{ form.first_name.label }}</label>
+                    {{ form.first_name }}
+                    {% for error in form.first_name.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs text-muted" for="{{ form.last_name.id_for_label }}">{{ form.last_name.label }}</label>
+                    {{ form.last_name }}
+                    {% for error in form.last_name.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+            <div>
+                <label class="mb-1 block text-xs text-muted" for="{{ form.date_of_birth.id_for_label }}">{{ form.date_of_birth.label }}</label>
+                {{ form.date_of_birth }}
+                {% for error in form.date_of_birth.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+            </div>
+        {% endif %}
+
+        <div>
+            <label class="mb-1 block text-xs text-muted" for="{{ form.entry_kind.id_for_label }}">{{ form.entry_kind.label }}</label>
+            {{ form.entry_kind }}
+        </div>
+
+        <div>
+            <label class="mb-1 block text-xs text-muted" for="{{ form.product_variant.id_for_label }}">{{ form.product_variant.label }}</label>
+            {{ form.product_variant }}
+            {% for error in form.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div>
+            <label class="mb-1 block text-xs text-muted" for="{{ form.requested_team.id_for_label }}">{{ form.requested_team.label }}</label>
+            {{ form.requested_team }}
+            <p class="mt-1 text-xs text-muted">{{ form.requested_team.help_text }}</p>
+            {% for error in form.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+        </div>
+
+        {% if form.has_jersey_choice %}
+            <div>
+                <label class="mb-1 block text-xs text-muted" for="{{ form.requested_jersey_number.id_for_label }}">{{ form.requested_jersey_number.label }}</label>
+                {{ form.requested_jersey_number }}
+                {% for error in form.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="flex flex-col gap-2">
+            <button type="submit" name="action" value="save" class="btn-rc btn-rc-primary">{% trans "Save" %}</button>
+            <button type="submit" name="action" value="cancel" class="btn-rc btn-rc-neutral" data-editor-cancel formnovalidate>{% trans "Cancel" %}</button>
+        </div>
+    </form>
+{% endwith %}

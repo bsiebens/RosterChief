@@ -681,12 +681,16 @@ class ReRegisterCopyTests(TestCase):
         response = self.client.get(reverse("mobile:reregister"), HTTP_HOST=HOST)
 
         self.assertContains(response, "See the price")
-        self.assertContains(response, "Someone new")
-        self.assertContains(response, "No preference")
-        self.assertContains(response, "Choose…")
-        self.assertContains(response, "Your preference. The club makes the final choice.")
+        self.assertContains(response, "Add a registration")
         self.assertContains(response, "Add a registration for each person and role.")
         self.assertNotContains(response, "Calculate price")
+
+        # The editor sheet carries the rest of the app's wording.
+        editor = self.client.post(reverse("mobile:reregister"), {"action": "add", "entries-TOTAL_FORMS": "0"}, HTTP_HOST=HOST)
+        self.assertContains(editor, "Someone new")
+        self.assertContains(editor, "No preference")
+        self.assertContains(editor, "Choose…")
+        self.assertContains(editor, "The club makes the final choice.")
 
     def test_the_price_screen_offers_send_registration_and_keeps_the_current_number(self):
         response = self._post("preview")

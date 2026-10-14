@@ -1960,7 +1960,7 @@ class CoachScheduleView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             kind = ""
         this_week, next_week, later_months = [], [], []
         if self.active_team is not None:
-            events = Event.objects.filter(teams=self.active_team, cancelled=False, start__gte=timezone.now()).select_related("location", "series").order_by("start")
+            events = Event.objects.filter(teams=self.active_team, start__gte=timezone.now()).select_related("location", "series").order_by("start")
             if kind:
                 events = events.filter(kind=kind)
             this_week, next_week, later_months = agenda_groups(list(events))

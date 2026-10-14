@@ -1,0 +1,20 @@
+{% comment %}
+    The draft registration list as hidden formset inputs (entries-N-field): the exact POST shape RegistrationEntryFormSet validates, so the list survives every round trip without any server-side session. ``skip_jersey`` leaves the jersey number out once the price screen shows its own picker for it.
+{% endcomment %}
+<input type="hidden" name="entries-TOTAL_FORMS" value="{{ entry_cards|length }}">
+<input type="hidden" name="entries-INITIAL_FORMS" value="0">
+<input type="hidden" name="entries-MIN_NUM_FORMS" value="0">
+<input type="hidden" name="entries-MAX_NUM_FORMS" value="1000">
+{% for card in entry_cards %}
+    {% with index=card.index entry=card.entry %}
+        {% if entry.existing_member %}<input type="hidden" name="entries-{{ index }}-existing_member" value="{{ entry.existing_member }}">{% endif %}
+        {% if entry.first_name %}<input type="hidden" name="entries-{{ index }}-first_name" value="{{ entry.first_name }}">{% endif %}
+        {% if entry.last_name %}<input type="hidden" name="entries-{{ index }}-last_name" value="{{ entry.last_name }}">{% endif %}
+        {% if entry.date_of_birth %}<input type="hidden" name="entries-{{ index }}-date_of_birth" value="{{ entry.date_of_birth }}">{% endif %}
+        {% if entry.is_contact %}<input type="hidden" name="entries-{{ index }}-is_contact" value="on">{% endif %}
+        {% if entry.entry_kind %}<input type="hidden" name="entries-{{ index }}-entry_kind" value="{{ entry.entry_kind }}">{% endif %}
+        {% if entry.product_variant %}<input type="hidden" name="entries-{{ index }}-product_variant" value="{{ entry.product_variant }}">{% endif %}
+        {% if entry.requested_team %}<input type="hidden" name="entries-{{ index }}-requested_team" value="{{ entry.requested_team }}">{% endif %}
+        {% if entry.requested_jersey_number and not skip_jersey %}<input type="hidden" name="entries-{{ index }}-requested_jersey_number" value="{{ entry.requested_jersey_number }}">{% endif %}
+    {% endwith %}
+{% endfor %}

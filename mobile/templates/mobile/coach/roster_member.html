@@ -102,11 +102,11 @@
             <button class="btn-rc btn-rc-primary mt-1 w-full" type="submit">{% trans "Save" %}</button>
         </form>
 
-        <button type="button" class="btn-rc btn-rc-destructive mt-3 w-full gap-2" onclick="document.getElementById('roster-remove-sheet').showModal()" aria-haspopup="dialog">{% lucide "trash-2" size=16 %} {% trans "Remove from roster" %}</button>
+        <button type="button" class="btn-rc btn-rc-destructive mt-3 w-full gap-2" onclick="document.getElementById('roster-remove-sheet').showModal()" aria-haspopup="dialog">{% lucide "trash-2" size=16 %} {% trans "Remove from the roster" %}</button>
         <dialog class="sheet" id="roster-remove-sheet" aria-labelledby="roster-remove-title" onclick="if (event.target === this) this.close()">
             <div class="sheet-handle" aria-hidden="true"></div>
             <div class="flex flex-col gap-4 pb-2">
-                <h2 id="roster-remove-title" class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Remove from roster?" %}</h2>
+                <h2 id="roster-remove-title" class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Remove from the roster?" %}</h2>
                 <p class="text-sm text-slate">{% blocktrans with name=member.get_full_name %}{{ name }} will be taken off this team's roster for the season. This cannot be undone.{% endblocktrans %}</p>
                 <form class="grid grid-cols-2 gap-2" method="post" action="{% url "mobile:coach_roster_remove" membership.pk %}" hx-boost="false">
                     {% csrf_token %}

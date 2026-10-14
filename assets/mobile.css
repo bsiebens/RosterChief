@@ -1646,7 +1646,7 @@
         top: calc(100% + 6px);
         z-index: 40;
         min-width: 13rem;
-        max-width: 80vw;
+        max-width: calc(100vw - 2rem);
         padding: 6px;
         border: 1px solid var(--color-line);
         border-radius: 14px;

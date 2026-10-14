@@ -7,7 +7,6 @@ routes here yet.
 import datetime
 import json
 import uuid
-from collections import defaultdict
 from decimal import Decimal
 
 from allauth.mfa.models import Authenticator
@@ -26,7 +25,7 @@ from django.utils.cache import add_never_cache_headers
 from django.utils.html import linebreaks
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.safestring import mark_safe
-from django.utils.translation import get_language, get_language_info
+from django.utils.translation import get_language, get_language_info, ngettext
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import TemplateView
@@ -66,6 +65,7 @@ from notifications import preferences as notification_preferences
 from notifications import quiet_hours
 from notifications.models import NotificationCategory, NotificationPreference
 from notifications.services import clear_all, inbox_for, mark_all_read, mark_read, unread_count
+from registration.forms import MAX_REGISTRATION_ENTRIES
 from registration.models import RegistrationBatch
 from registration.services import (
     PricingError,
@@ -74,7 +74,6 @@ from registration.services import (
     priced_rows_with_jersey_fields,
     resolve_chosen_season,
     team_number_pools,
-    variant_registration_kinds,
 )
 from registration.services.invoicing import RegistrationInvoicePDFError, batch_invoice_pdf, membership_ids_awaiting_confirmation
 from registration.services.notifications import send_registration_confirmation_email
@@ -96,7 +95,7 @@ from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
 from .services.payments import payment_cards, payments_overview
 from .services.push import subscription_error
-from .services.reregistration import entry_formset, member_current_numbers, price_formset, submit_reregistration
+from .services.reregistration import EDITOR_ACTIONS, editor_form, entries_state, entry_cards, entry_formset, member_current_numbers, price_formset, state_to_data, submit_reregistration
 
 
 class ManifestView(ClubScopedPublicMixin, View):
@@ -1598,12 +1597,9 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         source = data if data is not None else request.GET
         return resolve_chosen_season(request.club, source.get("season"))
 
-    def get_initial_entries(self):
-        return [{"existing_member": person.pk, "first_name": person.first_name, "last_name": person.last_name, "date_of_birth": person.date_of_birth, "is_contact": self.me is not None and person.pk == self.me.pk} for person in self.managed_people]
-
-    def get_formset(self, season, data=None):
+    def get_formset(self, season, data):
         # Scoping and the "Include this person" meaning of is_contact: mobile.services.reregistration.
-        formset = entry_formset(self.request.club, self.managed_people, season, data=data, initial=self.get_initial_entries())
+        formset = entry_formset(self.request.club, self.managed_people, season, data=data)
         for row in formset.forms:
             style_dynamic_form(row)
             self._word_like_the_app(row)
@@ -1622,29 +1618,18 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def render_season_picker(self, available_seasons):
         return self.render_to_response(self.get_context_data(registration_open=bool(available_seasons), needs_season_choice=True, available_seasons=available_seasons))
 
-    def render_page(self, season, entry_formset, priced_entries=None, season_error=None):
-        # Grouped by existing_member (not position): a person can now carry
-        # more than one row (Add another registration), so the old 1:1
-        # zip(self.managed_people, entry_formset.forms) no longer holds. A
-        # form with no existing_member at all is the trailing "someone new"
-        # row(s) -- normally exactly one (RegistrationEntryFormSet's own
-        # extra=1), shown separately from every known person's own card.
-        rows_by_member = defaultdict(list)
-        extra_rows = []
-        for form in entry_formset.forms:
-            member_value = form["existing_member"].value()
-            (rows_by_member[str(member_value)] if member_value else extra_rows).append(form)
-        person_rows = [(person, rows_by_member.get(str(person.pk), [])) for person in self.managed_people]
+    def get_editor(self, season, entry=None, data=None, index=None):
+        """The editor sheet's context: a form (blank, prefilled from ``entry``, or bound to ``data``) and which list row it edits."""
+        if entry is None and data is None and self.managed_people:
+            entry = {"existing_member": str(self.managed_people[0].pk)}  # the signed-in person first, "Someone new" one tap away
+        return {"form": editor_form(self.request.club, self.managed_people, season, data=data, entry=entry), "index": index}
+
+    def render_page(self, season, entries, entry_formset=None, priced_entries=None, season_error=None, editor=None):
+        """``entries``: the draft list (reregistration.entries_state shape); ``entry_formset``: that list bound and validated, when it has been."""
         return self.render_to_response(
             self.get_context_data(
-                # registration_season, not season -- PersonScopeMixin.get_context_data
-                # already injects season=current_season(club) itself, a
-                # different thing (today's season, not necessarily the one
-                # this registration targets) that a same-named kwarg here
-                # would collide with.
                 entry_formset=entry_formset,
-                person_rows=person_rows,
-                extra_rows=extra_rows,
+                entry_cards=entry_cards(entries, entry_formset, self.managed_people, self.request.club),
                 priced_entries=priced_entries,
                 # Same amount submit_registration actually charges per entry,
                 # summed once -- see registration.views.RegistrationView.
@@ -1658,57 +1643,60 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 season_error=season_error,
                 registration_open=True,
                 registration_season=season,
-                variant_registration_kinds=variant_registration_kinds(self.request.club, season),
-                team_number_pools=team_number_pools(self.request.club, season),
+                max_entries=MAX_REGISTRATION_ENTRIES,
                 member_current_numbers=self.get_member_current_numbers(season),
-                # entry_formset.empty_form is a plain @property (BaseFormSet's
-                # own, not cached) -- a fresh, unstyled Form instance every
-                # access, so #subrow-template (reregister.html) must be built
-                # from this one styled instance rather than the template
-                # calling .empty_form itself, or style_dynamic_form's work
-                # here would just be thrown away.
-                subrow_template_form=self._word_like_the_app(style_dynamic_form(entry_formset.empty_form)),
+                can_add_entry=len(entries) < MAX_REGISTRATION_ENTRIES,
+                editor=editor,
             )
         )
+
+    def render_editor(self, season, entries, editor):
+        """The editor sheet's own content for an htmx request, the whole page (sheet open) otherwise."""
+        if self.request.headers.get("HX-Request") == "true" and self.request.headers.get("HX-Target") == "registration-editor-body":
+            return TemplateResponse(self.request, "mobile/_registration_entry_editor.html", self.get_context_data(registration_season=season, editor=editor, entry_cards=entry_cards(entries, None, self.managed_people, self.request.club)))
+        return self.render_page(season, entries, editor=editor)
 
     def get(self, request, *args, **kwargs):
         season, available_seasons = self.get_season(request)
         if season is None:
             return self.render_season_picker(available_seasons)
-        return self.render_page(season, self.get_formset(season))
+        return self.render_page(season, [])
 
     def post(self, request, *args, **kwargs):
         season, available_seasons = self.get_season(request, data=request.POST)
         if season is None:
             return self.render_season_picker(available_seasons)
 
-        entry_formset = self.get_formset(season, request.POST)
-        if not entry_formset.is_valid():
-            return self.render_page(season, entry_formset)
+        action = request.POST.get("action", "")
+        verb, _sep, argument = action.partition(":")
+        entries = entries_state(request.POST)
+        if verb in EDITOR_ACTIONS:
+            return self.handle_list_action(request, season, entries, verb, argument)
 
-        if request.POST.get("action") == "edit":
-            # "Back" from the receipt screen -- same submitted choices
-            # (entry_formset is bound to this same POST, so every field
-            # redisplays exactly as chosen), just the form again instead of
-            # re-pricing straight back into the receipt.
-            return self.render_page(season, entry_formset)
+        entry_formset = self.get_formset(season, state_to_data(entries, season))
+        if not entry_formset.is_valid():
+            return self.render_page(season, entries, entry_formset)
+
+        if action == "edit":
+            # "Back" from the receipt screen -- the same entries, back in the list.
+            return self.render_page(season, entries, entry_formset)
 
         try:
-            entries, priced = price_formset(entry_formset)
+            built, priced = price_formset(entry_formset)
         except PricingError as error:
-            return self.render_page(season, entry_formset, season_error=str(error))
+            return self.render_page(season, entries, entry_formset, season_error=str(error))
 
         current_numbers = self.get_member_current_numbers(season)
-        priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), current_numbers)
+        priced_rows = priced_rows_with_jersey_fields(entry_formset, built, priced, team_number_pools(request.club, season), current_numbers)
         self._label_kept_jersey_numbers(priced_rows, current_numbers)
 
-        if request.POST.get("action") != "submit":
-            return self.render_page(season, entry_formset, priced_entries=priced_rows)
+        if action != "submit":
+            return self.render_page(season, entries, entry_formset, priced_entries=priced_rows)
 
         try:
-            batch = submit_reregistration(request.club, request.user, self.me, entries)
+            batch = submit_reregistration(request.club, request.user, self.me, built)
         except RegistrationError as error:
-            return self.render_page(season, entry_formset, season_error=str(error))
+            return self.render_page(season, entries, entry_formset, season_error=str(error))
 
         send_registration_confirmation_email(batch, request=request)
         total = sum((row["price"] - row["min_registrants_discount"] for _form, _entry, row in priced_rows), Decimal("0"))
@@ -1716,6 +1704,42 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         body = _("Thank you! The club will review it and send the invoice for € %(total)s. You'll find it under Payments & dues, and we've emailed you a confirmation.") % {"total": f"{total:.2f}"}
         notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:me"))
+
+    def handle_list_action(self, request, season, entries, verb, argument):
+        """add / change:N / refresh / save / cancel / remove:N -- editing the draft list; nothing is created until "Send registration"."""
+        index = int(argument) if argument.isdigit() and int(argument) < len(entries) else None
+        if verb == "remove":
+            if index is not None:
+                del entries[index]
+            return self.render_page(season, entries)
+        if verb == "cancel":
+            return self.render_page(season, entries)
+        if verb == "add":
+            if len(entries) >= MAX_REGISTRATION_ENTRIES:
+                too_many = ngettext("You can submit at most %(num)d registration at a time.", "You can submit at most %(num)d registrations at a time.", MAX_REGISTRATION_ENTRIES)
+                return self.render_page(season, entries, season_error=too_many % {"num": MAX_REGISTRATION_ENTRIES})
+            return self.render_editor(season, entries, self.get_editor(season))
+        if verb == "change":
+            if index is None:
+                return self.render_page(season, entries)
+            return self.render_editor(season, entries, self.get_editor(season, entry=entries[index], index=index))
+        # refresh / save: the editor's own posted fields (the "editor-" prefix), plus which row it replaces.
+        edited = request.POST.get("editor_index", "")
+        edited_index = int(edited) if edited.isdigit() and int(edited) < len(entries) else None
+        form = self.get_editor(season, data=request.POST, index=edited_index)
+        if verb == "refresh":
+            # A role/team/person change: redraw so the options and numbers follow it, without validating yet.
+            return self.render_editor(season, entries, form)
+        if not form["form"].is_valid():
+            return self.render_page(season, entries, editor=form)
+        entry = form["form"].to_entry()
+        if edited_index is None:
+            if len(entries) >= MAX_REGISTRATION_ENTRIES:
+                return self.render_page(season, entries)
+            entries.append(entry)
+        else:
+            entries[edited_index] = entry
+        return self.render_page(season, entries)
 
     @staticmethod
     def _label_kept_jersey_numbers(priced_rows, current_numbers):

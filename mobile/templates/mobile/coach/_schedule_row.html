@@ -3,7 +3,7 @@
     One row of the Events list. Tapping opens the event as a bottom sheet over the list (hx-get
     into #sheet-host, see coach/base.html); without htmx the href still opens the full page.
 {% endcomment %}
-<a class="pressable flex items-center gap-3 px-4 py-3" href="{% url "mobile:coach_event_detail" event.pk %}" hx-get="{% url "mobile:coach_event_detail" event.pk %}" hx-target="#sheet-host" hx-swap="innerHTML" hx-push-url="false" hx-boost="false">
+<a class="pressable flex items-center gap-3 px-4 py-3{% if event.cancelled %} opacity-60{% endif %}" href="{% url "mobile:coach_event_detail" event.pk %}" hx-get="{% url "mobile:coach_event_detail" event.pk %}" hx-target="#sheet-host" hx-swap="innerHTML" hx-push-url="false" hx-boost="false">
     <div class="w-9.5 shrink-0 text-center">
         <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ event.start|date:"D" }}</div>
         <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ event.start|date:"d" }}</div>
@@ -12,12 +12,14 @@
     <div class="min-w-0 flex-1">
         <div class="flex items-center gap-1 text-[15px] font-semibold text-ink">
             {% if event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
-            <span class="truncate">{{ event.title }}</span>
+            <span class="truncate{% if event.cancelled %} line-through{% endif %}">{{ event.title }}</span>
         </div>
         <div class="truncate text-[13px] text-muted">{{ event.start|date:"H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}</div>
     </div>
     {% if event.series_id %}<span class="shrink-0" title="{% trans 'Repeats' %}">{% lucide "repeat" size=13 class="text-dim" %}</span>{% endif %}
-    {% if event.score_for is not None and event.score_against is not None and event.kind == "game" %}
+    {% if event.cancelled %}
+        <span class="pill pill-danger shrink-0">{% trans "Cancelled" %}</span>
+    {% elif event.score_for is not None and event.score_against is not None and event.kind == "game" %}
         <span class="shrink-0 font-display text-base font-extrabold text-ink">{{ event.score_for }}&ndash;{{ event.score_against }}</span>
     {% elif event.is_live %}
         <span class="shrink-0 font-display text-[11px] font-extrabold text-club-dark">{% trans "LIVE" %}</span>

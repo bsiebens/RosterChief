@@ -9,10 +9,10 @@
 {% endcomment %}
 
 {% block header_extra %}
-    <div class="mt-3 flex items-center gap-2">
+    <div class="relative mt-3 flex items-center gap-2">
         <span class="font-display text-2xl font-extrabold text-white uppercase">{% trans "Calendar" %}</span>
         <div class="flex-1"></div>
-        <details class="relative" data-menu>
+        <details data-menu>
             <summary class="header-pill relative !min-h-[30px] w-[30px] justify-center !px-0" aria-label="{% trans "Filter" %}">
                 {% lucide "list-filter" size=15 stroke_width=2.6 %}
                 {% if filter_active %}<span class="absolute -top-px -right-px h-[7px] w-[7px] rounded-full bg-club"></span>{% endif %}
@@ -42,7 +42,7 @@
             </form>
         </details>
         {% if show_scope_menu %}
-            <details class="relative" data-menu>
+            <details data-menu>
                 <summary class="header-pill">
                     <span class="max-w-24 truncate">{{ scope_label }}</span>
                     {% lucide "chevron-down" size=11 stroke_width=3 %}

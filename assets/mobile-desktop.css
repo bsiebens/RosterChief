@@ -23,6 +23,11 @@
 @import "tailwindcss";
 
 @source "../mobile/templates/mobile/desktop";
+/* Shared partials (the redesigned mobile screens' building blocks) that desktop pages include
+   -- scanned so their utilities exist in this build; their component classes (.m-card,
+   .state-card, .answer-btn, .card-btn, .menu-*, .month-*, .sheet ...) are repeated at the
+   bottom of this file. */
+@source "../mobile/templates/mobile/_*.html";
 
 @theme {
     --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
@@ -93,6 +98,15 @@
        accent, distinct from the club colour so it can't be mistaken for "my team's
        game"). */
     --color-referee: #7c5cfc;
+    --color-referee-bg: #f1ecff;
+    --color-referee-border: #d9caff;
+    --color-referee-text: #5b2fd6;
+    --color-official: #0d9488;
+    --color-ice: #14b8e8;
+    --color-ice-ink: #04212c;
+    --color-row-sel: #fff7f8;
+    --color-row-focus: #f4f9ff;
+    --color-row-warn: #fffdf6;
 
     --radius-box: 0.75rem; /* matches management's rounded-xl cards, not mobile's 14px */
 }
@@ -1064,5 +1078,423 @@
             animation-duration: 0.001ms !important;
             transition-duration: 0.001ms !important;
         }
+    }
+}
+
+/* Shared component classes of the redesigned member screens (copied from mobile.css so the
+   shared partials render the same on desktop). Desktop-specific adjustments sit at the end. */
+@layer components {
+    .m-card {
+        background: var(--color-surface);
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+    }
+
+    .m-card-dark {
+        background: var(--color-night);
+        color: #fff;
+        border-radius: var(--radius-box);
+    }
+
+    .pressable {
+        transition:
+            opacity 0.12s ease,
+            transform 0.12s ease;
+    }
+
+    a.pressable:hover {
+        background: var(--color-subhead);
+    }
+
+    .state-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 32px 20px;
+        text-align: center;
+        background: var(--color-surface);
+        border: 1px solid var(--color-line);
+        border-radius: var(--radius-box);
+        color: var(--color-muted);
+    }
+
+    .state-card-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 999px;
+        background: var(--color-rule);
+        color: var(--color-dim);
+    }
+
+    .state-card-title {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 1.25rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-ink);
+    }
+
+    .state-card-text {
+        font-size: 0.9375rem;
+        max-width: 36ch;
+    }
+
+    .state-card-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 280px;
+        margin-top: 8px;
+    }
+
+    .toast {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        bottom: 24px;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-inline: auto;
+        max-width: 420px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: var(--color-night);
+        color: #fff;
+        font-size: 0.9375rem;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        opacity: 0;
+        transform: translateY(12px);
+        pointer-events: none;
+        transition:
+            opacity 0.2s ease,
+            transform 0.2s ease;
+    }
+
+    .toast-show {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+    }
+
+    .toast-error {
+        background: var(--color-club-dark);
+    }
+
+    .toast-ok {
+        background: var(--color-ok-text);
+    }
+
+    /* The event sheet: a centred modal on desktop (mobile.css: bottom sheet). */
+    dialog.sheet {
+        position: fixed;
+        inset: 0;
+        margin: auto;
+        width: calc(100% - 48px);
+        max-width: 640px;
+        height: min(90dvh, 860px);
+        max-height: 90dvh;
+        padding: 0 16px 16px;
+        border: none;
+        border-radius: 20px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    dialog.sheet[open] {
+        animation: rc-fade 0.2s ease;
+    }
+
+    dialog.sheet::backdrop {
+        background: rgba(0, 0, 0, 0.45);
+        animation: rc-fade 0.2s ease;
+    }
+
+    .sheet-handle {
+        display: none;
+    }
+
+    @keyframes rc-fade {
+        from {
+            opacity: 0;
+        }
+    }
+
+    .answer-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
+        min-height: 44px;
+        padding-inline: 0.75rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 12px;
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: opacity 0.12s ease;
+    }
+
+    .answer-btn:hover {
+        opacity: 0.85;
+    }
+
+    .answer-btn-on {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+    }
+
+    .answer-btn-danger {
+        background: var(--color-danger-bg);
+        border-color: var(--color-danger-border);
+        color: var(--color-club-dark);
+    }
+
+    .answer-btn-sm {
+        min-height: 36px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    .answer-btn-line {
+        min-height: 34px;
+        min-width: 64px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    .card-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        min-width: 52px;
+        border-radius: 6px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+
+    .card-btn-in {
+        background: var(--color-ok);
+        color: #fff;
+    }
+
+    .card-btn-out {
+        background: var(--color-steel);
+        color: var(--color-on-dark);
+    }
+
+    .card-btn-ghost {
+        padding-inline: 10px;
+        border: 1.5px solid var(--color-on-dark-faint);
+        color: var(--color-on-dark);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+    }
+
+    /* Calendar controls: on desktop they sit on the page (not on a navy header), so the pill
+       and segmented switch use the surface palette. */
+    .header-pill {
+        display: flex;
+        align-items: center;
+        gap: 0.3125rem;
+        min-height: 36px;
+        padding-inline: 0.875rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 999px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        list-style: none;
+        cursor: pointer;
+    }
+
+    .header-pill::-webkit-details-marker {
+        display: none;
+    }
+
+    .header-seg {
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--color-edge);
+        border-radius: 999px;
+        background: var(--color-surface);
+    }
+
+    .header-seg a {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        min-height: 30px;
+        border-radius: 999px;
+        color: var(--color-muted);
+    }
+
+    .header-seg a[aria-current="true"] {
+        background: var(--color-emphasis);
+        color: #fff;
+    }
+
+    .menu-panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        z-index: 40;
+        min-width: 13rem;
+        max-width: 80vw;
+        padding: 6px;
+        border: 1px solid var(--color-line);
+        border-radius: 14px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .menu-item {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        min-height: 40px;
+        padding-inline: 0.625rem;
+        border-radius: 10px;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    a.menu-item:hover,
+    label.menu-item:hover {
+        background: var(--color-rule);
+    }
+
+    .menu-heading {
+        padding: 8px 10px 2px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    .month-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        padding-block: 3px;
+        min-height: 44px;
+    }
+
+    .month-day {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        font-size: 14px;
+        border: 1.5px solid transparent;
+    }
+
+    .month-day-today {
+        border-color: var(--color-ink);
+    }
+
+    .month-day-selected {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .month-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--color-club);
+    }
+
+    .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .sponsor-scroll {
+        overflow: hidden;
+        mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+    }
+
+    .sponsor-scroll-track {
+        display: flex;
+        width: max-content;
+        gap: 0.75rem;
+        animation: sponsor-scroll linear infinite;
+    }
+
+    @keyframes sponsor-scroll {
+        from {
+            transform: translateX(0);
+        }
+
+        to {
+            transform: translateX(-50%);
+        }
+    }
+
+    [x-cloak] {
+        display: none !important;
+    }
+}
+
+/* Registration editor sheet (Register screen): a centred modal on desktop. */
+@layer components {
+    dialog.sheet {
+        width: min(560px, 92vw);
+        max-height: 88vh;
+        margin: auto;
+        padding: 20px 20px 16px;
+        border: none;
+        border-radius: 16px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        overflow-y: auto;
+    }
+
+    dialog.sheet::backdrop {
+        background: rgba(0, 0, 0, 0.45);
+    }
+
+    .m-card {
+        background: var(--color-surface);
+        border: 1px solid var(--color-line);
+        border-radius: 14px;
     }
 }
