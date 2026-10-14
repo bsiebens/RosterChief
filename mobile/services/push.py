@@ -18,12 +18,15 @@ from urllib.parse import urlsplit
 import requests
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.conf import settings
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
+from appapi.presenters import notification_target
+from members.services.family import managed_people
 from notifications import delivery_log, sandbox
 from notifications.preferences import is_enabled
-from notifications.services import muted_push_users, preference_key, quiet_decisions, recipient_user_ids, users_with_native_push
+from notifications.services import muted_push_users, preference_key, quiet_decisions, recipient_user_ids, unread_count, users_with_native_push
 
 from .. import models
 
@@ -205,6 +208,35 @@ def send_push_to_user(club, user, *, title: str, body: str, url: str = "/app/", 
     return len(subscriptions)
 
 
+def _notification_extras(notification) -> dict:
+    """``{"target": {type, id, slug} | None, "url": deep link | None}`` for a Notification's push payload:
+    the same target the native push carries, plus the /app/ page it maps to (what the service worker opens
+    when it has no richer rule; older workers only read ``url``)."""
+    target = notification_target(notification)
+    url = None
+    if target:
+        kind, ident, slug = target["type"], target.get("id"), target.get("slug")
+        if kind == "calendar":
+            url = reverse("mobile:calendar")
+        elif kind == "news" and slug:
+            url = reverse("mobile:news_detail", kwargs={"slug": slug})
+        elif kind == "event" and ident:
+            url = reverse("mobile:event_detail", kwargs={"pk": ident})
+        elif kind == "form_send" and ident:
+            url = reverse("mobile:form_fill", kwargs={"pk": ident})
+        elif kind == "order" and ident:
+            url = reverse("mobile:shop_order_detail", kwargs={"pk": ident})
+    return {"target": {key: str(value) for key, value in target.items() if value is not None} if target else None, "url": url}
+
+
+def _unread_for(subscription, cache) -> int:
+    """The subscribing account's unread badge count in that club (for the app-icon badge)."""
+    key = (subscription.club_id, subscription.member_id)
+    if key not in cache:
+        cache[key] = unread_count(subscription.club, managed_people(subscription.member, subscription.club))
+    return cache[key]
+
+
 def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     """Web push for a whole notifications.services.notify_members() fan-out at once.
 
@@ -233,9 +265,10 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
         subscriptions_by_account.setdefault((subscription.club_id, subscription.member.user_id), []).append(subscription)
 
     sent = set()
+    unread_cache = {}
     for notification in notifications:
         dedupe_key = (notification.club_id, notification.content_type_id, notification.object_id, notification.title, notification.body)
-        payload = json.dumps({"title": str(notification.title), "body": str(notification.body), "url": url})
+        extras = _notification_extras(notification)
         for user_id in recipients[notification.pk] - skip:
             action, hold_until = quiet.get((notification.pk, user_id), ("send", None))
             if action == "drop":
@@ -244,4 +277,14 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
                 if (subscription.pk, dedupe_key) in sent:
                     continue
                 sent.add((subscription.pk, dedupe_key))
+                payload = json.dumps(
+                    {
+                        "title": str(notification.title),
+                        "body": str(notification.body),
+                        "url": extras["url"] or url,
+                        "notification_id": str(notification.pk),
+                        "target": extras["target"],
+                        "unread": _unread_for(subscription, unread_cache),
+                    }
+                )
                 _deliver(subscription, payload, label=subscription.member, notification=notification, hold_until=hold_until)

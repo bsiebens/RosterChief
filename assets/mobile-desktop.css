@@ -1008,3 +1008,61 @@
         text-align: right;
     }
 }
+
+/* iOS parity: shared accessibility + .btn-rc (see mobile.css) */
+@layer components {
+    .btn-rc {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 50px;
+        border: none;
+        border-radius: 10px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 15px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+
+    .btn-rc:active {
+        opacity: 0.85;
+    }
+
+    .btn-rc:disabled {
+        background: var(--color-dim);
+        color: var(--color-surface);
+        cursor: not-allowed;
+    }
+
+    .btn-rc-primary {
+        background: var(--color-club, #e4002b);
+        color: var(--color-club-content, #fff);
+    }
+
+    .btn-rc-neutral {
+        background: var(--color-emphasis);
+        color: #fff;
+    }
+
+    .btn-rc-destructive {
+        background: var(--color-club-dark, #b00021);
+        color: #fff;
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--color-club-dark, #b00021);
+        outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.001ms !important;
+            transition-duration: 0.001ms !important;
+        }
+    }
+}

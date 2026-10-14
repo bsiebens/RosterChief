@@ -19,6 +19,8 @@
     teaser.
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     {% if managed_people|length > 1 %}
         <div class="scrollbar-hide -mt-1 flex gap-2 overflow-x-auto pb-0.5">

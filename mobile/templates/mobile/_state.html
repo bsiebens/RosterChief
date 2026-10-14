@@ -1,0 +1,17 @@
+{% load i18n lucide %}
+{% comment %}
+    Shared state card. Params (all optional): kind ("error" | "empty", default "empty"), icon, title, text, retry_url (error only; GET re-fetch via hx-boost), action_url, action_label.
+{% endcomment %}
+<div class="state-card" role="{% if kind == "error" %}alert{% else %}status{% endif %}">
+    {% if kind == "error" %}
+        {% lucide icon|default:"cloud-off" size=32 %}
+        <h2>{{ title|default:_("Couldn't load") }}</h2>
+        <p>{{ text|default:_("Something went wrong. Check your connection and try again.") }}</p>
+        <button type="button" class="btn" onclick="{% if retry_url %}window.htmx&&htmx.ajax('GET','{{ retry_url|escapejs }}',{target:'body',swap:'innerHTML',headers:{'HX-Boosted':'true'}}){% else %}window.rosterchiefRefresh&&rosterchiefRefresh(){% endif %}">{% trans "Try again" %}</button>
+    {% else %}
+        {% lucide icon|default:"inbox" size=32 %}
+        {% if title %}<h2>{{ title }}</h2>{% endif %}
+        {% if text %}<p>{{ text }}</p>{% endif %}
+        {% if action_url %}<a class="btn" href="{{ action_url }}">{{ action_label }}</a>{% endif %}
+    {% endif %}
+</div>

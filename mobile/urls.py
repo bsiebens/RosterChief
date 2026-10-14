@@ -8,6 +8,7 @@ urlpatterns = [
     # PWA plumbing.
     path("manifest.webmanifest", views.ManifestView.as_view(), name="manifest"),
     path("sw.js", views.ServiceWorkerView.as_view(), name="service_worker"),
+    path("offline/", views.OfflineView.as_view(), name="offline"),
     path("icon/<int:size>.png", views.AppIconView.as_view(), name="icon"),
     path("push/subscribe/", views.PushSubscribeView.as_view(), name="push_subscribe"),
     path("calendar/<str:token>.ics", views.CalendarFeedView.as_view(), name="calendar_feed"),

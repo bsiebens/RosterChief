@@ -8392,7 +8392,7 @@ class BugListViewTests(TestCase):
 #: own plumbing (fetched by the browser before/independently of login) and the
 #: token-authenticated calendar feed (a calendar app can't log in; the feed
 #: only ever lists the token owner's own invitations).
-MEMBER_APP_EXEMPT_URL_NAMES = {"manifest", "service_worker", "icon", "calendar_feed"}
+MEMBER_APP_EXEMPT_URL_NAMES = {"manifest", "service_worker", "icon", "offline", "calendar_feed"}
 
 
 def _dummy_kwargs(pattern):
@@ -9087,3 +9087,44 @@ class CalendarFeedTokenMigrationTests(TransactionTestCase):
 
         self.assertEqual(row.token_hash, hashlib.sha256(b"legacy-raw-token-value").hexdigest())
         self.assertNotIn("token", [field.name for field in NewToken._meta.fields])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MeLanguagePickerTests(TestCase):
+    """Me -> "Language": a django set_language POST (cookie only, no per-user field)."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="lang@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lia", last_name="Lang", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def test_me_lists_both_languages_and_marks_the_current_one(self):
+        response = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(response, reverse("set_language"))
+        self.assertContains(response, 'value="en" lang="en" aria-current="true"')
+        self.assertContains(response, 'value="nl" lang="nl"')
+        self.assertContains(response, "Nederlands")
+
+    def test_choosing_dutch_sets_the_cookie_and_me_renders_in_dutch(self):
+        response = self.client.post(reverse("set_language"), {"language": "nl", "next": reverse("mobile:me")}, HTTP_HOST=self.HOST)
+        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.assertEqual(response.cookies[settings.LANGUAGE_COOKIE_NAME].value, "nl")
+
+        page = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(page, "Persoonlijke gegevens")
+        self.assertContains(page, "Taal")
+        self.assertContains(page, 'value="nl" lang="nl" aria-current="true"')
+
+    def test_desktop_me_has_the_picker_too(self):
+        with translation.override("nl"):
+            html = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST, HTTP_ACCEPT_LANGUAGE="nl").content.decode()
+        self.assertIn("Taal", html)

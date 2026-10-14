@@ -34,6 +34,8 @@
     {% endif %}
 {% endblock header_extra %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     {% if not managed_people %}
         <div class="m-card p-6 text-center">
@@ -177,6 +179,21 @@
                 <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Report a bug" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
+        </div>
+
+        <div>
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Language" %}</div>
+            <form class="m-card overflow-hidden" action="{% url "set_language" %}" method="post" hx-boost="false">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.path }}">
+                {% for language in available_languages %}
+                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                    <button class="flex w-full items-center gap-3 p-3.5 text-left" type="submit" name="language" value="{{ language.code }}" lang="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}aria-current="true"{% endif %}>
+                        <span class="flex-1 text-[15px] font-semibold text-ink">{{ language.name_local }}</span>
+                        {% if language.code == LANGUAGE_CODE %}{% lucide "check" size=18 class="shrink-0 text-club" %}{% endif %}
+                    </button>
+                {% endfor %}
+            </form>
         </div>
 
         <a class="m-card flex items-center justify-center gap-2 p-3.5 text-[15px] font-semibold text-club" href="{% url "account_logout" %}" hx-boost="false">

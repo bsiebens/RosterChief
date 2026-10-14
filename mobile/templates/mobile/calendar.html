@@ -33,6 +33,8 @@
     </div>
 {% endblock header_extra %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     <div class="flex gap-2">
         <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not kind_filter %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="{% url "mobile:calendar" %}">

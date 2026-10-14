@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: RosterChief\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-12 12:00+0200\n"
+"POT-Creation-Date: 2026-10-14 12:54+0200\n"
 "PO-Revision-Date: 2026-10-12 12:00+0200\n"
 "Last-Translator: RosterChief\n"
 "Language-Team: Dutch\n"
@@ -13,5 +13,1839 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "Reminder: %(kind)s on %(when)s still needs your answer."
-msgstr "Herinnering: we wachten nog op jouw antwoord voor %(kind)s op %(when)s."
+msgid "Evaluations"
+msgstr ""
+
+msgid "New evaluation"
+msgstr ""
+
+msgid "Could not submit"
+msgstr ""
+
+msgid "Evaluation submitted"
+msgstr ""
+
+#, python-format
+msgid "Your evaluation of “%(player)s” has been recorded."
+msgstr ""
+
+msgid "Evaluation"
+msgstr ""
+
+msgid "Location"
+msgstr ""
+
+msgid "Opponent"
+msgstr ""
+
+msgid "Today"
+msgstr ""
+
+msgid "Silent players"
+msgstr ""
+
+#, python-format
+msgid "%(count)d haven't answered yet"
+msgstr ""
+
+msgid "Review"
+msgstr ""
+
+msgid "Line-up not published"
+msgstr ""
+
+#, python-format
+msgid "%(title)s · %(date)s"
+msgstr ""
+
+msgid "Build"
+msgstr ""
+
+msgid "Attendance"
+msgstr ""
+
+msgid "Attendance saved"
+msgstr ""
+
+#, python-format
+msgid "%(count)d players checked in."
+msgstr ""
+
+msgid "Reminder sent"
+msgstr ""
+
+#, python-format
+msgid "%(count)d player nudged."
+msgid_plural "%(count)d players nudged."
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Nobody to remind"
+msgstr ""
+
+msgid "Everyone has already responded."
+msgstr ""
+
+msgid "New event"
+msgstr ""
+
+msgid "Type a name to search..."
+msgstr ""
+
+#, python-format
+msgid "“%(series)s” created, with %(count)d occurrence scheduled."
+msgid_plural "“%(series)s” created, with %(count)d occurrences scheduled."
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Series created"
+msgstr ""
+
+#, python-format
+msgid "“%(event)s” created."
+msgstr ""
+
+msgid "Event created"
+msgstr ""
+
+msgid "Edit event"
+msgstr ""
+
+msgid "Event updated"
+msgstr ""
+
+#, python-format
+msgid "“%(event)s” has been updated."
+msgstr ""
+
+msgid "Edit series"
+msgstr ""
+
+msgid "Series updated"
+msgstr ""
+
+#, python-format
+msgid "“%(series)s” has been updated."
+msgstr ""
+
+msgid "Detached from series"
+msgstr ""
+
+#, python-format
+msgid ""
+"“%(event)s” is now edited independently and won't be touched by future "
+"series-wide changes."
+msgstr ""
+
+msgid "Event"
+msgstr ""
+
+msgid "Add task"
+msgstr ""
+
+msgid "Task added"
+msgstr ""
+
+#, python-format
+msgid "“%(title)s” was added to this event."
+msgstr ""
+
+msgid "Could not update task"
+msgstr ""
+
+msgid "Task updated"
+msgstr ""
+
+#, python-format
+msgid "“%(title)s” was updated."
+msgstr ""
+
+msgid "Task deleted"
+msgstr ""
+
+#, python-format
+msgid "“%(title)s” was removed from this event."
+msgstr ""
+
+msgid "New post"
+msgstr ""
+
+#, python-format
+msgid "“%(news)s” is ready for review."
+msgstr ""
+
+msgid "Sent for review"
+msgstr ""
+
+msgid "Add players"
+msgstr ""
+
+#, python-format
+msgid "%(count)d player added to the roster."
+msgid_plural "%(count)d players added to the roster."
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Roster updated"
+msgstr ""
+
+msgid "Add staff"
+msgstr ""
+
+msgid "Could not add staff"
+msgstr ""
+
+msgid "Pick a position first."
+msgstr ""
+
+#, python-format
+msgid "%(count)d staff member added."
+msgid_plural "%(count)d staff members added."
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Staff updated"
+msgstr ""
+
+msgid "Line-up"
+msgstr ""
+
+msgid "No position set"
+msgstr ""
+
+msgid "Line-up saved"
+msgstr ""
+
+#, python-format
+msgid "%(count)d player(s) selected."
+msgstr ""
+
+msgid "Could not schedule"
+msgstr ""
+
+msgid "Pick a date and time in the future."
+msgstr ""
+
+msgid "Publish scheduled"
+msgstr ""
+
+msgid "The line-up will publish itself automatically at that time."
+msgstr ""
+
+msgid "Schedule cancelled"
+msgstr ""
+
+msgid "Publish it manually whenever you are ready."
+msgstr ""
+
+msgid "Line-up updated"
+msgstr ""
+
+msgid "Anyone whose status changed has been notified."
+msgstr ""
+
+msgid "Line-up published"
+msgstr ""
+
+msgid "Selected players have been notified."
+msgstr ""
+
+msgid "Squad"
+msgstr ""
+
+msgid "Player"
+msgstr ""
+
+msgid "Player updated"
+msgstr ""
+
+#, python-format
+msgid "“%(member)s” has been updated."
+msgstr ""
+
+msgid "Player removed"
+msgstr ""
+
+#, python-format
+msgid "“%(member)s” removed from the roster."
+msgstr ""
+
+msgid "Staff removed"
+msgstr ""
+
+#, python-format
+msgid "“%(member)s” removed from staff."
+msgstr ""
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Show the official player picture on the club's public website"
+msgstr ""
+
+msgid "This number is already taken in this team's number pool this season."
+msgstr ""
+
+msgid "Another player on this team already has this jersey number this season."
+msgstr ""
+
+msgid "Shop closed"
+msgstr ""
+
+msgid "The shop isn't taking orders right now."
+msgstr ""
+
+msgid "member"
+msgstr ""
+
+msgid "endpoint"
+msgstr ""
+
+msgid "p256dh key"
+msgstr ""
+
+msgid "auth key"
+msgstr ""
+
+msgid "user agent"
+msgstr ""
+
+msgid "push subscription"
+msgstr ""
+
+msgid "push subscriptions"
+msgstr ""
+
+msgid "user"
+msgstr ""
+
+msgid "token hash"
+msgstr ""
+
+msgid "calendar feed token"
+msgstr ""
+
+msgid "calendar feed tokens"
+msgstr ""
+
+#, python-format
+msgid "%(club)s — RosterChief"
+msgstr ""
+
+#, python-format
+msgid "%(title)s — %(name)s"
+msgstr ""
+
+#, python-format
+msgid "RSVP: %(status)s"
+msgstr ""
+
+#, python-format
+msgid "Starts: %(time)s"
+msgstr ""
+
+msgid "Unsupported push service endpoint."
+msgstr ""
+
+msgid "Invalid p256dh key."
+msgstr ""
+
+msgid "Invalid auth secret."
+msgstr ""
+
+msgid "Home"
+msgstr ""
+
+msgid "Calendar"
+msgstr ""
+
+msgid "News"
+msgstr ""
+
+msgid "Me"
+msgstr "Ik"
+
+#, python-format
+msgid "Complete “%(name)s” to sign up"
+msgstr ""
+
+msgid "Blocked"
+msgstr ""
+
+msgid "Official"
+msgstr ""
+
+msgid "Confirmed"
+msgstr ""
+
+msgid "Reply needed"
+msgstr ""
+
+msgid "Referee"
+msgstr ""
+
+msgid "Friendly"
+msgstr ""
+
+#, python-format
+msgid "Season dues &mdash; %(name)s"
+msgstr ""
+
+#, python-format
+msgid "Due %(due)s"
+msgstr ""
+
+msgid "Multi-registrant discount"
+msgstr ""
+
+#, python-format
+msgid "Pay &euro;%(total)s by %(date)s to save &euro;%(amount)s."
+msgstr ""
+
+#, python-format
+msgid "Registration &mdash; %(names)s"
+msgstr ""
+
+msgid "Discount"
+msgstr ""
+
+msgid "Download invoice"
+msgstr ""
+
+#, python-format
+msgid "Save &euro;%(amount)s if paid by %(date)s"
+msgstr ""
+
+msgid "Tasks"
+msgstr ""
+
+msgid "Covered by"
+msgstr ""
+
+msgid "I can't take this after all"
+msgstr ""
+
+msgid "I'll take it"
+msgstr ""
+
+msgid "In"
+msgstr ""
+
+msgid "Out"
+msgstr ""
+
+msgid "Reason -- only you and the coach can see this"
+msgstr ""
+
+msgid "e.g. sick, family event..."
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Confirm"
+msgstr ""
+
+msgid "Remove this registration"
+msgstr ""
+
+#, python-format
+msgid "Season %(name)s"
+msgstr ""
+
+msgid "Notifications"
+msgstr "Meldingen"
+
+msgid "Member"
+msgstr ""
+
+msgid "Manager"
+msgstr ""
+
+msgid "Shop"
+msgstr ""
+
+msgid "Back"
+msgstr ""
+
+msgid "Report a bug"
+msgstr "Een bug melden"
+
+msgid "No account to file from"
+msgstr ""
+
+msgid ""
+"Once you're linked to a member record, you'll be able to report bugs here."
+msgstr ""
+
+msgid "New report"
+msgstr ""
+
+msgid "Submit"
+msgstr ""
+
+msgid "Your reports"
+msgstr ""
+
+#, python-format
+msgid "Submitted %(date)s"
+msgstr ""
+
+#, python-format
+msgid "Fixed in %(version)s"
+msgstr ""
+
+#, python-format
+msgid "Fixed on %(date)s"
+msgstr ""
+
+msgid "Notes from the platform"
+msgstr ""
+
+msgid "No bugs reported yet."
+msgstr ""
+
+msgid "All"
+msgstr ""
+
+msgid "Games"
+msgstr ""
+
+msgid "Practices"
+msgstr ""
+
+msgid "No one to show yet"
+msgstr "Nog niemand om te tonen"
+
+msgid ""
+"Once you're linked to a member record, their schedule will show up here."
+msgstr ""
+
+msgid "No games scheduled."
+msgstr ""
+
+msgid "No practices scheduled."
+msgstr ""
+
+msgid "Nothing scheduled."
+msgstr ""
+
+msgid "This week"
+msgstr ""
+
+msgid "Next week"
+msgstr ""
+
+msgid "Calendar sync"
+msgstr "Agendasynchronisatie"
+
+msgid ""
+"Subscribe this link in your phone or computer's calendar app to see everyone "
+"you manage's schedule alongside your own. It includes every event they're "
+"invited to, not just the ones they've replied to."
+msgstr ""
+
+msgid "Add to calendar"
+msgstr ""
+
+msgid ""
+"Opens directly in Apple/macOS Calendar. On Android or a desktop calendar "
+"app, copy the link below and add it as a new calendar by URL."
+msgstr ""
+
+msgid "Copy"
+msgstr ""
+
+msgid "Copied"
+msgstr ""
+
+msgid ""
+"Add it to your calendar now: for your security this link is only shown this "
+"once. If you lose it, you can get a new one here at any time."
+msgstr ""
+
+msgid ""
+"Updates can take a few hours to appear in your calendar app -- it checks in "
+"on its own schedule, RosterChief can't push to it directly."
+msgstr ""
+
+msgid "Your calendar link is set up"
+msgstr ""
+
+msgid ""
+"For your security the link is only shown once, right after it's created. "
+"Calendars you already subscribed with it keep working."
+msgstr ""
+
+msgid ""
+"Need the link again, or shared it by accident? Get a new one -- the old link "
+"stops working immediately and you'll need to re-subscribe with the new one."
+msgstr ""
+
+msgid "Get a new calendar link"
+msgstr ""
+
+msgid "Create my calendar link"
+msgstr ""
+
+msgid ""
+"The link is shown once, right after it's created -- have your calendar app "
+"ready."
+msgstr ""
+
+msgid "Details"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "Address"
+msgstr ""
+
+msgid "City"
+msgstr ""
+
+msgid "Zip code"
+msgstr ""
+
+msgid "Country"
+msgstr ""
+
+msgid "+ New"
+msgstr ""
+
+#, python-format
+msgid "Add to %(team)s"
+msgstr ""
+
+#, python-format
+msgid "%(counter)s on squad"
+msgid_plural "%(counter)s on squad"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Search by name"
+msgstr ""
+
+msgid "Suggested"
+msgstr ""
+
+msgid "No team"
+msgstr ""
+
+msgid ""
+"Was on this team's roster last season, or is on a team that feeds into this "
+"one this season."
+msgstr ""
+
+msgid "Not on any team's roster yet this season."
+msgstr ""
+
+msgid "No one matches."
+msgstr ""
+
+msgid "Select players to add"
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
+#, python-format
+msgid "Add staff to %(team)s"
+msgstr ""
+
+msgid "Position"
+msgstr ""
+
+msgid "Choose a position"
+msgstr ""
+
+msgid "No one is eligible to be added."
+msgstr ""
+
+msgid "Select people to add"
+msgstr ""
+
+msgid "registered"
+msgstr ""
+
+msgid "Responded"
+msgstr ""
+
+msgid "Silent"
+msgstr ""
+
+msgid "Declined"
+msgstr ""
+
+#, python-format
+msgid "Remind %(counter)s silent player"
+msgid_plural "Remind %(counter)s silent players"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "No one matches this filter."
+msgstr ""
+
+msgid "Save attendance"
+msgstr ""
+
+msgid "Add player"
+msgstr ""
+
+msgid "Which checklist?"
+msgstr ""
+
+msgid "Unknown evaluator"
+msgstr ""
+
+msgid "No answer"
+msgstr ""
+
+msgid "This club hasn't set up an evaluation checklist yet."
+msgstr ""
+
+msgid "Submit evaluation"
+msgstr ""
+
+msgid "No evaluations yet."
+msgstr ""
+
+msgid "Edit"
+msgstr ""
+
+msgid "Cancelled"
+msgstr ""
+
+#, python-format
+msgid "Meet %(time)s"
+msgstr ""
+
+#, python-format
+msgid "Score: %(us)s – %(them)s"
+msgstr ""
+
+msgid "Live"
+msgstr ""
+
+#, python-format
+msgid "Part of the recurring series “%(series)s”."
+msgstr ""
+
+msgid "Detached"
+msgstr ""
+
+msgid ""
+"Detach this event from the series? Future series-wide edits will no longer "
+"touch it."
+msgstr ""
+
+msgid "Detach from series"
+msgstr ""
+
+msgid "Nobody has claimed this yet."
+msgstr ""
+
+msgid "Delete this task? This cannot be undone."
+msgstr ""
+
+msgid "Delete"
+msgstr ""
+
+msgid "Needed"
+msgstr ""
+
+msgid "Save"
+msgstr ""
+
+msgid "No tasks yet."
+msgstr ""
+
+msgid "Create"
+msgstr ""
+
+msgid "Practice"
+msgstr ""
+
+msgid "Game"
+msgstr ""
+
+msgid "Tournament"
+msgstr ""
+
+msgid "Meeting"
+msgstr ""
+
+msgid "This repeats"
+msgstr ""
+
+msgid "Title"
+msgstr ""
+
+msgid "Date &amp; time"
+msgstr ""
+
+msgid "Gathering time"
+msgstr ""
+
+msgid "Leave blank if there's no separate meet-up time."
+msgstr ""
+
+msgid "First occurrence"
+msgstr ""
+
+msgid "Gathering (minutes before each occurrence)"
+msgstr ""
+
+msgid "Competition"
+msgstr ""
+
+msgid "Competition ID"
+msgstr ""
+
+msgid "This game's id in the competition's own data source, if it has one."
+msgstr ""
+
+msgid "A friendly game doesn't count towards the standings."
+msgstr ""
+
+msgid "Score for"
+msgstr ""
+
+msgid "Score against"
+msgstr ""
+
+msgid "Live now"
+msgstr ""
+
+msgid "Officiating"
+msgstr ""
+
+msgid "Referees needed"
+msgstr ""
+
+msgid "Officials needed"
+msgstr ""
+
+msgid "Repeats"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
+msgid "Every"
+msgstr ""
+
+msgid "On (weekly only)"
+msgstr ""
+
+msgid "Repeats until"
+msgstr ""
+
+msgid "Leave blank to keep repeating with no end date."
+msgstr ""
+
+msgid "Length of each occurrence"
+msgstr ""
+
+msgid "Hours"
+msgstr ""
+
+msgid "Minutes"
+msgstr ""
+
+msgid "Who"
+msgstr ""
+
+#, python-format
+msgid ""
+"Automatically for %(team)s. Need more than one team? Create it from the "
+"management panel instead."
+msgstr ""
+
+msgid "Exclude from the roster"
+msgstr ""
+
+msgid "Add someone not on the roster"
+msgstr ""
+
+msgid "Answers close"
+msgstr ""
+
+msgid "Leave blank to keep answers open until the event starts."
+msgstr ""
+
+msgid "Answers close (minutes before each occurrence)"
+msgstr ""
+
+msgid "Leave blank to keep answers open until each occurrence starts."
+msgstr ""
+
+msgid "New location"
+msgstr ""
+
+msgid "Close"
+msgstr ""
+
+msgid "Add location"
+msgstr ""
+
+msgid "New opponent"
+msgstr ""
+
+msgid "Add opponent"
+msgstr ""
+
+msgid "Published"
+msgstr ""
+
+msgid "Scheduled"
+msgstr ""
+
+msgid "Tasks & officiating"
+msgstr ""
+
+msgid "open"
+msgstr ""
+
+msgid "Referees"
+msgstr ""
+
+msgid "Officials"
+msgstr ""
+
+#, python-format
+msgid "%(rate)s%% turnout"
+msgstr ""
+
+msgid "Yes"
+msgstr ""
+
+msgid "No"
+msgstr ""
+
+msgid "No available players to pick from."
+msgstr ""
+
+msgid "Save line-up"
+msgstr ""
+
+msgid "Unavailable"
+msgstr ""
+
+#, python-format
+msgid "Scheduled to publish %(time)s"
+msgstr ""
+
+msgid "Publish now"
+msgstr ""
+
+msgid "Cancel schedule"
+msgstr ""
+
+msgid "Publish changes"
+msgstr ""
+
+msgid "Publish"
+msgstr ""
+
+msgid "Or schedule for later"
+msgstr ""
+
+msgid "Send"
+msgstr ""
+
+msgid "Headline"
+msgstr ""
+
+msgid "Body"
+msgstr ""
+
+msgid "Photos"
+msgstr ""
+
+msgid "Optional. The first photo becomes the main picture."
+msgstr ""
+
+#, python-format
+msgid ""
+"Linked to %(team)s and sent to an editor for review before it goes out to "
+"families -- they can widen who it reaches if needed."
+msgstr ""
+
+msgid "Contact"
+msgstr ""
+
+msgid "Call"
+msgstr ""
+
+msgid "Emergency call"
+msgstr ""
+
+#, python-format
+msgid "Call %(name)s"
+msgstr ""
+
+#, python-format
+msgid "Emergency: %(name)s"
+msgstr ""
+
+msgid "No phone numbers on file."
+msgstr ""
+
+msgid "Attendance this season"
+msgstr ""
+
+msgid "Present"
+msgstr ""
+
+msgid "Absent"
+msgstr ""
+
+msgid "No reply"
+msgstr ""
+
+msgid "No-shows"
+msgstr ""
+
+msgid "Roster details"
+msgstr ""
+
+msgid "Jersey number"
+msgstr ""
+
+msgid "Captain"
+msgstr ""
+
+msgid "Alternate captain"
+msgstr ""
+
+msgid "Remove this player from the roster? This cannot be undone."
+msgstr ""
+
+msgid "Remove from roster"
+msgstr ""
+
+msgid "Not staffing a team yet"
+msgstr ""
+
+msgid "Roster"
+msgstr ""
+
+msgid "Pending"
+msgstr ""
+
+msgid "No one on the roster for this season yet."
+msgstr ""
+
+msgid "Staff"
+msgstr "Staf"
+
+msgid "Remove this staff member?"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "No staff assigned for this season yet."
+msgstr ""
+
+msgid "Description"
+msgstr ""
+
+msgid ""
+"Once you're assigned to a team's staff, its schedule and roster will show up "
+"here."
+msgstr ""
+
+msgid "Stats for tonight"
+msgstr ""
+
+#, python-format
+msgid "Stats for %(date)s"
+msgstr ""
+
+#, python-format
+msgid "Tonight &middot; %(time)s"
+msgstr ""
+
+#, python-format
+msgid "Next up &middot; %(date)s"
+msgstr ""
+
+msgid "Check attendance"
+msgstr ""
+
+msgid "Needs you"
+msgstr ""
+
+msgid "Also yours"
+msgstr ""
+
+#, python-format
+msgid "Your own next event &middot; %(date)s"
+msgstr ""
+
+msgid "Nothing needs your attention right now."
+msgstr ""
+
+#, python-format
+msgid "Complete &ldquo;%(name)s&rdquo; to sign up"
+msgstr ""
+
+msgid "Overview"
+msgstr ""
+
+msgid "Personal details"
+msgstr "Persoonlijke gegevens"
+
+msgid "Payments &amp; dues"
+msgstr "Betalingen en bijdragen"
+
+msgid "Forms"
+msgstr "Formulieren"
+
+msgid "Account"
+msgstr ""
+
+msgid "Change password"
+msgstr "Wachtwoord wijzigen"
+
+msgid "Manage two-factor auth"
+msgstr ""
+
+msgid "Log out"
+msgstr "Uitloggen"
+
+#, python-format
+msgid "%(counter)s requirement still open: %(names)s"
+msgid_plural "%(counter)s requirements still open: %(names)s"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Profile picture"
+msgstr ""
+
+msgid "Identity"
+msgstr ""
+
+msgid "Emergency"
+msgstr ""
+
+msgid "Emergency contact"
+msgstr ""
+
+msgid "Home game"
+msgstr ""
+
+msgid "Away game"
+msgstr ""
+
+msgid "Face-off"
+msgstr ""
+
+msgid "Where"
+msgstr ""
+
+msgid "Refereeing"
+msgstr ""
+
+msgid "Can't make it after all"
+msgstr ""
+
+msgid "I'll ref"
+msgstr ""
+
+msgid "Can't"
+msgstr ""
+
+msgid "I'll do it"
+msgstr ""
+
+msgid "Your answers"
+msgstr ""
+
+msgid "Let the coach know why -- they'll be notified right away"
+msgstr ""
+
+msgid "e.g. sick, injured, running late..."
+msgstr ""
+
+msgid "Maybe"
+msgstr ""
+
+msgid "Add a reason (optional) -- only you and the coach can see this"
+msgstr ""
+
+msgid "Can't sign up yet"
+msgstr ""
+
+#, python-format
+msgid "Complete &ldquo;%(name)s&rdquo;"
+msgstr ""
+
+msgid "Squad response"
+msgstr ""
+
+#, python-format
+msgid "%(responded)s of %(total)s"
+msgstr ""
+
+msgid "in"
+msgstr ""
+
+msgid "out"
+msgstr ""
+
+msgid "no reply"
+msgstr ""
+
+msgid "No one you manage is invited to this event."
+msgstr ""
+
+#, python-format
+msgid "Filling in for <strong>%(name)s</strong>"
+msgstr ""
+
+msgid "Fill in for someone else:"
+msgstr ""
+
+msgid "Completed"
+msgstr ""
+
+#, python-format
+msgid "Due %(date)s"
+msgstr ""
+
+msgid "Nothing here yet"
+msgstr ""
+
+msgid "Any form sent to you or the people you manage will show up here."
+msgstr ""
+
+#, python-format
+msgid "%(time)s face-off"
+msgstr ""
+
+msgid "Replies are closed for this event"
+msgstr ""
+
+#, python-format
+msgid "%(name)s &mdash; are you in?"
+msgstr ""
+
+msgid "Needs your answer"
+msgstr ""
+
+#, python-format
+msgid "%(counter)s task open"
+msgid_plural "%(counter)s tasks open"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Reply"
+msgstr ""
+
+#, python-format
+msgid "+%(counter)s more in Calendar &rarr;"
+msgid_plural "+%(counter)s more in Calendar &rarr;"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Open tasks"
+msgstr ""
+
+#, python-format
+msgid "%(counter)s open"
+msgid_plural "%(counter)s open"
+msgstr[0] ""
+msgstr[1] ""
+
+#, python-format
+msgid "+%(counter)s more open task"
+msgid_plural "+%(counter)s more open tasks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Nothing to show right now."
+msgstr ""
+
+msgid "Forms to complete"
+msgstr ""
+
+msgid "Complete"
+msgstr ""
+
+msgid "All forms"
+msgstr ""
+
+msgid "Club news"
+msgstr ""
+
+msgid "All news"
+msgstr ""
+
+msgid "No news yet."
+msgstr ""
+
+msgid "Sponsors"
+msgstr ""
+
+msgid "Once you're linked to a member record, your profile will show up here."
+msgstr "Zodra je aan een ledenprofiel gekoppeld bent, verschijnt je profiel hier."
+
+#, python-format
+msgid "Member since %(year)s"
+msgstr "Lid sinds %(year)s"
+
+msgid "People I manage"
+msgstr "Personen die ik beheer"
+
+msgid "(me)"
+msgstr "(ik)"
+
+msgid "Teams I coach/manage"
+msgstr "Teams die ik coach of beheer"
+
+msgid "Vouchers"
+msgstr "Tegoedbonnen"
+
+#, python-format
+msgid "Expires %(date)s"
+msgstr "Verloopt op %(date)s"
+
+#, python-format
+msgid "&euro; %(amount)s"
+msgstr ""
+
+msgid "Register"
+msgstr "Inschrijven"
+
+#, python-format
+msgid "%(counter)s OPEN"
+msgid_plural "%(counter)s OPEN"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "Language"
+msgstr "Taal"
+
+#, python-format
+msgid "RosterChief &middot; %(club_name)s &middot; v%(version)s"
+msgstr ""
+
+#, python-format
+msgid "Posted by %(name)s"
+msgstr ""
+
+msgid "Share"
+msgstr ""
+
+msgid "Newer"
+msgstr ""
+
+msgid "Older"
+msgstr ""
+
+msgid "Mark all read"
+msgstr ""
+
+msgid "Clear all"
+msgstr ""
+
+msgid ""
+"Once you're linked to a member record, their notifications will show up here."
+msgstr ""
+
+msgid "Enable push notifications"
+msgstr ""
+
+msgid "Get notified on this device as soon as something new comes in."
+msgstr ""
+
+msgid ""
+"Couldn't turn on notifications -- check this browser's notification "
+"permission for the site, then try again."
+msgstr ""
+
+msgid "Enable"
+msgstr ""
+
+msgid "Nothing here yet."
+msgstr ""
+
+msgid "Earlier this week"
+msgstr ""
+
+msgid "How to pay"
+msgstr ""
+
+msgid "All settled up"
+msgstr ""
+
+msgid "There's nothing open right now."
+msgstr ""
+
+msgid "Not open yet"
+msgstr ""
+
+msgid "Registration isn't open right now -- check back soon."
+msgstr ""
+
+msgid "Which season?"
+msgstr ""
+
+msgid ""
+"Registration is currently open for more than one season -- pick which one "
+"this is for."
+msgstr ""
+
+#, python-format
+msgid "Season %(start)s-%(end)s"
+msgstr ""
+
+msgid "Continue"
+msgstr ""
+
+#, python-format
+msgid "Registering for Season %(start)s-%(end)s"
+msgstr ""
+
+msgid "yours"
+msgstr ""
+
+msgid "Add another registration"
+msgstr ""
+
+msgid "Include this person"
+msgstr ""
+
+msgid "Someone new"
+msgstr ""
+
+msgid "Price"
+msgstr ""
+
+#, python-format
+msgid "Jersey number (%(team)s)"
+msgstr ""
+
+#, python-format
+msgid "€%(amount)s off if paid by %(date)s"
+msgstr ""
+
+msgid "Total"
+msgstr ""
+
+msgid "If paid before the deadline(s) above"
+msgstr ""
+
+msgid ""
+"This is what's owed once the club confirms this -- payment happens "
+"separately, not on this page."
+msgstr ""
+
+msgid "Confirm & submit"
+msgstr ""
+
+msgid "Calculate price"
+msgstr ""
+
+msgid "Some items are no longer available. Remove them to place your order."
+msgstr ""
+
+msgid ""
+"Some prices have changed since you added them to your cart. The total below "
+"is up to date."
+msgstr ""
+
+msgid "No longer available"
+msgstr ""
+
+#, python-format
+msgid "For %(name)s &middot; "
+msgstr ""
+
+#, python-format
+msgid "&euro; %(amount)s each"
+msgstr ""
+
+msgid "Decrease quantity"
+msgstr ""
+
+msgid "Increase quantity"
+msgstr ""
+
+msgid "Discount code"
+msgstr ""
+
+msgid "Apply"
+msgstr ""
+
+#, python-format
+msgid "Discount applied: %(name)s"
+msgstr ""
+
+msgid "Subtotal"
+msgstr ""
+
+msgid "Place order"
+msgstr ""
+
+msgid "Pay when you pick it up -- no online payment."
+msgstr ""
+
+msgid "Your cart is empty."
+msgstr ""
+
+msgid "My orders"
+msgstr ""
+
+msgid "Cart"
+msgstr ""
+
+msgid "Other"
+msgstr ""
+
+msgid "No photo"
+msgstr ""
+
+msgid "Nothing in the shop yet."
+msgstr ""
+
+msgid "Pickup instructions"
+msgstr ""
+
+#, python-format
+msgid "%(qty)sx"
+msgstr ""
+
+#, python-format
+msgid "%(name)s &middot; %(date)s"
+msgstr ""
+
+msgid "No orders yet."
+msgstr ""
+
+msgid "Option"
+msgstr ""
+
+msgid "For"
+msgstr ""
+
+msgid "Number (optional)"
+msgstr ""
+
+msgid "e.g. 7"
+msgstr ""
+
+msgid "Name (optional)"
+msgstr ""
+
+msgid "e.g. on the back"
+msgstr ""
+
+msgid "Quantity"
+msgstr ""
+
+msgid "Add to cart"
+msgstr ""
+
+msgid "Meet"
+msgstr ""
+
+#, python-format
+msgid "Complete “%(name)s”"
+msgstr ""
+
+#, python-format
+msgid "+%(counter)s more in Calendar"
+msgid_plural "+%(counter)s more in Calendar"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "News photo"
+msgstr ""
+
+msgid ""
+"Once you're linked to a member record, their schedule and updates will show "
+"up here."
+msgstr ""
+
+msgid "Live game updates"
+msgstr "Live wedstrijdupdates"
+
+msgid ""
+"Get a push notification while a team is playing: goals, penalties, period "
+"ends and the final result. Pick the teams you want to follow."
+msgstr ""
+
+msgid "This club has no teams yet."
+msgstr ""
+
+msgid ""
+"Notifications arrive on this device only once you've allowed notifications "
+"for the app."
+msgstr ""
+
+msgid "Payments & dues"
+msgstr "Betalingen en bijdragen"
+
+msgid "Notification emails"
+msgstr "Meldings-e-mails"
+
+msgid "Two-factor authentication"
+msgstr "Tweestapsverificatie"
+
+msgid ""
+"Every notification also arrives by email. If you use the RosterChief app on "
+"your phone you may not need both."
+msgstr ""
+
+msgid ""
+"Emails with an attachment, such as an invoice, are always sent. This applies "
+"to every club you belong to."
+msgstr ""
+
+#, python-format
+msgid "Notifications from %(club)s"
+msgstr ""
+
+msgid "Whose notifications"
+msgstr ""
+
+#, python-format
+msgid ""
+"These switches only apply to notifications about %(name)s. Anything you do "
+"not change here follows your own switches for this club."
+msgstr ""
+
+msgid ""
+"Choose per kind of notification whether it reaches you as a push message "
+"(app and browser) and by email. The inbox in the app always shows everything."
+msgstr ""
+
+msgid "Notification"
+msgstr ""
+
+msgid "Push"
+msgstr ""
+
+msgid "Email"
+msgstr ""
+
+msgid "Set for this person only"
+msgstr ""
+
+msgid "Set for this club only"
+msgstr ""
+
+msgid "Reset to default"
+msgstr ""
+
+#, python-format
+msgid "Push: %(name)s"
+msgstr ""
+
+#, python-format
+msgid "Email: %(name)s"
+msgstr ""
+
+msgid "Quiet hours"
+msgstr ""
+
+msgid ""
+"During quiet hours push messages wait until the window ends. Important "
+"changes such as a cancelled event, and email, are not held. Live game "
+"updates are skipped instead of delayed."
+msgstr ""
+
+msgid "Hold push messages during quiet hours"
+msgstr ""
+
+msgid "From"
+msgstr ""
+
+msgid "Until"
+msgstr ""
+
+msgid "Time zone"
+msgstr ""
+
+msgid ""
+"Quiet hours apply to your account in every club. These switches apply to "
+"this club only. Your defaults for all clubs can be changed in the "
+"RosterChief app."
+msgstr ""
+
+msgid "Out of stock"
+msgstr ""
+
+msgid "Reminder"
+msgstr ""
+
+#, python-format
+msgid "Score is %(count)d"
+msgstr ""
+
+msgid "Calendar link reset"
+msgstr ""
+
+msgid ""
+"Your old calendar link no longer works. Re-subscribe using the new one below."
+msgstr ""
+
+msgid "Saved"
+msgstr ""
+
+msgid "Your live game updates have been updated."
+msgstr ""
+
+msgid "Your notification email setting has been updated."
+msgstr ""
+
+msgid "Your notification switches for this person have been updated."
+msgstr ""
+
+msgid "Your notification switches for this club have been updated."
+msgstr ""
+
+msgid "This category follows your default again."
+msgstr ""
+
+msgid "Your quiet hours have been updated."
+msgstr ""
+
+#, python-format
+msgid "%(name)s is confirmed to referee -- see you there."
+msgstr ""
+
+msgid "Referee sign-up confirmed"
+msgstr ""
+
+msgid "Could not sign up"
+msgstr ""
+
+#, python-format
+msgid "%(name)s won't be refereeing this one -- thanks for letting us know."
+msgstr ""
+
+msgid "Unknown response."
+msgstr ""
+
+#, python-format
+msgid "%(name)s is confirmed as an official -- see you there."
+msgstr ""
+
+msgid "Official sign-up confirmed"
+msgstr ""
+
+#, python-format
+msgid ""
+"%(name)s won't be an official for this one -- thanks for letting us know."
+msgstr ""
+
+msgid "No member record for this account."
+msgstr ""
+
+msgid "Claimed"
+msgstr ""
+
+#, python-format
+msgid "You're down for “%(title)s”."
+msgstr ""
+
+msgid "Could not claim"
+msgstr ""
+
+msgid "Removed"
+msgstr ""
+
+#, python-format
+msgid "You're no longer down for “%(title)s”."
+msgstr ""
+
+msgid "Unknown RSVP status."
+msgstr ""
+
+msgid "You can't RSVP for that person."
+msgstr ""
+
+msgid "Too late to reply"
+msgstr ""
+
+#, python-format
+msgid "Team manager %(teams)s"
+msgstr "Teammanager %(teams)s"
+
+msgid "Form"
+msgstr ""
+
+msgid "Submitted"
+msgstr ""
+
+msgid "Thanks -- your response has been recorded."
+msgstr ""
+
+msgid "Your responses"
+msgstr ""
+
+msgid "PDF unavailable"
+msgstr ""
+
+msgid "Edit info"
+msgstr ""
+
+#, python-format
+msgid "%(name)s's info was updated."
+msgstr ""
+
+msgid "Registration received"
+msgstr ""
+
+msgid ""
+"Thanks -- the club will review this and be in touch. A confirmation email is "
+"on its way with a link to check status."
+msgstr ""
+
+msgid "Order"
+msgstr ""
+
+msgid "You can't mark that notification as read."
+msgstr ""
+
+msgid "Unknown action."
+msgstr ""
+
+msgid "That option isn't available."
+msgstr ""
+
+msgid "You can't order for that person."
+msgstr ""
+
+msgid "Not available"
+msgstr ""
+
+msgid "Added to cart"
+msgstr ""
+
+#, python-format
+msgid "%(product)s added to your cart."
+msgstr ""
+
+msgid "Nothing to order"
+msgstr ""
+
+msgid "Could not place order"
+msgstr ""
+
+msgid "Order placed"
+msgstr ""
+
+#, python-format
+msgid "Order %(number)s is in -- pay when you pick it up."
+msgstr ""
+
+#~ msgid "Reminder: %(kind)s on %(when)s still needs your answer."
+#~ msgstr ""
+#~ "Herinnering: we wachten nog op jouw antwoord voor %(kind)s op %(when)s."

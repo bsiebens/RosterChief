@@ -119,6 +119,18 @@
                     </a>
                 </div>
 
+                <form class="card" action="{% url "set_language" %}" method="post" hx-boost="false">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <div class="border-b border-rule px-4.5 py-3 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Language" %}</div>
+                    {% for language in available_languages %}
+                        <button class="flex w-full items-center gap-3 px-4.5 py-3 text-left{% if not forloop.last %} border-b border-rule{% endif %}" type="submit" name="language" value="{{ language.code }}" lang="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}aria-current="true"{% endif %}>
+                            <span class="flex-1 text-[15px] font-semibold text-ink">{{ language.name_local }}</span>
+                            {% if language.code == LANGUAGE_CODE %}{% lucide "check" size=18 class="shrink-0 text-club" %}{% endif %}
+                        </button>
+                    {% endfor %}
+                </form>
+
                 <p class="text-center font-mono text-xs text-dim">{% blocktrans with club_name=club.name version=platform_version %}RosterChief &middot; {{ club_name }} &middot; v{{ version }}{% endblocktrans %}</p>
             </div>
         </div>

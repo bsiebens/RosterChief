@@ -22,7 +22,7 @@ _DEFAULT_FOREGROUND = "#ffffff"
 
 #: The icon sizes referenced by the manifest (mobile.views.ManifestView) and
 #: the mobile base templates. Anything else is a 404.
-ICON_SIZES = frozenset({192, 512})
+ICON_SIZES = frozenset({180, 192, 512})
 
 _CACHE_TIMEOUT = 60 * 60 * 24
 

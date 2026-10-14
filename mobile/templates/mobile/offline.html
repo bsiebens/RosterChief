@@ -1,0 +1,30 @@
+{% load i18n %}<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:"en" }}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <meta name="color-scheme" content="light dark">
+        <meta name="theme-color" content="#101e36">
+        <title>{% trans "You're offline" %}{% if club %} &middot; {{ club.name }}{% endif %}</title>
+        {% comment %}Inline styles only: this page is precached by the service worker and must render with nothing else available.{% endcomment %}
+        <style>
+            :root { --bg: #f6f4ef; --fg: #1d2433; --muted: #5d6677; --accent: #101e36; --accent-fg: #fff; }
+            @media (prefers-color-scheme: dark) { :root { --bg: #0b1424; --fg: #eef1f6; --muted: #9aa5b8; --accent: #eef1f6; --accent-fg: #0b1424; } }
+            * { box-sizing: border-box; }
+            body { margin: 0; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; text-align: center; padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: var(--bg); color: var(--fg); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            main { max-width: 22rem; }
+            svg { width: 56px; height: 56px; color: var(--muted); }
+            h1 { margin: 16px 0 8px; font-size: 1.4rem; }
+            p { margin: 0 0 24px; color: var(--muted); }
+            button { appearance: none; border: 0; border-radius: 999px; padding: 12px 28px; font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-fg); }
+        </style>
+    </head>
+    <body>
+        <main>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></svg>
+            <h1>{% trans "You're offline" %}</h1>
+            <p>{% trans "RosterChief needs a connection to show up-to-date club information. Check your connection and try again." %}</p>
+            <button type="button" onclick="location.reload()">{% trans "Try again" %}</button>
+        </main>
+    </body>
+</html>

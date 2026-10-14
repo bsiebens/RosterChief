@@ -20,7 +20,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.cache import add_never_cache_headers
-from django.utils.translation import get_language
+from django.utils.translation import get_language, get_language_info
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import TemplateView
@@ -95,17 +95,28 @@ class ManifestView(ClubScopedPublicMixin, View):
 
     def get(self, request):
         club = request.club
+        icon = lambda size: reverse("mobile:icon", kwargs={"size": size})  # noqa: E731
         manifest = {
+            "id": "/app/",
             "name": club.name,
             "short_name": club.name[:24],
+            "lang": get_language() or "en",
             "start_url": "/app/",
             "scope": "/app/",
             "display": "standalone",
+            "orientation": "portrait",
             "background_color": "#101e36",
             "theme_color": club.primary_color or "#101e36",
             "icons": [
-                {"src": reverse("mobile:icon", kwargs={"size": 192}), "sizes": "192x192", "purpose": "any"},
-                {"src": reverse("mobile:icon", kwargs={"size": 512}), "sizes": "512x512", "purpose": "any"},
+                {"src": icon(192), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": icon(512), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                # Same artwork: the generated fallback keeps its initials inside the maskable safe zone; a club logo is used as uploaded.
+                {"src": icon(192), "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+                {"src": icon(512), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+            "shortcuts": [
+                {"name": str(_("Calendar")), "url": reverse("mobile:calendar"), "icons": [{"src": icon(192), "sizes": "192x192", "type": "image/png"}]},
+                {"name": str(_("Notifications")), "url": reverse("mobile:notifications"), "icons": [{"src": icon(192), "sizes": "192x192", "type": "image/png"}]},
             ],
         }
         return JsonResponse(manifest, content_type="application/manifest+json")
@@ -119,6 +130,14 @@ class AppIconView(ClubScopedPublicMixin, View):
         if club.logo:
             return HttpResponseRedirect(club.logo.url)
         return HttpResponse(get_fallback_icon(club, size=size), content_type="image/png")
+
+
+class OfflineView(View):
+    """The precached page the service worker shows when a navigation fails offline.
+    Public and club-agnostic (it carries no data), so it can be cached once."""
+
+    def get(self, request):
+        return HttpResponse(render_to_string("mobile/offline.html", {"club": getattr(request, "club", None)}, request=request))
 
 
 class ServiceWorkerView(View):
@@ -834,6 +853,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             vouchers=vouchers,
             open_forms_count=open_forms_count,
             registration_open=registration_open,
+            available_languages=[get_language_info(code) for code, _name in settings.LANGUAGES],
             **kwargs,
         )
 

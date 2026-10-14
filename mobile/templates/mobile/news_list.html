@@ -16,6 +16,8 @@
     </div>
 {% endblock header_extra %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     <div class="-mx-4">
         {% if page.object_list %}

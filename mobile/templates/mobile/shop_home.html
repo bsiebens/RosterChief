@@ -16,6 +16,8 @@
     just a shortcut past the ones you don't want to scroll past.
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     {% trans "Other" as other_label %}
     <div class="flex items-center justify-between">

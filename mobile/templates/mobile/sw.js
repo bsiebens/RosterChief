@@ -7,11 +7,13 @@
 // offline would be actively misleading. The offline attendance queue
 // described in the design doc is Coach mode, a later phase.
 
-const SHELL_CACHE = "rosterchief-shell-v2";
+const SHELL_CACHE = "rosterchief-shell-v3";
+const OFFLINE_URL = "/app/offline/";
 const SHELL_ASSETS = ["/static/css/mobile.css", "/static/js/htmx.js", "/static/js/alpine.js", "/static/js/mobile-app.js"];
 
 self.addEventListener("install", (event) => {
-    event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_ASSETS)));
+    // The offline page is precached so a failed navigation always has something to show; no other page is ever cached.
+    event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll([...SHELL_ASSETS, OFFLINE_URL])));
     self.skipWaiting();
 });
 
@@ -23,12 +25,17 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-    if (event.request.method !== "GET" || !SHELL_ASSETS.some((asset) => event.request.url.endsWith(asset))) return;
+    if (event.request.method !== "GET") return;
+    if (event.request.mode === "navigate") {
+        // Network-only for pages (live club data is never served stale); the precached offline page only when the network fails.
+        event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE_URL).then((cached) => cached || Response.error())));
+        return;
+    }
+    if (!SHELL_ASSETS.some((asset) => event.request.url.endsWith(asset))) return;
     // Network-first, not cache-first: this app ships CSS/JS fixes constantly during
     // active development, and a cache-first shell would leave an already-installed
-    // browser stuck on stale assets indefinitely (nothing ever re-triggers a fetch
-    // once something is cached). Falling back to the cache only when the network
-    // request itself fails still gives the offline-shell behaviour this exists for.
+    // browser stuck on stale assets indefinitely. Falling back to the cache only
+    // when the network request itself fails still gives the offline-shell behaviour.
     event.respondWith(
         fetch(event.request)
             .then((response) => {
@@ -49,23 +56,59 @@ self.addEventListener("push", (event) => {
             payload.body = event.data.text();
         }
     }
+    const url = payload.url || "/app/";
     event.waitUntil(
-        self.registration.showNotification(payload.title, {
-            body: payload.body,
-            data: { url: payload.url || "/app/" },
-        }),
+        (async () => {
+            await self.registration.showNotification(payload.title, {
+                body: payload.body,
+                data: { url, target: payload.target || null, notification_id: payload.notification_id || null },
+            });
+            if (typeof payload.unread === "number") {
+                // App-icon badge, plus the open windows so their in-page badge updates without a reload.
+                if (self.navigator && "setAppBadge" in self.navigator) {
+                    try {
+                        await (payload.unread > 0 ? self.navigator.setAppBadge(payload.unread) : self.navigator.clearAppBadge());
+                    } catch {
+                        // Badging is best-effort.
+                    }
+                }
+                const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+                for (const client of windows) client.postMessage({ type: "unread", count: payload.unread });
+            }
+        })(),
     );
 });
 
+// Deep link for a notification: its target type wins, then the payload url, then the app home.
+function notificationUrl(data) {
+    const target = data && data.target;
+    if (target && target.type) {
+        if (target.type === "calendar") return "/app/calendar/";
+        if (target.type === "news" && target.slug) return "/app/news/" + encodeURIComponent(target.slug) + "/";
+        if (target.type === "event" && target.id) return "/app/events/" + encodeURIComponent(target.id) + "/";
+        if (target.type === "form_send" && target.id) return "/app/forms/" + encodeURIComponent(target.id) + "/";
+        if (target.type === "order" && target.id) return "/app/shop/orders/" + encodeURIComponent(target.id) + "/";
+    }
+    return (data && data.url) || "/app/";
+}
+
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
-    const url = event.notification.data && event.notification.data.url ? event.notification.data.url : "/app/";
+    const url = new URL(notificationUrl(event.notification.data), self.location.origin);
+    // Never navigate anywhere outside this origin's /app/.
+    if (url.origin !== self.location.origin || !url.pathname.startsWith("/app/")) url.pathname = "/app/";
+    const path = url.pathname + url.search + url.hash;
     event.waitUntil(
-        self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+        self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
             for (const client of clients) {
-                if (client.url === url && "focus" in client) return client.focus();
+                const open = new URL(client.url);
+                if (open.origin === self.location.origin && open.pathname.startsWith("/app/") && "focus" in client) {
+                    await client.focus();
+                    client.postMessage({ type: "navigate", url: path });
+                    return;
+                }
             }
-            return self.clients.openWindow(url);
+            return self.clients.openWindow(path);
         }),
     );
 });
