@@ -218,6 +218,88 @@ window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };
         toastTimer = setTimeout(() => toastEl && toastEl.remove(), 8000);
     }
 
+    // Top banners -- the same strip Django messages render in base.html -- for htmx actions that
+    // answer `HX-Trigger: {"rc:banner": {"level", "title", "body", "link": {"href", "label"}}}`.
+    // Every banner (server-rendered or not) dismisses itself after a few seconds.
+    const BANNER_ICONS = {
+        success: '<path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/>',
+        error: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+        warning: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+        info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    };
+    const BANNER_CSS = { success: "alert-success", error: "alert-error", warning: "alert-warning", info: "alert-info" };
+    const BANNER_MS = 5000;
+
+    function dismissBanner(el) {
+        if (!el || el.dataset.leaving) return;
+        el.dataset.leaving = "1";
+        el.style.transition = "opacity .25s ease, max-height .25s ease, padding .25s ease";
+        el.style.overflow = "hidden";
+        el.style.maxHeight = el.offsetHeight + "px";
+        requestAnimationFrame(() => {
+            el.style.opacity = "0";
+            el.style.maxHeight = "0";
+            el.style.paddingTop = "0";
+            el.style.paddingBottom = "0";
+        });
+        setTimeout(() => {
+            const wrap = el.parentElement;
+            el.remove();
+            if (wrap && wrap.hasAttribute("data-flash") && !wrap.children.length) wrap.remove();
+        }, 300);
+    }
+
+    function armBanners() {
+        document.querySelectorAll("[data-flash] .m-flash").forEach((el) => {
+            if (el.dataset.armed) return;
+            el.dataset.armed = "1";
+            setTimeout(() => dismissBanner(el), BANNER_MS);
+        });
+    }
+
+    function showBanner(spec) {
+        const level = BANNER_CSS[spec.level] ? spec.level : "info";
+        const inner = document.querySelector("main > div");
+        if (!inner) return;
+        let wrap = inner.querySelector(":scope > [data-flash]");
+        if (!wrap) {
+            wrap = document.createElement("div");
+            wrap.className = "-mx-4 -mt-4 flex flex-col";
+            wrap.setAttribute("data-flash", "");
+            inner.prepend(wrap);
+        }
+        const el = document.createElement("div");
+        el.className = "m-flash " + BANNER_CSS[level] + (wrap.children.length ? " border-t-2 border-white" : "");
+        el.setAttribute("role", "alert");
+        el.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + BANNER_ICONS[level] + "</svg>";
+        const text = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "font-display text-sm font-bold tracking-wide uppercase";
+        title.textContent = spec.title || "";
+        const body = document.createElement("div");
+        body.className = "text-sm";
+        body.textContent = spec.body || "";
+        text.append(title, body);
+        if (spec.link && spec.link.href && String(spec.link.href).startsWith("/")) {
+            const a = document.createElement("a");
+            a.className = "mt-1 inline-block text-sm font-semibold underline";
+            a.href = spec.link.href;
+            a.textContent = spec.link.label || "";
+            text.append(a);
+        }
+        el.append(text);
+        wrap.append(el);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        armBanners();
+    }
+
+    document.body.addEventListener("rc:banner", (e) => {
+        if (e.detail && typeof e.detail === "object") showBanner(e.detail.value && typeof e.detail.value === "object" ? e.detail.value : e.detail);
+    });
+    document.addEventListener("DOMContentLoaded", armBanners);
+    document.addEventListener("htmx:afterSettle", armBanners);
+    armBanners();
+
     // Server-sent toasts: a view answers an htmx request with `HX-Trigger: {"rc:toast": "text"}`
     // (see mobile.views.NotificationsView).
     document.body.addEventListener("rc:toast", (e) => {

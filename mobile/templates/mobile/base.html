@@ -113,7 +113,7 @@
             <div class="flex flex-col gap-4 px-4 py-4">
                 {% if messages %}
                     {# Level-aware (colour/icon) same as _auth_base.html's own messages block, but a solid full-bleed band here rather than that screen's own rounded, bordered card -- this sits above a page's real content instead of inside a small centred auth form, so it reads better as one flat strip than as a floating card. Django's messages framework already consumes each one after this render, so this doubles as the "shown once" banner mobile:home redirects need (e.g. ShopScopeMixin's own "the shop is closed" notice). Full-bleed (-mx-4 -mt-4, same idiom as e.g. shop_order_detail.html's own back-header): on a page whose own content starts with that same white/-mt-4 back-header, the -mt-4 there cancels this block's trailing gap-4 exactly (both 1rem), so the two read as one continuous panel instead of a grey seam between them. #}
-                    <div class="-mx-4 -mt-4 flex flex-col">
+                    <div class="-mx-4 -mt-4 flex flex-col" data-flash>
                         {% for message in messages %}
                             {% with alert=message|as_alert %}
                                 <div class="m-flash {{ alert.css }} {% if not forloop.first %}border-t-2 border-white{% endif %}" role="alert">

@@ -688,7 +688,7 @@ class EventSheetTests(MemberScreenFixture, TestCase):
 
         self.assertContains(response, "U12 vs Leuven Chiefs")
         self.assertContains(response, "Home game")
-        self.assertContains(response, "data-sheet-close")
+        self.assertNotContains(response, "data-sheet-close")  # the sheet shell owns the close button; the hero has no "Done"
 
     def test_an_away_game_puts_the_opponent_first(self):
         away = Location.objects.create(club=self.club, name="Their Arena", address="2 St", city="Elsewhere", zip_code="2000", country="BE")

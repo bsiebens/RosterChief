@@ -1525,6 +1525,17 @@ class CoachAddStaffView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:coach_squad"))
 
 
+def _lineup_answer(status):
+    """The reply label a line-up row shows under a player's name, same mapping as the iOS LineupView."""
+    if status in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NOT_SELECTED):
+        return _("In")
+    if status == Attendance.AttendanceStatus.MAYBE:
+        return _("Maybe")
+    if status in (Attendance.AttendanceStatus.ABSENT, Attendance.AttendanceStatus.EXCUSED):
+        return _("Out")
+    return _("No reply")
+
+
 class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     """C3 -- a game's line-up, kept deliberately simple: a plain yes/no pick
     per available roster player, grouped by their roster position ("category")
@@ -1593,7 +1604,7 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             position = membership.position if membership else None
             key = position.pk if position else None
             bucket = buckets.setdefault(key, {"label": position.name if position else _("No position set"), "ordering": position.ordering if position else 9999, "rows": []})
-            bucket["rows"].append({"member": attendance.member, "membership": membership, "selected": attendance.member_id in selected_ids, "attendance_rate": rates_by_member.get(attendance.member_id)})
+            bucket["rows"].append({"member": attendance.member, "membership": membership, "selected": attendance.member_id in selected_ids, "attendance_rate": rates_by_member.get(attendance.member_id), "answer": _lineup_answer(attendance.status)})
 
         return sorted(buckets.values(), key=lambda bucket: (bucket["ordering"], bucket["label"]))
 

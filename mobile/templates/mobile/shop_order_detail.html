@@ -15,10 +15,6 @@
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Order" %}</span>
     </div>
 
-    {% if is_new %}
-        <p class="flex items-center gap-2 text-[15px] font-semibold text-ok-text" role="status">{% lucide "circle-check" size=20 %} {% trans "Order placed. Thank you!" %}</p>
-    {% endif %}
-
     <div class="flex items-center justify-between gap-3">
         <span class="font-mono text-base font-bold text-ink">{{ order.number }}</span>
         <span class="pill pill-sm {{ status_pill_class }}">{{ status_label }}</span>

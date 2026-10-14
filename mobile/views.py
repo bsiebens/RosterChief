@@ -1839,7 +1839,7 @@ class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if not self._is_htmx():
             return HttpResponseRedirect(reverse("mobile:notifications"))
         response = self._partial("mobile/_notification_list.html", self.get_context_data())
-        response["HX-Trigger"] = json.dumps({"rc:toast": str(toast), "rc-unread": unread_count(request.club, self.managed_people)})
+        response["HX-Trigger"] = json.dumps({"rc:banner": {"level": "success", "title": str(_("Done")), "body": str(toast)}, "rc-unread": unread_count(request.club, self.managed_people)})
         return response
 
     def post(self, request, *args, **kwargs):
@@ -2161,10 +2161,13 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
             notify(request, f"w|{_('Not available')}|{error}")
             return HttpResponseRedirect(request.path)
 
-        if _is_partial_request(request):
-            return self._added(request)
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}
+        if _is_partial_request(request):
+            # The same top banner the redirect flow queues below, shown without leaving the page.
+            response = HttpResponse(status=204)
+            response["HX-Trigger"] = json.dumps({"rc:banner": {"level": "success", "title": str(title), "body": str(body), "link": {"href": reverse("mobile:shop_cart"), "label": str(_("View cart"))}}})
+            return response
         notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:shop_cart"))
 

@@ -156,7 +156,7 @@ class InboxTests(Base):
         self.assertContains(response, 'id="notification-list"')
         self.assertNotContains(response, "bg-red-600")
         trigger = json.loads(response["HX-Trigger"])
-        self.assertTrue(trigger["rc:toast"])
+        self.assertTrue(trigger["rc:banner"])
         self.assertEqual(trigger["rc-unread"], 0)
         first.refresh_from_db()
         self.assertIsNotNone(first.read_at)
@@ -168,7 +168,7 @@ class InboxTests(Base):
 
         self.assertContains(response, "state-card")
         self.assertFalse(Notification.objects.filter(club=self.club).exists())
-        self.assertIn("rc:toast", json.loads(response["HX-Trigger"]))
+        self.assertIn("rc:banner", json.loads(response["HX-Trigger"]))
 
     def test_plain_post_without_htmx_still_redirects(self):
         self.notify()

@@ -8,9 +8,7 @@
     {% endif %}
     <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.5) 0%, rgba(11,18,32,.75) 60%, rgba(11,18,32,.96) 100%)"></div>
     <div class="relative z-10 flex flex-1 flex-col justify-end p-4 pt-14 text-white">
-        {% if in_sheet %}
-            <button class="absolute top-4 left-4 flex h-9 items-center rounded-full bg-black/35 px-3.5 text-base font-semibold text-white" type="button" data-sheet-close>{% trans "Done" %}</button>
-        {% else %}
+        {% if not in_sheet %}
             <a class="absolute top-4 left-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% if request.GET.from == "calendar" %}{% url "mobile:calendar" %}{% else %}{% url "mobile:home" %}{% endif %}" aria-label="{% trans "Back" %}">
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
             </a>

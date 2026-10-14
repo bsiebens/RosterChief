@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: RosterChief\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-14 14:55+0200\n"
+"POT-Creation-Date: 2026-10-14 15:43+0200\n"
 "PO-Revision-Date: 2026-10-12 12:00+0200\n"
 "Last-Translator: RosterChief\n"
 "Language-Team: Dutch\n"
@@ -821,9 +821,6 @@ msgstr "Ik doe het"
 msgid "No one you manage is invited to this event."
 msgstr "Niemand die je beheert is voor dit event uitgenodigd."
 
-msgid "Done"
-msgstr "Klaar"
-
 msgid "Back"
 msgstr "Terug"
 
@@ -844,6 +841,9 @@ msgstr "Er ging iets mis. Controleer je verbinding en probeer opnieuw."
 
 msgid "Try again"
 msgstr "Probeer opnieuw"
+
+msgid "Done"
+msgstr "Klaar"
 
 msgid "Can't"
 msgstr "Kan niet"
@@ -1565,9 +1565,6 @@ msgstr "Nog niemand in de selectie voor dit seizoen."
 msgid "Staff"
 msgstr "Staf"
 
-msgid "Add"
-msgstr "Toevoegen"
-
 msgid "(you)"
 msgstr "(jij)"
 
@@ -1630,6 +1627,9 @@ msgstr "Niemand komt overeen."
 
 msgid "Select players to add"
 msgstr "Selecteer spelers om toe te voegen"
+
+msgid "Add"
+msgstr "Toevoegen"
 
 #, python-format
 msgid "Add staff to %(team)s"
@@ -2084,7 +2084,8 @@ msgid ""
 "This picture is shown to everyone in the club's apps. The official player "
 "picture is set by the club."
 msgstr ""
-"Deze foto zie je in de apps van de club, net als alle clubleden. De officiële spelersfoto wordt door de club ingesteld."
+"Deze foto zie je in de apps van de club, net als alle clubleden. De "
+"officiële spelersfoto wordt door de club ingesteld."
 
 msgid "Identity"
 msgstr "Identiteit"
@@ -2707,9 +2708,6 @@ msgstr "Kom later terug."
 msgid "Order"
 msgstr "Bestelling"
 
-msgid "Order placed. Thank you!"
-msgstr "Bestelling geplaatst. Bedankt!"
-
 msgid "Pickup"
 msgstr "Afhaling"
 
@@ -2962,6 +2960,9 @@ msgstr "Bestelling geplaatst"
 #, python-format
 msgid "Order %(number)s is in -- pay when you pick it up."
 msgstr "Bestelling %(number)s is binnen -- betaal bij het afhalen."
+
+#~ msgid "Order placed. Thank you!"
+#~ msgstr "Bestelling geplaatst. Bedankt!"
 
 #~ msgid "Notification emails"
 #~ msgstr "Meldings-e-mails"

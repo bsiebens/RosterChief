@@ -3,6 +3,7 @@ native app (card shapes, copy, states). The older, behaviour-level tests for the
 mobile/tests.py; this file covers what the native-app parity pass added."""
 
 import datetime
+import json
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -341,12 +342,14 @@ class ShopProductParityTests(ShopTestBase):
         self.assertContains(response, 'name="beneficiary"')
         self.assertContains(response, "Mila")
 
-    def test_adding_with_htmx_answers_with_the_confirmation_not_a_redirect(self):
+    def test_adding_with_htmx_answers_with_the_top_banner_not_a_redirect(self):
         response = self.client.post(self._url(), {"variant": str(self.small.pk), "quantity": "2", "personalization_number": "7", "personalization_name": "Somers"}, HTTP_HOST=HOST, headers={"HX-Request": "true"})
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Added to your cart")
-        self.assertContains(response, reverse("mobile:shop_cart"))
+        self.assertEqual(response.status_code, 204)
+        banner = json.loads(response["HX-Trigger"])["rc:banner"]
+        self.assertEqual(banner["level"], "success")
+        self.assertEqual(banner["title"], "Added to cart")
+        self.assertEqual(banner["link"]["href"], reverse("mobile:shop_cart"))
         item = CartItem.objects.get()
         self.assertEqual((item.quantity, item.personalization_number, item.personalization_name), (2, "7", "Somers"))
 
@@ -486,7 +489,7 @@ class ShopCartParityTests(ShopTestBase):
 
         self.assertRedirects(response, f"{reverse('mobile:shop_cart')}?code=TEN10", fetch_redirect_response=False)
 
-    def test_placing_the_order_shows_the_thank_you_banner_once(self):
+    def test_placing_the_order_shows_one_top_banner_and_no_duplicate_in_the_page(self):
         self._item()
 
         response = self.client.post(reverse("mobile:shop_checkout"), {"discount_code": ""}, HTTP_HOST=HOST)
@@ -496,8 +499,10 @@ class ShopCartParityTests(ShopTestBase):
         self.assertRedirects(response, detail_url, fetch_redirect_response=False)
         first = self.client.get(detail_url, HTTP_HOST=HOST)
         second = self.client.get(detail_url, HTTP_HOST=HOST)
-        self.assertContains(first, "Order placed. Thank you!")
-        self.assertNotContains(second, "Order placed. Thank you!")
+        # The top flash banner (Django messages) is the one confirmation; the page has no second copy.
+        self.assertContains(first, "m-flash")
+        self.assertNotContains(first, "Order placed. Thank you!")
+        self.assertNotContains(second, "m-flash")
 
 
 @override_settings(**SETTINGS)
