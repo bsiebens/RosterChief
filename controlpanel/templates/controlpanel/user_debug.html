@@ -1,0 +1,200 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Platform-wide, read-only debug view of one account (controlpanel.views.UserDebugView, data from
+    controlpanel.services.user_debug). Personal data (phones, birth dates, pictures, push tokens)
+    is deliberately never rendered here. A notification switch with no stored row is on.
+{% endcomment %}
+
+{% block panel_title %}{% trans "User debug" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <span class="text-ink">{% trans "users" %}</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <form method="get" class="card flex flex-wrap items-center gap-2 p-4">
+        <input type="email" name="email" value="{{ email }}" placeholder="{% trans 'Account email' %}" class="input w-72" required autofocus data-testid="lookup-email">
+        <button class="btn btn-primary" type="submit">{% lucide "search" size=14 %} {% trans "Look up" %}</button>
+    </form>
+
+    {% if email and not account %}
+        <div class="card p-4 text-sm text-slate" data-testid="no-account">{% blocktrans with email=email %}No account with the email {{ email }}.{% endblocktrans %}</div>
+    {% elif account %}
+        {# --- Account ------------------------------------------------------ #}
+        <div class="card p-4" data-testid="account">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <h2 class="font-display text-lg font-extrabold tracking-[.06em] text-ink uppercase">{{ account.email }}</h2>
+                <p class="flex flex-wrap items-center gap-1.5 text-xs">
+                    {% if account.is_active %}<span class="badge badge-success">{% trans "active" %}</span>{% else %}<span class="badge badge-error">{% trans "inactive" %}</span>{% endif %}
+                    {% if account.is_superuser %}<span class="badge badge-warning">{% trans "superuser" %}</span>{% endif %}
+                    {% if account.is_staff %}<span class="badge badge-warning">{% trans "staff" %}</span>{% endif %}
+                    <span class="badge">{% trans "email notifications" %}: {{ account.get_email_notifications_display }}</span>
+                </p>
+            </div>
+            <p class="mt-1 text-sm">
+                {% if account.member %}{{ account.member.get_full_name }}{% else %}<span class="text-muted">{% trans "No member profile" %}</span>{% endif %}
+            </p>
+            <div class="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div class="rounded border border-edge p-3"><div class="font-mono text-[11px] text-muted uppercase">{% trans "Last login" %}</div><div class="mt-1 text-sm text-ink">{{ account.last_login|date:"d/m/Y H:i"|default:"–" }}</div></div>
+                <div class="rounded border border-edge p-3" data-testid="mfa"><div class="font-mono text-[11px] text-muted uppercase">{% trans "Two-factor" %}</div><div class="mt-1 text-sm text-ink">{% for type in authenticators %}{{ type }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "none" %}{% endfor %}</div></div>
+                <div class="rounded border border-edge p-3"><div class="font-mono text-[11px] text-muted uppercase">{% trans "Account id" %}</div><div class="mt-1 font-mono text-[11px] break-all text-ink">{{ account.pk }}</div></div>
+                <div class="rounded border border-edge p-3"><div class="font-mono text-[11px] text-muted uppercase">{% trans "Member id" %}</div><div class="mt-1 font-mono text-[11px] break-all text-ink">{{ account.member.pk|default:"–" }}</div></div>
+            </div>
+            <table class="table mt-3 w-full text-sm" data-testid="email-addresses">
+                <thead><tr><th class="text-left">{% trans "Email address" %}</th><th class="text-left">{% trans "Verified" %}</th><th class="text-left">{% trans "Primary" %}</th></tr></thead>
+                <tbody>
+                    {% for address in email_addresses %}
+                        <tr><td>{{ address.email }}</td><td>{% if address.verified %}{% trans "yes" %}{% else %}<span class="text-warn">{% trans "no" %}</span>{% endif %}</td><td>{% if address.primary %}{% trans "yes" %}{% else %}–{% endif %}</td></tr>
+                    {% empty %}
+                        <tr><td colspan="3" class="text-muted">{% trans "No address records." %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {# --- Clubs ---------------------------------------------------------- #}
+        {% for entry in clubs %}
+            <div class="card p-4" data-testid="club-section">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase"><a class="hover:underline" href="{% url 'controlpanel:club_detail' entry.club.pk %}">{{ entry.club.name }}</a></h3>
+                    <p class="flex flex-wrap items-center gap-1.5 text-xs">
+                        {% for role in entry.roles %}<span class="badge badge-warning">{{ role.get_role_display }}</span>{% endfor %}
+                        {% if entry.shop_manager %}<span class="badge badge-warning">{% trans "shop manager" %}</span>{% endif %}
+                        {% if not entry.roles and not entry.shop_manager %}<span class="text-muted">{% trans "No club role" %}</span>{% endif %}
+                    </p>
+                </div>
+
+                {% if entry.memberships %}
+                    <table class="table mt-3 w-full text-sm" data-testid="memberships">
+                        <thead><tr><th class="text-left">{% trans "Season" %}</th><th class="text-left">{% trans "Kind" %}</th><th class="text-left">{% trans "Status" %}</th><th class="text-left">{% trans "Registration" %}</th></tr></thead>
+                        <tbody>
+                            {% for membership in entry.memberships %}
+                                <tr>
+                                    <td>{{ membership.season.name }}</td>
+                                    <td>{{ membership.get_kind_display }}</td>
+                                    <td>{{ membership.get_status_display }}</td>
+                                    <td>
+                                        {% for reg in membership.registration_entries %}
+                                            <div>{{ reg.get_entry_kind_display }}{% if reg.requested_team %} → {{ reg.requested_team.name }}{% endif %} <span class="font-mono text-[11px] text-muted">{{ reg.created|date:"d/m/Y" }}</span></div>
+                                        {% empty %}<span class="text-muted">–</span>{% endfor %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <p class="mt-3 text-sm text-muted">{% trans "No club membership." %}</p>
+                {% endif %}
+
+                {% if entry.teams or entry.staff %}
+                    <table class="table mt-3 w-full text-sm" data-testid="teams">
+                        <thead><tr><th class="text-left">{% trans "Team" %}</th><th class="text-left">{% trans "Season" %}</th><th class="text-left">{% trans "Role" %}</th></tr></thead>
+                        <tbody>
+                            {% for place in entry.teams %}
+                                <tr><td>{{ place.team.name }}</td><td>{{ place.season.name }}</td><td>{% trans "player" %}{% if place.position %} · {{ place.position.name }}{% endif %}{% if place.jersey_number %} · #{{ place.jersey_number }}{% endif %}{% if place.is_captain %} · {% trans "captain" %}{% endif %}</td></tr>
+                            {% endfor %}
+                            {% for spot in entry.staff %}
+                                <tr><td>{{ spot.team.name }}</td><td>{{ spot.season.name }}</td><td>{% trans "staff" %} · {{ spot.position.name }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% endif %}
+
+                {% for fam in entry.families %}
+                    <p class="mt-3 text-sm" data-testid="family"><span class="font-semibold">{% trans "Family" %}:</span> {{ fam.family.name|default:"–" }} ({{ fam.role.get_role_display }}){% if fam.others %}: {% for other in fam.others %}{{ other.member.get_full_name }} ({{ other.get_role_display }}){% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+                {% endfor %}
+            </div>
+        {% empty %}
+            <div class="card p-4 text-sm text-muted" data-testid="no-clubs">{% trans "Not attached to any club." %}</div>
+        {% endfor %}
+
+        {# --- Push devices ------------------------------------------------------- #}
+        <div class="card p-4" data-testid="devices">
+            <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Push devices" %}</h3>
+            {% if devices %}
+                <table class="table mt-2 w-full text-sm">
+                    <thead><tr><th class="text-left">{% trans "Platform" %}</th><th class="text-left">{% trans "Environment" %}</th><th class="text-left">{% trans "App" %}</th><th class="text-left">{% trans "Locale" %}</th><th class="text-left">{% trans "State" %}</th><th class="text-left">{% trans "Last seen" %}</th></tr></thead>
+                    <tbody>
+                        {% for device in devices %}
+                            <tr>
+                                <td>{{ device.get_platform_display }}</td><td>{{ device.get_environment_display }}</td><td>{{ device.app_version|default:"–" }}</td><td>{{ device.locale|default:"–" }}</td>
+                                <td>{% if device.enabled %}<span class="badge badge-success">{% trans "enabled" %}</span>{% else %}<span class="badge badge-error">{% trans "token rejected" %}</span>{% endif %}</td>
+                                <td>{{ device.last_seen|date:"d/m/Y H:i" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="mt-2 text-sm text-slate">{% trans "No registered devices." %}</p>
+            {% endif %}
+        </div>
+
+        {# --- Notifications ------------------------------------------------------ #}
+        <div class="card p-4" data-testid="quiet-hours">
+            <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Quiet hours" %}</h3>
+            {% with quiet=notifications.quiet %}
+                {% if quiet %}
+                    <p class="mt-2 text-sm">
+                        {% if quiet.hours.enabled %}<span class="badge badge-success">{% trans "On" %}</span>{% else %}<span class="badge">{% trans "Off" %}</span>{% endif %}
+                        <span class="font-mono" data-testid="quiet-window">{{ quiet.hours.start|time:"H:i" }} – {{ quiet.hours.end|time:"H:i" }}</span>
+                        <span class="text-muted">({{ quiet.hours.timezone }})</span>
+                    </p>
+                    {% if not quiet.is_window %}<p class="mt-1 text-xs text-muted">{% trans "From and until are equal: no window." %}</p>{% endif %}
+                    {% if quiet.active_until %}<p class="mt-1 text-xs text-warn">{% blocktrans with at=quiet.active_until|date:"d/m H:i" %}Inside the window right now; pushes are held until {{ at }}.{% endblocktrans %}</p>{% endif %}
+                    <p class="mt-1 font-mono text-[11px] text-muted">{% trans "Modified" %}: {{ quiet.hours.modified|date:"d/m/Y H:i" }}</p>
+                {% else %}
+                    <p class="mt-2 text-sm text-slate">{% trans "None saved: pushes are never held." %}</p>
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        <div class="card p-4" data-testid="preferences">
+            <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Saved notification switches" %}</h3>
+            {% if not notifications.scopes %}
+                <p class="mt-2 text-sm text-slate">{% trans "Nothing saved: every category is on, on every channel." %}</p>
+            {% endif %}
+            {% for scope in notifications.scopes %}
+                <div class="mt-4" data-testid="scope">
+                    <p class="text-sm font-semibold text-ink">
+                        {% if scope.member %}{% blocktrans with club=scope.club.name member=scope.member %}{{ club }}: only notifications about {{ member }}{% endblocktrans %}
+                        {% elif scope.club %}{{ scope.club.name }}
+                        {% else %}{% trans "All clubs" %}{% endif %}
+                    </p>
+                    <table class="table mt-1 w-full text-sm">
+                        <thead><tr><th class="text-left">{% trans "Category" %}</th><th class="text-left">{% trans "Push" %}</th><th class="text-left">{% trans "Email" %}</th></tr></thead>
+                        <tbody>
+                            {% for line in scope.lines %}
+                                <tr>
+                                    <td>{{ line.label }}</td>
+                                    <td>{% if line.push %}{% if line.push.enabled %}<span class="badge badge-success">{% trans "On" %}</span>{% else %}<span class="badge badge-error">{% trans "Off" %}</span>{% endif %}{% else %}<span class="text-muted">{% trans "default (on)" %}</span>{% endif %}</td>
+                                    <td>{% if line.email %}{% if line.email.enabled %}<span class="badge badge-success">{% trans "On" %}</span>{% else %}<span class="badge badge-error">{% trans "Off" %}</span>{% endif %}{% else %}<span class="text-muted">{% trans "default (on)" %}</span>{% endif %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="card p-4" data-testid="deliveries">
+            <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Recent deliveries" %}</h3>
+            {% if notifications.deliveries %}
+                <table class="table mt-2 w-full text-sm">
+                    <thead><tr><th class="text-left">{% trans "When" %}</th><th class="text-left">{% trans "Club" %}</th><th class="text-left">{% trans "Channel" %}</th><th class="text-left">{% trans "Provider" %}</th><th class="text-left">{% trans "Status" %}</th><th class="text-left">{% trans "Title" %}</th><th class="text-left">{% trans "Error" %}</th></tr></thead>
+                    <tbody>
+                        {% for delivery in notifications.deliveries %}
+                            <tr>
+                                <td class="font-mono text-[11px]">{{ delivery.created|date:"d/m H:i" }}</td><td>{{ delivery.club.name }}</td><td>{{ delivery.get_channel_display }}</td><td>{{ delivery.provider|default:"–" }}</td><td>{{ delivery.get_status_display }}</td>
+                                <td>{{ delivery.notification.title|default:"–" }}</td><td class="text-xs text-muted">{{ delivery.last_error }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="mt-2 text-sm text-slate">{% trans "No deliveries logged for this account." %}</p>
+            {% endif %}
+        </div>
+    {% endif %}
+{% endblock panel %}

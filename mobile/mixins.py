@@ -37,6 +37,14 @@ class DesktopTemplateMixin:
         desktop_names = [name.replace("mobile/", "mobile/desktop/", 1) for name in names if name.startswith("mobile/")]
         return desktop_names + names
 
+    def render_to_response(self, *args, **kwargs):
+        response = super().render_to_response(*args, **kwargs)
+        # Which layout the server chose and why (club.device.is_mobile_or_tablet) -- visible in the
+        # browser's network panel when a device lands on the "wrong" layout.
+        response["X-RC-Layout"] = "phone" if is_mobile_or_tablet(self.request) else "desktop"
+        response["X-RC-Layout-Reason"] = getattr(self.request, "layout_reason", "")
+        return response
+
 
 class MemberAppMixin(AccessMixin):
     """The gate every signed-in member-app screen (Member mode, Coach mode,
@@ -191,7 +199,12 @@ class ShopScopeMixin(PersonScopeMixin):
     without the "shop" waffle flag active for this club the screens 404, the
     same as every other disabled feature. Both checks run only after the
     member-app gate (``check_member_app``), so an anonymous visitor is sent to
-    login first and learns nothing about the club's shop."""
+    login first and learns nothing about the club's shop.
+
+    A screen that stays useful while the shop is closed (the catalogue's own "closed" state,
+    the family's orders and their invoices) sets ``allow_closed``; it is still licensed-only."""
+
+    allow_closed = False
 
     def check_member_app(self, request):
         refusal = super().check_member_app(request)
@@ -200,6 +213,8 @@ class ShopScopeMixin(PersonScopeMixin):
         if not shop_enabled(request):
             if not flag_is_active(request, SHOP_FLAG):
                 raise Http404("The “shop” feature isn't enabled for this club.")
+            if self.allow_closed:
+                return None
             notify(request, f"w|{_('Shop closed')}|{_("The shop isn't taking orders right now.")}")
             return redirect("mobile:home")
         return None

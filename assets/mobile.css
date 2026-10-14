@@ -30,7 +30,10 @@
     --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
-    --color-ink: #0b1220;
+    --color-ink: #0b1220; /* text colour; flips in dark mode */
+    --color-night: #0b1220; /* fixed dark surface (coach shell, dark buttons) */
+    --color-surface: #ffffff; /* cards, tab bar, inputs */
+    --color-emphasis: #0b1220;
     --color-navy: var(--tenant-navy, #101e36);
     --color-steel: #1b2b47;
     --color-hairline: #1e2b42;
@@ -76,7 +79,7 @@
     /* Referee sign-up accent -- deliberately distinct from game/training/other's
        club-red/info-blue/warn-amber (mobile/_calendar_row.html) so a "needs a
        referee" row stands out from the member's own RSVP rows at a glance. */
-    --color-referee: #7c4dff;
+    --color-referee: #7c5cfc;
     --color-referee-bg: #f1ecff;
     --color-referee-border: #d9caff;
     --color-referee-text: #5b2fd6;
@@ -86,7 +89,48 @@
     --color-row-warn: #fffdf6;
     --color-subhead: #f8f9fa;
 
+    --color-official: #0d9488;
+
     --radius-box: 0.875rem; /* 14px -- mobile card radius, see the file banner */
+}
+
+/* Dark mode: follows the system, like the iOS app's Color(light:dark:) tokens. Only the
+   tokens that differ are redefined; utilities read them through var(--color-*). */
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --color-ink: #f1f4f9;
+        --color-surface: #151d2c;
+        --color-emphasis: #33496f;
+        --color-paper: #0b1018;
+        --color-line: #222c3c;
+        --color-rule: #1c2535;
+        --color-edge: #2e3a4f;
+        --color-stroke: #3a475c;
+        --color-muted: #8e9aad;
+        --color-dim: #76839a;
+        --color-slate: #b4bece;
+        --color-subhead: #111826;
+        --color-row-sel: #1c1a24;
+        --color-row-focus: #121c2c;
+        --color-row-warn: #1d1b14;
+
+        --color-ok-bg: #10291d;
+        --color-ok-border: #1d4a33;
+        --color-ok-text: #5fd49a;
+        --color-warn-bg: #2d2310;
+        --color-warn-border: #4d3b17;
+        --color-warn-text: #f3b655;
+        --color-warn-deep: #f3b655;
+        --color-danger-bg: #2d1519;
+        --color-danger-border: #5a2a31;
+        --color-info-bg: #0f2630;
+        --color-info-border: #1d4556;
+        --color-info-text: #6cd0f0;
+        --color-referee-bg: #231c3f;
+        --color-referee-border: #3d3070;
+        --color-referee-text: #b6a2ff;
+    }
 }
 
 /* --- fonts: identical set to management.css/controlpanel.css, same self-hosted files. --- */
@@ -274,7 +318,7 @@
     }
 
     .role-switcher-item-active {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
     }
 
@@ -290,7 +334,7 @@
        the doc's fixed 26px, which was standing in for it. */
     .tab-bar {
         flex-shrink: 0;
-        background: #fff;
+        background: var(--color-surface);
         border-top: 1px solid var(--color-line);
         padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
         display: flex;
@@ -357,7 +401,7 @@
     }
 
     .btn-dark {
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
     }
 
@@ -367,7 +411,7 @@
     }
 
     .btn-secondary {
-        background: #fff;
+        background: var(--color-surface);
         border: 1.5px solid var(--color-stroke);
         color: var(--color-ink);
     }
@@ -444,7 +488,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        background: #fff;
+        background: var(--color-surface);
         border: 1.5px solid var(--color-line);
         border-radius: 999px;
         padding: 4px 10px 4px 4px;
@@ -495,13 +539,13 @@
     /* --- Cards ---------------------------------------------------------------------- */
 
     .m-card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid var(--color-line);
         border-radius: var(--radius-box);
     }
 
     .m-card-dark {
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         border-radius: var(--radius-box);
     }
@@ -542,7 +586,7 @@
         margin-right: 0.75rem;
         border: none;
         border-radius: 0.375rem;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         font-family: var(--font-display);
         font-weight: 800;
@@ -573,7 +617,7 @@
 
     .coach-header {
         padding: max(env(safe-area-inset-top), 14px) 16px 22px;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         flex-shrink: 0;
     }
@@ -587,7 +631,7 @@
     .coach-tab-bar {
         flex-shrink: 0;
         position: relative; /* anchors the "+" action's popup menu */
-        background: var(--color-ink);
+        background: var(--color-night);
         border-top: 1px solid var(--color-hairline);
         padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
         display: flex;
@@ -844,7 +888,7 @@
         font-size: 0.8125rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         border: 1px solid transparent;
         cursor: pointer;
@@ -921,7 +965,7 @@
     }
 
     .card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid var(--color-line);
         border-radius: var(--radius-box);
     }
@@ -949,7 +993,7 @@
         padding: 0.875rem 1rem;
         border-radius: var(--radius-box);
         border: 1px solid var(--color-line);
-        background: #fff;
+        background: var(--color-surface);
         font-size: 0.875rem;
     }
 
@@ -995,7 +1039,7 @@
         width: 100%;
         border: 1px solid var(--color-edge);
         border-radius: 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
         font-family: var(--font-sans);
         font-size: 0.9375rem;
@@ -1070,7 +1114,7 @@
     }
 
     .bg-base-100 {
-        background: #fff;
+        background: var(--color-surface);
     }
 
     /* static/js/searchable-select.js's dropdown -- the script is shared with
@@ -1135,7 +1179,7 @@
         height: 3rem;
         border: 1px solid var(--color-edge);
         border-radius: 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
         font-family: var(--font-mono);
         font-size: 1.25rem;
         color: var(--color-ink);
@@ -1163,4 +1207,559 @@
         height: 3.5rem;
         font-size: 1.375rem;
     }
+}
+
+/* --- iOS parity components (design system: ButtonStyles.swift, MainTabView.swift) --- */
+@layer components {
+    .app-title {
+        letter-spacing: 1.1px;
+    }
+
+    .tab-bar-item-active {
+        color: var(--color-club-dark);
+    }
+
+    /* Full-width 50px / 10px radius button, same as the iOS RCButtonStyle. */
+    .btn-rc {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        height: 50px;
+        padding-inline: 1.25rem;
+        border: none;
+        border-radius: 10px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 15px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: opacity 0.12s ease;
+    }
+
+    .btn-rc:active {
+        opacity: 0.85;
+    }
+
+    .btn-rc:disabled,
+    .btn-rc[aria-disabled="true"] {
+        background: var(--color-dim);
+        color: var(--color-surface);
+        opacity: 1;
+        cursor: not-allowed;
+    }
+
+    .btn-rc-primary {
+        background: var(--color-club);
+        color: var(--color-club-content);
+    }
+
+    .btn-rc-neutral {
+        background: var(--color-emphasis);
+        color: #fff;
+    }
+
+    .btn-rc-destructive {
+        background: var(--color-club-dark);
+        color: #fff;
+    }
+
+    /* Pressed feedback for tappable cards/rows. */
+    .pressable {
+        transition:
+            opacity 0.12s ease,
+            transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .pressable:active,
+    a.card:active,
+    a.list-row:active,
+    a.tab-bar-item:active {
+        opacity: 0.7;
+    }
+
+    .pressable:active {
+        transform: scale(0.985);
+    }
+
+    /* Shared error / empty state. */
+    .state-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 32px 20px;
+        text-align: center;
+        background: var(--color-surface);
+        border: 1px solid var(--color-line);
+        border-radius: 14px;
+        color: var(--color-muted);
+    }
+
+    .state-card-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 999px;
+        background: var(--color-rule);
+        color: var(--color-dim);
+    }
+
+    .state-card-title {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 1.25rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--color-ink);
+    }
+
+    .state-card-text {
+        font-size: 0.9375rem;
+        max-width: 28ch;
+    }
+
+    .state-card-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 280px;
+        margin-top: 8px;
+    }
+
+    /* Pull-to-refresh indicator: height is driven by JS (--ptr-pull); .ptr-active spins. */
+    .ptr {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: var(--ptr-pull, 0px);
+        overflow: hidden;
+        color: var(--color-muted);
+        transition: height 0.2s ease;
+    }
+
+    .ptr.ptr-dragging {
+        transition: none;
+    }
+
+    .ptr-spinner {
+        width: 22px;
+        height: 22px;
+        border: 2.5px solid var(--color-edge);
+        border-top-color: var(--color-club-dark);
+        border-radius: 999px;
+    }
+
+    .ptr-active {
+        --ptr-pull: 48px;
+    }
+
+    .ptr-active .ptr-spinner {
+        animation: rc-spin 0.7s linear infinite;
+    }
+
+    @keyframes rc-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Toast: add .toast-show to display; sits above the tab bar. */
+    .toast {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        bottom: calc(env(safe-area-inset-bottom) + 96px);
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-inline: auto;
+        max-width: 420px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: var(--color-night);
+        color: #fff;
+        font-size: 0.9375rem;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        opacity: 0;
+        transform: translateY(12px);
+        pointer-events: none;
+        transition:
+            opacity 0.2s ease,
+            transform 0.2s ease;
+    }
+
+    .toast-show {
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+    }
+
+    .toast-error {
+        background: var(--color-club-dark);
+    }
+
+    .toast-ok {
+        background: var(--color-ok-text);
+    }
+
+    /* Bottom sheet: <dialog class="sheet"> (medium by default, .sheet-large for large). */
+    dialog.sheet {
+        position: fixed;
+        inset: auto 0 0 0;
+        margin: 0 auto;
+        width: 100%;
+        max-width: 560px;
+        height: 50dvh;
+        max-height: 50dvh;
+        padding: 0 16px max(env(safe-area-inset-bottom), 16px);
+        border: none;
+        border-radius: 20px 20px 0 0;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    dialog.sheet.sheet-large {
+        height: 92dvh;
+        max-height: 92dvh;
+    }
+
+    dialog.sheet[open] {
+        animation: rc-sheet-up 0.28s cubic-bezier(0.2, 0.9, 0.3, 1);
+    }
+
+    dialog.sheet::backdrop {
+        background: rgba(0, 0, 0, 0.45);
+        animation: rc-fade 0.2s ease;
+    }
+
+    /* Close button for a bottom sheet: sticky at the top right, takes no layout space. */
+    .sheet-close-wrap {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        display: flex;
+        justify-content: flex-end;
+        height: 0;
+    }
+
+    .sheet-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: var(--sheet-close-top, 2px) 4px 0 0;
+    }
+
+    .sheet-close > span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: var(--sheet-close-bg, var(--color-rule));
+        color: var(--sheet-close-fg, var(--color-ink));
+    }
+
+    .sheet-handle {
+        width: 36px;
+        height: 5px;
+        margin: 8px auto 12px;
+        border-radius: 999px;
+        background: var(--color-stroke);
+        touch-action: none;
+        cursor: grab;
+    }
+
+    @keyframes rc-sheet-up {
+        from {
+            transform: translateY(100%);
+        }
+    }
+
+    @keyframes rc-fade {
+        from {
+            opacity: 0;
+        }
+    }
+
+    /* Accessibility */
+    :focus-visible {
+        outline: 2px solid var(--color-club-dark);
+        outline-offset: 2px;
+    }
+
+    /* Inside a clipped card (overflow-hidden) an outset ring is cut off on three sides; draw it inside. */
+    .m-card :focus-visible {
+        outline-offset: -2px;
+    }
+
+    dialog.sheet:focus {
+        outline: none;
+    }
+
+    .app-header :focus-visible,
+    .role-switcher :focus-visible {
+        outline-color: #fff;
+    }
+
+    .icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    button,
+    [role="button"],
+    .tab-bar-item {
+        min-height: 44px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+/* Dark mode: club-dark is too low-contrast on the dark surface, use the plain club colour. */
+@media (prefers-color-scheme: dark) {
+    .tab-bar-item-active {
+        color: var(--color-club);
+    }
+}
+
+/* --- Member Home / Calendar / event sheet (iOS parity) ----------------------------------
+   Answer buttons (In / Maybe / Out, Claim, Give back), the Calendar header's controls and
+   menus, and the month grid. Everything else on those screens is plain utilities. */
+@layer components {
+    .answer-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
+        min-height: 46px;
+        padding-inline: 0.75rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 12px;
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        transition: opacity 0.12s ease;
+    }
+
+    .answer-btn:active {
+        opacity: 0.8;
+    }
+
+    .answer-btn-on {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+    }
+
+    .answer-btn-danger {
+        background: var(--color-danger-bg);
+        border-color: var(--color-danger-border);
+        color: var(--color-club-dark);
+    }
+
+    .answer-btn-sm {
+        min-height: 36px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    /* Inline In / Out on a Calendar answer line. */
+    .answer-btn-line {
+        min-height: 34px;
+        min-width: 64px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    /* Home's compact pair on the dark next-up card (iOS 52x30). */
+    .card-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        min-width: 52px;
+        border-radius: 6px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .card-btn-in {
+        background: var(--color-ok);
+        color: #fff;
+    }
+
+    .card-btn-out {
+        background: var(--color-steel);
+        color: var(--color-on-dark);
+    }
+
+    .card-btn-ghost {
+        padding-inline: 10px;
+        border: 1.5px solid var(--color-on-dark-faint);
+        color: var(--color-on-dark);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+    }
+
+    /* Header controls: round filter button, scope pill, List/Month switch. */
+    .header-pill {
+        display: flex;
+        align-items: center;
+        gap: 0.3125rem;
+        min-height: 30px;
+        padding-inline: 0.625rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        color: #fff;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        list-style: none;
+        cursor: pointer;
+    }
+
+    .header-pill::-webkit-details-marker {
+        display: none;
+    }
+
+    .header-seg {
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    .header-seg a {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        min-height: 26px;
+        border-radius: 999px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+
+    .header-seg a[aria-current="true"] {
+        background: var(--color-surface);
+        color: var(--color-club-dark);
+    }
+
+    .menu-panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        z-index: 40;
+        min-width: 13rem;
+        max-width: calc(100vw - 2rem);
+        padding: 6px;
+        border: 1px solid var(--color-line);
+        border-radius: 14px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .menu-item {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        min-height: 44px;
+        padding-inline: 0.625rem;
+        border-radius: 10px;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    .menu-heading {
+        padding: 8px 10px 2px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    /* Month grid. */
+    .month-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        padding-block: 3px;
+        min-height: 44px;
+    }
+
+    .month-day {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        font-size: 14px;
+        border: 1.5px solid transparent;
+    }
+
+    .month-day-today {
+        border-color: var(--color-ink);
+    }
+
+    .month-day-selected {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .month-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--color-club);
+    }
+}
+
+/* No visible scrollbars anywhere in the app (scrolling itself is unchanged), like the native app. */
+* {
+    scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+    display: none;
 }

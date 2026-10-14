@@ -1,0 +1,62 @@
+{% load i18n lucide %}
+{% comment %}
+    The manager's confirmation sheets for the event detail (sheet and full page alike): stop
+    following the series, delete (one-off, or occurrence of a series), delete the whole series.
+    Mirrors the iOS confirmationDialog / DeleteEventSheet. Plain POSTs (hx-boost="false") that
+    redirect back to the tab the event was opened from (hidden ``next``) or to the Events list.
+{% endcomment %}
+{% if can_manage_active_team %}
+    {% if event.series_id and not event.detached %}
+        <dialog class="sheet" id="event-detach-sheet" aria-labelledby="event-detach-title">
+            <div class="sheet-handle"></div>
+            <form class="flex flex-col gap-3" method="post" action="{% url "mobile:coach_event_detach" event.pk %}" hx-boost="false">
+                {% csrf_token %}
+                {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
+                <h2 id="event-detach-title" class="font-display text-xl font-extrabold text-ink uppercase">{% trans "Stop following the series?" %}</h2>
+                <p class="text-sm text-muted">{% trans "Changes to the series won't touch this event any more." %}</p>
+                <button class="btn-rc btn-rc-primary" type="submit">{% trans "Stop following" %}</button>
+                <button class="btn-rc btn-rc-neutral" type="button" onclick="this.closest('dialog').close()">{% trans "Cancel" %}</button>
+            </form>
+        </dialog>
+    {% endif %}
+
+    <dialog class="sheet{% if event.series_id %} sheet-large{% endif %}" id="event-delete-sheet" aria-labelledby="event-delete-title">
+        <div class="sheet-handle"></div>
+        <form class="flex flex-col gap-3" method="post" action="{% url "mobile:coach_event_delete" event.pk %}" hx-boost="false">
+            {% csrf_token %}
+            {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
+            <h2 id="event-delete-title" class="font-display text-xl font-extrabold text-ink uppercase">{% trans "Delete" %}</h2>
+            <label class="flex items-start gap-3">
+                <input class="mt-0.5 h-5 w-5 shrink-0 accent-ink" type="checkbox" name="notify">
+                <span>
+                    <span class="block text-sm font-semibold text-ink">{% trans "Tell the players" %}</span>
+                    <span class="block text-xs text-muted">{% trans "They get a notification that the event was cancelled." %}</span>
+                </span>
+            </label>
+            {% if event.series_id %}
+                <button class="btn-rc btn-rc-neutral" type="submit" name="mode" value="cancel">{% trans "Cancel it but keep the record" %}</button>
+                <button class="btn-rc btn-rc-destructive" type="submit" name="mode" value="remove">{% trans "Remove this event" %}</button>
+                <button class="btn-rc btn-rc-destructive" type="button" onclick="document.getElementById('event-series-sheet').showModal()">{% trans "Delete the whole series" %}</button>
+                <p class="text-xs text-muted">{% trans "Deleting the series removes every event in it, past ones and their attendance too. To keep the history, change the end date of the series instead." %}</p>
+            {% else %}
+                <button class="btn-rc btn-rc-destructive" type="submit" name="mode" value="delete">{% trans "Delete this event" %}</button>
+            {% endif %}
+            <button class="btn-rc btn-rc-neutral" type="button" onclick="this.closest('dialog').close()">{% trans "Cancel" %}</button>
+        </form>
+    </dialog>
+
+    {% if event.series_id %}
+        <dialog class="sheet" id="event-series-sheet" aria-labelledby="event-series-title">
+            <div class="sheet-handle"></div>
+            <form class="flex flex-col gap-3" method="post" action="{% url "mobile:coach_event_delete" event.pk %}" hx-boost="false">
+                {% csrf_token %}
+                {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
+                <input type="hidden" name="mode" value="series">
+                <h2 id="event-series-title" class="font-display text-xl font-extrabold text-ink uppercase">{% trans "Delete the whole series?" %}</h2>
+                <p class="text-sm text-muted">{% trans "This can't be undone." %}</p>
+                <button class="btn-rc btn-rc-destructive" type="submit">{% trans "Delete the series" %}</button>
+                <button class="btn-rc btn-rc-neutral" type="button" onclick="this.closest('dialog').close()">{% trans "Cancel" %}</button>
+            </form>
+        </dialog>
+    {% endif %}
+{% endif %}

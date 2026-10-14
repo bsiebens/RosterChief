@@ -739,7 +739,8 @@ class HomeViewTests(TestCase):
         response = self._get("home")
 
         self.assertEqual(list(response.context["open_tasks"]), [])
-        self.assertNotContains(response, "Bring fruit")
+        # No longer in "Open tasks" -- but the household took it, so the event's card lists it under "Your tasks".
+        self.assertNotContains(response, "Open tasks")
 
     def test_open_tasks_ignores_a_task_on_an_event_not_in_scope(self):
         # A task on some other club event this member has no Attendance row
@@ -2396,7 +2397,7 @@ class NotificationsViewTests(TestCase):
         self.client.force_login(self.user)
 
         response = self._get()
-        self.assertContains(response, "Club news")
+        self.assertContains(response, "New article")
 
         redirect_response = self._post({"action": "mark_read", "notification_id": str(notification.pk)})
         self.assertRedirects(redirect_response, reverse("mobile:news_detail", kwargs={"slug": news_item.slug}), fetch_redirect_response=False)
@@ -2727,20 +2728,15 @@ class MeViewTests(TestCase):
 
         self.assertNotContains(response, reverse("mobile:reregister"))
 
-    def test_change_password_and_2fa_links_are_boosted_not_a_full_reload(self):
-        # Issue #16: these used to force a real navigation (hx-boost="false")
-        # out of the boosted app shell -- now that mobile/_auth_base.html
-        # shares mobile/base.html's own chrome, there's no shell mismatch to
-        # guard against, so the link itself can boost like any other in-app
-        # navigation.
+    def test_password_and_2fa_live_behind_a_single_security_row(self):
+        # iOS has one "Security" row; change password / passkeys / 2FA are on that screen (mobile/test_me_account.py).
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertContains(response, f'href="{reverse("account_change_password")}">')
-        self.assertContains(response, f'href="{reverse("mfa_index")}">')
-        self.assertNotContains(response, f'href="{reverse("account_change_password")}" hx-boost="false"')
-        self.assertNotContains(response, f'href="{reverse("mfa_index")}" hx-boost="false"')
+        self.assertContains(response, f'href="{reverse("mobile:security")}"')
+        self.assertNotContains(response, f'href="{reverse("account_change_password")}"')
+        self.assertNotContains(response, f'href="{reverse("mfa_index")}"')
 
     def test_payments_pill_holds_back_an_unconfirmed_registrations_balance(self):
         # Same filter PaymentsView/HomeView apply to open_dues_rows -- this
@@ -3002,7 +2998,7 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "All settled up")
+        self.assertContains(response, "Nothing to pay")
 
     def test_an_open_balance_shows_the_amount(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -3013,7 +3009,7 @@ class PaymentsViewTests(TestCase):
 
         self.assertEqual(len(response.context["display_rows"]), 1)
         self.assertContains(response, "150.00")
-        self.assertNotContains(response, "All settled up")
+        self.assertNotContains(response, "Nothing to pay")
 
     def test_no_pay_button_since_there_is_no_online_payment_gateway(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -3097,7 +3093,6 @@ class PaymentsViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Multi-registrant discount")
         self.assertContains(response, "15.00")
 
     def test_shows_the_early_payment_offer_while_still_open(self):
@@ -3182,7 +3177,7 @@ class PaymentsViewTests(TestCase):
         response = self._get()
 
         self.assertEqual(response.context["display_rows"], [])
-        self.assertContains(response, "All settled up")
+        self.assertContains(response, "Nothing to pay")
 
     def test_the_balance_appears_once_the_registration_is_confirmed(self):
         self.membership.fee_amount = Decimal("150.00")
@@ -3314,7 +3309,7 @@ class EditProfileViewTests(TestCase):
             {"first_name": "Larsen", "last_name": "Bakker", "email": "larsen@example.com", "phone": "", "emergency_phone": ""},
         )
 
-        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("mobile:edit_profile", kwargs={"member_id": self.member.pk}) + "?saved=1", fetch_redirect_response=False)
         self.member.refresh_from_db()
         self.assertEqual(self.member.first_name, "Larsen")
         self.assertEqual(self.member.email, "larsen@example.com")
@@ -3327,7 +3322,7 @@ class EditProfileViewTests(TestCase):
             {"first_name": "Lars", "last_name": "Bakker", "email": "lars@example.com", "phone": "", "emergency_phone": "", "profile_photo": make_image_file("me.png")},
         )
 
-        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("mobile:edit_profile", kwargs={"member_id": self.member.pk}) + "?saved=1", fetch_redirect_response=False)
         self.member.refresh_from_db()
         self.addCleanup(self.member.profile_photo.delete, save=False)
         self.assertTrue(self.member.profile_photo)
@@ -3389,7 +3384,7 @@ class EditProfileViewTests(TestCase):
             {"first_name": "Noor", "last_name": "Bakker", "email": "noor@example.com", "phone": "", "emergency_phone": ""},
         )
 
-        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("mobile:edit_profile", kwargs={"member_id": self.child.pk}) + "?saved=1", fetch_redirect_response=False)
         self.child.refresh_from_db()
         self.assertEqual(self.child.email, "noor@example.com")
 
@@ -3469,14 +3464,17 @@ class ReRegisterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_get_shows_a_row_per_managed_person(self):
+    def test_get_shows_an_empty_list_and_the_editor_offers_every_managed_person(self):
         self.client.force_login(self.user)
 
         response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Lars")
-        self.assertContains(response, "Noor")
+        self.assertContains(response, "Add a registration")
+        self.assertEqual(response.context["entry_cards"], [])
+        editor = self.client.post(self._url(), {**self.formset_management(0), "action": "add"}, HTTP_HOST="ajax-united.rosterchief.app")
+        self.assertContains(editor, "Lars")
+        self.assertContains(editor, "Noor")
 
     def test_no_registration_products_shows_an_empty_state(self):
         self.product.is_active = False
@@ -3558,7 +3556,7 @@ class ReRegisterViewTests(TestCase):
 
         response = self.client.post(self._url(), data, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertContains(response, "If paid before the deadline")
+        self.assertContains(response, "if you pay early")
         self.assertEqual(response.context["priced_total"], Decimal("80.00"))
         self.assertEqual(response.context["priced_early_total"], Decimal("70.00"))
 
@@ -3669,33 +3667,8 @@ class ReRegisterViewTests(TestCase):
         self.assertEqual(child_membership.status, ClubMembership.StatusChoices.PENDING)
         self.assertEqual(child_membership.fee_amount, Decimal("80.00"))
 
-    def test_each_persons_card_offers_add_another_registration(self):
-        self.client.force_login(self.user)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, "Add another registration")
-        self.assertContains(response, f'data-person="{self.member.pk}"')
-        self.assertContains(response, f'data-person="{self.child.pk}"')
-
-    def test_the_add_another_registration_template_row_is_styled_the_same_as_the_default_row(self):
-        # entry_formset.empty_form is a fresh, unstyled Form instance on every
-        # access (BaseFormSet's own plain @property, not cached) -- the
-        # #subrow-template clone source must be a separately-styled instance
-        # or its "Registering as" select renders bare next to an
-        # already-styled default row.
-        self.client.force_login(self.user)
-
-        response = self.client.get(self._url(), HTTP_HOST="ajax-united.rosterchief.app")
-
-        self.assertContains(response, 'id="subrow-template"')
-        template_start = response.content.decode().index('id="subrow-template"')
-        template_html = response.content.decode()[template_start : template_start + 2000]
-        self.assertIn('name="entries-__prefix__-entry_kind" class="h-11', template_html)
-
     def test_an_additional_registration_row_for_an_already_registered_person_adds_to_the_fee(self):
-        # Submitted via the "Add another registration" row under Noor's own
-        # card (mobile-reregister-rows.js), not their default row -- proof
+        # A second entry for the same person (the list's "Add a registration") -- proof
         # a person can carry more than one entry in the same submission.
         first_membership = ClubMembership.objects.create(
             club=self.club, member=self.child, season=self.season, status=ClubMembership.StatusChoices.ACTIVE, fee_amount=Decimal("80.00"), fee_status=ClubMembership.FeeStatus.PAID, amount_paid=Decimal("80.00")
@@ -4543,7 +4516,7 @@ class CoachRosterMemberViewTests(TestCase):
         response = self._get()
 
         self.assertIsNotNone(response.context["form"])
-        self.assertContains(response, "Remove from roster")
+        self.assertContains(response, "Remove from the roster")
 
     def test_switching_team_links_to_that_teams_home_not_a_bare_query_string(self):
         # A path-relative "?team=<pk>" kept the URL on this page's own path
@@ -4571,7 +4544,7 @@ class CoachRosterMemberViewTests(TestCase):
         response = self._get()
 
         self.assertIsNone(response.context["form"])
-        self.assertNotContains(response, "Remove from roster")
+        self.assertNotContains(response, "Remove from the roster")
 
     def test_a_membership_from_another_team_is_not_reachable(self):
         other_team = Team.objects.create(club=self.club, name="U14", short_name="U14")
@@ -4953,7 +4926,7 @@ class CoachScheduleViewTests(TestCase):
 
         self.assertNotContains(response, "Friendly")
 
-    def test_past_and_cancelled_events_are_excluded(self):
+    def test_past_events_excluded_and_cancelled_upcoming_shown_with_pill(self):
         past = Event.objects.create(club=self.club, title="Old practice", kind=Event.EventKind.TRAINING, start=timezone.now() - datetime.timedelta(days=2))
         past.teams.add(self.team)
         cancelled = Event.objects.create(club=self.club, title="Cancelled game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=2), cancelled=True)
@@ -4962,9 +4935,9 @@ class CoachScheduleViewTests(TestCase):
 
         response = self._get()
 
-        self.assertEqual(response.context["this_week"], [])
-        self.assertEqual(response.context["next_week"], [])
-        self.assertEqual(response.context["later_months"], [])
+        self.assertNotContains(response, "Old practice")
+        self.assertContains(response, "Cancelled game")
+        self.assertContains(response, "Cancelled</span>")
 
     def test_no_staff_assignment_404s(self):
         # A club member who isn't on any team's staff this season has no Coach mode.
@@ -5147,8 +5120,8 @@ class CoachAttendanceViewTests(TestCase):
         response = self._get()
 
         self.assertNotContains(response, "Goalies")
-        self.assertContains(response, "Responded")
-        self.assertContains(response, "Declined")
+        self.assertContains(response, "No reply")
+        self.assertContains(response, "Out")
 
     def test_silent_rows_have_no_special_background(self):
         silent_member = Member.objects.create(first_name="Ben", last_name="Silent")
@@ -7033,17 +7006,17 @@ class ShopTabVisibilityTests(TestCase):
 
         self.assertNotContains(response, reverse("mobile:shop_home"))
 
-    def test_shop_home_redirects_to_home_when_closed(self):
+    def test_the_cart_redirects_to_home_when_closed(self):
         self._login(shop_open=False)
 
-        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app")
+        response = self.client.get(reverse("mobile:shop_cart"), HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, reverse("mobile:home"))
 
     def test_a_flashed_notice_explains_the_redirect(self):
         self._login(shop_open=False)
 
-        response = self.client.get(reverse("mobile:shop_home"), HTTP_HOST="ajax-united.rosterchief.app", follow=True)
+        response = self.client.get(reverse("mobile:shop_cart"), HTTP_HOST="ajax-united.rosterchief.app", follow=True)
 
         self.assertContains(response, "Shop closed")
 
@@ -7105,7 +7078,7 @@ class ShopHomeViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Nothing in the shop yet.")
+        self.assertContains(response, "Nothing here yet")
 
     def test_cart_item_count_badge_reflects_the_open_cart(self):
         product = Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"))
@@ -7125,12 +7098,9 @@ class ShopHomeViewTests(TestCase):
 
         response = self._get()
 
-        groups = response.context["groups"]
-        self.assertEqual(len(groups), 2)
-        self.assertEqual(groups[0]["category"], category)
-        self.assertEqual(groups[0]["products"], [categorized])
-        self.assertIsNone(groups[1]["category"])
-        self.assertEqual(groups[1]["products"], [uncategorized])
+        # The grid is flat (category chips filter it client-side); only categories in use get a chip.
+        self.assertEqual(response.context["categories"], [category])
+        self.assertEqual({product.pk for product in response.context["products"]}, {categorized.pk, uncategorized.pk})
 
     def test_a_single_group_shows_no_category_pills(self):
         # The pill row is a same-page #jump between sections -- with nothing
@@ -7142,7 +7112,7 @@ class ShopHomeViewTests(TestCase):
 
         self.assertNotContains(response, 'href="#cat-')
 
-    def test_multiple_categories_show_a_jump_pill_each(self):
+    def test_multiple_categories_show_a_filter_chip_each(self):
         merch = ProductCategory.objects.create(club=self.club, name="Merchandise")
         fees = ProductCategory.objects.create(club=self.club, name="Fees")
         Product.objects.create(club=self.club, name="Home Jersey", price=Decimal("25.00"), category=merch)
@@ -7151,8 +7121,8 @@ class ShopHomeViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, f'href="#cat-{merch.pk}"')
-        self.assertContains(response, f'href="#cat-{fees.pk}"')
+        self.assertContains(response, f"category = '{merch.pk}'")
+        self.assertContains(response, f"category = '{fees.pk}'")
         self.assertContains(response, "Merchandise")
         self.assertContains(response, "Fees")
 
@@ -7368,7 +7338,7 @@ class ShopCartViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Your cart is empty.")
+        self.assertContains(response, "Your cart is empty")
 
     def test_cart_items_and_totals_are_shown(self):
         cart = Cart.objects.create(club=self.club, user=self.user)
@@ -7578,7 +7548,7 @@ class ShopOrdersViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "No orders yet.")
+        self.assertContains(response, "No orders yet")
 
     def test_shows_the_consolidated_member_status_not_the_raw_fulfillment_status(self):
         # fulfillment_status alone is still NOT_READY while a jersey is being
@@ -7840,7 +7810,7 @@ class FormsListViewTests(TestCase):
         response = self._get()
 
         self.assertContains(response, "Sign-up")
-        self.assertContains(response, "Pending")
+        self.assertContains(response, "Complete")
 
     def test_a_completed_send_shows_its_submitted_date(self):
         send = FormSend.objects.create(club=self.club, form=self.form, club_wide=True)
@@ -7849,7 +7819,7 @@ class FormsListViewTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Completed")
+        self.assertContains(response, "Done")
         self.assertContains(response, reverse("mobile:form_response", kwargs={"pk": submission.pk}))
 
     def test_a_send_outside_my_audience_is_absent(self):
@@ -7912,7 +7882,7 @@ class FormResponseViewTests(TestCase):
 
         response = self.client.get(self._url(submission), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertContains(response, "No answer")
+        self.assertContains(response, "&mdash;")
 
     def test_someone_elses_submission_404s(self):
         other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
@@ -7983,7 +7953,8 @@ class FormFillViewTests(TestCase):
 
         response = self.client.post(self._url(send), {}, HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.content.decode().count("This field is required."), 1)
+        # The form also carries the client-side copy of the message (data-required-text); only the rendered one counts.
+        self.assertEqual(response.content.decode().count('text-club-dark">This field is required.</p>'), 1)
 
     def test_a_window_rejection_still_shows_as_a_banner_not_a_field_error(self):
         # No Field to attach this one to -- unlike a missing-required-field
@@ -8392,7 +8363,7 @@ class BugListViewTests(TestCase):
 #: own plumbing (fetched by the browser before/independently of login) and the
 #: token-authenticated calendar feed (a calendar app can't log in; the feed
 #: only ever lists the token owner's own invitations).
-MEMBER_APP_EXEMPT_URL_NAMES = {"manifest", "service_worker", "icon", "calendar_feed"}
+MEMBER_APP_EXEMPT_URL_NAMES = {"manifest", "service_worker", "icon", "offline", "calendar_feed"}
 
 
 def _dummy_kwargs(pattern):
@@ -8744,8 +8715,7 @@ class FormFillOnBehalfTests(TestCase):
 
         response = self.client.get(self._url(send), HTTP_HOST=self.HOST)
 
-        self.assertContains(response, "Filling in for")
-        self.assertContains(response, "Mila Bakker")
+        self.assertContains(response, "For Mila Bakker")
         self.assertEqual(response.context["for_member"], self.child)
 
     def test_explicit_for_picks_the_child_when_parent_and_child_are_both_addressed(self):
@@ -8902,7 +8872,7 @@ class ShopFeatureFlagTests(TestCase):
         self.club.save(update_fields=["shop_open"])
         self.client.force_login(self.user)
 
-        self.assertRedirects(self._get("mobile:shop_home"), reverse("mobile:home"))
+        self.assertRedirects(self._get("mobile:shop_cart"), reverse("mobile:home"))
 
     def test_anonymous_is_sent_to_login_whatever_the_shop_state(self):
         for licensed, shop_open in [(False, True), (True, True), (True, False)]:
@@ -9087,3 +9057,93 @@ class CalendarFeedTokenMigrationTests(TransactionTestCase):
 
         self.assertEqual(row.token_hash, hashlib.sha256(b"legacy-raw-token-value").hexdigest())
         self.assertNotIn("token", [field.name for field in NewToken._meta.fields])
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MeLanguagePickerTests(TestCase):
+    """Me -> "Language": a set_language POST (cookie; the saved Member.language is covered by MemberLanguageTests)."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="lang@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Lia", last_name="Lang", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def test_me_lists_both_languages_and_marks_the_current_one(self):
+        response = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(response, reverse("set_language"))
+        self.assertContains(response, 'value="en" lang="en" aria-current="true"')
+        self.assertContains(response, 'value="nl" lang="nl"')
+        self.assertContains(response, "Nederlands")
+
+    def test_choosing_dutch_sets_the_cookie_and_me_renders_in_dutch(self):
+        response = self.client.post(reverse("set_language"), {"language": "nl", "next": reverse("mobile:me")}, HTTP_HOST=self.HOST)
+        self.assertRedirects(response, reverse("mobile:me"), fetch_redirect_response=False)
+        self.assertEqual(response.cookies[settings.LANGUAGE_COOKIE_NAME].value, "nl")
+
+        page = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(page, "Een bug melden")
+        self.assertContains(page, "Taal")
+        self.assertContains(page, 'value="nl" lang="nl" aria-current="true"')
+
+    def test_desktop_me_has_the_picker_too(self):
+        with translation.override("nl"):
+            html = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST, HTTP_ACCEPT_LANGUAGE="nl").content.decode()
+        self.assertIn("Taal", html)
+
+
+@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
+class MemberLanguageTests(TestCase):
+    """Member.language: saved by the Language picker, applied without a cookie, used for web push."""
+
+    HOST = "ajax-united.rosterchief.app"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = make_club()
+        cls.user = User.objects.create_user(email="taal@example.com", password="pw-secret-123")
+        cls.member = Member.objects.create(first_name="Tess", last_name="Taal", user=cls.user)
+        ClubRole.objects.create(club=cls.club, member=cls.member)
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.client.force_login(self.user)
+
+    def test_choosing_a_language_saves_it_on_the_member(self):
+        self.client.post(reverse("set_language"), {"language": "nl", "next": reverse("mobile:me")}, HTTP_HOST=self.HOST)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.language, "nl")
+
+    def test_an_unknown_language_is_not_saved(self):
+        self.client.post(reverse("set_language"), {"language": "xx"}, HTTP_HOST=self.HOST)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.language, "")
+
+    def test_saved_language_applies_without_a_cookie(self):
+        Member.objects.filter(pk=self.member.pk).update(language="nl")
+        page = self.client.get(reverse("mobile:me"), HTTP_HOST=self.HOST)
+        self.assertContains(page, "Een bug melden")
+
+    def test_web_push_is_sent_in_the_subscribers_language(self):
+        from mobile.services.push import send_push_for_notifications
+        from notifications.models import Notification
+
+        Member.objects.filter(pk=self.member.pk).update(language="nl")
+        PushSubscription.objects.create(club=self.club, member=self.member, endpoint="https://fcm.googleapis.com/fcm/send/lang", p256dh="k", auth="a")
+        notification = Notification.objects.create(
+            club=self.club, member=self.member, title="Practice moved", body="See the calendar.", translations={"en": {"title": "Practice moved", "body": "See the calendar."}, "nl": {"title": "Training verplaatst", "body": "Zie de kalender."}}
+        )
+        with override_settings(VAPID_PRIVATE_KEY="x"), patch("mobile.services.push._deliver") as deliver:
+            send_push_for_notifications([notification])
+        payload = json.loads(deliver.call_args.args[1])
+        self.assertEqual(payload["title"], "Training verplaatst")
+        self.assertEqual(payload["body"], "Zie de kalender.")

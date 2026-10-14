@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: RosterChief\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-12 12:00+0200\n"
+"POT-Creation-Date: 2026-10-14 18:23+0200\n"
 "PO-Revision-Date: 2026-10-12 12:00+0200\n"
 "Last-Translator: RosterChief\n"
 "Language-Team: Dutch\n"
@@ -13,5 +13,2969 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "Reminder: %(kind)s on %(when)s still needs your answer."
-msgstr "Herinnering: we wachten nog op jouw antwoord voor %(kind)s op %(when)s."
+msgid "Choose Your Club"
+msgstr "Kies je club"
+
+msgid "Evaluations"
+msgstr "Evaluaties"
+
+msgid "New evaluation"
+msgstr "Nieuwe evaluatie"
+
+msgid "Could not submit"
+msgstr "Kon niet verzenden"
+
+msgid "Evaluation submitted"
+msgstr "Evaluatie verzonden"
+
+#, python-format
+msgid "Your evaluation of “%(player)s” has been recorded."
+msgstr "Je evaluatie van “%(player)s” is geregistreerd."
+
+msgid "Evaluation"
+msgstr "Evaluatie"
+
+msgid "Location"
+msgstr "Locatie"
+
+msgid "Opponent"
+msgstr "Tegenstander"
+
+msgid "Today"
+msgstr "Vandaag"
+
+msgid "Silent players"
+msgstr "Stille spelers"
+
+#, python-format
+msgid "%(count)d haven't answered yet"
+msgstr "%(count)d hebben nog niet geantwoord"
+
+msgid "Review"
+msgstr "Nakijken"
+
+msgid "Line-up not published"
+msgstr "Opstelling niet gepubliceerd"
+
+#, python-format
+msgid "%(title)s · %(date)s"
+msgstr "%(title)s · %(date)s"
+
+msgid "Build"
+msgstr "Bouwen"
+
+msgid "In"
+msgstr "In"
+
+msgid "Maybe"
+msgstr "Misschien"
+
+msgid "Out"
+msgstr "Uit"
+
+msgid "No reply"
+msgstr "Geen antwoord"
+
+msgid "Attendance"
+msgstr "Aanwezigheid"
+
+msgid "Attendance saved"
+msgstr "Aanwezigheid opgeslagen"
+
+#, python-format
+msgid "%(count)d players checked in."
+msgstr "%(count)d spelers ingecheckt."
+
+msgid "Saved"
+msgstr "Opgeslagen"
+
+msgid "The note is too long (500 characters at most)."
+msgstr "De notitie is te lang (maximaal 500 tekens)."
+
+msgid "Answer saved"
+msgstr "Antwoord opgeslagen"
+
+#, python-format
+msgid "“%(member)s” updated."
+msgstr "“%(member)s” bijgewerkt."
+
+msgid "Couldn't save"
+msgstr "Kon niet opslaan"
+
+msgid "Not saved"
+msgstr "Niet opgeslagen"
+
+msgid "Reminder sent"
+msgstr "Herinnering verstuurd"
+
+#, python-format
+msgid "%(count)d player nudged."
+msgid_plural "%(count)d players nudged."
+msgstr[0] "%(count)d speler herinnerd."
+msgstr[1] "%(count)d spelers herinnerd."
+
+msgid "Nobody to remind"
+msgstr "Niemand om te herinneren"
+
+msgid "Everyone has already responded."
+msgstr "Iedereen heeft al geantwoord."
+
+msgid "New event"
+msgstr "Nieuw event"
+
+msgid "Type a name to search..."
+msgstr "Typ een naam om te zoeken..."
+
+#, python-format
+msgid "“%(series)s” created, with %(count)d occurrence scheduled."
+msgid_plural "“%(series)s” created, with %(count)d occurrences scheduled."
+msgstr[0] "“%(series)s” aangemaakt, met %(count)d geplande gebeurtenis."
+msgstr[1] "“%(series)s” aangemaakt, met %(count)d geplande gebeurtenissen."
+
+msgid "Series created"
+msgstr "Reeks aangemaakt"
+
+#, python-format
+msgid "“%(event)s” created."
+msgstr "“%(event)s” aangemaakt."
+
+msgid "Event created"
+msgstr "Event aangemaakt"
+
+msgid "Edit event"
+msgstr "Event wijzigen"
+
+msgid "Event updated"
+msgstr "Event bijgewerkt"
+
+#, python-format
+msgid "“%(event)s” has been updated."
+msgstr "“%(event)s” is bijgewerkt."
+
+msgid "Edit series"
+msgstr "Reeks bewerken"
+
+msgid "Series updated"
+msgstr "Reeks bijgewerkt"
+
+#, python-format
+msgid "“%(series)s” has been updated."
+msgstr "“%(series)s” is bijgewerkt."
+
+msgid "Detached from series"
+msgstr "Losgekoppeld van reeks"
+
+#, python-format
+msgid ""
+"“%(event)s” is now edited independently and won't be touched by future "
+"series-wide changes."
+msgstr ""
+"“%(event)s” wordt nu apart bewerkt en wordt niet meer geraakt door "
+"toekomstige wijzigingen aan de hele reeks."
+
+msgid "Event"
+msgstr "Event"
+
+msgid "Series deleted"
+msgstr "Reeks verwijderd"
+
+#, python-format
+msgid "“%(series)s” and all of its occurrences have been deleted."
+msgstr "“%(series)s” en alle bijbehorende events zijn verwijderd."
+
+msgid "Occurrence cancelled"
+msgstr "Event geannuleerd"
+
+#, python-format
+msgid "“%(event)s” was cancelled."
+msgstr "“%(event)s” werd geannuleerd."
+
+msgid "Event deleted"
+msgstr "Event verwijderd"
+
+#, python-format
+msgid "“%(event)s” has been deleted."
+msgstr "“%(event)s” is verwijderd."
+
+msgid "Add task"
+msgstr "Taak toevoegen"
+
+msgid "Task added"
+msgstr "Taak toegevoegd"
+
+#, python-format
+msgid "“%(title)s” was added to this event."
+msgstr "“%(title)s” is aan dit event toegevoegd."
+
+msgid "Could not update task"
+msgstr "Kon taak niet bijwerken"
+
+msgid "Task updated"
+msgstr "Taak bijgewerkt"
+
+#, python-format
+msgid "“%(title)s” was updated."
+msgstr "“%(title)s” is bijgewerkt."
+
+msgid "Task deleted"
+msgstr "Taak verwijderd"
+
+#, python-format
+msgid "“%(title)s” was removed from this event."
+msgstr "“%(title)s” is uit dit event verwijderd."
+
+msgid "New post"
+msgstr "Nieuw bericht"
+
+#, python-format
+msgid "At most %(count)d photo."
+msgid_plural "At most %(count)d photos."
+msgstr[0] "Maximaal %(count)d foto."
+msgstr[1] "Maximaal %(count)d foto's."
+
+#, python-format
+msgid "“%(news)s” is ready for review."
+msgstr "“%(news)s” staat klaar voor nazicht."
+
+msgid "Sent for review"
+msgstr "Ter nazicht verstuurd"
+
+msgid "Team news"
+msgstr "Teamnieuws"
+
+msgid "Scheduled"
+msgstr "Gepland"
+
+msgid "Published"
+msgstr "Gepubliceerd"
+
+msgid "Waiting for review"
+msgstr "Wacht op nazicht"
+
+msgid "Not published, ask the editor"
+msgstr "Niet gepubliceerd, vraag het aan de redacteur"
+
+msgid "Add players"
+msgstr "Spelers toevoegen"
+
+msgid "Age match"
+msgstr "Leeftijd past"
+
+msgid "Last season"
+msgstr "Vorig seizoen"
+
+msgid "Feeder team"
+msgstr "Doorstroomteam"
+
+msgid "Close in age"
+msgstr "Bijna juiste leeftijd"
+
+msgid "All"
+msgstr "Alle"
+
+msgid "Suggested"
+msgstr "Voorgesteld"
+
+msgid "No team"
+msgstr "Geen team"
+
+#, python-format
+msgid "%(count)d player added to the roster."
+msgid_plural "%(count)d players added to the roster."
+msgstr[0] "%(count)d speler aan de selectie toegevoegd."
+msgstr[1] "%(count)d spelers aan de selectie toegevoegd."
+
+msgid "Roster updated"
+msgstr "Selectie bijgewerkt"
+
+msgid "Add staff"
+msgstr "Staf toevoegen"
+
+msgid "Could not add staff"
+msgstr "Kon staf niet toevoegen"
+
+msgid "Pick a position first."
+msgstr "Kies eerst een positie."
+
+#, python-format
+msgid "%(count)d staff member added."
+msgid_plural "%(count)d staff members added."
+msgstr[0] "%(count)d staflid toegevoegd."
+msgstr[1] "%(count)d stafleden toegevoegd."
+
+msgid "Staff updated"
+msgstr "Staf bijgewerkt"
+
+msgid "Line-up"
+msgstr "Opstelling"
+
+msgid "No position set"
+msgstr "Geen positie ingesteld"
+
+msgid "Draft"
+msgstr "Concept"
+
+msgid "Not started"
+msgstr "Niet gestart"
+
+msgid "Line-up saved"
+msgstr "Opstelling opgeslagen"
+
+#, python-format
+msgid "%(count)d player(s) selected."
+msgstr "%(count)d speler(s) geselecteerd."
+
+msgid "Picks saved. Nobody has been told yet."
+msgstr "Keuze opgeslagen. Nog niemand is op de hoogte gebracht."
+
+msgid "Couldn't publish"
+msgstr "Kon niet publiceren"
+
+msgid "Pick at least one player first."
+msgstr "Kies eerst minstens één speler."
+
+msgid "Could not schedule"
+msgstr "Kon niet plannen"
+
+msgid "Pick a date and time in the future."
+msgstr "Kies een datum en tijdstip in de toekomst."
+
+msgid "Publish scheduled"
+msgstr "Publicatie gepland"
+
+msgid "The line-up will publish itself automatically at that time."
+msgstr "De opstelling wordt op dat moment automatisch gepubliceerd."
+
+msgid "Schedule cancelled"
+msgstr "Planning geannuleerd"
+
+msgid "Publish it manually whenever you are ready."
+msgstr "Publiceer ze handmatig wanneer je klaar bent."
+
+msgid "Nobody needed to be told."
+msgstr "Niemand moest verwittigd worden."
+
+#, python-format
+msgid "%(count)d player was told."
+msgid_plural "%(count)d players were told."
+msgstr[0] "%(count)d speler werd verwittigd."
+msgstr[1] "%(count)d spelers werden verwittigd."
+
+msgid "Line-up updated"
+msgstr "Opstelling gewijzigd"
+
+msgid "Anyone whose status changed has been notified."
+msgstr "Wie van status veranderde, is verwittigd."
+
+msgid "Line-up published"
+msgstr "Opstelling bekend"
+
+msgid "Selected players have been notified."
+msgstr "De geselecteerde spelers zijn verwittigd."
+
+msgid "Squad"
+msgstr "Kern"
+
+msgid "Player"
+msgstr "Speler"
+
+msgid "Player updated"
+msgstr "Speler bijgewerkt"
+
+#, python-format
+msgid "“%(member)s” has been updated."
+msgstr "“%(member)s” is bijgewerkt."
+
+msgid "Player removed"
+msgstr "Speler verwijderd"
+
+#, python-format
+msgid "“%(member)s” removed from the roster."
+msgstr "“%(member)s” uit de selectie verwijderd."
+
+msgid "Couldn't remove"
+msgstr "Kon niet verwijderen"
+
+msgid "You can't remove yourself from the staff."
+msgstr "Je kunt jezelf niet uit de staf verwijderen."
+
+msgid "Staff removed"
+msgstr "Staflid verwijderd"
+
+#, python-format
+msgid "“%(member)s” removed from staff."
+msgstr "“%(member)s” uit de staf verwijderd."
+
+msgid "Events"
+msgstr "Events"
+
+msgid "Show the official player picture on the club's public website"
+msgstr "Toon de officiële spelersfoto op de publieke website van de club"
+
+msgid "This number is already taken in this team's number pool this season."
+msgstr "Dit nummer is dit seizoen al vergeven in de nummerpool van dit team."
+
+msgid "Another player on this team already has this jersey number this season."
+msgstr "Een andere speler van dit team heeft dit seizoen al dit rugnummer."
+
+msgid "Shop closed"
+msgstr "Shop gesloten"
+
+msgid "The shop isn't taking orders right now."
+msgstr "De shop neemt momenteel geen bestellingen aan."
+
+msgid "member"
+msgstr "lid"
+
+msgid "endpoint"
+msgstr "endpoint"
+
+msgid "p256dh key"
+msgstr "p256dh-sleutel"
+
+msgid "auth key"
+msgstr "auth-sleutel"
+
+msgid "user agent"
+msgstr "user agent"
+
+msgid "push subscription"
+msgstr "pushabonnement"
+
+msgid "push subscriptions"
+msgstr "pushabonnementen"
+
+msgid "user"
+msgstr "gebruiker"
+
+msgid "token hash"
+msgstr "tokenhash"
+
+msgid "calendar feed token"
+msgstr "token voor agendafeed"
+
+msgid "calendar feed tokens"
+msgstr "tokens voor agendafeed"
+
+#, python-format
+msgid "%(club)s — RosterChief"
+msgstr "%(club)s — RosterChief"
+
+#, python-format
+msgid "%(title)s — %(name)s"
+msgstr "%(title)s — %(name)s"
+
+#, python-format
+msgid "RSVP: %(status)s"
+msgstr "Antwoord: %(status)s"
+
+#, python-format
+msgid "Starts: %(time)s"
+msgstr "Start: %(time)s"
+
+msgid "Game"
+msgstr "Wedstrijd"
+
+msgid "Games"
+msgstr "Wedstrijden"
+
+msgid "Tournament"
+msgstr "Toernooi"
+
+msgid "Tournaments"
+msgstr "Toernooien"
+
+msgid "Practice"
+msgstr "Training"
+
+msgid "Practices"
+msgstr "Trainingen"
+
+msgid "Meeting"
+msgstr "Vergadering"
+
+msgid "Meetings"
+msgstr "Vergaderingen"
+
+msgid "Social"
+msgstr "Sociaal"
+
+msgid "Other"
+msgstr "Overige"
+
+msgid "You"
+msgstr "Jij"
+
+msgid "Not selected"
+msgstr "Niet geselecteerd"
+
+msgid "Excused"
+msgstr "Verontschuldigd"
+
+msgid "Reply"
+msgstr "Antwoord"
+
+msgid "Confirmed"
+msgstr "Bevestigd"
+
+msgid "Declined"
+msgstr "Geweigerd"
+
+msgid "Reply needed"
+msgstr "Antwoord nodig"
+
+msgid "Referee"
+msgstr "Scheidsrechter"
+
+msgid "Official"
+msgstr "Official"
+
+#, python-format
+msgid "%(role)s · %(opponent)s"
+msgstr "%(role)s · %(opponent)s"
+
+msgid "Home"
+msgstr "Home"
+
+msgid "Away"
+msgstr "Uit"
+
+msgid "Blocked"
+msgstr "Geblokkeerd"
+
+msgid "Home game"
+msgstr "Thuiswedstrijd"
+
+msgid "Away game"
+msgstr "Uitwedstrijd"
+
+#, python-format
+msgid "vs %(opponent)s"
+msgstr "vs %(opponent)s"
+
+#, python-format
+msgid "Away · %(opponent)s"
+msgstr "Uit · %(opponent)s"
+
+#, python-format
+msgid "%(home)s vs %(away)s"
+msgstr "%(home)s vs %(away)s"
+
+msgid "your team"
+msgstr "je team"
+
+msgid "Unknown"
+msgstr "Onbekend"
+
+msgid "Us"
+msgstr "Wij"
+
+#, python-format
+msgid "Period %(period)s"
+msgstr "Periode %(period)s"
+
+msgid "Period"
+msgstr "Periode"
+
+#, python-format
+msgid "Start of %(period)s"
+msgstr "Start van %(period)s"
+
+#, python-format
+msgid "End of %(period)s"
+msgstr "Einde van %(period)s"
+
+#, python-format
+msgid "Goal · %(player)s"
+msgstr "Doelpunt · %(player)s"
+
+#, python-format
+msgid "Assists: %(players)s"
+msgstr "Assists: %(players)s"
+
+msgid "Penalty shot"
+msgstr "Strafschot"
+
+msgid "Empty net"
+msgstr "Leeg doel"
+
+msgid "Game winner"
+msgstr "Winnend doelpunt"
+
+#, python-format
+msgid "(%(minutes)s min)"
+msgstr "(%(minutes)s min)"
+
+#, python-format
+msgid "%(player)s in goal"
+msgstr "%(player)s in doel"
+
+#, python-format
+msgid "%(player)s leaves goal"
+msgstr "%(player)s verlaat het doel"
+
+#, python-format
+msgid "%(team)s penalty shot"
+msgstr "Strafworp %(team)s"
+
+#, python-format
+msgid "%(team)s timeout"
+msgstr "Time-out %(team)s"
+
+msgid "Final · OT"
+msgstr "Einde · verlenging"
+
+msgid "Final · SO"
+msgstr "Einde · shootout"
+
+msgid "Final"
+msgstr "Einde"
+
+msgid "Them"
+msgstr "Zij"
+
+msgid "Live"
+msgstr "Live"
+
+msgid "Season dues"
+msgstr "Lidgeld seizoen"
+
+msgid "Unsupported push service endpoint."
+msgstr "Niet-ondersteund endpoint van de pushdienst."
+
+msgid "Invalid p256dh key."
+msgstr "Ongeldige p256dh-sleutel."
+
+msgid "Invalid auth secret."
+msgstr "Ongeldig auth-geheim."
+
+msgid "Person"
+msgstr "Persoon"
+
+msgid "Someone new"
+msgstr "Iemand nieuw"
+
+msgid "Role"
+msgstr "Rol"
+
+msgid "Option"
+msgstr "Optie"
+
+msgid "Team preference"
+msgstr "Teamvoorkeur"
+
+msgid "No preference"
+msgstr "Geen voorkeur"
+
+msgid "The club makes the final choice."
+msgstr "De club maakt de eindkeuze."
+
+msgid "Choose…"
+msgstr "Kies…"
+
+msgid "No number"
+msgstr "Geen nummer"
+
+#, python-format
+msgid "Keep #%(number)s"
+msgstr "Behoud #%(number)s"
+
+msgid "Enter a first name."
+msgstr "Vul een voornaam in."
+
+msgid "Enter a last name."
+msgstr "Vul een achternaam in."
+
+msgid "Calendar"
+msgstr "Agenda"
+
+msgid "News"
+msgstr "Nieuws"
+
+msgid "Me"
+msgstr "Ik"
+
+msgid "Previous month"
+msgstr "Vorige maand"
+
+msgid "Next month"
+msgstr "Volgende maand"
+
+msgid "Nothing scheduled"
+msgstr "Niets gepland"
+
+msgid "Friendly"
+msgstr "Vriendschappelijk"
+
+#, python-format
+msgid "Complete “%(name)s” to sign up"
+msgstr "Vul “%(name)s” in om je in te schrijven"
+
+#, python-format
+msgid "%(open)s of %(counter)s task open"
+msgid_plural "%(open)s of %(counter)s tasks open"
+msgstr[0] "%(open)s van %(counter)s taak open"
+msgstr[1] "%(open)s van %(counter)s taken open"
+
+msgid "Reason -- only you and the coach can see this"
+msgstr "Reden -- alleen jij en de coach kunnen dit zien"
+
+msgid "e.g. sick, family event..."
+msgstr "bv. ziek, familie-evenement..."
+
+msgid "Cancel"
+msgstr "Annuleren"
+
+msgid "Send"
+msgstr "Verstuur"
+
+#, python-format
+msgid "Season dues &mdash; %(name)s"
+msgstr "Lidgeld seizoen &mdash; %(name)s"
+
+#, python-format
+msgid "Due %(due)s"
+msgstr "Te betalen voor %(due)s"
+
+#, python-format
+msgid "Save &euro;%(amount)s if paid by %(date)s"
+msgstr "Bespaar &euro;%(amount)s bij betaling voor %(date)s"
+
+msgid "When"
+msgstr "Wanneer"
+
+msgid "Meet"
+msgstr "Verzamelen"
+
+msgid "Where"
+msgstr "Waar"
+
+msgid "Open in Maps"
+msgstr "Open in Kaarten"
+
+msgid "Replies are closed for this event"
+msgstr "Antwoorden zijn gesloten voor dit evenement"
+
+msgid "Your answers"
+msgstr "Jouw antwoorden"
+
+msgid "Deadline passed"
+msgstr "Deadline verstreken"
+
+msgid "Drop out"
+msgstr "Afmelden"
+
+msgid "Can't make it after all"
+msgstr "Toch niet beschikbaar"
+
+msgid "Let the coach know why -- they'll be notified right away"
+msgstr "Laat de coach weten waarom -- die wordt meteen verwittigd"
+
+msgid "e.g. sick, injured, running late..."
+msgstr "bv. ziek, geblesseerd, komt te laat..."
+
+msgid "Add a reason (optional) -- only you and the coach can see this"
+msgstr ""
+"Voeg een reden toe (optioneel) -- alleen jij en de coach kunnen dit zien"
+
+msgid "Confirm"
+msgstr "Bevestigen"
+
+msgid "Squad response"
+msgstr "Reacties van de selectie"
+
+#, python-format
+msgid "%(responded)s of %(total)s"
+msgstr "%(responded)s van %(total)s"
+
+msgid "in"
+msgstr "in"
+
+msgid "out"
+msgstr "uit"
+
+msgid "no reply"
+msgstr "geen antwoord"
+
+msgid "Can't sign up yet"
+msgstr "Nog niet mogelijk om je in te schrijven"
+
+msgid "Can't reply yet"
+msgstr "Nog niet mogelijk om te antwoorden"
+
+msgid "Still needed:"
+msgstr "Nog nodig:"
+
+msgid "Refereeing"
+msgstr "Scheidsrechter"
+
+msgid "I'll ref"
+msgstr "Ik fluit"
+
+msgid "Officiating"
+msgstr "Official"
+
+msgid "I'll do it"
+msgstr "Ik doe het"
+
+msgid "No one you manage is invited to this event."
+msgstr "Niemand die je beheert is voor dit event uitgenodigd."
+
+msgid "Back"
+msgstr "Terug"
+
+msgid "Event details"
+msgstr "Eventdetails"
+
+msgid "Close"
+msgstr "Sluiten"
+
+msgid "Loading"
+msgstr "Laden"
+
+msgid "Couldn't load"
+msgstr "Kon niet laden"
+
+msgid "Something went wrong. Check your connection and try again."
+msgstr "Er ging iets mis. Controleer je verbinding en probeer opnieuw."
+
+msgid "Try again"
+msgstr "Probeer opnieuw"
+
+msgid "Done"
+msgstr "Klaar"
+
+msgid "Can't"
+msgstr "Kan niet"
+
+msgid "Tasks"
+msgstr "Taken"
+
+#, python-format
+msgid "%(taken)s of %(needed)s taken"
+msgstr "%(taken)s van %(needed)s ingenomen"
+
+msgid "Covered by"
+msgstr "Ingevuld door"
+
+msgid "Give back"
+msgstr "Teruggeven"
+
+msgid "Full"
+msgstr "Vol"
+
+msgid "Claim"
+msgstr "Opnemen"
+
+msgid "Following"
+msgstr "Volgend"
+
+msgid "Team"
+msgstr "Team"
+
+msgid "vs"
+msgstr "vs"
+
+#, python-format
+msgid "Submitted %(date)s"
+msgstr "Ingediend op %(date)s"
+
+#, python-format
+msgid "Closes %(date)s"
+msgstr "Sluit op %(date)s"
+
+#, python-format
+msgid "Closed %(date)s"
+msgstr "Gesloten op %(date)s"
+
+msgid "Complete"
+msgstr "Invullen"
+
+msgid "Closed"
+msgstr "Gesloten"
+
+msgid "Following this game"
+msgstr "Je volgt deze wedstrijd"
+
+msgid "Follow this game"
+msgstr "Volg deze wedstrijd"
+
+#, python-format
+msgid "Following via %(team)s. To stop, unfollow the team in your profile."
+msgstr ""
+"Je volgt via %(team)s. Om te stoppen, ontvolg je het team in je profiel."
+
+msgid "Live score pushes for this game."
+msgstr "Live scoremeldingen voor deze wedstrijd."
+
+msgid "Get live score pushes for this game."
+msgstr "Ontvang live scoremeldingen voor deze wedstrijd."
+
+msgid "Follow"
+msgstr "Volgen"
+
+#, python-format
+msgid "P%(label)s"
+msgstr "P%(label)s"
+
+msgid "Waiting for the first events."
+msgstr "Wachten op de eerste events."
+
+#, python-format
+msgid "%(time)s face-off"
+msgstr "Aftrap om %(time)s"
+
+#, python-format
+msgid "Meet %(time)s"
+msgstr "Verzamelen om %(time)s"
+
+msgid "Going"
+msgstr "Erbij"
+
+msgid "Can't make it?"
+msgstr "Kan niet komen?"
+
+msgid "Your tasks"
+msgstr "Je taken"
+
+#, python-format
+msgid "%(title)s &middot; someone in your family"
+msgstr "%(title)s &middot; iemand van je gezin"
+
+msgid "Club news"
+msgstr "Clubnieuws"
+
+msgid "Loading more news…"
+msgstr "Meer nieuws laden…"
+
+msgid "No notifications"
+msgstr "Geen meldingen"
+
+msgid "You're all caught up."
+msgstr "Je bent helemaal bij."
+
+#, python-format
+msgid "%(ago)s ago"
+msgstr "%(ago)s geleden"
+
+msgid "Read"
+msgstr "Gelezen"
+
+msgid "Unread"
+msgstr "Ongelezen"
+
+msgid "Loading more…"
+msgstr "Meer laden…"
+
+msgid "Registration"
+msgstr "Inschrijving"
+
+msgid "Balance"
+msgstr "Saldo"
+
+msgid "Discount"
+msgstr "Korting"
+
+msgid "To pay"
+msgstr "Te betalen"
+
+#, python-format
+msgid "Due %(date)s"
+msgstr "Te betalen voor %(date)s"
+
+#, python-format
+msgid "Pay &euro; %(total)s by %(date)s and save &euro; %(amount)s"
+msgstr "Betaal &euro; %(total)s voor %(date)s en bespaar &euro; %(amount)s"
+
+msgid "Download invoice"
+msgstr "Factuur downloaden"
+
+msgid "Edit registration"
+msgstr "Inschrijving bewerken"
+
+msgid "Add a registration"
+msgstr "Inschrijving toevoegen"
+
+msgid "Save"
+msgstr "Opslaan"
+
+msgid "New"
+msgstr "Nieuw"
+
+msgid "Edit"
+msgstr "Bewerken"
+
+msgid "Remove this registration"
+msgstr "Deze inschrijving verwijderen"
+
+msgid "Remove"
+msgstr "Verwijderen"
+
+msgid "No registrations yet."
+msgstr "Nog geen inschrijvingen."
+
+msgid "Added to your cart"
+msgstr "Toegevoegd aan je winkelmandje"
+
+msgid "View cart"
+msgstr "Winkelmandje bekijken"
+
+msgid "Some prices changed since you added them."
+msgstr "Sommige prijzen zijn gewijzigd sinds je ze toevoegde."
+
+msgid "Some items can't be ordered any more. Remove them to continue."
+msgstr ""
+"Sommige artikelen kunnen niet meer besteld worden. Verwijder ze om door te "
+"gaan."
+
+msgid "Decrease quantity"
+msgstr "Aantal verminderen"
+
+msgid "Increase quantity"
+msgstr "Aantal verhogen"
+
+msgid "Discount code"
+msgstr "Kortingscode"
+
+msgid "Code"
+msgstr "Code"
+
+msgid "Apply"
+msgstr "Toepassen"
+
+msgid "Subtotal"
+msgstr "Subtotaal"
+
+msgid "Total"
+msgstr "Totaal"
+
+msgid "Place order"
+msgstr "Bestelling plaatsen"
+
+msgid "You pay at the club when you pick up your order."
+msgstr "Je betaalt bij de club wanneer je je bestelling afhaalt."
+
+msgid "Your cart is empty"
+msgstr "Je winkelmandje is leeg"
+
+msgid "Add something from the shop."
+msgstr "Voeg iets toe uit de shop."
+
+msgid "Shop"
+msgstr "Shop"
+
+msgid "Too many attempts, try again later"
+msgstr "Te veel pogingen, probeer het later opnieuw"
+
+msgid "You're offline. Check your connection."
+msgstr "Je bent offline. Controleer je verbinding."
+
+msgid "Couldn't load. Please try again."
+msgstr "Kon niet laden. Probeer opnieuw."
+
+#, python-format
+msgid "Season %(name)s"
+msgstr "Seizoen %(name)s"
+
+msgid "Notifications"
+msgstr "Meldingen"
+
+msgid "Member"
+msgstr "Lid"
+
+msgid "Manager"
+msgstr "Beheerder"
+
+msgid "Report a bug"
+msgstr "Een bug melden"
+
+msgid "No account to file from"
+msgstr "Geen account om mee te melden"
+
+msgid ""
+"Once you're linked to a member record, you'll be able to report bugs here."
+msgstr "Zodra je aan een ledenrecord gekoppeld bent, kun je hier bugs melden."
+
+msgid "New report"
+msgstr "Nieuwe melding"
+
+msgid "Submit"
+msgstr "Verstuur"
+
+msgid "Your reports"
+msgstr "Je meldingen"
+
+#, python-format
+msgid "Fixed in %(version)s"
+msgstr "Opgelost in %(version)s"
+
+#, python-format
+msgid "Fixed on %(date)s"
+msgstr "Opgelost op %(date)s"
+
+msgid "Notes from the platform"
+msgstr "Opmerkingen van het platform"
+
+msgid "No bugs reported yet."
+msgstr "Nog geen bugs gemeld."
+
+msgid "Filter"
+msgstr "Filter"
+
+msgid "Show on calendar"
+msgstr "Toon in agenda"
+
+msgid "Requests"
+msgstr "Aanvragen"
+
+msgid "Referee requests"
+msgstr "Aanvragen scheidsrechter"
+
+msgid "Official requests"
+msgstr "Aanvragen official"
+
+msgid "List"
+msgstr "Lijst"
+
+msgid "Month"
+msgstr "Maand"
+
+msgid "No one to show yet"
+msgstr "Nog niemand om te tonen"
+
+msgid ""
+"Once you're linked to a member record, their schedule will show up here."
+msgstr ""
+"Zodra je aan een ledenrecord gekoppeld bent, verschijnt hier hun agenda."
+
+msgid "Show earlier events"
+msgstr "Toon eerdere events"
+
+msgid "No games scheduled."
+msgstr "Geen wedstrijden gepland."
+
+msgid "No practices scheduled."
+msgstr "Geen trainingen gepland."
+
+msgid "Nothing on the calendar right now."
+msgstr "Momenteel niets in de agenda."
+
+msgid "This week"
+msgstr "Deze week"
+
+msgid "Next week"
+msgstr "Volgende week"
+
+msgid "Calendar sync"
+msgstr "Agendasynchronisatie"
+
+msgid ""
+"Subscribe this link in your phone or computer's calendar app to see everyone "
+"you manage's schedule alongside your own. It includes every event they're "
+"invited to, not just the ones they've replied to."
+msgstr ""
+"Abonneer je met deze link in de agenda-app van je telefoon of computer om de "
+"agenda van iedereen die je beheert naast die van jezelf te zien. Ze bevat "
+"elk event waarvoor ze uitgenodigd zijn, niet alleen die waarop ze geantwoord "
+"hebben."
+
+msgid "Add to calendar"
+msgstr "Toevoegen aan agenda"
+
+msgid ""
+"Opens directly in Apple/macOS Calendar. On Android or a desktop calendar "
+"app, copy the link below and add it as a new calendar by URL."
+msgstr ""
+"Opent rechtstreeks in Apple/macOS Agenda. Kopieer op Android of in een "
+"desktop-agenda-app de link hieronder en voeg hem toe als nieuwe agenda via "
+"URL."
+
+msgid "Copy"
+msgstr "Kopiëren"
+
+msgid "Copied"
+msgstr "Gekopieerd"
+
+msgid ""
+"Add it to your calendar now: for your security this link is only shown this "
+"once. If you lose it, you can get a new one here at any time."
+msgstr ""
+"Voeg hem nu toe aan je agenda: voor je veiligheid wordt deze link maar één "
+"keer getoond. Als je hem kwijtraakt, kun je hier op elk moment een nieuwe "
+"krijgen."
+
+msgid ""
+"Updates can take a few hours to appear in your calendar app -- it checks in "
+"on its own schedule, RosterChief can't push to it directly."
+msgstr ""
+"Updates kunnen enkele uren duren voor ze in je agenda-app verschijnen -- die "
+"controleert volgens haar eigen schema, RosterChief kan er niet rechtstreeks "
+"naartoe pushen."
+
+msgid "Your calendar link is set up"
+msgstr "Je agendalink is ingesteld"
+
+msgid ""
+"For your security the link is only shown once, right after it's created. "
+"Calendars you already subscribed with it keep working."
+msgstr ""
+"Voor je veiligheid wordt de link maar één keer getoond, meteen nadat hij is "
+"aangemaakt. Agenda's waarmee je al geabonneerd was, blijven werken."
+
+msgid ""
+"Need the link again, or shared it by accident? Get a new one -- the old link "
+"stops working immediately and you'll need to re-subscribe with the new one."
+msgstr ""
+"Link opnieuw nodig of per ongeluk gedeeld? Vraag een nieuwe aan -- de oude "
+"link werkt meteen niet meer en je moet je opnieuw abonneren met de nieuwe."
+
+msgid "Get a new calendar link"
+msgstr "Nieuwe agendalink aanvragen"
+
+msgid "Create my calendar link"
+msgstr "Mijn agendalink aanmaken"
+
+msgid ""
+"The link is shown once, right after it's created -- have your calendar app "
+"ready."
+msgstr ""
+"De link wordt maar één keer getoond, meteen nadat hij is aangemaakt -- zorg "
+"dat je agenda-app klaarstaat."
+
+#, python-format
+msgid "Checked in %(done)s of %(total)s"
+msgstr "%(done)s van %(total)s ingecheckt"
+
+msgid "Checked in"
+msgstr "Ingecheckt"
+
+msgid "This event is cancelled."
+msgstr "Dit evenement is geannuleerd."
+
+msgid ""
+"Remind players who haven't answered? They get a notification asking them to "
+"reply."
+msgstr ""
+"Spelers herinneren die nog niet geantwoord hebben? Ze krijgen een melding "
+"met de vraag te antwoorden."
+
+#, python-format
+msgid "Remind %(counter)s player"
+msgid_plural "Remind %(counter)s players"
+msgstr[0] "Herinner %(counter)s speler"
+msgstr[1] "Herinner %(counter)s spelers"
+
+msgid "They're still in the published line-up. Swap them there."
+msgstr ""
+"Deze speler staat nog in de gepubliceerde opstelling. Vervang hem of haar "
+"daar."
+
+msgid "Open line-up"
+msgstr "Open opstelling"
+
+#, python-format
+msgid "Showed up: %(name)s"
+msgstr "Aanwezig: %(name)s"
+
+#, python-format
+msgid "Didn't show up: %(name)s"
+msgstr "Niet aanwezig: %(name)s"
+
+msgid "Showed up"
+msgstr "Kwam opdagen"
+
+msgid "Didn't show up"
+msgstr "Niet komen opdagen"
+
+msgid "Nobody here."
+msgstr "Hier is niemand."
+
+msgid "Answer"
+msgstr "Antwoord"
+
+msgid "Reset answer"
+msgstr "Antwoord wissen"
+
+msgid "The answer will be cleared; the player counts as not replied."
+msgstr "Het antwoord wordt gewist; de speler telt als niet geantwoord."
+
+msgid "They're in the published line-up. Only Out can change their answer."
+msgstr ""
+"Deze speler staat in de gepubliceerde opstelling. Alleen Uit kan het "
+"antwoord wijzigen."
+
+msgid "They stay in the published line-up until you swap them there."
+msgstr "Ze blijven in de gepubliceerde opstelling tot je ze daar vervangt."
+
+msgid "Private coach note"
+msgstr "Privénotitie van de coach"
+
+msgid "Only team managers can see this."
+msgstr "Alleen teambeheerders zien dit."
+
+msgid "Tell the player"
+msgstr "Speler verwittigen"
+
+msgid ""
+"The player isn't notified unless you switch this on. They never see the "
+"private note."
+msgstr ""
+"De speler wordt niet verwittigd tenzij je dit aanzet. De privénotitie ziet "
+"hij of zij nooit."
+
+msgid "Set by coach"
+msgstr "Door coach ingesteld"
+
+msgid "Private note:"
+msgstr "Privénotitie:"
+
+msgid "Cancelled"
+msgstr "Geannuleerd"
+
+msgid "Result"
+msgstr "Resultaat"
+
+msgid "Ends"
+msgstr "Einde"
+
+msgid "Replies close"
+msgstr "Antwoorden sluiten"
+
+msgid "Competition"
+msgstr "Competitie"
+
+msgid "Repeats"
+msgstr "Herhaalt"
+
+msgid "edited on its own"
+msgstr "apart aangepast"
+
+#, python-format
+msgid "Part of the recurring series “%(series)s”."
+msgstr "Onderdeel van de terugkerende reeks “%(series)s”."
+
+msgid "Edit the repeat pattern"
+msgstr "Herhalingspatroon wijzigen"
+
+msgid "Stop following the series"
+msgstr "De reeks niet meer volgen"
+
+msgid "Delete"
+msgstr "Verwijderen"
+
+msgid "Nobody has claimed this yet."
+msgstr "Niemand heeft dit al op zich genomen."
+
+msgid "Delete this task? This cannot be undone."
+msgstr "Deze taak verwijderen? Dit kan niet ongedaan worden gemaakt."
+
+msgid "Needed"
+msgstr "Nodig"
+
+msgid "No tasks yet."
+msgstr "Nog geen taken."
+
+msgid "Stop following the series?"
+msgstr "De reeks niet meer volgen?"
+
+msgid "Changes to the series won't touch this event any more."
+msgstr "Wijzigingen aan de reeks raken dit event niet meer."
+
+msgid "Stop following"
+msgstr "Niet meer volgen"
+
+msgid "Tell the players"
+msgstr "Spelers verwittigen"
+
+msgid "They get a notification that the event was cancelled."
+msgstr "Ze krijgen een melding dat het event geannuleerd is."
+
+msgid "Cancel it but keep the record"
+msgstr "Annuleren maar bewaren"
+
+msgid "Remove this event"
+msgstr "Dit event verwijderen uit de reeks"
+
+msgid "Delete the whole series"
+msgstr "De hele reeks verwijderen"
+
+msgid ""
+"Deleting the series removes every event in it, past ones and their "
+"attendance too. To keep the history, change the end date of the series "
+"instead."
+msgstr ""
+"De reeks verwijderen wist elk event erin, ook de voorbije en hun "
+"aanwezigheden. Pas liever de einddatum van de reeks aan om de geschiedenis "
+"te bewaren."
+
+msgid "Delete this event"
+msgstr "Dit event verwijderen"
+
+msgid "Delete the whole series?"
+msgstr "De hele reeks verwijderen?"
+
+msgid "This can't be undone."
+msgstr "Dit kan niet ongedaan gemaakt worden."
+
+msgid "Delete the series"
+msgstr "De reeks verwijderen"
+
+msgid "Details"
+msgstr "Details"
+
+msgid "Saving…"
+msgstr "Opslaan…"
+
+#, python-format
+msgid "%(counter)s selected"
+msgid_plural "%(counter)s selected"
+msgstr[0] "%(counter)s geselecteerd"
+msgstr[1] "%(counter)s geselecteerd"
+
+#, python-format
+msgid "Publishes %(time)s"
+msgstr "Publiceert %(time)s"
+
+msgid "Cancel schedule"
+msgstr "Planning annuleren"
+
+#, python-format
+msgid "%(counter)s will hear they're in"
+msgid_plural "%(counter)s will hear they're in"
+msgstr[0] "%(counter)s hoort dat hij of zij erbij is"
+msgstr[1] "%(counter)s horen dat ze erbij zijn"
+
+#, python-format
+msgid "%(counter)s will hear they're not"
+msgid_plural "%(counter)s will hear they're not"
+msgstr[0] "%(counter)s hoort dat hij of zij er niet bij is"
+msgstr[1] "%(counter)s horen dat ze er niet bij zijn"
+
+msgid "Nobody needs to be told about a change."
+msgstr "Niemand moet op de hoogte gebracht worden van een wijziging."
+
+msgid "Publish changes"
+msgstr "Wijzigingen publiceren"
+
+msgid "Publish"
+msgstr "Publiceren"
+
+msgid "Pick at least one player to publish."
+msgstr "Kies minstens één speler om te publiceren."
+
+msgid "Tasks & officiating"
+msgstr "Taken & officials"
+
+msgid "open"
+msgstr "open"
+
+msgid "Referees"
+msgstr "Scheidsrechters"
+
+msgid "Officials"
+msgstr "Officials"
+
+msgid "Selected"
+msgstr "Geselecteerd"
+
+msgid "No available players to pick from."
+msgstr "Geen beschikbare spelers om uit te kiezen."
+
+msgid "Unavailable"
+msgstr "Niet beschikbaar"
+
+msgid "Publish line-up"
+msgstr "Opstelling publiceren"
+
+msgid "When to publish"
+msgstr "Wanneer publiceren"
+
+msgid "Publish now"
+msgstr "Nu publiceren"
+
+msgid "Players are told right away."
+msgstr "Spelers worden meteen verwittigd."
+
+msgid "Publish later"
+msgstr "Later publiceren"
+
+msgid "Pick a date and time."
+msgstr "Kies een datum en tijdstip."
+
+msgid "Publish at"
+msgstr "Publiceren om"
+
+msgid "The line-up is published and the players are told at that time."
+msgstr ""
+"De opstelling wordt op dat moment gepubliceerd en de spelers worden "
+"verwittigd."
+
+#, python-format
+msgid "%(selected)s will hear they're in · %(dropped)s will hear they're not"
+msgstr ""
+"%(selected)s horen dat ze erbij zijn · %(dropped)s horen dat ze er niet bij "
+"zijn"
+
+msgid "Schedule"
+msgstr "Plannen"
+
+#, python-format
+msgid "%(rate)s%% turnout"
+msgstr "%(rate)s%% opkomst"
+
+msgid "Name"
+msgstr "Naam"
+
+msgid "Address"
+msgstr "Adres"
+
+msgid "City"
+msgstr "Stad"
+
+msgid "Zip code"
+msgstr "Postcode"
+
+msgid "Country"
+msgstr "Land"
+
+msgid "+ New"
+msgstr "+ Nieuw"
+
+msgid "LIVE"
+msgstr "LIVE"
+
+msgid "Players"
+msgstr "Spelers"
+
+msgid "Captain"
+msgstr "Aanvoerder"
+
+msgid "Alternate captain"
+msgstr "Assistent-aanvoerder"
+
+msgid "No position"
+msgstr "Geen positie"
+
+msgid "Sign-up waiting for approval"
+msgstr "Inschrijving wacht op goedkeuring"
+
+msgid "No one on the roster for this season yet."
+msgstr "Nog niemand in de selectie voor dit seizoen."
+
+msgid "Staff"
+msgstr "Staf"
+
+msgid "(you)"
+msgstr "(jij)"
+
+#, python-format
+msgid "Remove %(name)s from staff"
+msgstr "%(name)s uit de staf verwijderen"
+
+msgid "Remove from staff?"
+msgstr "Uit de staf verwijderen?"
+
+#, python-format
+msgid "%(name)s will no longer be on this team's staff."
+msgstr "%(name)s maakt niet langer deel uit van de staf van dit team."
+
+msgid "No staff assigned for this season yet."
+msgstr "Nog geen staf toegewezen voor dit seizoen."
+
+msgid "Edit player"
+msgstr "Speler wijzigen"
+
+msgid "Player details"
+msgstr "Spelerdetails"
+
+#, python-format
+msgid "Add to %(team)s"
+msgstr "Toevoegen aan %(team)s"
+
+#, python-format
+msgid "%(counter)s on squad"
+msgid_plural "%(counter)s on squad"
+msgstr[0] "%(counter)s in de kern"
+msgstr[1] "%(counter)s in de kern"
+
+msgid "Search by name"
+msgstr "Zoeken op naam"
+
+msgid "Searching…"
+msgstr "Zoeken…"
+
+msgid "Show"
+msgstr "Toon"
+
+msgid ""
+"Matches this team's age group, was on this team's roster last season, or is "
+"on a team that feeds into this one this season."
+msgstr ""
+"Komt overeen met de leeftijdsgroep van dit team, zat vorig seizoen in de "
+"selectie van dit team, of zit dit seizoen in een team dat doorstroomt naar "
+"dit team."
+
+msgid "Not on any team's roster yet this season."
+msgstr "Dit seizoen nog in geen enkele teamselectie."
+
+#, python-format
+msgid "Add %(name)s"
+msgstr "%(name)s toevoegen"
+
+msgid "No one matches."
+msgstr "Niemand komt overeen."
+
+msgid "Select players to add"
+msgstr "Selecteer spelers om toe te voegen"
+
+msgid "Add"
+msgstr "Toevoegen"
+
+#, python-format
+msgid "Add staff to %(team)s"
+msgstr "Staf toevoegen aan %(team)s"
+
+msgid "Position"
+msgstr "Positie"
+
+msgid "Choose a position"
+msgstr "Kies een positie"
+
+msgid "No one is eligible to be added."
+msgstr "Niemand komt in aanmerking om toegevoegd te worden."
+
+msgid "Select people to add"
+msgstr "Selecteer personen om toe te voegen"
+
+#, python-format
+msgid "Saved offline. Will sync (%%(count)d)"
+msgstr "Offline opgeslagen. Wordt gesynchroniseerd (%%(count)d)"
+
+#, python-format
+msgid "Synced %%(count)d offline changes"
+msgstr "%%(count)d offline wijzigingen gesynchroniseerd"
+
+msgid "Retry"
+msgstr "Opnieuw proberen"
+
+msgid "Discard"
+msgstr "Weggooien"
+
+msgid "A change saved offline could not be synced."
+msgstr "Een offline opgeslagen wijziging kon niet worden gesynchroniseerd."
+
+msgid ""
+"A change saved offline was refused by the server (the event may have "
+"changed)."
+msgstr ""
+"Een offline opgeslagen wijziging werd geweigerd door de server (het event is "
+"mogelijk gewijzigd)."
+
+msgid "Your session has ended. Sign in again, then retry."
+msgstr "Je sessie is beëindigd. Meld je opnieuw aan en probeer dan opnieuw."
+
+msgid ""
+"You're offline. This needs a connection, try again when you're back online."
+msgstr ""
+"Je bent offline. Hiervoor is een verbinding nodig, probeer opnieuw als je "
+"weer online bent."
+
+msgid "You're offline. Your change was not saved."
+msgstr "Je bent offline. Je wijziging werd niet opgeslagen."
+
+msgid "Which checklist?"
+msgstr "Welke checklist?"
+
+msgid "Unknown evaluator"
+msgstr "Onbekende beoordelaar"
+
+msgid "No answer"
+msgstr "Geen antwoord"
+
+msgid "No checklists"
+msgstr "Geen checklists"
+
+msgid "The club hasn't set up an evaluation checklist yet."
+msgstr "De club heeft nog geen evaluatiechecklist ingesteld."
+
+msgid ""
+"This checklist has a question this version of the app can't show. Fill it in "
+"from the desktop site instead."
+msgstr ""
+"Deze checklist bevat een vraag die deze versie van de app niet kan tonen. "
+"Vul ze in op de desktopsite."
+
+msgid "Choose another checklist"
+msgstr "Kies een andere checklist"
+
+msgid "(required)"
+msgstr "(verplicht)"
+
+msgid "Submit evaluation"
+msgstr "Evaluatie verzenden"
+
+msgid "No evaluations yet."
+msgstr "Nog geen evaluaties."
+
+msgid "Create"
+msgstr "Aanmaken"
+
+msgid "This repeats"
+msgstr "Dit herhaalt zich"
+
+msgid "Title"
+msgstr "Titel"
+
+msgid "Date &amp; time"
+msgstr "Datum &amp; uur"
+
+msgid "Gathering time"
+msgstr "Verzameltijd"
+
+msgid "Leave blank if there's no separate meet-up time."
+msgstr "Laat leeg als er geen apart verzamelmoment is."
+
+msgid "First occurrence"
+msgstr "Eerste keer"
+
+msgid "Gathering (minutes before each occurrence)"
+msgstr "Verzamelen (minuten voor elke keer)"
+
+msgid "Competition ID"
+msgstr "Competitie-ID"
+
+msgid "This game's id in the competition's own data source, if it has one."
+msgstr ""
+"De id van deze wedstrijd in de eigen gegevensbron van de competitie, als die "
+"er is."
+
+msgid "A friendly game doesn't count towards the standings."
+msgstr "Een vriendschappelijke wedstrijd telt niet mee voor het klassement."
+
+msgid "Score for"
+msgstr "Score voor"
+
+msgid "Score against"
+msgstr "Score tegen"
+
+msgid "Live now"
+msgstr "Nu live"
+
+msgid "Referees needed"
+msgstr "Scheidsrechters nodig"
+
+msgid "Officials needed"
+msgstr "Officials nodig"
+
+msgid "Frequency"
+msgstr "Frequentie"
+
+msgid "Every"
+msgstr "Elke"
+
+msgid "On (weekly only)"
+msgstr "Op (alleen wekelijks)"
+
+msgid "Repeats until"
+msgstr "Herhaalt tot"
+
+msgid "Leave blank to keep repeating with no end date."
+msgstr "Laat leeg om te blijven herhalen zonder einddatum."
+
+msgid "Length of each occurrence"
+msgstr "Duur van elke keer"
+
+msgid "Hours"
+msgstr "Uren"
+
+msgid "Minutes"
+msgstr "Minuten"
+
+msgid "Who"
+msgstr "Wie"
+
+#, python-format
+msgid ""
+"Automatically for %(team)s. Need more than one team? Create it from the "
+"management panel instead."
+msgstr ""
+"Automatisch voor %(team)s. Meer dan één team nodig? Maak het dan aan via het "
+"beheerpaneel."
+
+msgid "Exclude from the roster"
+msgstr "Uitsluiten van de selectie"
+
+msgid "Add someone not on the roster"
+msgstr "Iemand toevoegen die niet in de selectie zit"
+
+msgid "Answers close"
+msgstr "Antwoorden sluiten"
+
+msgid "Leave blank to keep answers open until the event starts."
+msgstr "Laat leeg om antwoorden open te houden tot het event start."
+
+msgid "Answers close (minutes before each occurrence)"
+msgstr "Antwoorden sluiten (minuten voor elke keer)"
+
+msgid "Leave blank to keep answers open until each occurrence starts."
+msgstr "Laat leeg om antwoorden open te houden tot elke keer start."
+
+msgid ""
+"Changing the pattern only decides future dates. Events that already exist "
+"keep theirs."
+msgstr ""
+"Het patroon wijzigen bepaalt enkel toekomstige data. Bestaande events "
+"behouden hun datum."
+
+msgid "Apply this change to…"
+msgstr "Deze wijziging toepassen op…"
+
+msgid "Only this event"
+msgstr "Enkel dit event"
+
+msgid "This and following events"
+msgstr "Dit en volgende events"
+
+msgid "All upcoming events"
+msgstr "Alle komende events"
+
+msgid "Tell the players about this change"
+msgstr "Spelers verwittigen over deze wijziging"
+
+msgid "A series doesn't notify per event."
+msgstr "Een reeks verwittigt niet per event."
+
+msgid "New location"
+msgstr "Nieuwe locatie"
+
+msgid "Add location"
+msgstr "Locatie toevoegen"
+
+msgid "New opponent"
+msgstr "Nieuwe tegenstander"
+
+msgid "Add opponent"
+msgstr "Tegenstander toevoegen"
+
+msgid "Headline"
+msgstr "Titel"
+
+msgid "Body"
+msgstr "Tekst"
+
+msgid "You can use Markdown, for example **bold** and lists."
+msgstr "Je kunt Markdown gebruiken, bijvoorbeeld **vet** en lijsten."
+
+msgid "Photos"
+msgstr "Foto’s"
+
+msgid "Cover"
+msgstr "Omslag"
+
+msgid "Remove photo"
+msgstr "Foto verwijderen"
+
+msgid "Add photos"
+msgstr "Foto’s toevoegen"
+
+#, python-format
+msgid "The first photo is the cover. Up to %(count)s."
+msgstr "De eerste foto is de cover. Maximaal %(count)s."
+
+#, python-format
+msgid "Your post goes to %(team)s's families once an editor has published it."
+msgstr ""
+"Je bericht gaat naar de families van %(team)s zodra een redacteur het heeft "
+"gepubliceerd."
+
+msgid "Send for review"
+msgstr "Verstuur ter nazicht"
+
+msgid "Sending…"
+msgstr "Versturen…"
+
+msgid "Share news"
+msgstr "Nieuws delen"
+
+msgid "Share news with the team's families."
+msgstr "Deel nieuws met de families van het team."
+
+msgid "Posts you submit show up here."
+msgstr "Berichten die je indient verschijnen hier."
+
+msgid "No posts yet"
+msgstr "Nog geen berichten"
+
+msgid "Contact"
+msgstr "Contact"
+
+msgid "Call"
+msgstr "Bellen"
+
+msgid "Emergency call"
+msgstr "Noodnummer bellen"
+
+#, python-format
+msgid "Call %(name)s"
+msgstr "%(name)s bellen"
+
+#, python-format
+msgid "Emergency: %(name)s"
+msgstr "Noodcontact: %(name)s"
+
+msgid "No phone numbers on file."
+msgstr "Geen telefoonnummers bekend."
+
+msgid "Attendance this season"
+msgstr "Aanwezigheid dit seizoen"
+
+msgid "Present"
+msgstr "Aanwezig"
+
+msgid "Absent"
+msgstr "Afwezig"
+
+msgid "No-shows"
+msgstr "Niet komen opdagen"
+
+msgid "Roster details"
+msgstr "Selectiedetails"
+
+msgid "Jersey number"
+msgstr "Rugnummer"
+
+msgid "Remove from the roster"
+msgstr "Uit de selectie verwijderen"
+
+msgid "Remove from the roster?"
+msgstr "Uit de selectie verwijderen?"
+
+#, python-format
+msgid ""
+"%(name)s will be taken off this team's roster for the season. This cannot be "
+"undone."
+msgstr ""
+"%(name)s wordt voor het seizoen uit de selectie van dit team verwijderd. Dit "
+"kan niet ongedaan worden gemaakt."
+
+msgid "Add an event"
+msgstr "Event toevoegen"
+
+msgid "No teams"
+msgstr "Geen teams"
+
+msgid "You don't coach a team this season."
+msgstr "Je coacht dit seizoen geen team."
+
+msgid "Filter by type"
+msgstr "Filter op type"
+
+msgid "No events"
+msgstr "Geen events"
+
+msgid "Nothing is planned for this team."
+msgstr "Voor dit team is niets gepland."
+
+msgid "Add a player"
+msgstr "Speler toevoegen"
+
+msgid "Not staffing a team yet"
+msgstr "Nog geen team in de staf"
+
+msgid "Description"
+msgstr "Beschrijving"
+
+#, python-format
+msgid "%(counter)s player"
+msgid_plural "%(counter)s players"
+msgstr[0] "%(counter)s speler"
+msgstr[1] "%(counter)s spelers"
+
+msgid "Next up"
+msgstr "Volgende"
+
+#, python-format
+msgid "Replies close %(when)s"
+msgstr "Antwoorden sluiten %(when)s"
+
+msgid "Replies closed"
+msgstr "Antwoorden gesloten"
+
+msgid "Check attendance"
+msgstr "Aanwezigheid controleren"
+
+msgid "Nothing planned for this team yet."
+msgstr "Voor dit team is nog niets gepland."
+
+msgid "Needs you"
+msgstr "Wacht op jou"
+
+msgid "Roster"
+msgstr "Selectie"
+
+msgid "Also yours"
+msgstr "Ook van jou"
+
+#, python-format
+msgid "Your own next event &middot; %(date)s"
+msgstr "Je eigen volgende event &middot; %(date)s"
+
+#, python-format
+msgid "Complete &ldquo;%(name)s&rdquo; to sign up"
+msgstr "Vul &ldquo;%(name)s&rdquo; in om je in te schrijven"
+
+msgid "Show upcoming events"
+msgstr "Komende events tonen"
+
+msgid "Multi-registrant discount"
+msgstr "Korting voor meerdere inschrijvers"
+
+#, python-format
+msgid "Pay &euro;%(total)s by %(date)s to save &euro;%(amount)s."
+msgstr "Betaal &euro;%(total)s voor %(date)s en bespaar &euro;%(amount)s."
+
+#, python-format
+msgid "Registration &mdash; %(names)s"
+msgstr "Inschrijving &mdash; %(names)s"
+
+msgid "I can't take this after all"
+msgstr "Ik kan dit toch niet doen"
+
+msgid "I'll take it"
+msgstr "Ik doe het"
+
+msgid "Overview"
+msgstr "Overzicht"
+
+msgid "Personal details"
+msgstr "Persoonlijke gegevens"
+
+msgid "Payments &amp; dues"
+msgstr "Betalingen en bijdragen"
+
+msgid "Forms"
+msgstr "Formulieren"
+
+msgid "Account"
+msgstr "Account"
+
+msgid "Change password"
+msgstr "Wachtwoord wijzigen"
+
+msgid "Manage two-factor auth"
+msgstr "Tweestapsverificatie beheren"
+
+msgid "Log out"
+msgstr "Uitloggen"
+
+#, python-format
+msgid "%(counter)s requirement still open: %(names)s"
+msgid_plural "%(counter)s requirements still open: %(names)s"
+msgstr[0] "%(counter)s vereiste nog open: %(names)s"
+msgstr[1] "%(counter)s vereisten nog open: %(names)s"
+
+msgid "Profile picture"
+msgstr "Profielfoto"
+
+msgid "Change picture"
+msgstr "Foto wijzigen"
+
+msgid "Choose picture"
+msgstr "Foto kiezen"
+
+msgid ""
+"This picture is shown to everyone in the club's apps. The official player "
+"picture is set by the club."
+msgstr ""
+"Deze foto zie je in de apps van de club, net als alle clubleden. De "
+"officiële spelersfoto wordt door de club ingesteld."
+
+msgid "Identity"
+msgstr "Identiteit"
+
+msgid "Emergency"
+msgstr "Noodgeval"
+
+msgid "Emergency contact"
+msgstr "Noodcontact"
+
+#, python-format
+msgid "Filling in for <strong>%(name)s</strong>"
+msgstr "Invullen voor <strong>%(name)s</strong>"
+
+msgid "Fill in for someone else:"
+msgstr "Invullen voor iemand anders:"
+
+msgid "Completed"
+msgstr "Afgerond"
+
+msgid "Pending"
+msgstr "In behandeling"
+
+msgid "Nothing here yet"
+msgstr "Hier staat nog niets"
+
+msgid "Any form sent to you or the people you manage will show up here."
+msgstr ""
+"Elk formulier dat naar jou of de mensen die je beheert wordt gestuurd, "
+"verschijnt hier."
+
+msgid "All Caught Up"
+msgstr "Alles bijgewerkt"
+
+msgid "Nothing needs your attention right now."
+msgstr "Er is momenteel niets dat je aandacht vraagt."
+
+msgid "Open tasks"
+msgstr "Open taken"
+
+#, python-format
+msgid "%(counter)s open"
+msgid_plural "%(counter)s open"
+msgstr[0] "%(counter)s open"
+msgstr[1] "%(counter)s open"
+
+#, python-format
+msgid "+%(counter)s more open task"
+msgid_plural "+%(counter)s more open tasks"
+msgstr[0] "+%(counter)s open taak meer"
+msgstr[1] "+%(counter)s open taken meer"
+
+msgid "Needs your answer"
+msgstr "Wacht op je antwoord"
+
+msgid "Invited"
+msgstr "Uitgenodigd"
+
+#, python-format
+msgid "+%(counter)s more in Calendar"
+msgid_plural "+%(counter)s more in Calendar"
+msgstr[0] "+%(counter)s meer in Agenda"
+msgstr[1] "+%(counter)s meer in Agenda"
+
+msgid "Forms to complete"
+msgstr "In te vullen formulieren"
+
+msgid "All forms"
+msgstr "Alle formulieren"
+
+msgid "All news"
+msgstr "Al het nieuws"
+
+msgid "News photo"
+msgstr "Nieuwsfoto"
+
+msgid "No news yet."
+msgstr "Nog geen nieuws."
+
+msgid "Sponsors"
+msgstr "Sponsors"
+
+msgid ""
+"Once you're linked to a member record, their schedule and updates will show "
+"up here."
+msgstr ""
+"Zodra je aan een ledenrecord gekoppeld bent, verschijnen hier hun agenda en "
+"updates."
+
+msgid ""
+"Get a push notification while a team is playing: goals, penalties, period "
+"ends and the final result. Pick the teams you want to follow."
+msgstr ""
+"Ontvang een pushmelding terwijl een team speelt: doelpunten, strafworpen, "
+"einde van periodes en de eindstand. Kies de teams die je wilt volgen."
+
+msgid "Teams"
+msgstr "Teams"
+
+msgid "This club has no teams yet."
+msgstr "Deze club heeft nog geen teams."
+
+msgid "Individual games"
+msgstr "Individuele wedstrijden"
+
+msgid "Unfollow"
+msgstr "Ontvolgen"
+
+msgid ""
+"Notifications arrive on this device only once you've allowed notifications "
+"for the app."
+msgstr ""
+"Meldingen komen pas op dit toestel aan nadat je meldingen voor de app hebt "
+"toegestaan."
+
+msgid "Once you're linked to a member record, your profile will show up here."
+msgstr ""
+"Zodra je aan een ledenprofiel gekoppeld bent, verschijnt je profiel hier."
+
+#, python-format
+msgid "Member since %(year)s"
+msgstr "Lid sinds %(year)s"
+
+msgid "People I manage"
+msgstr "Personen die ik beheer"
+
+msgid "(me)"
+msgstr "(ik)"
+
+msgid "Teams I coach/manage"
+msgstr "Teams die ik coach of beheer"
+
+msgid "Vouchers"
+msgstr "Tegoedbonnen"
+
+#, python-format
+msgid "Expires %(date)s"
+msgstr "Verloopt op %(date)s"
+
+#, python-format
+msgid "&euro; %(amount)s"
+msgstr "&euro; %(amount)s"
+
+msgid "Register"
+msgstr "Inschrijven"
+
+#, python-format
+msgid "%(counter)s OPEN"
+msgid_plural "%(counter)s OPEN"
+msgstr[0] "%(counter)s OPEN"
+msgstr[1] "%(counter)s OPEN"
+
+msgid "Live game updates"
+msgstr "Live wedstrijdupdates"
+
+msgid "Security"
+msgstr "Beveiliging"
+
+msgid "Switch club"
+msgstr "Wissel van club"
+
+msgid "Language"
+msgstr "Taal"
+
+#, python-format
+msgid "RosterChief &middot; %(club_name)s &middot; v%(version)s"
+msgstr "RosterChief &middot; %(club_name)s &middot; v%(version)s"
+
+#, python-format
+msgid "Posted by %(name)s"
+msgstr "Geplaatst door %(name)s"
+
+msgid "Share"
+msgstr "Delen"
+
+msgid "Newer"
+msgstr "Nieuwer"
+
+msgid "Older"
+msgstr "Ouder"
+
+msgid "Applies to"
+msgstr "Geldt voor"
+
+msgid "Everyone"
+msgstr "Iedereen"
+
+#, python-format
+msgid ""
+"Applies to notifications about %(name)s, such as their events. Anything you "
+"do not change here follows your own switches for this club."
+msgstr ""
+"Geldt voor meldingen over %(name)s, zoals hun events. Wat je hier niet "
+"wijzigt, volgt je eigen schakelaars voor deze club."
+
+msgid "Applies to every notification in this club."
+msgstr "Geldt voor elke melding in deze club."
+
+msgid ""
+"Choose per kind of notification whether it reaches you as a push message "
+"(app and browser) and by email. The inbox in the app always shows everything."
+msgstr ""
+"Kies per soort melding of ze je bereikt als pushbericht (app en browser) en "
+"per e-mail. De inbox in de app toont altijd alles."
+
+msgid "All channels"
+msgstr "Alle kanalen"
+
+msgid "Customised"
+msgstr "Aangepast"
+
+msgid "All push"
+msgstr "Alle push"
+
+msgid "All emails"
+msgstr "Alle e-mails"
+
+msgid ""
+"Switching one of these off stops everything on that channel, whatever the "
+"switches below say."
+msgstr ""
+"Als je er hier een uitschakelt, stopt alles op dat kanaal, wat de "
+"schakelaars hieronder ook zeggen."
+
+msgid "Notification"
+msgstr "Melding"
+
+msgid "Push"
+msgstr "Push"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Set for this person only"
+msgstr "Enkel voor deze persoon ingesteld"
+
+msgid "Set for this club only"
+msgstr "Enkel voor deze club ingesteld"
+
+msgid "Reset to default"
+msgstr "Terug naar standaard"
+
+#, python-format
+msgid "Push: %(name)s"
+msgstr "Push: %(name)s"
+
+#, python-format
+msgid "Email: %(name)s"
+msgstr "E-mail: %(name)s"
+
+msgid "Reset all"
+msgstr "Alles resetten"
+
+msgid "Quiet hours"
+msgstr "Stille uren"
+
+msgid ""
+"During quiet hours push messages wait until the window ends. Important "
+"changes such as a cancelled event, and email, are not held. Live game "
+"updates are skipped instead of delayed."
+msgstr ""
+"Tijdens stille uren wachten pushberichten tot het tijdvak voorbij is. "
+"Belangrijke wijzigingen, zoals een geannuleerd event, en e-mail worden niet "
+"tegengehouden. Live wedstrijdupdates worden overgeslagen in plaats van "
+"uitgesteld."
+
+msgid "Hold push messages during quiet hours"
+msgstr "Pushberichten tegenhouden tijdens stille uren"
+
+msgid "From"
+msgstr "Van"
+
+msgid "Until"
+msgstr "Tot"
+
+msgid "Time zone"
+msgstr "Tijdzone"
+
+msgid ""
+"Quiet hours apply to your account in every club. These switches apply to "
+"this club only."
+msgstr ""
+"Stille uren gelden voor je account in elke club. Deze schakelaars gelden "
+"enkel voor deze club."
+
+msgid "Email preferences"
+msgstr "E-mailvoorkeuren"
+
+msgid ""
+"Every notification also arrives by email. If you use the RosterChief app on "
+"your phone you may not need both."
+msgstr ""
+"Elke melding komt ook per e-mail binnen. Als je de RosterChief-app op je "
+"telefoon gebruikt, heb je misschien niet beide nodig."
+
+msgid ""
+"Emails with an attachment, such as an invoice, are always sent. This applies "
+"to every club you belong to."
+msgstr ""
+"E-mails met een bijlage, zoals een factuur, worden altijd verstuurd. Dit "
+"geldt voor elke club waartoe je behoort."
+
+msgid "Mark all read"
+msgstr "Alles als gelezen markeren"
+
+msgid "Clear all"
+msgstr "Alles wissen"
+
+msgid ""
+"Once you're linked to a member record, their notifications will show up here."
+msgstr ""
+"Zodra je aan een ledenrecord gekoppeld bent, verschijnen hier hun meldingen."
+
+msgid "Enable push notifications"
+msgstr "Pushmeldingen inschakelen"
+
+msgid "Get notified on this device as soon as something new comes in."
+msgstr "Word op dit toestel verwittigd zodra er iets nieuws is."
+
+msgid ""
+"Couldn't turn on notifications -- check this browser's notification "
+"permission for the site, then try again."
+msgstr ""
+"Kon meldingen niet inschakelen -- controleer de meldingsmachtiging van deze "
+"browser voor de site en probeer opnieuw."
+
+msgid "Enable"
+msgstr "Inschakelen"
+
+msgid "How to pay"
+msgstr "Hoe betalen"
+
+msgid "Nothing to pay"
+msgstr "Niets te betalen"
+
+msgid "You have no open payments."
+msgstr "Je hebt geen openstaande betalingen."
+
+msgid "Not open yet"
+msgstr "Nog niet open"
+
+msgid "Registration isn't open right now -- check back soon."
+msgstr "Inschrijven is momenteel niet open -- kom binnenkort terug."
+
+msgid "Which season?"
+msgstr "Welk seizoen?"
+
+msgid ""
+"Registration is currently open for more than one season -- pick which one "
+"this is for."
+msgstr ""
+"Inschrijven is momenteel open voor meer dan één seizoen -- kies voor welk "
+"dit is."
+
+#, python-format
+msgid "Season %(start)s-%(end)s"
+msgstr "Seizoen %(start)s-%(end)s"
+
+msgid "Continue"
+msgstr "Doorgaan"
+
+#, python-format
+msgid "Registering for Season %(start)s-%(end)s"
+msgstr "Inschrijven voor seizoen %(start)s-%(end)s"
+
+msgid ""
+"Add a registration for each person and role. You'll see the price before you "
+"send it."
+msgstr ""
+"Voeg een inschrijving toe per persoon en rol. Je ziet de prijs voor je "
+"verstuurt."
+
+msgid "Price"
+msgstr "Prijs"
+
+#, python-format
+msgid "Jersey number (%(team)s)"
+msgstr "Rugnummer (%(team)s)"
+
+#, python-format
+msgid "€%(amount)s off if paid by %(date)s"
+msgstr "€%(amount)s korting bij betaling voor %(date)s"
+
+msgid "If paid before the deadline(s) above"
+msgstr "Bij betaling voor de bovenstaande deadline(s)"
+
+msgid ""
+"This is what's owed once the club confirms this -- payment happens "
+"separately, not on this page."
+msgstr ""
+"Dit is wat verschuldigd is zodra de club dit bevestigt -- de betaling "
+"gebeurt apart, niet op deze pagina."
+
+msgid "Send registration"
+msgstr "Inschrijving versturen"
+
+msgid "See the price"
+msgstr "Prijs bekijken"
+
+msgid "Passkeys"
+msgstr "Passkeys"
+
+msgid ""
+"A passkey lets you sign in with Face ID, Touch ID or your device's screen "
+"lock instead of a password. It is stored on your devices and works for every "
+"club."
+msgstr ""
+"Met een passkey meld je je aan met Face ID, Touch ID of de "
+"schermvergrendeling van je toestel in plaats van met een wachtwoord. Hij "
+"wordt op je toestellen bewaard en werkt voor elke club."
+
+#, python-format
+msgid "Added %(added)s &middot; used %(used)s"
+msgstr "Toegevoegd %(added)s &middot; gebruikt %(used)s"
+
+#, python-format
+msgid "Added %(added)s &middot; never used"
+msgstr "Toegevoegd %(added)s &middot; nooit gebruikt"
+
+msgid "Rename"
+msgstr "Hernoemen"
+
+msgid "No passkeys yet."
+msgstr "Nog geen passkeys."
+
+msgid "Add a passkey"
+msgstr "Passkey toevoegen"
+
+msgid "Password"
+msgstr "Wachtwoord"
+
+msgid "Two-factor authentication"
+msgstr "Tweestapsverificatie"
+
+msgid "An authenticator app is set up for this account."
+msgstr "Voor dit account is een authenticator-app ingesteld."
+
+msgid "No authenticator app is set up. You can add one on the website."
+msgstr ""
+"Er is geen authenticator-app ingesteld. Je kunt er een toevoegen op de "
+"website."
+
+msgid "Manage two-factor authentication"
+msgstr "Tweestapsverificatie beheren"
+
+msgid "Back to the shop"
+msgstr "Terug naar de winkel"
+
+msgid "Some items are no longer available. Remove them to place your order."
+msgstr ""
+"Sommige items zijn niet meer beschikbaar. Verwijder ze om je bestelling te "
+"plaatsen."
+
+msgid ""
+"Some prices have changed since you added them to your cart. The total below "
+"is up to date."
+msgstr ""
+"Sommige prijzen zijn gewijzigd sinds je ze aan je winkelmandje toevoegde. "
+"Het totaal hieronder is up-to-date."
+
+msgid "No longer available"
+msgstr "Niet meer beschikbaar"
+
+#, python-format
+msgid "For %(name)s &middot; "
+msgstr "Voor %(name)s &middot; "
+
+#, python-format
+msgid "&euro; %(amount)s each"
+msgstr "&euro; %(amount)s per stuk"
+
+#, python-format
+msgid "Discount applied: %(name)s"
+msgstr "Korting toegepast: %(name)s"
+
+msgid "Pay when you pick it up -- no online payment."
+msgstr "Betaal bij het afhalen -- geen online betaling."
+
+msgid "Your cart is empty."
+msgstr "Je winkelmandje is leeg."
+
+msgid "My orders"
+msgstr "Mijn bestellingen"
+
+msgid "Cart"
+msgstr "Winkelmandje"
+
+msgid "No photo"
+msgstr "Geen foto"
+
+msgid "Nothing in the shop yet."
+msgstr "Nog niets in de shop."
+
+msgid "Back to my orders"
+msgstr "Terug naar mijn bestellingen"
+
+msgid "Pickup instructions"
+msgstr "Afhaalinstructies"
+
+#, python-format
+msgid "%(qty)sx"
+msgstr "%(qty)sx"
+
+#, python-format
+msgid "%(name)s &middot; %(date)s"
+msgstr "%(name)s &middot; %(date)s"
+
+msgid "No orders yet."
+msgstr "Nog geen bestellingen."
+
+msgid "For"
+msgstr "Voor"
+
+msgid "Number (optional)"
+msgstr "Nummer (optioneel)"
+
+msgid "e.g. 7"
+msgstr "bv. 7"
+
+msgid "Name (optional)"
+msgstr "Naam (optioneel)"
+
+msgid "e.g. on the back"
+msgstr "bv. op de rug"
+
+msgid "Quantity"
+msgstr "Aantal"
+
+msgid "Add to cart"
+msgstr "Toevoegen aan winkelmandje"
+
+msgid "This field is required."
+msgstr "Dit veld is verplicht."
+
+msgid "This form is closed."
+msgstr "Dit formulier is gesloten."
+
+#, python-format
+msgid "For %(name)s"
+msgstr "Voor %(name)s"
+
+msgid "Please complete the highlighted fields."
+msgstr "Vul de gemarkeerde velden in."
+
+msgid "To do"
+msgstr "Te doen"
+
+msgid "Done and closed"
+msgstr "Afgerond en gesloten"
+
+msgid "No forms"
+msgstr "Geen formulieren"
+
+msgid "Nothing to fill in right now."
+msgstr "Er is momenteel niets in te vullen."
+
+msgid "Team staff"
+msgstr "Stafleden"
+
+msgid "Payments & dues"
+msgstr "Betalingen en bijdragen"
+
+msgid "Sign out"
+msgstr "Afmelden"
+
+msgid "Check back later for club updates."
+msgstr "Kom later terug voor clubnieuws."
+
+msgid "More"
+msgstr "Meer"
+
+msgid "Clear all notifications?"
+msgstr "Alle meldingen wissen?"
+
+msgid "This permanently deletes every notification."
+msgstr "Dit verwijdert alle meldingen definitief."
+
+msgid "You're offline"
+msgstr "Je bent offline"
+
+msgid ""
+"RosterChief needs a connection to show up-to-date club information. Check "
+"your connection and try again."
+msgstr ""
+"RosterChief heeft een verbinding nodig om actuele clubinformatie te tonen. "
+"Controleer je verbinding en probeer opnieuw."
+
+msgid ""
+"Registration is open for more than one season. Pick the one this is for."
+msgstr "Inschrijven is open voor meer dan één seizoen. Kies voor welk dit is."
+
+msgid "Registrations"
+msgstr "Inschrijvingen"
+
+#, python-format
+msgid "&minus;&euro; %(amount)s family discount"
+msgstr "&minus;&euro; %(amount)s gezinskorting"
+
+#, python-format
+msgid "&euro; %(amount)s if you pay early"
+msgstr "&euro; %(amount)s als je vroeg betaalt"
+
+msgid ""
+"The club reviews your registration and then sends the invoice. You'll find "
+"it under Payments & dues."
+msgstr ""
+"De club bekijkt je inschrijving en stuurt daarna de factuur. Je vindt ze "
+"onder Betalingen en lidgeld."
+
+msgid "The shop is closed"
+msgstr "De shop is gesloten"
+
+msgid "Ordering is closed right now. You can still see your orders."
+msgstr "Bestellen is momenteel gesloten. Je kunt je bestellingen nog bekijken."
+
+msgid "Sold out"
+msgstr "Uitverkocht"
+
+#, python-format
+msgid "From &euro; %(amount)s"
+msgstr "Vanaf &euro; %(amount)s"
+
+msgid "Check back later."
+msgstr "Kom later terug."
+
+msgid "Order"
+msgstr "Bestelling"
+
+msgid "Pickup"
+msgstr "Afhaling"
+
+msgid "No orders yet"
+msgstr "Nog geen bestellingen"
+
+msgid "Your orders will show up here."
+msgstr "Je bestellingen verschijnen hier."
+
+msgid "This product is sold out right now."
+msgstr "Dit product is momenteel uitverkocht."
+
+msgid "Personalisation"
+msgstr "Personalisatie"
+
+msgid "Number to print"
+msgstr "Nummer om te bedrukken"
+
+msgid "Name to print"
+msgstr "Naam om te bedrukken"
+
+msgid "Choose an option"
+msgstr "Kies een optie"
+
+msgid "Reminder"
+msgstr "Herinnering"
+
+#, python-format
+msgid "Score is %(count)d"
+msgstr "Stand is %(count)d"
+
+msgid "Calendar link reset"
+msgstr "Agendalink gereset"
+
+msgid ""
+"Your old calendar link no longer works. Re-subscribe using the new one below."
+msgstr ""
+"Je oude agendalink werkt niet meer. Abonneer je opnieuw met de nieuwe "
+"hieronder."
+
+msgid "You no longer follow this game."
+msgstr "Je volgt deze wedstrijd niet meer."
+
+msgid "Your live game updates have been updated."
+msgstr "Je live wedstrijdupdates zijn bijgewerkt."
+
+msgid "Your notification email setting has been updated."
+msgstr "Je instelling voor e-mailmeldingen is bijgewerkt."
+
+msgid "Your notification switches for this person have been updated."
+msgstr "Je meldingsschakelaars voor deze persoon zijn bijgewerkt."
+
+msgid "Your notification switches for this club have been updated."
+msgstr "Je meldingsschakelaars voor deze club zijn bijgewerkt."
+
+msgid "This category follows your default again."
+msgstr "Deze categorie volgt opnieuw je standaardinstelling."
+
+msgid "All switches follow your default again."
+msgstr "Alle schakelaars volgen opnieuw je standaardinstelling."
+
+msgid "Your quiet hours have been updated."
+msgstr "Je stille uren zijn bijgewerkt."
+
+msgid "All members"
+msgstr "Alle leden"
+
+#, python-format
+msgid "%(name)s is confirmed to referee -- see you there."
+msgstr "%(name)s is bevestigd als scheidsrechter -- tot dan."
+
+msgid "Referee sign-up confirmed"
+msgstr "Inschrijving als scheidsrechter bevestigd"
+
+msgid "Could not sign up"
+msgstr "Kon je niet inschrijven"
+
+#, python-format
+msgid "%(name)s won't be refereeing this one -- thanks for letting us know."
+msgstr "%(name)s fluit deze niet -- bedankt om het te laten weten."
+
+msgid "Unknown response."
+msgstr "Onbekend antwoord."
+
+#, python-format
+msgid "%(name)s is confirmed as an official -- see you there."
+msgstr "%(name)s is bevestigd als official -- tot dan."
+
+msgid "Official sign-up confirmed"
+msgstr "Inschrijving als official bevestigd"
+
+#, python-format
+msgid ""
+"%(name)s won't be an official for this one -- thanks for letting us know."
+msgstr "%(name)s is hiervoor geen official -- bedankt om het te laten weten."
+
+msgid "No member record for this account."
+msgstr "Geen ledenrecord voor dit account."
+
+msgid "Claimed"
+msgstr "Opgenomen"
+
+#, python-format
+msgid "You're down for “%(title)s”."
+msgstr "Je staat ingepland voor “%(title)s”."
+
+msgid "Could not claim"
+msgstr "Kon niet opnemen"
+
+msgid "Removed"
+msgstr "Verwijderd"
+
+#, python-format
+msgid "You're no longer down for “%(title)s”."
+msgstr "Je staat niet meer ingepland voor “%(title)s”."
+
+msgid "Unknown RSVP status."
+msgstr "Onbekende aanwezigheidsstatus."
+
+msgid "You can't RSVP for that person."
+msgstr "Je kunt niet antwoorden voor die persoon."
+
+msgid "Could not send your answer"
+msgstr "Kon je antwoord niet verzenden"
+
+msgid "Too late to reply"
+msgstr "Te laat om te antwoorden"
+
+msgid "Only games can be followed."
+msgstr "Alleen wedstrijden kunnen gevolgd worden."
+
+#, python-format
+msgid "Team manager %(teams)s"
+msgstr "Teammanager %(teams)s"
+
+msgid "Form"
+msgstr "Formulier"
+
+msgid "Submitted"
+msgstr "Ingediend"
+
+msgid "Thanks -- your response has been recorded."
+msgstr "Bedankt -- je antwoord is geregistreerd."
+
+msgid "Your responses"
+msgstr "Je antwoorden"
+
+msgid "Yes"
+msgstr "Ja"
+
+msgid "No"
+msgstr "Nee"
+
+msgid "PDF unavailable"
+msgstr "PDF niet beschikbaar"
+
+msgid "Edit info"
+msgstr "Info bewerken"
+
+msgid "The photo was removed."
+msgstr "De foto is verwijderd."
+
+#, python-format
+msgid "%(name)s's info was updated."
+msgstr "De info van %(name)s is bijgewerkt."
+
+msgid "Registration received"
+msgstr "Inschrijving ontvangen"
+
+#, python-format
+msgid ""
+"Thank you! The club will review it and send the invoice for € %(total)s. "
+"You'll find it under Payments & dues, and we've emailed you a confirmation."
+msgstr ""
+"Bedankt! De club bekijkt het en stuurt de factuur van € %(total)s. Je vindt "
+"ze onder Betalingen en lidgeld en we hebben je een bevestiging gemaild."
+
+#, python-format
+msgid "You can submit at most %(num)d registration at a time."
+msgid_plural "You can submit at most %(num)d registrations at a time."
+msgstr[0] "Je kunt maximaal %(num)d inschrijving tegelijk indienen."
+msgstr[1] "Je kunt maximaal %(num)d inschrijvingen tegelijk indienen."
+
+msgid "All notifications marked as read."
+msgstr "Alle meldingen als gelezen gemarkeerd."
+
+msgid "Notifications cleared."
+msgstr "Meldingen gewist."
+
+msgid "You can't mark that notification as read."
+msgstr "Je kunt die melding niet als gelezen markeren."
+
+msgid "Unknown action."
+msgstr "Onbekende actie."
+
+msgid "To pay at pickup"
+msgstr "Te betalen bij afhaling"
+
+msgid "Partly paid"
+msgstr "Gedeeltelijk betaald"
+
+msgid "Paid"
+msgstr "Betaald"
+
+msgid "Refunded"
+msgstr "Terugbetaald"
+
+msgid "Being prepared"
+msgstr "In voorbereiding"
+
+msgid "In production"
+msgstr "In productie"
+
+msgid "Ready for pickup"
+msgstr "Klaar voor afhaling"
+
+msgid "That option isn't available."
+msgstr "Die optie is niet beschikbaar."
+
+msgid "You can't order for that person."
+msgstr "Je kunt niet bestellen voor die persoon."
+
+msgid "Not available"
+msgstr "Niet beschikbaar"
+
+msgid "Added to cart"
+msgstr "Toegevoegd aan winkelmandje"
+
+#, python-format
+msgid "%(product)s added to your cart."
+msgstr "%(product)s toegevoegd aan je winkelmandje."
+
+msgid "Not enough in stock for this quantity. Lower it or remove the item."
+msgstr ""
+"Niet genoeg in voorraad voor dit aantal. Verlaag het of verwijder het "
+"artikel."
+
+msgid "Sold out or no longer available"
+msgstr "Uitverkocht of niet meer beschikbaar"
+
+msgid "Nothing to order"
+msgstr "Niets om te bestellen"
+
+msgid "Could not place order"
+msgstr "Kon bestelling niet plaatsen"
+
+msgid "Order placed"
+msgstr "Bestelling geplaatst"
+
+#, python-format
+msgid "Order %(number)s is in -- pay when you pick it up."
+msgstr "Bestelling %(number)s is binnen -- betaal bij het afhalen."
+
+#~ msgid "Order placed. Thank you!"
+#~ msgstr "Bestelling geplaatst. Bedankt!"
+
+#~ msgid "Notification emails"
+#~ msgstr "Meldings-e-mails"
+
+#~ msgid "Reminder: %(kind)s on %(when)s still needs your answer."
+#~ msgstr ""
+#~ "Herinnering: we wachten nog op jouw antwoord voor %(kind)s op %(when)s."

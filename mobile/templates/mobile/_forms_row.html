@@ -1,0 +1,37 @@
+{% load i18n lucide %}
+{% comment %}
+    One Forms row, like the native app: title, "Me"/first name (only when the account manages several people) plus "Submitted ..."/"Closes ..."/"Closed ..." and a status pill -- Done (opens the submission), Complete (open, still to fill in) or Closed. A closed row nobody answered is shown but isn't tappable. Expects ``row`` (formbuilder.services.form_status_rows_for + is_done/is_open) and ``show_names``.
+{% endcomment %}
+{% if row.is_done %}
+    <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:form_response" row.submission.pk %}">
+{% elif row.is_open %}
+    <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}?for={{ row.member.pk }}">
+{% else %}
+    <div class="flex items-center gap-3 p-3.5 opacity-60" aria-disabled="true">
+{% endif %}
+    <div class="min-w-0 flex-1">
+        <div class="text-[15px] font-semibold text-ink">{{ row.send.form.title }}</div>
+        <div class="text-[13px] text-muted">
+            {% if show_names %}{% if row.member == me %}{% trans "Me" %}{% else %}{{ row.member.first_name }}{% endif %}{% endif %}
+            {% if row.submitted_at %}
+                {% if show_names %}&middot;{% endif %}
+                {% blocktrans with date=row.submitted_at|date:"SHORT_DATE_FORMAT" %}Submitted {{ date }}{% endblocktrans %}
+            {% elif row.send.closes_at %}
+                {% if show_names %}&middot;{% endif %}
+                {% if row.is_open %}{% blocktrans with date=row.send.closes_at|date:"SHORT_DATE_FORMAT" %}Closes {{ date }}{% endblocktrans %}{% else %}{% blocktrans with date=row.send.closes_at|date:"SHORT_DATE_FORMAT" %}Closed {{ date }}{% endblocktrans %}{% endif %}
+            {% endif %}
+        </div>
+    </div>
+    {% if row.is_done %}
+        <span class="pill pill-sm pill-ok shrink-0">{% trans "Done" %}</span>
+    {% elif row.is_open %}
+        <span class="pill pill-sm pill-warn shrink-0">{% trans "Complete" %}</span>
+    {% else %}
+        <span class="pill pill-sm pill-neutral shrink-0">{% trans "Closed" %}</span>
+    {% endif %}
+    {% if row.is_done or row.is_open %}{% lucide "chevron-right" size=16 class="shrink-0 text-dim" %}{% endif %}
+{% if row.is_done or row.is_open %}
+    </a>
+{% else %}
+    </div>
+{% endif %}

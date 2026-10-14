@@ -1,0 +1,87 @@
+{% load i18n lucide %}
+{% comment %}
+    Everything below the cart header: notices, the lines (64px thumbnail, "For X . #17 NAME", a per-line problem message, quantity stepper + remove), the discount code, Subtotal/Discount/Total and "Place order" (disabled while any line can't be ordered). Context from mobile.views._cart_context. Each htmx form carries the applied ``code`` so the discount survives a quantity change; the response replaces #cart-body's content.
+{% endcomment %}
+{% if items %}
+    {% if prices_changed %}
+        <p class="rounded-[10px] border border-warn-border bg-warn-bg p-3 text-[13px] text-warn-text">{% trans "Some prices changed since you added them." %}</p>
+    {% endif %}
+    {% if has_unavailable %}
+        <p class="rounded-[10px] border border-warn-border bg-warn-bg p-3 text-[13px] text-warn-text">{% trans "Some items can't be ordered any more. Remove them to continue." %}</p>
+    {% endif %}
+
+    <div class="m-card overflow-hidden">
+        {% for item in items %}
+            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+            <div class="flex items-start gap-3 p-3.5">
+                {% if item.product.image %}
+                    <img class="h-16 w-16 shrink-0 rounded-lg object-cover{% if item.unavailable %} opacity-40{% endif %}" src="{{ item.product.image.url }}" alt="" loading="lazy">
+                {% else %}
+                    <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-rule text-dim{% if item.unavailable %} opacity-40{% endif %}">{% lucide "shirt" size=22 %}</div>
+                {% endif %}
+                <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <div class="text-[15px] font-semibold text-ink">{{ item.product.name }}</div>
+                    {% if item.variant %}<div class="text-[13px] text-muted">{{ item.variant.name }}</div>{% endif %}
+                    {% if item.detail %}<div class="text-[13px] text-muted">{{ item.detail }}</div>{% endif %}
+                    {% if item.unavailable %}<div class="text-xs font-semibold text-club-dark">{{ item.problem }}</div>{% endif %}
+                    <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}" hx-post="{% url "mobile:shop_cart_item_update" item.pk %}" hx-target="#cart-body" hx-swap="innerHTML" class="mt-1.5 flex items-center gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="code" value="{{ code }}">
+                        {% if not item.sold_out_option %}
+                            <button type="submit" name="action" value="decrement" class="flex h-8 w-8 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" aria-label="{% trans "Decrease quantity" %}">{% lucide "minus" size=14 %}</button>
+                            <span class="w-5 text-center text-sm font-semibold text-ink">{{ item.quantity }}</span>
+                            <button type="submit" name="action" value="increment" class="flex h-8 w-8 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" aria-label="{% trans "Increase quantity" %}"{% if item.quantity >= max_quantity %} disabled{% endif %}>{% lucide "plus" size=14 %}</button>
+                        {% endif %}
+                        <button type="submit" name="action" value="remove" class="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-club-dark" aria-label="{% trans "Remove" %}">{% lucide "trash-2" size=16 %}</button>
+                    </form>
+                </div>
+                <span class="shrink-0 text-[15px] font-semibold text-ink">&euro; {{ item.line_total|floatformat:2 }}</span>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="flex flex-col gap-2">
+        <div class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Discount code" %}</div>
+        <form method="post" action="{% url "mobile:shop_cart" %}" hx-post="{% url "mobile:shop_cart" %}" hx-target="#cart-body" hx-swap="innerHTML" class="flex items-center gap-2">
+            {% csrf_token %}
+            <input type="text" name="code" value="{{ code }}" placeholder="{% trans "Code" %}" aria-label="{% trans "Discount code" %}" autocapitalize="characters" autocomplete="off" autocorrect="off" class="h-11 min-w-0 flex-1 rounded-[10px] border border-line bg-surface px-3 text-[16px] text-ink uppercase placeholder:text-dim placeholder:normal-case focus:border-ink focus:outline-none">
+            <button type="submit" class="px-2 text-[15px] font-semibold text-ink">{% trans "Apply" %}</button>
+        </form>
+        {% if discount %}
+            <p class="flex items-center gap-1.5 text-[13px] text-ok-text">{% lucide "tag" size=14 %} {{ discount.name }} &middot; &minus;&euro; {{ totals.discount_amount|floatformat:2 }}</p>
+        {% elif discount_error %}
+            <p class="text-[13px] text-club-dark" role="alert">{{ discount_error }}</p>
+        {% endif %}
+    </div>
+
+    <div class="m-card flex flex-col gap-2 p-3.5 text-[15px] text-ink">
+        <div class="flex items-center justify-between">
+            <span>{% trans "Subtotal" %}</span>
+            <span>&euro; {{ totals.subtotal|floatformat:2 }}</span>
+        </div>
+        {% if discount %}
+            <div class="flex items-center justify-between">
+                <span>{{ discount.name }}</span>
+                <span>&minus;&euro; {{ totals.discount_amount|floatformat:2 }}</span>
+            </div>
+        {% endif %}
+        <div class="h-px bg-rule"></div>
+        <div class="flex items-center justify-between text-[17px] font-bold">
+            <span>{% trans "Total" %}</span>
+            <span>&euro; {{ totals.total|floatformat:2 }}</span>
+        </div>
+    </div>
+
+    <form method="post" action="{% url "mobile:shop_checkout" %}">
+        {% csrf_token %}
+        <input type="hidden" name="discount_code" value="{% if discount %}{{ code }}{% endif %}">
+        <button type="submit" class="btn-rc btn-rc-primary"{% if has_unavailable %} disabled{% endif %}>{% trans "Place order" %}</button>
+    </form>
+    <p class="text-center text-[13px] text-muted">{% trans "You pay at the club when you pick up your order." %}</p>
+{% else %}
+    {% trans "Your cart is empty" as empty_title %}
+    {% trans "Add something from the shop." as empty_text %}
+    {% trans "Shop" as empty_action %}
+    {% url "mobile:shop_home" as shop_url %}
+    {% include "mobile/_state.html" with kind="empty" icon="shopping-cart" title=empty_title text=empty_text action_url=shop_url action_label=empty_action %}
+{% endif %}

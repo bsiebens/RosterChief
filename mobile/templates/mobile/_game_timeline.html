@@ -1,0 +1,68 @@
+{% load i18n lucide %}
+{% comment %}
+    The game's timeline (iOS GameTimelineCard): a dark scoreboard (status, date, score, per-period scores) over the read-only list of goals (assists, tags), penalties, goalie changes, time-outs and period markers. Expects ``tl`` from mobile.services.game_ui.timeline_context. Hidden when the game has no timeline. While the game is live the wrapper re-fetches itself every 15 s (not while the tab is hidden); the final fragment has no hx-get, so polling stops by itself.
+{% endcomment %}
+<div id="game-timeline" {% if tl.timeline and tl.live %}hx-get="{% url "mobile:game_timeline" tl.event.pk %}" hx-trigger="every 15s [!document.hidden]" hx-swap="outerHTML" hx-push-url="false"{% endif %}>
+    {% if tl.timeline %}
+        {% with data=tl.timeline %}
+            <div class="m-card overflow-hidden">
+                <div class="bg-ink px-3.5 py-3.5 text-white">
+                    <div class="flex items-center justify-between">
+                        {% if tl.live %}
+                            <span class="flex items-center gap-1.5 font-display text-xs font-extrabold tracking-wide text-club uppercase"><span class="block h-1.5 w-1.5 animate-pulse rounded-full bg-club"></span>{{ tl.status_label }}</span>
+                        {% else %}
+                            <span class="font-display text-xs font-extrabold tracking-wide text-ice uppercase">{{ tl.status_label }}</span>
+                        {% endif %}
+                        <span class="font-mono text-xs text-on-dark-dim uppercase">{{ tl.event.start|date:"d M · H:i" }}</span>
+                    </div>
+                    <div class="mt-3 flex items-center justify-center gap-2 py-3">
+                        <div class="flex min-w-0 flex-1 flex-col items-center gap-0.5 {% if tl.home_dim %}text-on-dark-faint{% endif %}">
+                            <span class="max-w-full truncate font-display text-[11px] font-bold tracking-wide uppercase">{{ tl.home_name }}</span>
+                            <span class="font-display text-[34px] leading-none font-extrabold">{{ data.home_score|default_if_none:"–" }}</span>
+                        </div>
+                        <span class="font-display text-[28px] font-extrabold text-on-dark-dim">:</span>
+                        <div class="flex min-w-0 flex-1 flex-col items-center gap-0.5 {% if tl.away_dim %}text-on-dark-faint{% endif %}">
+                            <span class="max-w-full truncate font-display text-[11px] font-bold tracking-wide uppercase">{{ tl.away_name }}</span>
+                            <span class="font-display text-[34px] leading-none font-extrabold">{{ data.away_score|default_if_none:"–" }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% if data.periods %}
+                    <div class="flex divide-x divide-white/10 bg-ink text-white">
+                        {% for period in data.periods %}
+                            <div class="flex flex-1 flex-col items-center py-2.5">
+                                <span class="font-display text-[10px] font-bold tracking-wide text-on-dark-dim uppercase">{% blocktrans with label=period.label %}P{{ label }}{% endblocktrans %}</span>
+                                <span class="font-display text-base font-extrabold">{{ period.home }} &ndash; {{ period.away }}</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                <div class="flex flex-col gap-3 p-3.5">
+                    {% for row in tl.rows %}
+                        {% if row.marker %}
+                            <div class="flex items-center gap-2">
+                                <span class="h-px flex-1 bg-rule"></span>
+                                <span class="font-display text-[10px] font-extrabold tracking-wider whitespace-nowrap text-dim">{{ row.marker }}</span>
+                                <span class="h-px flex-1 bg-rule"></span>
+                            </div>
+                        {% else %}
+                            <div class="flex items-start gap-3">
+                                <span class="w-9 shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted">{{ row.time }}</span>
+                                <span class="mt-0.5 shrink-0 {% if row.tone == "club" %}text-club{% elif row.tone == "warn" %}text-warn{% elif row.tone == "danger" %}text-club-dark{% elif row.tone == "ice" %}text-ice{% else %}text-dim{% endif %}">{% lucide row.icon size=16 stroke_width=2.4 %}</span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-ink">{{ row.title }}</div>
+                                    {% if row.subtitle %}<div class="text-xs text-muted">{{ row.subtitle }}</div>{% endif %}
+                                </div>
+                                {% if row.score_after %}
+                                    <span class="shrink-0 rounded-full bg-rule px-2 py-0.5 font-display text-lg leading-tight font-extrabold text-ink">{{ row.score_after.home }} &ndash; {{ row.score_after.away }}</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% empty %}
+                        <p class="text-sm text-muted">{% trans "Waiting for the first events." %}</p>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endwith %}
+    {% endif %}
+</div>

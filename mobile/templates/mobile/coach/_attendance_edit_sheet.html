@@ -1,0 +1,66 @@
+{% load i18n lucide %}
+{% comment %}
+    The per-player "Edit answer" bottom sheet (dialog.sheet), one per row,
+    opened by that row's button. Posts through CoachAttendanceEditView; the
+    partial it gets back replaces #attendance-body, sheets included, so a
+    successful save closes it. Alpine only drives the segmented answer
+    control (a hidden input carries the value), the character counter and
+    the save button's enabled state.
+{% endcomment %}
+<dialog class="sheet" id="att-edit-{{ row.pk }}" aria-labelledby="att-edit-title-{{ row.pk }}" onclick="if (event.target === this) this.close()">
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <form class="flex flex-col gap-4 pb-2" method="post" action="{% url "mobile:coach_attendance_edit" event.pk row.pk %}?filter={{ filter_param }}" hx-post="{% url "mobile:coach_attendance_edit" event.pk row.pk %}?filter={{ filter_param }}" hx-target="#attendance-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-disabled-elt="find button[type=submit]"
+          x-data="{ answer: '{{ row.answer }}', original: '{{ row.answer }}', noteLength: {{ row.coach_note|length }}, noteChanged: false }">
+        {% csrf_token %}
+        <div class="flex items-center justify-between gap-3">
+            <h2 id="att-edit-title-{{ row.pk }}" class="min-w-0 truncate font-display text-lg font-extrabold text-ink uppercase">{{ row.member.get_full_name }}</h2>
+            <button type="button" class="icon-btn" onclick="this.closest('dialog').close()" aria-label="{% trans "Close" %}">{% lucide "x" size=20 %}</button>
+        </div>
+
+        <div>
+            <div class="mb-1.5 text-xs font-semibold tracking-wide text-muted uppercase" id="att-answer-label-{{ row.pk }}">{% trans "Answer" %}</div>
+            <input type="hidden" name="status" :value="answer">
+            <div class="flex h-11 overflow-hidden rounded-lg border border-line" role="group" aria-labelledby="att-answer-label-{{ row.pk }}">
+                <button type="button" class="flex-1 text-sm font-semibold" :class="answer === 'present' ? 'bg-ok text-white' : 'bg-surface text-ink'" :aria-pressed="answer === 'present'" @click="answer = 'present'">{% trans "In" %}</button>
+                <button type="button" class="flex-1 border-x border-line text-sm font-semibold" :class="answer === 'absent' ? 'bg-club text-club-content' : 'bg-surface text-ink'" :aria-pressed="answer === 'absent'" @click="answer = 'absent'">{% trans "Out" %}</button>
+                {% if not row.in_published_lineup %}
+                    <button type="button" class="flex-1 text-sm font-semibold" :class="answer === 'maybe' ? 'bg-warn text-white' : 'bg-surface text-ink'" :aria-pressed="answer === 'maybe'" @click="answer = 'maybe'">{% trans "Maybe" %}</button>
+                {% endif %}
+            </div>
+            {% if not row.in_published_lineup %}
+                <button type="button" class="mt-2 flex items-center gap-1.5 text-sm font-semibold text-club-dark disabled:opacity-40" :disabled="answer === 'no_response'" @click="answer = 'no_response'">
+                    {% lucide "rotate-ccw" size=14 %} {% trans "Reset answer" %}
+                </button>
+            {% endif %}
+            <p class="mt-2 text-xs text-muted" aria-live="polite">
+                <span x-show="answer === 'no_response'" x-cloak>{% trans "The answer will be cleared; the player counts as not replied." %}</span>
+                {% if row.in_published_lineup %}
+                    <span x-show="answer !== 'no_response'">{% trans "They're in the published line-up. Only Out can change their answer." %}</span>
+                    <span x-show="answer === 'absent'" x-cloak class="mt-1 block font-semibold text-warn-text">{% trans "They stay in the published line-up until you swap them there." %}</span>
+                {% endif %}
+            </p>
+        </div>
+
+        <div>
+            <label class="mb-1.5 block text-xs font-semibold tracking-wide text-muted uppercase" for="att-note-{{ row.pk }}">{% trans "Private coach note" %}</label>
+            <textarea id="att-note-{{ row.pk }}" name="coach_note" rows="3" maxlength="{{ coach_note_max }}" class="w-full rounded-lg border border-stroke bg-paper p-3 text-[15px] text-ink focus:border-ink focus:outline-none" @input="noteLength = $event.target.value.length; noteChanged = true">{{ row.coach_note }}</textarea>
+            <div class="mt-1 flex items-center justify-between gap-2 text-xs text-muted">
+                <span class="flex items-center gap-1">{% lucide "lock" size=11 %} {% trans "Only team managers can see this." %}</span>
+                <span class="tabular-nums"><span x-text="noteLength">{{ row.coach_note|length }}</span>/{{ coach_note_max }}</span>
+            </div>
+        </div>
+
+        <label class="flex items-start gap-2.5 text-sm text-ink">
+            <input class="mt-0.5 h-5 w-5 shrink-0 accent-ink" type="checkbox" name="notify">
+            <span>
+                <span class="block font-semibold">{% trans "Tell the player" %}</span>
+                <span class="block text-xs text-muted">{% trans "The player isn't notified unless you switch this on. They never see the private note." %}</span>
+            </span>
+        </label>
+
+        <div class="grid grid-cols-2 gap-2">
+            <button type="button" class="btn-rc btn-rc-neutral" onclick="this.closest('dialog').close()">{% trans "Cancel" %}</button>
+            <button type="submit" class="btn-rc btn-rc-primary" :disabled="answer === original && !noteChanged">{% trans "Save" %}</button>
+        </div>
+    </form>
+</dialog>

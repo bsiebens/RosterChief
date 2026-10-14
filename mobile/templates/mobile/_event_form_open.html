@@ -1,0 +1,7 @@
+{% comment %}
+    Opens one answer form on the event page or in the event sheet (the caller closes it with </form>). Params: ``action`` (the POST URL) and, optionally, ``note_form`` (the form owns a note panel that static/js/mobile-sheet.js reveals).
+    Inside the sheet a form posts through htmx and swaps the sheet's own content -- the sheet stays open on the new state. On the full page it is a plain, non-boosted POST that redirects back here (``next``), as before.
+{% endcomment %}
+<form method="post" action="{{ action }}" {% if note_form %}data-note-form{% endif %} {% if in_sheet %}hx-post="{{ action }}" hx-target="#event-sheet-content" hx-swap="innerHTML" hx-push-url="false"{% else %}hx-boost="false"{% endif %}>
+    {% csrf_token %}
+    {% if in_sheet %}<input type="hidden" name="surface" value="sheet">{% else %}<input type="hidden" name="next" value="event_detail">{% endif %}

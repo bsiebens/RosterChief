@@ -1,0 +1,163 @@
+{% load i18n lucide %}
+{% comment %}
+    The event detail content shared by the bottom sheet (_event_sheet.html) and the full page
+    (event_detail.html), same layout as the iOS CoachEventDetailView: kind chips + title, a score
+    row for a game, the info card, the Attendance/Line-up links, the manager actions, and the
+    PWA's own task list. Renders its blocks as siblings so the including container sets the gap.
+    Needs: event, tasks, series_summary, can_edit_pattern, return_url, can_manage_active_team.
+{% endcomment %}
+<div>
+    <h1 class="pr-12 font-display text-[26px] leading-none font-extrabold text-ink uppercase">{{ event.title }}</h1>
+    <div class="mt-2 flex flex-wrap items-center gap-2">
+        <span class="pill {% if event.kind == "game" %}pill-danger{% elif event.kind == "training" %}pill-info{% else %}pill-neutral{% endif %}">{{ event.get_kind_display }}</span>
+        {% if event.is_friendly %}<span class="pill pill-neutral">{% trans "Friendly" %}</span>{% endif %}
+        {% if event.cancelled %}<span class="pill pill-danger">{% trans "Cancelled" %}</span>{% endif %}
+        {% if event.is_live and not event.cancelled %}<span class="pill pill-danger">{% trans "Live" %}</span>{% endif %}
+    </div>
+</div>
+
+{% if event.kind == "game" and event.score_for is not None and event.score_against is not None %}
+    <div class="m-card flex items-center justify-center gap-4 p-4" aria-label="{% trans "Result" %}">
+        <span class="font-display text-[40px] leading-none font-extrabold text-ink">{{ event.score_for }}</span>
+        <span class="font-display text-2xl text-dim">&ndash;</span>
+        <span class="font-display text-[40px] leading-none font-extrabold text-ink">{{ event.score_against }}</span>
+    </div>
+{% endif %}
+
+<div class="m-card divide-y divide-line overflow-hidden">
+    <div class="flex items-baseline gap-3 p-3.5">
+        <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "When" %}</span>
+        <span class="text-[15px] text-ink">{{ event.start|date:"D d M Y, H:i" }}</span>
+    </div>
+    {% if event.end %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Ends" %}</span>
+            <span class="text-[15px] text-ink">{{ event.end|date:"H:i" }}</span>
+        </div>
+    {% endif %}
+    {% if event.gathering %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Meet" %}</span>
+            <span class="text-[15px] text-ink">{{ event.gathering|date:"H:i" }}</span>
+        </div>
+    {% endif %}
+    {% if event.deadline %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Replies close" %}</span>
+            <span class="text-[15px] text-ink">{{ event.deadline|date:"D d M, H:i" }}</span>
+        </div>
+    {% endif %}
+    {% if event.location %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Where" %}</span>
+            <span class="text-[15px] text-ink">{{ event.location.name }}</span>
+        </div>
+    {% endif %}
+    {% if event.opponent %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Opponent" %}</span>
+            <span class="text-[15px] text-ink">{{ event.opponent.name }}</span>
+        </div>
+    {% endif %}
+    {% if event.competition %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Competition" %}</span>
+            <span class="text-[15px] text-ink">{{ event.competition }}</span>
+        </div>
+    {% endif %}
+    {% if event.series_id %}
+        <div class="flex items-baseline gap-3 p-3.5">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Repeats" %}</span>
+            <span class="text-[15px] text-ink">
+                {{ series_summary }}{% if event.detached %} &middot; {% trans "edited on its own" %}{% endif %}
+                <span class="block text-xs text-muted">{% blocktrans with series=event.series %}Part of the recurring series “{{ series }}”.{% endblocktrans %}</span>
+            </span>
+        </div>
+    {% endif %}
+</div>
+
+<div class="m-card divide-y divide-line overflow-hidden">
+    <a class="pressable flex items-center justify-between p-3.5 text-[15px] font-semibold text-ink" href="{% url "mobile:coach_attendance" event.pk %}">
+        {% trans "Attendance" %} {% lucide "chevron-right" size=16 class="text-dim" %}
+    </a>
+    {% if event.kind == "game" or event.kind == "tournament" %}
+        <a class="pressable flex items-center justify-between p-3.5 text-[15px] font-semibold text-ink" href="{% url "mobile:coach_lineup" event.pk %}">
+            {% trans "Line-up" %} {% lucide "chevron-right" size=16 class="text-dim" %}
+        </a>
+    {% endif %}
+</div>
+
+{% if can_manage_active_team %}
+    <div class="flex flex-col gap-2.5">
+        <a class="btn-rc btn-rc-neutral" href="{% url "mobile:coach_edit_event" event.pk %}{% if return_url %}?next={{ return_url|urlencode:"" }}{% endif %}">{% lucide "pencil" size=16 %} {% trans "Edit event" %}</a>
+        {% if event.series_id %}
+            {% if can_edit_pattern %}
+                <a class="btn-rc btn-rc-neutral" href="{% url "mobile:coach_edit_event_series" event.series_id %}">{% lucide "repeat" size=16 %} {% trans "Edit the repeat pattern" %}</a>
+            {% endif %}
+            {% if not event.detached %}
+                <button class="btn-rc btn-rc-neutral" type="button" onclick="document.getElementById('event-detach-sheet').showModal()">{% lucide "unlink" size=16 %} {% trans "Stop following the series" %}</button>
+            {% endif %}
+        {% endif %}
+        <button class="btn-rc btn-rc-destructive" type="button" onclick="document.getElementById('event-delete-sheet').showModal()">{% lucide "trash-2" size=16 %} {% trans "Delete" %}</button>
+    </div>
+{% endif %}
+
+<div class="m-card p-4">
+    <div class="flex items-center justify-between">
+        <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Tasks" %}</span>
+        {% if can_manage_active_team %}
+            <a class="font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="{% url "mobile:coach_event_task_create" event.pk %}">{% trans "Add task" %}</a>
+        {% endif %}
+    </div>
+
+    <div class="mt-3 flex flex-col gap-2.5">
+        {% for task in tasks %}
+            <div class="rounded-lg border border-line p-3" x-data="{ editing: false }">
+                <div x-show="!editing">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-sm font-semibold text-ink">{{ task.title }}</span>
+                        <span class="pill pill-sm {% if task.is_full %}pill-ok{% else %}pill-neutral{% endif %}">{{ task.claim_labels|length }} / {{ task.needed_quantity }}</span>
+                    </div>
+                    {% if task.description %}<p class="mt-1 text-sm text-muted">{{ task.description }}</p>{% endif %}
+                    {% if task.claim_labels %}
+                        <p class="mt-1 text-xs text-muted">{% trans "Covered by" %}: {{ task.claim_labels|join:", " }}</p>
+                    {% else %}
+                        <p class="mt-1 text-xs text-dim">{% trans "Nobody has claimed this yet." %}</p>
+                    {% endif %}
+                    {% if can_manage_active_team %}
+                        <div class="mt-3 flex items-center justify-end gap-2">
+                            <button class="btn btn-secondary btn-sm gap-1.5" type="button" @click="editing = true">
+                                {% lucide "pencil" size=14 %} {% trans "Edit" %}
+                            </button>
+                            {% trans "Delete this task? This cannot be undone." as delete_task_confirm_text %}
+                            <form method="post" action="{% url "mobile:coach_event_task_delete" event.pk task.pk %}" hx-boost="false" onsubmit="return confirm('{{ delete_task_confirm_text|escapejs }}')">
+                                {% csrf_token %}
+                                <button class="btn btn-secondary btn-sm gap-1.5" type="submit">
+                                    {% lucide "trash-2" size=14 %} {% trans "Delete" %}
+                                </button>
+                            </form>
+                        </div>
+                    {% endif %}
+                </div>
+
+                {% if can_manage_active_team %}
+                    <form x-show="editing" x-cloak class="flex flex-col gap-2" method="post" action="{% url "mobile:coach_event_task_update" event.pk task.pk %}" hx-boost="false">
+                        {% csrf_token %}
+                        {{ task.edit_form.title }}
+                        {{ task.edit_form.description }}
+                        <div class="flex items-center gap-2">
+                            <label class="text-xs font-semibold text-muted" for="{{ task.edit_form.needed_quantity.id_for_label }}">{% trans "Needed" %}</label>
+                            {{ task.edit_form.needed_quantity }}
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-secondary btn-sm flex-1" type="button" @click="editing = false">{% trans "Cancel" %}</button>
+                            <button class="btn btn-dark btn-sm flex-1" type="submit">{% trans "Save" %}</button>
+                        </div>
+                    </form>
+                {% endif %}
+            </div>
+        {% empty %}
+            <p class="text-sm text-muted">{% trans "No tasks yet." %}</p>
+        {% endfor %}
+    </div>
+</div>

@@ -1,62 +1,80 @@
 {% extends "mobile/coach/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
-    Bottom-tab "Schedule" -- every upcoming event for the active team (not
-    just the next one, that's Today's job), grouped into This week/Next
-    week/by-month dividers -- see CoachScheduleView's own docstring for the
-    shared agenda_groups grouping behind this (also mobile.views.CalendarView
-    and management.views.EventListView's "List" mode). Each row links
-    straight into the coach-relevant action for its kind rather than
-    mobile:event_detail (the Member-shell RSVP page).
+    The Manager Events tab (iOS TeamEventsView): a title row with the add button, the kind chips
+    (All / Training / Game / Tournament / Meeting, ?kind=), then the team's upcoming events
+    grouped into This week / Next week / by-month dividers -- see CoachScheduleView's own docstring
+    for the shared agenda_groups grouping. Rows open the event as a bottom sheet. Pull-to-refresh
+    via data-refreshable.
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
+    <div class="-mt-1 flex min-h-8 items-center justify-between">
+        <h1 class="font-display text-[26px] leading-none font-extrabold tracking-wide text-ink uppercase">{% trans "Events" %}</h1>
+        {% if can_manage_active_team %}
+            <a class="icon-btn pressable flex h-11 w-11 items-center justify-center text-club-dark" href="{% url "mobile:coach_create_event" %}" aria-label="{% trans "Add an event" %}">
+                {% lucide "circle-plus" size=32 %}
+            </a>
+        {% endif %}
+    </div>
+
     {% if not active_team %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not staffing a team yet" %}</p>
-        </div>
-    {% elif not this_week and not next_week and not later_months %}
-        <div class="m-card p-6 text-center">
-            <p class="text-sm text-muted">{% trans "Nothing scheduled." %}</p>
-        </div>
+        {% trans "No teams" as no_teams_title %}
+        {% trans "You don't coach a team this season." as no_teams_text %}
+        {% include "mobile/_state.html" with kind="empty" icon="users" title=no_teams_title text=no_teams_text %}
     {% else %}
-        <div class="flex flex-col gap-4">
-            {% if this_week %}
-                <div>
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
-                    <div class="m-card flex flex-col overflow-hidden">
-                        {% for event in this_week %}
-                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                            {% include "mobile/coach/_schedule_row.html" %}
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            {% if next_week %}
-                <div>
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
-                    <div class="m-card flex flex-col overflow-hidden">
-                        {% for event in next_week %}
-                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                            {% include "mobile/coach/_schedule_row.html" %}
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            {% for month in later_months %}
-                <div>
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
-                    <div class="m-card flex flex-col overflow-hidden">
-                        {% for event in month.items %}
-                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                            {% include "mobile/coach/_schedule_row.html" %}
-                        {% endfor %}
-                    </div>
-                </div>
+        <div class="-mx-4 flex gap-2 overflow-x-auto px-4 scrollbar-hide" role="group" aria-label="{% trans "Filter by type" %}">
+            <a class="shrink-0 rounded-full border px-3 py-1.5 font-display text-[13px] font-bold tracking-wide uppercase {% if not kind_filter %}border-2 border-ink bg-surface text-ink{% else %}border-line bg-surface text-muted{% endif %}" href="{% url "mobile:coach_schedule" %}"{% if not kind_filter %} aria-current="true"{% endif %}>{% trans "All" %}</a>
+            {% for value, label in kind_choices %}
+                <a class="shrink-0 rounded-full border px-3 py-1.5 font-display text-[13px] font-bold tracking-wide uppercase {% if kind_filter == value %}border-2 border-ink bg-surface text-ink{% else %}border-line bg-surface text-muted{% endif %}" href="{% url "mobile:coach_schedule" %}?kind={{ value }}"{% if kind_filter == value %} aria-current="true"{% endif %}>{{ label }}</a>
             {% endfor %}
         </div>
+
+        {% if not this_week and not next_week and not later_months %}
+            {% trans "No events" as empty_title %}
+            {% trans "Nothing is planned for this team." as empty_text %}
+            {% include "mobile/_state.html" with kind="empty" icon="calendar" title=empty_title text=empty_text %}
+        {% else %}
+            <div class="flex flex-col gap-4">
+                {% if this_week %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
+                        <div class="m-card flex flex-col overflow-hidden">
+                            {% for event in this_week %}
+                                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                                {% include "mobile/coach/_schedule_row.html" %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% if next_week %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
+                        <div class="m-card flex flex-col overflow-hidden">
+                            {% for event in next_week %}
+                                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                                {% include "mobile/coach/_schedule_row.html" %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+
+                {% for month in later_months %}
+                    <div>
+                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
+                        <div class="m-card flex flex-col overflow-hidden">
+                            {% for event in month.items %}
+                                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                                {% include "mobile/coach/_schedule_row.html" %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
     {% endif %}
 {% endblock content %}

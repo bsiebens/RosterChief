@@ -1,0 +1,105 @@
+{% load i18n lucide %}
+<div id="squad-body" class="flex flex-col gap-5">
+    <section aria-labelledby="squad-players">
+        <div class="mb-2 flex items-center justify-between">
+            <h2 id="squad-players" class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Players" %} <span class="ml-1 text-sm text-dim tabular-nums">{{ roster|length }}</span></h2>
+        </div>
+        <div class="m-card overflow-hidden">
+            {% for membership in roster %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <button type="button" class="pressable flex w-full items-center gap-3 p-3.5 text-left" onclick="document.getElementById('player-sheet-{{ membership.pk }}').showModal()" aria-haspopup="dialog">
+                    {% include "mobile/_avatar.html" with person=membership.member size_class="h-10 w-10" text_class="text-sm" %}
+                    <span class="block min-w-0 flex-1">
+                        <span class="flex items-center gap-1.5">
+                            <span class="truncate text-[15px] font-semibold text-ink">{{ membership.member.get_full_name }}</span>
+                            {% if membership.is_captain %}<span class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-club font-display text-[11px] font-extrabold text-club-content" title="{% trans "Captain" %}"><span aria-hidden="true">C</span><span class="sr-only">{% trans "Captain" %}</span></span>{% endif %}
+                            {% if membership.is_alternate_captain and not membership.is_captain %}<span class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-club font-display text-[11px] font-extrabold text-club-content" title="{% trans "Alternate captain" %}"><span aria-hidden="true">A</span><span class="sr-only">{% trans "Alternate captain" %}</span></span>{% endif %}
+                        </span>
+                        <span class="block text-xs text-muted">{{ membership.position|default:_("No position") }}</span>
+                        {% if membership.club_status_pending %}<span class="block text-[11px] font-semibold text-warn-text">{% trans "Sign-up waiting for approval" %}</span>{% endif %}
+                    </span>
+                    {% if membership.jersey_number %}<span class="font-display text-xl font-extrabold text-ink tabular-nums">#{{ membership.jersey_number }}</span>{% endif %}
+                    {% lucide "chevron-right" size=16 class="shrink-0 text-dim" %}
+                </button>
+            {% empty %}
+                <div class="p-6 text-center text-sm text-muted">{% trans "No one on the roster for this season yet." %}</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section aria-labelledby="squad-staff">
+        <div class="mb-2 flex items-center justify-between">
+            <h2 id="squad-staff" class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %} <span class="ml-1 text-sm text-dim tabular-nums">{{ staff|length }}</span></h2>
+            {% if can_manage_active_team %}
+                <a class="icon-btn pressable -my-2 -mr-2 flex h-11 w-11 items-center justify-center text-club-dark" href="{% url "mobile:coach_add_staff" %}" aria-label="{% trans "Add staff" %}">
+                    {% lucide "circle-plus" size=26 %}
+                </a>
+            {% endif %}
+        </div>
+        <div class="m-card overflow-hidden">
+            {% for assignment in staff %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <div class="flex items-center gap-3 p-3.5">
+                    {% include "mobile/_avatar.html" with person=assignment.member size_class="h-10 w-10" text_class="text-sm" %}
+                    <div class="min-w-0 flex-1">
+                        <div class="text-[15px] font-semibold text-ink">{{ assignment.member.get_full_name }}{% if assignment.member_id == me.pk %} <span class="text-xs font-normal text-muted">{% trans "(you)" %}</span>{% endif %}</div>
+                        <div class="text-xs text-muted">{{ assignment.position }}</div>
+                    </div>
+                    {% if can_manage_active_team and assignment.member_id != me.pk %}
+                        <button type="button" class="icon-btn text-club-dark" onclick="document.getElementById('staff-remove-{{ assignment.pk }}').showModal()" aria-haspopup="dialog" aria-label="{% blocktrans with name=assignment.member.get_full_name %}Remove {{ name }} from staff{% endblocktrans %}">
+                            {% lucide "circle-minus" size=20 %}
+                        </button>
+                        <dialog class="sheet" id="staff-remove-{{ assignment.pk }}" aria-labelledby="staff-remove-title-{{ assignment.pk }}" onclick="if (event.target === this) this.close()">
+                            <div class="sheet-handle" aria-hidden="true"></div>
+                            <div class="flex flex-col gap-4 pb-2">
+                                <h2 id="staff-remove-title-{{ assignment.pk }}" class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Remove from staff?" %}</h2>
+                                <p class="text-sm text-slate">{% blocktrans with name=assignment.member.get_full_name %}{{ name }} will no longer be on this team's staff.{% endblocktrans %}</p>
+                                <form class="grid grid-cols-2 gap-2" method="post" action="{% url "mobile:coach_staff_remove" assignment.pk %}" hx-post="{% url "mobile:coach_staff_remove" assignment.pk %}" hx-target="#squad-body" hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+                                    {% csrf_token %}
+                                    <button type="button" class="btn-rc btn-rc-neutral" onclick="this.closest('dialog').close()">{% trans "Cancel" %}</button>
+                                    <button type="submit" class="btn-rc btn-rc-destructive">{% trans "Remove" %}</button>
+                                </form>
+                            </div>
+                        </dialog>
+                    {% endif %}
+                </div>
+            {% empty %}
+                <div class="p-6 text-center text-sm text-muted">{% trans "No staff assigned for this season yet." %}</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    {% for membership in roster %}
+        <dialog class="sheet" id="player-sheet-{{ membership.pk }}" aria-labelledby="player-sheet-title-{{ membership.pk }}" onclick="if (event.target === this) this.close()">
+            <div class="sheet-handle" aria-hidden="true"></div>
+            <div class="flex flex-col gap-4 pb-2">
+                <div class="flex items-center gap-3">
+                    {% include "mobile/_avatar.html" with person=membership.member size_class="h-12 w-12" text_class="text-base" %}
+                    <div class="min-w-0 flex-1">
+                        <h2 id="player-sheet-title-{{ membership.pk }}" class="truncate font-display text-lg font-extrabold text-ink uppercase">{{ membership.member.get_full_name }}</h2>
+                        <p class="text-xs text-muted">{{ membership.position|default:_("No position") }}{% if membership.jersey_number %} &middot; #{{ membership.jersey_number }}{% endif %}</p>
+                    </div>
+                    <button type="button" class="icon-btn" onclick="this.closest('dialog').close()" aria-label="{% trans "Close" %}">{% lucide "x" size=20 %}</button>
+                </div>
+                {% if membership.club_status_pending %}<p class="text-[13px] font-semibold text-warn-text">{% trans "Sign-up waiting for approval" %}</p>{% endif %}
+                <div class="m-card overflow-hidden">
+                    {% if evaluations_enabled %}
+                        <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:coach_evaluation_history" membership.member_id %}">
+                            {% lucide "clipboard-list" size=20 class="shrink-0 text-club" %}
+                            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Evaluations" %}</span>
+                            {% lucide "chevron-right" size=16 class="shrink-0 text-dim" %}
+                        </a>
+                        <div class="h-px bg-rule"></div>
+                    {% endif %}
+                    <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:coach_roster_member" membership.pk %}">
+                        {% if can_manage_active_team %}{% lucide "pencil" size=20 class="shrink-0 text-club" %}{% else %}{% lucide "user" size=20 class="shrink-0 text-club" %}{% endif %}
+                        <span class="flex-1 text-[15px] font-semibold text-ink">{% if can_manage_active_team %}{% trans "Edit player" %}{% else %}{% trans "Player details" %}{% endif %}</span>
+                        {% lucide "chevron-right" size=16 class="shrink-0 text-dim" %}
+                    </a>
+                </div>
+            </div>
+        </dialog>
+    {% endfor %}
+
+    {% if inline_response %}{% include "mobile/coach/_inline_feedback.html" %}{% endif %}
+</div>

@@ -2,9 +2,9 @@
 {% load i18n lucide %}
 
 {% block header_extra %}
-    <a class="font-display text-xs font-bold tracking-wide text-club-dark uppercase" href="{% url "mobile:shop_orders" %}">{% trans "My orders" %}</a>
-    <a class="desktop-icobtn" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
-        {% lucide "shopping-cart" size=17 %}
+    <a class="shop-btn" href="{% url "mobile:shop_orders" %}">{% lucide "package" size=16 %} {% trans "My orders" %}</a>
+    <a class="shop-btn" href="{% url "mobile:shop_cart" %}">
+        {% lucide "shopping-cart" size=16 %} {% trans "Cart" %}
         {% if cart_item_count %}
             <span class="desktop-notidot">{% if cart_item_count > 9 %}9+{% else %}{{ cart_item_count }}{% endif %}</span>
         {% endif %}

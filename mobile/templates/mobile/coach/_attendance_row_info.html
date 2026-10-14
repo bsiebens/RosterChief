@@ -1,0 +1,23 @@
+{% load i18n lucide %}
+{% comment %}Avatar + name/position/status/notes of one attendance row (shared by the tappable and read-only variants).{% endcomment %}
+{% include "mobile/_avatar.html" with person=row.member size_class="h-10 w-10" text_class="text-sm" %}
+<span class="block min-w-0 flex-1">
+    <span class="block text-[15px] font-semibold text-ink">{{ row.member.get_full_name }}</span>
+    {% if row.membership.jersey_number or row.membership.position %}
+        <span class="block text-xs text-muted">{% if row.membership.jersey_number %}#{{ row.membership.jersey_number }}{% endif %}{% if row.membership.jersey_number and row.membership.position %} &middot; {% endif %}{{ row.membership.position|default:"" }}</span>
+    {% endif %}
+    <span class="mt-0.5 flex items-center gap-1.5">
+        <span class="pill pill-sm {{ row.pill_class }}">{{ row.pill_label }}</span>
+        {% if row.answered_by_coach %}<span class="text-[11px] font-semibold text-muted">{% trans "Set by coach" %}</span>{% endif %}
+    </span>
+    {% if row.note %}
+        {# Only ever set alongside absent/maybe -- cleared for present. #}
+        <span class="mt-0.5 block text-xs text-slate italic">&ldquo;{{ row.note }}&rdquo;</span>
+    {% endif %}
+    {% if can_manage_active_team and row.coach_note %}
+        <span class="mt-1 flex items-start gap-1.5 rounded-lg bg-rule px-2 py-1.5 text-xs text-slate">
+            {% lucide "lock" size=11 class="mt-0.5 shrink-0 text-muted" %}
+            <span><span class="sr-only">{% trans "Private note:" %} </span>{{ row.coach_note }}</span>
+        </span>
+    {% endif %}
+</span>

@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to the shop" as back_label %}{% url "mobile:shop_home" as shop_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=shop_url label=back_label width="max-w-[760px]" %}
     <div class="mx-auto w-full max-w-[760px]">
         {% if rows %}
             <div class="card">
@@ -12,8 +14,8 @@
                             <div class="text-xs text-muted">{% blocktrans with name=row.order.purchaser.first_name date=row.order.created|date:"d M Y" %}{{ name }} &middot; {{ date }}{% endblocktrans %}</div>
                         </div>
                         <div class="flex shrink-0 flex-col items-end gap-1">
-                            <span class="pill pill-sm {{ row.payment_pill_class }}">{% lucide "wallet" size=10 %} {{ row.order.get_payment_status_display }}</span>
-                            <span class="pill pill-sm {{ row.member_status_pill_class }}">{% lucide "package" size=10 %} {{ row.order.member_status.label }}</span>
+                            <span class="text-xs text-muted">{{ row.payment_label }}</span>
+                            <span class="pill pill-sm {{ row.status_pill_class }}">{{ row.status_label }}</span>
                         </div>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>

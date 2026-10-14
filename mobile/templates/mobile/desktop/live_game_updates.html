@@ -1,0 +1,48 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n %}
+
+{% block content %}
+    {% include "mobile/desktop/_settings_back.html" %}
+    <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+        <p class="text-sm text-muted">{% trans "Get a push notification while a team is playing: goals, penalties, period ends and the final result. Pick the teams you want to follow." %}</p>
+
+        <form method="post" action="{% url "mobile:live_game_updates" %}" hx-boost="false" class="card">
+            {% csrf_token %}
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Teams" %}</span></div>
+            {% for row in team_rows %}
+                <label class="flex items-center gap-3 border-b border-rule p-4.5">
+                    <input type="checkbox" name="team" value="{{ row.team.pk }}" class="h-5 w-5 shrink-0 accent-ink" {% if row.following %}checked{% endif %}>
+                    <span class="flex-1 text-[15px] font-semibold text-ink">{{ row.team.name }}</span>
+                </label>
+            {% empty %}
+                <p class="p-4.5 text-sm text-muted">{% trans "This club has no teams yet." %}</p>
+            {% endfor %}
+            {% if team_rows %}
+                <div class="p-4.5">
+                    <button class="btn btn-primary" type="submit">{% trans "Save" %}</button>
+                </div>
+            {% endif %}
+        </form>
+
+        {% if followed_games %}
+            <div class="card">
+                <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Individual games" %}</span></div>
+                {% for game in followed_games %}
+                    <div class="flex items-center gap-3 border-b border-rule p-4.5 last:border-b-0">
+                        <a class="min-w-0 flex-1" href="{% url "mobile:event_detail" game.pk %}">
+                            <span class="block truncate text-[15px] font-semibold text-ink">{{ game.title }}</span>
+                            <span class="block truncate text-[13px] text-muted">{{ game.start|date:"D d M, H:i" }}</span>
+                        </a>
+                        <form method="post" action="{% url "mobile:live_game_updates" %}" hx-boost="false">
+                            {% csrf_token %}
+                            <input type="hidden" name="unfollow_game" value="{{ game.pk }}">
+                            <button class="btn btn-outline btn-sm" type="submit">{% trans "Unfollow" %}</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <p class="text-xs text-dim">{% trans "Notifications arrive on this device only once you've allowed notifications for the app." %}</p>
+    </div>
+{% endblock content %}

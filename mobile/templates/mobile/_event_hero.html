@@ -1,0 +1,23 @@
+{% load i18n lucide %}
+{% comment %}
+    The event's hero (iOS EventReplySheet.hero): the club's generic event photo in black & white under a dark gradient -- individual events have no photo of their own -- or the club's navy when none is set; an eyebrow badge in the kind's colour ("Home game", "Practice", "Referee" for a sign-up-only game) and the title ("Team vs Opponent" for a game). In the sheet a "Done" pill closes it; on the full page a back chevron returns to the tab it was opened from. Expects ``hero``, ``event`` and ``in_sheet``.
+{% endcomment %}
+<div class="relative -mx-4 flex min-h-[200px] flex-col overflow-hidden {% if in_sheet %}rounded-t-[20px]{% else %}-mt-4{% endif %}" style="background: var(--color-navy)">
+    {% if club.event_background %}
+        <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+    {% endif %}
+    <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.5) 0%, rgba(11,18,32,.75) 60%, rgba(11,18,32,.96) 100%)"></div>
+    <div class="relative z-10 flex flex-1 flex-col justify-end p-4 pt-14 text-white">
+        {% if not in_sheet %}
+            <a class="absolute top-4 left-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% if request.GET.from == "calendar" %}{% url "mobile:calendar" %}{% else %}{% url "mobile:home" %}{% endif %}" aria-label="{% trans "Back" %}">
+                {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
+            </a>
+        {% endif %}
+        <span class="mb-2.5 inline-block w-fit rounded px-2 py-1 font-display text-xs font-extrabold tracking-wide uppercase {{ hero.badge }}">{{ hero.eyebrow }}</span>
+        {% if in_sheet %}
+            <h2 class="font-display text-[28px] leading-[1.02] font-extrabold uppercase">{{ hero.title }}</h2>
+        {% else %}
+            <h1 class="font-display text-4xl leading-[.98] font-extrabold uppercase">{{ hero.title }}</h1>
+        {% endif %}
+    </div>
+</div>

@@ -5,10 +5,13 @@ pill), switching which team is "active" rather than aggregating across
 several people the way Member mode's person switcher does.
 """
 
+from django.conf import settings
 from django.http import Http404
+from django.urls import reverse
 
 from club.services.access import get_current_season, teams_managed_by, teams_staffed_by
 from members.services.lookup import get_request_member
+from notifications.services import unread_count
 from teams.models import StaffAssignment
 
 from .mixins import MemberAppMixin
@@ -81,9 +84,26 @@ class CoachScopeMixin(MemberAppMixin):
 
         return self.staffed_teams[0] if self.staffed_teams else None
 
+    #: url names of the four Manager tab roots; the team chips in the header switch team *on the
+    #: tab you are on* here, and fall back to Today anywhere deeper (an event or a player belongs
+    #: to one team, so the same URL under another team would 404).
+    TAB_ROOT_URL_NAMES = ("coach_today", "coach_schedule", "coach_squad", "coach_news")
+
+    def _team_chip_base_url(self):
+        match = getattr(self.request, "resolver_match", None)
+        name = match.url_name if match is not None else ""
+        return reverse(f"mobile:{name}") if name in self.TAB_ROOT_URL_NAMES else reverse("mobile:coach_today")
+
     def get_context_data(self, **kwargs):
         kwargs.setdefault("active_tab", getattr(self, "active_tab", ""))
         kwargs.setdefault("screen_title", getattr(self, "screen_title", ""))
+
+        # What mobile/base.html (the shell Manager mode now shares) reads, which PersonScopeMixin
+        # supplies for member screens.
+        kwargs.setdefault("has_coach_access", True)
+        kwargs.setdefault("unread_notification_count", unread_count(self.request.club, [self.me] if self.me is not None else []))
+        kwargs.setdefault("vapid_public_key", settings.VAPID_PUBLIC_KEY)
+        kwargs.setdefault("team_chip_base_url", self._team_chip_base_url())
 
         return super().get_context_data(
             me=self.me,

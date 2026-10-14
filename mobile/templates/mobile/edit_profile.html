@@ -16,12 +16,12 @@
     <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
         {% csrf_token %}
 
-        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
             <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
             </a>
             <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ member.get_full_name }}</span>
-            <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Save" %}</button>
+            <button type="submit" class="btn-rc btn-rc-primary pressable h-9! w-auto! px-3.5! text-sm!">{% if saved %}{% lucide "check" size=16 stroke_width=3 %} {% trans "Saved" %}{% else %}{% trans "Save" %}{% endif %}</button>
         </div>
 
         {% if open_requirement_names %}
@@ -36,15 +36,26 @@
                 <div class="flex items-center gap-3 p-3.5">
                     {% include "mobile/_avatar.html" with person=member size_class="h-14 w-14" text_class="text-xl" %}
                     <div class="min-w-0 flex-1">
-                        {{ form.profile_photo }}
+                        <div x-data="{ name: '' }" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <label for="{{ form.profile_photo.id_for_label }}" class="pressable inline-flex h-9 cursor-pointer items-center rounded-lg bg-night px-3.5 font-display text-sm font-bold tracking-wide text-white uppercase">{% if has_profile_photo %}{% trans "Change picture" %}{% else %}{% trans "Choose picture" %}{% endif %}</label>
+                            <input id="{{ form.profile_photo.id_for_label }}" class="sr-only" type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp" @change="name = $event.target.files[0] ? $event.target.files[0].name : ''">
+                            <span x-show="name" x-text="name" class="min-w-0 truncate text-[13px] text-muted"></span>
+                        </div>
                         {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        {% if has_profile_photo %}
+                            <button type="submit" form="remove-photo-form" class="pressable mt-2 text-[13px] font-semibold text-club">{% trans "Remove photo" %}</button>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="h-px bg-rule"></div>
-                <label class="flex items-center gap-2.5 p-3.5 text-[15px] text-ink">
-                    {{ form.photo_public_consent }}
-                    {{ form.photo_public_consent.label }}
-                </label>
+                <p class="p-3.5 text-[13px] text-muted">{% trans "This picture is shown to everyone in the club's apps. The official player picture is set by the club." %}</p>
+                {% if show_photo_consent %}
+                    <div class="h-px bg-rule"></div>
+                    <label class="flex items-center gap-2.5 p-3.5 text-[15px] text-ink">
+                        {{ form.photo_public_consent }}
+                        {{ form.photo_public_consent.label }}
+                    </label>
+                {% endif %}
             </div>
         </div>
 
@@ -105,5 +116,27 @@
                 {% endfor %}
             </div>
         </div>
+
+        {% if team_rows %}
+            <div>
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Teams" %}</div>
+                <div class="m-card overflow-hidden">
+                    {% for row in team_rows %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <div class="flex items-center gap-3 p-3.5">
+                            <span class="min-w-0 flex-1 truncate text-[15px] font-medium text-ink">{{ row.team.name }}</span>
+                            <span class="shrink-0 text-[13px] text-muted">{% if row.jersey_number %}#{{ row.jersey_number }}{% endif %}{% if row.jersey_number and row.position %} &middot; {% endif %}{% if row.position %}{{ row.position }}{% endif %}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
     </form>
+
+    {% if has_profile_photo %}
+        <form id="remove-photo-form" method="post" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="remove_photo">
+        </form>
+    {% endif %}
 {% endblock content %}

@@ -17,38 +17,89 @@
 {% endblock head_title %}
 
 {% block content %}
-    {% element h1 %}
-        {% trans "Two-Factor Authentication" %}
-    {% endelement %}
-    {% element p %}
-        {% blocktranslate %}Your account is protected by two-factor authentication. Please enter an authenticator code:{% endblocktranslate %}
-    {% endelement %}
+    {% if base_template == "mobile/_auth_base.html" %}
+        {% comment %}
+            iOS TwoFactorView: one code field that takes an authenticator code or a recovery
+            code (allauth's `code` field accepts both), a Verify button, "Use a passkey
+            instead" when the account has one, a toggle between the two hints, and Cancel.
+            The toggle only changes the hint and switches the field between six boxes and a
+            plain input (data-recovery, read by the data-otp script in mobile/_auth_base.html).
+        {% endcomment %}
+        <div class="flex flex-col items-center gap-2 pb-6 text-center">
+            <h1 class="m-0 font-display text-2xl leading-none font-extrabold text-ink uppercase">{% trans "Two-Factor Verification" %}</h1>
+            <p id="mfa-hint" class="m-0 text-sm text-muted" data-code="{% trans "Enter the 6-digit code from your authenticator app." %}" data-recovery="{% trans "Enter one of your recovery codes." %}">{% trans "Enter the 6-digit code from your authenticator app." %}</p>
+        </div>
 
-    <form class="mt-8" method="post" action="{% url 'mfa_authenticate' %}">
-        {% csrf_token %}
-
-        <div class="mb-10">
+        <form method="post" action="{% url 'mfa_authenticate' %}" class="flex flex-col gap-4">
+            {% csrf_token %}
             {% element fields form=form unlabeled=True %}
             {% endelement %}
-        </div>
 
-        <div class="flex flex-wrap items-center justify-end gap-2">
-            <button class="btn btn-outline btn-neutral gap-2" type="submit" form="logout-from-stage">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
-            <button class="btn btn-primary gap-2" type="submit">{% lucide "log-in" size=16 %} {% trans "Sign In" %}</button>
-        </div>
-    </form>
+            <button class="btn-rc btn-rc-primary" type="submit">{% trans "Verify" %}</button>
+
+            {% if "webauthn" in MFA_SUPPORTED_TYPES %}
+                <button class="btn-rc btn-rc-neutral" type="button" form="webauthn_form" id="mfa_webauthn_authenticate">{% lucide "key-round" size=18 %} {% trans "Use a passkey instead" %}</button>
+            {% endif %}
+
+            <button id="mfa-toggle" type="button" class="text-center text-sm font-semibold text-club" data-code="{% trans "Use a recovery code instead" %}" data-recovery="{% trans "Use authenticator code instead" %}">{% trans "Use a recovery code instead" %}</button>
+            <button class="text-center text-sm text-muted" type="submit" form="logout-from-stage">{% trans "Cancel" %}</button>
+        </form>
+
+        <script>
+            (function () {
+                const toggle = document.getElementById("mfa-toggle");
+                const hint = document.getElementById("mfa-hint");
+                const otp = document.querySelector("[data-otp]");
+                if (!toggle || !hint || !otp) return;
+                const input = otp.querySelector("input");
+                let recovery = false;
+                toggle.addEventListener("click", () => {
+                    recovery = !recovery;
+                    hint.textContent = recovery ? hint.dataset.recovery : hint.dataset.code;
+                    toggle.textContent = recovery ? toggle.dataset.recovery : toggle.dataset.code;
+                    otp.toggleAttribute("data-recovery", recovery);
+                    input.value = "";
+                    input.inputMode = recovery ? "text" : "numeric";
+                    input.dispatchEvent(new Event("input"));
+                    input.focus();
+                });
+            })();
+        </script>
+    {% else %}
+        {% element h1 %}
+            {% trans "Two-Factor Authentication" %}
+        {% endelement %}
+        {% element p %}
+            {% blocktranslate %}Your account is protected by two-factor authentication. Please enter an authenticator code:{% endblocktranslate %}
+        {% endelement %}
+
+        <form class="mt-8" method="post" action="{% url 'mfa_authenticate' %}">
+            {% csrf_token %}
+
+            <div class="mb-10">
+                {% element fields form=form unlabeled=True %}
+                {% endelement %}
+            </div>
+
+            <div class="flex flex-wrap items-center justify-end gap-2">
+                <button class="btn btn-outline btn-neutral gap-2" type="submit" form="logout-from-stage">{% lucide "x" size=16 %} {% trans "Cancel" %}</button>
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "log-in" size=16 %} {% trans "Sign In" %}</button>
+            </div>
+        </form>
+    {% endif %}
 
     {% if "webauthn" in MFA_SUPPORTED_TYPES %}
-        {% element hr %}
-        {% endelement %}
-        {% element h2 %}
-            {% translate "Alternative options" %}
-        {% endelement %}
+        {% if base_template != "mobile/_auth_base.html" %}
+            {% element hr %}
+            {% endelement %}
+            {% element h2 %}
+                {% translate "Alternative options" %}
+            {% endelement %}
 
-        <button class="btn btn-accent gap-2" type="button" form="webauthn_form" id="mfa_webauthn_authenticate">
-            {% lucide "user-key" size=16 %} {% trans "Use a security key" %}
-        </button>
-
+            <button class="btn btn-accent gap-2" type="button" form="webauthn_form" id="mfa_webauthn_authenticate">
+                {% lucide "user-key" size=16 %} {% trans "Use a security key" %}
+            </button>
+        {% endif %}
         <form id="webauthn_form" method="post" action="{% url 'mfa_authenticate' %}">
             {% csrf_token %}
             {{ webauthn_form.credential }}

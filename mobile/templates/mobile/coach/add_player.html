@@ -2,61 +2,81 @@
 {% load i18n lucide %}
 
 {% comment %}
-    C6 -- the design handoff's C6 section: a
-    checkbox per eligible candidate rather than one member at a time (see
-    CoachAddPlayerView's own docstring for why, and what's scoped down from
-    the mock -- no "Age eligible" filter, no fixed footer).
+    C6 -- add players to the roster (iOS AddToRosterView): live search, All /
+    Suggested / No team chips, a reason label on suggested players (age
+    match, last season, feeder team, close in age), the player's birth year
+    and current team(s), and a checkbox per candidate. See CoachAddPlayerView.
+
+    Search and chips swap only #candidate-region (hx-get + hx-select against
+    the same URL, so it works with the plain full-page view and a no-JS
+    browser still gets a normal GET form). What's ticked lives in Alpine
+    (``chosen``) and goes out as hidden inputs, so ticks survive a search.
 {% endcomment %}
 
 {% block header_extra %}
-    <div class="mt-3 flex items-center justify-between">
-        <span class="font-display text-lg font-extrabold text-white uppercase">{% blocktrans with team=active_team.name %}Add to {{ team }}{% endblocktrans %}</span>
-        <span class="font-mono text-xs text-on-dark">{% blocktrans count counter=squad_count %}{{ counter }} on squad{% plural %}{{ counter }} on squad{% endblocktrans %}</span>
+    <div class="mt-3 flex items-center justify-between gap-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:coach_squad" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=24 stroke_width=2.4 class="text-white" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-lg font-extrabold text-white uppercase">{% blocktrans with team=active_team.name %}Add to {{ team }}{% endblocktrans %}</span>
+        <span class="shrink-0 font-mono text-xs text-on-dark">{% blocktrans count counter=squad_count %}{{ counter }} on squad{% plural %}{{ counter }} on squad{% endblocktrans %}</span>
     </div>
 {% endblock header_extra %}
 
 {% block content %}
-    <form method="get" class="relative">
-        {% if filter_param %}<input type="hidden" name="filter" value="{{ filter_param }}">{% endif %}
-        <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=16 %}</span>
-        <input type="search" name="q" value="{{ search_query }}" placeholder="{% trans "Search by name" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper pr-3 pl-9 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
-    </form>
-
-    <div class="flex gap-2">
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?{% if search_query %}q={{ search_query|urlencode }}{% endif %}">
-            {% trans "All" %}
-        </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "suggested" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=suggested{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
-            {% trans "Suggested" %}
-        </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "no_team" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=no_team{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
-            {% trans "No team" %}
-        </a>
-    </div>
-
-    {% if filter_param == "suggested" %}
-        <p class="text-xs text-muted">{% trans "Was on this team's roster last season, or is on a team that feeds into this one this season." %}</p>
-    {% elif filter_param == "no_team" %}
-        <p class="text-xs text-muted">{% trans "Not on any team's roster yet this season." %}</p>
-    {% endif %}
-
-    <form method="post" action="{% url "mobile:coach_add_player" %}" x-data="{ count: 0 }" hx-boost="false">
+    <form method="post" action="{% url "mobile:coach_add_player" %}" x-data="{ chosen: [], toggle(id) { const i = this.chosen.indexOf(id); i === -1 ? this.chosen.push(id) : this.chosen.splice(i, 1) } }" hx-boost="false" class="flex flex-col gap-4">
         {% csrf_token %}
-        <div class="m-card flex flex-col overflow-hidden">
-            {% for candidate in candidates %}
-                <label class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %}">
-                    {% include "mobile/_avatar.html" with person=candidate size_class="h-9 w-9" text_class="text-xs" %}
-                    <span class="min-w-0 flex-1 text-sm font-semibold text-ink">{{ candidate.get_full_name }}</span>
-                    <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="member" value="{{ candidate.pk }}" @change="count = $el.form.querySelectorAll('input[name=member]:checked').length">
-                </label>
-            {% empty %}
-                <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one matches." %}</div>
-            {% endfor %}
+        <template x-for="id in chosen" :key="id"><input type="hidden" name="member" :value="id"></template>
+
+        <div class="relative">
+            <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=16 %}</span>
+            <label class="sr-only" for="candidate-q">{% trans "Search by name" %}</label>
+            <input id="candidate-q" type="search" name="q" value="{{ search_query }}" placeholder="{% trans "Search by name" %}" autocomplete="off" class="h-11 w-full rounded-lg border border-stroke bg-paper pr-3 pl-9 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
+                   hx-get="{% url "mobile:coach_add_player" %}" hx-trigger="input changed delay:300ms, search" hx-include="#candidate-filter" hx-target="#candidate-region" hx-select="#candidate-region" hx-swap="outerHTML" hx-sync="this:replace" hx-indicator="#candidate-loading"
+                   @keydown.enter.prevent>
+        </div>
+        <span id="candidate-loading" class="htmx-indicator text-xs text-muted" aria-hidden="true">{% trans "Searching…" %}</span>
+
+        <div id="candidate-region" class="flex flex-col gap-4">
+            <input type="hidden" id="candidate-filter" name="filter" value="{{ filter_param }}">
+            <nav class="flex gap-2" aria-label="{% trans "Show" %}">
+                {% for value, label in filter_chips %}
+                    <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == value %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?{% if value %}filter={{ value }}{% endif %}{% if search_query %}{% if value %}&{% endif %}q={{ search_query|urlencode }}{% endif %}" hx-get="{% url "mobile:coach_add_player" %}?{% if value %}filter={{ value }}{% endif %}" hx-include="#candidate-q" hx-target="#candidate-region" hx-select="#candidate-region" hx-swap="outerHTML" {% if filter_param == value %}aria-current="true"{% endif %}>
+                        {{ label }}
+                    </a>
+                {% endfor %}
+            </nav>
+
+            {% if filter_param == "suggested" %}
+                <p class="text-xs text-muted">{% trans "Matches this team's age group, was on this team's roster last season, or is on a team that feeds into this one this season." %}</p>
+            {% elif filter_param == "no_team" %}
+                <p class="text-xs text-muted">{% trans "Not on any team's roster yet this season." %}</p>
+            {% endif %}
+
+            <div class="m-card flex flex-col overflow-hidden">
+                {% for candidate in candidates %}
+                    <label class="flex items-center gap-3 px-4 py-3 {% if not forloop.last %}border-b border-rule{% endif %}">
+                        {% include "mobile/_avatar.html" with person=candidate size_class="h-10 w-10" text_class="text-sm" %}
+                        <span class="block min-w-0 flex-1">
+                            <span class="block text-[15px] font-semibold text-ink">{{ candidate.get_full_name }}</span>
+                            {% if candidate.birth_year or candidate.current_team_names %}
+                                <span class="block text-xs text-muted">{% if candidate.birth_year %}{{ candidate.birth_year }}{% endif %}{% if candidate.birth_year %} &middot; {% endif %}{% if candidate.current_team_names %}{{ candidate.current_team_names|join:", " }}{% else %}{% trans "No team" %}{% endif %}</span>
+                            {% endif %}
+                        </span>
+                        {% if candidate.suggestion_label %}
+                            <span class="pill pill-sm shrink-0 {% if candidate.suggestion_reason == "age_adjacent" %}pill-neutral{% else %}pill-ok{% endif %}">{{ candidate.suggestion_label }}</span>
+                        {% endif %}
+                        <input class="h-6 w-6 shrink-0 accent-ink" type="checkbox" value="{{ candidate.pk }}" :checked="chosen.includes('{{ candidate.pk }}')" @change="toggle('{{ candidate.pk }}')" aria-label="{% blocktrans with name=candidate.get_full_name %}Add {{ name }}{% endblocktrans %}">
+                    </label>
+                {% empty %}
+                    <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one matches." %}</div>
+                {% endfor %}
+            </div>
         </div>
 
-        <button class="btn btn-dark mt-4 w-full" type="submit" :disabled="count === 0">
-            <span x-show="count === 0">{% trans "Select players to add" %}</span>
-            <span x-show="count > 0" x-cloak>{% trans "Add" %} (<span x-text="count"></span>)</span>
+        <button class="btn-rc btn-rc-primary w-full" type="submit" :disabled="chosen.length === 0">
+            <span x-show="chosen.length === 0">{% trans "Select players to add" %}</span>
+            <span x-show="chosen.length > 0" x-cloak>{% trans "Add" %} (<span x-text="chosen.length"></span>)</span>
         </button>
     </form>
 {% endblock content %}

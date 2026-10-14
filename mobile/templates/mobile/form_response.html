@@ -9,28 +9,24 @@
 {% endcomment %}
 
 {% block content %}
-    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:forms_list" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ submission.send.form.title }}</span>
     </div>
 
-    <div class="flex items-center gap-2 text-xs text-muted">
+    <div class="flex items-center gap-2 text-[13px] text-muted">
         {% if submission.member != me %}<span>{{ submission.member.first_name }} &middot;</span>{% endif %}
-        <span>{% blocktrans with date=submission.submitted_at|date:"d M Y H:i" %}Submitted {{ date }}{% endblocktrans %}</span>
+        <span>{% blocktrans with date=submission.submitted_at|date:"DATETIME_FORMAT" %}Submitted {{ date }}{% endblocktrans %}</span>
     </div>
 
     <div class="m-card overflow-hidden">
         {% for row in rows %}
             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-            <div class="p-3.5">
-                <div class="mb-1 text-xs text-muted">{{ row.field.label }}</div>
-                {% if row.display is None %}
-                    <div class="text-[15px] text-dim">{% trans "No answer" %}</div>
-                {% else %}
-                    <div class="text-[15px] whitespace-pre-line text-ink">{{ row.display }}</div>
-                {% endif %}
+            <div class="flex flex-col gap-0.5 p-3.5">
+                <div class="text-xs text-muted">{{ row.field.label }}</div>
+                <div class="text-[15px] whitespace-pre-line text-ink">{% if row.display is None or row.display == "" %}&mdash;{% else %}{{ row.display }}{% endif %}</div>
             </div>
         {% endfor %}
     </div>

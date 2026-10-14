@@ -1,0 +1,11 @@
+{% load i18n %}
+{% comment %}
+    A page of inbox rows plus the infinite-scroll sentinel for the next one. Rendered on its
+    own for the sentinel's request (NotificationsView, HX-Target "notif-more").
+{% endcomment %}
+{% for row in rows %}
+    {% include "mobile/_notification_row.html" %}
+{% endfor %}
+{% if page.has_next %}
+    <div id="notif-more" class="py-4 text-center text-[13px] font-semibold text-muted" hx-get="{% url "mobile:notifications" %}?page={{ page.next_page_number }}" hx-trigger="revealed, click" hx-target="this" hx-swap="outerHTML" hx-push-url="false">{% trans "Loading more…" %}</div>
+{% endif %}

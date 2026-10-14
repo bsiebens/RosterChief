@@ -2,59 +2,90 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Renders send.form's dynamic Field set (formbuilder.services.form_factory.
-    build_form, styled by mobile.forms.style_dynamic_form) -- generic, one
-    .m-card row per field, since the field set isn't known ahead of time the
-    way every other mobile form (edit_profile.html, ...) is. See
-    mobile.views.FormFillView.
+    Renders send.form's dynamic Field set (formbuilder.services.form_factory.build_form, styled by mobile.forms.style_dynamic_form), like the native app: the description, a "closed" banner, a "For" picker when the form is addressed to several of the people the account manages, the fields grouped under their section headings (one card per section, one row per field), a highlighted required-field check before anything is sent, and a full-width Submit at the bottom. The server has the last word (formbuilder.services.submission.submit_form), so a rejected POST re-renders here with its field errors. See mobile.views.FormFillView.
 {% endcomment %}
 
 {% block content %}
-    <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
+    <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false" novalidate data-required-text="{% trans "This field is required." %}"
+          x-data="{
+            missing: false,
+            check(event) {
+                let first = null;
+                this.$root.querySelectorAll('[data-field][data-required]').forEach((wrapper) => {
+                    const inputs = Array.from(wrapper.querySelectorAll('input, select, textarea')).filter((input) => input.type !== 'hidden');
+                    const kinds = new Set(inputs.map((input) => input.type));
+                    let filled;
+                    if (kinds.has('checkbox') || kinds.has('radio')) filled = inputs.some((input) => input.checked);
+                    else if (kinds.has('file')) filled = inputs.some((input) => input.files.length > 0 || wrapper.dataset.hasFile === '1');
+                    else filled = inputs.some((input) => input.value.trim() !== '');
+                    wrapper.classList.toggle('field-missing', !filled);
+                    const message = wrapper.querySelector('[data-required-msg]');
+                    message.textContent = this.$root.dataset.requiredText;
+                    message.hidden = filled;
+                    if (!filled && !first) first = wrapper;
+                });
+                this.missing = first !== null;
+                if (first) { event.preventDefault(); first.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+            },
+          }"
+          @submit="check($event)">
         {% csrf_token %}
 
-        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
-            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
+        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
+            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:forms_list" %}" aria-label="{% trans "Back" %}">
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
             </a>
             <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ send.form.title }}</span>
-            <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Submit" %}</button>
         </div>
 
-        {% if show_for_member %}
-            <div class="m-card p-3.5 text-sm text-ink">
-                {% blocktrans with name=for_member.get_full_name %}Filling in for <strong>{{ name }}</strong>{% endblocktrans %}
-                {% if fill_for_others %}
-                    <div class="mt-1 text-xs text-muted">
-                        {% trans "Fill in for someone else:" %}
-                        {% for person in fill_for_others %}
-                            <a class="font-semibold text-club" href="{% url "mobile:form_fill" send.pk %}?for={{ person.pk }}">{{ person.get_full_name }}</a>{% if not forloop.last %},{% endif %}
-                        {% endfor %}
-                    </div>
-                {% endif %}
-            </div>
+        {% if send.form.description %}
+            <p class="text-[15px] text-slate">{{ send.form.description|linebreaksbr }}</p>
         {% endif %}
 
-        {% if send.form.description %}
-            <p class="text-sm text-muted">{{ send.form.description|linebreaksbr }}</p>
+        {% if not send_is_open %}
+            <p class="rounded-[10px] border border-warn-border bg-warn-bg p-3 text-[13px] text-warn-text" role="status">{% trans "This form is closed." %}</p>
+        {% endif %}
+
+        {% if addressed|length > 1 %}
+            <label class="flex items-center justify-between gap-3">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "For" %}</span>
+                <select class="h-11 rounded-lg border border-stroke bg-surface px-3 text-[15px] text-ink focus:border-ink focus:outline-none" onchange="window.location = this.value">
+                    {% for person in addressed %}
+                        <option value="{% url "mobile:form_fill" send.pk %}?for={{ person.pk }}"{% if person == for_member %} selected{% endif %}>{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        {% elif for_member != me %}
+            <p class="text-sm text-muted">{% blocktrans with name=for_member.get_full_name %}For {{ name }}{% endblocktrans %}</p>
         {% endif %}
 
         {% for error in form.non_field_errors %}
             <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
         {% endfor %}
 
-        <div class="m-card overflow-hidden">
-            {% for field in form %}
-                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                <div class="p-3.5">
-                    <label class="mb-1 block text-xs text-muted" for="{{ field.id_for_label }}">
-                        {{ field.label }}{% if field.field.required %} *{% endif %}
-                    </label>
-                    {{ field }}
-                    {% if field.help_text %}<p class="mt-1 text-xs text-muted">{{ field.help_text }}</p>{% endif %}
-                    {% for error in field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+        {% for section in sections %}
+            <section class="flex flex-col gap-2">
+                {% if section.title %}
+                    <div class="px-0.5 pt-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ section.title }}</div>
+                {% endif %}
+                <div class="m-card overflow-hidden">
+                    {% for field in section.fields %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <div class="p-3.5 [&.field-missing]:bg-danger-bg" data-field{% if field.field.required %} data-required{% endif %}>
+                            <label class="mb-1.5 block text-[13px] font-semibold text-muted" for="{{ field.id_for_label }}">
+                                {{ field.label }}{% if field.field.required %} *{% endif %}
+                            </label>
+                            {{ field }}
+                            {% if field.help_text %}<p class="mt-1 text-xs text-dim">{{ field.help_text }}</p>{% endif %}
+                            {% for error in field.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
+                            <p class="mt-1 text-xs text-club-dark" data-required-msg hidden></p>
+                        </div>
+                    {% endfor %}
                 </div>
-            {% endfor %}
-        </div>
+            </section>
+        {% endfor %}
+
+        <p class="text-[13px] text-club-dark" x-show="missing" x-cloak role="alert">{% trans "Please complete the highlighted fields." %}</p>
+        <button type="submit" class="btn-rc btn-rc-primary"{% if not send_is_open %} disabled{% endif %}>{% trans "Submit" %}</button>
     </form>
 {% endblock content %}

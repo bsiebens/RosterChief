@@ -191,6 +191,33 @@ class NotificationPreference(models.Model):
         return f"{self.user} {self.category}/{self.channel}={'on' if self.enabled else 'off'}"
 
 
+class NotificationMasterSwitch(models.Model):
+    """The "All push" / "All emails" master toggle for one scope (same three scopes as
+    ``NotificationPreference``: one person in a club, one club, every club). ``enabled`` False means
+    *nothing* on that channel in that scope, whatever the per-category switches say; True (or no row)
+    leaves the per-category switches to decide. The most specific scope's row wins."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notification_master_switches", verbose_name=_("account"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, null=True, blank=True, related_name="notification_master_switches", verbose_name=_("club"))
+    member = models.ForeignKey("members.Member", on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("member"))
+    channel = models.CharField(_("channel"), max_length=8, choices=NotificationPreference.Channel.choices)
+    enabled = models.BooleanField(_("enabled"), default=True)
+    modified = models.DateTimeField(_("modified"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("notification master switch")
+        verbose_name_plural = _("notification master switches")
+        constraints = [
+            models.UniqueConstraint(fields=["user", "channel"], condition=models.Q(club__isnull=True, member__isnull=True), name="unique_global_notification_master"),
+            models.UniqueConstraint(fields=["user", "club", "channel"], condition=models.Q(club__isnull=False, member__isnull=True), name="unique_club_notification_master"),
+            models.UniqueConstraint(fields=["user", "club", "member", "channel"], condition=models.Q(member__isnull=False), name="unique_member_notification_master"),
+            models.CheckConstraint(condition=models.Q(member__isnull=True) | models.Q(club__isnull=False), name="member_master_needs_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} all {self.channel}={'on' if self.enabled else 'off'}"
+
+
 class QuietHours(models.Model):
     """A daily window in which an account's *pushes* are held until it ends (``HELD`` deliveries),
     or dropped for categories that go stale (live games). ``Critical`` notifications and email are

@@ -15,19 +15,19 @@
 {% block content %}
     <div class="-mx-4 -mt-4 flex h-[330px] flex-col justify-end p-4 text-white"
          style="background: linear-gradient(180deg, rgba(11,18,32,.6) 0%, rgba(11,18,32,0) 40%, rgba(11,18,32,.88) 100%){% if news_item.main_photo %}, url('{{ news_item.main_photo.image.url }}') {{ news_item.main_photo.object_position }}/cover no-repeat{% else %}, var(--color-navy){% endif %}">
-        <a class="mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-white/15" href="{% if request.GET.from == "news_list" %}{% url "mobile:news_list" %}{% else %}{% url "mobile:home" %}#news{% endif %}" aria-label="{% trans "Back" %}">
+        <a class="icon-btn pressable mb-auto flex h-11 w-11 items-center justify-center rounded-full bg-black/35" href="{% if request.GET.from == "news_list" %}{% url "mobile:news_list" %}{% else %}{% url "mobile:home" %}#news{% endif %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-white" %}
         </a>
         <span class="mb-1.5 inline-block w-fit font-display text-xs font-extrabold tracking-wide text-club uppercase">
             {% with team=news_item.teams.first %}
                 {% if team %}{{ team.short_name }}{% else %}{% trans "Club news" %}{% endif %}
             {% endwith %}
-            &middot; {{ news_item.published_at|date:"d M Y" }}
+            &middot; {{ news_item.published_at|date:"d M Y, H:i" }}
         </span>
         <h1 class="font-display text-4xl leading-[.96] font-extrabold uppercase">{{ article_title }}</h1>
     </div>
 
-    <div class="flex flex-col gap-3.5">
+    <div class="flex flex-col gap-3.5 pt-1">
         <div class="article-body">{{ article_body|safe }}</div>
 
         {% with teams=news_item.teams.all %}
@@ -53,7 +53,7 @@
             {% endif %}
             {# Internal-only news has no public page for the shared link to land on -- whoever opens it just hits the login wall, so there's nothing useful to share here. #}
             {% if news_item.visibility != "internal" %}
-                <button type="button" class="btn btn-secondary h-[38px] px-3.5 text-sm" onclick="navigator.share ? navigator.share({title: '{{ article_title|escapejs }}', url: window.location.href}).catch(() => {}) : null">{% trans "Share" %}</button>
+                <button type="button" class="btn-rc btn-rc-neutral pressable h-[38px]! w-auto! px-4 text-sm" data-share-title="{{ article_title }}" onclick="navigator.share ? navigator.share({title: this.dataset.shareTitle, url: window.location.href}).catch(() => {}) : null">{% lucide "share" size=16 %} {% trans "Share" %}</button>
             {% endif %}
         </div>
     </div>

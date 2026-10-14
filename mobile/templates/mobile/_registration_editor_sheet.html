@@ -1,0 +1,8 @@
+{% load i18n %}
+{% comment %}
+    The registration editor sheet: always on the page, closed. An htmx response swaps #registration-editor-body and static/js/mobile-reregister-rows.js opens it; after a plain post (no JavaScript, or a failed validation) the server renders it already ``open`` with the editor inside, and the script upgrades it to a modal.
+{% endcomment %}
+<dialog id="registration-editor" class="sheet sheet-large bg-paper" aria-label="{% trans "Registration" %}" {% if editor %}open data-autoopen{% endif %}>
+    <div class="sticky top-0 z-30 -mx-4 -mb-6 flex h-6 items-center justify-center"><span class="block h-[5px] w-9 rounded-full bg-line"></span></div>
+    <div id="registration-editor-body" class="pt-6">{% if editor %}{% include "mobile/_registration_entry_editor.html" %}{% endif %}</div>
+</dialog>

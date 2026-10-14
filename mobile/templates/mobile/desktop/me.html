@@ -10,7 +10,7 @@
     {% else %}
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
             <div class="flex flex-col gap-4">
-                <div class="card flex items-center gap-4 bg-gradient-to-br from-ink to-navy p-6 text-white">
+                <div class="card flex items-center gap-4 bg-gradient-to-br from-night to-navy p-6 text-white">
                     {% include "mobile/_avatar.html" with person=me size_class="h-14 w-14" text_class="text-xl" bg_class="bg-club" content_class="text-club-content" %}
                     <div class="min-w-0">
                         <div class="font-display text-xl font-extrabold uppercase">{{ me.get_full_name }}</div>
@@ -47,7 +47,7 @@
                 </div>
 
                 {% if staff_assignments %}
-                    <div class="card bg-ink text-white">
+                    <div class="card bg-night text-white">
                         <div class="border-b px-4.5 py-3.5" style="border-color: var(--color-hairline)"><span class="card-title text-white">{% trans "Teams I coach/manage" %}</span></div>
                         {% for assignment in staff_assignments %}
                             <a class="flex items-center gap-3 border-b px-4.5 py-3 last:border-b-0" style="border-color: var(--color-hairline)" href="{% url "management:home" %}" hx-boost="false">
@@ -105,19 +105,47 @@
                         {% if open_dues_count %}<span class="pill pill-sm pill-danger shrink-0">{% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}</span>{% endif %}
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
-                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:notifications" %}">
+                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:notification_settings" %}">
                         <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notifications" %}</span>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
+                    {% if live_game_updates_enabled %}
+                        <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:live_game_updates" %}">
+                            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Live game updates" %}</span>
+                            {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                        </a>
+                    {% endif %}
                     <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:calendar_feed_settings" %}">
                         <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
+                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:security" %}">
+                        <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Security" %}</span>
+                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                    </a>
+                    {% if has_multiple_clubs %}
+                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:club_picker" %}">
+                        <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Switch club" %}</span>
+                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                    </a>
+                    {% endif %}
                     <a class="flex items-center gap-3 px-4.5 py-3" href="{% url "mobile:bug_list" %}">
                         <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Report a bug" %}</span>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
                 </div>
+
+                <form class="card" action="{% url "set_language" %}" method="post" hx-boost="false">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                    <div class="border-b border-rule px-4.5 py-3 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Language" %}</div>
+                    {% for language in available_languages %}
+                        <button class="flex w-full items-center gap-3 px-4.5 py-3 text-left{% if not forloop.last %} border-b border-rule{% endif %}" type="submit" name="language" value="{{ language.code }}" lang="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}aria-current="true"{% endif %}>
+                            <span class="flex-1 text-[15px] font-semibold text-ink">{{ language.name_local }}</span>
+                            {% if language.code == LANGUAGE_CODE %}{% lucide "check" size=18 class="shrink-0 text-club" %}{% endif %}
+                        </button>
+                    {% endfor %}
+                </form>
 
                 <p class="text-center font-mono text-xs text-dim">{% blocktrans with club_name=club.name version=platform_version %}RosterChief &middot; {{ club_name }} &middot; v{{ version }}{% endblocktrans %}</p>
             </div>

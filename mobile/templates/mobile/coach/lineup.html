@@ -2,145 +2,27 @@
 {% load i18n lucide %}
 
 {% comment %}
-    C3 -- the design handoff's C3 section, kept
-    deliberately simple per product feedback: a plain yes/no toggle per
-    available roster player, grouped by position ("category") rather than
-    the mock's lines/slots -- see CoachLineupView's own docstring for why an
-    earlier tap-to-place build was replaced. The mock's "fully dark screen"
-    is approximated with dark cards throughout rather than overriding the
-    shared .coach-sheet's own light background -- a real per-screen shell
-    hook is more infrastructure than one screen justifies.
-
-    The one form is hx-boost="false", same reasoning as every other
-    write-action form in this app (see mobile/templates/mobile/event_detail.
-    html's own top-of-file comment) -- each row's Yes/No pair is
-    Alpine-owned (x-data toggling a hidden input), and this codebase hasn't
-    established an htmx interaction pattern to layer on top of that safely.
-
-    The Publish section below stays visible after the first publish too (not
-    just while draft) -- editing selections and hitting "Save line-up" never
-    notifies anyone by itself (see CoachLineupView's own docstring), so a
-    coach who changes an already-published lineup needs an explicit
-    "Publish changes" step to sync it and notify whoever's status changed.
+    C3 -- a game's line-up, iOS-parity: a plain pick per available roster
+    player, grouped by position, saved the moment you tap (nobody is told
+    until Publish -- see CoachLineupView's docstring), a pending-changes line
+    ("N will hear they're in"), a Publish sheet (now / later) and a success
+    toast. The list is _lineup_body.html, swapped in place by every inline
+    save; this page holds the header, pull-to-refresh and the feedback hosts.
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block header_extra %}
-    <div class="mt-3 flex items-center justify-between">
-        <div class="flex min-w-0 flex-1 items-center gap-2">
-            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:coach_schedule" %}" aria-label="{% trans "Back" %}">
-                {% lucide "chevron-left" size=24 stroke_width=2.4 class="text-white" %}
-            </a>
-            <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-white uppercase">{{ event.title }}</span>
-        </div>
-        {% if lineup.published_at %}
-            <span class="pill pill-info shrink-0">{% trans "Published" %}</span>
-        {% elif lineup.scheduled_publish_at %}
-            <span class="pill pill-warn shrink-0">{% trans "Scheduled" %}</span>
-        {% endif %}
+    <div class="mt-3 flex items-center gap-2">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:coach_schedule" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=24 stroke_width=2.4 class="text-white" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-white uppercase">{{ event.title }}</span>
     </div>
     {% include "mobile/coach/_event_tabs.html" with active_screen="lineup" %}
 {% endblock header_extra %}
 
 {% block content %}
-    {% if task_rows or needs_referees or needs_officials %}
-        <div class="m-card-dark p-3">
-            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{% trans "Tasks & officiating" %}</div>
-            <div class="flex flex-wrap gap-1.5">
-                {% for task in task_rows %}
-                    <span class="pill pill-sm {% if task.is_full %}pill-ok{% else %}pill-warn{% endif %}">{{ task.title }}: {% if task.claim_labels %}{{ task.claim_labels|join:", " }}{% else %}{% trans "open" %}{% endif %}</span>
-                {% endfor %}
-                {% if needs_referees %}
-                    <span class="pill pill-sm {% if not referee_rows %}pill-danger{% elif referee_rows|length < event.max_referees %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Referees" %}: {% if referee_rows %}{% for referee in referee_rows %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
-                {% endif %}
-                {% if needs_officials %}
-                    <span class="pill pill-sm {% if not official_rows %}pill-danger{% elif official_rows|length < event.max_officials %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Officials" %}: {% if official_rows %}{% for official in official_rows %}{{ official.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
-                {% endif %}
-            </div>
-        </div>
-    {% endif %}
-
-    <form method="post" action="{% url "mobile:coach_lineup" event.pk %}" hx-boost="false">
-        {% csrf_token %}
-        <div class="flex flex-col gap-3">
-            {% for category in categories %}
-                <div class="m-card-dark p-3">
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-ice uppercase">{{ category.label }}</div>
-                    <div class="flex flex-col gap-2">
-                        {% for row in category.rows %}
-                            <div class="flex items-center gap-3" {% if can_manage_active_team %}x-data="{ state: '{{ row.selected|yesno:'true,false' }}' }"{% endif %}>
-                                <div class="min-w-0 flex-1 text-sm text-white">
-                                    {{ row.member.get_full_name }}
-                                    {% if row.membership.jersey_number %}<span class="text-on-dark-dim">&middot; #{{ row.membership.jersey_number }}</span>{% endif %}
-                                    {% if row.attendance_rate is not None %}
-                                        <span class="{% if row.attendance_rate >= 80 %}text-ok{% elif row.attendance_rate >= 50 %}text-warn{% else %}text-club{% endif %}">&middot; {% blocktrans with rate=row.attendance_rate %}{{ rate }}% turnout{% endblocktrans %}</span>
-                                    {% endif %}
-                                </div>
-                                {% if can_manage_active_team %}
-                                    <input type="hidden" name="selected_{{ row.member.pk }}" :value="state">
-                                    <div class="flex h-9 w-24 shrink-0 overflow-hidden rounded-lg">
-                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'true' ? 'bg-ok text-white' : 'bg-steel text-on-dark-dim'" @click="state = 'true'">{% trans "Yes" %}</button>
-                                        <button type="button" class="flex-1 font-display text-xs font-extrabold tracking-wide uppercase" :class="state === 'false' ? 'bg-club text-club-content' : 'bg-steel text-on-dark-dim'" @click="state = 'false'">{% trans "No" %}</button>
-                                    </div>
-                                {% elif row.selected %}
-                                    <span class="pill pill-ok shrink-0">{% trans "Yes" %}</span>
-                                {% endif %}
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% empty %}
-                <div class="m-card-dark p-6 text-center text-sm text-on-dark-dim">{% trans "No available players to pick from." %}</div>
-            {% endfor %}
-        </div>
-
-        {% if can_manage_active_team %}
-            <button class="btn btn-dark mt-3 w-full" type="submit">{% trans "Save line-up" %}</button>
-        {% endif %}
-    </form>
-
-    {% if unavailable %}
-        <div class="mt-1">
-            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Unavailable" %}</div>
-            <div class="flex flex-wrap gap-2">
-                {% for attendance in unavailable %}
-                    <span class="rounded-full bg-steel px-3 py-1.5 text-xs text-on-dark">{{ attendance.member.get_full_name }} &middot; {{ attendance.get_status_display }}</span>
-                {% endfor %}
-            </div>
-        </div>
-    {% endif %}
-
-    {% if can_manage_active_team %}
-        {% if lineup.scheduled_publish_at %}
-            <div class="m-card-dark mt-2 p-4">
-                <p class="text-sm text-white">{% blocktrans with time=lineup.scheduled_publish_at|date:"D d M H:i" %}Scheduled to publish {{ time }}{% endblocktrans %}</p>
-                <div class="mt-3 grid grid-cols-2 gap-2">
-                    <form method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="publish_now">
-                        <button class="btn w-full bg-ice text-ice-ink" type="submit">{% trans "Publish now" %}</button>
-                    </form>
-                    <form method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="cancel_schedule">
-                        <button class="btn bg-steel text-on-dark w-full" type="submit">{% trans "Cancel schedule" %}</button>
-                    </form>
-                </div>
-            </div>
-        {% else %}
-            <form class="mt-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="publish_now">
-                <button class="btn w-full bg-ice text-ice-ink" type="submit">{% if lineup.published_at %}{% trans "Publish changes" %}{% else %}{% trans "Publish" %}{% endif %}</button>
-            </form>
-            <details class="mt-2">
-                <summary class="cursor-pointer font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Or schedule for later" %}</summary>
-                <form class="mt-2 flex items-center gap-2" method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-boost="false">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="schedule">
-                    <input type="datetime-local" name="publish_at" class="h-10 min-w-0 flex-1 rounded-lg border border-steel bg-steel px-2 text-sm text-white" required>
-                    <button class="btn h-10 shrink-0 bg-steel text-on-dark" type="submit">{% trans "Schedule" %}</button>
-                </form>
-            </details>
-        {% endif %}
-    {% endif %}
+    {% include "mobile/coach/_inline_hosts.html" %}
+    {% include "mobile/coach/_lineup_body.html" %}
 {% endblock content %}

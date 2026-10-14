@@ -1,26 +1,31 @@
 {% extends "mobile/coach/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
-    Squad screen's staff "Add" entry point -- see CoachAddStaffView's own
-    docstring for why this needs a shared position picker up top, unlike
-    CoachAddPlayerView/C6's plain checkbox list (a roster spot's position is
-    optional; StaffAssignment's is required).
+    Squad screen's staff "Add" entry point (iOS AddToRosterView, staff role):
+    a shared position picker up top (StaffAssignment.position is required,
+    unlike a roster spot's), live search, a checkbox per candidate. What's
+    ticked lives in Alpine so it survives a search -- same pattern as
+    add_player.html, see its comment and CoachAddStaffView's docstring.
 {% endcomment %}
 
 {% block header_extra %}
-    <div class="mt-3 flex items-center justify-between">
-        <span class="font-display text-lg font-extrabold text-white uppercase">{% blocktrans with team=active_team.name %}Add staff to {{ team }}{% endblocktrans %}</span>
+    <div class="mt-3 flex items-center gap-3">
+        <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:coach_squad" %}" aria-label="{% trans "Back" %}">
+            {% lucide "chevron-left" size=24 stroke_width=2.4 class="text-white" %}
+        </a>
+        <span class="min-w-0 flex-1 truncate font-display text-lg font-extrabold text-white uppercase">{% blocktrans with team=active_team.name %}Add staff to {{ team }}{% endblocktrans %}</span>
     </div>
 {% endblock header_extra %}
 
 {% block content %}
-    <form method="post" action="{% url "mobile:coach_add_staff" %}" x-data="{ count: 0 }" hx-boost="false">
+    <form method="post" action="{% url "mobile:coach_add_staff" %}" x-data="{ chosen: [], toggle(id) { const i = this.chosen.indexOf(id); i === -1 ? this.chosen.push(id) : this.chosen.splice(i, 1) } }" hx-boost="false" class="flex flex-col gap-4">
         {% csrf_token %}
+        <template x-for="id in chosen" :key="id"><input type="hidden" name="member" :value="id"></template>
 
         <div class="m-card p-3.5">
-            <label class="mb-1 block text-xs font-semibold text-muted uppercase tracking-wide">{% trans "Position" %}</label>
-            <select class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none" name="position" required>
+            <label class="mb-1 block text-xs font-semibold tracking-wide text-muted uppercase" for="staff-position">{% trans "Position" %}</label>
+            <select id="staff-position" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none" name="position" required>
                 <option value="">{% trans "Choose a position" %}</option>
                 {% for position in positions %}
                     <option value="{{ position.pk }}">{{ position.name }}</option>
@@ -28,21 +33,30 @@
             </select>
         </div>
 
-        <div class="m-card mt-3 flex flex-col overflow-hidden">
+        <div class="relative">
+            <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim">{% lucide "search" size=16 %}</span>
+            <label class="sr-only" for="candidate-q">{% trans "Search by name" %}</label>
+            <input id="candidate-q" type="search" name="q" value="{{ search_query }}" placeholder="{% trans "Search by name" %}" autocomplete="off" class="h-11 w-full rounded-lg border border-stroke bg-paper pr-3 pl-9 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
+                   hx-get="{% url "mobile:coach_add_staff" %}" hx-trigger="input changed delay:300ms, search" hx-target="#candidate-region" hx-select="#candidate-region" hx-swap="outerHTML" hx-sync="this:replace" hx-indicator="#candidate-loading"
+                   @keydown.enter.prevent>
+        </div>
+        <span id="candidate-loading" class="htmx-indicator text-xs text-muted" aria-hidden="true">{% trans "Searching…" %}</span>
+
+        <div id="candidate-region" class="m-card flex flex-col overflow-hidden">
             {% for candidate in candidates %}
-                <label class="flex items-center gap-3 px-4 py-2.5 {% if not forloop.last %}border-b border-rule{% endif %}">
-                    {% include "mobile/_avatar.html" with person=candidate size_class="h-9 w-9" text_class="text-xs" %}
-                    <span class="min-w-0 flex-1 text-sm font-semibold text-ink">{{ candidate.get_full_name }}</span>
-                    <input class="h-5 w-5 shrink-0 accent-ink" type="checkbox" name="member" value="{{ candidate.pk }}" @change="count = $el.form.querySelectorAll('input[name=member]:checked').length">
+                <label class="flex items-center gap-3 px-4 py-3 {% if not forloop.last %}border-b border-rule{% endif %}">
+                    {% include "mobile/_avatar.html" with person=candidate size_class="h-10 w-10" text_class="text-sm" %}
+                    <span class="min-w-0 flex-1 text-[15px] font-semibold text-ink">{{ candidate.get_full_name }}</span>
+                    <input class="h-6 w-6 shrink-0 accent-ink" type="checkbox" value="{{ candidate.pk }}" :checked="chosen.includes('{{ candidate.pk }}')" @change="toggle('{{ candidate.pk }}')" aria-label="{% blocktrans with name=candidate.get_full_name %}Add {{ name }}{% endblocktrans %}">
                 </label>
             {% empty %}
                 <div class="px-4 py-6 text-center text-sm text-muted">{% trans "No one is eligible to be added." %}</div>
             {% endfor %}
         </div>
 
-        <button class="btn btn-dark mt-4 w-full" type="submit" :disabled="count === 0">
-            <span x-show="count === 0">{% trans "Select people to add" %}</span>
-            <span x-show="count > 0" x-cloak>{% trans "Add" %} (<span x-text="count"></span>)</span>
+        <button class="btn-rc btn-rc-primary w-full" type="submit" :disabled="chosen.length === 0">
+            <span x-show="chosen.length === 0">{% trans "Select people to add" %}</span>
+            <span x-show="chosen.length > 0" x-cloak>{% trans "Add" %} (<span x-text="chosen.length"></span>)</span>
         </button>
     </form>
 {% endblock content %}

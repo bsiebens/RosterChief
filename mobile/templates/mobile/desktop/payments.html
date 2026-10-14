@@ -1,28 +1,29 @@
 {% extends "mobile/desktop/base.html" %}
 {% load i18n %}
 
+{% comment %}
+    Payments & dues on desktop -- the same native-app-shaped cards as the phone (_payment_card.html), in iOS's form-width (520) column.
+{% endcomment %}
+
 {% block content %}
-    <div class="mx-auto flex w-full max-w-[760px] flex-col gap-4">
-        {% if display_rows %}
-            {% for item in display_rows %}
-                {% if item.kind == "registration" %}
-                    {% include "mobile/desktop/_dues_registration_receipt.html" with group=item.group %}
-                {% else %}
-                    {% include "mobile/desktop/_dues_receipt.html" with row=item.row %}
-                {% endif %}
+    <div class="mx-auto flex w-full max-w-[520px] flex-col gap-4">
+        {% if cards %}
+            {% for card in cards %}
+                {% include "mobile/_payment_card.html" %}
             {% endfor %}
 
             {% if payment_instructions %}
-                <div class="card p-4.5">
-                    <div class="card-title mb-1.5">{% trans "How to pay" %}</div>
-                    <p class="text-sm whitespace-pre-line text-ink">{{ payment_instructions }}</p>
-                </div>
+                <section class="flex flex-col gap-2">
+                    <div class="px-0.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "How to pay" %}</div>
+                    <div class="m-card p-3.5">
+                        <p class="text-sm whitespace-pre-line text-slate select-text">{{ payment_instructions }}</p>
+                    </div>
+                </section>
             {% endif %}
         {% else %}
-            <div class="card p-6 text-center">
-                <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "All settled up" %}</p>
-                <p class="mt-1 text-sm text-muted">{% trans "There's nothing open right now." %}</p>
-            </div>
+            {% trans "Nothing to pay" as empty_title %}
+            {% trans "You have no open payments." as empty_text %}
+            {% include "mobile/_state.html" with kind="empty" icon="circle-check" title=empty_title text=empty_text %}
         {% endif %}
     </div>
 {% endblock content %}

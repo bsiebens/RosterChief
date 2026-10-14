@@ -1,0 +1,58 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block content %}
+    {% include "mobile/desktop/_settings_back.html" %}
+    <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+        {% if passkeys_enabled %}
+            <div class="card">
+                <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Passkeys" %}</span></div>
+                <p class="border-b border-rule p-4.5 text-[13px] text-muted">{% trans "A passkey lets you sign in with Face ID, Touch ID or your device's screen lock instead of a password. It is stored on your devices and works for every club." %}</p>
+                {% for passkey in passkeys %}
+                    <div class="flex items-center gap-3 border-b border-rule p-4.5">
+                        {% lucide "key-round" size=22 class="shrink-0 text-muted" %}
+                        <div class="min-w-0 flex-1">
+                            <div class="truncate text-[15px] font-semibold text-ink">{{ passkey.name }}</div>
+                            <div class="text-xs text-muted">
+                                {% if passkey.last_used_at %}
+                                    {% blocktrans with added=passkey.created_at|date:"d M Y" used=passkey.last_used_at|date:"d M Y" %}Added {{ added }} &middot; used {{ used }}{% endblocktrans %}
+                                {% else %}
+                                    {% blocktrans with added=passkey.created_at|date:"d M Y" %}Added {{ added }} &middot; never used{% endblocktrans %}
+                                {% endif %}
+                            </div>
+                        </div>
+                        <a class="btn btn-outline btn-sm" href="{% url "mfa_edit_webauthn" pk=passkey.pk %}">{% trans "Rename" %}</a>
+                        <a class="btn btn-outline btn-error btn-sm" href="{% url "mfa_remove_webauthn" pk=passkey.pk %}">{% trans "Remove" %}</a>
+                    </div>
+                {% empty %}
+                    <p class="border-b border-rule p-4.5 text-sm text-muted">{% trans "No passkeys yet." %}</p>
+                {% endfor %}
+                <div class="p-4.5">
+                    <a class="btn btn-primary" href="{% url "mfa_add_webauthn" %}" hx-boost="false">{% lucide "plus" size=18 %} {% trans "Add a passkey" %}</a>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Password" %}</span></div>
+            <a class="flex items-center gap-3 p-4.5 hover:bg-subhead" href="{% url "account_change_password" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Change password" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
+        </div>
+
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Two-factor authentication" %}</span></div>
+            <p class="border-b border-rule p-4.5 text-sm text-muted">
+                {% if has_totp %}
+                    {% trans "An authenticator app is set up for this account." %}
+                {% else %}
+                    {% trans "No authenticator app is set up. You can add one on the website." %}
+                {% endif %}
+            </p>
+            <div class="p-4.5">
+                <a class="btn btn-outline" href="{% url "mfa_index" %}">{% trans "Manage two-factor authentication" %}</a>
+            </div>
+        </div>
+    </div>
+{% endblock content %}

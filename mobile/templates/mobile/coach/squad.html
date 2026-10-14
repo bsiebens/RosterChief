@@ -2,79 +2,30 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Bottom-tab "Squad" -- roster + staff for the active team, current season.
-    Each roster row links through to CoachRosterMemberView (stats, tap-to-
-    call, edit, remove) -- see that view's own docstring.
+    Manager "Squad" tab -- roster + staff for the active team, current
+    season (iOS RosterView). The lists are _squad_body.html, swapped in place
+    after an inline staff removal; this page holds pull-to-refresh and the
+    toast host. Tapping a player opens a bottom sheet with their actions
+    (Evaluations, Edit player / Player details) -- see the sheet in the body.
 {% endcomment %}
 
-{% block content %}
-    {% if not active_team %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Not staffing a team yet" %}</p>
-        </div>
-    {% else %}
-        <div>
-            <div class="mb-2 flex items-center justify-between">
-                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Roster" %}</span>
-                {% if can_manage_active_team %}
-                    <a class="flex items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_add_player" %}">
-                        {% lucide "user-plus" size=14 %} {% trans "Add" %}
-                    </a>
-                {% endif %}
-            </div>
-            <div class="m-card overflow-hidden">
-                {% for membership in roster %}
-                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_roster_member" membership.pk %}">
-                        <div class="w-8 shrink-0 text-center font-display text-lg font-extrabold text-ink tabular-nums">{{ membership.jersey_number|default:"—" }}</div>
-                        <div class="min-w-0 flex-1">
-                            <div class="text-[15px] font-semibold text-ink">
-                                {{ membership.member.get_full_name }}
-                                {% if membership.is_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">C</span>{% endif %}
-                                {% if membership.is_alternate_captain %}<span class="ml-1 font-display text-xs font-extrabold text-club-dark">A</span>{% endif %}
-                                {% if membership.club_status_pending %}<span class="pill pill-sm pill-warn ml-1">{% trans "Pending" %}</span>{% endif %}
-                            </div>
-                            <div class="text-xs text-muted">{{ membership.position|default:"—" }}</div>
-                        </div>
-                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-                    </a>
-                {% empty %}
-                    <div class="p-6 text-center text-sm text-muted">{% trans "No one on the roster for this season yet." %}</div>
-                {% endfor %}
-            </div>
-        </div>
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
 
-        <div>
-            <div class="mb-2 flex items-center justify-between">
-                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %}</span>
-                {% if can_manage_active_team %}
-                    <a class="flex items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club uppercase" href="{% url "mobile:coach_add_staff" %}">
-                        {% lucide "user-plus" size=14 %} {% trans "Add" %}
-                    </a>
-                {% endif %}
-            </div>
-            <div class="m-card overflow-hidden">
-                {% for assignment in staff %}
-                    {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                    <div class="flex items-center gap-3 p-3.5">
-                        <div class="min-w-0 flex-1">
-                            <div class="text-[15px] font-semibold text-ink">{{ assignment.member.get_full_name }}</div>
-                            <div class="text-xs text-muted">{{ assignment.position }}</div>
-                        </div>
-                        {% if can_manage_active_team and assignment.member_id != me.pk %}
-                            {% trans "Remove this staff member?" as remove_staff_confirm_text %}
-                            <form method="post" action="{% url "mobile:coach_staff_remove" assignment.pk %}" hx-boost="false" onsubmit="return confirm('{{ remove_staff_confirm_text|escapejs }}')">
-                                {% csrf_token %}
-                                <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-club" type="submit" aria-label="{% trans "Remove" %}">
-                                    {% lucide "trash-2" size=16 %}
-                                </button>
-                            </form>
-                        {% endif %}
-                    </div>
-                {% empty %}
-                    <div class="p-6 text-center text-sm text-muted">{% trans "No staff assigned for this season yet." %}</div>
-                {% endfor %}
-            </div>
-        </div>
+{% block content %}
+    <div class="-mt-1 flex min-h-8 items-center justify-between">
+        <h1 class="font-display text-[26px] leading-none font-extrabold tracking-wide text-ink uppercase">{% trans "Squad" %}</h1>
+        {% if active_team and can_manage_active_team %}
+            <a class="icon-btn pressable flex h-11 w-11 items-center justify-center text-club-dark" href="{% url "mobile:coach_add_player" %}" aria-label="{% trans "Add a player" %}">
+                {% lucide "circle-plus" size=32 %}
+            </a>
+        {% endif %}
+    </div>
+
+    {% if not active_team %}
+        {% include "mobile/_state.html" with kind="empty" icon="users" title=_("Not staffing a team yet") %}
+    {% else %}
+        <div id="inline-toast" aria-live="polite"></div>
+        <span id="inline-status" class="sr-only" role="status" aria-live="polite"></span>
+        {% include "mobile/coach/_squad_body.html" %}
     {% endif %}
 {% endblock content %}

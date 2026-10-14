@@ -2,54 +2,60 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Me -> "Notification emails": whether notifications are also emailed to this account
-    (mobile.views.NotificationSettingsView, authentication.User.email_notifications). One
-    choice, account-wide.
+    Me -> "Notifications" (iOS NotificationSettingsView): per-category push/email switches for
+    this club with an "Applies to" picker (Everyone / each child), quiet hours, and last the
+    account-wide email preference (authentication.User.email_notifications).
 {% endcomment %}
 
 {% block content %}
-    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
-        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Notification emails" %}</span>
+        <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Notifications" %}</span>
     </div>
 
-    <p class="text-sm text-muted">{% trans "Every notification also arrives by email. If you use the RosterChief app on your phone you may not need both." %}</p>
-
-    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line">
-        {% csrf_token %}
-        {% for value, label in choices %}
-            <label class="flex items-center gap-3 p-3.5">
-                <input type="radio" name="email_notifications" value="{{ value }}" class="h-5 w-5 shrink-0 accent-ink" {% if value == current %}checked{% endif %}>
-                <span class="flex-1 text-[15px] font-semibold text-ink">{{ label }}</span>
-            </label>
-        {% endfor %}
-        <div class="p-3.5">
-            <button class="btn btn-primary w-full" type="submit">{% trans "Save" %}</button>
-        </div>
-    </form>
-
-    <p class="text-xs text-dim">{% trans "Emails with an attachment, such as an invoice, are always sent. This applies to every club you belong to." %}</p>
-
-    <h2 class="mt-2 font-display text-lg leading-none font-extrabold text-ink uppercase">{% blocktrans with club=request.club.name %}Notifications from {{ club }}{% endblocktrans %}</h2>
     {% if children %}
-        <nav class="flex flex-wrap gap-2" aria-label="{% trans "Whose notifications" %}">
-            <a href="{% url "mobile:notification_settings" %}" class="person-chip {% if not selected_person %}person-chip-active{% endif %}" {% if not selected_person %}aria-current="true"{% endif %}>{% trans "Me" %}</a>
-            {% for child in children %}
-                <a href="{% url "mobile:notification_settings" %}?person={{ child.pk }}" class="person-chip {% if selected_person.pk == child.pk %}person-chip-active{% endif %}" {% if selected_person.pk == child.pk %}aria-current="true"{% endif %}>{{ child.first_name }}</a>
-            {% endfor %}
-        </nav>
-        {% if selected_person %}
-            <p class="text-sm text-muted">{% blocktrans with name=selected_person.first_name %}These switches only apply to notifications about {{ name }}. Anything you do not change here follows your own switches for this club.{% endblocktrans %}</p>
-        {% endif %}
+        <form method="get" action="{% url "mobile:notification_settings" %}" class="m-card p-3.5">
+            <label class="flex items-center gap-3 text-[15px] font-semibold text-ink" for="applies-to">
+                <span class="flex-1">{% trans "Applies to" %}</span>
+                <select id="applies-to" name="person" class="select w-auto max-w-[60%]" onchange="this.form.requestSubmit()">
+                    <option value="" {% if not selected_person %}selected{% endif %}>{% trans "Everyone" %}</option>
+                    {% for child in children %}
+                        <option value="{{ child.pk }}" {% if selected_person.pk == child.pk %}selected{% endif %}>{{ child.first_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <noscript><button class="btn-rc btn-rc-neutral mt-2" type="submit">{% trans "Show" %}</button></noscript>
+        </form>
+        <p class="-mt-2 px-1 text-xs text-muted">
+            {% if selected_person %}
+                {% blocktrans with name=selected_person.first_name %}Applies to notifications about {{ name }}, such as their events. Anything you do not change here follows your own switches for this club.{% endblocktrans %}
+            {% else %}
+                {% trans "Applies to every notification in this club." %}
+            {% endif %}
+        </p>
     {% endif %}
     <p class="text-sm text-muted">{% trans "Choose per kind of notification whether it reaches you as a push message (app and browser) and by email. The inbox in the app always shows everything." %}</p>
 
-    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line">
+    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line overflow-hidden" x-data="{ push: {{ master.push|yesno:"true,false" }}, email: {{ master.email|yesno:"true,false" }} }">
         {% csrf_token %}
         <input type="hidden" name="category_switches" value="1">
+        <input type="hidden" name="master_switches" value="1">
         {% if selected_person %}<input type="hidden" name="person" value="{{ selected_person.pk }}">{% endif %}
+        <div class="flex items-center gap-2 p-3.5">
+            <span class="flex-1 text-xs font-semibold text-dim uppercase">{% trans "All channels" %}</span>
+            {% if customised %}<span class="rounded-full bg-line px-2 py-0.5 text-xs font-semibold text-ink">{% trans "Customised" %}</span>{% endif %}
+        </div>
+        <label class="flex items-center gap-3 p-3.5">
+            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "All push" %}</span>
+            <input type="checkbox" name="master__push" class="h-5 w-5 accent-ink" x-model="push" {% if master.push %}checked{% endif %}>
+        </label>
+        <label class="flex items-center gap-3 p-3.5">
+            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "All emails" %}</span>
+            <input type="checkbox" name="master__email" class="h-5 w-5 accent-ink" x-model="email" {% if master.email %}checked{% endif %}>
+        </label>
+        <p class="p-3.5 text-xs text-dim">{% trans "Switching one of these off stops everything on that channel, whatever the switches below say." %}</p>
         <table class="w-full text-left">
             <thead>
                 <tr class="text-xs font-semibold text-dim uppercase">
@@ -70,14 +76,14 @@
                             {% endif %}
                         </th>
                         <td class="p-2 text-center">
-                            <label class="inline-flex h-11 w-11 items-center justify-center">
-                                <input type="checkbox" name="push__{{ row.key }}" class="h-5 w-5 accent-ink" {% if row.push %}checked{% endif %}>
+                            <label class="inline-flex h-11 w-11 items-center justify-center" :class="push || 'opacity-40'">
+                                <input type="checkbox" name="push__{{ row.key }}" class="h-5 w-5 accent-ink" :disabled="!push" {% if row.push %}checked{% endif %}>
                                 <span class="sr-only">{% blocktrans with name=row.label %}Push: {{ name }}{% endblocktrans %}</span>
                             </label>
                         </td>
                         <td class="p-2 text-center">
-                            <label class="inline-flex h-11 w-11 items-center justify-center">
-                                <input type="checkbox" name="email__{{ row.key }}" class="h-5 w-5 accent-ink" {% if row.email %}checked{% endif %}>
+                            <label class="inline-flex h-11 w-11 items-center justify-center" :class="email || 'opacity-40'">
+                                <input type="checkbox" name="email__{{ row.key }}" class="h-5 w-5 accent-ink" :disabled="!email" {% if row.email %}checked{% endif %}>
                                 <span class="sr-only">{% blocktrans with name=row.label %}Email: {{ name }}{% endblocktrans %}</span>
                             </label>
                         </td>
@@ -85,10 +91,18 @@
                 {% endfor %}
             </tbody>
         </table>
-        <div class="p-3.5">
-            <button class="btn btn-primary w-full" type="submit">{% trans "Save" %}</button>
+        <div class="flex items-center gap-3 p-3.5">
+            <button class="btn-rc btn-rc-primary" type="submit">{% trans "Save" %}</button>
+            {% if customised %}<button type="submit" form="reset-all" class="text-sm font-semibold text-ink underline">{% trans "Reset all" %}</button>{% endif %}
         </div>
     </form>
+    {% if customised %}
+        <form id="reset-all" method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="reset_all" value="1">
+            {% if selected_person %}<input type="hidden" name="person" value="{{ selected_person.pk }}">{% endif %}
+        </form>
+    {% endif %}
     {% for row in category_rows %}
         {% if row.overridden %}
             <form id="reset-{{ row.key }}" method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false">
@@ -110,15 +124,15 @@
         </label>
         <div class="flex items-center gap-3 p-3.5">
             <label class="flex-1 text-sm font-semibold text-ink">{% trans "From" %}
-                <input type="time" name="start" value="{{ quiet.start }}" required class="mt-1 block w-full rounded-lg border border-line p-2">
+                <input type="time" name="start" value="{{ quiet.start }}" required class="input mt-1 block w-full">
             </label>
             <label class="flex-1 text-sm font-semibold text-ink">{% trans "Until" %}
-                <input type="time" name="end" value="{{ quiet.end }}" required class="mt-1 block w-full rounded-lg border border-line p-2">
+                <input type="time" name="end" value="{{ quiet.end }}" required class="input mt-1 block w-full">
             </label>
         </div>
         <div class="p-3.5">
             <label class="text-sm font-semibold text-ink">{% trans "Time zone" %}
-                <select name="timezone" class="mt-1 block w-full rounded-lg border border-line p-2">
+                <select name="timezone" class="select mt-1 block w-full">
                     {% for zone in zones %}
                         <option value="{{ zone }}" {% if zone == quiet.timezone %}selected{% endif %}>{{ zone }}</option>
                     {% endfor %}
@@ -126,8 +140,26 @@
             </label>
         </div>
         <div class="p-3.5">
-            <button class="btn btn-primary w-full" type="submit">{% trans "Save" %}</button>
+            <button class="btn-rc btn-rc-primary" type="submit">{% trans "Save" %}</button>
         </div>
     </form>
-    <p class="text-xs text-dim">{% trans "Quiet hours apply to your account in every club. These switches apply to this club only. Your defaults for all clubs can be changed in the RosterChief app." %}</p>
+    <p class="text-xs text-dim">{% trans "Quiet hours apply to your account in every club. These switches apply to this club only." %}</p>
+    <h2 class="mt-2 font-display text-lg leading-none font-extrabold text-ink uppercase">{% trans "Email preferences" %}</h2>
+    <p class="text-sm text-muted">{% trans "Every notification also arrives by email. If you use the RosterChief app on your phone you may not need both." %}</p>
+
+    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line">
+        {% csrf_token %}
+        {% for value, label in choices %}
+            <label class="flex items-center gap-3 p-3.5">
+                <input type="radio" name="email_notifications" value="{{ value }}" class="h-5 w-5 shrink-0 accent-ink" {% if value == current %}checked{% endif %}>
+                <span class="flex-1 text-[15px] font-semibold text-ink">{{ label }}</span>
+            </label>
+        {% endfor %}
+        <div class="p-3.5">
+            <button class="btn-rc btn-rc-primary" type="submit">{% trans "Save" %}</button>
+        </div>
+    </form>
+
+    <p class="text-xs text-dim">{% trans "Emails with an attachment, such as an invoice, are always sent. This applies to every club you belong to." %}</p>
+
 {% endblock content %}

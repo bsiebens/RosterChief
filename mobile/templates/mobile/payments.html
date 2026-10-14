@@ -5,44 +5,43 @@
     M5's "Payments & dues" row -- every open season-dues balance across every
     managed person. mobile.views.PaymentsView groups anyone billed through
     the same confirmed registration into one combined card
-    (_dues_registration_receipt.html -- one balance, one early-payment
-    figure, one invoice download); a membership with no registration behind
-    it gets its own plain card instead (_dues_receipt.html). Home's own
+    (one balance, one early-payment figure, one invoice download); a
+    membership with no registration behind it gets its own card with the
+    dues invoice. Both render through _payment_card.html (native-app shape). Home's own
     dues card stays on the plainer _dues_row.html; this is the one screen
     that shows the full breakdown. White sticky back-header, same pattern
     as calendar_feed_settings.html -- not a tab of its own, active_tab
     stays "me" (PaymentsView's own docstring).
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
-    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Payments & dues" %}</span>
     </div>
 
-    {% if display_rows %}
-        <div class="flex flex-col gap-2.5">
-            {% for item in display_rows %}
-                {% if item.kind == "registration" %}
-                    {% include "mobile/_dues_registration_receipt.html" with group=item.group %}
-                {% else %}
-                    {% include "mobile/_dues_receipt.html" with row=item.row %}
-                {% endif %}
+    {% if cards %}
+        <div class="flex flex-col gap-4">
+            {% for card in cards %}
+                {% include "mobile/_payment_card.html" %}
             {% endfor %}
-        </div>
 
-        {% if payment_instructions %}
-            <div class="m-card mt-2.5 p-4">
-                <div class="mb-1.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "How to pay" %}</div>
-                <p class="text-sm whitespace-pre-line text-ink">{{ payment_instructions }}</p>
-            </div>
-        {% endif %}
-    {% else %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "All settled up" %}</p>
-            <p class="mt-1 text-sm text-muted">{% trans "There's nothing open right now." %}</p>
+            {% if payment_instructions %}
+                <section class="flex flex-col gap-2">
+                    <div class="px-0.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "How to pay" %}</div>
+                    <div class="m-card p-3.5">
+                        <p class="text-sm whitespace-pre-line text-slate select-text">{{ payment_instructions }}</p>
+                    </div>
+                </section>
+            {% endif %}
         </div>
+    {% else %}
+        {% trans "Nothing to pay" as empty_title %}
+        {% trans "You have no open payments." as empty_text %}
+        {% include "mobile/_state.html" with kind="empty" icon="circle-check" title=empty_title text=empty_text %}
     {% endif %}
 {% endblock content %}

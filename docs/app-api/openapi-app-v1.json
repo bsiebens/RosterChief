@@ -4886,6 +4886,36 @@
             "title": "Effective",
             "type": "object"
           },
+          "master": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The \"All push\" / \"All emails\" master switches that apply in this club, `{push, email}`. When one is false nothing is sent on that channel, whatever `effective` says.",
+            "title": "Master"
+          },
+          "master_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only the master switches set for exactly this club, `{push?, email?}`.",
+            "title": "Master Overrides"
+          },
           "overrides": {
             "additionalProperties": {
               "$ref": "#/components/schemas/NotificationOverridesOut"
@@ -5070,6 +5100,36 @@
             "title": "Is Self",
             "type": "boolean"
           },
+          "master": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The \"All push\" / \"All emails\" master switches that apply for this person, `{push, email}`. When one is false nothing is sent on that channel, whatever `effective` says.",
+            "title": "Master"
+          },
+          "master_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only the master switches set for exactly this person, `{push?, email?}`.",
+            "title": "Master Overrides"
+          },
           "member_id": {
             "format": "uuid",
             "title": "Member Id",
@@ -5119,6 +5179,30 @@
             "description": "`null`: the all-clubs defaults. A club slug: an override for just that club.",
             "title": "Club Slug"
           },
+          "master_email": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set the \"All emails\" master for this scope. Off: no email at all (attachments such as invoices excepted), whatever the categories say. Omit to leave it as it is.",
+            "title": "Master Email"
+          },
+          "master_push": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set the \"All push\" master for this scope. Off: no push at all in this scope, whatever the categories say. Omit to leave it as it is.",
+            "title": "Master Push"
+          },
           "member_id": {
             "anyOf": [
               {
@@ -5133,9 +5217,6 @@
             "title": "Member Id"
           }
         },
-        "required": [
-          "changes"
-        ],
         "title": "NotificationPreferencesIn",
         "type": "object"
       },
@@ -5165,6 +5246,21 @@
             "description": "The all-clubs switches, `{category: {push, email}}`. No stored row means on. The in-app inbox is never switchable.",
             "title": "Defaults",
             "type": "object"
+          },
+          "master_defaults": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The all-clubs \"All push\" / \"All emails\" master switches, `{push, email}`. No stored row means on; off silences that channel entirely, whatever the per-category switches say.",
+            "title": "Master Defaults"
           }
         },
         "required": [

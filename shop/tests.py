@@ -2219,7 +2219,7 @@ class ShopCartRepricingAndThrottleViewTests(TestCase):
         response = self.get_cart()
 
         self.assertTrue(response.context["has_unavailable"])
-        self.assertContains(response, "No longer available")
+        self.assertContains(response, "Sold out or no longer available")
 
     def test_checkout_with_a_changed_price_goes_back_to_the_cart(self):
         from django.urls import reverse

@@ -38,6 +38,7 @@ from features.models import EmailSuppression, JobToggle, Maintenance
 from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
+from .services import user_debug
 from .services.accounts import UnverifiedEmailError
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.club_deletion import ClubDeletionBlocked, delete_club, deletion_impact
@@ -98,6 +99,27 @@ class JobsView(PlatformStaffRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         jobs = job_overview()
         return super().get_context_data(nav="jobs", jobs=jobs, summary=job_summary(jobs), **kwargs)
+
+
+class UserDebugView(PlatformSuperuserRequiredMixin, TemplateView):
+    """Platform-wide debug screen for one account, found by ``?email=`` (case-insensitive):
+    account state, clubs/roles, memberships and registrations per season, teams and staff
+    spots, families, push devices, and the notification settings and recent deliveries.
+    Read-only and deliberately free of personal data (phones, birth dates, pictures, push
+    tokens) -- see controlpanel.services.user_debug."""
+
+    template_name = "controlpanel/user_debug.html"
+
+    def get_context_data(self, **kwargs):
+        email = self.request.GET.get("email", "").strip()
+        account = get_user_model().objects.select_related("member").filter(email__iexact=email).first() if email else None
+        context = {"nav": "users", "email": email, "account": account}
+        if account is not None:
+            context |= user_debug.account_info(account)
+            context["clubs"] = user_debug.club_sections(getattr(account, "member", None))
+            context["devices"] = user_debug.devices(account)
+            context["notifications"] = user_debug.notification_section(account)
+        return super().get_context_data(**context, **kwargs)
 
 
 class PushMonitoringView(PlatformSuperuserRequiredMixin, TemplateView):

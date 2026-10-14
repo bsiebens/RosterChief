@@ -1,0 +1,27 @@
+{% load i18n lucide %}
+{% comment %}
+    News cards (iOS NewsListRow): 72px thumbnail (placeholder when the post has no
+    picture), meta line "TEAMS · date time" in the club colour, 2-line title and 2-line
+    excerpt. Followed by an infinite-scroll sentinel while there is another page: it
+    swaps itself for the next cards when scrolled into view (or tapped, for browsers
+    where "revealed" never fires). Rendered on its own for that request (NewsListView).
+{% endcomment %}
+{% for card in cards %}
+    <a class="m-card pressable flex items-start gap-3 p-3" href="{% url "mobile:news_detail" card.item.slug %}?from=news_list">
+        {% if card.photo %}
+            <img class="h-[72px] w-[72px] shrink-0 rounded-[10px] bg-line object-cover" style="object-position: {{ card.photo.object_position }}" src="{{ card.photo.image.url }}" alt="" loading="lazy">
+        {% else %}
+            <span class="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-[10px] bg-line text-dim">{% lucide "newspaper" size=24 %}</span>
+        {% endif %}
+        <span class="flex min-w-0 flex-1 flex-col gap-1">
+            <span class="font-display text-[11px] font-extrabold tracking-wide text-club uppercase">{% if card.teams %}{{ card.teams }}{% else %}{% trans "Club news" %}{% endif %} &middot; {{ card.item.published_at|date:"d M Y, H:i" }}</span>
+            <span class="line-clamp-2 text-base font-bold text-ink">{{ card.title }}</span>
+            {% if card.excerpt %}<span class="line-clamp-2 text-[13px] text-muted">{{ card.excerpt }}</span>{% endif %}
+        </span>
+    </a>
+{% endfor %}
+{% if page.has_next %}
+    <div id="news-more" class="flex items-center justify-center gap-2 py-4 text-[13px] font-semibold text-muted" hx-get="{% url "mobile:news_list" %}?page={{ page.next_page_number }}" hx-trigger="revealed, click" hx-target="this" hx-swap="outerHTML" hx-push-url="false">
+        {% trans "Loading more news…" %}
+    </div>
+{% endif %}

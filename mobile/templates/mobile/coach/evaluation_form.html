@@ -25,15 +25,25 @@
 
 {% block content %}
     {% if not rubric_configured %}
-        <div class="m-card p-6 text-center text-sm text-muted">
-            {% trans "This club hasn't set up an evaluation checklist yet." %}
+        {% include "mobile/_state.html" with kind="empty" icon="clipboard-list" title=_("No checklists") text=_("The club hasn't set up an evaluation checklist yet.") %}
+    {% elif unsupported_field %}
+        <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep" role="alert">
+            {% trans "This checklist has a question this version of the app can't show. Fill it in from the desktop site instead." %}
         </div>
+        {% if other_checklists %}
+            <a class="btn-rc btn-rc-neutral w-full" href="{% url "mobile:coach_evaluation_create" player.pk %}">{% trans "Choose another checklist" %}</a>
+        {% endif %}
     {% else %}
-        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false">
+        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4" hx-boost="false" x-data="{ busy: false }" @submit="busy = true">
             {% csrf_token %}
 
+            {% if checklist.description %}<p class="text-sm text-slate">{{ checklist.description }}</p>{% endif %}
+            {% if other_checklists %}
+                <a class="flex min-h-11 items-center gap-1.5 text-sm font-semibold text-club-dark" href="{% url "mobile:coach_evaluation_create" player.pk %}">{% lucide "repeat" size=14 %} {% trans "Choose another checklist" %}</a>
+            {% endif %}
+
             {% for error in form.non_field_errors %}
-                <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep">{{ error }}</div>
+                <div class="rounded-box border border-warn-border bg-warn-bg p-3.5 text-sm text-warn-deep" role="alert">{{ error }}</div>
             {% endfor %}
 
             <div class="m-card overflow-hidden">
@@ -44,16 +54,19 @@
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
                     <div class="p-3.5">
                         <label class="mb-1 block text-xs text-muted" for="{{ bound_field.id_for_label }}">
-                            {{ bound_field.label }}{% if bound_field.field.required %} *{% endif %}
+                            {{ bound_field.label }}{% if bound_field.field.required %} <span aria-hidden="true">*</span><span class="sr-only">{% trans "(required)" %}</span>{% endif %}
                         </label>
                         {{ bound_field }}
                         {% if bound_field.help_text %}<p class="mt-1 text-xs text-muted">{{ bound_field.help_text }}</p>{% endif %}
-                        {% for error in bound_field.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        {% for error in bound_field.errors %}<p class="mt-1 text-xs text-club-dark" role="alert">{{ error }}</p>{% endfor %}
                     </div>
                 {% endfor %}
             </div>
 
-            <button class="btn btn-dark w-full" type="submit">{% trans "Submit evaluation" %}</button>
+            <button class="btn-rc btn-rc-primary w-full" type="submit" :disabled="busy">
+                <span x-show="!busy">{% trans "Submit evaluation" %}</span>
+                <span x-show="busy" x-cloak>{% trans "Saving…" %}</span>
+            </button>
         </form>
     {% endif %}
 {% endblock content %}

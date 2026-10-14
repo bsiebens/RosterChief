@@ -1,0 +1,23 @@
+{% extends "mobile/desktop/base.html" %}
+{% load i18n lucide %}
+
+{% block content %}
+    {% include "mobile/desktop/_settings_back.html" %}
+    <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+        <div class="card">
+            <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Choose Your Club" %}</span></div>
+            {% for row in rows %}
+                <a class="flex items-center gap-3 border-b border-rule p-4.5 last:border-b-0 hover:bg-subhead" href="{{ row.url }}" hx-boost="false" {% if row.is_current %}aria-current="true"{% endif %}>
+                    {% if row.logo_url %}
+                        <img src="{{ row.logo_url }}" alt="" class="h-10 w-10 shrink-0 rounded-full object-contain">
+                    {% else %}
+                        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-steel text-sm font-bold text-white">{{ row.club.initials }}</span>
+                    {% endif %}
+                    <span class="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{{ row.club.name }}</span>
+                    {% if row.is_current %}{% lucide "check" size=18 class="shrink-0 text-club" %}{% endif %}
+                </a>
+            {% endfor %}
+        </div>
+        <div><a class="btn btn-outline" href="{% url "mobile:me" %}">{% trans "Cancel" %}</a></div>
+    </div>
+{% endblock content %}

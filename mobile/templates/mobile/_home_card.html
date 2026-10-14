@@ -1,0 +1,75 @@
+{% load i18n lucide %}
+{% comment %}
+    One "next up" card on Home (iOS MemberCardView). Expects ``card`` ({kind, event, style, lines, closed, my_tasks}) in scope; kind is "rsvp_needed" (a pending invitation: inline In / Out), "rsvp_closed" (an unanswered invitation whose deadline has passed: read-only) or "next_going" (something the person is going to: GOING + "Can't make it?").
+    The top part (club photo, kind badge, title, times) is the link that opens the event sheet; the answer rows below it are separate forms so a tap on a button never opens the sheet. Out / "Can't make it?" reveal a reason panel (mobile-sheet.js; a disabled <fieldset> until opened). A going player picked in a published line-up reports a "dropout" (the coach is notified); a plain PRESENT one answers Out -- both need a reason. The reason is private to the family and the coaches.
+{% endcomment %}
+<div class="relative overflow-hidden rounded-[14px] bg-night text-white">
+    <a class="block" href="{% url "mobile:event_detail" card.event.pk %}">
+        <div class="relative flex h-[120px] flex-col justify-end overflow-hidden px-4 pb-3">
+            {% if club.event_background %}
+                <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
+            {% endif %}
+            <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.15) 0%, rgba(11,18,32,.92) 100%)"></div>
+            <div class="relative z-10 flex flex-col items-start gap-1.5">
+                <span class="rounded px-2 py-1 font-display text-xs font-extrabold tracking-wide uppercase {{ card.style.badge }}">{{ card.style.label }} &middot; {{ card.event.start|date:"D d M" }}</span>
+                <span class="max-w-full truncate font-display text-[26px] leading-none font-extrabold uppercase">{{ card.event.title }}</span>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3.5 text-[13px] text-on-dark">
+            <span>{% blocktrans with time=card.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
+            {% if card.event.gathering %}
+                <span>{% blocktrans with time=card.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
+            {% endif %}
+            {% if card.event.location %}<span>{{ card.event.location.name }}</span>{% endif %}
+        </div>
+    </a>
+
+    <div class="px-4 pt-3 pb-4">
+        {% if card.closed %}
+            <p class="font-display text-[11px] font-extrabold tracking-wide text-on-dark-faint uppercase">{% trans "Replies are closed for this event" %}</p>
+        {% else %}
+            <div class="flex flex-col gap-2.5">
+                {% for line in card.lines %}
+                    <form method="post" action="{% url "mobile:event_detail" card.event.pk %}" data-note-form hx-swap="innerHTML show:none" hx-push-url="false">
+                        {% csrf_token %}
+                        <input type="hidden" name="member_id" value="{{ line.attendance.member_id }}">
+                        <input type="hidden" name="return" value="{{ request.get_full_path }}">
+                        <div class="flex items-center gap-2.5">
+                            <span class="min-w-0 flex-1 truncate font-display text-[13px] font-bold text-white">{{ line.name }}</span>
+                            {% if card.kind == "rsvp_needed" %}
+                                <button type="submit" name="status" value="present" class="card-btn card-btn-in">{% trans "In" %}</button>
+                                <button type="button" class="card-btn card-btn-out" data-ask>{% trans "Out" %}</button>
+                            {% else %}
+                                <span class="font-display text-[10px] font-extrabold tracking-wide text-ok uppercase">{% trans "Going" %}</span>
+                                <button type="button" class="card-btn card-btn-ghost" data-ask>{% trans "Can't make it?" %}</button>
+                            {% endif %}
+                        </div>
+                        <fieldset class="mt-2 rounded-lg border border-white/20 bg-steel/60 p-3" data-note-panel hidden disabled>
+                            <input type="hidden" name="status" value="{% if card.kind == "rsvp_needed" %}absent{% else %}{{ line.drop_status }}{% endif %}">
+                            <label class="mb-1 block text-xs font-semibold text-white" for="note-{{ card.event.pk }}-{{ line.attendance.member_id }}">
+                                {% if card.kind == "next_going" and line.drop_status == "dropout" %}{% trans "Let the coach know why -- they'll be notified right away" %}{% else %}{% trans "Reason -- only you and the coach can see this" %}{% endif %}
+                            </label>
+                            <textarea id="note-{{ card.event.pk }}-{{ line.attendance.member_id }}" class="h-16 w-full rounded-lg border border-white/20 bg-black/20 p-2 text-sm text-white placeholder:text-on-dark" name="note" placeholder="{% trans "e.g. sick, family event..." %}"></textarea>
+                            <div class="mt-2 grid grid-cols-2 gap-2">
+                                <button type="button" class="card-btn card-btn-out !min-h-9" data-ask-cancel>{% trans "Cancel" %}</button>
+                                <button type="submit" class="card-btn !min-h-9 bg-white text-night">{% trans "Send" %}</button>
+                            </div>
+                        </fieldset>
+                    </form>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if card.my_tasks %}
+            <div class="mt-3.5 flex flex-col gap-1.5">
+                <span class="font-display text-xs font-extrabold tracking-wide text-on-dark-dim uppercase">{% trans "Your tasks" %}</span>
+                {% for task in card.my_tasks %}
+                    <div class="flex items-start gap-2 text-sm font-semibold text-white">
+                        <span class="mt-0.5 shrink-0 text-ok">{% lucide "circle-check" size=16 stroke_width=2.4 %}</span>
+                        <span>{% if task.claimed_by_me %}{{ task.title }}{% else %}{% blocktrans with title=task.title %}{{ title }} &middot; someone in your family{% endblocktrans %}{% endif %}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+</div>

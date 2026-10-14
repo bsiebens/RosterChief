@@ -139,6 +139,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "authentication.middleware.RequireMFAMiddleware",
+    # After authentication: a signed-in member's saved language applies when there is no language cookie.
+    "members.language.MemberLanguageMiddleware",
     "club.tenancy.ClubTenantMiddleware",
     # After tenancy: it decides club-vs-platform from request.club, which was just resolved.
     "features.middleware.MaintenanceMiddleware",

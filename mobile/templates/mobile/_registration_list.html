@@ -1,0 +1,35 @@
+{% load i18n lucide %}
+{% comment %}
+    The "Add a registration" list (iOS: Register). One card per draft entry with Edit / Remove (plain submit buttons: they work as ordinary form posts without JavaScript; with it, Edit and "Add a registration" open the editor sheet over this screen instead). ``card`` is the surface class (m-card here, card on the desktop page), ``btn_*`` its button classes. Nothing is created until "Send registration".
+{% endcomment %}
+<div class="flex flex-col gap-3" id="registration-list">
+    {% for item in entry_cards %}
+        <div class="{{ card }} overflow-hidden {% if item.errors %}border-warn-border{% endif %}" data-registration-entry>
+            <div class="flex items-start gap-3 p-3.5">
+                <div class="min-w-0 flex-1">
+                    <div class="truncate text-[15px] font-semibold text-ink">{{ item.name }}{% if item.is_new %} <span class="text-xs font-normal text-muted">&middot; {% trans "New" %}</span>{% endif %}</div>
+                    <div class="mt-0.5 text-xs text-muted">{{ item.role }}{% if item.option %} &middot; {{ item.option }}{% endif %}</div>
+                    {% if item.team or item.jersey %}
+                        <div class="mt-0.5 text-xs text-muted">
+                            {% if item.team %}{{ item.team }}{% endif %}{% if item.team and item.jersey %} &middot; {% endif %}{% if item.jersey %}#{{ item.jersey }}{% endif %}
+                        </div>
+                    {% endif %}
+                    {% for error in item.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                </div>
+                {% if not priced_entries %}
+                    <div class="flex shrink-0 items-center gap-1">
+                        <button type="submit" name="action" value="change:{{ item.index }}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-club" hx-post="{{ request.path }}" hx-vals='{"action": "change:{{ item.index }}"}' hx-include="closest form" hx-target="#registration-editor-body" hx-swap="innerHTML">{% trans "Edit" %}</button>
+                        <button type="submit" name="action" value="remove:{{ item.index }}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-muted" aria-label="{% trans 'Remove this registration' %}">{% trans "Remove" %}</button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% empty %}
+        <div class="{{ card }} p-5 text-center text-sm text-muted">{% trans "No registrations yet." %}</div>
+    {% endfor %}
+    {% if can_add_entry %}
+        <button type="submit" name="action" value="add" class="btn-rc btn-rc-neutral" data-add-registration hx-post="{{ request.path }}" hx-vals='{"action": "add"}' hx-include="closest form" hx-target="#registration-editor-body" hx-swap="innerHTML">
+            {% lucide "circle-plus" size=18 stroke_width=2.4 %} {% trans "Add a registration" %}
+        </button>
+    {% endif %}
+</div>

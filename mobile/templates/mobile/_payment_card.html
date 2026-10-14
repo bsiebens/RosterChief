@@ -1,0 +1,59 @@
+{% load i18n lucide %}
+{% comment %}
+    One "Payments & dues" item, shaped like the native app's card (card built by mobile.services.payments.payment_cards): an eyebrow naming the kind, a card holding one block per person (name only when the card covers several people or the account manages others), the manual discount, a bold "To pay" total, the long-date due line and the early-payment banner, then the invoice download when one exists.
+{% endcomment %}
+<section class="flex flex-col gap-2">
+    <div class="px-0.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% if card.kind == "registration" %}{% trans "Registration" %}{% else %}{% trans "Season dues" %}{% endif %}</div>
+    <div class="m-card overflow-hidden">
+        {% for block in card.members %}
+            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+            <div class="flex flex-col gap-1.5 p-3.5">
+                {% if block.show_name %}
+                    <div class="text-[15px] font-semibold text-ink">{% if block.is_me %}{% trans "Me" %}{% else %}{{ block.member.get_full_name }}{% endif %}</div>
+                {% endif %}
+                {% for line in block.lines %}
+                    <div class="flex items-baseline justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="text-sm text-slate">{{ line.label }}</div>
+                            {% if line.team %}<div class="text-xs text-muted">{{ line.team }}</div>{% endif %}
+                            {% if line.discount %}<div class="text-xs text-ok-text">&minus;&euro; {{ line.discount|floatformat:2 }}</div>{% endif %}
+                        </div>
+                        <span class="shrink-0 font-mono text-sm tabular-nums text-ink">&euro; {{ line.price|floatformat:2 }}</span>
+                    </div>
+                {% endfor %}
+                {% if block.lines|length > 1 %}
+                    <div class="flex items-baseline justify-between">
+                        <span class="text-[13px] text-muted">{% trans "Balance" %}</span>
+                        <span class="font-mono text-sm font-semibold tabular-nums text-ink">&euro; {{ block.balance|floatformat:2 }}</span>
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        {% if card.manual_discount %}
+            <div class="h-px bg-rule"></div>
+            <div class="flex items-baseline justify-between gap-3 p-3.5 text-sm text-ok-text">
+                <span>{{ card.manual_discount_note|default:_("Discount") }}</span>
+                <span class="shrink-0 font-mono tabular-nums">&minus;&euro; {{ card.manual_discount|floatformat:2 }}</span>
+            </div>
+        {% endif %}
+        <div class="h-px bg-rule"></div>
+        <div class="flex items-baseline justify-between p-3.5 text-[17px] font-bold text-ink">
+            <span>{% trans "To pay" %}</span>
+            <span class="font-mono tabular-nums">&euro; {{ card.total|floatformat:2 }}</span>
+        </div>
+        {% if card.due_date %}
+            <div class="px-3.5 pb-3 text-[13px] text-muted">{% blocktrans with date=card.due_date|date:"DATE_FORMAT" %}Due {{ date }}{% endblocktrans %}</div>
+        {% endif %}
+        {% if card.early_payment %}
+            <div class="flex items-center gap-2 bg-info-bg p-3 text-[13px] font-medium text-info-text">
+                {% lucide "clock" size=16 class="shrink-0" %}
+                <span>{% blocktrans with total=card.early_payment.discounted_total|floatformat:2 date=card.early_payment.deadline|date:"DATE_FORMAT" amount=card.early_payment.discount|floatformat:2 %}Pay &euro; {{ total }} by {{ date }} and save &euro; {{ amount }}{% endblocktrans %}</span>
+            </div>
+        {% endif %}
+    </div>
+    {% if card.batch %}
+        <a class="btn-rc btn-rc-neutral" href="{% url "mobile:registration_invoice_pdf" card.batch.pk %}" hx-boost="false">{% lucide "file-down" size=16 %} {% trans "Download invoice" %}</a>
+    {% elif card.invoice %}
+        <a class="btn-rc btn-rc-neutral" href="{% url "mobile:dues_invoice_pdf" card.invoice.pk %}" hx-boost="false">{% lucide "file-down" size=16 %} {% trans "Download invoice" %}</a>
+    {% endif %}
+</section>

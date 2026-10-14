@@ -16,7 +16,7 @@
 {% endcomment %}
 
 {% block content %}
-    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-white px-4 py-3">
+    <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
             {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
         </a>
@@ -43,7 +43,7 @@
                     {{ form.description }}
                     {% for error in form.description.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                 </div>
-                <button type="submit" class="btn btn-primary w-full">{% trans "Submit" %}</button>
+                <button type="submit" class="btn-rc btn-rc-primary">{% trans "Submit" %}</button>
             </form>
         </div>
 
@@ -58,7 +58,7 @@
                                     <div class="text-[15px] font-semibold text-ink">{{ row.bug.title }}</div>
                                     <div class="text-xs text-muted">{% blocktrans with date=row.bug.created|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
                                 </div>
-                                <span class="pill {{ row.pill_class }} shrink-0">{{ row.bug.get_status_display }}</span>
+                                <span class="pill pill-sm {{ row.pill_class }} shrink-0">{{ row.bug.get_status_display }}</span>
                             </div>
 
                             <p class="mt-2 text-sm text-ink">{{ row.bug.description|linebreaksbr }}</p>
@@ -90,9 +90,8 @@
                     {% endfor %}
                 </div>
             {% else %}
-                <div class="m-card p-6 text-center">
-                    <p class="text-sm text-muted">{% trans "No bugs reported yet." %}</p>
-                </div>
+                {% trans "No bugs reported yet." as empty_title %}
+                {% include "mobile/_state.html" with kind="empty" icon="bug" title=empty_title %}
             {% endif %}
         </div>
     {% endif %}

@@ -1,0 +1,28 @@
+{% load i18n lucide %}
+{% comment %}
+    "Follow this game" (iOS EventReplySheet.followCard). Expects ``follow`` ({event, directly, via_team, is_following, team_name}) and ``in_sheet``. A game followed through a followed team shows on and read-only (only unfollowing the team changes it, on Me > Live game updates). Posts to mobile:game_follow and swaps itself in place.
+{% endcomment %}
+<div id="game-follow" class="m-card flex items-center gap-3 p-3.5">
+    <span class="shrink-0 {% if follow.is_following %}text-warn{% else %}text-muted{% endif %}">{% if follow.is_following %}{% lucide "star" size=20 stroke_width=2.2 fill="currentColor" %}{% else %}{% lucide "star" size=20 stroke_width=2.2 %}{% endif %}</span>
+    <div class="min-w-0 flex-1">
+        <div class="text-[15px] font-semibold text-ink">{% if follow.is_following %}{% trans "Following this game" %}{% else %}{% trans "Follow this game" %}{% endif %}</div>
+        <div class="text-xs text-muted">
+            {% if follow.via_team %}
+                {% blocktrans with team=follow.team_name %}Following via {{ team }}. To stop, unfollow the team in your profile.{% endblocktrans %}
+            {% elif follow.directly %}
+                {% trans "Live score pushes for this game." %}
+            {% else %}
+                {% trans "Get live score pushes for this game." %}
+            {% endif %}
+        </div>
+        {% if follow_error %}<div class="mt-1 text-xs font-semibold text-club-dark" role="alert">{{ follow_error }}</div>{% endif %}
+    </div>
+    <form method="post" action="{% url "mobile:game_follow" follow.event.pk %}" hx-post="{% url "mobile:game_follow" follow.event.pk %}" hx-target="#game-follow" hx-swap="outerHTML" hx-push-url="false">
+        {% csrf_token %}
+        <input type="hidden" name="follow" value="{% if follow.directly %}0{% else %}1{% endif %}">
+        <input type="hidden" name="next" value="{{ follow.event.pk }}">
+        <button type="submit" class="answer-btn {% if follow.is_following %}answer-btn-on{% endif %} answer-btn-line" {% if follow.via_team and not follow.directly %}disabled{% endif %} aria-pressed="{% if follow.is_following %}true{% else %}false{% endif %}">
+            {% if follow.is_following %}{% trans "Following" %}{% else %}{% trans "Follow" %}{% endif %}
+        </button>
+    </form>
+</div>

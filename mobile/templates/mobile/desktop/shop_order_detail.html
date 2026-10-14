@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to my orders" as back_label %}{% url "mobile:shop_orders" as orders_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=orders_url label=back_label width="max-w-[680px]" %}
     <div class="mx-auto flex w-full max-w-[680px] flex-col gap-4">
         <div class="card flex items-center justify-between p-4.5">
             <div>
@@ -9,8 +11,8 @@
                 <div class="text-xs text-muted">{{ order.created|date:"d M Y" }}</div>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1">
-                <span class="pill pill-sm {{ payment_pill_class }}">{% lucide "wallet" size=10 %} {{ order.get_payment_status_display }}</span>
-                <span class="pill pill-sm {{ member_status_pill_class }}">{% lucide "package" size=10 %} {{ order.member_status.label }}</span>
+                <span class="text-xs text-muted">{{ payment_label }}</span>
+                <span class="pill pill-sm {{ status_pill_class }}">{{ status_label }}</span>
             </div>
         </div>
 

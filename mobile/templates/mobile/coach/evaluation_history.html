@@ -23,15 +23,15 @@
     </div>
 {% endblock header_extra %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     {% if rubric_configured %}
-        <a class="btn btn-dark w-full gap-2" href="{% url "mobile:coach_evaluation_create" player.pk %}">
-            {% lucide "plus" size=16 %} {% trans "New evaluation" %}
+        <a class="btn-rc btn-rc-primary w-full gap-2" href="{% url "mobile:coach_evaluation_create" player.pk %}">
+            {% lucide "circle-plus" size=18 %} {% trans "New evaluation" %}
         </a>
     {% else %}
-        <div class="m-card p-4 text-center text-sm text-muted">
-            {% trans "This club hasn't set up an evaluation checklist yet." %}
-        </div>
+        {% include "mobile/_state.html" with kind="empty" icon="clipboard-list" title=_("No checklists") text=_("The club hasn't set up an evaluation checklist yet.") %}
     {% endif %}
 
     <div class="m-card overflow-hidden">
