@@ -1,0 +1,17 @@
+{% load i18n %}
+{% comment %}
+    The inbox list region (#notification-list) -- swapped whole by Mark all read / Clear all.
+{% endcomment %}
+<div id="notification-list" class="-mx-4">
+    {% if rows %}
+        <div class="border-t border-rule">
+            {% include "mobile/_notification_rows.html" %}
+        </div>
+    {% else %}
+        <div class="mx-4">
+            {% trans "No notifications" as empty_title %}
+            {% trans "You're all caught up." as empty_text %}
+            {% include "mobile/_state.html" with kind="empty" icon="bell-off" title=empty_title text=empty_text %}
+        </div>
+    {% endif %}
+</div>

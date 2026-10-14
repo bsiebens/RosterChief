@@ -1,34 +1,28 @@
 {% load i18n %}
 {% comment %}
-    One M7 notification row -- included from notifications.html once per day
-    bucket. Expects ``row`` ({notification, source_label}) in scope. The
-    whole row is the tap target (a submit button styled full-width, since a
-    POST form can't wrap another form/link) -- tapping always marks it read,
-    and also navigates to the linked News/Event when its source resolves to
-    one (see mobile.views._notification_source_link and
-    NotificationsView.post). A club-coloured bar marks it unread -- full
-    height via self-stretch, same technique as mobile/_calendar_row.html's
-    own kind marker, so it still spans the row now that the body text below
-    is shown in full (no truncatechars) and can wrap to several lines. The
-    timestamp is stacked time-over-date (like _calendar_row.html's own
-    day/date column) rather than a relative "X ago" string -- that can run
-    long ("1 hour, 20 minutes ago") and eats into the body text's width now
-    that it's no longer truncated.
+    One inbox row (iOS NotificationsView.row). Expects ``row`` ({notification, title, body,
+    source_label, url, person}) in scope. Unread: filled red dot, red left edge, bold title,
+    on a surface background; read: nothing but the space, receding onto the page. Subtitle
+    is "person (only when the account manages more than one) · relative time".
+
+    The whole row is a POST form (a form can't wrap another form/link): tapping marks it
+    read. With a screen to land on (row.url) it is a plain form post that redirects there
+    (hx-boost="false"); otherwise htmx swaps just this row to its read state.
 {% endcomment %}
-<form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
+<form method="post" action="{% url "mobile:notifications" %}" {% if row.url %}hx-boost="false"{% else %}hx-post="{% url "mobile:notifications" %}" hx-target="this" hx-swap="outerHTML"{% endif %}>
     {% csrf_token %}
     <input type="hidden" name="action" value="mark_read">
     <input type="hidden" name="notification_id" value="{{ row.notification.pk }}">
-    <button type="submit" class="m-card flex w-full items-center gap-3 p-3.5 text-left">
-        <span class="w-[3px] shrink-0 self-stretch rounded-full {% if not row.notification.read_at %}bg-club{% else %}bg-line{% endif %}"></span>
+    <button type="submit" class="pressable relative flex w-full items-start gap-3 border-b border-rule px-4 py-3 text-left {% if not row.notification.read_at %}bg-surface{% endif %}">
+        {% if not row.notification.read_at %}<span class="absolute inset-y-0 left-0 w-[3px] bg-red-600"></span>{% endif %}
+        <span class="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full {% if not row.notification.read_at %}bg-red-600{% endif %}" aria-hidden="true"></span>
         <span class="min-w-0 flex-1">
-            <span class="block text-sm font-semibold text-ink">{{ row.notification.title }}</span>
-            <span class="block text-xs text-muted">{{ row.notification.body }}</span>
-            {% if row.source_label %}<span class="block font-display text-[11px] font-extrabold text-club uppercase tracking-wide">{{ row.source_label }}</span>{% endif %}
+            <span class="block text-[15px] {% if row.notification.read_at %}text-slate{% else %}font-bold text-ink{% endif %}">{{ row.title }}</span>
+            {% if row.body %}<span class="mt-0.5 block text-[13px] {% if row.notification.read_at %}text-dim{% else %}font-medium text-slate{% endif %}">{{ row.body }}</span>{% endif %}
+            <span class="mt-0.5 block text-xs text-dim">
+                {% if row.person %}{{ row.person }} &middot; {% endif %}{% blocktrans with ago=row.notification.created|timesince %}{{ ago }} ago{% endblocktrans %}
+            </span>
         </span>
-        <span class="w-11 shrink-0 text-right">
-            <span class="block font-mono text-[11px] text-dim">{{ row.notification.created|date:"H:i" }}</span>
-            <span class="block font-mono text-[10px] text-dim">{{ row.notification.created|date:"d M" }}</span>
-        </span>
+        <span class="sr-only">{% if row.notification.read_at %}{% trans "Read" %}{% else %}{% trans "Unread" %}{% endif %}</span>
     </button>
 </form>

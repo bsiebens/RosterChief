@@ -34,7 +34,7 @@
         {# More than one registration window is open at once -- pick one before anything else shows, so a batch can never mix products from two different seasons. #}
         <div class="m-card p-4">
             <p class="text-[15px] font-semibold text-ink">{% trans "Which season?" %}</p>
-            <p class="mt-1 text-sm text-muted">{% trans "Registration is currently open for more than one season -- pick which one this is for." %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Registration is open for more than one season. Pick the one this is for." %}</p>
             <form method="get" class="mt-3 flex flex-col gap-3">
                 <select name="season" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink focus:border-ink focus:outline-none">
                     {% for choice in available_seasons %}
@@ -42,15 +42,15 @@
                         <option value="{{ choice.pk }}">{{ choice_label }}</option>
                     {% endfor %}
                 </select>
-                <button type="submit" class="btn btn-primary h-11">{% trans "Continue" %}</button>
+                <button type="submit" class="btn-rc btn-rc-primary">{% trans "Continue" %}</button>
             </form>
         </div>
     {% else %}
         {% if registration_season %}
-            <div class="flex items-center gap-1.5 text-sm text-muted">
-                {% lucide "calendar" size=15 class="shrink-0 text-club" %}
-                {% blocktrans with start=registration_season.start_date|date:"Y" end=registration_season.end_date|date:"Y" %}Registering for Season {{ start }}-{{ end }}{% endblocktrans %}
-            </div>
+            <h1 class="font-display text-[22px] leading-tight font-extrabold text-ink uppercase">{% blocktrans with start=registration_season.start_date|date:"Y" end=registration_season.end_date|date:"Y" %}Season {{ start }}-{{ end }}{% endblocktrans %}</h1>
+        {% endif %}
+        {% if not priced_entries %}
+            <p class="text-sm text-muted">{% trans "Add a registration for each person and role. You'll see the price before you send it." %}</p>
         {% endif %}
         <form method="post" class="flex flex-col gap-4" hx-boost="false">
             {% csrf_token %}
@@ -91,19 +91,20 @@
                                     </div>
                                     <div class="h-px bg-rule"></div>
                                     <div class="p-3.5">
-                                        <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{{ row.entry_kind.label }}</label>
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.entry_kind.id_for_label }}">{% trans "Role" %}</label>
                                         {{ row.entry_kind }}
                                     </div>
                                     <div class="h-px bg-rule"></div>
                                     <div class="p-3.5">
-                                        <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{{ row.product_variant.label }}</label>
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.product_variant.id_for_label }}">{% trans "Registering for" %}</label>
                                         {{ row.product_variant }}
                                         {% for error in row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                                     </div>
                                     <div class="h-px bg-rule"></div>
                                     <div class="p-3.5">
-                                        <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{{ row.requested_team.label }}</label>
+                                        <label class="mb-1 block text-xs text-muted" for="{{ row.requested_team.id_for_label }}">{% trans "Team" %}</label>
                                         {{ row.requested_team }}
+                                        <p class="mt-1 text-xs text-muted">{% trans "Your preference. The club makes the final choice." %}</p>
                                         {% for error in row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                                     </div>
                                     {# Jersey number itself isn't picked here -- it moves to the Price/confirm screen below, once the team is already submitted. Recovery fallback only, see _entry_row.html's own comment: a formset with any invalid row never reaches pricing at all. #}
@@ -145,19 +146,20 @@
                         </div>
                         <div class="h-px bg-rule"></div>
                         <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.entry_kind.id_for_label }}">{{ extra_row.entry_kind.label }}</label>
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.entry_kind.id_for_label }}">{% trans "Role" %}</label>
                             {{ extra_row.entry_kind }}
                         </div>
                         <div class="h-px bg-rule"></div>
                         <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.product_variant.id_for_label }}">{{ extra_row.product_variant.label }}</label>
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.product_variant.id_for_label }}">{% trans "Registering for" %}</label>
                             {{ extra_row.product_variant }}
                             {% for error in extra_row.product_variant.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                         </div>
                         <div class="h-px bg-rule"></div>
                         <div class="p-3.5">
-                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_team.id_for_label }}">{{ extra_row.requested_team.label }}</label>
+                            <label class="mb-1 block text-xs text-muted" for="{{ extra_row.requested_team.id_for_label }}">{% trans "Team" %}</label>
                             {{ extra_row.requested_team }}
+                            <p class="mt-1 text-xs text-muted">{% trans "Your preference. The club makes the final choice." %}</p>
                             {% for error in extra_row.requested_team.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
                         </div>
                         {% if extra_row.requested_jersey_number.errors %}
@@ -184,49 +186,46 @@
                     <div class="m-card overflow-hidden">
                         {% for form, entry, price in priced_entries %}
                             {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                            <div class="flex items-center justify-between p-3.5">
-                                <span class="text-[15px] text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
-                                <span class="font-mono text-sm whitespace-nowrap tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
+                            <div class="flex flex-col gap-0.5 p-3.5">
+                                <div class="flex items-baseline justify-between gap-3">
+                                    <span class="text-sm font-semibold text-ink">{{ entry.first_name }} {{ entry.last_name }}</span>
+                                    <span class="font-mono text-sm whitespace-nowrap tabular-nums text-ink">&euro; {{ price.price|floatformat:2 }}</span>
+                                </div>
+                                {% if entry.product_variant %}<div class="text-xs text-muted">{{ entry.product_variant.product.name }} &middot; {{ entry.product_variant.name }}</div>{% endif %}
+                                {% if price.min_registrants_discount > 0 %}
+                                    <div class="text-xs text-ok-text">{% blocktrans with amount=price.min_registrants_discount|floatformat:2 %}&minus;&euro; {{ amount }} family discount{% endblocktrans %}</div>
+                                {% endif %}
+                                {% if price.deadline %}
+                                    <div class="text-xs text-muted">{% blocktrans with amount=price.deadline_discount|floatformat:2 date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</div>
+                                {% endif %}
+                                {# Jersey number lives here, not on the form above -- there was nothing to narrow it to (which team?) until the team was already submitted, which this receipt is proof of. #}
+                                {% if form.requested_jersey_number.field.choices|length > 1 %}
+                                    {% blocktrans asvar jersey_label with team=entry.requested_team.short_name %}Jersey number ({{ team }}){% endblocktrans %}
+                                    <div class="mt-2">
+                                        <label class="mb-1 block text-xs text-muted" for="{{ form.requested_jersey_number.id_for_label }}">{{ jersey_label }}</label>
+                                        {{ form.requested_jersey_number }}
+                                        {% for error in form.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                                    </div>
+                                {% endif %}
                             </div>
-                            {# Jersey number lives here now, not on the form above -- there was nothing to narrow it to (which team?) until the team was already submitted, which this receipt is proof of. #}
-                            {% if form.requested_jersey_number.field.choices|length > 1 %}
-                                {% blocktrans asvar jersey_label with team=entry.requested_team.short_name %}Jersey number ({{ team }}){% endblocktrans %}
-                                <div class="px-3.5 pb-3.5">
-                                    <label class="mb-1 block text-xs text-muted" for="{{ form.requested_jersey_number.id_for_label }}">{{ jersey_label }}</label>
-                                    {{ form.requested_jersey_number }}
-                                    {% for error in form.requested_jersey_number.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
-                                </div>
-                            {% endif %}
-                            {% if price.min_registrants_discount > 0 %}
-                                <div class="flex items-center justify-between px-3.5 pb-3">
-                                    <span class="text-xs text-muted">{% trans "Multi-registrant discount" %}</span>
-                                    <span class="font-mono text-xs tabular-nums text-muted">&minus;&euro; {{ price.min_registrants_discount|floatformat:2 }}</span>
-                                </div>
-                            {% endif %}
-                            {% if price.deadline %}
-                                <div class="px-3.5 pb-3 text-xs text-muted">{% blocktrans with amount=price.deadline_discount|floatformat:2 date=price.deadline %}€{{ amount }} off if paid by {{ date }}{% endblocktrans %}</div>
-                            {% endif %}
                         {% endfor %}
                         <div class="h-px bg-rule"></div>
-                        <div class="flex items-center justify-between p-3.5">
-                            <span class="text-[15px] font-bold text-ink">{% trans "Total" %}</span>
-                            <span class="font-mono text-base font-bold tabular-nums text-ink">&euro; {{ priced_total|floatformat:2 }}</span>
+                        <div class="flex items-baseline justify-between p-3.5 text-[17px] font-bold text-ink">
+                            <span>{% trans "Total" %}</span>
+                            <span class="font-mono tabular-nums">&euro; {{ priced_total|floatformat:2 }}</span>
                         </div>
                         {% if priced_early_total != priced_total %}
-                            <div class="flex items-center justify-between px-3.5 pb-3">
-                                <span class="text-xs text-muted">{% trans "If paid before the deadline(s) above" %}</span>
-                                <span class="font-mono text-xs tabular-nums text-muted">&euro; {{ priced_early_total|floatformat:2 }}</span>
-                            </div>
+                            <div class="px-3.5 pb-3 text-[13px] text-info-text">{% blocktrans with amount=priced_early_total|floatformat:2 %}&euro; {{ amount }} if you pay early{% endblocktrans %}</div>
                         {% endif %}
                     </div>
-                    <p class="mt-2 text-xs text-muted">{% trans "This is what's owed once the club confirms this -- payment happens separately, not on this page." %}</p>
+                    <p class="mt-2 text-[13px] text-muted">{% trans "The club reviews your registration and then sends the invoice. You'll find it under Payments & dues." %}</p>
                 </div>
-                <div class="flex gap-2">
-                    <button type="submit" name="action" value="edit" class="btn btn-secondary h-11">{% trans "Back" %}</button>
-                    <button type="submit" name="action" value="submit" class="btn btn-primary h-11 flex-1">{% trans "Confirm & submit" %}</button>
+                <div class="flex flex-col gap-2">
+                    <button type="submit" name="action" value="submit" class="btn-rc btn-rc-primary">{% trans "Send registration" %}</button>
+                    <button type="submit" name="action" value="edit" class="btn-rc btn-rc-neutral">{% trans "Back" %}</button>
                 </div>
             {% else %}
-                <button type="submit" name="action" value="preview" class="btn btn-primary h-11">{% trans "Calculate price" %}</button>
+                <button type="submit" name="action" value="preview" class="btn-rc btn-rc-primary">{% trans "See the price" %}</button>
             {% endif %}
         </form>
     {% endif %}

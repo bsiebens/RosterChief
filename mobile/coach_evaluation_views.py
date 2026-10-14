@@ -120,6 +120,20 @@ class CoachEvaluationHistoryView(CoachEvaluationMixin, TemplateView):
         )
 
 
+def _rubric_form(rubric, data=None, files=None):
+    """``(styled form, rows, unsupported)`` for a checklist's rubric. A rubric
+    with a field type this build can't render (formbuilder knows more types
+    over time than a stale deploy of this screen) comes back as
+    ``(None, [], True)`` rather than a 500 -- the template then says so and
+    offers no Submit, the same call the iOS app makes ("needs a newer
+    version of the app")."""
+    try:
+        bound_form = style_dynamic_form(build_form(rubric, data=data, files=files))
+    except KeyError:
+        return None, [], True
+    return bound_form, rubric_field_rows(rubric, bound_form), False
+
+
 class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
     """Fill in a new evaluation of one player against one of the club's
     checklists -- see evaluations.services.submit_evaluation. The evaluator
@@ -158,8 +172,8 @@ class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
             return render(request, self.picker_template_name, self.get_context_data(player=player, checklists=checklists))
 
         rubric = current_rubric_form(checklist)
-        bound_form = style_dynamic_form(build_form(rubric))
-        return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rubric_field_rows(rubric, bound_form)))
+        bound_form, rows, unsupported = _rubric_form(rubric)
+        return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rows, unsupported_field=unsupported, other_checklists=checklists.count() > 1))
 
     def post(self, request, *args, **kwargs):
         player = self.get_player()
@@ -169,15 +183,17 @@ class CoachEvaluationCreateView(CoachEvaluationMixin, TemplateView):
             return HttpResponseRedirect(reverse("mobile:coach_evaluation_create", kwargs={"player_pk": player.pk}))
 
         rubric_form = current_rubric_form(checklist)
+        if _rubric_form(rubric_form)[2]:
+            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=None, rows=[], unsupported_field=True, other_checklists=checklists.count() > 1), status=422)
         try:
             submit_evaluation(club=request.club, checklist=checklist, player=player, season=current_season(request.club), evaluator=self.me, data=request.POST, files=request.FILES)
         except EvaluationRubricNotConfigured as error:
             raise Http404("This checklist hasn't been set up yet.") from error
         except EvaluationSubmissionError as error:
-            bound_form = style_dynamic_form(build_form(rubric_form, data=request.POST, files=request.FILES))
+            bound_form, rows, _unsupported = _rubric_form(rubric_form, data=request.POST, files=request.FILES)
             bound_form.is_valid()
             notify(request, f"e|{_('Could not submit')}|{error}")
-            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rubric_field_rows(rubric_form, bound_form)))
+            return self.render_to_response(self.get_context_data(player=player, checklist=checklist, rubric_configured=True, form=bound_form, rows=rows, unsupported_field=False, other_checklists=checklists.count() > 1))
 
         title = _("Evaluation submitted")
         body = _("Your evaluation of “%(player)s” has been recorded.") % {"player": player}

@@ -9,17 +9,22 @@ import json
 from collections import defaultdict
 from decimal import Decimal
 
+from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.contenttypes.prefetch import GenericPrefetch
 from django.core.paginator import Paginator
-from django.db.models import F
+from django.db.models import F, Sum
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.cache import add_never_cache_headers
+from django.utils.html import linebreaks
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
+from django.utils.safestring import mark_safe
 from django.utils.translation import get_language, get_language_info
 from django.utils.translation import gettext_lazy as _
 from django.views import View
@@ -30,16 +35,19 @@ from authentication.models import User
 from bugs.forms import BugReportForm
 from bugs.models import BugReport
 from bugs.services import file_report
-from club.models import ClubMembership
+from club.device import is_mobile_or_tablet
+from club.models import ClubMembership, DuesInvoice
 from club.services.access import current_season, get_current_season, has_management_access, teams_managed_by
 from club.services.fees import open_dues_rows
+from club.services.invoicing import DuesInvoicePDFError
+from club.services.invoicing import invoice_pdf as dues_invoice_pdf
 from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS as AGENDA_KIND_FILTERS
 from events.services.agenda import member_agenda
-from events.services.calendar import agenda_groups, week_bounds
+from events.services.calendar import agenda_groups
 from events.services.game_push import followed_team_ids, set_followed_teams
 from events.services.member_view import member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
@@ -47,12 +55,12 @@ from events.services.referees import RefereeAssignmentError, accept_referee_sign
 from events.services.rsvp import ANSWERABLE_STATUSES, RsvpError, submit_rsvp
 from events.services.tasks import TaskClaimError, claim_task, unclaim_task
 from formbuilder.models import FormSend, Submission
-from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, submit_form
+from formbuilder.services import FormSubmissionError, addressed_people, build_form, form_status_rows_for, is_send_open, submit_form
 from members.models import FamilyMembership, Member
 from members.services.family import managed_people
 from members.views import ClubScopedPublicMixin
 from news.models import News
-from news.services import live_news, localized_news, member_news, render_body_html
+from news.services import live_news, localized_news, member_news, render_body_excerpt, render_body_html
 from notifications import preferences as notification_preferences
 from notifications import quiet_hours
 from notifications.models import NotificationCategory, NotificationPreference
@@ -73,17 +81,18 @@ from rosterchief.client_ip import client_ip
 from shop.models import Cart, CartItem, Order, ProductCategory, Voucher
 from shop.services.cart import MAX_CART_QUANTITY, add_to_cart, cart_summary, catalog, open_cart, orders_for, set_quantity
 from shop.services.checkout import CheckoutError, place_order
-from shop.services.inventory import annotate_availability
+from shop.services.inventory import annotate_availability, annotate_cart_variants
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import StaffAssignment, Team, TeamMembership
 
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
 from .models import CalendarFeedToken, PushSubscription
+from .services import event_ui
 from .services.calendar_feed import build_feed
 from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
-from .services.payments import payments_overview
+from .services.payments import payment_cards, payments_overview
 from .services.push import subscription_error
 from .services.reregistration import entry_formset, member_current_numbers, price_formset, submit_reregistration
 
@@ -282,12 +291,14 @@ class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """The "Notification emails" row under Me -- whether notifications are also emailed to
-    this account (authentication.User.email_notifications), account-wide like the app
-    API's PATCH /me/settings."""
+    """The "Notifications" row under Me (iOS: Notifications): per-category push/email
+    switches for this club with an "Applies to" picker (Everyone / each managed child),
+    quiet hours, and -- last -- whether notifications are also emailed to this account
+    (authentication.User.email_notifications), account-wide like the app API's
+    PATCH /me/settings."""
 
     template_name = "mobile/notification_settings.html"
-    screen_title = _("Notification emails")
+    screen_title = _("Notifications")
     active_tab = "me"
 
     COMMON_ZONES = (
@@ -388,6 +399,72 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         return redirect(self._redirect_url(self._notification_person(request)))
 
 
+# ---------------------------------------------------------------------------
+# Home / Calendar / Event sheet helpers (iOS parity) -- the presentation lives in
+# mobile/services/event_ui.py, the rules in events/services/*.
+# ---------------------------------------------------------------------------
+
+
+def _return_url(request, default):
+    """Where an inline answer (a Home card, a Calendar row) goes back to: the page it was posted
+    from (the ``return`` field), as long as that is a path on this site."""
+    target = request.POST.get("return", "")
+    if target.startswith("/") and url_has_allowed_host_and_scheme(target, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return target
+    return default
+
+
+def _home_cards(view, summary):
+    """Home's "next up" cards: one per event, everyone whose next event it is sharing it (see
+    mobile.services.home). A still-unanswered invitation whose reply deadline has passed gets a
+    read-only "closed" card first, as the single hero used to."""
+    source = list(summary["member_cards"])
+    hero = summary["hero_attendance"]
+    if hero is not None and summary["rsvp_closed"]:
+        source.insert(0, {"kind": "rsvp_closed", "event": hero.event, "attendances": [hero]})
+    mine = event_ui.household_tasks(view.me, view.request.club, [card["event"].pk for card in source])
+    cards = []
+    for card in source:
+        event = card["event"]
+        lines = [{"attendance": attendance, "name": attendance.member.first_name, "drop_status": "dropout" if attendance.status == Attendance.AttendanceStatus.SELECTED else "absent"} for attendance in card["attendances"]]
+        cards.append({"kind": card["kind"], "event": event, "style": event_ui.kind_style(event.kind), "lines": lines, "closed": card["kind"] == "rsvp_closed", "my_tasks": mine.get(event.pk, [])})
+    return cards
+
+
+def _event_context(view, event, *, in_sheet=False, error=None) -> dict:
+    """Everything the event page and the event sheet render (mobile/_event_body.html)."""
+    request = view.request
+    officials = flag_is_active(request, "officials")
+    # Line-up, sign-ups, tasks, per-person answers, blocked people and the squad
+    # summary come from events.services.member_view, shared with the app API.
+    member_view = member_event_view(event, request.club, view.managed_people, view.me, officials_enabled=officials)
+    return {
+        "event": event,
+        "rsvp_closed": member_view["rsvp_closed"],
+        "started": member_view["started"],
+        "lineup": member_view["lineup"],
+        "lineup_categories": member_view["lineup_categories"],
+        "referee_signups": member_view["referee_signups"],
+        "official_signups": member_view["official_signups"],
+        "tasks": member_view["tasks"],
+        "your_answers": event_ui.shape_answers(member_view, event),
+        "blocked_signups": member_view["blocked_signups"],
+        "squad_summary": member_view["squad_summary"],
+        "hero": event_ui.hero_for(event, rsvp_rows_present=bool(member_view["your_answers"]), referee_signups=member_view["referee_signups"], official_signups=member_view["official_signups"]),
+        "maps_url": event_ui.maps_url(event.location, request.META.get("HTTP_USER_AGENT", "")),
+        "in_sheet": in_sheet,
+        "sheet_error": error,
+    }
+
+
+def render_event_sheet(view, event, error=None):
+    """The event sheet's content (the dialog fetches it and every answer inside it swaps it
+    again). ``error`` shows a refusal -- a closed deadline, a full task -- inside the sheet."""
+    response = render(view.request, "mobile/_event_sheet.html", _event_context(view, event, in_sheet=True, error=error))
+    add_never_cache_headers(response)
+    return response
+
+
 class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """M1 -- the design handoff's M1 section: two
     independent "next up" hero cards for everyone currently in scope -- the
@@ -421,7 +498,17 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         # The cards themselves (and their caps) are mobile.services.home, shared with the
         # app API's GET /home.
         summary = home_summary(self.request.club, self.people_in_scope, officials_enabled=flag_is_active(self.request, "officials"))
+        member_cards = _home_cards(self, summary)
+        # A person's soonest unanswered invitation is a card above, so the "Needs your answer" list
+        # leaves it out (the iOS Home does the same) -- the context's own ``needs_answer`` stays whole.
+        card_attendance_ids = {attendance.pk for card in summary["member_cards"] for attendance in card["attendances"]}
+        needs_answer_view = [row for row in summary["needs_answer"] if "attendance" not in row or row["attendance"].pk not in card_attendance_ids]
+        needs_answer_view_total = summary["needs_answer_total"] - (len(summary["needs_answer"]) - len(needs_answer_view))
         return super().get_context_data(
+            member_cards=member_cards,
+            needs_answer_view=needs_answer_view,
+            needs_answer_view_total=needs_answer_view_total,
+            needs_answer_view_remaining=needs_answer_view_total - len(needs_answer_view),
             hero_attendance=summary["hero_attendance"],
             rsvp_closed=summary["rsvp_closed"],
             going_attendance=summary["going_attendance"],
@@ -482,38 +569,144 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         Attendance.AttendanceStatus.NO_RESPONSE: "pill-warn",
     }
 
+    def _calendar_url(self, **overrides):
+        """This screen's URL with the current query string, ``overrides`` applied (``None`` drops a
+        parameter) -- every link in the header, the filter form and the month grid goes through it."""
+        params = self.request.GET.copy()
+        for key, value in overrides.items():
+            if value is None:
+                params.pop(key, None)
+            else:
+                params[key] = value
+        query = params.urlencode()
+        return reverse("mobile:calendar") + (f"?{query}" if query else "")
+
     def get_context_data(self, **kwargs):
+        request = self.request
+        now = timezone.now()
         today = timezone.localdate()
-        kind_filter = self.request.GET.get("kind")
+        zone = timezone.get_current_timezone()
+        midnight = timezone.make_aware(datetime.datetime.combine(today, datetime.time.min), zone)
+        kind_filter = request.GET.get("kind")
         if kind_filter not in self.KIND_FILTERS:
             kind_filter = None
+        month_mode = request.GET.get("view") == "month"
+        show_earlier = not month_mode and request.GET.get("earlier") == "1"
+        season = get_current_season(request)
+
+        # Like the iOS Calendar, a person-scope menu narrows it to one person (``?as=``); without it,
+        # it is everyone the account acts for. Only worth naming whose row it is once there's more
+        # than one person in scope to tell apart.
+        people = self.people_in_scope
+        show_member = len(people) > 1
+
+        if month_mode:
+            month_start = event_ui.parse_month(request.GET.get("month"), today)
+            window_start, window_end = event_ui.month_window(month_start)
+        else:
+            month_start = None
+            window_end = None
+            window_start = midnight
+            if show_earlier:
+                earliest = min(season.start_date, today) if season else today - datetime.timedelta(days=90)
+                window_start = timezone.make_aware(datetime.datetime.combine(earliest, datetime.time.min), zone)
 
         # The merged agenda itself (invitations, referee/official sign-ups, events blocked
         # by an open onboarding requirement) is events.services.agenda, shared with the app
         # API; this only shapes each row for the template. Declined sign-ups are dropped,
         # accepted ones stay visible as a confirmed commitment; the officials rows follow
-        # the "officials" flag like EventDetailView's own card.
-        agenda = member_agenda(self.request.club, self.managed_people, kind=kind_filter, officials_enabled=flag_is_active(self.request, "officials"))
-
-        # Only worth naming whose row it is once there's more than one managed person to
-        # tell apart -- a lone member's own agenda doesn't need it.
-        show_member = len(self.managed_people) > 1
+        # the "officials" flag like EventDetailView's own card. The list starts at the beginning of
+        # today (so a game played this morning still shows its score); ``?earlier=1`` reaches back
+        # to the season's start.
+        agenda = member_agenda(request.club, people, kind=kind_filter, officials_enabled=flag_is_active(request, "officials"), start=window_start, end=window_end)
         rows = []
         for row in agenda:
-            member = row["member"] if show_member else None
+            person = row["member"]
+            member = person if show_member else None
+            shaped = {"event": row["event"], "type": row["type"], "person": person}
             if row["type"] == "rsvp":
                 attendance = row["attendance"]
-                rows.append({"event": row["event"], "pill_class": self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), "pill_label": attendance.get_status_display(), "member": member})
+                shaped.update(attendance=attendance, pill_class=self.STATUS_PILL_CLASSES.get(attendance.status, "pill-neutral"), pill_label=attendance.get_status_display(), member=member)
             elif row["type"] == "referee":
-                rows.append({"event": row["event"], "referee_signup": row["signup"], "referee_member": member})
+                shaped.update(signup=row["signup"], referee_signup=row["signup"], referee_member=member)
             elif row["type"] == "official":
-                rows.append({"event": row["event"], "official_signup": row["signup"], "official_member": member})
+                shaped.update(signup=row["signup"], official_signup=row["signup"], official_member=member)
             else:
-                rows.append({"event": row["event"], "blocked_requirements": row["requirements"], "blocked_member": member})
+                shaped.update(requirements=row["requirements"], blocked_requirements=row["requirements"], blocked_member=member)
+            rows.append(shaped)
 
-        this_week, next_week, later_months = agenda_groups(rows, start_of=lambda row: row["event"].start, today=today)
+        # The filter menu (iOS: "Show on calendar" + "Requests"). Opt-in through the URL: once the form
+        # was submitted (``f=1``) only the ticked kinds/requests show.
+        filtered = request.GET.get("f") == "1"
+        selected_kinds = set(request.GET.getlist("k")) if filtered else None
+        has_referee_rows = any(row["type"] == "referee" for row in rows)
+        has_official_rows = any(row["type"] == "official" for row in rows)
+        show_referee = "referee" in request.GET.getlist("rq") if filtered else True
+        show_official = "official" in request.GET.getlist("rq") if filtered else True
+        present_kinds = {row["event"].kind for row in rows}
+        menu_kinds = [
+            {"value": kind, "label": event_ui.kind_style(kind)["filter_label"], "checked": selected_kinds is None or kind in selected_kinds}
+            for kind in event_ui.KIND_ORDER
+            if kind != Event.EventKind.OTHER or kind in present_kinds or (selected_kinds is not None and kind not in selected_kinds)
+        ]
+        menu_values = {item["value"] for item in menu_kinds}
+        hidden_kinds = [kind for kind in event_ui.KIND_ORDER if kind not in menu_values and (selected_kinds is None or kind in selected_kinds)]
+        filter_active = filtered and (any(not item["checked"] for item in menu_kinds) or (has_referee_rows and not show_referee) or (has_official_rows and not show_official))
+        rows = event_ui.apply_filters(rows, kinds=selected_kinds, referee=show_referee, official=show_official)
 
-        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, kind_filter=kind_filter or "", **kwargs)
+        groups = event_ui.build_groups(rows, me=self.me, now=now, show_names=show_member)
+
+        this_week = next_week = later_months = earlier_months = []
+        month_pane = None
+        if month_mode:
+            selected = event_ui.parse_day(request.GET.get("day"))
+            if selected is None or selected.replace(day=1) != month_start:
+                selected = today if today.replace(day=1) == month_start else month_start
+            month_pane = event_ui.month_pane(groups, month_start=month_start, selected=selected, today=today, url_for=self._calendar_url)
+        else:
+            past = [group for group in groups if group["event"].start < midnight]
+            upcoming = [group for group in groups if group["event"].start >= midnight]
+            this_week, next_week, later_months = agenda_groups(upcoming, start_of=lambda group: group["event"].start, today=today)
+            earlier_months = event_ui.months_of(past)
+            event_ui.mark_today_anchor(this_week, next_week, *[month["items"] for month in later_months], today=today)
+
+        scope_options = [{"label": _("All members"), "url": self._calendar_url(**{"as": "all"}), "active": self.scope_everyone}]
+        for person in self.managed_people:
+            scope_options.append({"label": _("Me") if person == self.me else person.get_full_name(), "url": self._calendar_url(**{"as": str(person.pk)}), "active": not self.scope_everyone and person == self.scope_person})
+        if self.scope_everyone or self.scope_person is None:
+            scope_label = _("All members")
+        else:
+            scope_label = _("Me") if self.scope_person == self.me else self.scope_person.first_name
+
+        return super().get_context_data(
+            this_week=this_week,
+            next_week=next_week,
+            later_months=later_months,
+            earlier_months=earlier_months,
+            has_groups=bool(groups),
+            kind_filter=kind_filter or "",
+            view_mode="month" if month_mode else "list",
+            month_pane=month_pane,
+            list_url=self._calendar_url(view=None, month=None, day=None, earlier=None),
+            month_url=self._calendar_url(view="month", month=None, day=None, earlier=None),
+            earlier_url=self._calendar_url(earlier="1", today="1") if not month_mode and not show_earlier and season is not None and season.start_date < today else None,
+            show_earlier=show_earlier,
+            scroll_today=not month_mode and request.GET.get("today") == "1",
+            # Where an inline answer comes back to: this very screen, without the one-shot "jump to today".
+            return_url=self._calendar_url(today=None),
+            scope_options=scope_options,
+            scope_label=scope_label,
+            show_scope_menu=len(self.managed_people) > 1,
+            menu_kinds=menu_kinds,
+            hidden_kinds=hidden_kinds,
+            has_referee_rows=has_referee_rows,
+            has_official_rows=has_official_rows,
+            show_referee=show_referee,
+            show_official=show_official,
+            filter_active=filter_active,
+            filter_hidden=[(key, request.GET[key]) for key in ("as", "view", "month", "day") if key in request.GET],
+            **kwargs,
+        )
 
 
 class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
@@ -532,24 +725,33 @@ class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         signup = get_object_or_404(RefereeSignup, pk=kwargs["signup_id"], member__in=self.managed_people, event__club=request.club)
         response = request.POST.get("response")
+        # From the event sheet the answer stays in the sheet: it is re-rendered, a refusal shown inside it.
+        sheet = request.POST.get("surface") == "sheet"
+        sheet_error = None
 
         if response == "accept":
             try:
                 accept_referee_signup(signup)
                 body = _("%(name)s is confirmed to referee -- see you there.") % {"name": signup.member.get_full_name()}
-                notify(request, f"s|{_('Referee sign-up confirmed')}|{body}")
+                if not sheet:
+                    notify(request, f"s|{_('Referee sign-up confirmed')}|{body}")
             except RefereeAssignmentError as exc:
-                notify(request, f"e|{_('Could not sign up')}|{exc}")
+                sheet_error = str(exc)
+                if not sheet:
+                    notify(request, f"e|{_('Could not sign up')}|{exc}")
         elif response == "decline":
             decline_referee_signup(signup)
             body = _("%(name)s won't be refereeing this one -- thanks for letting us know.") % {"name": signup.member.get_full_name()}
-            notify(request, f"s|{_('Declined')}|{body}")
+            if not sheet:
+                notify(request, f"s|{_('Declined')}|{body}")
         else:
             return HttpResponseBadRequest(_("Unknown response."))
 
+        if sheet:
+            return render_event_sheet(self, signup.event, error=sheet_error)
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": signup.event_id}))
-        return HttpResponseRedirect(reverse("mobile:calendar"))
+        return HttpResponseRedirect(_return_url(request, reverse("mobile:calendar")))
 
 
 class OfficialSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
@@ -559,24 +761,32 @@ class OfficialSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         signup = get_object_or_404(OfficialSignup, pk=kwargs["signup_id"], member__in=self.managed_people, event__club=request.club)
         response = request.POST.get("response")
+        sheet = request.POST.get("surface") == "sheet"
+        sheet_error = None
 
         if response == "accept":
             try:
                 accept_official_signup(signup)
                 body = _("%(name)s is confirmed as an official -- see you there.") % {"name": signup.member.get_full_name()}
-                notify(request, f"s|{_('Official sign-up confirmed')}|{body}")
+                if not sheet:
+                    notify(request, f"s|{_('Official sign-up confirmed')}|{body}")
             except OfficialAssignmentError as exc:
-                notify(request, f"e|{_('Could not sign up')}|{exc}")
+                sheet_error = str(exc)
+                if not sheet:
+                    notify(request, f"e|{_('Could not sign up')}|{exc}")
         elif response == "decline":
             decline_official_signup(signup)
             body = _("%(name)s won't be an official for this one -- thanks for letting us know.") % {"name": signup.member.get_full_name()}
-            notify(request, f"s|{_('Declined')}|{body}")
+            if not sheet:
+                notify(request, f"s|{_('Declined')}|{body}")
         else:
             return HttpResponseBadRequest(_("Unknown response."))
 
+        if sheet:
+            return render_event_sheet(self, signup.event, error=sheet_error)
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": signup.event_id}))
-        return HttpResponseRedirect(reverse("mobile:calendar"))
+        return HttpResponseRedirect(_return_url(request, reverse("mobile:calendar")))
 
 
 class EventTaskRespondView(PersonScopeMixin, LoginRequiredMixin, View):
@@ -594,24 +804,33 @@ class EventTaskRespondView(PersonScopeMixin, LoginRequiredMixin, View):
 
         task = get_object_or_404(EventTask, pk=kwargs["task_id"], event__club=request.club)
         response = request.POST.get("response")
+        # From the event sheet (or an inline Claim on Home) the screen is answered in place.
+        sheet = request.POST.get("surface") == "sheet"
+        sheet_error = None
 
         if response == "claim":
             try:
                 claim_task(task, self.me)
-                notify(request, f"s|{_('Claimed')}|" + _("You're down for “%(title)s”.") % {"title": task.title})
+                if not sheet:
+                    notify(request, f"s|{_('Claimed')}|" + _("You're down for “%(title)s”.") % {"title": task.title})
             except TaskClaimError as exc:
-                notify(request, f"e|{_('Could not claim')}|{exc}")
+                sheet_error = str(exc)
+                if not sheet:
+                    notify(request, f"e|{_('Could not claim')}|{exc}")
         elif response == "unclaim":
             claim = task.claims.filter(member=self.me).first()
             if claim is not None:
                 unclaim_task(claim)
-                notify(request, f"w|{_('Removed')}|" + _("You're no longer down for “%(title)s”.") % {"title": task.title})
+                if not sheet:
+                    notify(request, f"w|{_('Removed')}|" + _("You're no longer down for “%(title)s”.") % {"title": task.title})
         else:
             return HttpResponseBadRequest(_("Unknown response."))
 
+        if sheet:
+            return render_event_sheet(self, task.event, error=sheet_error)
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": task.event_id}))
-        return HttpResponseRedirect(reverse("mobile:calendar"))
+        return HttpResponseRedirect(_return_url(request, reverse("mobile:calendar")))
 
 
 class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -639,25 +858,19 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Event")
     active_tab = "calendar"
 
+    def _wants_sheet(self) -> bool:
+        return self.request.GET.get("sheet") == "1"
+
+    def get_template_names(self):
+        # The bottom sheet (mobile/static/js/mobile-sheet.js fetches ``?sheet=1``) is a fragment; a
+        # direct visit (a push notification, a bookmark) still gets the full page below.
+        if self._wants_sheet():
+            return ["mobile/_event_sheet.html"]
+        return super().get_template_names()
+
     def get_context_data(self, **kwargs):
         event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=self.kwargs["pk"], club=self.request.club)
-        # Line-up, sign-ups, tasks, per-person answers, blocked people and the squad
-        # summary come from events.services.member_view, shared with the app API.
-        view = member_event_view(event, self.request.club, self.managed_people, self.me, officials_enabled=flag_is_active(self.request, "officials"))
-        return super().get_context_data(
-            screen_title=event.title,
-            event=event,
-            rsvp_closed=view["rsvp_closed"],
-            lineup=view["lineup"],
-            lineup_categories=view["lineup_categories"],
-            referee_signups=view["referee_signups"],
-            official_signups=view["official_signups"],
-            tasks=view["tasks"],
-            your_answers=view["your_answers"],
-            blocked_signups=view["blocked_signups"],
-            squad_summary=view["squad_summary"],
-            **kwargs,
-        )
+        return super().get_context_data(screen_title=event.title, **_event_context(self, event, in_sheet=self._wants_sheet()), **kwargs)
 
     def post(self, request, *args, **kwargs):
         # The rules themselves (dropout, deadline, reasons) live in events.services.rsvp,
@@ -674,22 +887,34 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         if member is None:
             return HttpResponseBadRequest(_("You can't RSVP for that person."))
 
-        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club)
+        event = get_object_or_404(Event.objects.select_related("location", "opponent"), pk=kwargs["pk"], club=request.club)
         # Only an invited person can answer: an RSVP updates their Attendance row and
         # never creates one for an event the person wasn't invited to.
         existing = get_object_or_404(Attendance.objects.select_related("event", "member"), event=event, member=member)
 
+        # Where the answer was given decides what comes back: the sheet re-renders itself (a refusal
+        # shown inside it), an inline Home/Calendar answer goes back to that page, everything else
+        # keeps the original redirects.
+        sheet = request.POST.get("surface") == "sheet"
+        inline = bool(request.POST.get("return"))
         try:
             submit_rsvp(existing, status, request.POST.get("note", ""))
         except RsvpError as exc:
+            if sheet:
+                return render_event_sheet(self, event, error=str(exc.message))
+            if inline:
+                notify(request, f"e|{_('Could not send your answer')}|{exc.message}")
+                return HttpResponseRedirect(_return_url(request, reverse("mobile:home")))
             if exc.code == "event_started":
                 notify(request, f"e|{_('Too late to reply')}|{exc.message}")
                 return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
             return HttpResponseBadRequest(exc.message)
 
+        if sheet:
+            return render_event_sheet(self, event)
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
-        return HttpResponseRedirect(reverse("mobile:home"))
+        return HttpResponseRedirect(_return_url(request, reverse("mobile:home")))
 
 
 class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -704,11 +929,28 @@ class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("News")
     active_tab = "news"
     PAGE_SIZE = 20
+    EXCERPT_WORDS = 30
+
+    def _is_partial(self):
+        """The infinite-scroll sentinel (``#news-more`` in _news_cards.html) asks for just the next cards."""
+        return bool(self.request.GET.get("page")) and self.request.headers.get("HX-Target") == "news-more"
+
+    def get_template_names(self):
+        if self._is_partial():
+            return ["mobile/_news_cards.html"]
+        return super().get_template_names()
 
     def get_context_data(self, **kwargs):
-        news_items = member_news(self.request.club).prefetch_related("teams")
+        news_items = member_news(self.request.club).prefetch_related("teams", "photos")
         page = Paginator(news_items, self.PAGE_SIZE).get_page(self.request.GET.get("page"))
-        return super().get_context_data(page=page, **kwargs)
+        language = get_language()
+        cards = []
+        for item in page.object_list:
+            title, body, _language = localized_news(item, language)
+            photo = item.main_photo
+            cards.append({"item": item, "title": title, "excerpt": render_body_excerpt(body, words=self.EXCERPT_WORDS), "photo": photo, "teams": ", ".join(team.short_name for team in item.teams.all())})
+        context = super().get_context_data(page=page, cards=cards, **kwargs)
+        return context
 
 
 class NewsDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -872,7 +1114,14 @@ class FormsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         forms_status = form_status_rows_for(self.managed_people, self.request.club)
-        return super().get_context_data(forms_status=forms_status, **kwargs)
+        # "To do" = still open and not yet submitted; everything else (done, or closed without an
+        # answer) goes under "Done and closed" -- a closed, unanswered row is shown but not tappable.
+        for row in forms_status:
+            row["is_done"] = row["submission"] is not None
+            row["is_open"] = is_send_open(row["send"])
+        todo_rows = [row for row in forms_status if not row["is_done"] and row["is_open"]]
+        rest_rows = [row for row in forms_status if row["is_done"] or not row["is_open"]]
+        return super().get_context_data(forms_status=forms_status, todo_rows=todo_rows, rest_rows=rest_rows, show_names=len(self.managed_people) > 1, **kwargs)
 
 
 class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
@@ -957,8 +1206,21 @@ class FormFillView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:home"))
 
     def get_context_data(self, **kwargs):
+        send = kwargs["send"]
+        # Consecutive fields sharing a Field.section value sit under that heading (blank = none).
+        section_by_key = dict(send.form.fields.values_list("key", "section"))
+        sections = []
+        for bound_field in kwargs["form"]:
+            title = section_by_key.get(bound_field.name, "")
+            if sections and sections[-1]["title"] == title:
+                sections[-1]["fields"].append(bound_field)
+            else:
+                sections.append({"title": title, "fields": [bound_field]})
         return super().get_context_data(
             screen_title=kwargs["send"].form.title,
+            sections=sections,
+            send_is_open=is_send_open(send),
+            addressed=self.addressed_people,
             for_member=self.for_member,
             # Named whenever it isn't just the viewer's own, only possible, response.
             show_for_member=self.for_member != self.me or len(self.addressed_people) > 1,
@@ -1037,7 +1299,8 @@ class PaymentsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         # Grouping and filtering live in mobile.services.payments, shared with the app API.
         display_rows = payments_overview(self.request.club, self.managed_people)
-        return super().get_context_data(display_rows=display_rows, payment_instructions=self.request.club.payment_instructions, **kwargs)
+        cards = payment_cards(display_rows, me=self.me, show_names=len(self.managed_people) > 1)
+        return super().get_context_data(display_rows=display_rows, cards=cards, payment_instructions=self.request.club.payment_instructions, **kwargs)
 
 
 class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
@@ -1065,6 +1328,24 @@ class RegistrationInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
 
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{request.club.slug}-registration-{batch.pk}.pdf"'
+        return response
+
+
+class DuesInvoicePdfView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Payments & dues' "Download invoice" for a membership billed by hand (no
+    registration behind it): the same PDF club.services.invoicing.invoice_pdf
+    mails out, scoped to self.managed_people so it is never another family's."""
+
+    def get(self, request, *args, **kwargs):
+        invoice = get_object_or_404(DuesInvoice.objects.select_related("membership__member"), pk=kwargs["pk"], club=request.club, membership__member__in=self.managed_people)
+        try:
+            pdf = dues_invoice_pdf(invoice)
+        except DuesInvoicePDFError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return HttpResponseRedirect(reverse("mobile:payments"))
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{invoice.number or invoice.pk}.pdf"'
         return response
 
 
@@ -1121,13 +1402,20 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):
         member = self._target_member()
+        if request.POST.get("action") == "remove_photo":
+            # Only the self-service profile picture; the club's official player picture isn't the member's to remove.
+            if member.profile_photo:
+                member.profile_photo.delete(save=True)
+            notify(request, f"s|{_('Saved')}|{_('The photo was removed.')}")
+            return HttpResponseRedirect(reverse("mobile:edit_profile", kwargs={"member_id": member.pk}))
         form = MemberProfileForm(request.POST, request.FILES, instance=member)
         if form.is_valid():
             form.save()
             title = _("Saved")
             body = _("%(name)s's info was updated.") % {"name": member.get_full_name()}
             notify(request, f"s|{title}|{body}")
-            return HttpResponseRedirect(reverse("mobile:me"))
+            # Stay on the screen (iOS shows "Saved" on the button) rather than bouncing back to Me.
+            return HttpResponseRedirect(f"{reverse('mobile:edit_profile', kwargs={'member_id': member.pk})}?saved=1")
         return self.render_to_response(self.get_context_data(member=member, form=form))
 
     def get_context_data(self, **kwargs):
@@ -1155,8 +1443,15 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             if membership is not None:
                 open_requirement_names = [requirement.name for requirement, status in checklist_for(membership) if status is None or not (status.is_complete or status.is_bypassed)]
 
+        team_rows = []
+        if season is not None:
+            team_rows = list(TeamMembership.objects.filter(team__club=self.request.club, member=member, season=season).select_related("team", "position").order_by("team__name"))
+
         return super().get_context_data(
             screen_title=member.get_full_name(),
+            team_rows=team_rows,
+            saved=self.request.GET.get("saved") == "1",
+            has_profile_photo=bool(member.profile_photo),
             guardian_rows=guardian_rows,
             open_requirement_names=open_requirement_names,
             open_requirement_summary=", ".join(open_requirement_names),
@@ -1205,7 +1500,15 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         formset = entry_formset(self.request.club, self.managed_people, season, data=data, initial=self.get_initial_entries())
         for row in formset.forms:
             style_dynamic_form(row)
+            self._word_like_the_app(row)
         return formset
+
+    @staticmethod
+    def _word_like_the_app(row):
+        """The native app's empty choices ("Choose…", "No preference") on one entry row."""
+        row.fields["product_variant"].empty_label = _("Choose…")
+        row.fields["requested_team"].empty_label = _("No preference")
+        return row
 
     def get_member_current_numbers(self, season):
         return member_current_numbers(self.request.club, self.managed_people, season)
@@ -1258,7 +1561,7 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
                 # from this one styled instance rather than the template
                 # calling .empty_form itself, or style_dynamic_form's work
                 # here would just be thrown away.
-                subrow_template_form=style_dynamic_form(entry_formset.empty_form),
+                subrow_template_form=self._word_like_the_app(style_dynamic_form(entry_formset.empty_form)),
             )
         )
 
@@ -1289,7 +1592,9 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         except PricingError as error:
             return self.render_page(season, entry_formset, season_error=str(error))
 
-        priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), self.get_member_current_numbers(season))
+        current_numbers = self.get_member_current_numbers(season)
+        priced_rows = priced_rows_with_jersey_fields(entry_formset, entries, priced, team_number_pools(request.club, season), current_numbers)
+        self._label_kept_jersey_numbers(priced_rows, current_numbers)
 
         if request.POST.get("action") != "submit":
             return self.render_page(season, entry_formset, priced_entries=priced_rows)
@@ -1300,8 +1605,22 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             return self.render_page(season, entry_formset, season_error=str(error))
 
         send_registration_confirmation_email(batch, request=request)
-        notify(request, f"s|{_('Registration received')}|{_('Thanks -- the club will review this and be in touch. A confirmation email is on its way with a link to check status.')}")
+        total = sum((row["price"] - row["min_registrants_discount"] for _form, _entry, row in priced_rows), Decimal("0"))
+        title = _("Registration received")
+        body = _("Thank you! The club will review it and send the invoice for € %(total)s. You'll find it under Payments & dues, and we've emailed you a confirmation.") % {"total": f"{total:.2f}"}
+        notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:me"))
+
+    @staticmethod
+    def _label_kept_jersey_numbers(priced_rows, current_numbers):
+        """"Keep #7" for the number the person already wears in the chosen team, "#8" for the rest."""
+        for form, entry, _price in priced_rows:
+            member = entry.existing_member
+            team = entry.requested_team
+            current = current_numbers.get(str(member.pk), {}).get(str(team.pk)) if member is not None and team is not None else None
+            choices = [(value, label) for value, label in form.fields["requested_jersey_number"].choices if value != ""]
+            labelled = [(value, _("Keep #%(number)s") % {"number": value} if current is not None and str(current) == value else f"#{value}") for value, _label in choices]
+            form.fields["requested_jersey_number"].choices = [("", _("No number"))] + labelled
 
 
 def _notification_source_link(notification):
@@ -1326,86 +1645,124 @@ def _notification_source_link(notification):
 
 
 class NotificationsView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
-    """M7 -- the design handoff's M7 section
-    ("Inbox"). The mockup shows rich per-type cards (RSVP-needed, medical
-    form missing, invoice due, line-up published, ...) with inline quick
-    actions, but notifications.models.Notification is generic -- title/body/
-    created/read_at plus an optional ``source`` -- and the only things that
-    create member-facing rows today are news.tasks.notify_news_published and
-    events.tasks.notify_new_event. There's no type/category field to key a
-    richer layout or the mockup's "Action"/"Club" filter off, so this is
-    deliberately a flat, generic list: day-grouped ("Today"/"Earlier this
-    week"/"Older", echoing Calendar's own "This week"/"Next week" bucketing)
-    with an unread treatment and a link to the underlying News/Event when
-    ``source`` resolves to one (see _notification_source_link above).
+    """M7 -- the inbox, shaped like the iOS app's: one flat, newest-first list. An
+    unread row has a red dot, a red left edge and a bold title; the subtitle is
+    "person (only when this account manages more than one) · relative time". The
+    title and body are shown in the active language (``Notification.text_for``).
 
-    Scoped to every one of ``self.managed_people`` (not just scope_person) --
-    same scope PersonScopeMixin.get_context_data already uses for
-    unread_notification_count, since notifications aren't really "per
-    switched person" the way RSVPs are.
+    Paged (``PAGE_SIZE``) with an htmx "load more" sentinel; "Mark all read" and "Clear
+    all" (confirmed in a sheet) are htmx actions that swap the list in place and answer
+    with an ``HX-Trigger`` toast + the new unread count, so nothing reloads. Without
+    htmx (plain POST) they redirect back like before. Tapping a row marks it read and,
+    when its ``source`` resolves to a screen (see _notification_source_link), goes there.
+
+    Scoped to every one of ``self.managed_people`` (not just scope_person) -- same scope
+    PersonScopeMixin.get_context_data already uses for unread_notification_count, since
+    notifications aren't really "per switched person" the way RSVPs are.
     """
 
     template_name = "mobile/notifications.html"
     screen_title = _("Notifications")
     active_tab = "me"
+    PAGE_SIZE = 20
+
+    def _is_htmx(self):
+        return self.request.headers.get("HX-Request") == "true" and not self.request.headers.get("HX-Boosted")
+
+    def get_template_names(self):
+        if self._is_htmx() and self.request.headers.get("HX-Target") == "notif-more":
+            return ["mobile/_notification_rows.html"]
+        return super().get_template_names()
+
+    def _partial(self, name, context):
+        names = [name] if is_mobile_or_tablet(self.request) else [name.replace("mobile/", "mobile/desktop/", 1), name]
+        return TemplateResponse(self.request, names, context)
+
+    def _rows(self, notifications):
+        language = (get_language() or "en").split("-")[0]
+        names = {person.pk: person.first_name for person in self.managed_people}
+        show_person = len(self.managed_people) > 1
+        rows = []
+        for notification in notifications:
+            source_label, url = _notification_source_link(notification)
+            text = notification.text_for(language)
+            rows.append({"notification": notification, "title": text["title"], "body": text["body"], "source_label": source_label, "url": url, "person": names.get(notification.member_id) if show_person else None})
+        return rows
 
     def get_context_data(self, **kwargs):
-        today = []
-        earlier_this_week = []
-        older = []
-
+        page = None
+        rows = []
         if self.managed_people:
-            this_week_start, _this_week_end = week_bounds(timezone.localdate())
-            local_today = timezone.localdate()
-
             # GenericPrefetch batches `source` by content type (one query per type
             # actually used -- News/Event/FormSend) instead of one query per
-            # notification the plain GenericForeignKey lookup below would otherwise
-            # issue on this unbounded list.
-            notifications = inbox_for(self.request.club, self.managed_people).select_related("member").prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all()])).order_by("-created")
+            # notification the plain GenericForeignKey lookup would otherwise issue.
+            notifications = (
+                inbox_for(self.request.club, self.managed_people).select_related("member").prefetch_related(GenericPrefetch("source", [News.objects.all(), Event.objects.all(), FormSend.objects.all(), Order.objects.all()])).order_by("-created")
+            )
+            page = Paginator(notifications, self.PAGE_SIZE).get_page(self.request.GET.get("page"))
+            rows = self._rows(page.object_list)
+        return super().get_context_data(rows=rows, page=page, **kwargs)
 
-            for notification in notifications:
-                source_label, _url = _notification_source_link(notification)
-                row = {"notification": notification, "source_label": source_label}
-
-                created_date = timezone.localtime(notification.created).date()
-                if created_date == local_today:
-                    today.append(row)
-                elif created_date >= this_week_start:
-                    earlier_this_week.append(row)
-                else:
-                    older.append(row)
-
-        return super().get_context_data(today=today, earlier_this_week=earlier_this_week, older=older, **kwargs)
+    def _list_response(self, request, toast):
+        """The refreshed list (htmx) plus a toast and the new unread count -- or a redirect without htmx."""
+        if not self._is_htmx():
+            return HttpResponseRedirect(reverse("mobile:notifications"))
+        response = self._partial("mobile/_notification_list.html", self.get_context_data())
+        response["HX-Trigger"] = json.dumps({"rc:toast": str(toast), "rc-unread": unread_count(request.club, self.managed_people)})
+        return response
 
     def post(self, request, *args, **kwargs):
         action = request.POST.get("action")
 
         if action == "mark_all_read":
             mark_all_read(request.club, self.managed_people)
-            return HttpResponseRedirect(reverse("mobile:notifications"))
+            return self._list_response(request, _("All notifications marked as read."))
 
         if action == "clear_all":
             # A hard delete, not another read-state flip -- "Clear" empties the
             # list itself, same as the clear-all gesture in a phone's own
             # notification centre, rather than just marking everything read.
             clear_all(request.club, self.managed_people)
-            return HttpResponseRedirect(reverse("mobile:notifications"))
+            return self._list_response(request, _("Notifications cleared."))
 
         if action == "mark_read":
             notification = mark_read(request.club, self.managed_people, request.POST.get("notification_id"))
             if notification is None:
                 return HttpResponseBadRequest(_("You can't mark that notification as read."))
 
-            # A row whose source resolves to something this app has a detail
-            # page for doubles as a link to it (see _notification_source_link)
-            # -- the plain-POST tap that marks it read also lands the member
-            # there, no separate "next" field needed since the server already
-            # has the source.
             _label, url = _notification_source_link(notification)
+            if self._is_htmx() and not url:
+                # Nowhere to go: just flip the row to "read" in place.
+                response = self._partial("mobile/_notification_row.html", {"row": self._rows([notification])[0]})
+                response["HX-Trigger"] = json.dumps({"rc-unread": unread_count(request.club, self.managed_people)})
+                return response
             return HttpResponseRedirect(url or reverse("mobile:notifications"))
 
         return HttpResponseBadRequest(_("Unknown action."))
+
+
+class SecurityView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
+    """The "Security" row under Me (iOS SecurityView): the account's passkeys with Add /
+    Rename / Remove, a link to change the password, and a read-only note on two-factor
+    status. Adding, renaming and removing run through allauth's own webauthn screens
+    (they re-authenticate when needed and already wear the app's shell via
+    mobile/_auth_base.html); this page is the listing that ties them together."""
+
+    template_name = "mobile/security.html"
+    screen_title = _("Security")
+    active_tab = "me"
+
+    def get_context_data(self, **kwargs):
+        authenticators = list(Authenticator.objects.filter(user=self.request.user).order_by("created_at"))
+        passkeys = [
+            {"pk": authenticator.pk, "name": authenticator.wrap().name, "created_at": authenticator.created_at, "last_used_at": authenticator.last_used_at} for authenticator in authenticators if authenticator.type == Authenticator.Type.WEBAUTHN
+        ]
+        return super().get_context_data(
+            passkeys=passkeys,
+            passkeys_enabled="webauthn" in settings.MFA_SUPPORTED_TYPES,
+            has_totp=any(authenticator.type == Authenticator.Type.TOTP for authenticator in authenticators),
+            **kwargs,
+        )
 
 
 #: Pill styling for BugListView's own report list -- SUBMITTED and WONT_FIX
@@ -1495,79 +1852,109 @@ class BugListView(DesktopTemplateMixin, MemberAppMixin, TemplateView):
         )
 
 
-#: Pill styling shared by ShopOrdersView's list rows and ShopOrderDetailView's
-#: own header. Payment and the consolidated member-facing status
-#: (Order.member_status, which already folds production_status into
-#: fulfillment_status -- see its own docstring) are shown as two separate
-#: pills, not merged into one: this app is pay-on-pickup, so "Ready for
-#: pickup" + "Pending" is a real, common, and informative combination for a
-#: member to see at a glance.
-ORDER_PAYMENT_STATUS_PILL_CLASSES = {
-    Order.PaymentStatus.PENDING: "pill-warn",
-    Order.PaymentStatus.PARTIALLY_PAID: "pill-warn",
-    Order.PaymentStatus.PAID: "pill-ok",
-    Order.PaymentStatus.REFUNDED: "pill-neutral",
+#: Order payment line (small grey text under the total) and the member-facing progress pill,
+#: worded like the native app. The progress pill is the only coloured one: warm while the club is
+#: still working on it, green once it can be collected, red when cancelled.
+ORDER_PAYMENT_LABELS = {
+    Order.PaymentStatus.PENDING: _("To pay at pickup"),
+    Order.PaymentStatus.PARTIALLY_PAID: _("Partly paid"),
+    Order.PaymentStatus.PAID: _("Paid"),
+    Order.PaymentStatus.REFUNDED: _("Refunded"),
+}
+ORDER_STATUS_LABELS = {
+    Order.MemberStatus.NOT_READY: _("Being prepared"),
+    Order.MemberStatus.IN_PRODUCTION: _("In production"),
+    Order.MemberStatus.READY_FOR_PICKUP: _("Ready for pickup"),
+    Order.MemberStatus.COMPLETED: _("Completed"),
+    Order.MemberStatus.CANCELLED: _("Cancelled"),
 }
 ORDER_MEMBER_STATUS_PILL_CLASSES = {
-    Order.MemberStatus.NOT_READY: "pill-neutral",
-    Order.MemberStatus.IN_PRODUCTION: "pill-info",
-    Order.MemberStatus.READY_FOR_PICKUP: "pill-info",
+    Order.MemberStatus.NOT_READY: "pill-warn",
+    Order.MemberStatus.IN_PRODUCTION: "pill-warn",
+    Order.MemberStatus.READY_FOR_PICKUP: "pill-ok",
     Order.MemberStatus.COMPLETED: "pill-ok",
-    Order.MemberStatus.CANCELLED: "pill-neutral",
+    Order.MemberStatus.CANCELLED: "pill-danger",
 }
+
+#: Session key ShopCheckoutView leaves for ShopOrderDetailView's "Order placed. Thank you!" banner
+#: (a query string would break the plain redirect the checkout has always answered with).
+ORDER_PLACED_SESSION_KEY = "shop_order_placed"
+
+
+def _is_partial_request(request) -> bool:
+    """An htmx request aimed at one region (not a boosted full-page navigation)."""
+    return request.headers.get("HX-Request") == "true" and not request.headers.get("HX-Boosted")
+
+
+def _shop_line_detail(line, *, me, show_people) -> str:
+    """ "For Lars · #17 SOMERS" for a cart/order line: who it is for (only when the account manages
+    several people) and what is printed on it."""
+    parts = []
+    if show_people and line.beneficiary_id:
+        name = _("Me") if me is not None and line.beneficiary_id == me.pk else line.beneficiary.first_name
+        parts.append(_("For %(name)s") % {"name": name})
+    printed = " ".join(bit for bit in (f"#{line.personalization_number}" if line.personalization_number else "", line.personalization_name.upper()) if bit)
+    if printed:
+        parts.append(printed)
+    return " · ".join(str(part) for part in parts)
+
+
+def _product_description_html(text):
+    """A product's description as safe HTML: staff may have entered HTML (sanitised like news
+    bodies) or plain text (escaped, line breaks kept)."""
+    if "<" in text:
+        return mark_safe(render_body_html(text))
+    return mark_safe(linebreaks(text, autoescape=True))
 
 
 class ShopHomeView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """Shop tab landing -- every active+public Product for this club, grid
-    style. Only reachable while Club.shop_open is on (ShopScopeMixin 404s
-    otherwise); the tab itself is simply absent from the tab bar the rest of
-    the time (base.html), matching every other "not applicable to you" case
-    in this app."""
+    """Shop tab landing -- every active+public Product for this club as a two-column grid, with
+    "All" + category filter chips (client-side, Alpine). Reachable while the shop is closed too
+    (``allow_closed``): it then shows the closed state with a way to "My orders", like the app."""
 
     template_name = "mobile/shop_home.html"
     screen_title = _("Shop")
     active_tab = "shop"
+    allow_closed = True
 
     def get_context_data(self, **kwargs):
+        if not shop_enabled(self.request):
+            return super().get_context_data(shop_closed=True, products=[], categories=[], cart_item_count=0, **kwargs)
+
         # MEMBERSHIP-type products are never orderable through the shop --
         # they're priced through registration/re-registration instead
         # (registration.services.pricing) -- excluded structurally here
         # regardless of is_public, not left to staff remembering to flag
         # each one.
         products = annotate_availability(catalog(self.request.club).prefetch_related("variants"))
-        cart = open_cart(self.request.club, self.request.user)
-        cart_item_count = cart.items.count() if cart is not None else 0
+        for product in products:
+            prices = [variant.effective_price for variant in product.variants.all() if variant.is_active] or [product.price]
+            product.lowest_price = min(prices)
+            product.has_price_range = len(set(prices)) > 1
+            product.sold_out = not product.in_stock
 
-        # One products query total (not one per category) -- see ShopHomeView's
-        # own template for how "groups" feeds both the top pill row (a same-page
-        # anchor jump, not a filter -- the whole grid still scrolls straight
-        # through) and each category's own section.
-        categories = ProductCategory.objects.filter(club=self.request.club).order_by("name")
-        groups = []
-        for category in categories:
-            items = [product for product in products if product.category_id == category.pk]
-            if items:
-                groups.append({"category": category, "products": items})
+        used_categories = {product.category_id for product in products if product.category_id}
+        categories = list(ProductCategory.objects.filter(club=self.request.club, pk__in=used_categories).order_by("name"))
+        cart = open_cart(self.request.club, self.request.user)
+        cart_item_count = (cart.items.aggregate(total=Sum("quantity"))["total"] or 0) if cart is not None else 0
+        # The desktop grid still sections the catalogue by category (mobile filters client-side).
+        groups = [{"category": category, "products": [product for product in products if product.category_id == category.pk]} for category in categories]
         uncategorized = [product for product in products if product.category_id is None]
         if uncategorized:
             groups.append({"category": None, "products": uncategorized})
-
-        return super().get_context_data(products=products, groups=groups, cart_item_count=cart_item_count, **kwargs)
+        return super().get_context_data(shop_closed=False, products=products, categories=categories, groups=groups, cart_item_count=cart_item_count, **kwargs)
 
 
 class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """Photo/description/price, a variant picker (when the product has any --
-    see ProductVariant's own docstring for why it's one free-text label, not
-    separate size/colour axes), a quantity stepper and -- since CartItem.
-    beneficiary exists specifically for this -- a chip row to say who it's
-    for, mirroring Home's own person-chip pattern. The beneficiary chip row
-    only renders once self.managed_people has more than one person: a member
-    ordering just for themselves has nothing to disambiguate, so the item's
-    beneficiary is simply left unset in that case.
+    """Photo/description, an option picker (when the product has any -- see ProductVariant's own
+    docstring for why it's one free-text label, not separate size/colour axes), a "For" picker
+    (only once the account manages more than one person), number/name personalisation, a quantity
+    stepper and "Add to cart". The price follows the chosen option.
 
-    "Add to cart" get-or-creates the member's open Cart for this club and
-    bumps quantity on the (cart, product, variant, beneficiary) row if it
-    already exists, rather than erroring on the model's own unique constraint.
+    "Add to cart" get-or-creates the member's open Cart for this club and bumps quantity on the
+    (cart, product, variant, beneficiary) row if it already exists. From the page itself (htmx) it
+    answers with a small "Added to your cart / View cart" confirmation (or the reason it
+    couldn't); without htmx it redirects to the cart.
     """
 
     template_name = "mobile/shop_product_detail.html"
@@ -1581,10 +1968,24 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
         product = annotate_availability([self._product()])[0]
         variants = [variant for variant in product.variants.all() if variant.is_active]
         first_in_stock_variant = next((variant for variant in variants if variant.in_stock), None)
-        return self.render_to_response(self.get_context_data(product=product, variants=variants, first_in_stock_variant=first_in_stock_variant))
+        prices = [variant.effective_price for variant in variants] or [product.price]
+        variant_data = [{"id": str(variant.pk), "name": variant.name, "price": str(variant.effective_price), "in_stock": variant.in_stock} for variant in variants]
+        return self.render_to_response(
+            self.get_context_data(
+                product=product,
+                variants=variants,
+                first_in_stock_variant=first_in_stock_variant,
+                variant_data=variant_data,
+                lowest_price=min(prices),
+                description_html=_product_description_html(product.description) if product.description else "",
+            )
+        )
 
     def get_context_data(self, **kwargs):
         return super().get_context_data(screen_title=kwargs["product"].name, max_quantity=MAX_CART_QUANTITY, **kwargs)
+
+    def _added(self, request, *, error=None):
+        return render(request, "mobile/_shop_added.html", {"error": error})
 
     def post(self, request, *args, **kwargs):
         product = self._product()
@@ -1624,29 +2025,63 @@ class ShopProductDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
                 personalization_name=request.POST.get("personalization_name", ""),
             )
         except CheckoutError as error:
+            if _is_partial_request(request):
+                return self._added(request, error=str(error))
             notify(request, f"w|{_('Not available')}|{error}")
             return HttpResponseRedirect(request.path)
 
+        if _is_partial_request(request):
+            return self._added(request)
         title = _("Added to cart")
         body = _("%(product)s added to your cart.") % {"product": product.name}
         notify(request, f"s|{title}|{body}")
         return HttpResponseRedirect(reverse("mobile:shop_cart"))
 
 
+def _cart_context(view, request, code=""):
+    """What shop/_shop_cart_body.html (and the full cart page) render: the cart re-priced to what
+    checkout would charge, with each line's own problem message and "For X · #17 NAME" detail."""
+    summary = cart_summary(request.club, request.user, code=code, member=view.me, ip=client_ip(request))
+    items = summary["items"]
+    annotate_cart_variants(items)
+    show_people = len(view.managed_people) > 1
+    for item in items:
+        # A sold-out option can only be removed; too large a quantity can be lowered.
+        item.sold_out_option = item.variant_id is not None and item.variant.in_stock is False
+        item.detail = _shop_line_detail(item, me=view.me, show_people=show_people)
+        if not item.unavailable:
+            item.problem = ""
+        elif item.sold_out_option:
+            item.problem = _("Sold out")
+        elif item.variant_id is not None:
+            item.problem = _("Not enough in stock for this quantity. Lower it or remove the item.")
+        else:
+            item.problem = _("Sold out or no longer available")
+    return {
+        "cart": summary["cart"],
+        "items": items,
+        "code": summary["code"],
+        "discount": summary["discount"],
+        "discount_error": summary["discount_error"],
+        "totals": summary["totals"],
+        "has_unavailable": summary["has_unavailable"],
+        "prices_changed": summary["prices_changed"],
+        "max_quantity": MAX_CART_QUANTITY,
+    }
+
+
 class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """Cart + checkout screen. The discount code is applied via a plain GET
-    (``?code=``), recomputed on each render through shop.services.pricing.cart_totals
-    -- no htmx/live preview, matching this screen's otherwise-static-form
-    shape. "Place order" carries whatever code is currently in the box
-    through to ShopCheckoutView as a hidden field; place_order is the only
-    place a code is actually redeemed, so it re-validates it itself rather
-    than trusting this screen's own preview.
+    """Cart + checkout screen. The discount code is applied by POST (htmx swaps the cart body in
+    place; without htmx it redirects to ``?code=``, which still previews a code on a plain GET)
+    and recomputed through shop.services.pricing.cart_totals. "Place order" carries whatever code
+    is currently applied through to ShopCheckoutView as a hidden field; place_order is the only
+    place a code is actually redeemed, so it re-validates it itself rather than trusting this
+    screen's own preview.
 
     Every line is re-priced from its current product/variant on each render
-    (shop.services.checkout.reprice_cart_items), so the cart always shows
-    what checkout will actually charge; lines that can't be ordered any more
-    are flagged for the member to remove. A wrong code here counts towards
-    the same per-member/per-IP throttle as one at checkout.
+    (shop.services.checkout.reprice_cart_items), so the cart always shows what checkout will
+    actually charge; lines that can't be ordered any more say why and block "Place order". A
+    wrong code here counts towards the same per-member/per-IP throttle as one at checkout.
     """
 
     template_name = "mobile/shop_cart.html"
@@ -1654,24 +2089,20 @@ class ShopCartView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     active_tab = "shop"
 
     def get_context_data(self, **kwargs):
-        summary = cart_summary(self.request.club, self.request.user, code=self.request.GET.get("code", ""), member=self.me, ip=client_ip(self.request))
-        return super().get_context_data(
-            cart=summary["cart"],
-            items=summary["items"],
-            code=summary["code"],
-            discount=summary["discount"],
-            discount_error=summary["discount_error"],
-            totals=summary["totals"],
-            has_unavailable=summary["has_unavailable"],
-            prices_changed=summary["prices_changed"],
-            **kwargs,
-        )
+        return super().get_context_data(**_cart_context(self, self.request, self.request.GET.get("code", "")), **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        code = request.POST.get("code", "").strip()
+        if _is_partial_request(request):
+            return render(request, "mobile/_shop_cart_body.html", _cart_context(self, request, code))
+        return HttpResponseRedirect(f"{reverse('mobile:shop_cart')}?{urlencode({'code': code})}" if code else reverse("mobile:shop_cart"))
 
 
 class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
-    """+/- and remove on a single cart row. Decrementing below 1 removes the
-    item outright -- a row stuck at a quantity nobody asked to keep isn't
-    useful, and there's no separate "0 means gone" state to represent."""
+    """+/- and remove on a single cart row. Decrementing below 1 removes the item outright -- a
+    row stuck at a quantity nobody asked to keep isn't useful, and there's no separate "0 means
+    gone" state to represent. Via htmx it answers with the refreshed cart body (carrying the
+    applied discount ``code`` along), otherwise it redirects to the cart."""
 
     def post(self, request, *args, **kwargs):
         item = get_object_or_404(CartItem, pk=kwargs["item_id"], cart__club=request.club, cart__user=request.user, cart__status=Cart.CartStatus.OPEN)
@@ -1686,6 +2117,8 @@ class ShopCartItemUpdateView(ShopScopeMixin, LoginRequiredMixin, View):
         else:
             return HttpResponseBadRequest(_("Unknown action."))
 
+        if _is_partial_request(request):
+            return render(request, "mobile/_shop_cart_body.html", _cart_context(self, request, request.POST.get("code", "")))
         return HttpResponseRedirect(reverse("mobile:shop_cart"))
 
 
@@ -1710,6 +2143,7 @@ class ShopCheckoutView(ShopScopeMixin, LoginRequiredMixin, View):
         title = _("Order placed")
         body = _("Order %(number)s is in -- pay when you pick it up.") % {"number": order.number}
         notify(request, f"s|{title}|{body}")
+        request.session[ORDER_PLACED_SESSION_KEY] = str(order.pk)
         return HttpResponseRedirect(reverse("mobile:shop_order_detail", kwargs={"pk": order.pk}))
 
 
@@ -1719,19 +2153,22 @@ class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
     app gives one Cart per account, never per managed person), so this is the
     same "aggregate across everyone I'm responsible for" scope PaymentsView/
     club.services.fees.open_dues_rows already use, e.g. a parent checking on
-    an order a teenager placed under their own login."""
+    an order a teenager placed under their own login. Also reachable while
+    the shop is closed."""
 
     template_name = "mobile/shop_orders.html"
     screen_title = _("My orders")
     active_tab = "shop"
+    allow_closed = True
 
     def get_context_data(self, **kwargs):
         orders = orders_for(self.request.club, self.managed_people)
         rows = [
             {
                 "order": order,
-                "payment_pill_class": ORDER_PAYMENT_STATUS_PILL_CLASSES.get(order.payment_status, "pill-neutral"),
-                "member_status_pill_class": ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-neutral"),
+                "payment_label": ORDER_PAYMENT_LABELS.get(order.payment_status, ORDER_PAYMENT_LABELS[Order.PaymentStatus.PENDING]),
+                "status_label": ORDER_STATUS_LABELS.get(order.member_status, ORDER_STATUS_LABELS[Order.MemberStatus.NOT_READY]),
+                "status_pill_class": ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-warn"),
             }
             for order in orders
         ]
@@ -1739,25 +2176,32 @@ class ShopOrdersView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
 
 
 class ShopOrderDetailView(ShopScopeMixin, LoginRequiredMixin, TemplateView):
-    """Line items, status, total and a link to the invoice PDF. Scoped to
-    self.managed_people, same reasoning as ShopOrdersView -- an order outside
-    that set 404s, same treatment EditProfileView gives an unmanaged member."""
+    """Number, date, status, lines, discounts, total, pickup instructions and the invoice PDF.
+    Scoped to self.managed_people, same reasoning as ShopOrdersView -- an order outside that set
+    404s, same treatment EditProfileView gives an unmanaged member. Straight after checkout it
+    carries an "Order placed. Thank you!" banner (``is_new``, once)."""
 
     template_name = "mobile/shop_order_detail.html"
     screen_title = _("Order")
     active_tab = "shop"
+    allow_closed = True
 
     def get_context_data(self, **kwargs):
         order = get_object_or_404(Order.objects.select_related("purchaser"), pk=self.kwargs["pk"], club=self.request.club, purchaser__in=self.managed_people)
-        lines = order.order_items.select_related("product", "variant", "beneficiary")
-        payment_pill_class = ORDER_PAYMENT_STATUS_PILL_CLASSES.get(order.payment_status, "pill-neutral")
-        member_status_pill_class = ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-neutral")
+        show_people = len(self.managed_people) > 1
+        lines = list(order.order_items.select_related("product", "variant", "beneficiary").order_by("created"))
+        for line in lines:
+            line.detail = _shop_line_detail(line, me=self.me, show_people=show_people)
+        is_new = self.request.session.pop(ORDER_PLACED_SESSION_KEY, None) == str(order.pk)
         return super().get_context_data(
             screen_title=order.number,
             order=order,
             lines=lines,
-            payment_pill_class=payment_pill_class,
-            member_status_pill_class=member_status_pill_class,
+            discounts=list(order.applied_discounts.select_related("discount")),
+            is_new=is_new,
+            payment_label=ORDER_PAYMENT_LABELS.get(order.payment_status, ORDER_PAYMENT_LABELS[Order.PaymentStatus.PENDING]),
+            status_label=ORDER_STATUS_LABELS.get(order.member_status, ORDER_STATUS_LABELS[Order.MemberStatus.NOT_READY]),
+            status_pill_class=ORDER_MEMBER_STATUS_PILL_CLASSES.get(order.member_status, "pill-warn"),
             **kwargs,
         )
 
@@ -1767,6 +2211,8 @@ class ShopInvoiceView(ShopScopeMixin, LoginRequiredMixin, View):
     mirrors management.views.DuesInvoicePdfView's own try/except pattern.
     Scoped the same way as ShopOrdersView/ShopOrderDetailView -- never
     another member's invoice, including another managed family's."""
+
+    allow_closed = True
 
     def get(self, request, *args, **kwargs):
         order = get_object_or_404(Order, pk=kwargs["pk"], club=request.club, purchaser__in=self.managed_people)

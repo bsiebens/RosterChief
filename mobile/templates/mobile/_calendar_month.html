@@ -1,0 +1,36 @@
+{% load i18n lucide %}
+{% comment %}
+    Month mode (iOS CalendarMonthView): month header with arrows, weekday row, the day grid (a dot under any day with something on it, the selected day filled, today ringed) and, below it, the selected day's events as the same rows the list uses. Everything is server-rendered; the arrows and day cells are hx-get links that swap just #month-pane (hx-select) and push the URL, scroll untouched. Expects ``month_pane`` (mobile.services.event_ui.month_pane) and ``return_url``.
+{% endcomment %}
+<div id="month-pane" class="-mx-4 -mt-4">
+    <div class="bg-surface pb-3">
+        <div class="flex items-center justify-between px-4 pt-3.5 pb-2.5 text-ink">
+            <a class="icon-btn -ml-3" href="{{ month_pane.prev_url }}" hx-boost="false" hx-get="{{ month_pane.prev_url }}" hx-target="#month-pane" hx-select="#month-pane" hx-swap="outerHTML show:none" hx-push-url="true" aria-label="{% trans "Previous month" %}">{% lucide "chevron-left" size=18 stroke_width=2.6 %}</a>
+            <a class="font-display text-lg font-extrabold tracking-wide uppercase" href="{{ month_pane.today_url }}" hx-boost="false" hx-get="{{ month_pane.today_url }}" hx-target="#month-pane" hx-select="#month-pane" hx-swap="outerHTML show:none" hx-push-url="true">{{ month_pane.month_start|date:"F Y" }}</a>
+            <a class="icon-btn -mr-3" href="{{ month_pane.next_url }}" hx-boost="false" hx-get="{{ month_pane.next_url }}" hx-target="#month-pane" hx-select="#month-pane" hx-swap="outerHTML show:none" hx-push-url="true" aria-label="{% trans "Next month" %}">{% lucide "chevron-right" size=18 stroke_width=2.6 %}</a>
+        </div>
+        <div class="grid grid-cols-7 px-2 pb-1.5" aria-hidden="true">
+            {% for day in month_pane.weekday_labels %}<span class="text-center text-[11px] font-semibold text-muted">{{ day|date:"D"|slice:":2" }}</span>{% endfor %}
+        </div>
+        <div class="grid grid-cols-7 gap-y-1.5 px-2">
+            {% for week in month_pane.weeks %}
+                {% for cell in week %}
+                    <a class="month-cell" href="{{ cell.url }}" hx-boost="false" hx-get="{{ cell.url }}" hx-target="#month-pane" hx-select="#month-pane" hx-swap="outerHTML show:none" hx-push-url="true" aria-label="{{ cell.date|date:"l j F" }}" {% if cell.selected %}aria-current="date"{% endif %}>
+                        <span class="month-day {% if cell.selected %}month-day-selected{% else %}{% if cell.in_month %}text-ink{% else %}text-dim{% endif %}{% if cell.is_today %} month-day-today{% endif %}{% endif %}">{{ cell.date.day }}</span>
+                        <span class="month-dot" {% if not cell.has_events %}style="visibility: hidden"{% endif %}></span>
+                    </a>
+                {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="h-2 bg-rule"></div>
+    <div class="px-4 pt-3.5 pb-2 font-display text-xs font-extrabold tracking-widest text-muted uppercase">{{ month_pane.selected|date:"l d F" }}</div>
+    {% if month_pane.selected_groups %}
+        <div class="flex flex-col gap-px bg-line">
+            {% for group in month_pane.selected_groups %}{% include "mobile/_calendar_row.html" %}{% endfor %}
+        </div>
+    {% else %}
+        <p class="px-4 pb-6 text-sm text-dim">{% trans "Nothing scheduled" %}</p>
+    {% endif %}
+</div>

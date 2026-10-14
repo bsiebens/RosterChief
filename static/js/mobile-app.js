@@ -212,8 +212,18 @@ window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };
             toastEl.appendChild(btn);
         }
         document.body.appendChild(toastEl);
+        // .toast starts hidden (opacity 0); .toast-show fades it in on the next frame.
+        const shown = toastEl;
+        requestAnimationFrame(() => shown.classList.add("toast-show"));
         toastTimer = setTimeout(() => toastEl && toastEl.remove(), 8000);
     }
+
+    // Server-sent toasts: a view answers an htmx request with `HX-Trigger: {"rc:toast": "text"}`
+    // (see mobile.views.NotificationsView).
+    document.body.addEventListener("rc:toast", (e) => {
+        const text = e.detail && (e.detail.value || e.detail);
+        if (typeof text === "string" && text) showToast(text);
+    });
 
     function retryFor(detail) {
         const cfg = detail && detail.requestConfig;

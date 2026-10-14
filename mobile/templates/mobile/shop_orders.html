@@ -8,6 +8,8 @@
     active_tab stays "shop".
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:shop_home" %}" aria-label="{% trans "Back" %}">
@@ -17,27 +19,24 @@
     </div>
 
     {% if rows %}
-        <div class="m-card overflow-hidden">
+        <div class="flex flex-col gap-3">
             {% for row in rows %}
-                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:shop_order_detail" row.order.pk %}">
-                    <div class="min-w-0 flex-1">
-                        <div class="text-[15px] font-semibold text-ink">{{ row.order.number }}</div>
-                        <div class="text-xs text-muted">
-                            {% blocktrans with name=row.order.purchaser.first_name date=row.order.created|date:"d M Y" %}{{ name }} &middot; {{ date }}{% endblocktrans %}
-                        </div>
+                <a class="pressable m-card flex items-center justify-between gap-3 p-3.5" href="{% url "mobile:shop_order_detail" row.order.pk %}">
+                    <div class="flex min-w-0 flex-col items-start gap-1">
+                        <span class="font-mono text-sm text-ink">{{ row.order.number }}</span>
+                        <span class="text-[13px] text-muted">{{ row.order.created|date:"SHORT_DATE_FORMAT" }}</span>
+                        <span class="pill pill-sm {{ row.status_pill_class }}">{{ row.status_label }}</span>
                     </div>
                     <div class="flex shrink-0 flex-col items-end gap-1">
-                        <span class="pill pill-sm {{ row.payment_pill_class }}">{% lucide "wallet" size=10 %} {{ row.order.get_payment_status_display }}</span>
-                        <span class="pill pill-sm {{ row.member_status_pill_class }}">{% lucide "package" size=10 %} {{ row.order.member_status.label }}</span>
+                        <span class="text-base font-bold text-ink">&euro; {{ row.order.total|floatformat:2 }}</span>
+                        <span class="text-xs text-muted">{{ row.payment_label }}</span>
                     </div>
-                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                 </a>
             {% endfor %}
         </div>
     {% else %}
-        <div class="m-card p-6 text-center">
-            <p class="text-sm text-muted">{% trans "No orders yet." %}</p>
-        </div>
+        {% trans "No orders yet" as empty_title %}
+        {% trans "Your orders will show up here." as empty_text %}
+        {% include "mobile/_state.html" with kind="empty" icon="package" title=empty_title text=empty_text %}
     {% endif %}
 {% endblock content %}

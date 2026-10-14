@@ -6,32 +6,40 @@ mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
 
+from urllib.parse import urlsplit
+
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.db.models import Q
-from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
+from django.http import Http404, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.cache import patch_cache_control, patch_vary_headers
 from django.utils.dateparse import parse_datetime
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
 from waffle import flag_is_active
 
+from appapi import coach_events as api_coach_events
 from club.models import ClubMembership, Season
 from club.services.access import can_add_news, can_manage_evaluations, current_season, get_current_season
 from controlpanel.messages import notify
 from events.models import Attendance, Event, EventSeries, EventTask, Lineup, LineupSelection, Location, Opponent
 from events.services import detach_occurrence, generate_occurrences, propagate_series
-from events.services.attendance import member_attendance_counts, player_attendance_rankings, record_check_in
+from events.services.attendance import COACH_NOTE_MAX, CoachAnswerError, member_attendance_counts, player_attendance_rankings, record_check_in, set_answer_as_coach
 from events.services.calendar import agenda_groups
-from events.services.coach import COACH_EVENT_KINDS, IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, remind_silent, still_current_events
-from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, publish_lineup, schedule_lineup_publish, toggle_selection
+from events.services.coach import COACH_EVENT_KINDS, IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, notify_event_cancelled, notify_event_changed, remind_silent, still_current_events
+from events.services.lineup import UNAVAILABLE_STATUSES, cancel_scheduled_publish, changes_on_publish, publish_lineup, schedule_lineup_publish, toggle_selection
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import needs_official_management, officials_enabled_for
+from events.services.recurrence import cancel_occurrence
 from events.services.referees import needs_referee_management
 from management.forms import EventForm, EventSeriesForm, EventTaskForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm, _location_label
+from management.recurrence_ui import describe_rrule, parse_rrule
 from members.models import Member
 from members.services.family import claim_label_for
 from news.models import News, NewsPhoto
@@ -204,10 +212,40 @@ class CoachTodayView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             out_count=out_count,
             silent_count=silent_count,
             needs_you=needs_you,
+            replies_open=session_event is not None and session_event.deadline is not None and session_event.deadline > now,
             hero_attendance=hero_attendance,
             rsvp_closed=rsvp_closed,
             **kwargs,
         )
+
+
+def is_inline_request(request):
+    """True for an htmx request the page itself issued (hx-post/hx-get on an
+    element), false for a boosted navigation (HX-Boosted) or a plain browser
+    request -- inline requests get a partial back, everything else the
+    classic redirect/full page, so the screens keep working without JS."""
+    return request.headers.get("HX-Request") == "true" and request.headers.get("HX-Boosted") != "true"
+
+
+def _answer_for_status(status):
+    """The three-way answer (+ reset) a stored Attendance.status reads as to a
+    coach: selected counts as In, not-selected/excused as Out."""
+    Status = Attendance.AttendanceStatus
+    if status in (Status.PRESENT, Status.SELECTED):
+        return "present"
+    if status in (Status.ABSENT, Status.EXCUSED, Status.NOT_SELECTED):
+        return "absent"
+    if status == Status.MAYBE:
+        return "maybe"
+    return "no_response"
+
+
+_PILL_FOR_ANSWER = {
+    "present": (_("In"), "pill-ok"),
+    "maybe": (_("Maybe"), "pill-warn"),
+    "absent": (_("Out"), "pill-danger"),
+    "no_response": (_("No reply"), "pill-neutral"),
+}
 
 
 class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -216,13 +254,24 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     events.services.attendance.record_check_in, built for exactly this and
     previously uncalled anywhere in the codebase.
 
+    Check-ins, the per-player answer sheet and "Remind" all save inline: each
+    posts to its own view below (subclasses of this one, so they share the
+    event lookup and context) and gets the ``_attendance_body.html`` partial
+    back to swap in, plus an out-of-band status line and toast. The plain
+    form ``post`` (a batch of showed_up_<pk> fields, redirect back) stays for
+    clients without JS.
+
     Read-only for staff without a management position on the active team --
-    can_manage_active_team hides the two-state control and the Save button in
-    the template (hide, don't disable), and ``post`` 403s regardless, since a
-    hidden control is still a client-side fact, not a real permission check.
+    can_manage_active_team hides the check-in/edit controls in the template
+    (hide, don't disable), and every write 403s regardless, since a hidden
+    control is still a client-side fact, not a real permission check.
+
+    Responses are never cacheable: they can carry the managers-only private
+    coach note.
     """
 
     template_name = "mobile/coach/attendance.html"
+    body_template_name = "mobile/coach/_attendance_body.html"
     screen_title = _("Attendance")
     active_tab = "coach_schedule"
 
@@ -231,8 +280,13 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     #: default view. A coach doesn't need to check in someone silent or
     #: declined -- neither is expected to show up -- so those are left out of
     #: the default rather than needing to be filtered away each time; each
-    #: still gets its own chip to review who's in either bucket.
-    FILTERS = {"silent", "declined"}
+    #: still gets its own chip to review who's in either bucket, plus "All".
+    FILTERS = {"silent", "declined", "all"}
+
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        patch_cache_control(response, no_store=True, private=True)
+        return response
 
     def get_event(self):
         if self.active_team is None:
@@ -251,6 +305,9 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         for attendance in attendances:
             attendance.membership = memberships_by_member.get(attendance.member_id)
             attendance.is_silent = attendance.status == Attendance.AttendanceStatus.NO_RESPONSE
+            attendance.answer = _answer_for_status(attendance.status)
+            attendance.pill_label, attendance.pill_class = _PILL_FOR_ANSWER[attendance.answer]
+            attendance.in_published_lineup = attendance.status == Attendance.AttendanceStatus.SELECTED
 
         filter_param = self.request.GET.get("filter")
         if filter_param not in self.FILTERS:
@@ -259,20 +316,44 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             rows = [row for row in attendances if row.is_silent]
         elif filter_param == "declined":
             rows = [row for row in attendances if row.status in OUT_STATUSES]
+        elif filter_param == "all":
+            rows = attendances
         else:
             rows = [row for row in attendances if row.status in IN_STATUSES]
 
+        responded_count = sum(1 for row in attendances if row.status in IN_STATUSES)
         return super().get_context_data(
             event=event,
             rows=rows,
             total_count=len(attendances),
-            responded_count=sum(1 for row in attendances if row.status in IN_STATUSES),
+            responded_count=responded_count,
             silent_count=sum(1 for row in attendances if row.is_silent),
             declined_count=sum(1 for row in attendances if row.status in OUT_STATUSES),
             checked_in_count=sum(1 for row in attendances if row.showed_up is not None),
             filter_param=filter_param,
+            # Answers can be corrected by a manager on any event that isn't cancelled
+            # -- the reply deadline and the start time don't matter (see
+            # events.services.attendance.set_answer_as_coach).
+            can_edit_answers=self.can_manage_active_team and not event.cancelled,
+            coach_note_max=COACH_NOTE_MAX,
             **kwargs,
         )
+
+    def render_body(self, *, toast=None, status_text="", needs_lineup_swap=False, status=200):
+        """The swap-in partial plus the out-of-band status line/toast."""
+        context = self.get_context_data(toast=toast, status_text=status_text, needs_lineup_swap=needs_lineup_swap, inline_response=True)
+        response = render(self.request, self.body_template_name, context, status=status)
+        patch_cache_control(response, no_store=True, private=True)
+        return response
+
+    def finish(self, request, *, toast=None, status_text="", needs_lineup_swap=False):
+        """Inline requests get the partial; everything else the classic redirect."""
+        if is_inline_request(request):
+            return self.render_body(toast=toast, status_text=status_text, needs_lineup_swap=needs_lineup_swap)
+        if toast:
+            level = {"ok": "s", "warn": "w", "error": "e"}[toast["kind"]]
+            notify(request, f"{level}|{toast['title']}|{toast['text']}")
+        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": self.kwargs["event_id"]}))
 
     def post(self, request, *args, **kwargs):
         event = self.get_event()
@@ -292,28 +373,94 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": event.pk}))
 
 
-class CoachAttendanceRemindSilentView(CoachScopeMixin, LoginRequiredMixin, View):
-    """Attendance sheet's "Remind silent" button -- an on-demand version of
+class CoachAttendanceCheckInView(CoachAttendanceView):
+    """One tap on a row's showed-up / didn't-show-up button. Posting the value
+    a row already has clears it back to "not recorded" (same as the iOS app),
+    so each button is a real toggle (aria-pressed)."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        event = self.get_event()
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        wanted = request.POST.get("showed_up")
+        if wanted not in ("true", "false"):
+            return HttpResponseBadRequest()
+        wanted_value = wanted == "true"
+        with transaction.atomic():
+            attendance = get_object_or_404(Attendance.objects.select_for_update(), pk=kwargs["attendance_id"], event=event)
+            record_check_in(attendance, showed_up=None if attendance.showed_up == wanted_value else wanted_value)
+        return self.finish(request, status_text=_("Saved"))
+
+
+class CoachAttendanceEditView(CoachAttendanceView):
+    """The per-player edit sheet: a manager sets a player's answer on their
+    behalf (or resets it), writes the private coach note, and chooses whether
+    to tell the player. All rules live in events.services.attendance.
+    set_answer_as_coach, shared with the app API.
+
+    The coach note is deliberately never put in a toast, a message, a log line
+    or a cacheable response -- it's compared and stored, nothing more.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        event = self.get_event()
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        status = request.POST.get("status", "")
+        raw_note = request.POST.get("coach_note")
+        if raw_note is not None and len(raw_note.strip()) > COACH_NOTE_MAX:
+            return self._error(_("The note is too long (500 characters at most)."))
+
+        try:
+            with transaction.atomic():
+                attendance = get_object_or_404(Attendance.objects.select_for_update().select_related("event", "member"), pk=kwargs["attendance_id"], event=event)
+                was_in_lineup = attendance.status == Attendance.AttendanceStatus.SELECTED
+                note = None
+                if raw_note is not None and raw_note.strip() != (attendance.coach_note or "").strip():
+                    note = raw_note.strip()
+                set_answer_as_coach(attendance, status, note, coach=self.me, notify=request.POST.get("notify") == "on")
+        except CoachAnswerError as error:
+            return self._error(str(error.message))
+
+        title = _("Answer saved")
+        text = _("“%(member)s” updated.") % {"member": attendance.member}
+        return self.finish(request, toast={"kind": "ok", "title": title, "text": text}, status_text=_("Saved"), needs_lineup_swap=was_in_lineup and status == "absent")
+
+    def _error(self, message):
+        toast = {"kind": "error", "title": _("Couldn't save"), "text": message}
+        if is_inline_request(self.request):
+            return self.render_body(toast=toast, status_text=_("Not saved"))
+        notify(self.request, f"e|{toast['title']}|{message}")
+        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": self.kwargs["event_id"]}))
+
+
+class CoachAttendanceRemindSilentView(CoachAttendanceView):
+    """Attendance sheet's "Remind N players" button -- an on-demand version of
     events.tasks.send_deadline_reminders' own NO_RESPONSE nudge, for a coach
     who doesn't want to wait for that once-a-day sweep. Same title/body shape
     as that task, so a player who gets both isn't looking at two differently
     worded pushes for the same event."""
 
+    http_method_names = ["post"]
+
     def post(self, request, *args, **kwargs):
-        if self.active_team is None:
-            raise Http404
+        event = self.get_event()
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team)
         count = remind_silent(event)
 
         if count:
-            notify(request, f"s|{_('Reminder sent')}|" + ngettext("%(count)d player nudged.", "%(count)d players nudged.", count) % {"count": count})
+            toast = {"kind": "ok", "title": _("Reminder sent"), "text": ngettext("%(count)d player nudged.", "%(count)d players nudged.", count) % {"count": count}}
         else:
-            notify(request, f"w|{_('Nobody to remind')}|{_('Everyone has already responded.')}")
-
-        return HttpResponseRedirect(reverse("mobile:coach_attendance", kwargs={"event_id": event.pk}))
+            toast = {"kind": "warn", "title": _("Nobody to remind"), "text": _("Everyone has already responded.")}
+        return self.finish(request, toast=toast)
 
 
 class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -444,6 +591,9 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # setting one anyway (the desktop form still offers the full list).
         form.fields["kind"].choices = [choice for choice in form.fields["kind"].choices if choice[0] in COACH_EVENT_KINDS]
         self._scope_shared_fields(form)
+        if "end" in form.fields:
+            # No end-time input on this screen: disabled keeps the stored value instead of an absent POST value clearing it.
+            form.fields["end"].disabled = True
         for field_name in ("start", "gathering", "deadline", "competition", "external_game_id", "max_referees"):
             form.fields[field_name].widget.attrs["class"] = _INPUT_CLASSES
         form.fields["is_friendly"].widget.attrs["class"] = "h-5 w-5 shrink-0 accent-ink"
@@ -502,6 +652,7 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         kwargs.setdefault("opponent_picker", _opponent_picker(self.request.club, selected=bound.data.get("opponent") if bound else None))
         kwargs.setdefault("location_form", _styled_location_form())
         kwargs.setdefault("opponent_form", _styled_opponent_form())
+        kwargs.setdefault("return_url", _return_url(self.request))
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -531,7 +682,10 @@ class CoachCreateEventView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         # A deliberately-planned single event, same as the desktop create
         # flow -- see notify_new_event's own docstring for why a recurring
         # series' occurrences aren't wired to this.
-        dispatch_notify_new_event(str(event.pk))
+        # The "Tell the players" checkbox (iOS parity). A form that never rendered it (notify_present
+        # missing) keeps the old always-notify behaviour.
+        if request.POST.get("notify") == "on" or "notify_present" not in request.POST:
+            dispatch_notify_new_event(str(event.pk))
         return HttpResponseRedirect(reverse("mobile:coach_today"))
 
 
@@ -578,9 +732,32 @@ class CoachEditEventView(CoachCreateEventView):
         if not form.is_valid():
             return self.render_to_response(self.get_context_data(form=form))
 
-        event = form.save()
+        # Same semantics as the API's PATCH /events/{id} (and so the iOS editor): ``scope`` only
+        # means something for an occurrence that still follows its series, and only for the fields
+        # the series template carries (title, kind, place, opponent, end/gathering/deadline,
+        # audience). "Only this event" detaches the occurrence when one of those changed, so the
+        # next series edit can't undo it.
+        scope = request.POST.get("scope", "this")
+        if scope not in ("this", "this_and_following", "all"):
+            scope = "this"
+        before = self.get_event_instance()
+        follows_series = before.series_id is not None and not before.detached
+        touched = {api_coach_events.FIELD_ALIASES.get(name, name) for name in form.changed_data} & api_coach_events.TEMPLATE_FIELDS
+
+        with transaction.atomic():
+            event = form.save()
+            if follows_series and touched:
+                if scope == "this":
+                    detach_occurrence(event)
+                else:
+                    series = api_coach_events.split_series(event) if scope == "this_and_following" else event.series
+                    event.series = series
+                    api_coach_events.apply_to_series(series, event, touched)
+
+        if request.POST.get("notify") == "on":
+            notify_event_changed(event)
         notify(request, f"s|{_('Event updated')}|" + _("“%(event)s” has been updated.") % {"event": event})
-        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+        return HttpResponseRedirect(_return_url(request, avoid=None) or reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
 
 
 class CoachEditEventSeriesView(CoachCreateEventView):
@@ -648,22 +825,56 @@ class CoachEventDetachView(CoachScopeMixin, LoginRequiredMixin, View):
         event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
         detach_occurrence(event)
         notify(request, f"s|{_('Detached from series')}|" + _("“%(event)s” is now edited independently and won't be touched by future series-wide changes.") % {"event": event})
-        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+        return HttpResponseRedirect(_return_url(request) or reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+def _is_sheet_request(request):
+    """An htmx fetch that is not a boosted navigation: the Today/Events rows load the event detail
+    as a bottom sheet over the current tab (hx-get into #sheet-host); a plain visit or a boosted
+    link still gets the full page, so deep links, push notifications and redirects keep working."""
+    return request.headers.get("HX-Request") == "true" and request.headers.get("HX-Boosted") != "true"
+
+
+def _return_url(request, *, avoid=None):
+    """Where a sheet action should land afterwards: the tab it was opened over (``next``, or htmx's
+    HX-Current-URL for the sheet itself), if it is a safe local URL and not the screen about to
+    stop existing (``avoid``, e.g. a deleted event's own page)."""
+    candidate = request.POST.get("next") or request.GET.get("next") or ""
+    if not candidate and _is_sheet_request(request):
+        current = urlsplit(request.headers.get("HX-Current-URL", ""))
+        candidate = f"{current.path}?{current.query}" if current.query else current.path
+    if not candidate or not url_has_allowed_host_and_scheme(candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return ""
+    if avoid is not None and str(avoid) in candidate:
+        return ""
+    return candidate
 
 
 class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
-    """Issue #18 -- the coach-facing event hub CoachScheduleView's own
-    docstring already points at ("rather than mobile:event_detail, the
-    Member-shell RSVP page a coach browsing their own team's schedule has no
-    use for"): series membership/detach, and full task management (add/edit/
-    delete -- mobile.views.EventTaskRespondView only ever claims/unclaims one,
-    same read-only gap this whole issue is about). Attendance/line-up stay
-    their own screens, reached from Schedule directly, same as today.
+    """The coach-facing event hub. Opened from the Today/Events rows it is a bottom sheet over the
+    current tab (iOS pushes a screen, the PWA product decision is a sheet): the row fetches this
+    URL with hx-get and the response is just the ``<dialog>`` (coach/_event_sheet.html). A direct
+    visit, a boosted link or a redirect (after saving an edit, say) gets the full page instead.
+
+    Shows what the iOS CoachEventDetailView shows -- kind chip, score for a game, the info rows,
+    Attendance/Line-up links, and (managers) Edit / Edit the repeat pattern / Stop following the
+    series / Delete -- plus the PWA's own task management (add/edit/delete; claiming a slot is
+    still member-only, mobile.views.EventTaskRespondView).
     """
 
     template_name = "mobile/coach/event_detail.html"
+    sheet_template_name = "mobile/coach/_event_sheet.html"
     screen_title = _("Event")
     active_tab = "coach_schedule"
+
+    def get_template_names(self):
+        return [self.sheet_template_name if _is_sheet_request(self.request) else self.template_name]
+
+    def render_to_response(self, context, **response_kwargs):
+        response = super().render_to_response(context, **response_kwargs)
+        # The same URL answers with a sheet or a page depending on how it was fetched.
+        patch_vary_headers(response, ["HX-Request", "HX-Boosted"])
+        return response
 
     def get_event(self):
         if self.active_team is None:
@@ -679,11 +890,67 @@ class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             task.is_full = len(task.claim_labels) >= task.needed_quantity
             task.edit_form = _styled_task_form(instance=task)
 
+        series_summary = ""
+        can_edit_pattern = False
+        if event.series_id:
+            series_summary = describe_rrule(event.series.rrule)
+            can_edit_pattern = parse_rrule(event.series.rrule) is not None
+
         return super().get_context_data(
             event=event,
             tasks=tasks,
+            series_summary=series_summary,
+            can_edit_pattern=can_edit_pattern,
+            is_sheet=_is_sheet_request(self.request),
+            return_url=_return_url(self.request, avoid=event.pk),
             **kwargs,
         )
+
+
+class CoachEventDeleteView(CoachScopeMixin, LoginRequiredMixin, View):
+    """The Delete sheet's action, same four outcomes as iOS DeleteEventSheet (and the API's DELETE
+    /events/{id}): a one-off is deleted; an occurrence of a series is cancelled but kept
+    (``cancel``), removed (``remove``, the series won't regenerate it) or goes with its whole
+    series (``series``). ``notify`` tells the invited people first. Managers only."""
+
+    MODES = ("delete", "cancel", "remove", "series")
+
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event.objects.select_related("series"), pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        mode = request.POST.get("mode", "delete")
+        if mode not in self.MODES:
+            return HttpResponseBadRequest()
+        tell = request.POST.get("notify") == "on"
+        title = str(event)
+        event_pk = event.pk  # event.delete() clears .pk
+
+        if mode == "series":
+            if event.series_id is None:
+                return HttpResponseBadRequest()
+            series = get_object_or_404(EventSeries, pk=event.series_id, club=request.club, teams=self.active_team)
+            name = str(series)
+            series.delete()
+            notify(request, f"w|{_('Series deleted')}|" + _("“%(series)s” and all of its occurrences have been deleted.") % {"series": name})
+        else:
+            keep_record = mode == "cancel" and event.series_id is not None
+            with transaction.atomic():
+                if tell:
+                    notify_event_cancelled(event, keep_link=keep_record)
+                if event.series_id:
+                    cancel_occurrence(event, hard_delete=not keep_record)
+                else:
+                    event.delete()
+            if keep_record:
+                notify(request, f"w|{_('Occurrence cancelled')}|" + _("“%(event)s” was cancelled.") % {"event": title})
+            else:
+                notify(request, f"w|{_('Event deleted')}|" + _("“%(event)s” has been deleted.") % {"event": title})
+
+        return HttpResponseRedirect(_return_url(request, avoid=event_pk) or reverse("mobile:coach_schedule"))
 
 
 class CoachEventTaskCreateView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -857,6 +1124,8 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     template_name = "mobile/coach/news_form.html"
     screen_title = _("New post")
     active_tab = "coach_today"
+    #: Most photos one post can carry (same cap as the app API and the iOS composer).
+    MAX_PHOTOS = 10
 
     def get(self, request, *args, **kwargs):
         if not can_add_news(request.user, request.club):
@@ -906,6 +1175,8 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         kwargs.setdefault("form", self.build_form())
         kwargs.setdefault("photo_form", self.build_photo_form())
+        kwargs.setdefault("next_param", "news" if (self.request.GET.get("next") or self.request.POST.get("next")) == "news" else "")
+        kwargs.setdefault("max_photos", self.MAX_PHOTOS)
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -914,7 +1185,11 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         form = self.build_form(request.POST)
         photo_form = self.build_photo_form(request.POST, request.FILES)
-        if not form.is_valid() or not photo_form.is_valid():
+        valid = form.is_valid() and photo_form.is_valid()
+        if valid and len(photo_form.cleaned_data["images"]) > self.MAX_PHOTOS:
+            photo_form.add_error("images", ngettext("At most %(count)d photo.", "At most %(count)d photos.", self.MAX_PHOTOS) % {"count": self.MAX_PHOTOS})
+            valid = False
+        if not valid:
             return self.render_to_response(self.get_context_data(form=form, photo_form=photo_form))
 
         news_item = form.save()
@@ -925,7 +1200,45 @@ class CoachCreateNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
 
         body = _("“%(news)s” is ready for review.") % {"news": news_item}
         notify(request, f"s|{_('Sent for review')}|{body}")
-        return HttpResponseRedirect(reverse("mobile:coach_today"))
+        # Opened from the News tab ("?next=news"): land back on the list, where the new post
+        # shows as "Waiting for review". Anywhere else (the + menu) goes home as before.
+        return HttpResponseRedirect(reverse("mobile:coach_news" if request.POST.get("next") == "news" else "mobile:coach_today"))
+
+
+class CoachNewsView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
+    """Manager "News" tab (iOS TeamNewsView): the posts *you* submitted for the
+    active team, newest first, each with where it stands -- waiting for an
+    editor's review, published, scheduled, or not published (taken back to
+    draft). Any staff of the team can look; the "Share news" button needs
+    club.services.access.can_add_news, same gate as the compose screen.
+    """
+
+    template_name = "mobile/coach/news_list.html"
+    screen_title = _("Team news")
+    active_tab = "coach_news"
+    #: Newest posts shown; a coach's own submissions for one team stay small.
+    LIMIT = 50
+
+    @staticmethod
+    def status_for(post, now):
+        """``(key, label, pill class)`` -- the same four states as the iOS pill."""
+        if post.status == News.Status.PUBLISHED:
+            if post.published_at is not None and post.published_at > now:
+                return "scheduled", _("Scheduled"), "pill-info"
+            return "published", _("Published"), "pill-ok"
+        if post.status == News.Status.PENDING_REVIEW:
+            return "pending_review", _("Waiting for review"), "pill-warn"
+        return "draft", _("Not published, ask the editor"), "pill-neutral"
+
+    def get_context_data(self, **kwargs):
+        posts = []
+        if self.active_team is not None and self.me is not None:
+            posts = list(News.objects.filter(club=self.request.club, teams=self.active_team, created_by=self.me).prefetch_related("photos").order_by("-created")[: self.LIMIT])
+        now = timezone.now()
+        for post in posts:
+            post.status_key, post.status_label, post.status_class = self.status_for(post, now)
+            post.cover = post.main_photo or next(iter(post.photos.all()), None)
+        return super().get_context_data(posts=posts, can_post_news=can_add_news(self.request.user, self.request.club), **kwargs)
 
 
 class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -969,6 +1282,50 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         taken = TeamMembership.objects.filter(team=self.active_team, season=season).values_list("member_id", flat=True)
         return eligible_roster_members(self.request.club).exclude(pk__in=taken)
 
+    #: Why a player is suggested, best first -- the same four reasons (and
+    #: order) the app API's candidate list uses; each is a label + a pill look.
+    SUGGESTION_REASONS = {
+        "age_match": _("Age match"),
+        "previous_team": _("Last season"),
+        "feeder_team": _("Feeder team"),
+        "age_adjacent": _("Close in age"),
+    }
+
+    def _age_signals(self, season):
+        """``(match, adjacent)`` Q objects on Member for this team's age band, or
+        ``(None, None)`` when the team has none -- same rule as the app API's
+        candidate list: a player's birth year against the season's start year."""
+        team = self.active_team
+        if team.age_min is None and team.age_max is None:
+            return None, None
+        year = season.start_date.year
+        oldest = year - team.age_max if team.age_max is not None else None  # earliest birth year
+        youngest = year - team.age_min if team.age_min is not None else None  # latest birth year
+        match = Q(date_of_birth__isnull=False)
+        if oldest is not None:
+            match &= Q(date_of_birth__year__gte=oldest)
+        if youngest is not None:
+            match &= Q(date_of_birth__year__lte=youngest)
+        adjacent = Q()
+        if oldest is not None:
+            adjacent |= Q(date_of_birth__year=oldest - 1)
+        if youngest is not None:
+            adjacent |= Q(date_of_birth__year=youngest + 1)
+        return match, Q(date_of_birth__isnull=False) & adjacent
+
+    def _suggestion_ids(self, pool, season):
+        """``{reason: set of member ids in pool}`` for every reason that applies."""
+        by_reason = {reason: set() for reason in self.SUGGESTION_REASONS}
+        match, adjacent = self._age_signals(season)
+        if match is not None:
+            by_reason["age_match"] = set(pool.filter(match).values_list("pk", flat=True))
+            by_reason["age_adjacent"] = set(pool.filter(adjacent).values_list("pk", flat=True))
+        previous_season = Season.before(self.request.club, season)
+        if previous_season is not None:
+            by_reason["previous_team"] = set(pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season).values_list("pk", flat=True))
+        by_reason["feeder_team"] = set(pool.filter(team_memberships__team__in=self.active_team.feeder_teams.all(), team_memberships__season=season).values_list("pk", flat=True))
+        return by_reason
+
     def get_context_data(self, **kwargs):
         season = current_season(self.request.club)
         candidates = []
@@ -982,6 +1339,12 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         if self.active_team is not None and season is not None:
             squad_count = TeamMembership.objects.filter(team=self.active_team, season=season).count()
             pool = self._candidate_pool(season)
+            reasons_by_member = {}
+            reason_ids = self._suggestion_ids(pool, season)
+            # Best reason wins when a player has several (dict order = rank).
+            for reason in self.SUGGESTION_REASONS:
+                for member_id in reason_ids[reason]:
+                    reasons_by_member.setdefault(member_id, reason)
 
             if filter_param == "no_team":
                 # Staff-only members (a coach/manager with no playing TeamMembership
@@ -990,23 +1353,32 @@ class CoachAddPlayerView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
                 # show up as add-as-player candidates.
                 pool = pool.exclude(team_memberships__season=season).exclude(staff_assignments__season=season)
             elif filter_param == "suggested":
-                suggested_ids = set()
-                previous_season = Season.before(self.request.club, season)
-                if previous_season is not None:
-                    suggested_ids.update(pool.filter(team_memberships__team=self.active_team, team_memberships__season=previous_season).values_list("pk", flat=True))
-                suggested_ids.update(pool.filter(team_memberships__team__in=self.active_team.feeder_teams.all(), team_memberships__season=season).values_list("pk", flat=True))
-                pool = pool.filter(pk__in=suggested_ids)
+                pool = pool.filter(pk__in=set(reasons_by_member))
 
             if search_query:
                 pool = pool.filter(Q(first_name__icontains=search_query) | Q(last_name__icontains=search_query))
 
             candidates = list(pool.distinct().order_by("last_name", "first_name"))
+            if filter_param == "suggested":
+                rank = {reason: index for index, reason in enumerate(self.SUGGESTION_REASONS)}
+                candidates.sort(key=lambda member: rank[reasons_by_member[member.pk]])
+
+            teams_by_member = {}
+            for membership in TeamMembership.objects.filter(season=season, member_id__in=[member.pk for member in candidates]).select_related("team").order_by("team__name"):
+                teams_by_member.setdefault(membership.member_id, []).append(membership.team.name)
+            for member in candidates:
+                reason = reasons_by_member.get(member.pk)
+                member.suggestion_reason = reason
+                member.suggestion_label = self.SUGGESTION_REASONS.get(reason)
+                member.current_team_names = teams_by_member.get(member.pk, [])
+                member.birth_year = member.date_of_birth.year if member.date_of_birth else None
 
         return super().get_context_data(
             candidates=candidates,
             squad_count=squad_count,
             filter_param=filter_param,
             search_query=search_query,
+            filter_chips=[("", _("All")), ("suggested", _("Suggested")), ("no_team", _("No team"))],
             **kwargs,
         )
 
@@ -1060,12 +1432,16 @@ class CoachAddStaffView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         season = current_season(self.request.club)
         candidates = []
         positions = Position.objects.none()
+        search_query = self.request.GET.get("q", "").strip()
 
         if self.active_team is not None and season is not None:
-            candidates = list(self._candidate_pool(season).order_by("last_name", "first_name"))
+            pool = self._candidate_pool(season)
+            if search_query:
+                pool = pool.filter(Q(first_name__icontains=search_query) | Q(last_name__icontains=search_query))
+            candidates = list(pool.order_by("last_name", "first_name"))
             positions = Position.objects.filter(club=self.request.club, staff_position=True)
 
-        return super().get_context_data(candidates=candidates, positions=positions, **kwargs)
+        return super().get_context_data(candidates=candidates, positions=positions, search_query=search_query, **kwargs)
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
@@ -1194,19 +1570,59 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             "official_rows": official_rows,
         }
 
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        patch_cache_control(response, no_store=True, private=True)
+        return response
+
     def get_context_data(self, **kwargs):
         event = self.get_event()
         lineup, _created = Lineup.objects.get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
         unavailable = list(Attendance.objects.filter(event=event, status__in=UNAVAILABLE_STATUSES).select_related("member"))
+        categories = self._categories(event, lineup)
+        selected_count = sum(1 for category in categories for row in category["rows"] if row["selected"])
+        newly_selected, newly_dropped = changes_on_publish(lineup)
+
+        if lineup.scheduled_publish_at:
+            lineup_status, lineup_status_label, lineup_status_class = "scheduled", _("Scheduled"), "pill-info"
+        elif lineup.published_at:
+            lineup_status, lineup_status_label, lineup_status_class = "published", _("Published"), "pill-ok"
+        elif selected_count:
+            lineup_status, lineup_status_label, lineup_status_class = "draft", _("Draft"), "pill-warn"
+        else:
+            lineup_status, lineup_status_label, lineup_status_class = "not_started", _("Not started"), "pill-neutral"
 
         return super().get_context_data(
             event=event,
             lineup=lineup,
-            categories=self._categories(event, lineup),
+            categories=categories,
             unavailable=unavailable,
+            selected_count=selected_count,
+            lineup_status=lineup_status,
+            lineup_status_label=lineup_status_label,
+            lineup_status_class=lineup_status_class,
+            pending_selected_count=len(newly_selected),
+            pending_dropped_count=len(newly_dropped),
             **self._officiating_info(event),
             **kwargs,
         )
+
+    body_template_name = "mobile/coach/_lineup_body.html"
+
+    def render_body(self, *, toast=None, status_text=""):
+        """The swap-in partial plus the out-of-band status line/toast."""
+        response = render(self.request, self.body_template_name, self.get_context_data(toast=toast, status_text=status_text, inline_response=True))
+        patch_cache_control(response, no_store=True, private=True)
+        return response
+
+    def finish(self, request, *, toast=None, status_text=""):
+        """Inline requests get the partial; everything else the classic redirect."""
+        if is_inline_request(request):
+            return self.render_body(toast=toast, status_text=status_text)
+        if toast:
+            level = {"ok": "s", "warn": "w", "error": "e"}[toast["kind"]]
+            notify(request, f"{level}|{toast['title']}|{toast['text']}")
+        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": self.kwargs["event_id"]}))
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
@@ -1231,7 +1647,30 @@ class CoachLineupView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
 
 
-class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
+class CoachLineupToggleView(CoachLineupView):
+    """One tap on a player row: flips their pick and answers with the refreshed
+    list. Saving a pick never touches Attendance or notifies anyone (see
+    CoachLineupView's docstring) -- the pending-changes line says who a later
+    Publish will tell."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = self.get_event()
+        with transaction.atomic():
+            lineup, _created = Lineup.objects.select_for_update().get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
+            attendance = get_object_or_404(Attendance.objects.exclude(status__in=UNAVAILABLE_STATUSES).select_related("member"), event=event, member_id=kwargs["member_id"])
+            # The client says what it wants (so a double tap or a retry can't flip it back).
+            wants_selected = request.POST.get("selected") == "true"
+            if wants_selected != LineupSelection.objects.filter(lineup=lineup, member=attendance.member).exists():
+                toggle_selection(lineup, attendance.member)
+        return self.finish(request, status_text=_("Picks saved. Nobody has been told yet."))
+
+
+class CoachLineupPublishView(CoachLineupView):
     """Publish now, schedule for a later time, or cancel a pending schedule --
     events.services.lineup.publish_lineup/schedule_lineup_publish/
     cancel_scheduled_publish do the actual work; events.tasks.
@@ -1242,37 +1681,53 @@ class CoachLineupPublishView(CoachScopeMixin, LoginRequiredMixin, View):
     publish or a republish of an already-published lineup a coach kept
     editing -- publish_lineup itself is what limits the notification to
     whoever's status actually changed.
+
+    Inline (htmx) requests get the refreshed list back with a success/error
+    toast and refuse an empty line-up ("Pick at least one player first"),
+    like the iOS app; a plain form post keeps the old redirect behaviour.
     """
+
+    http_method_names = ["post"]
 
     def post(self, request, *args, **kwargs):
         if not self.can_manage_active_team:
             return HttpResponseForbidden()
 
-        event = get_object_or_404(Event, pk=kwargs["event_id"], club=request.club, teams=self.active_team, kind__in=LINEUP_EVENT_KINDS)
+        event = self.get_event()
         lineup = get_object_or_404(Lineup, event=event)
         action = request.POST.get("action", "publish_now")
+        inline = is_inline_request(request)
+        has_picks = LineupSelection.objects.filter(lineup=lineup).exists()
+        toast = None
 
-        if action == "schedule":
+        if inline and action != "cancel_schedule" and not has_picks:
+            toast = {"kind": "error", "title": _("Couldn't publish"), "text": _("Pick at least one player first.")}
+        elif action == "schedule":
             when = parse_datetime(request.POST.get("publish_at", ""))
             if when is not None and timezone.is_naive(when):
                 when = timezone.make_aware(when)
             if when is None or when <= timezone.now():
-                notify(request, f"e|{_('Could not schedule')}|{_('Pick a date and time in the future.')}")
+                toast = {"kind": "error", "title": _("Could not schedule"), "text": _("Pick a date and time in the future.")}
             else:
                 schedule_lineup_publish(lineup, when)
-                notify(request, f"s|{_('Publish scheduled')}|{_('The line-up will publish itself automatically at that time.')}")
+                toast = {"kind": "ok", "title": _("Publish scheduled"), "text": _("The line-up will publish itself automatically at that time.")}
         elif action == "cancel_schedule":
             cancel_scheduled_publish(lineup)
-            notify(request, f"s|{_('Schedule cancelled')}|{_('Publish it manually whenever you are ready.')}")
+            toast = {"kind": "ok", "title": _("Schedule cancelled"), "text": _("Publish it manually whenever you are ready.")}
         else:
             was_already_published = lineup.published_at is not None
+            newly_selected, newly_dropped = changes_on_publish(lineup)
+            told = len(newly_selected) + len(newly_dropped)
             publish_lineup(lineup)
-            if was_already_published:
-                notify(request, f"s|{_('Line-up updated')}|{_('Anyone whose status changed has been notified.')}")
+            if inline:
+                text = _("Nobody needed to be told.") if not told else ngettext("%(count)d player was told.", "%(count)d players were told.", told) % {"count": told}
+                toast = {"kind": "ok", "title": _("Published"), "text": text}
+            elif was_already_published:
+                toast = {"kind": "ok", "title": _("Line-up updated"), "text": _("Anyone whose status changed has been notified.")}
             else:
-                notify(request, f"s|{_('Line-up published')}|{_('Selected players have been notified.')}")
+                toast = {"kind": "ok", "title": _("Line-up published"), "text": _("Selected players have been notified.")}
 
-        return HttpResponseRedirect(reverse("mobile:coach_lineup", kwargs={"event_id": event.pk}))
+        return self.finish(request, toast=toast, status_text="")
 
 
 class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1298,7 +1753,14 @@ class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
             for membership in roster:
                 membership.club_status_pending = membership.member_id in pending_member_ids
 
-        return super().get_context_data(roster=roster, staff=staff, **kwargs)
+        return super().get_context_data(
+            roster=roster,
+            staff=staff,
+            # Gates the "Evaluations" action on a player's sheet -- the feature flag plus the club-wide
+            # grant (see mobile.coach_evaluation_views.EvaluationAccessMixin), not a team role.
+            evaluations_enabled=flag_is_active(self.request, "evaluations") and can_manage_evaluations(self.request.user, self.request.club),
+            **kwargs,
+        )
 
 
 class CoachRosterMemberView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
@@ -1373,12 +1835,19 @@ class CoachRosterRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
         return HttpResponseRedirect(reverse("mobile:coach_squad"))
 
 
-class CoachStaffRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
+class CoachStaffRemoveView(CoachSquadView):
     """Squad screen's per-staff-row remove action. A manager can't remove
     their own StaffAssignment this way -- self-removal would strand them off
     a team they're actively viewing, with no one obviously left to undo it;
     that stays a desktop-only action (management.views.TeamStaffRemoveView),
-    which any *other* admin/manager can still reach."""
+    which any *other* admin/manager can still reach.
+
+    Inline (htmx) requests get the refreshed squad list back with a toast --
+    a refused self-removal is a toast too ("You can't remove yourself from the
+    staff."); a plain form post keeps the 403/redirect behaviour.
+    """
+
+    http_method_names = ["post"]
 
     def post(self, request, *args, **kwargs):
         if self.active_team is None:
@@ -1387,13 +1856,20 @@ class CoachStaffRemoveView(CoachScopeMixin, LoginRequiredMixin, View):
             return HttpResponseForbidden()
 
         assignment = get_object_or_404(StaffAssignment.objects.filter(team=self.active_team, season=get_current_season(request)), pk=kwargs["assignment_pk"])
+        inline = is_inline_request(request)
         if self.me is not None and assignment.member_id == self.me.pk:
-            return HttpResponseForbidden()
+            if not inline:
+                return HttpResponseForbidden()
+            return render(request, "mobile/coach/_squad_body.html", self.get_context_data(inline_response=True, toast={"kind": "error", "title": _("Couldn't remove"), "text": _("You can't remove yourself from the staff.")}))
 
         member = assignment.member
         assignment.delete()
 
-        notify(request, f"w|{_('Staff removed')}|" + _("“%(member)s” removed from staff.") % {"member": member})
+        title = _("Staff removed")
+        text = _("“%(member)s” removed from staff.") % {"member": member}
+        if inline:
+            return render(request, "mobile/coach/_squad_body.html", self.get_context_data(inline_response=True, toast={"kind": "ok", "title": title, "text": text}))
+        notify(request, f"w|{title}|{text}")
         return HttpResponseRedirect(reverse("mobile:coach_squad"))
 
 
@@ -1409,13 +1885,27 @@ class CoachScheduleView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     EventListView's "List" mode use, so all three read the same way."""
 
     template_name = "mobile/coach/schedule.html"
-    screen_title = _("Schedule")
+    screen_title = _("Events")
     active_tab = "coach_schedule"
 
     def get_context_data(self, **kwargs):
+        # ?kind= narrows the list to one of the four coach kinds (the iOS Events tab's chip bar);
+        # anything else is "All".
+        kind = self.request.GET.get("kind", "")
+        if kind not in COACH_EVENT_KINDS:
+            kind = ""
         this_week, next_week, later_months = [], [], []
         if self.active_team is not None:
-            events = list(Event.objects.filter(teams=self.active_team, cancelled=False, start__gte=timezone.now()).order_by("start"))
-            this_week, next_week, later_months = agenda_groups(events)
+            events = Event.objects.filter(teams=self.active_team, cancelled=False, start__gte=timezone.now()).select_related("location", "series").order_by("start")
+            if kind:
+                events = events.filter(kind=kind)
+            this_week, next_week, later_months = agenda_groups(list(events))
 
-        return super().get_context_data(this_week=this_week, next_week=next_week, later_months=later_months, **kwargs)
+        return super().get_context_data(
+            this_week=this_week,
+            next_week=next_week,
+            later_months=later_months,
+            kind_filter=kind,
+            kind_choices=[(kind_value, Event.EventKind(kind_value).label) for kind_value in COACH_EVENT_KINDS],
+            **kwargs,
+        )

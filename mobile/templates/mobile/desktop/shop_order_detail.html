@@ -9,8 +9,8 @@
                 <div class="text-xs text-muted">{{ order.created|date:"d M Y" }}</div>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1">
-                <span class="pill pill-sm {{ payment_pill_class }}">{% lucide "wallet" size=10 %} {{ order.get_payment_status_display }}</span>
-                <span class="pill pill-sm {{ member_status_pill_class }}">{% lucide "package" size=10 %} {{ order.member_status.label }}</span>
+                <span class="text-xs text-muted">{{ payment_label }}</span>
+                <span class="pill pill-sm {{ status_pill_class }}">{{ status_label }}</span>
             </div>
         </div>
 

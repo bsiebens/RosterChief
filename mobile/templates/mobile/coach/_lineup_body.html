@@ -1,0 +1,140 @@
+{% load i18n lucide %}
+{% comment %}
+    The swappable part of lineup.html (id="lineup-body"). Every inline save
+    (a pick, Publish, Schedule, Cancel schedule) returns exactly this plus
+    _inline_feedback.html. Picks save per tap through the toggle view; the
+    Publish bottom sheet is a dialog.sheet whose forms replace the body too,
+    so a successful publish closes it.
+{% endcomment %}
+<div id="lineup-body" class="flex flex-col gap-4">
+    <div>
+        <p class="text-xs text-muted">{{ event.start|date:"D d M, H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}</p>
+        <div class="mt-1.5 flex items-center gap-2">
+            <span class="pill {{ lineup_status_class }}">{{ lineup_status_label }}</span>
+            <span class="text-[13px] font-semibold text-slate">{% blocktrans count counter=selected_count %}{{ counter }} selected{% plural %}{{ counter }} selected{% endblocktrans %}</span>
+        </div>
+    </div>
+
+    {% if can_manage_active_team %}
+        <div class="flex flex-col gap-2">
+            {% if lineup.scheduled_publish_at %}
+                <div class="flex items-center justify-between gap-3 text-[13px] text-info-text">
+                    <span class="flex items-center gap-1.5">{% lucide "clock" size=14 %} {% blocktrans with time=lineup.scheduled_publish_at|date:"D d M H:i" %}Publishes {{ time }}{% endblocktrans %}</span>
+                    <form method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-post="{% url "mobile:coach_lineup_publish" event.pk %}" hx-target="#lineup-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-disabled-elt="find button">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="cancel_schedule">
+                        <button class="text-[13px] font-semibold underline" type="submit">{% trans "Cancel schedule" %}</button>
+                    </form>
+                </div>
+            {% endif %}
+            <p class="text-[13px] text-slate" id="lineup-pending">
+                {% if pending_selected_count or pending_dropped_count %}
+                    {% if pending_selected_count %}{% blocktrans count counter=pending_selected_count %}{{ counter }} will hear they're in{% plural %}{{ counter }} will hear they're in{% endblocktrans %}{% endif %}{% if pending_selected_count and pending_dropped_count %} &middot; {% endif %}{% if pending_dropped_count %}{% blocktrans count counter=pending_dropped_count %}{{ counter }} will hear they're not{% plural %}{{ counter }} will hear they're not{% endblocktrans %}{% endif %}
+                {% else %}
+                    {% trans "Nobody needs to be told about a change." %}
+                {% endif %}
+            </p>
+            <button class="btn-rc btn-rc-primary w-full" type="button" onclick="document.getElementById('lineup-publish-sheet').showModal()" aria-haspopup="dialog" {% if not selected_count %}disabled{% endif %}>
+                {% if lineup.published_at %}{% trans "Publish changes" %}{% else %}{% trans "Publish" %}{% endif %}
+            </button>
+            {% if not selected_count %}<p class="text-xs text-muted">{% trans "Pick at least one player to publish." %}</p>{% endif %}
+        </div>
+    {% endif %}
+
+    {% if task_rows or needs_referees or needs_officials %}
+        <div class="m-card p-3">
+            <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Tasks & officiating" %}</div>
+            <div class="flex flex-wrap gap-1.5">
+                {% for task in task_rows %}
+                    <span class="pill pill-sm {% if task.is_full %}pill-ok{% else %}pill-warn{% endif %}">{{ task.title }}: {% if task.claim_labels %}{{ task.claim_labels|join:", " }}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endfor %}
+                {% if needs_referees %}
+                    <span class="pill pill-sm {% if not referee_rows %}pill-danger{% elif referee_rows|length < event.max_referees %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Referees" %}: {% if referee_rows %}{% for referee in referee_rows %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+                {% if needs_officials %}
+                    <span class="pill pill-sm {% if not official_rows %}pill-danger{% elif official_rows|length < event.max_officials %}pill-warn{% else %}pill-ok{% endif %}">{% trans "Officials" %}: {% if official_rows %}{% for official in official_rows %}{{ official.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{% trans "open" %}{% endif %}</span>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% for category in categories %}
+        <section aria-labelledby="lineup-cat-{{ forloop.counter }}">
+            <h2 id="lineup-cat-{{ forloop.counter }}" class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ category.label }}</h2>
+            <div class="m-card flex flex-col overflow-hidden">
+                {% for row in category.rows %}
+                    {% if can_manage_active_team %}
+                        <form class="{% if not forloop.last %}border-b border-rule{% endif %}" method="post" action="{% url "mobile:coach_lineup_toggle" event.pk row.member.pk %}" hx-post="{% url "mobile:coach_lineup_toggle" event.pk row.member.pk %}" hx-target="#lineup-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-sync="#lineup-body:queue all">
+                            {% csrf_token %}
+                            <input type="hidden" name="selected" value="{% if row.selected %}false{% else %}true{% endif %}">
+                            <button class="pressable flex w-full items-center gap-3 p-3.5 text-left" type="submit" aria-pressed="{% if row.selected %}true{% else %}false{% endif %}">
+                                {% include "mobile/coach/_lineup_row_info.html" %}
+                                <span class="shrink-0 {% if row.selected %}text-ok{% else %}text-stroke{% endif %}" aria-hidden="true">
+                                    {% if row.selected %}{% lucide "circle-check" size=26 %}{% else %}{% lucide "circle" size=26 %}{% endif %}
+                                </span>
+                                <span class="sr-only">{% if row.selected %}{% trans "Selected" %}{% else %}{% trans "Not selected" %}{% endif %}</span>
+                            </button>
+                        </form>
+                    {% else %}
+                        <div class="flex items-center gap-3 p-3.5 {% if not forloop.last %}border-b border-rule{% endif %}">
+                            {% include "mobile/coach/_lineup_row_info.html" %}
+                            {% if row.selected %}<span class="pill pill-ok shrink-0">{% trans "Selected" %}</span>{% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </section>
+    {% empty %}
+        <div class="m-card p-6 text-center text-sm text-muted">{% trans "No available players to pick from." %}</div>
+    {% endfor %}
+
+    {% if unavailable %}
+        <section aria-labelledby="lineup-unavailable">
+            <h2 id="lineup-unavailable" class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Unavailable" %}</h2>
+            <div class="flex flex-wrap gap-2">
+                {% for attendance in unavailable %}
+                    <span class="rounded-full border border-line bg-surface px-3 py-1.5 text-xs text-slate">{{ attendance.member.get_full_name }} &middot; {{ attendance.get_status_display }}</span>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
+    {% if can_manage_active_team %}
+        <dialog class="sheet" id="lineup-publish-sheet" aria-labelledby="lineup-publish-title" onclick="if (event.target === this) this.close()">
+            <div class="sheet-handle" aria-hidden="true"></div>
+            <div class="flex flex-col gap-4 pb-2" x-data="{ later: false }">
+                <div class="flex items-center justify-between gap-3">
+                    <h2 id="lineup-publish-title" class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Publish line-up" %}</h2>
+                    <button type="button" class="icon-btn" onclick="this.closest('dialog').close()" aria-label="{% trans "Close" %}">{% lucide "x" size=20 %}</button>
+                </div>
+                <div class="flex flex-col gap-2" role="group" aria-label="{% trans "When to publish" %}">
+                    <button type="button" class="pressable flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left" :aria-pressed="!later" @click="later = false">
+                        {% lucide "send" size=20 class="shrink-0 text-club" %}
+                        <span class="min-w-0 flex-1"><span class="block text-[15px] font-semibold text-ink">{% trans "Publish now" %}</span><span class="block text-[13px] text-muted">{% trans "Players are told right away." %}</span></span>
+                        <span :class="!later ? 'text-ok' : 'text-stroke'" aria-hidden="true">{% lucide "circle-check" size=22 %}</span>
+                    </button>
+                    <button type="button" class="pressable flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left" :aria-pressed="later" @click="later = true">
+                        {% lucide "clock" size=20 class="shrink-0 text-club" %}
+                        <span class="min-w-0 flex-1"><span class="block text-[15px] font-semibold text-ink">{% trans "Publish later" %}</span><span class="block text-[13px] text-muted">{% trans "Pick a date and time." %}</span></span>
+                        <span :class="later ? 'text-ok' : 'text-stroke'" aria-hidden="true">{% lucide "circle-check" size=22 %}</span>
+                    </button>
+                </div>
+                <form method="post" action="{% url "mobile:coach_lineup_publish" event.pk %}" hx-post="{% url "mobile:coach_lineup_publish" event.pk %}" hx-target="#lineup-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-disabled-elt="find button[type=submit]" class="flex flex-col gap-3">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" :value="later ? 'schedule' : 'publish_now'">
+                    <div x-show="later" x-cloak>
+                        <label class="mb-1 block text-xs font-semibold tracking-wide text-muted uppercase" for="lineup-publish-at">{% trans "Publish at" %}</label>
+                        <input id="lineup-publish-at" type="datetime-local" name="publish_at" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink" :required="later">
+                    </div>
+                    <p class="text-[13px] text-muted">
+                        <span x-show="later" x-cloak>{% trans "The line-up is published and the players are told at that time." %}</span>
+                        <span x-show="!later">{% if pending_selected_count or pending_dropped_count %}{% blocktrans with selected=pending_selected_count dropped=pending_dropped_count %}{{ selected }} will hear they're in · {{ dropped }} will hear they're not{% endblocktrans %}{% else %}{% trans "Nobody needs to be told about a change." %}{% endif %}</span>
+                    </p>
+                    <button class="btn-rc btn-rc-primary w-full" type="submit"><span x-show="!later">{% trans "Publish now" %}</span><span x-show="later" x-cloak>{% trans "Schedule" %}</span></button>
+                </form>
+            </div>
+        </dialog>
+    {% endif %}
+
+    {% if inline_response %}{% include "mobile/coach/_inline_feedback.html" %}{% endif %}
+</div>

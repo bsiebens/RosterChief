@@ -1,0 +1,12 @@
+{% load i18n %}
+{% comment %}
+    Where _inline_feedback.html's out-of-band content lands. ``saving`` is the
+    htmx indicator (shown while a save is in flight, hx-indicator="#inline-saving");
+    #inline-status is a polite live region that announces "Saved". Kept outside
+    the swapped region so a re-render never replaces the live region itself.
+{% endcomment %}
+<div class="flex min-h-5 items-center gap-2 px-1 text-xs text-muted">
+    <span id="inline-saving" class="htmx-indicator" aria-hidden="true">{% trans "Saving…" %}</span>
+    <span id="inline-status" role="status" aria-live="polite"></span>
+</div>
+<div id="inline-toast" aria-live="polite"></div>

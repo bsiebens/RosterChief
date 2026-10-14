@@ -2,14 +2,10 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Cart + checkout. Discount code is applied via a plain GET (?code=),
-    recomputed on each render through shop.services.pricing.cart_totals --
-    no htmx/live preview, see ShopCartView's own docstring. "Place order"
-    posts to shop_checkout carrying whatever code is currently in the box as
-    a hidden field; place_order (shop.services.checkout) is the only place a
-    code is actually redeemed, so a bad/expired code still surfaces as a
-    flashed error there even if this screen's own preview never applied it.
+    Cart + checkout. The body lives in _shop_cart_body.html so quantity changes, removals and the discount code (all htmx) can swap it in place without a page reload -- see mobile.views.ShopCartView/ShopCartItemUpdateView. "Place order" posts to shop_checkout carrying the applied code as a hidden field; place_order (shop.services.checkout) is the only place a code is actually redeemed, so a bad/expired code still surfaces as a flashed error there even if this screen's own preview never applied it.
 {% endcomment %}
+
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
 
 {% block content %}
     <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
@@ -19,82 +15,7 @@
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Cart" %}</span>
     </div>
 
-    {% if items %}
-        {% if has_unavailable %}
-            <p class="px-1 text-sm font-medium text-club">{% trans "Some items are no longer available. Remove them to place your order." %}</p>
-        {% elif prices_changed %}
-            <p class="px-1 text-sm font-medium text-club">{% trans "Some prices have changed since you added them to your cart. The total below is up to date." %}</p>
-        {% endif %}
-        <div class="m-card overflow-hidden">
-            {% for item in items %}
-                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                <div class="flex items-start gap-3 p-3.5">
-                    <div class="min-w-0 flex-1">
-                        <div class="text-[15px] font-semibold text-ink">{{ item.product.name }}{% if item.variant %} &middot; {{ item.variant.name }}{% endif %}</div>
-                        {% if item.unavailable %}<div class="text-xs font-medium text-club">{% trans "No longer available" %}</div>{% endif %}
-                        <div class="text-xs text-muted">
-                            {% if item.beneficiary %}{% blocktrans with name=item.beneficiary.first_name %}For {{ name }} &middot; {% endblocktrans %}{% endif %}{% if item.personalization_number or item.personalization_name %}{% if item.personalization_number %}#{{ item.personalization_number }} {% endif %}{{ item.personalization_name }} &middot; {% endif %}{% blocktrans with amount=item.unit_price|floatformat:2 %}&euro; {{ amount }} each{% endblocktrans %}
-                        </div>
-                        <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}" class="mt-2 flex items-center gap-2">
-                            {% csrf_token %}
-                            <button type="submit" name="action" value="decrement" class="flex h-8 w-8 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" aria-label="{% trans "Decrease quantity" %}">
-                                {% lucide "minus" size=14 %}
-                            </button>
-                            <span class="w-5 text-center text-sm font-semibold text-ink">{{ item.quantity }}</span>
-                            <button type="submit" name="action" value="increment" class="flex h-8 w-8 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" aria-label="{% trans "Increase quantity" %}">
-                                {% lucide "plus" size=14 %}
-                            </button>
-                        </form>
-                    </div>
-                    <div class="flex flex-col items-end gap-2">
-                        <span class="font-display text-sm font-extrabold text-ink">{% blocktrans with amount=item.line_total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
-                        <form method="post" action="{% url "mobile:shop_cart_item_update" item.pk %}">
-                            {% csrf_token %}
-                            <button type="submit" name="action" value="remove" class="flex h-8 w-8 items-center justify-center rounded-lg text-dim" aria-label="{% trans "Remove" %}">
-                                {% lucide "trash-2" size=15 %}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            {% endfor %}
-        </div>
-
-        <form method="get" class="m-card flex items-center gap-2 p-3.5">
-            <input type="text" name="code" value="{{ code }}" placeholder="{% trans "Discount code" %}" class="h-11 flex-1 rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
-            <button type="submit" class="btn btn-secondary">{% trans "Apply" %}</button>
-        </form>
-        {% if discount_error %}
-            <p class="-mt-2 px-1 text-sm font-medium text-club">{{ discount_error }}</p>
-        {% elif discount %}
-            <p class="-mt-2 px-1 text-sm font-medium text-ok">{% blocktrans with name=discount.name %}Discount applied: {{ name }}{% endblocktrans %}</p>
-        {% endif %}
-
-        <div class="m-card flex flex-col gap-2 p-4">
-            <div class="flex items-center justify-between text-sm text-muted">
-                <span>{% trans "Subtotal" %}</span>
-                <span>{% blocktrans with amount=totals.subtotal|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
-            </div>
-            {% if totals.discount_amount %}
-                <div class="flex items-center justify-between text-sm text-muted">
-                    <span>{% trans "Discount" %}</span>
-                    <span>&minus;{% blocktrans with amount=totals.discount_amount|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
-                </div>
-            {% endif %}
-            <div class="mt-1 flex items-center justify-between border-t border-rule pt-2 font-display text-lg font-extrabold text-ink">
-                <span>{% trans "Total" %}</span>
-                <span>{% blocktrans with amount=totals.total|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</span>
-            </div>
-        </div>
-
-        <form method="post" action="{% url "mobile:shop_checkout" %}">
-            {% csrf_token %}
-            <input type="hidden" name="discount_code" value="{{ code }}">
-            <button type="submit" class="btn btn-primary w-full">{% trans "Place order" %}</button>
-        </form>
-        <p class="pb-2 text-center text-xs text-dim">{% trans "Pay when you pick it up -- no online payment." %}</p>
-    {% else %}
-        <div class="m-card p-6 text-center">
-            <p class="text-sm text-muted">{% trans "Your cart is empty." %}</p>
-        </div>
-    {% endif %}
+    <div id="cart-body" class="flex flex-col gap-4">
+        {% include "mobile/_shop_cart_body.html" %}
+    </div>
 {% endblock content %}

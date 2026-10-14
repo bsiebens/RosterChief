@@ -2,22 +2,9 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Product detail + add-to-cart. White sticky back-header, same pattern as
-    payments.html/calendar_feed_settings.html -- not a tab of its own,
-    active_tab stays "shop" (ShopProductDetailView's own docstring).
+    Product detail + add-to-cart, like the native app. White sticky back-header (same pattern as payments.html) -- not a tab of its own, active_tab stays "shop".
 
-    The beneficiary chip row (mirrors Home's own person-chip pattern, see
-    mobile/templates/mobile/home.html) only renders once managed_people has
-    more than one person -- a member ordering just for themselves has
-    nothing to disambiguate, so the hidden "beneficiary" field simply isn't
-    submitted in that case (ShopProductDetailView.post then leaves the
-    CartItem's beneficiary unset).
-
-    The variant picker (same chip styling, reused rather than inventing a
-    second chip look) only renders when the product actually has any active
-    variants -- most products don't. The first variant is pre-selected by
-    default so "Add to cart" always carries a valid one once any exist;
-    there's no unpicked/blank state to guard against.
+    One Alpine scope drives the page: the price follows the chosen option (variant_data, from the view), the button reads "Add to cart . total" once everything required is chosen and "Choose an option" before, a sold-out option is struck through and disabled. The "For" picker only renders once the account manages more than one person (otherwise the beneficiary is left unset), personalisation only when the product offers it. "Add to cart" posts with htmx into #shop-added ("Added to your cart / View cart", or the reason it failed); without htmx the form still posts and redirects to the cart.
 {% endcomment %}
 
 {% block content %}
@@ -28,83 +15,96 @@
         <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ product.name }}</span>
     </div>
 
-    <div class="m-card overflow-hidden">
+    {{ variant_data|json_script:"variant-data" }}
+    <div class="flex flex-col gap-4"
+         x-data="{
+            variants: JSON.parse(document.getElementById('variant-data').textContent),
+            variant: '',
+            qty: 1,
+            base: {{ product.price|stringformat:'s' }},
+            lowest: {{ lowest_price|stringformat:'s' }},
+            soldOut: {% if product.in_stock %}false{% else %}true{% endif %},
+            get chosen() { return this.variants.find((option) => option.id === this.variant) || null },
+            get needsVariant() { return this.variants.length > 0 },
+            get unit() { return this.chosen ? parseFloat(this.chosen.price) : (this.needsVariant ? parseFloat(this.lowest) : parseFloat(this.base)) },
+            get total() { return (this.unit * this.qty).toFixed(2) },
+            get canAdd() { return !this.soldOut && (!this.needsVariant || this.chosen !== null) },
+         }"
+         x-init="$watch('variant', () => { $refs.added.innerHTML = '' }); $watch('qty', () => { $refs.added.innerHTML = '' })">
         {% if product.image %}
-            <img class="h-48 w-full object-cover" src="{{ product.image.url }}" alt="">
+            <img class="h-64 w-full rounded-[14px] object-cover" src="{{ product.image.url }}" alt="">
         {% else %}
-            <div class="flex h-48 items-center justify-center bg-line text-xs text-dim">{% trans "No photo" %}</div>
+            <div class="flex h-64 w-full items-center justify-center rounded-[14px] bg-rule text-dim">{% lucide "shirt" size=44 %}</div>
         {% endif %}
-        <div class="p-4">
-            <div class="font-display text-2xl font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
-            {% if product.description %}
-                <p class="mt-2 text-sm text-ink">{{ product.description|linebreaksbr }}</p>
+
+        <div class="flex flex-col gap-1.5">
+            <h1 class="font-display text-[26px] leading-tight font-extrabold text-ink uppercase">{{ product.name }}</h1>
+            <div class="text-lg font-semibold text-club">&euro; <span x-text="unit.toFixed(2)">{{ lowest_price|floatformat:2 }}</span></div>
+            {% if not product.in_stock %}
+                <p class="text-[13px] font-semibold text-club-dark">{% trans "This product is sold out right now." %}</p>
+            {% endif %}
+            {% if description_html %}
+                <div class="text-[15px] text-slate [&_a]:text-club [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5">{{ description_html }}</div>
             {% endif %}
         </div>
+
+        <form method="post" action="{{ request.path }}" class="flex flex-col gap-4" hx-post="{{ request.path }}" hx-target="#shop-added" hx-swap="innerHTML">
+            {% csrf_token %}
+
+            {% if variants %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Option" %}</div>
+                    <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="{% trans "Option" %}">
+                        {% for option in variants %}
+                            <button type="button" role="radio" class="rounded-[10px] px-3.5 py-2 text-sm font-semibold" :class="variant === '{{ option.pk }}' ? 'bg-emphasis text-white' : 'border border-line bg-surface {% if option.in_stock %}text-ink{% else %}text-dim line-through{% endif %}'" :aria-checked="variant === '{{ option.pk }}'" {% if option.in_stock %}@click="variant = '{{ option.pk }}'"{% else %}disabled{% endif %}>{{ option.name }}{% if not option.in_stock %} &middot; {% trans "Sold out" %}{% endif %}</button>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" name="variant" :value="variant">
+                </div>
+            {% endif %}
+
+            {% if managed_people|length > 1 %}
+                <label class="flex items-center justify-between gap-3">
+                    <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "For" %}</span>
+                    <select name="beneficiary" class="h-11 rounded-lg border border-stroke bg-surface px-3 text-[15px] text-ink focus:border-ink focus:outline-none">
+                        {% for person in managed_people %}
+                            <option value="{{ person.pk }}"{% if person == me %} selected{% endif %}>{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            {% endif %}
+
+            {% if product.personalization_enabled %}
+                <div>
+                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Personalisation" %}</div>
+                    <div class="m-card overflow-hidden">
+                        <input type="text" name="personalization_number" maxlength="20" inputmode="numeric" placeholder="{% trans "Number to print" %}" aria-label="{% trans "Number to print" %}" class="h-12 w-full border-0 bg-transparent px-3.5 text-[16px] text-ink placeholder:text-dim focus:outline-none">
+                        <div class="h-px bg-rule"></div>
+                        <input type="text" name="personalization_name" maxlength="100" autocapitalize="characters" placeholder="{% trans "Name to print" %}" aria-label="{% trans "Name to print" %}" class="h-12 w-full border-0 bg-transparent px-3.5 text-[16px] text-ink uppercase placeholder:text-dim placeholder:normal-case focus:outline-none">
+                    </div>
+                </div>
+            {% endif %}
+
+            <div class="flex items-center justify-between">
+                <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Quantity" %}</span>
+                <div class="flex items-center gap-3">
+                    <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" @click="qty = Math.max(1, qty - 1)" aria-label="{% trans "Decrease quantity" %}">{% lucide "minus" size=16 %}</button>
+                    <span class="w-6 text-center font-display text-lg font-extrabold text-ink" x-text="qty" aria-live="polite">1</span>
+                    <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" @click="qty = Math.min({{ max_quantity }}, qty + 1)" aria-label="{% trans "Increase quantity" %}">{% lucide "plus" size=16 %}</button>
+                </div>
+            </div>
+            <input type="hidden" name="quantity" :value="qty">
+
+            <div id="shop-added" x-ref="added" aria-live="polite"></div>
+
+            <button type="submit" class="btn-rc btn-rc-primary" :disabled="!canAdd"{% if not product.in_stock %} disabled{% endif %}>
+                {% if not product.in_stock %}
+                    {% trans "Sold out" %}
+                {% else %}
+                    <span x-show="canAdd">{% trans "Add to cart" %} &middot; &euro; <span x-text="total"></span></span>
+                    <span x-show="!canAdd" x-cloak>{% trans "Choose an option" %}</span>
+                {% endif %}
+            </button>
+        </form>
     </div>
-
-    <form method="post" class="m-card flex flex-col gap-4 p-4" x-data="{ qty: 1, beneficiary: '{{ me.pk }}', variant: '{{ first_in_stock_variant.pk|default:"" }}' }">
-        {% csrf_token %}
-
-        {% if variants %}
-            <div>
-                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Option" %}</div>
-                <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
-                    {% for option in variants %}
-                        <button type="button" class="person-chip pl-2.5{% if not option.in_stock %} opacity-50{% endif %}" :class="variant === '{{ option.pk }}' && 'person-chip-active'" {% if option.in_stock %}@click="variant = '{{ option.pk }}'"{% else %}disabled{% endif %}>
-                            <span class="person-chip-label{% if not option.in_stock %} line-through{% endif %}">{{ option.name }}{% if option.price is not None %} &middot; &euro;{{ option.price|floatformat:2 }}{% endif %}</span>{% if not option.in_stock %}<span class="ml-1 text-xs text-dim">{% trans "Out of stock" %}</span>{% endif %}
-                        </button>
-                    {% endfor %}
-                </div>
-                <input type="hidden" name="variant" :value="variant">
-            </div>
-        {% endif %}
-
-        {% if managed_people|length > 1 %}
-            <div>
-                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "For" %}</div>
-                <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
-                    {% for person in managed_people %}
-                        <button type="button" class="person-chip" :class="beneficiary === '{{ person.pk }}' && 'person-chip-active'" @click="beneficiary = '{{ person.pk }}'">
-                            <span class="person-chip-avatar">{{ person.first_name|slice:":1" }}</span>
-                            <span class="person-chip-label">{% if person == me %}{% trans "Me" %}{% else %}{{ person.first_name }}{% endif %}</span>
-                        </button>
-                    {% endfor %}
-                </div>
-                <input type="hidden" name="beneficiary" :value="beneficiary">
-            </div>
-        {% endif %}
-
-        {% if product.personalization_enabled %}
-            <div class="grid grid-cols-2 gap-3">
-                <div>
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Number (optional)" %}</div>
-                    <input type="text" name="personalization_number" maxlength="20" placeholder="{% trans "e.g. 7" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
-                </div>
-                <div>
-                    <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Name (optional)" %}</div>
-                    <input type="text" name="personalization_name" maxlength="100" placeholder="{% trans "e.g. on the back" %}" class="h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none">
-                </div>
-            </div>
-        {% endif %}
-
-        <div class="flex items-center justify-between">
-            <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Quantity" %}</span>
-            <div class="flex items-center gap-3">
-                <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" @click="qty = Math.max(1, qty - 1)" aria-label="{% trans "Decrease quantity" %}">
-                    {% lucide "minus" size=16 %}
-                </button>
-                <span class="w-6 text-center font-display text-lg font-extrabold text-ink" x-text="qty"></span>
-                <button type="button" class="flex h-10 w-10 items-center justify-center rounded-lg border border-stroke bg-surface text-ink" @click="qty = Math.min({{ max_quantity }}, qty + 1)" aria-label="{% trans "Increase quantity" %}">
-                    {% lucide "plus" size=16 %}
-                </button>
-            </div>
-        </div>
-        <input type="hidden" name="quantity" :value="qty">
-
-        {% if product.in_stock %}
-            <button type="submit" class="btn btn-primary w-full">{% trans "Add to cart" %}</button>
-        {% else %}
-            <button type="button" class="btn btn-primary w-full opacity-50" disabled>{% trans "Out of stock" %}</button>
-        {% endif %}
-    </form>
 {% endblock content %}

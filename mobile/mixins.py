@@ -191,7 +191,12 @@ class ShopScopeMixin(PersonScopeMixin):
     without the "shop" waffle flag active for this club the screens 404, the
     same as every other disabled feature. Both checks run only after the
     member-app gate (``check_member_app``), so an anonymous visitor is sent to
-    login first and learns nothing about the club's shop."""
+    login first and learns nothing about the club's shop.
+
+    A screen that stays useful while the shop is closed (the catalogue's own "closed" state,
+    the family's orders and their invoices) sets ``allow_closed``; it is still licensed-only."""
+
+    allow_closed = False
 
     def check_member_app(self, request):
         refusal = super().check_member_app(request)
@@ -200,6 +205,8 @@ class ShopScopeMixin(PersonScopeMixin):
         if not shop_enabled(request):
             if not flag_is_active(request, SHOP_FLAG):
                 raise Http404("The “shop” feature isn't enabled for this club.")
+            if self.allow_closed:
+                return None
             notify(request, f"w|{_('Shop closed')}|{_("The shop isn't taking orders right now.")}")
             return redirect("mobile:home")
         return None

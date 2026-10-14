@@ -1,0 +1,91 @@
+{% load i18n lucide %}
+{% comment %}
+    The swappable part of attendance.html (id="attendance-body"): summary,
+    filter chips, remind button, rows and edit sheets. Every inline save
+    returns exactly this (+ _inline_feedback.html) and htmx swaps it in
+    place. Writes post to ".../?filter=<current>" so the partial keeps the
+    chip the coach was on.
+{% endcomment %}
+<div id="attendance-body" class="flex flex-col gap-4">
+    <div>
+        <p class="text-xs text-muted">
+            {{ event.start|date:"D d M, H:i" }}{% if event.location %} &middot; {{ event.location.name }}{% endif %}
+        </p>
+        <p class="mt-0.5 text-sm font-semibold text-slate">{% blocktrans with done=checked_in_count total=responded_count %}Checked in {{ done }} of {{ total }}{% endblocktrans %}</p>
+        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-rule" role="progressbar" aria-valuemin="0" aria-valuemax="{{ responded_count }}" aria-valuenow="{{ checked_in_count }}" aria-label="{% trans "Checked in" %}">
+            <div class="h-full bg-ok" style="width: {% widthratio checked_in_count responded_count|default:1 100 %}%"></div>
+        </div>
+        {% if event.cancelled %}<p class="mt-2 text-sm font-semibold text-club-dark">{% trans "This event is cancelled." %}</p>{% endif %}
+    </div>
+
+    <nav class="flex gap-2 overflow-x-auto scrollbar-hide" aria-label="{% trans "Filter" %}">
+        <a class="flex h-9 shrink-0 items-center justify-center rounded-full px-3.5 font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?" {% if not filter_param %}aria-current="true"{% endif %}>
+            {% trans "Responded" %} {{ responded_count }}
+        </a>
+        <a class="flex h-9 shrink-0 items-center justify-center rounded-full px-3.5 font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "silent" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?filter=silent" {% if filter_param == "silent" %}aria-current="true"{% endif %}>
+            {% trans "Silent" %} {{ silent_count }}
+        </a>
+        <a class="flex h-9 shrink-0 items-center justify-center rounded-full px-3.5 font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "declined" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?filter=declined" {% if filter_param == "declined" %}aria-current="true"{% endif %}>
+            {% trans "Declined" %} {{ declined_count }}
+        </a>
+        <a class="flex h-9 shrink-0 items-center justify-center rounded-full px-3.5 font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "all" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?filter=all" {% if filter_param == "all" %}aria-current="true"{% endif %}>
+            {% trans "All" %} {{ total_count }}
+        </a>
+    </nav>
+
+    {% if can_manage_active_team and silent_count > 0 %}
+        {% trans "Remind players who haven't answered? They get a notification asking them to reply." as remind_confirm_text %}
+        <form method="post" action="{% url "mobile:coach_attendance_remind_silent" event.pk %}?filter={{ filter_param }}" hx-post="{% url "mobile:coach_attendance_remind_silent" event.pk %}?filter={{ filter_param }}" hx-target="#attendance-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-confirm="{{ remind_confirm_text }}" hx-disabled-elt="find button">
+            {% csrf_token %}
+            <button class="btn-rc btn-rc-neutral w-full gap-2" type="submit">
+                {% lucide "bell" size=16 %} {% blocktrans count counter=silent_count %}Remind {{ counter }} player{% plural %}Remind {{ counter }} players{% endblocktrans %}
+            </button>
+        </form>
+    {% endif %}
+
+    {% if needs_lineup_swap %}
+        <a class="flex items-center gap-2.5 rounded-xl border border-warn-border bg-warn-bg p-3" href="{% url "mobile:coach_lineup" event.pk %}">
+            {% lucide "triangle-alert" size=18 class="shrink-0 text-warn-text" %}
+            <span class="min-w-0 flex-1 text-[13px] font-semibold text-ink">{% trans "They're still in the published line-up. Swap them there." %}</span>
+            <span class="shrink-0 text-[13px] font-bold text-club-dark">{% trans "Open line-up" %}</span>
+        </a>
+    {% endif %}
+
+    <div class="m-card flex flex-col overflow-hidden">
+        {% for row in rows %}
+            <div class="flex items-start gap-3 p-3.5 {% if not forloop.last %}border-b border-rule{% endif %}">
+                {% if can_edit_answers %}
+                    <button type="button" class="pressable flex min-w-0 flex-1 items-start gap-3 text-left" onclick="document.getElementById('att-edit-{{ row.pk }}').showModal()" aria-haspopup="dialog">
+                        {% include "mobile/coach/_attendance_row_info.html" %}
+                    </button>
+                {% else %}
+                    <div class="flex min-w-0 flex-1 items-start gap-3">
+                        {% include "mobile/coach/_attendance_row_info.html" %}
+                    </div>
+                {% endif %}
+                {% if can_manage_active_team %}
+                    <div class="flex shrink-0 gap-2">
+                        <button type="button" class="flex h-11 w-11 items-center justify-center rounded-full {% if row.showed_up is True %}bg-ok text-white{% else %}border border-edge bg-paper text-muted{% endif %}" aria-pressed="{% if row.showed_up is True %}true{% else %}false{% endif %}" aria-label="{% blocktrans with name=row.member.get_full_name %}Showed up: {{ name }}{% endblocktrans %}" hx-post="{% url "mobile:coach_attendance_check_in" event.pk row.pk %}?filter={{ filter_param }}" hx-vals='{"showed_up": "true"}' hx-target="#attendance-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-sync="#attendance-body:queue all">
+                            {% lucide "check" size=18 stroke_width=2.6 %}
+                        </button>
+                        <button type="button" class="flex h-11 w-11 items-center justify-center rounded-full {% if row.showed_up is False %}bg-club text-club-content{% else %}border border-edge bg-paper text-muted{% endif %}" aria-pressed="{% if row.showed_up is False %}true{% else %}false{% endif %}" aria-label="{% blocktrans with name=row.member.get_full_name %}Didn't show up: {{ name }}{% endblocktrans %}" hx-post="{% url "mobile:coach_attendance_check_in" event.pk row.pk %}?filter={{ filter_param }}" hx-vals='{"showed_up": "false"}' hx-target="#attendance-body" hx-swap="outerHTML" hx-indicator="#inline-saving" hx-sync="#attendance-body:queue all">
+                            {% lucide "x" size=18 stroke_width=2.6 %}
+                        </button>
+                    </div>
+                {% elif row.showed_up is not None %}
+                    <span class="pill {% if row.showed_up %}pill-ok{% else %}pill-danger{% endif %} shrink-0">{% if row.showed_up %}{% trans "Showed up" %}{% else %}{% trans "Didn't show up" %}{% endif %}</span>
+                {% endif %}
+            </div>
+        {% empty %}
+            <div class="px-4 py-6 text-center text-sm text-muted">{% trans "Nobody here." %}</div>
+        {% endfor %}
+    </div>
+
+    {% if can_edit_answers %}
+        {% for row in rows %}
+            {% include "mobile/coach/_attendance_edit_sheet.html" %}
+        {% endfor %}
+    {% endif %}
+
+    {% if inline_response %}{% include "mobile/coach/_inline_feedback.html" %}{% endif %}
+</div>

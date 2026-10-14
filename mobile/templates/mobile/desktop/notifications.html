@@ -2,7 +2,7 @@
 {% load i18n %}
 
 {% block header_extra %}
-    {% if today or earlier_this_week or older %}
+    {% if rows %}
         {% if unread_notification_count %}
             <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
                 {% csrf_token %}
@@ -35,33 +35,18 @@
                 <button type="button" class="btn shrink-0" :disabled="pending" @click="pending = true; failed = false; requested = await window.rosterchiefPush.subscribe(); failed = !requested; pending = false">{% trans "Enable" %}</button>
             </div>
 
-            {% if not today and not earlier_this_week and not older %}
+            {% if not rows %}
                 <div class="card p-6 text-center">
-                    <p class="text-sm text-muted">{% trans "Nothing here yet." %}</p>
+                    <p class="text-sm text-muted">{% trans "No notifications" %}</p>
                 </div>
             {% else %}
-                {% if today %}
-                    <div>
-                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
-                        <div class="flex flex-col gap-2">
-                            {% for row in today %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
-                        </div>
-                    </div>
-                {% endif %}
-                {% if earlier_this_week %}
-                    <div>
-                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
-                        <div class="flex flex-col gap-2">
-                            {% for row in earlier_this_week %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
-                        </div>
-                    </div>
-                {% endif %}
-                {% if older %}
-                    <div>
-                        <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
-                        <div class="flex flex-col gap-2">
-                            {% for row in older %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
-                        </div>
+                <div class="flex flex-col gap-2">
+                    {% for row in rows %}{% include "mobile/desktop/_notification_row.html" %}{% endfor %}
+                </div>
+                {% if page.has_other_pages %}
+                    <div class="mt-2 flex justify-center gap-4">
+                        {% if page.has_previous %}<a class="font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="?page={{ page.previous_page_number }}">&larr; {% trans "Newer" %}</a>{% endif %}
+                        {% if page.has_next %}<a class="font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="?page={{ page.next_page_number }}">{% trans "Older" %} &rarr;</a>{% endif %}
                     </div>
                 {% endif %}
             {% endif %}

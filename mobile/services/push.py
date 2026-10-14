@@ -125,9 +125,7 @@ def _sandbox_send(subscription, payload: str) -> tuple[str, str]:
     except ValueError:
         parsed = {"raw": payload}
     request = {**(parsed if isinstance(parsed, dict) else {"payload": parsed}), "endpoint": urlsplit(subscription.endpoint).hostname or ""}
-    outcome = sandbox.capture(
-        channel="web", provider="webpush", target=subscription.pk, title=request.get("title", ""), body=request.get("body", ""), request=request, user=getattr(subscription.member, "user", None), club=subscription.club
-    )
+    outcome = sandbox.capture(channel="web", provider="webpush", target=subscription.pk, title=request.get("title", ""), body=request.get("body", ""), request=request, user=getattr(subscription.member, "user", None), club=subscription.club)
     Outcome = sandbox.Outcome
     if outcome == Outcome.DELIVERED:
         return "sent", ""

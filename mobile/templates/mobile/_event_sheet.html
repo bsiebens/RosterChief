@@ -1,0 +1,7 @@
+{% comment %}
+    The event as a bottom sheet over the current tab: the dialog (mobile/_event_sheet_shell.html) fetches this fragment with ``?sheet=1`` and every answer inside it swaps it again. The full page (event_detail.html) renders the very same hero + body, so a push-notification deep link and the sheet never drift apart.
+{% endcomment %}
+{% include "mobile/_event_hero.html" %}
+<div class="flex flex-col gap-4 py-4">
+    {% include "mobile/_event_body.html" %}
+</div>

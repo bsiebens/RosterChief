@@ -27,27 +27,27 @@
         {% if this_week %}
             <div class="card overflow-hidden">
                 <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "This week" %}</span></div>
-                {% for row in this_week %}
+                {% for group in this_week %}{% for row in group.rows %}
                     {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
-                {% endfor %}
+                {% endfor %}{% endfor %}
             </div>
         {% endif %}
 
         {% if next_week %}
             <div class="card overflow-hidden">
                 <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{% trans "Next week" %}</span></div>
-                {% for row in next_week %}
+                {% for group in next_week %}{% for row in group.rows %}
                     {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
-                {% endfor %}
+                {% endfor %}{% endfor %}
             </div>
         {% endif %}
 
         {% for month in later_months %}
             <div class="card overflow-hidden">
                 <div class="border-b border-line px-4.5 py-3.5"><span class="card-title">{{ month.month_start|date:"F Y" }}</span></div>
-                {% for row in month.items %}
+                {% for group in month.items %}{% for row in group.rows %}
                     {% if row.blocked_requirements %}{% include "mobile/desktop/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/desktop/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/desktop/_calendar_official_row.html" %}{% else %}{% include "mobile/desktop/_calendar_row.html" %}{% endif %}
-                {% endfor %}
+                {% endfor %}{% endfor %}
             </div>
         {% endfor %}
     {% endif %}

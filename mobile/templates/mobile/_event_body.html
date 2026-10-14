@@ -1,0 +1,211 @@
+{% load i18n lucide %}
+{% comment %}
+    Everything below the hero on the event page and in the event sheet, in the iOS EventReplySheet's order: details (When / Meet / Where with an "Open in Maps" link-out / Opponent), Your answers (In / Maybe / Out per person, notes, "Drop out", "Deadline passed"), the published line-up, Tasks, Squad response, the "can't reply yet" blocked state, then referee / official sign-ups. Renders sibling blocks for the caller's flex-col gap. Privacy as before: the squad summary is counts only, task claims read as a family label ("Covered by"), a note is only ever shown back to the family that wrote it.
+    ``in_sheet`` decides how a form posts (see _event_form_open.html).
+{% endcomment %}
+{% if sheet_error %}
+    <div class="rounded-xl bg-club-dark px-3.5 py-3 text-sm font-semibold text-white" role="alert">{{ sheet_error }}</div>
+{% endif %}
+
+<div class="m-card flex flex-col gap-2.5 p-3.5">
+    <div class="flex items-center gap-3">
+        <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "When" %}</span>
+        <span class="text-sm font-medium text-ink">{{ event.start|date:"D d M, H:i" }}</span>
+    </div>
+    {% if event.gathering %}
+        <div class="flex items-center gap-3">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Meet" %}</span>
+            <span class="text-sm font-medium text-ink">{{ event.gathering|date:"H:i" }}</span>
+        </div>
+    {% endif %}
+    {% if event.location %}
+        <div class="flex items-start gap-3">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Where" %}</span>
+            <div class="min-w-0">
+                <div class="text-sm font-medium text-ink">{{ event.location.name }}</div>
+                {% if event.location.address %}<div class="text-[13px] text-muted">{{ event.location.address }}, {{ event.location.zip_code }} {{ event.location.city }}</div>{% endif %}
+                {% if maps_url %}
+                    <a class="mt-1.5 inline-flex min-h-9 items-center gap-1.5 text-[13px] font-semibold text-club-dark dark:text-club" href="{{ maps_url }}" target="_blank" rel="noopener" hx-boost="false">
+                        {% lucide "map-pin" size=14 stroke_width=2.4 %}
+                        {% trans "Open in Maps" %}
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+    {% if event.opponent %}
+        <div class="flex items-center gap-3">
+            <span class="w-24 shrink-0 font-display text-[11px] font-bold tracking-wide text-muted uppercase">{% trans "Opponent" %}</span>
+            <span class="text-sm font-medium text-ink">{{ event.opponent.name }}</span>
+        </div>
+    {% endif %}
+    {% if rsvp_closed %}
+        <p class="font-display text-[11px] font-extrabold tracking-wide text-muted uppercase">{% trans "Replies are closed for this event" %}</p>
+    {% endif %}
+</div>
+
+{% if your_answers %}
+    <div class="m-card p-3.5">
+        <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Your answers" %}</span>
+        <div class="mt-2.5 flex flex-col gap-3.5">
+            {% for answer in your_answers %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <div>
+                    <div class="mb-2.5 flex items-center gap-2.5">
+                        {% include "mobile/_avatar.html" with person=answer.member size_class="h-[38px] w-[38px]" %}
+                        <div class="min-w-0 flex-1">
+                            <div class="text-base font-semibold text-ink">{{ answer.member.get_full_name }}</div>
+                            {% if answer.membership %}
+                                <div class="text-xs text-muted">
+                                    {{ answer.membership.team.short_name }}
+                                    {% if answer.membership.jersey_number %}&middot; #{{ answer.membership.jersey_number }}{% endif %}
+                                    {% if answer.membership.position %}&middot; {{ answer.membership.position.name }}{% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% if answer.attendance.status == "no_response" %}
+                            <span class="pill pill-warn shrink-0">{% trans "No reply" %}</span>
+                        {% endif %}
+                    </div>
+
+                    {% if answer.locked %}
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="pill pill-neutral">{{ answer.attendance.get_status_display }}</span>
+                            {% if answer.deadline_passed %}
+                                <span class="inline-flex items-center gap-1.5 text-[13px] font-semibold text-muted">{% lucide "clock" size=14 stroke_width=2.4 %}{% trans "Deadline passed" %}</span>
+                            {% endif %}
+                        </div>
+                        {% if answer.can_drop_out %}
+                            {% comment %}Only a SELECTED player sees this -- once they report a dropout the view stores ABSENT, so a reload drops the button.{% endcomment %}
+                            {% url "mobile:event_detail" event.pk as answer_url %}
+                            <div class="mt-2.5">
+                                {% include "mobile/_event_form_open.html" with action=answer_url note_form=True %}
+                                    <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                    <button type="button" class="answer-btn answer-btn-danger w-full" data-ask data-note-hide>{% trans "Drop out" %}</button>
+                                    <fieldset class="mt-0 rounded-xl border border-edge bg-paper p-3" data-note-panel hidden disabled>
+                                        <input type="hidden" name="status" value="dropout">
+                                        <p class="mb-1 text-sm font-semibold text-ink">{% trans "Can't make it after all" %}</p>
+                                        <label class="mb-1 block text-xs font-semibold text-muted" for="drop-{{ answer.member.pk }}">{% trans "Let the coach know why -- they'll be notified right away" %}</label>
+                                        <textarea id="drop-{{ answer.member.pk }}" class="h-16 w-full rounded-lg border border-edge bg-surface p-2 text-sm text-ink" name="note" required minlength="2" placeholder="{% trans "e.g. sick, injured, running late..." %}"></textarea>
+                                        <div class="mt-2 grid grid-cols-2 gap-2">
+                                            <button type="button" class="answer-btn answer-btn-sm" data-ask-cancel>{% trans "Cancel" %}</button>
+                                            <button type="submit" class="answer-btn answer-btn-sm answer-btn-on">{% trans "Send" %}</button>
+                                        </div>
+                                    </fieldset>
+                                </form>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        {% url "mobile:event_detail" event.pk as answer_url %}
+                        {% with status=answer.attendance.status %}
+                            {% include "mobile/_event_form_open.html" with action=answer_url note_form=True %}
+                                <input type="hidden" name="member_id" value="{{ answer.member.pk }}">
+                                <div class="grid grid-cols-3 gap-2" data-note-hide>
+                                    <button type="submit" name="status" value="present" class="answer-btn {% if status == "present" %}answer-btn-on{% endif %}">{% trans "In" %}</button>
+                                    <button type="button" class="answer-btn {% if status == "maybe" %}answer-btn-on{% endif %}" data-ask data-status="maybe">{% trans "Maybe" %}</button>
+                                    <button type="button" class="answer-btn {% if status == "absent" %}answer-btn-on{% endif %}" data-ask data-status="absent">{% trans "Out" %}</button>
+                                </div>
+                                <fieldset class="rounded-xl border border-edge bg-paper p-3" data-note-panel hidden disabled>
+                                    <input type="hidden" name="status" value="" data-note-status>
+                                    <label class="mb-1 block text-xs font-semibold text-muted" for="note-{{ answer.member.pk }}" data-for-status="absent" hidden>{% trans "Reason -- only you and the coach can see this" %}</label>
+                                    <label class="mb-1 block text-xs font-semibold text-muted" for="note-{{ answer.member.pk }}" data-for-status="maybe" hidden>{% trans "Add a reason (optional) -- only you and the coach can see this" %}</label>
+                                    <textarea id="note-{{ answer.member.pk }}" class="h-16 w-full rounded-lg border border-edge bg-surface p-2 text-sm text-ink" name="note" data-note-text placeholder="{% trans "e.g. sick, family event..." %}">{{ answer.attendance.note }}</textarea>
+                                    <div class="mt-2 grid grid-cols-2 gap-2">
+                                        <button type="button" class="answer-btn answer-btn-sm" data-ask-cancel>{% trans "Cancel" %}</button>
+                                        <button type="submit" class="answer-btn answer-btn-sm answer-btn-on">{% trans "Confirm" %}</button>
+                                    </div>
+                                </fieldset>
+                            </form>
+                        {% endwith %}
+                    {% endif %}
+                    {% if answer.attendance.note %}
+                        {# Only ever set alongside absent/maybe -- the RSVP service clears it for present. #}
+                        <p class="mt-2 text-xs text-muted italic">&ldquo;{{ answer.attendance.note }}&rdquo;</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endif %}
+
+{% if lineup %}
+    <div class="m-card p-3.5">
+        <div class="flex items-center justify-between">
+            <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Line-up" %}</span>
+            <span class="pill pill-info">{% trans "Published" %}</span>
+        </div>
+        <div class="mt-3 flex flex-col gap-3">
+            {% for category in lineup_categories %}
+                <div>
+                    <div class="mb-1.5 font-display text-xs font-extrabold tracking-wide text-club uppercase">{{ category.label }}</div>
+                    <div class="flex flex-wrap gap-1.5">
+                        {% for member in category.members %}<span class="pill pill-neutral">{{ member.get_full_name }}</span>{% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endif %}
+
+{% if tasks %}
+    {% include "mobile/_event_tasks.html" %}
+{% endif %}
+
+{% if squad_summary %}
+    <div class="m-card p-3.5">
+        <div class="flex items-center justify-between">
+            <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Squad response" %}</span>
+            <span class="text-[13px] text-muted">{% blocktrans with responded=squad_summary.responded total=squad_summary.total %}{{ responded }} of {{ total }}{% endblocktrans %}</span>
+        </div>
+        <div class="mt-2.5 flex h-2 overflow-hidden rounded-full bg-rule">
+            <div class="bg-ok" style="width: {{ squad_summary.in_pct }}%"></div>
+            <div class="bg-club" style="width: {{ squad_summary.out_pct }}%"></div>
+            <div class="bg-line" style="width: {{ squad_summary.no_reply_pct }}%"></div>
+        </div>
+        <div class="mt-2 flex gap-3.5 text-[13px] text-muted">
+            <span><strong class="text-ink">{{ squad_summary.in_count }}</strong> {% trans "in" %}</span>
+            <span><strong class="text-ink">{{ squad_summary.out_count }}</strong> {% trans "out" %}</span>
+            <span><strong class="text-ink">{{ squad_summary.no_reply_count }}</strong> {% trans "no reply" %}</span>
+        </div>
+    </div>
+{% endif %}
+
+{% if blocked_signups %}
+    <div class="m-card p-3.5">
+        <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Can't sign up yet" %}</span>
+        <div class="mt-3 flex flex-col gap-3">
+            {% for row in blocked_signups %}
+                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                <div class="flex items-center gap-2.5">
+                    {% include "mobile/_avatar.html" with person=row.member size_class="h-[38px] w-[38px]" %}
+                    <div class="min-w-0 flex-1">
+                        <div class="text-base font-semibold text-ink">{{ row.member.get_full_name }}</div>
+                        <div class="text-[13px] font-semibold text-club-dark dark:text-club">{% trans "Can't reply yet" %}</div>
+                        <div class="text-xs text-muted">
+                            {% trans "Still needed:" %}
+                            {% for requirement in row.requirements %}{{ requirement.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endif %}
+
+{% if referee_signups %}
+    {% trans "Refereeing" as signups_heading %}
+    {% trans "I'll ref" as signups_accept %}
+    {% include "mobile/_event_signups.html" with signups=referee_signups heading=signups_heading respond_url="mobile:referee_signup_respond" accent="referee" accept_label=signups_accept %}
+{% endif %}
+
+{% if official_signups %}
+    {% trans "Officiating" as signups_heading %}
+    {% trans "I'll do it" as signups_accept %}
+    {% include "mobile/_event_signups.html" with signups=official_signups heading=signups_heading respond_url="mobile:official_signup_respond" accent="official" accept_label=signups_accept %}
+{% endif %}
+
+{% if not your_answers and not squad_summary and not lineup and not referee_signups and not blocked_signups and not tasks and not official_signups %}
+    <div class="m-card p-6 text-center">
+        <p class="text-sm text-muted">{% trans "No one you manage is invited to this event." %}</p>
+    </div>
+{% endif %}

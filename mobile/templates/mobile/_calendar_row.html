@@ -1,31 +1,82 @@
 {% load i18n lucide %}
 {% comment %}
-    One M3 agenda row -- included from calendar.html once per bucket. Expects
-    ``row`` ({event, pill_class, pill_label}) in scope. A 3px colour bar next
-    to the date marks the event kind: club-red for games, info-blue for
-    training, warn-amber for everything else -- one consistent marker
-    position for every kind, rather than games getting a different
-    treatment (a left border on the whole row) from the rest. The bar uses
-    self-stretch rather than a fixed height so it matches the content
-    column's height even when the location line adds a third row of text.
+    One event on the Calendar (iOS CalendarGroupRow): a tappable row -- date box, a 3px bar in the event kind's colour (a referee/official-only game gets its own role colour), title, a meta line (time, Home/Away, team, names), the "x of y tasks open" pill and, for a finished game, its final score -- and underneath one answer line per person and role: name, role, and In / Out (Out on a player asks for a reason first, a referee/official answer is Accept / Decline). Once an answer is locked (deadline passed, started, line-up published) the line shows the status instead. Several people's rows on one event share this card. Expects ``group`` (mobile.services.event_ui.build_groups) and ``return_url`` in scope; the row's link opens the event sheet (static/js/mobile-sheet.js) -- the ?from=calendar keeps the full-page fallback's back link right.
+    ``id="today"`` marks the row the tab's re-tap / ?today=1 jump lands on (the first event today, else the next one).
 {% endcomment %}
-<a class="flex items-center gap-3 bg-surface px-4 py-3" href="{% url "mobile:event_detail" row.event.pk %}?from=calendar">
-    <div class="w-9.5 shrink-0 text-center">
-        <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ row.event.start|date:"D" }}</div>
-        <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
-    </div>
-    <div class="w-[3px] shrink-0 self-stretch rounded-full {% if row.event.kind == "game" %}bg-club{% elif row.event.kind == "training" %}bg-info{% else %}bg-warn{% endif %}"></div>
-    <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1 text-sm font-semibold text-ink">
-            {% if row.event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
-            <span class="truncate">{{ row.event.title }}</span>
+<div {% if group.anchor_today %}id="today"{% else %}id="{{ group.dom_id }}"{% endif %} class="bg-surface" style="scroll-margin-top: 9rem">
+    <a class="pressable flex items-center gap-3 px-4 py-3 {% if group.blocked_pill %}opacity-70{% endif %}" href="{% url "mobile:event_detail" group.event.pk %}?from=calendar">
+        <div class="w-[42px] shrink-0 text-center">
+            <div class="font-mono text-[10px] tracking-wide text-muted uppercase">{{ group.event.start|date:"D" }}</div>
+            <div class="font-display text-2xl leading-none font-extrabold text-ink">{{ group.event.start|date:"d" }}</div>
         </div>
-        <div class="truncate text-xs text-muted">
-            {{ row.event.start|date:"H:i" }}
-            {% if row.member %}&middot; {{ row.member.first_name }}{% endif %}
-            {% for team in row.event.teams.all %}&middot; {{ team.name }}{% endfor %}
+        <div class="min-h-[38px] w-[3px] shrink-0 self-stretch rounded-full {{ group.bar_class }}"></div>
+        <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1 text-[15px] font-semibold text-ink">
+                {% if group.event.is_friendly %}<span class="shrink-0" title="{% trans 'Friendly' %}" aria-label="{% trans 'Friendly' %}">{% lucide "handshake" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
+                {% if group.blocked_pill %}<span class="shrink-0">{% lucide "lock" size=13 stroke_width=2.4 class="text-dim" %}</span>{% endif %}
+                <span class="truncate">{{ group.title }}</span>
+            </div>
+            <div class="truncate text-[13px] text-muted">{{ group.meta }}</div>
+            {% for blocked in group.blocked %}
+                <div class="truncate text-xs text-club-dark dark:text-club">
+                    {% if group.lines %}{{ blocked.name }}: {% endif %}{% blocktrans with name=blocked.requirements.0.name %}Complete “{{ name }}” to sign up{% endblocktrans %}
+                </div>
+            {% endfor %}
+            {% if group.task_open %}
+                <span class="pill pill-sm pill-info mt-1 w-fit">
+                    {% lucide "clipboard-list" size=10 stroke_width=2.6 %}
+                    {% blocktrans count counter=group.task_total with open=group.task_open %}{{ open }} of {{ counter }} task open{% plural %}{{ open }} of {{ counter }} tasks open{% endblocktrans %}
+                </span>
+            {% endif %}
         </div>
-        {% if row.event.location %}<div class="truncate text-xs text-muted">{{ row.event.location.name }}</div>{% endif %}
-    </div>
-    <span class="pill {{ row.pill_class }} shrink-0">{{ row.pill_label }}</span>
-</a>
+        {% if group.finished %}
+            <div class="shrink-0 font-display text-xl font-extrabold whitespace-nowrap text-ink">{{ group.event.score_for }} &ndash; {{ group.event.score_against }}</div>
+        {% elif group.blocked_pill %}
+            <span class="pill {{ group.blocked_pill.1 }} shrink-0">{{ group.blocked_pill.0 }}</span>
+        {% endif %}
+    </a>
+
+    {% if group.lines %}
+        <div class="flex flex-col gap-1.5 px-4 pb-3">
+            {% for line in group.lines %}
+                {% if line.type == "rsvp" %}{% url "mobile:event_detail" group.event.pk as line_action %}{% elif line.type == "referee" %}{% url "mobile:referee_signup_respond" line.signup.pk as line_action %}{% else %}{% url "mobile:official_signup_respond" line.signup.pk as line_action %}{% endif %}
+                <form method="post" action="{{ line_action }}" {% if line.type == "rsvp" and line.editable %}data-note-form{% endif %} hx-swap="innerHTML show:none" hx-push-url="false">
+                    {% csrf_token %}
+                    <input type="hidden" name="return" value="{{ return_url }}">
+                    {% if line.type == "rsvp" %}<input type="hidden" name="member_id" value="{{ line.person.pk }}">{% endif %}
+                    <div class="flex min-h-[34px] items-center gap-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="truncate text-sm font-semibold text-ink">{{ line.name }}</div>
+                            {% if line.editable and line.show_pill %}<span class="pill pill-sm {{ line.pill_class }}">{{ line.pill_label }}</span>{% endif %}
+                        </div>
+                        <span class="w-[58px] shrink-0 truncate font-display text-[11px] font-extrabold tracking-wider text-muted uppercase">{{ line.role_label }}</span>
+                        <div class="flex w-[134px] shrink-0 justify-end gap-1.5">
+                            {% if line.editable %}
+                                {% if line.type == "rsvp" %}
+                                    <button type="submit" name="status" value="present" class="answer-btn answer-btn-line {% if line.answer is True %}answer-btn-on{% endif %}" {% if line.answer is True %}disabled aria-pressed="true"{% endif %}>{% trans "In" %}</button>
+                                    <button type="button" class="answer-btn answer-btn-line {% if line.answer is False %}answer-btn-on{% endif %}" data-ask data-status="absent" {% if line.answer is False %}disabled aria-pressed="true"{% endif %}>{% trans "Out" %}</button>
+                                {% else %}
+                                    <button type="submit" name="response" value="accept" class="answer-btn answer-btn-line {% if line.answer is True %}answer-btn-on{% endif %}" {% if line.answer is True %}disabled aria-pressed="true"{% endif %}>{% trans "In" %}</button>
+                                    <button type="submit" name="response" value="decline" class="answer-btn answer-btn-line {% if line.answer is False %}answer-btn-on{% endif %}" {% if line.answer is False %}disabled aria-pressed="true"{% endif %}>{% trans "Out" %}</button>
+                                {% endif %}
+                            {% else %}
+                                <span class="pill {{ line.pill_class }}">{{ line.pill_label }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if line.type == "rsvp" and line.editable %}
+                        <fieldset class="mt-1.5 rounded-xl border border-edge bg-paper p-3" data-note-panel hidden disabled>
+                            <input type="hidden" name="status" value="absent">
+                            <label class="mb-1 block text-xs font-semibold text-muted" for="note-{{ group.event.pk }}-{{ line.person.pk }}">{% trans "Reason -- only you and the coach can see this" %}</label>
+                            <textarea id="note-{{ group.event.pk }}-{{ line.person.pk }}" class="h-16 w-full rounded-lg border border-edge bg-surface p-2 text-sm text-ink" name="note" placeholder="{% trans "e.g. sick, family event..." %}">{{ line.note }}</textarea>
+                            <div class="mt-2 grid grid-cols-2 gap-2">
+                                <button type="button" class="answer-btn answer-btn-sm" data-ask-cancel>{% trans "Cancel" %}</button>
+                                <button type="submit" class="answer-btn answer-btn-sm answer-btn-on">{% trans "Send" %}</button>
+                            </div>
+                        </fieldset>
+                    {% endif %}
+                </form>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>

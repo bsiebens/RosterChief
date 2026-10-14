@@ -1,0 +1,32 @@
+{% load i18n lucide %}
+{% comment %}
+    The coach event detail as a bottom sheet over the current tab (CoachEventDetailView answers
+    an hx-get that is not a boosted navigation with this). Lands in #sheet-host (coach/base.html);
+    the inline script opens it as a modal <dialog>, clears the host when it closes, and lets a
+    downward drag on the handle (or a tap on the backdrop) dismiss it. htmx runs inline scripts
+    in swapped content.
+{% endcomment %}
+<dialog class="sheet sheet-large" id="event-sheet" aria-label="{{ event.title }}">
+    <div class="sheet-handle" id="event-sheet-handle"></div>
+    <div class="flex flex-col gap-4 pb-4">
+        {% include "mobile/coach/_event_body.html" %}
+    </div>
+</dialog>
+{% include "mobile/coach/_event_dialogs.html" %}
+<script>
+    (function () {
+        var sheet = document.getElementById("event-sheet");
+        if (!sheet || typeof sheet.showModal !== "function") return;
+        var host = document.getElementById("sheet-host");
+        sheet.addEventListener("close", function () { if (host) host.innerHTML = ""; });
+        sheet.addEventListener("click", function (event) { if (event.target === sheet) sheet.close(); });
+        var handle = document.getElementById("event-sheet-handle");
+        var startY = null;
+        handle.addEventListener("touchstart", function (event) { startY = event.touches[0].clientY; }, { passive: true });
+        handle.addEventListener("touchend", function (event) {
+            if (startY !== null && event.changedTouches[0].clientY - startY > 60) sheet.close();
+            startY = null;
+        }, { passive: true });
+        sheet.showModal();
+    })();
+</script>

@@ -1,0 +1,10 @@
+{% load i18n lucide %}
+{% comment %}Swapped into the product page's #shop-added slot after "Add to cart" (htmx): the confirmation with a way to the cart, or the reason the item couldn't be added.{% endcomment %}
+{% if error %}
+    <p class="text-[13px] text-club-dark" role="alert">{{ error }}</p>
+{% else %}
+    <div class="flex items-center justify-between gap-3 text-sm" role="status">
+        <span class="flex items-center gap-1.5 font-medium text-ok-text">{% lucide "circle-check" size=18 %} {% trans "Added to your cart" %}</span>
+        <a class="font-semibold text-ink" href="{% url "mobile:shop_cart" %}">{% trans "View cart" %}</a>
+    </div>
+{% endif %}

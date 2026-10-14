@@ -1507,3 +1507,211 @@
         color: var(--color-club);
     }
 }
+
+/* --- Member Home / Calendar / event sheet (iOS parity) ----------------------------------
+   Answer buttons (In / Maybe / Out, Claim, Give back), the Calendar header's controls and
+   menus, and the month grid. Everything else on those screens is plain utilities. */
+@layer components {
+    .answer-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
+        min-height: 46px;
+        padding-inline: 0.75rem;
+        border: 1px solid var(--color-edge);
+        border-radius: 12px;
+        background: var(--color-paper);
+        color: var(--color-slate);
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        transition: opacity 0.12s ease;
+    }
+
+    .answer-btn:active {
+        opacity: 0.8;
+    }
+
+    .answer-btn-on {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+    }
+
+    .answer-btn-danger {
+        background: var(--color-danger-bg);
+        border-color: var(--color-danger-border);
+        color: var(--color-club-dark);
+    }
+
+    .answer-btn-sm {
+        min-height: 36px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    /* Inline In / Out on a Calendar answer line. */
+    .answer-btn-line {
+        min-height: 34px;
+        min-width: 64px;
+        border-radius: 10px;
+        font-size: 12px;
+    }
+
+    /* Home's compact pair on the dark next-up card (iOS 52x30). */
+    .card-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        min-width: 52px;
+        border-radius: 6px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .card-btn-in {
+        background: var(--color-ok);
+        color: #fff;
+    }
+
+    .card-btn-out {
+        background: var(--color-steel);
+        color: var(--color-on-dark);
+    }
+
+    .card-btn-ghost {
+        padding-inline: 10px;
+        border: 1.5px solid var(--color-on-dark-faint);
+        color: var(--color-on-dark);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+    }
+
+    /* Header controls: round filter button, scope pill, List/Month switch. */
+    .header-pill {
+        display: flex;
+        align-items: center;
+        gap: 0.3125rem;
+        min-height: 30px;
+        padding-inline: 0.625rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        color: #fff;
+        font-family: var(--font-display);
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        list-style: none;
+        cursor: pointer;
+    }
+
+    .header-pill::-webkit-details-marker {
+        display: none;
+    }
+
+    .header-seg {
+        display: flex;
+        gap: 2px;
+        padding: 2px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    .header-seg a {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        min-height: 26px;
+        border-radius: 999px;
+        color: rgba(255, 255, 255, 0.55);
+    }
+
+    .header-seg a[aria-current="true"] {
+        background: var(--color-surface);
+        color: var(--color-club-dark);
+    }
+
+    .menu-panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        z-index: 40;
+        min-width: 13rem;
+        max-width: 80vw;
+        padding: 6px;
+        border: 1px solid var(--color-line);
+        border-radius: 14px;
+        background: var(--color-surface);
+        color: var(--color-ink);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .menu-item {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        min-height: 44px;
+        padding-inline: 0.625rem;
+        border-radius: 10px;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    .menu-heading {
+        padding: 8px 10px 2px;
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+    }
+
+    /* Month grid. */
+    .month-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        padding-block: 3px;
+        min-height: 44px;
+    }
+
+    .month-day {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        font-size: 14px;
+        border: 1.5px solid transparent;
+    }
+
+    .month-day-today {
+        border-color: var(--color-ink);
+    }
+
+    .month-day-selected {
+        background: var(--color-emphasis);
+        border-color: transparent;
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .month-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: var(--color-club);
+    }
+}

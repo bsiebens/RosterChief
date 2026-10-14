@@ -2,21 +2,11 @@
 {% load i18n lucide %}
 
 {% comment %}
-    M1 -- the design handoff's M1 section. The
-    person switcher (chip row) sits in the white content area here, not the
-    navy header -- matching the design canvas's own M1 markup, and Home is
-    now the only screen that renders it at all (mobile/mixins.py's scope
-    resolution still runs for every screen, but only Home's UI exposes it).
-    Independently-optional cards below it, scoped to people_in_scope --
-    everyone the account manages once there's more than one ("All", on by
-    default), or just the one person picked from the chip row. Two
-    independent hero cards -- the soonest upcoming event nobody's answered
-    yet, with a quick In/Out RSVP (hidden entirely when nothing needs a
-    reply), and the soonest upcoming event someone's actually going to, as a
-    read-only overview -- then a "needs your answer" list, an "open tasks"
-    list for events already answered (or anyone's) that still need a
-    volunteer, a season-dues card per person who owes money, and a news
-    teaser.
+    M1 -- Home, laid out like the iOS app's Home tab. The person switcher (chip row) sits in the content area (Home is the only screen that renders it; mobile/mixins.py's scope resolution still runs for every screen). Everything below is independently optional and scoped to people_in_scope -- everyone the account manages once there's more than one ("All", the default), or the one person picked from the chip row:
+      - one dark "next up" card per event (mobile.services.home's member_cards: everyone whose next event it is shares the card) -- a pending invitation gets inline In / Out (Out asks for a reason), a closed one says so, an event someone is going to shows GOING + "Can't make it?", and the tasks the household already took sit underneath as "Your tasks";
+      - open tasks (inline Claim), then "needs your answer" (what is not already a card above), season dues, forms and club news, and the sponsors strip;
+      - "All Caught Up" when there is nothing at all.
+    Tapping an event opens it as a bottom sheet (static/js/mobile-sheet.js; mobile/_event_sheet_shell.html). Inline answers post to the event / task endpoints with ``return`` set to this page: htmx swaps the body without moving the scroll position (hx-swap "show:none"). The note panels are plain DOM toggled by mobile-sheet.js -- no Alpine on a boosted form.
 {% endcomment %}
 
 {% block main_attrs %}data-refreshable{% endblock main_attrs %}
@@ -40,107 +30,9 @@
     {% endif %}
 
     {% if managed_people %}
-        {% if hero_attendance %}
-            <div class="m-card-dark relative overflow-hidden">
-                {% if club.event_background %}
-                    <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
-                {% endif %}
-                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.45) 0%, rgba(11,18,32,.82) 55%, rgba(11,18,32,.97) 100%)"></div>
-                <div class="relative z-10">
-                    <div class="p-4 pb-0">
-                        <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
-                        <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ hero_attendance.event.title }}</p>
-                    </div>
-                    <div class="p-4">
-                        <div class="flex flex-wrap gap-4 font-mono text-xs text-white">
-                            <span>{% blocktrans with time=hero_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
-                            {% if hero_attendance.event.gathering %}
-                                <span>{% blocktrans with time=hero_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
-                            {% endif %}
-                            {% if hero_attendance.event.location %}<span>{{ hero_attendance.event.location.name }}</span>{% endif %}
-                        </div>
-
-                        {% if rsvp_closed %}
-                            <p class="mt-3 font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{% trans "Replies are closed for this event" %}</p>
-                            <span class="pill pill-neutral mt-2">{{ hero_attendance.get_status_display }}</span>
-                        {% else %}
-                            <p class="mt-3 font-display text-xs font-extrabold text-white uppercase tracking-wide">{% blocktrans with name=hero_attendance.member.first_name %}{{ name }} &mdash; are you in?{% endblocktrans %}</p>
-                            {% include "mobile/_hero_rsvp.html" %}
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if going_attendance %}
-            {% comment %}
-                Same dark, photo-backed hero treatment as hero_attendance above -- this is the
-                same "next up" moment, just already answered, so a static status pill takes the
-                RSVP buttons' place instead of demoting it to a flat list-style card.
-            {% endcomment %}
-            <div class="m-card-dark relative overflow-hidden">
-                {% if club.event_background %}
-                    <img class="absolute inset-0 h-full w-full object-cover grayscale" src="{{ club.event_background.url }}" alt="">
-                {% endif %}
-                <div class="absolute inset-0" style="background: linear-gradient(180deg, rgba(11,18,32,.45) 0%, rgba(11,18,32,.82) 55%, rgba(11,18,32,.97) 100%)"></div>
-                <div class="relative z-10">
-                    <div class="p-4 pb-0">
-                        <p class="font-display text-xs font-extrabold text-info uppercase tracking-wide">{% blocktrans with date=going_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</p>
-                        <p class="mt-1 font-display text-2xl leading-none font-extrabold uppercase">{{ going_attendance.event.title }}</p>
-                    </div>
-                    <div class="p-4">
-                        <div class="flex flex-wrap gap-4 font-mono text-xs text-white">
-                            <span>{% blocktrans with time=going_attendance.event.start|date:"H:i" %}{{ time }} face-off{% endblocktrans %}</span>
-                            {% if going_attendance.event.gathering %}
-                                <span>{% blocktrans with time=going_attendance.event.gathering|date:"H:i" %}Meet {{ time }}{% endblocktrans %}</span>
-                            {% endif %}
-                            {% if going_attendance.event.location %}<span>{{ going_attendance.event.location.name }}</span>{% endif %}
-                        </div>
-                        <div class="mt-3 flex items-center justify-between">
-                            <span class="font-display text-xs font-extrabold text-on-dark-dim uppercase tracking-wide">{{ going_attendance.member.first_name }}</span>
-                            <span class="pill pill-ok">{{ going_attendance.get_status_display }}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        {% if needs_answer %}
-            <div class="m-card p-4">
-                <div class="flex items-center justify-between">
-                    <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Needs your answer" %}</span>
-                    <span class="font-display text-lg font-extrabold text-club">{{ needs_answer|length|add:needs_answer_remaining }}</span>
-                </div>
-                <div class="mt-3 flex flex-col gap-2.5">
-                    {% for row in needs_answer %}
-                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" row.event.pk %}">
-                            <div class="w-9.5 shrink-0 text-center">
-                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
-                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ row.event.start|date:"M" }}</div>
-                            </div>
-                            <div class="min-w-0 flex-1">
-                                <div class="text-sm font-semibold text-ink">
-                                    {% if row.kind == "referee" %}{% trans "Referee" %} &middot; {% elif row.kind == "official" %}{% trans "Official" %} &middot; {% endif %}{{ row.event.title }}
-                                </div>
-                                <div class="text-xs text-muted">{{ row.member.first_name }} &middot; {{ row.event.start|date:"H:i" }}</div>
-                            </div>
-                            <div class="flex shrink-0 flex-col items-end gap-1">
-                                <span class="pill pill-sm {% if row.kind == "referee" %}pill-referee{% elif row.kind == "official" %}pill-info{% else %}pill-warn{% endif %}">{% trans "Reply" %}</span>
-                                {% if row.attendance.open_task_count %}
-                                    <span class="pill pill-sm pill-info">{% lucide "clipboard-list" size=10 %} {% blocktrans count counter=row.attendance.open_task_count %}{{ counter }} task open{% plural %}{{ counter }} tasks open{% endblocktrans %}</span>
-                                {% endif %}
-                            </div>
-                        </a>
-                    {% endfor %}
-                </div>
-                {% if needs_answer_remaining %}
-                    <a class="mt-3 block text-center text-xs font-semibold text-club" href="{% url "mobile:calendar" %}">
-                        {% blocktrans count counter=needs_answer_remaining %}+{{ counter }} more in Calendar{% plural %}+{{ counter }} more in Calendar{% endblocktrans %}
-                    </a>
-                {% endif %}
-            </div>
-        {% endif %}
+        {% for card in member_cards %}
+            {% include "mobile/_home_card.html" %}
+        {% endfor %}
 
         {% if open_tasks %}
             <div class="m-card p-4">
@@ -151,21 +43,58 @@
                 <div class="mt-3 flex flex-col gap-2.5">
                     {% for task in open_tasks %}
                         {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" task.event.pk %}">
-                            <div class="w-9.5 shrink-0 text-center">
-                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ task.event.start|date:"d" }}</div>
-                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ task.event.start|date:"M" }}</div>
-                            </div>
-                            <div class="min-w-0 flex-1">
-                                <div class="text-sm font-semibold text-ink">{{ task.title }}</div>
-                                <div class="text-xs text-muted">{{ task.event.title }}</div>
-                            </div>
-                            <span class="pill pill-info shrink-0">{% blocktrans count counter=task.open_count %}{{ counter }} open{% plural %}{{ counter }} open{% endblocktrans %}</span>
-                        </a>
+                        <div class="flex items-center gap-3">
+                            <a class="flex min-w-0 flex-1 items-center gap-3" href="{% url "mobile:event_detail" task.event.pk %}">
+                                <span class="flex w-9.5 shrink-0 justify-center text-warn">{% lucide "clipboard-list" size=20 stroke_width=2.2 %}</span>
+                                <span class="min-w-0 flex-1">
+                                    <span class="block truncate text-[15px] font-semibold text-ink">{{ task.title }}</span>
+                                    <span class="block truncate text-[13px] text-muted">{{ task.event.title }} &middot; {{ task.event.start|date:"D d M, H:i" }}</span>
+                                    <span class="block text-xs font-semibold text-warn-text">{% blocktrans count counter=task.open_count %}{{ counter }} open{% plural %}{{ counter }} open{% endblocktrans %}</span>
+                                </span>
+                            </a>
+                            <form class="shrink-0" method="post" action="{% url "mobile:event_task_respond" task.pk %}" hx-swap="innerHTML show:none" hx-push-url="false">
+                                {% csrf_token %}
+                                <input type="hidden" name="response" value="claim">
+                                <input type="hidden" name="return" value="{{ request.get_full_path }}">
+                                <button type="submit" class="answer-btn answer-btn-on answer-btn-line">{% trans "Claim" %}</button>
+                            </form>
+                        </div>
                     {% endfor %}
                 </div>
                 {% if open_tasks_remaining %}
                     <p class="mt-3 text-center text-xs text-muted">{% blocktrans count counter=open_tasks_remaining %}+{{ counter }} more open task{% plural %}+{{ counter }} more open tasks{% endblocktrans %}</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if needs_answer_view %}
+            <div class="m-card p-4">
+                <div class="flex items-center justify-between">
+                    <span class="font-display text-xs font-extrabold text-muted uppercase tracking-wide">{% trans "Needs your answer" %}</span>
+                    <span class="font-display text-lg font-extrabold text-club">{{ needs_answer_view_total }}</span>
+                </div>
+                <div class="mt-3 flex flex-col gap-2.5">
+                    {% for row in needs_answer_view %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <a class="flex items-center gap-3" href="{% url "mobile:event_detail" row.event.pk %}">
+                            <div class="w-9.5 shrink-0 text-center">
+                                <div class="font-display text-xl leading-none font-extrabold text-ink">{{ row.event.start|date:"d" }}</div>
+                                <div class="font-mono text-[10px] text-muted uppercase tracking-wide">{{ row.event.start|date:"M" }}</div>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-[15px] font-semibold text-ink">
+                                    {% if row.kind == "referee" %}{% trans "Referee" %} &middot; {% elif row.kind == "official" %}{% trans "Official" %} &middot; {% endif %}{{ row.event.title }}
+                                </div>
+                                <div class="text-[13px] text-muted">{{ row.event.start|date:"H:i" }} &middot; {{ row.member.first_name }}</div>
+                            </div>
+                            <span class="pill pill-sm pill-warn shrink-0">{% if row.kind == "rsvp" %}{% trans "Reply" %}{% else %}{% trans "Invited" %}{% endif %}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+                {% if needs_answer_view_remaining %}
+                    <a class="mt-3 block text-center text-[13px] font-semibold text-club-dark dark:text-club" href="{% url "mobile:calendar" %}">
+                        {% blocktrans count counter=needs_answer_view_remaining %}+{{ counter }} more in Calendar{% plural %}+{{ counter }} more in Calendar{% endblocktrans %}
+                    </a>
                 {% endif %}
             </div>
         {% endif %}
@@ -243,10 +172,10 @@
             {% endif %}
         </div>
 
-        {% if not hero_attendance and not going_attendance and not needs_answer and not open_tasks and not dues_rows and not forms_to_complete %}
-            <div class="m-card p-6 text-center">
-                <p class="text-sm text-muted">{% trans "Nothing to show right now." %}</p>
-            </div>
+        {% if not member_cards and not needs_answer_view and not open_tasks and not dues_rows and not forms_to_complete and not news_items %}
+            {% trans "All Caught Up" as caught_up_title %}
+            {% trans "Nothing needs your attention right now." as caught_up_text %}
+            {% include "mobile/_state.html" with kind="empty" icon="circle-check" title=caught_up_title text=caught_up_text %}
         {% endif %}
     {% else %}
         <div class="m-card p-6 text-center">
@@ -277,4 +206,6 @@
             </div>
         </div>
     {% endif %}
+
+    {% include "mobile/_event_sheet_shell.html" %}
 {% endblock content %}

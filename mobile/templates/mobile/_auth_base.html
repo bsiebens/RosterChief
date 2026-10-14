@@ -45,7 +45,9 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-        <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+        <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}" media="(prefers-color-scheme: light)">
+        <meta name="theme-color" content="#0b1424" media="(prefers-color-scheme: dark)">
+        <meta name="color-scheme" content="light dark">
         <meta name="apple-mobile-web-app-capable" content="yes">
         {# Solid, not black-translucent: iOS 26 blurs whatever is drawn under a translucent status bar, which smeared the header crest/title. #}
         <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -150,7 +152,8 @@
                 if (!input) return;
 
                 const fit = () => {
-                    const boxed = input.value.length <= boxes.length;
+                    // data-recovery (mfa/authenticate.html's "Use a recovery code instead") forces the plain input.
+                    const boxed = !otp.hasAttribute("data-recovery") && input.value.length <= boxes.length;
                     otp.classList.toggle("otp", boxed);
                     otp.classList.toggle("otp-lg", boxed);
                     boxes.forEach((box, index) => {

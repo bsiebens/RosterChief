@@ -1,0 +1,25 @@
+{% load i18n %}
+{% comment %}
+    The bottom sheet an event opens in over Home and the Calendar (iOS: the EventReplySheet). Closed it is invisible and costs nothing; static/js/mobile-sheet.js opens it on any tap on an event link, fetches the event's own fragment (``?sheet=1``, mobile/_event_sheet.html) into #event-sheet-content and, once a sheet has been used to answer something, refreshes the screen underneath when it closes. Without JavaScript the same links are plain links to the full event page.
+{% endcomment %}
+<dialog id="event-sheet" class="sheet sheet-large bg-paper" aria-label="{% trans "Event details" %}">
+    <div class="sticky top-0 z-30 -mx-4 -mb-6 flex h-6 items-center justify-center" data-sheet-handle>
+        <span class="block h-[5px] w-9 rounded-full bg-white/60"></span>
+    </div>
+    <div id="event-sheet-content"></div>
+    <template id="event-sheet-loading">
+        <div class="flex h-64 items-center justify-center" role="status" aria-label="{% trans "Loading" %}">
+            <span class="block h-7 w-7 animate-spin rounded-full border-[3px] border-line border-t-muted"></span>
+        </div>
+    </template>
+    <template id="event-sheet-error">
+        <div class="flex flex-col items-center gap-2 px-6 py-16 text-center" role="alert">
+            <h2 class="font-display text-xl font-extrabold text-ink uppercase">{% trans "Couldn't load" %}</h2>
+            <p class="text-sm text-muted">{% trans "Something went wrong. Check your connection and try again." %}</p>
+            <div class="mt-2 grid w-full max-w-60 gap-2">
+                <button type="button" class="btn-rc btn-rc-neutral" data-sheet-retry>{% trans "Try again" %}</button>
+                <button type="button" class="btn-rc" data-sheet-close style="background: var(--color-rule); color: var(--color-ink)">{% trans "Done" %}</button>
+            </div>
+        </div>
+    </template>
+</dialog>

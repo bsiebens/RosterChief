@@ -98,12 +98,14 @@
                     {% endif %}
                 </a>
             </div>
-            {% if has_coach_access %}
-                <div class="role-switcher">
-                    <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:home" %}">{% trans "Member" %}</a>
-                    <a class="role-switcher-item" href="{% url "mobile:coach_today" %}" hx-boost="false">{% trans "Manager" %}</a>
-                </div>
-            {% endif %}
+            {% block role_switcher %}
+                {% if has_coach_access %}
+                    <div class="role-switcher">
+                        <a class="role-switcher-item role-switcher-item-active" href="{% url "mobile:home" %}">{% trans "Member" %}</a>
+                        <a class="role-switcher-item" href="{% url "mobile:coach_today" %}">{% trans "Manager" %}</a>
+                    </div>
+                {% endif %}
+            {% endblock role_switcher %}
             {% block header_extra %}{% endblock header_extra %}
         </header>
 
@@ -130,6 +132,7 @@
             </div>
         </main>
 
+        {% block tab_bar %}
         <nav class="tab-bar sticky bottom-0 z-20">
             <a class="tab-bar-item {% if active_tab == "home" %}tab-bar-item-active{% endif %}" href="{% url "mobile:home" %}">
                 {% lucide "house" size=21 %}
@@ -154,8 +157,10 @@
                 <span class="tab-bar-label">{% trans "Me" %}</span>
             </a>
         </nav>
+        {% endblock tab_bar %}
 
         <script src="{% static "js/mobile-app.js" %}" defer></script>
+        <script src="{% static "js/mobile-sheet.js" %}" defer></script>
         {% include "_announcement_popup.html" %}
         {% block extra_body %}{% endblock extra_body %}
     </body>

@@ -1,0 +1,36 @@
+{% load i18n %}
+{% comment %}
+    One referee or official sign-up card (iOS "Signing up as referee/official"): per person Accept / Decline, or -- once accepted -- a "Confirmed" pill with a retract action. Params: ``signups``, ``heading``, ``respond_url`` (url name), ``accent`` ("referee" or "official") and ``accept_label``.
+{% endcomment %}
+<div class="m-card p-3.5">
+    <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ heading }}</span>
+    <div class="mt-3 flex flex-col gap-3">
+        {% for signup in signups %}
+            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+            <div>
+                <div class="mb-2 flex items-center justify-between gap-2.5">
+                    <span class="text-base font-semibold text-ink">{{ signup.member.get_full_name }}</span>
+                    {% if signup.status == "accepted" %}<span class="pill {% if accent == "referee" %}pill-referee{% else %}pill-info{% endif %} shrink-0">{% trans "Confirmed" %}</span>{% endif %}
+                </div>
+                {% url respond_url signup.pk as respond_action %}
+                {% if signup.status == "accepted" %}
+                    {% include "mobile/_event_form_open.html" with action=respond_action %}
+                        <input type="hidden" name="response" value="decline">
+                        <button type="submit" class="answer-btn answer-btn-sm w-full">{% trans "Can't make it after all" %}</button>
+                    </form>
+                {% else %}
+                    <div class="grid grid-cols-2 gap-2">
+                        {% include "mobile/_event_form_open.html" with action=respond_action %}
+                            <input type="hidden" name="response" value="accept">
+                            <button type="submit" class="answer-btn answer-btn-on w-full" {% if accent == "referee" %}style="background: var(--color-referee)"{% endif %}>{{ accept_label }}</button>
+                        </form>
+                        {% include "mobile/_event_form_open.html" with action=respond_action %}
+                            <input type="hidden" name="response" value="decline">
+                            <button type="submit" class="answer-btn w-full">{% trans "Can't" %}</button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</div>

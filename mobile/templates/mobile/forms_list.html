@@ -8,6 +8,8 @@
     -- not a tab of its own, active_tab stays "me" (FormsListView's own docstring).
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
     <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
         <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:me" %}" aria-label="{% trans "Back" %}">
@@ -17,38 +19,33 @@
     </div>
 
     {% if forms_status %}
-        <div class="m-card overflow-hidden">
-            {% for row in forms_status %}
-                {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                {% if row.submitted_at %}
-                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_response" row.submission.pk %}">
-                        <div class="min-w-0 flex-1">
-                            <div class="text-[15px] font-semibold text-ink">
-                                {{ row.send.form.title }}
-                                {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
-                            </div>
-                            <div class="text-xs text-muted">{% blocktrans with date=row.submitted_at|date:"d M Y" %}Submitted {{ date }}{% endblocktrans %}</div>
-                        </div>
-                        <span class="pill pill-ok shrink-0">{% trans "Completed" %}</span>
-                    </a>
-                {% else %}
-                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:form_fill" row.send.pk %}?for={{ row.member.pk }}">
-                        <div class="min-w-0 flex-1">
-                            <div class="text-[15px] font-semibold text-ink">
-                                {{ row.send.form.title }}
-                                {% if row.member != me %}<span class="font-normal text-muted">&middot; {{ row.member.first_name }}</span>{% endif %}
-                            </div>
-                            {% if row.send.closes_at %}<div class="text-xs text-muted">{% blocktrans with date=row.send.closes_at|date:"d M Y" %}Due {{ date }}{% endblocktrans %}</div>{% endif %}
-                        </div>
-                        <span class="pill pill-warn shrink-0">{% trans "Pending" %}</span>
-                    </a>
-                {% endif %}
-            {% endfor %}
+        <div class="flex flex-col gap-4">
+            {% if todo_rows %}
+                <section class="flex flex-col gap-2">
+                    <div class="px-0.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "To do" %}</div>
+                    <div class="m-card overflow-hidden">
+                        {% for row in todo_rows %}
+                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                            {% include "mobile/_forms_row.html" %}
+                        {% endfor %}
+                    </div>
+                </section>
+            {% endif %}
+            {% if rest_rows %}
+                <section class="flex flex-col gap-2">
+                    <div class="px-0.5 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Done and closed" %}</div>
+                    <div class="m-card overflow-hidden">
+                        {% for row in rest_rows %}
+                            {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                            {% include "mobile/_forms_row.html" %}
+                        {% endfor %}
+                    </div>
+                </section>
+            {% endif %}
         </div>
     {% else %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Nothing here yet" %}</p>
-            <p class="mt-1 text-sm text-muted">{% trans "Any form sent to you or the people you manage will show up here." %}</p>
-        </div>
+        {% trans "No forms" as empty_title %}
+        {% trans "Nothing to fill in right now." as empty_text %}
+        {% include "mobile/_state.html" with kind="empty" icon="file-text" title=empty_title text=empty_text %}
     {% endif %}
 {% endblock content %}

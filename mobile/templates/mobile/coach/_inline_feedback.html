@@ -1,0 +1,18 @@
+{% load i18n lucide %}
+{% comment %}
+    Out-of-band extras every inline (htmx) save on the coach screens sends
+    back next to its main partial: the "Saved" line (a polite live region, so
+    screen readers announce it) and, optionally, a toast (``toast`` = dict with
+    kind ok|error|warn, title, text). The two hosts (#inline-status,
+    #inline-toast) live in the page itself, outside whatever gets swapped --
+    see _inline_hosts.html. The toast removes itself after a few seconds.
+{% endcomment %}
+<span id="inline-status" hx-swap-oob="innerHTML">{{ status_text }}</span>
+<div id="inline-toast" hx-swap-oob="innerHTML">
+    {% if toast %}
+        <div class="toast toast-show {% if toast.kind == "ok" %}toast-ok{% elif toast.kind == "error" %}toast-error{% endif %}" role="{% if toast.kind == "error" %}alert{% else %}status{% endif %}" x-data x-init="setTimeout(() => $el.remove(), 4000)">
+            {% if toast.kind == "ok" %}{% lucide "circle-check" size=18 %}{% elif toast.kind == "error" %}{% lucide "circle-alert" size=18 %}{% else %}{% lucide "info" size=18 %}{% endif %}
+            <span><strong class="font-semibold">{{ toast.title }}</strong>{% if toast.text %}<span class="block text-sm opacity-90">{{ toast.text }}</span>{% endif %}</span>
+        </div>
+    {% endif %}
+</div>

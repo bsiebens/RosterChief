@@ -50,7 +50,7 @@ class GranularNotificationSettingsTests(TestCase):
 
     def test_selector_lists_children(self):
         page = self.client.get(self.url, HTTP_HOST=HOST)
-        self.assertContains(page, f"?person={self.child.pk}")
+        self.assertContains(page, f'<option value="{self.child.pk}"')
         self.assertContains(page, "Kim")
 
     def test_page_for_a_child_shows_their_switches(self):

@@ -1,0 +1,41 @@
+{% extends "mobile/coach/base.html" %}
+{% load i18n lucide %}
+
+{% comment %}
+    Manager "News" tab (iOS TeamNewsView): your own submissions for the active
+    team, each with its review status. See CoachNewsView's docstring.
+{% endcomment %}
+
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
+{% block content %}
+    {% if can_post_news %}
+        <a class="btn-rc btn-rc-primary w-full gap-2" href="{% url "mobile:coach_create_news" %}?next=news">
+            {% lucide "square-pen" size=18 %} {% trans "Share news" %}
+        </a>
+    {% endif %}
+
+    {% if posts %}
+        <ul class="flex flex-col gap-3">
+            {% for post in posts %}
+                <li class="m-card flex items-start gap-3 p-3.5">
+                    {% if post.cover %}
+                        <img class="h-16 w-16 shrink-0 rounded-lg object-cover" src="{{ post.cover.image.url }}" alt="" loading="lazy">
+                    {% endif %}
+                    <div class="min-w-0 flex-1">
+                        <p class="line-clamp-2 text-[15px] font-semibold text-ink">{{ post.title }}</p>
+                        <p class="mt-1"><span class="pill pill-sm {{ post.status_class }}">{{ post.status_label }}</span></p>
+                        <p class="mt-1 text-xs text-muted">{{ post.created|date:"d M Y" }}</p>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        {% if can_post_news %}
+            {% trans "Share news with the team's families." as empty_text %}
+        {% else %}
+            {% trans "Posts you submit show up here." as empty_text %}
+        {% endif %}
+        {% include "mobile/_state.html" with kind="empty" icon="newspaper" title=_("No posts yet") text=empty_text %}
+    {% endif %}
+{% endblock content %}

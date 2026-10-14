@@ -9,6 +9,8 @@ registration behind it (created by hand) stands alone.
 
 from decimal import Decimal
 
+from django.utils.translation import gettext_lazy as _
+
 from club.services.access import current_season
 from club.services.fees import open_dues_rows
 from registration.services.invoicing import active_batch_entries, batch_early_payment_offer, batch_totals, membership_ids_awaiting_confirmation
@@ -50,3 +52,46 @@ def payments_overview(club, people) -> list[dict]:
         group["member_names"] = ", ".join(row["membership"].member.first_name for row in group["rows"])
         display_rows.append({"kind": "registration", "group": group})
     return display_rows
+
+
+def payment_cards(display_rows, *, me=None, show_names=False) -> list[dict]:
+    """The overview shaped for the member web app's Payments screen (the same shape the native
+    app gets): one card per item with per-person blocks of lines. ``show_names`` is whether the
+    account manages anyone besides itself (a block carries a name when it does, or when the card
+    covers several people)."""
+    cards = []
+    for display in display_rows:
+        if display["kind"] == "registration":
+            group = display["group"]
+            batch = group["batch"]
+            rows = group["rows"]
+            card = {
+                "kind": "registration",
+                "batch": batch,
+                "due_date": batch.invoice_due_date,
+                "total": group["total_balance"],
+                "manual_discount": batch.manual_discount_amount if batch.manual_discount_amount > 0 else None,
+                "manual_discount_note": batch.manual_discount_note,
+                "early_payment": group["early_payment"],
+                "invoice": None,
+            }
+        else:
+            row = display["row"]
+            rows = [row]
+            invoice = row["invoice"]
+            card = {"kind": "membership", "batch": None, "due_date": invoice.due_date if invoice else None, "total": row["balance"], "manual_discount": None, "manual_discount_note": "", "early_payment": row["early_payment"], "invoice": invoice}
+        card["members"] = [_member_block(row, me=me, show_name=show_names or len(rows) > 1) for row in rows]
+        cards.append(card)
+    return cards
+
+
+def _member_block(row, *, me, show_name) -> dict:
+    member = row["membership"].member
+    lines = []
+    for entry in row["entries"]:
+        label = f"{entry.product_variant.product.name} — {entry.product_variant.name}" if entry.product_variant_id else str(entry.get_entry_kind_display())
+        lines.append({"label": label, "team": str(entry.requested_team) if entry.requested_team_id else "", "price": entry.price, "discount": entry.discount_amount if entry.discount_amount > 0 else None})
+    if not lines:
+        # A membership billed by hand has no registration entries: its whole balance is one line.
+        lines.append({"label": _("Season dues"), "team": "", "price": row["balance"], "discount": None})
+    return {"member": member, "is_me": me is not None and member.pk == me.pk, "show_name": show_name, "lines": lines, "balance": row["balance"]}

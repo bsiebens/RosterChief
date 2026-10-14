@@ -1,81 +1,112 @@
 {% extends "mobile/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
-    M3 -- the design handoff's M3 section: a full-
-    width chronological agenda, grouped under "This week"/"Next week", then
-    everything further out grouped by calendar month (see CalendarView's own
-    docstring -- later_months is a list of {month_start, items}). No person
-    switcher and no club-wide toggle here -- always every event
-    self.managed_people is invited to, plus (merged into the same
-    chronological list, each its own accent colour/look):
-      - any home game a managed person is eligible to referee -- see
-        mobile/_calendar_referee_row.html;
-      - any event a managed person has agreed (or been invited) to officiate,
-        when the "officials" waffle flag is on for this club -- see
-        mobile/_calendar_official_row.html;
-      - any event a managed person would normally be invited to but can't sign
-        up for yet, because an open onboarding requirement blocks it -- see
-        mobile/_calendar_blocked_row.html. Without this row it would just
-        silently never appear (events.services.attendance.effective_members
-        already excludes it), with no explanation at all.
-    A real, working ?kind= filter (All/Games/Practices) stands in for the
-    design mock's "Games only" pill; its List/Month toggle isn't reproduced --
-    that's a second view mode, not a filter. -mx-4 (on the row groups only,
-    not this filter row) breaks the rows out of base.html's shared page
-    padding so they run edge-to-edge, matching the design canvas's own M3
-    markup.
+    M3 -- the Calendar, laid out like the iOS Calendar tab. The navy header carries the title and three controls: the filter menu (kinds -- Games, Tournaments, Practices, Meetings, Social -- plus Referee / Official request toggles), the person-scope menu ("All members" / one person, only once there are several) and the List / Month switch. All three are plain links / a GET form (state lives in the URL), so they work boosted and survive a reload.
+    List: a chronological agenda from today on, grouped under "This week" / "Next week", then by calendar month (events.services.calendar.agenda_groups, also behind management's "List" mode and the coach Schedule); "Show earlier events" reaches back to the season's start. One row per *event* -- siblings and roles share it (mobile/_calendar_row.html, built by mobile.services.event_ui) -- and ``id="today"`` marks the row the tab's re-tap / ?today=1 lands on.
+    Month: a server-rendered month grid with a dot under every day that has something and the selected day's agenda below it; picking a day or paging months swaps only #month-pane (hx-get + hx-select), no JavaScript state. -mx-4 breaks the rows out of base.html's shared page padding so they run edge to edge.
+    Always every event the people in scope are invited to, merged with the games they may referee / officiate (the "officials" flag) and the events an open onboarding requirement keeps them off (shown, with the requirement, instead of silently missing).
 {% endcomment %}
 
 {% block header_extra %}
-    <div class="mt-3">
+    <div class="mt-3 flex items-center gap-2">
         <span class="font-display text-2xl font-extrabold text-white uppercase">{% trans "Calendar" %}</span>
+        <div class="flex-1"></div>
+        <details class="relative" data-menu>
+            <summary class="header-pill relative !min-h-[30px] w-[30px] justify-center !px-0" aria-label="{% trans "Filter" %}">
+                {% lucide "list-filter" size=15 stroke_width=2.6 %}
+                {% if filter_active %}<span class="absolute -top-px -right-px h-[7px] w-[7px] rounded-full bg-club"></span>{% endif %}
+            </summary>
+            <form class="menu-panel" method="get" action="{% url "mobile:calendar" %}">
+                <input type="hidden" name="f" value="1">
+                {% for key, value in filter_hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+                <div class="menu-heading">{% trans "Show on calendar" %}</div>
+                {% for item in menu_kinds %}
+                    <label class="menu-item"><input class="h-5 w-5 accent-club" type="checkbox" name="k" value="{{ item.value }}" {% if item.checked %}checked{% endif %}>{{ item.label }}</label>
+                {% endfor %}
+                {% for kind in hidden_kinds %}<input type="hidden" name="k" value="{{ kind }}">{% endfor %}
+                {% if has_referee_rows or has_official_rows %}
+                    <div class="menu-heading">{% trans "Requests" %}</div>
+                {% endif %}
+                {% if has_referee_rows %}
+                    <label class="menu-item"><input class="h-5 w-5 accent-club" type="checkbox" name="rq" value="referee" {% if show_referee %}checked{% endif %}>{% trans "Referee requests" %}</label>
+                {% else %}
+                    <input type="hidden" name="rq" value="referee">
+                {% endif %}
+                {% if has_official_rows %}
+                    <label class="menu-item"><input class="h-5 w-5 accent-club" type="checkbox" name="rq" value="official" {% if show_official %}checked{% endif %}>{% trans "Official requests" %}</label>
+                {% else %}
+                    <input type="hidden" name="rq" value="official">
+                {% endif %}
+                <button class="btn-rc btn-rc-neutral mt-1.5 !h-11" type="submit">{% trans "Apply" %}</button>
+            </form>
+        </details>
+        {% if show_scope_menu %}
+            <details class="relative" data-menu>
+                <summary class="header-pill">
+                    <span class="max-w-24 truncate">{{ scope_label }}</span>
+                    {% lucide "chevron-down" size=11 stroke_width=3 %}
+                </summary>
+                <div class="menu-panel">
+                    {% for option in scope_options %}
+                        <a class="menu-item {% if option.active %}text-club-dark dark:text-club{% endif %}" href="{{ option.url }}">
+                            <span class="flex w-4 shrink-0">{% if option.active %}{% lucide "check" size=16 stroke_width=2.8 %}{% endif %}</span>
+                            {{ option.label }}
+                        </a>
+                    {% endfor %}
+                </div>
+            </details>
+        {% endif %}
+        <div class="header-seg">
+            <a href="{{ list_url }}" aria-label="{% trans "List" %}" {% if view_mode == "list" %}aria-current="true"{% endif %}>{% lucide "list" size=15 stroke_width=2.6 %}</a>
+            <a href="{{ month_url }}" aria-label="{% trans "Month" %}" {% if view_mode == "month" %}aria-current="true"{% endif %}>{% lucide "calendar" size=15 stroke_width=2.6 %}</a>
+        </div>
     </div>
 {% endblock header_extra %}
 
-{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+{% block main_attrs %}data-refreshable{% if scroll_today %} data-scroll-today{% endif %}{% endblock main_attrs %}
 
 {% block content %}
-    <div class="flex gap-2">
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not kind_filter %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="{% url "mobile:calendar" %}">
-            {% trans "All" %}
-        </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if kind_filter == "game" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?kind=game">
-            {% trans "Games" %}
-        </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if kind_filter == "training" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?kind=training">
-            {% trans "Practices" %}
-        </a>
-    </div>
-
-    <div class="-mx-4">
-        {% if not managed_people %}
-            <div class="mx-4">
-                <div class="m-card p-6 text-center">
-                    <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
-                    <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
-                </div>
-            </div>
-        {% elif not this_week and not next_week and not later_months %}
-            <div class="mx-4">
-                <div class="m-card p-6 text-center">
-                    {% if kind_filter == "game" %}
-                        <p class="text-sm text-muted">{% trans "No games scheduled." %}</p>
-                    {% elif kind_filter == "training" %}
-                        <p class="text-sm text-muted">{% trans "No practices scheduled." %}</p>
-                    {% else %}
-                        <p class="text-sm text-muted">{% trans "Nothing scheduled." %}</p>
-                    {% endif %}
-                </div>
-            </div>
+    {% if not managed_people %}
+        <div class="m-card p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
+        </div>
+    {% elif view_mode == "month" %}
+        {% include "mobile/_calendar_month.html" %}
+    {% elif not has_groups %}
+        {% if earlier_url %}
+            <a class="-mt-1 block text-center text-[13px] font-semibold text-club-dark dark:text-club" href="{{ earlier_url }}">{% trans "Show earlier events" %}</a>
+        {% endif %}
+        {% trans "Nothing scheduled" as empty_title %}
+        {% if kind_filter == "game" %}
+            {% trans "No games scheduled." as empty_text %}
+        {% elif kind_filter == "training" %}
+            {% trans "No practices scheduled." as empty_text %}
         {% else %}
+            {% trans "Nothing on the calendar right now." as empty_text %}
+        {% endif %}
+        {% include "mobile/_state.html" with kind="empty" icon="calendar" title=empty_title text=empty_text %}
+    {% else %}
+        <div class="-mx-4">
+            {% if earlier_url %}
+                <a class="block bg-paper px-4 pb-3 text-center text-[13px] font-semibold text-club-dark dark:text-club" href="{{ earlier_url }}">{% trans "Show earlier events" %}</a>
+            {% endif %}
+
+            {% for month in earlier_months %}
+                <div>
+                    <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
+                    <div class="flex flex-col gap-px bg-line">
+                        {% for group in month.items %}{% include "mobile/_calendar_row.html" %}{% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+
             {% if this_week %}
                 <div>
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
-                        {% for row in this_week %}
-                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/_calendar_official_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
-                        {% endfor %}
+                        {% for group in this_week %}{% include "mobile/_calendar_row.html" %}{% endfor %}
                     </div>
                 </div>
             {% endif %}
@@ -84,9 +115,7 @@
                 <div>
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
                     <div class="flex flex-col gap-px bg-line">
-                        {% for row in next_week %}
-                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/_calendar_official_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
-                        {% endfor %}
+                        {% for group in next_week %}{% include "mobile/_calendar_row.html" %}{% endfor %}
                     </div>
                 </div>
             {% endif %}
@@ -95,12 +124,12 @@
                 <div>
                     <div class="bg-paper px-4 py-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
                     <div class="flex flex-col gap-px bg-line">
-                        {% for row in month.items %}
-                            {% if row.blocked_requirements %}{% include "mobile/_calendar_blocked_row.html" %}{% elif row.referee_signup %}{% include "mobile/_calendar_referee_row.html" %}{% elif row.official_signup %}{% include "mobile/_calendar_official_row.html" %}{% else %}{% include "mobile/_calendar_row.html" %}{% endif %}
-                        {% endfor %}
+                        {% for group in month.items %}{% include "mobile/_calendar_row.html" %}{% endfor %}
                     </div>
                 </div>
             {% endfor %}
-        {% endif %}
-    </div>
+        </div>
+    {% endif %}
+
+    {% include "mobile/_event_sheet_shell.html" %}
 {% endblock content %}

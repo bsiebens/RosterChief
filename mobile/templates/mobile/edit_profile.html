@@ -21,7 +21,7 @@
                 {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
             </a>
             <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{{ member.get_full_name }}</span>
-            <button type="submit" class="btn btn-primary h-9 px-3.5 text-sm">{% trans "Save" %}</button>
+            <button type="submit" class="btn-rc btn-rc-primary pressable h-9! w-auto! px-3.5! text-sm!">{% if saved %}{% lucide "check" size=16 stroke_width=3 %} {% trans "Saved" %}{% else %}{% trans "Save" %}{% endif %}</button>
         </div>
 
         {% if open_requirement_names %}
@@ -38,6 +38,9 @@
                     <div class="min-w-0 flex-1">
                         {{ form.profile_photo }}
                         {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club">{{ error }}</p>{% endfor %}
+                        {% if has_profile_photo %}
+                            <button type="submit" form="remove-photo-form" class="pressable mt-2 text-[13px] font-semibold text-club">{% trans "Remove photo" %}</button>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="h-px bg-rule"></div>
@@ -105,5 +108,27 @@
                 {% endfor %}
             </div>
         </div>
+
+        {% if team_rows %}
+            <div>
+                <div class="mb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Teams" %}</div>
+                <div class="m-card overflow-hidden">
+                    {% for row in team_rows %}
+                        {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
+                        <div class="flex items-center gap-3 p-3.5">
+                            <span class="min-w-0 flex-1 truncate text-[15px] font-medium text-ink">{{ row.team.name }}</span>
+                            <span class="shrink-0 text-[13px] text-muted">{% if row.jersey_number %}#{{ row.jersey_number }}{% endif %}{% if row.jersey_number and row.position %} &middot; {% endif %}{% if row.position %}{{ row.position }}{% endif %}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
     </form>
+
+    {% if has_profile_photo %}
+        <form id="remove-photo-form" method="post" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="remove_photo">
+        </form>
+    {% endif %}
 {% endblock content %}

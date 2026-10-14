@@ -48,7 +48,7 @@
             <div class="m-card overflow-hidden">
                 {% for row in people_rows %}
                     {% if not forloop.first %}<div class="h-px bg-rule"></div>{% endif %}
-                    <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" row.person.pk %}">
+                    <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" row.person.pk %}">
                         {% include "mobile/_avatar.html" with person=row.person %}
                         <div class="min-w-0 flex-1">
                             <div class="text-[15px] font-semibold text-ink">
@@ -74,13 +74,13 @@
                 <div class="m-card-dark overflow-hidden">
                     {% for assignment in staff_assignments %}
                         {% if not forloop.first %}<div class="h-px bg-white/10"></div>{% endif %}
-                        <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:coach_today" %}?team={{ assignment.team.pk }}" hx-boost="false">
+                        <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:coach_today" %}?team={{ assignment.team.pk }}" hx-boost="false">
                             <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-steel text-ice">
                                 {% lucide "users" size=20 stroke_width=2.4 %}
                             </span>
                             <div class="min-w-0 flex-1">
                                 <div class="text-[15px] font-semibold text-white">{{ assignment.team.name }}</div>
-                                <div class="text-xs text-on-dark-dim">{{ assignment.position }}</div>
+                                <div class="text-xs text-on-dark-dim">{% if assignment.position %}{{ assignment.position }}{% else %}{% trans "Team staff" %}{% endif %}</div>
                             </div>
                             {% lucide "chevron-right" size=18 class="shrink-0 text-on-dark-dim" %}
                         </a>
@@ -111,72 +111,53 @@
         {% endif %}
 
         <div class="m-card overflow-hidden">
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:edit_profile" me.pk %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Personal details" %}</span>
-                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-            </a>
             {% if registration_open %}
-                <div class="h-px bg-rule"></div>
-                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:reregister" %}">
-                    <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Register" %}</span>
-                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-                </a>
-            {% endif %}
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:reregister" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Register" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:forms_list" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Forms" %}</span>
+            {% endif %}
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:forms_list" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Forms" %}</span>
                 {% if open_forms_count %}
-                    <span class="pill pill-sm pill-warn shrink-0">
-                        {% blocktrans count counter=open_forms_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
-                    </span>
+                    <span class="pill pill-sm pill-warn shrink-0">{% blocktrans count counter=open_forms_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}</span>
                 {% endif %}
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:payments" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Payments & dues" %}</span>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:payments" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Payments & dues" %}</span>
                 {% if open_dues_count %}
-                    <span class="pill pill-sm pill-danger shrink-0">
-                        {% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}
-                    </span>
+                    <span class="pill pill-sm pill-warn shrink-0">{% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}</span>
                 {% endif %}
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:notifications" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notifications" %}</span>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:notification_settings" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Notifications" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:notification_settings" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notification emails" %}</span>
-                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-            </a>
-            <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:calendar_feed_settings" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
-                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-            </a>
             {% if live_game_updates_enabled %}
-                <div class="h-px bg-rule"></div>
-                <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:live_game_updates" %}">
-                    <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Live game updates" %}</span>
-                    {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
-                </a>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:live_game_updates" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Live game updates" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
+            <div class="h-px bg-rule"></div>
             {% endif %}
-            <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "account_change_password" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Change password" %}</span>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:calendar_feed_settings" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Calendar sync" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mfa_index" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Two-factor authentication" %}</span>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:security" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Security" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
-            <a class="flex items-center gap-3 p-3.5" href="{% url "mobile:bug_list" %}">
-                <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Report a bug" %}</span>
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:bug_list" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Report a bug" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
         </div>
@@ -196,8 +177,8 @@
             </form>
         </div>
 
-        <a class="m-card flex items-center justify-center gap-2 p-3.5 text-[15px] font-semibold text-club" href="{% url "account_logout" %}" hx-boost="false">
-            {% lucide "log-out" size=18 %} {% trans "Log out" %}
+        <a class="m-card pressable flex items-center justify-center gap-2 p-3.5 text-[15px] font-semibold text-club" href="{% url "account_logout" %}" hx-boost="false">
+            {% lucide "log-out" size=18 %} {% trans "Sign out" %}
         </a>
 
         <p class="pb-2 text-center text-xs text-dim">{% blocktrans with club_name=club.name version=platform_version %}RosterChief &middot; {{ club_name }} &middot; v{{ version }}{% endblocktrans %}</p>

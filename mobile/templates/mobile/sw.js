@@ -7,9 +7,9 @@
 // offline would be actively misleading. The offline attendance queue
 // described in the design doc is Coach mode, a later phase.
 
-const SHELL_CACHE = "rosterchief-shell-v3";
+const SHELL_CACHE = "rosterchief-shell-v4";
 const OFFLINE_URL = "/app/offline/";
-const SHELL_ASSETS = ["/static/css/mobile.css", "/static/js/htmx.js", "/static/js/alpine.js", "/static/js/mobile-app.js"];
+const SHELL_ASSETS = ["/static/css/mobile.css", "/static/js/htmx.js", "/static/js/alpine.js", "/static/js/mobile-app.js", "/static/js/mobile-sheet.js"];
 
 self.addEventListener("install", (event) => {
     // The offline page is precached so a failed navigation always has something to show; no other page is ever cached.

@@ -2,76 +2,76 @@
 {% load i18n lucide %}
 
 {% comment %}
-    Shop tab landing -- every active+public Product for this club, grouped by
-    ProductCategory into its own labelled section (grid style, photo/name/
-    price), tapping through to shop_product_detail.html. "My orders" and the
-    cart (with its item-count badge) both live in this same header row rather
-    than their own tab-bar slots -- reachable from the Shop tab, same idiom
-    Payments uses hanging off Me.
-
-    The pill row (only shown once there's more than one group -- a single
-    category, or no categories at all, has nothing to jump between) is a
-    same-page #anchor jump, not a filter: every section is always in the DOM
-    and the page still scrolls straight through top to bottom, the pills are
-    just a shortcut past the ones you don't want to scroll past.
+    Shop tab landing, like the native app: a header row with "My orders" and the cart (item-count badge), "All" + category filter chips (Alpine, client-side -- every product is in the DOM and the chips just hide the others), then a two-column grid of square-photo cards. A product with options at different prices reads "From EUR x"; a sold-out one gets a dimmed photo, a badge and "Sold out" instead of its price. While the club has the shop closed the page still loads, with a closed state that keeps "My orders" reachable.
 {% endcomment %}
 
 {% block main_attrs %}data-refreshable{% endblock main_attrs %}
 
 {% block content %}
-    {% trans "Other" as other_label %}
     <div class="flex items-center justify-between">
         <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Shop" %}</span>
-        <div class="flex items-center gap-3">
-            <a class="text-xs font-semibold text-club" href="{% url "mobile:shop_orders" %}">{% trans "My orders" %}</a>
-            <a class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-line" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
-                {% lucide "shopping-cart" size=18 class="text-ink" %}
-                {% if cart_item_count %}
-                    <span class="absolute -top-1.5 -right-1.5 flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-club px-1 font-mono text-[11px] font-bold text-club-content">
-                        {% if cart_item_count > 9 %}9+{% else %}{{ cart_item_count }}{% endif %}
-                    </span>
-                {% endif %}
-            </a>
+        <div class="flex items-center gap-1">
+            <a class="icon-btn pressable text-ink" href="{% url "mobile:shop_orders" %}" aria-label="{% trans "My orders" %}">{% lucide "package" size=20 %}</a>
+            {% if not shop_closed %}
+                <a class="icon-btn pressable relative text-ink" href="{% url "mobile:shop_cart" %}" aria-label="{% trans "Cart" %}">
+                    {% lucide "shopping-cart" size=20 %}
+                    {% if cart_item_count %}
+                        <span class="absolute top-1.5 right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-club px-1 text-[10px] font-extrabold text-club-content">{% if cart_item_count > 99 %}99+{% else %}{{ cart_item_count }}{% endif %}</span>
+                    {% endif %}
+                </a>
+            {% endif %}
         </div>
     </div>
 
-    {% if products %}
-        {% if groups|length > 1 %}
-            <div class="scrollbar-hide flex gap-2 overflow-x-auto pb-0.5">
-                {% for group in groups %}
-                    <a class="person-chip pl-2.5" href="#cat-{{ group.category.pk|default:"none" }}">
-                        <span class="person-chip-label">{{ group.category.name|default:other_label }}</span>
+    {% if shop_closed %}
+        {% trans "The shop is closed" as closed_title %}
+        {% trans "Ordering is closed right now. You can still see your orders." as closed_text %}
+        {% trans "My orders" as closed_action %}
+        {% url "mobile:shop_orders" as orders_url %}
+        {% include "mobile/_state.html" with kind="empty" icon="shopping-bag" title=closed_title text=closed_text action_url=orders_url action_label=closed_action %}
+    {% elif products %}
+        <div x-data="{ category: '' }" class="flex flex-col gap-3.5">
+            {% if categories|length > 1 %}
+                <div class="scrollbar-hide -mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5" role="tablist">
+                    <button type="button" role="tab" class="shrink-0 rounded-full border bg-surface px-3.5 py-2 font-display text-sm font-bold tracking-wider uppercase" :class="category === '' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === ''" @click="category = ''">{% trans "All" %}</button>
+                    {% for category in categories %}
+                        <button type="button" role="tab" class="shrink-0 rounded-full border bg-surface px-3.5 py-2 font-display text-sm font-bold tracking-wider uppercase" :class="category === '{{ category.pk }}' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === '{{ category.pk }}'" @click="category = '{{ category.pk }}'">{{ category.name }}</button>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <div class="grid grid-cols-2 gap-3">
+                {% for product in products %}
+                    <a class="pressable block overflow-hidden rounded-[14px] border border-line bg-surface" href="{% url "mobile:shop_product_detail" product.slug %}" x-show="category === '' || category === '{{ product.category_id|default_if_none:"" }}'">
+                        <div class="relative aspect-square w-full bg-rule">
+                            {% if product.image %}
+                                <img class="h-full w-full object-cover{% if product.sold_out %} opacity-45{% endif %}" src="{{ product.image.url }}" alt="" loading="lazy">
+                            {% else %}
+                                <div class="flex h-full w-full items-center justify-center text-dim{% if product.sold_out %} opacity-45{% endif %}">{% lucide "shirt" size=36 %}</div>
+                            {% endif %}
+                            {% if product.sold_out %}
+                                <span class="absolute top-2 left-2 rounded-full bg-night px-2 py-1 font-display text-[11px] font-extrabold tracking-wider text-white uppercase">{% trans "Sold out" %}</span>
+                            {% endif %}
+                        </div>
+                        <div class="flex flex-col gap-0.5 p-2.5">
+                            <div class="line-clamp-2 text-sm font-semibold text-ink">{{ product.name }}</div>
+                            <div class="text-[13px] text-muted">
+                                {% if product.sold_out %}
+                                    {% trans "Sold out" %}
+                                {% elif product.has_price_range %}
+                                    {% blocktrans with amount=product.lowest_price|floatformat:2 %}From &euro; {{ amount }}{% endblocktrans %}
+                                {% else %}
+                                    &euro; {{ product.lowest_price|floatformat:2 }}
+                                {% endif %}
+                            </div>
+                        </div>
                     </a>
                 {% endfor %}
             </div>
-        {% endif %}
-
-        {% for group in groups %}
-            <div id="cat-{{ group.category.pk|default:"none" }}" class="shop-category-anchor flex flex-col gap-3">
-                {% if groups|length > 1 %}
-                    <div class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ group.category.name|default:other_label }}</div>
-                {% endif %}
-                <div class="grid grid-cols-2 gap-3">
-                    {% for product in group.products %}
-                        <a class="m-card block overflow-hidden{% if not product.in_stock %} opacity-60{% endif %}" href="{% url "mobile:shop_product_detail" product.slug %}">
-                            {% if product.image %}
-                                <img class="h-28 w-full object-cover" src="{{ product.image.url }}" alt="">
-                            {% else %}
-                                <div class="flex h-28 items-center justify-center bg-line text-xs text-dim">{% trans "No photo" %}</div>
-                            {% endif %}
-                            <div class="p-3">
-                                <div class="truncate text-sm font-semibold text-ink">{{ product.name }}</div>
-                                <div class="mt-1 font-display text-base font-extrabold text-club">{% blocktrans with amount=product.price|floatformat:2 %}&euro; {{ amount }}{% endblocktrans %}</div>
-                                {% if not product.in_stock %}<div class="mt-1 text-xs font-semibold text-dim">{% trans "Out of stock" %}</div>{% endif %}
-                            </div>
-                        </a>
-                    {% endfor %}
-                </div>
-            </div>
-        {% endfor %}
-    {% else %}
-        <div class="m-card p-6 text-center">
-            <p class="text-sm text-muted">{% trans "Nothing in the shop yet." %}</p>
         </div>
+    {% else %}
+        {% trans "Nothing here yet" as empty_title %}
+        {% trans "Check back later." as empty_text %}
+        {% include "mobile/_state.html" with kind="empty" icon="shopping-bag" title=empty_title text=empty_text %}
     {% endif %}
 {% endblock content %}

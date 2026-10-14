@@ -1,101 +1,91 @@
 {% extends "mobile/base.html" %}
-{% load i18n %}
+{% load i18n lucide %}
 
 {% comment %}
-    M7 -- the design handoff's M7 section ("Inbox").
-    See NotificationsView's own docstring for why this is a flat, generic,
-    day-grouped list rather than the mockup's per-type cards: the underlying
-    model has no type/category field, and nothing but news publishing creates
-    a notification yet. Scoped to every managed_people, not just scope_person
-    -- same as unread_notification_count itself (mobile/mixins.py).
+    M7 -- the inbox, shaped like the iOS NotificationsView: a back-header with a "..." menu
+    (Mark all read / Clear all, the latter confirmed in a sheet), the push opt-in card, then
+    one flat list (_notification_list.html) that loads more as you scroll. See
+    NotificationsView's own docstring (mobile/views.py). Mark all read / Clear all are htmx
+    actions that swap #notification-list and answer with a toast + the new unread count
+    ("rc-unread", handled below to keep the header bell's badge in step).
 {% endcomment %}
 
+{% block main_attrs %}data-refreshable{% endblock main_attrs %}
+
 {% block content %}
-    {% if not managed_people %}
-        <div class="m-card p-6 text-center">
-            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
-            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their notifications will show up here." %}</p>
-        </div>
-    {% else %}
-        {% comment %}
-            requested only flips true (hiding this card) once subscribe()'s
-            own promise actually resolves truthy -- it used to flip
-            immediately on click regardless of outcome, so a denied
-            permission or a deployment with no VAPID key configured looked
-            identical to success: the card vanished and nothing else ever
-            happened. failed swaps the description for an explanation
-            instead, and the button stays put so it can be retried (e.g.
-            after fixing the browser's own site permission). x-init checks
-            this browser's own push subscription state on load -- a
-            server-side PushSubscription row would only prove *some* device
-            subscribed, not this one -- so a returning visitor who already
-            enabled push doesn't see the card at all.
-        {% endcomment %}
-        <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false, failed: false, pending: false }" x-init="requested = await window.rosterchiefPush.isSubscribed()" x-show="!requested">
-            <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
-                <div class="text-xs text-muted" x-show="!failed">{% trans "Get notified on this device as soon as something new comes in." %}</div>
-                <div class="text-xs text-club" x-show="failed" x-cloak>{% trans "Couldn't turn on notifications -- check this browser's notification permission for the site, then try again." %}</div>
-            </div>
-            <button type="button" class="btn btn-dark shrink-0" :disabled="pending" @click="pending = true; failed = false; requested = await window.rosterchiefPush.subscribe(); failed = !requested; pending = false">{% trans "Enable" %}</button>
+    <div x-data="{
+            setBadge(count) {
+                const link = document.querySelector('header a[href=&quot;{% url "mobile:notifications" %}&quot;]');
+                if (!link) return;
+                const badge = link.querySelector('span.absolute');
+                if (!count) { if (badge) badge.remove(); return; }
+                if (badge) badge.textContent = count > 9 ? '9+' : count;
+            }
+         }"
+         x-on:rc-unread.window="setBadge($event.detail.value)"
+         class="flex flex-col gap-4">
+        <div class="-mx-4 -mt-4 flex items-center gap-1 border-b border-line bg-surface px-4 py-3">
+            <a class="-ml-2.5 flex h-11 w-11 shrink-0 items-center justify-center" href="{% url "mobile:home" %}" aria-label="{% trans "Back" %}">
+                {% lucide "chevron-left" size=20 stroke_width=2.4 class="text-ink" %}
+            </a>
+            <span class="min-w-0 flex-1 truncate font-display text-xl leading-none font-extrabold text-ink uppercase">{% trans "Notifications" %}</span>
+            {% if managed_people %}
+                <button type="button" class="pressable flex h-11 w-11 shrink-0 items-center justify-center" aria-label="{% trans "More" %}" onclick="document.getElementById('notif-menu').showModal()">
+                    {% lucide "ellipsis" size=22 class="text-ink" %}
+                </button>
+            {% endif %}
         </div>
 
-        {% if today or earlier_this_week or older %}
-            <div class="flex items-center justify-between">
-                {% if unread_notification_count %}
-                    <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="mark_all_read">
-                        <button class="font-display text-xs font-extrabold tracking-wide text-club uppercase" type="submit">{% trans "Mark all read" %}</button>
-                    </form>
-                {% else %}
-                    <span></span>
-                {% endif %}
-                <form method="post" action="{% url "mobile:notifications" %}" hx-boost="false">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="clear_all">
-                    <button class="font-display text-xs font-extrabold tracking-wide text-muted uppercase" type="submit">{% trans "Clear all" %}</button>
-                </form>
-            </div>
-        {% endif %}
-
-        {% if not today and not earlier_this_week and not older %}
-            <div class="m-card p-6 text-center">
-                <p class="text-sm text-muted">{% trans "Nothing here yet." %}</p>
-            </div>
+        {% if not managed_people %}
+            {% trans "No one to show yet" as empty_title %}
+            {% trans "Once you're linked to a member record, their notifications will show up here." as empty_text %}
+            {% include "mobile/_state.html" with kind="empty" icon="bell-off" title=empty_title text=empty_text %}
         {% else %}
-            {% if today %}
-                <div>
-                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Today" %}</div>
-                    <div class="flex flex-col gap-2">
-                        {% for row in today %}
-                            {% include "mobile/_notification_row.html" %}
-                        {% endfor %}
-                    </div>
+            {% comment %}
+                requested only flips true (hiding this card) once subscribe()'s own promise
+                actually resolves truthy, so a denied permission or a deployment with no VAPID
+                key configured doesn't look like success. failed swaps the description for an
+                explanation and the button stays put so it can be retried. x-init checks this
+                browser's own push subscription state on load, so a returning visitor who
+                already enabled push doesn't see the card at all.
+            {% endcomment %}
+            <div class="m-card flex items-center gap-3 p-4" x-data="{ requested: false, failed: false, pending: false }" x-init="requested = await window.rosterchiefPush.isSubscribed()" x-show="!requested">
+                <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-ink">{% trans "Enable push notifications" %}</div>
+                    <div class="text-xs text-muted" x-show="!failed">{% trans "Get notified on this device as soon as something new comes in." %}</div>
+                    <div class="text-xs text-club" x-show="failed" x-cloak>{% trans "Couldn't turn on notifications -- check this browser's notification permission for the site, then try again." %}</div>
                 </div>
-            {% endif %}
+                <button type="button" class="btn btn-dark shrink-0" :disabled="pending" @click="pending = true; failed = false; requested = await window.rosterchiefPush.subscribe(); failed = !requested; pending = false">{% trans "Enable" %}</button>
+            </div>
 
-            {% if earlier_this_week %}
-                <div>
-                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Earlier this week" %}</div>
-                    <div class="flex flex-col gap-2">
-                        {% for row in earlier_this_week %}
-                            {% include "mobile/_notification_row.html" %}
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            {% if older %}
-                <div>
-                    <div class="bg-paper py-1 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Older" %}</div>
-                    <div class="flex flex-col gap-2">
-                        {% for row in older %}
-                            {% include "mobile/_notification_row.html" %}
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
+            {% include "mobile/_notification_list.html" %}
         {% endif %}
+    </div>
+
+    {% if managed_people %}
+        <dialog id="notif-menu" class="sheet" style="height: auto; max-height: 50dvh" onclick="if (event.target === this) this.close()">
+            <div class="sheet-handle"></div>
+            <div class="flex flex-col gap-2 pb-2">
+                <button type="button" class="btn-rc btn-rc-neutral" hx-post="{% url "mobile:notifications" %}" hx-vals='{"action": "mark_all_read"}' hx-target="#notification-list" hx-swap="outerHTML" hx-on::before-request="document.getElementById('notif-menu').close()">
+                    {% lucide "check-check" size=18 %} {% trans "Mark all read" %}
+                </button>
+                <button type="button" class="btn-rc btn-rc-destructive" onclick="document.getElementById('notif-menu').close(); document.getElementById('notif-clear').showModal()">
+                    {% lucide "trash-2" size=18 %} {% trans "Clear all" %}
+                </button>
+                <button type="button" class="btn-rc btn-rc-neutral" onclick="document.getElementById('notif-menu').close()">{% trans "Cancel" %}</button>
+            </div>
+        </dialog>
+
+        <dialog id="notif-clear" class="sheet" style="height: auto; max-height: 50dvh" onclick="if (event.target === this) this.close()">
+            <div class="sheet-handle"></div>
+            <div class="flex flex-col gap-2 pb-2">
+                <h2 class="font-display text-xl font-extrabold text-ink uppercase">{% trans "Clear all notifications?" %}</h2>
+                <p class="mb-2 text-sm text-muted">{% trans "This permanently deletes every notification." %}</p>
+                <button type="button" class="btn-rc btn-rc-destructive" hx-post="{% url "mobile:notifications" %}" hx-vals='{"action": "clear_all"}' hx-target="#notification-list" hx-swap="outerHTML" hx-on::before-request="document.getElementById('notif-clear').close()">{% trans "Clear all" %}</button>
+                <button type="button" class="btn-rc btn-rc-neutral" onclick="document.getElementById('notif-clear').close()">{% trans "Cancel" %}</button>
+            </div>
+        </dialog>
     {% endif %}
 {% endblock content %}
+
+{% block extra_body %}{% include "mobile/_event_sheet_shell.html" %}{% endblock extra_body %}
