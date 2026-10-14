@@ -266,7 +266,7 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
         background: var(--color-ink);
-        color: #fff;
+        color: var(--color-surface);
         border: 1px solid transparent;
         cursor: pointer;
         transition: opacity 0.15s ease;
@@ -323,7 +323,7 @@
     }
 
     .btn-outline {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
         border-color: var(--color-stroke);
     }
@@ -335,19 +335,19 @@
 
     .btn-outline.btn-primary,
     .btn-outline.btn-error {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-club-dark);
         border-color: var(--color-danger-border);
     }
 
     .btn-outline.btn-success {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ok-text);
         border-color: var(--color-ok-border);
     }
 
     .btn-outline.btn-info {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-info-text);
         border-color: var(--color-info-border);
     }
@@ -424,14 +424,14 @@
 
     .badge-ghost,
     .badge-outline {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-muted);
         border-color: var(--color-edge);
     }
 
     .badge-neutral {
         background: var(--color-ink);
-        color: #fff;
+        color: var(--color-surface);
         border-color: var(--color-ink);
     }
 
@@ -488,7 +488,7 @@
 
     .pill-neutral {
         background: var(--color-ink);
-        color: #fff;
+        color: var(--color-surface);
         border-color: var(--color-ink);
     }
 
@@ -498,14 +498,14 @@
     }
 
     .pill-referee {
-        background: color-mix(in srgb, var(--color-referee) 12%, white);
+        background: color-mix(in srgb, var(--color-referee) 12%, var(--color-surface));
         color: var(--color-referee);
-        border-color: color-mix(in srgb, var(--color-referee) 35%, white);
+        border-color: color-mix(in srgb, var(--color-referee) 35%, var(--color-surface));
     }
 
     /* --- Cards -- copied verbatim from management.css. --- */
     .card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid var(--color-line);
         border-radius: var(--radius-box);
     }
@@ -574,7 +574,7 @@
         padding: 0.875rem 1rem;
         border-radius: var(--radius-box);
         border: 1px solid var(--color-line);
-        background: #fff;
+        background: var(--color-surface);
         font-size: 0.875rem;
     }
 
@@ -625,7 +625,7 @@
         width: 100%;
         border: 1px solid var(--color-edge);
         border-radius: 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
         font-family: var(--font-sans);
         font-size: 0.875rem;
@@ -758,7 +758,7 @@
 
     .desktop-switcher-item-active {
         background: #fff;
-        color: var(--color-ink);
+        color: var(--color-night, #0b1220);
     }
 
     .desktop-icobtn {
@@ -766,7 +766,7 @@
         height: 36px;
         border-radius: 10px;
         border: 1px solid var(--color-stroke);
-        background: #fff;
+        background: var(--color-surface);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -873,7 +873,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        background: #fff;
+        background: var(--color-surface);
         border: 1.5px solid var(--color-line);
         border-radius: 999px;
         padding: 5px 14px 5px 5px;
