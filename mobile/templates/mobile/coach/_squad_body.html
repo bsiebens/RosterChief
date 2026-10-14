@@ -31,8 +31,8 @@
         <div class="mb-2 flex items-center justify-between">
             <h2 id="squad-staff" class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Staff" %} <span class="ml-1 text-sm text-dim tabular-nums">{{ staff|length }}</span></h2>
             {% if can_manage_active_team %}
-                <a class="flex min-h-11 items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="{% url "mobile:coach_add_staff" %}">
-                    {% lucide "user-plus" size=14 %} {% trans "Add" %}
+                <a class="icon-btn pressable -my-2 -mr-2 flex h-11 w-11 items-center justify-center text-club-dark" href="{% url "mobile:coach_add_staff" %}" aria-label="{% trans "Add staff" %}">
+                    {% lucide "circle-plus" size=26 %}
                 </a>
             {% endif %}
         </div>
