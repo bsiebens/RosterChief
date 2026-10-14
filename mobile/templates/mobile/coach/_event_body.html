@@ -7,13 +7,13 @@
     Needs: event, tasks, series_summary, can_edit_pattern, return_url, can_manage_active_team.
 {% endcomment %}
 <div>
-    <div class="flex flex-wrap items-center gap-2">
+    <h1 class="pr-12 font-display text-[26px] leading-none font-extrabold text-ink uppercase">{{ event.title }}</h1>
+    <div class="mt-2 flex flex-wrap items-center gap-2">
         <span class="pill {% if event.kind == "game" %}pill-danger{% elif event.kind == "training" %}pill-info{% else %}pill-neutral{% endif %}">{{ event.get_kind_display }}</span>
         {% if event.is_friendly %}<span class="pill pill-neutral">{% trans "Friendly" %}</span>{% endif %}
         {% if event.cancelled %}<span class="pill pill-danger">{% trans "Cancelled" %}</span>{% endif %}
         {% if event.is_live and not event.cancelled %}<span class="pill pill-danger">{% trans "Live" %}</span>{% endif %}
     </div>
-    <h1 class="mt-2 font-display text-[26px] leading-none font-extrabold text-ink uppercase">{{ event.title }}</h1>
 </div>
 
 {% if event.kind == "game" and event.score_for is not None and event.score_against is not None %}

@@ -1458,7 +1458,7 @@
         justify-content: center;
         width: 44px;
         height: 44px;
-        margin: 2px 4px 0 0;
+        margin: var(--sheet-close-top, 2px) 4px 0 0;
     }
 
     .sheet-close > span {
@@ -1753,4 +1753,13 @@
         border-radius: 999px;
         background: var(--color-club);
     }
+}
+
+/* No visible scrollbars anywhere in the app (scrolling itself is unchanged), like the native app. */
+* {
+    scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+    display: none;
 }
