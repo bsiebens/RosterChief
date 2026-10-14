@@ -20,7 +20,11 @@
             <div class="flex items-center gap-3 border-b border-rule p-4.5">
                 {% include "mobile/_avatar.html" with person=member size_class="h-16 w-16" text_class="text-2xl" %}
                 <div class="min-w-0 flex-1">
-                    {{ form.profile_photo }}
+                    <div x-data="{ name: '' }" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <label for="{{ form.profile_photo.id_for_label }}" class="pressable inline-flex h-9 cursor-pointer items-center rounded-lg bg-night px-3.5 font-display text-sm font-bold tracking-wide text-white uppercase">{% if has_profile_photo %}{% trans "Change picture" %}{% else %}{% trans "Choose picture" %}{% endif %}</label>
+                        <input id="{{ form.profile_photo.id_for_label }}" class="sr-only" type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp" @change="name = $event.target.files[0] ? $event.target.files[0].name : ''">
+                        <span x-show="name" x-text="name" class="min-w-0 truncate text-[13px] text-muted"></span>
+                    </div>
                     {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
                 </div>
             </div>
