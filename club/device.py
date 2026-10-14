@@ -35,7 +35,32 @@ def is_mobile_or_tablet(request) -> bool:
     about device detection -- keeps landing there rather than silently
     flipping to desktop-only markup.
     """
+    override = _layout_override(request)
+    if override is not None:
+        request.layout_reason = f"override:{override}"
+        return override == "phone"
     user_agent = request.META.get("HTTP_USER_AGENT", "")
     if not user_agent:
+        request.layout_reason = "no-user-agent"
         return True
-    return bool(_MOBILE_OR_TABLET_UA.search(user_agent))
+    matched = _MOBILE_OR_TABLET_UA.search(user_agent)
+    request.layout_reason = f"user-agent:{matched.group(0)}" if matched else "user-agent:desktop"
+    return bool(matched)
+
+
+def _layout_override(request):
+    """``"phone"`` / ``"desktop"`` when the visitor chose a layout, else None.
+
+    ``?layout=phone|desktop`` picks one and is remembered for the session (``?layout=auto`` clears
+    it), so a browser whose User-Agent says one thing while the window is the other -- device mode,
+    "Request Mobile Website", an iPad -- can still be put on the layout it should have."""
+    session = getattr(request, "session", None)
+    requested = request.GET.get("layout")
+    if session is not None:
+        if requested in ("phone", "desktop"):
+            session["layout"] = requested
+        elif requested == "auto":
+            session.pop("layout", None)
+        value = session.get("layout")
+        return value if value in ("phone", "desktop") else None
+    return requested if requested in ("phone", "desktop") else None

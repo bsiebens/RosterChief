@@ -7,7 +7,7 @@ mobile/desktop/*."""
 import datetime
 from decimal import Decimal
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -153,3 +153,37 @@ class DesktopScreenTests(MemberScreenFixture, TestCase):
         for selector in (".m-card", ".state-card", ".toast", "dialog.sheet", ".answer-btn", ".card-btn", ".menu-panel", ".month-cell", ".btn-rc", ".header-seg", ".sponsor-scroll"):
             with self.subTest(selector=selector):
                 self.assertIn(selector, css)
+
+
+class LayoutOverrideTests(SimpleTestCase):
+    """?layout=phone|desktop (club.device) wins over the User-Agent and is remembered in the session."""
+
+    SAFARI_MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15"
+
+    def _request(self, path="/", session=None):
+        from django.test import RequestFactory
+
+        request = RequestFactory().get(path, HTTP_USER_AGENT=self.SAFARI_MAC)
+        request.session = {} if session is None else session
+        return request
+
+    def test_safari_on_a_mac_is_desktop(self):
+        from club.device import is_mobile_or_tablet
+
+        request = self._request()
+        self.assertFalse(is_mobile_or_tablet(request))
+        self.assertEqual(request.layout_reason, "user-agent:desktop")
+
+    def test_the_override_wins_and_sticks_in_the_session(self):
+        from club.device import is_mobile_or_tablet
+
+        session = {}
+        self.assertTrue(is_mobile_or_tablet(self._request("/?layout=phone", session)))
+        self.assertTrue(is_mobile_or_tablet(self._request("/", session)))
+        self.assertFalse(is_mobile_or_tablet(self._request("/?layout=auto", session)))
+        self.assertNotIn("layout", session)
+
+    def test_an_unknown_value_is_ignored(self):
+        from club.device import is_mobile_or_tablet
+
+        self.assertFalse(is_mobile_or_tablet(self._request("/?layout=banana")))

@@ -37,6 +37,14 @@ class DesktopTemplateMixin:
         desktop_names = [name.replace("mobile/", "mobile/desktop/", 1) for name in names if name.startswith("mobile/")]
         return desktop_names + names
 
+    def render_to_response(self, *args, **kwargs):
+        response = super().render_to_response(*args, **kwargs)
+        # Which layout the server chose and why (club.device.is_mobile_or_tablet) -- visible in the
+        # browser's network panel when a device lands on the "wrong" layout.
+        response["X-RC-Layout"] = "phone" if is_mobile_or_tablet(self.request) else "desktop"
+        response["X-RC-Layout-Reason"] = getattr(self.request, "layout_reason", "")
+        return response
+
 
 class MemberAppMixin(AccessMixin):
     """The gate every signed-in member-app screen (Member mode, Coach mode,
