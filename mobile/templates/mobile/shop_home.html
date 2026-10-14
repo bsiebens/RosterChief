@@ -34,9 +34,9 @@
         <div x-data="{ category: '' }" class="flex flex-col gap-3.5">
             {% if categories|length > 1 %}
                 <div class="scrollbar-hide -mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5" role="tablist">
-                    <button type="button" role="tab" class="shrink-0 rounded-full border bg-surface px-3.5 py-2 font-display text-sm font-bold tracking-wider uppercase" :class="category === '' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === ''" @click="category = ''">{% trans "All" %}</button>
+                    <button type="button" role="tab" class="flex h-[33px] shrink-0 items-center rounded-full border-[1.5px] bg-surface px-3 font-display text-[13px] font-bold tracking-[0.06em] uppercase" :class="category === '' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === ''" @click="category = ''">{% trans "All" %}</button>
                     {% for category in categories %}
-                        <button type="button" role="tab" class="shrink-0 rounded-full border bg-surface px-3.5 py-2 font-display text-sm font-bold tracking-wider uppercase" :class="category === '{{ category.pk }}' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === '{{ category.pk }}'" @click="category = '{{ category.pk }}'">{{ category.name }}</button>
+                        <button type="button" role="tab" class="flex h-[33px] shrink-0 items-center rounded-full border-[1.5px] bg-surface px-3 font-display text-[13px] font-bold tracking-[0.06em] uppercase" :class="category === '{{ category.pk }}' ? 'border-ink text-ink' : 'border-line text-muted'" :aria-selected="category === '{{ category.pk }}'" @click="category = '{{ category.pk }}'">{{ category.name }}</button>
                     {% endfor %}
                 </div>
             {% endif %}
