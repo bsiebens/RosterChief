@@ -647,7 +647,9 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         kind_filter = request.GET.get("kind")
         if kind_filter not in self.KIND_FILTERS:
             kind_filter = None
-        month_mode = request.GET.get("view") == "month"
+        # Desktop shows the month grid and the agenda side by side (iPad-style), so ?view= only matters on the phone.
+        split = not is_mobile_or_tablet(request)
+        month_mode = request.GET.get("view") == "month" and not split
         show_earlier = not month_mode and request.GET.get("earlier") == "1"
         season = get_current_season(request)
 
@@ -667,6 +669,10 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             if show_earlier:
                 earliest = min(season.start_date, today) if season else today - datetime.timedelta(days=90)
                 window_start = timezone.make_aware(datetime.datetime.combine(earliest, datetime.time.min), zone)
+            if split:
+                # The agenda (open-ended) plus whatever part of the shown month lies before it.
+                month_start = event_ui.parse_month(request.GET.get("month"), today)
+                window_start = min(window_start, event_ui.month_window(month_start)[0])
 
         # The merged agenda itself (invitations, referee/official sign-ups, events blocked
         # by an open onboarding requirement) is events.services.agenda, shared with the app
@@ -715,7 +721,25 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
         this_week = next_week = later_months = earlier_months = []
         month_pane = None
-        if month_mode:
+        split_day = None
+        if split:
+            split_day = event_ui.parse_day(request.GET.get("day"))
+            if split_day is not None and not (split_day.replace(day=1) == month_start or abs((split_day - month_start).days) < 40):
+                split_day = None
+            # No day picked: nothing is filled in the grid (today stays ringed) and the list is the agenda.
+            month_pane = event_ui.month_pane(groups, month_start=month_start, selected=split_day or datetime.date.min, today=today, url_for=self._calendar_url)
+            for week in month_pane["weeks"]:
+                for cell in week:
+                    if cell["selected"]:
+                        cell["url"] = self._calendar_url(month=month_start.strftime("%Y-%m"), day=None)
+            past = [group for group in groups if group["event"].start < midnight]
+            upcoming = [group for group in groups if group["event"].start >= midnight]
+            this_week, next_week, later_months = agenda_groups(upcoming, start_of=lambda group: group["event"].start, today=today)
+            earlier_months = event_ui.months_of(past)
+            event_ui.mark_today_anchor(this_week, next_week, *[month["items"] for month in later_months], today=today)
+            if split_day is not None:
+                month_pane["selected_groups"] = [group for group in groups if timezone.localtime(group["event"].start).date() == split_day]
+        elif month_mode:
             selected = event_ui.parse_day(request.GET.get("day"))
             if selected is None or selected.replace(day=1) != month_start:
                 selected = today if today.replace(day=1) == month_start else month_start
@@ -743,9 +767,12 @@ class CalendarView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             has_groups=bool(groups),
             kind_filter=kind_filter or "",
             view_mode="month" if month_mode else "list",
+            split=split,
+            split_day=split_day,
             month_pane=month_pane,
             list_url=self._calendar_url(view=None, month=None, day=None, earlier=None),
             month_url=self._calendar_url(view="month", month=None, day=None, earlier=None),
+            agenda_url=self._calendar_url(day=None),
             earlier_url=self._calendar_url(earlier="1", today="1") if not month_mode and not show_earlier and season is not None and season.start_date < today else None,
             show_earlier=show_earlier,
             scroll_today=not month_mode and request.GET.get("today") == "1",

@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: RosterChief\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-14 15:43+0200\n"
+"POT-Creation-Date: 2026-10-14 18:23+0200\n"
 "PO-Revision-Date: 2026-10-12 12:00+0200\n"
 "Last-Translator: RosterChief\n"
 "Language-Team: Dutch\n"
@@ -2024,6 +2024,9 @@ msgstr "Je eigen volgende event &middot; %(date)s"
 msgid "Complete &ldquo;%(name)s&rdquo; to sign up"
 msgstr "Vul &ldquo;%(name)s&rdquo; in om je in te schrijven"
 
+msgid "Show upcoming events"
+msgstr "Komende events tonen"
+
 msgid "Multi-registrant discount"
 msgstr "Korting voor meerdere inschrijvers"
 
@@ -2175,6 +2178,32 @@ msgstr ""
 "Zodra je aan een ledenrecord gekoppeld bent, verschijnen hier hun agenda en "
 "updates."
 
+msgid ""
+"Get a push notification while a team is playing: goals, penalties, period "
+"ends and the final result. Pick the teams you want to follow."
+msgstr ""
+"Ontvang een pushmelding terwijl een team speelt: doelpunten, strafworpen, "
+"einde van periodes en de eindstand. Kies de teams die je wilt volgen."
+
+msgid "Teams"
+msgstr "Teams"
+
+msgid "This club has no teams yet."
+msgstr "Deze club heeft nog geen teams."
+
+msgid "Individual games"
+msgstr "Individuele wedstrijden"
+
+msgid "Unfollow"
+msgstr "Ontvolgen"
+
+msgid ""
+"Notifications arrive on this device only once you've allowed notifications "
+"for the app."
+msgstr ""
+"Meldingen komen pas op dit toestel aan nadat je meldingen voor de app hebt "
+"toegestaan."
+
 msgid "Once you're linked to a member record, your profile will show up here."
 msgstr ""
 "Zodra je aan een ledenprofiel gekoppeld bent, verschijnt je profiel hier."
@@ -2212,6 +2241,12 @@ msgid_plural "%(counter)s OPEN"
 msgstr[0] "%(counter)s OPEN"
 msgstr[1] "%(counter)s OPEN"
 
+msgid "Live game updates"
+msgstr "Live wedstrijdupdates"
+
+msgid "Security"
+msgstr "Beveiliging"
+
 msgid "Switch club"
 msgstr "Wissel van club"
 
@@ -2234,252 +2269,6 @@ msgstr "Nieuwer"
 
 msgid "Older"
 msgstr "Ouder"
-
-msgid "Mark all read"
-msgstr "Alles als gelezen markeren"
-
-msgid "Clear all"
-msgstr "Alles wissen"
-
-msgid ""
-"Once you're linked to a member record, their notifications will show up here."
-msgstr ""
-"Zodra je aan een ledenrecord gekoppeld bent, verschijnen hier hun meldingen."
-
-msgid "Enable push notifications"
-msgstr "Pushmeldingen inschakelen"
-
-msgid "Get notified on this device as soon as something new comes in."
-msgstr "Word op dit toestel verwittigd zodra er iets nieuws is."
-
-msgid ""
-"Couldn't turn on notifications -- check this browser's notification "
-"permission for the site, then try again."
-msgstr ""
-"Kon meldingen niet inschakelen -- controleer de meldingsmachtiging van deze "
-"browser voor de site en probeer opnieuw."
-
-msgid "Enable"
-msgstr "Inschakelen"
-
-msgid "How to pay"
-msgstr "Hoe betalen"
-
-msgid "Nothing to pay"
-msgstr "Niets te betalen"
-
-msgid "You have no open payments."
-msgstr "Je hebt geen openstaande betalingen."
-
-msgid "Not open yet"
-msgstr "Nog niet open"
-
-msgid "Registration isn't open right now -- check back soon."
-msgstr "Inschrijven is momenteel niet open -- kom binnenkort terug."
-
-msgid "Which season?"
-msgstr "Welk seizoen?"
-
-msgid ""
-"Registration is currently open for more than one season -- pick which one "
-"this is for."
-msgstr ""
-"Inschrijven is momenteel open voor meer dan één seizoen -- kies voor welk "
-"dit is."
-
-#, python-format
-msgid "Season %(start)s-%(end)s"
-msgstr "Seizoen %(start)s-%(end)s"
-
-msgid "Continue"
-msgstr "Doorgaan"
-
-#, python-format
-msgid "Registering for Season %(start)s-%(end)s"
-msgstr "Inschrijven voor seizoen %(start)s-%(end)s"
-
-msgid ""
-"Add a registration for each person and role. You'll see the price before you "
-"send it."
-msgstr ""
-"Voeg een inschrijving toe per persoon en rol. Je ziet de prijs voor je "
-"verstuurt."
-
-msgid "Price"
-msgstr "Prijs"
-
-#, python-format
-msgid "Jersey number (%(team)s)"
-msgstr "Rugnummer (%(team)s)"
-
-#, python-format
-msgid "€%(amount)s off if paid by %(date)s"
-msgstr "€%(amount)s korting bij betaling voor %(date)s"
-
-msgid "If paid before the deadline(s) above"
-msgstr "Bij betaling voor de bovenstaande deadline(s)"
-
-msgid ""
-"This is what's owed once the club confirms this -- payment happens "
-"separately, not on this page."
-msgstr ""
-"Dit is wat verschuldigd is zodra de club dit bevestigt -- de betaling "
-"gebeurt apart, niet op deze pagina."
-
-msgid "Send registration"
-msgstr "Inschrijving versturen"
-
-msgid "See the price"
-msgstr "Prijs bekijken"
-
-msgid "Some items are no longer available. Remove them to place your order."
-msgstr ""
-"Sommige items zijn niet meer beschikbaar. Verwijder ze om je bestelling te "
-"plaatsen."
-
-msgid ""
-"Some prices have changed since you added them to your cart. The total below "
-"is up to date."
-msgstr ""
-"Sommige prijzen zijn gewijzigd sinds je ze aan je winkelmandje toevoegde. "
-"Het totaal hieronder is up-to-date."
-
-msgid "No longer available"
-msgstr "Niet meer beschikbaar"
-
-#, python-format
-msgid "For %(name)s &middot; "
-msgstr "Voor %(name)s &middot; "
-
-#, python-format
-msgid "&euro; %(amount)s each"
-msgstr "&euro; %(amount)s per stuk"
-
-#, python-format
-msgid "Discount applied: %(name)s"
-msgstr "Korting toegepast: %(name)s"
-
-msgid "Pay when you pick it up -- no online payment."
-msgstr "Betaal bij het afhalen -- geen online betaling."
-
-msgid "Your cart is empty."
-msgstr "Je winkelmandje is leeg."
-
-msgid "My orders"
-msgstr "Mijn bestellingen"
-
-msgid "Cart"
-msgstr "Winkelmandje"
-
-msgid "No photo"
-msgstr "Geen foto"
-
-msgid "Nothing in the shop yet."
-msgstr "Nog niets in de shop."
-
-msgid "Pickup instructions"
-msgstr "Afhaalinstructies"
-
-#, python-format
-msgid "%(qty)sx"
-msgstr "%(qty)sx"
-
-#, python-format
-msgid "%(name)s &middot; %(date)s"
-msgstr "%(name)s &middot; %(date)s"
-
-msgid "No orders yet."
-msgstr "Nog geen bestellingen."
-
-msgid "For"
-msgstr "Voor"
-
-msgid "Number (optional)"
-msgstr "Nummer (optioneel)"
-
-msgid "e.g. 7"
-msgstr "bv. 7"
-
-msgid "Name (optional)"
-msgstr "Naam (optioneel)"
-
-msgid "e.g. on the back"
-msgstr "bv. op de rug"
-
-msgid "Quantity"
-msgstr "Aantal"
-
-msgid "Add to cart"
-msgstr "Toevoegen aan winkelmandje"
-
-msgid "Teams"
-msgstr "Teams"
-
-msgid "This field is required."
-msgstr "Dit veld is verplicht."
-
-msgid "This form is closed."
-msgstr "Dit formulier is gesloten."
-
-#, python-format
-msgid "For %(name)s"
-msgstr "Voor %(name)s"
-
-msgid "Please complete the highlighted fields."
-msgstr "Vul de gemarkeerde velden in."
-
-msgid "To do"
-msgstr "Te doen"
-
-msgid "Done and closed"
-msgstr "Afgerond en gesloten"
-
-msgid "No forms"
-msgstr "Geen formulieren"
-
-msgid "Nothing to fill in right now."
-msgstr "Er is momenteel niets in te vullen."
-
-msgid "Live game updates"
-msgstr "Live wedstrijdupdates"
-
-msgid ""
-"Get a push notification while a team is playing: goals, penalties, period "
-"ends and the final result. Pick the teams you want to follow."
-msgstr ""
-"Ontvang een pushmelding terwijl een team speelt: doelpunten, strafworpen, "
-"einde van periodes en de eindstand. Kies de teams die je wilt volgen."
-
-msgid "This club has no teams yet."
-msgstr "Deze club heeft nog geen teams."
-
-msgid "Individual games"
-msgstr "Individuele wedstrijden"
-
-msgid "Unfollow"
-msgstr "Ontvolgen"
-
-msgid ""
-"Notifications arrive on this device only once you've allowed notifications "
-"for the app."
-msgstr ""
-"Meldingen komen pas op dit toestel aan nadat je meldingen voor de app hebt "
-"toegestaan."
-
-msgid "Team staff"
-msgstr "Stafleden"
-
-msgid "Payments & dues"
-msgstr "Betalingen en bijdragen"
-
-msgid "Security"
-msgstr "Beveiliging"
-
-msgid "Sign out"
-msgstr "Afmelden"
-
-msgid "Check back later for club updates."
-msgstr "Kom later terug voor clubnieuws."
 
 msgid "Applies to"
 msgstr "Geldt voor"
@@ -2602,46 +2391,102 @@ msgstr ""
 "E-mails met een bijlage, zoals een factuur, worden altijd verstuurd. Dit "
 "geldt voor elke club waartoe je behoort."
 
-msgid "More"
-msgstr "Meer"
+msgid "Mark all read"
+msgstr "Alles als gelezen markeren"
 
-msgid "Clear all notifications?"
-msgstr "Alle meldingen wissen?"
-
-msgid "This permanently deletes every notification."
-msgstr "Dit verwijdert alle meldingen definitief."
-
-msgid "You're offline"
-msgstr "Je bent offline"
+msgid "Clear all"
+msgstr "Alles wissen"
 
 msgid ""
-"RosterChief needs a connection to show up-to-date club information. Check "
-"your connection and try again."
+"Once you're linked to a member record, their notifications will show up here."
 msgstr ""
-"RosterChief heeft een verbinding nodig om actuele clubinformatie te tonen. "
-"Controleer je verbinding en probeer opnieuw."
+"Zodra je aan een ledenrecord gekoppeld bent, verschijnen hier hun meldingen."
+
+msgid "Enable push notifications"
+msgstr "Pushmeldingen inschakelen"
+
+msgid "Get notified on this device as soon as something new comes in."
+msgstr "Word op dit toestel verwittigd zodra er iets nieuws is."
 
 msgid ""
-"Registration is open for more than one season. Pick the one this is for."
-msgstr "Inschrijven is open voor meer dan één seizoen. Kies voor welk dit is."
+"Couldn't turn on notifications -- check this browser's notification "
+"permission for the site, then try again."
+msgstr ""
+"Kon meldingen niet inschakelen -- controleer de meldingsmachtiging van deze "
+"browser voor de site en probeer opnieuw."
 
-msgid "Registrations"
-msgstr "Inschrijvingen"
+msgid "Enable"
+msgstr "Inschakelen"
+
+msgid "How to pay"
+msgstr "Hoe betalen"
+
+msgid "Nothing to pay"
+msgstr "Niets te betalen"
+
+msgid "You have no open payments."
+msgstr "Je hebt geen openstaande betalingen."
+
+msgid "Not open yet"
+msgstr "Nog niet open"
+
+msgid "Registration isn't open right now -- check back soon."
+msgstr "Inschrijven is momenteel niet open -- kom binnenkort terug."
+
+msgid "Which season?"
+msgstr "Welk seizoen?"
+
+msgid ""
+"Registration is currently open for more than one season -- pick which one "
+"this is for."
+msgstr ""
+"Inschrijven is momenteel open voor meer dan één seizoen -- kies voor welk "
+"dit is."
 
 #, python-format
-msgid "&minus;&euro; %(amount)s family discount"
-msgstr "&minus;&euro; %(amount)s gezinskorting"
+msgid "Season %(start)s-%(end)s"
+msgstr "Seizoen %(start)s-%(end)s"
+
+msgid "Continue"
+msgstr "Doorgaan"
 
 #, python-format
-msgid "&euro; %(amount)s if you pay early"
-msgstr "&euro; %(amount)s als je vroeg betaalt"
+msgid "Registering for Season %(start)s-%(end)s"
+msgstr "Inschrijven voor seizoen %(start)s-%(end)s"
 
 msgid ""
-"The club reviews your registration and then sends the invoice. You'll find "
-"it under Payments & dues."
+"Add a registration for each person and role. You'll see the price before you "
+"send it."
 msgstr ""
-"De club bekijkt je inschrijving en stuurt daarna de factuur. Je vindt ze "
-"onder Betalingen en lidgeld."
+"Voeg een inschrijving toe per persoon en rol. Je ziet de prijs voor je "
+"verstuurt."
+
+msgid "Price"
+msgstr "Prijs"
+
+#, python-format
+msgid "Jersey number (%(team)s)"
+msgstr "Rugnummer (%(team)s)"
+
+#, python-format
+msgid "€%(amount)s off if paid by %(date)s"
+msgstr "€%(amount)s korting bij betaling voor %(date)s"
+
+msgid "If paid before the deadline(s) above"
+msgstr "Bij betaling voor de bovenstaande deadline(s)"
+
+msgid ""
+"This is what's owed once the club confirms this -- payment happens "
+"separately, not on this page."
+msgstr ""
+"Dit is wat verschuldigd is zodra de club dit bevestigt -- de betaling "
+"gebeurt apart, niet op deze pagina."
+
+msgid "Send registration"
+msgstr "Inschrijving versturen"
+
+msgid "See the price"
+msgstr "Prijs bekijken"
 
 msgid "Passkeys"
 msgstr "Passkeys"
@@ -2688,6 +2533,170 @@ msgstr ""
 
 msgid "Manage two-factor authentication"
 msgstr "Tweestapsverificatie beheren"
+
+msgid "Back to the shop"
+msgstr "Terug naar de winkel"
+
+msgid "Some items are no longer available. Remove them to place your order."
+msgstr ""
+"Sommige items zijn niet meer beschikbaar. Verwijder ze om je bestelling te "
+"plaatsen."
+
+msgid ""
+"Some prices have changed since you added them to your cart. The total below "
+"is up to date."
+msgstr ""
+"Sommige prijzen zijn gewijzigd sinds je ze aan je winkelmandje toevoegde. "
+"Het totaal hieronder is up-to-date."
+
+msgid "No longer available"
+msgstr "Niet meer beschikbaar"
+
+#, python-format
+msgid "For %(name)s &middot; "
+msgstr "Voor %(name)s &middot; "
+
+#, python-format
+msgid "&euro; %(amount)s each"
+msgstr "&euro; %(amount)s per stuk"
+
+#, python-format
+msgid "Discount applied: %(name)s"
+msgstr "Korting toegepast: %(name)s"
+
+msgid "Pay when you pick it up -- no online payment."
+msgstr "Betaal bij het afhalen -- geen online betaling."
+
+msgid "Your cart is empty."
+msgstr "Je winkelmandje is leeg."
+
+msgid "My orders"
+msgstr "Mijn bestellingen"
+
+msgid "Cart"
+msgstr "Winkelmandje"
+
+msgid "No photo"
+msgstr "Geen foto"
+
+msgid "Nothing in the shop yet."
+msgstr "Nog niets in de shop."
+
+msgid "Back to my orders"
+msgstr "Terug naar mijn bestellingen"
+
+msgid "Pickup instructions"
+msgstr "Afhaalinstructies"
+
+#, python-format
+msgid "%(qty)sx"
+msgstr "%(qty)sx"
+
+#, python-format
+msgid "%(name)s &middot; %(date)s"
+msgstr "%(name)s &middot; %(date)s"
+
+msgid "No orders yet."
+msgstr "Nog geen bestellingen."
+
+msgid "For"
+msgstr "Voor"
+
+msgid "Number (optional)"
+msgstr "Nummer (optioneel)"
+
+msgid "e.g. 7"
+msgstr "bv. 7"
+
+msgid "Name (optional)"
+msgstr "Naam (optioneel)"
+
+msgid "e.g. on the back"
+msgstr "bv. op de rug"
+
+msgid "Quantity"
+msgstr "Aantal"
+
+msgid "Add to cart"
+msgstr "Toevoegen aan winkelmandje"
+
+msgid "This field is required."
+msgstr "Dit veld is verplicht."
+
+msgid "This form is closed."
+msgstr "Dit formulier is gesloten."
+
+#, python-format
+msgid "For %(name)s"
+msgstr "Voor %(name)s"
+
+msgid "Please complete the highlighted fields."
+msgstr "Vul de gemarkeerde velden in."
+
+msgid "To do"
+msgstr "Te doen"
+
+msgid "Done and closed"
+msgstr "Afgerond en gesloten"
+
+msgid "No forms"
+msgstr "Geen formulieren"
+
+msgid "Nothing to fill in right now."
+msgstr "Er is momenteel niets in te vullen."
+
+msgid "Team staff"
+msgstr "Stafleden"
+
+msgid "Payments & dues"
+msgstr "Betalingen en bijdragen"
+
+msgid "Sign out"
+msgstr "Afmelden"
+
+msgid "Check back later for club updates."
+msgstr "Kom later terug voor clubnieuws."
+
+msgid "More"
+msgstr "Meer"
+
+msgid "Clear all notifications?"
+msgstr "Alle meldingen wissen?"
+
+msgid "This permanently deletes every notification."
+msgstr "Dit verwijdert alle meldingen definitief."
+
+msgid "You're offline"
+msgstr "Je bent offline"
+
+msgid ""
+"RosterChief needs a connection to show up-to-date club information. Check "
+"your connection and try again."
+msgstr ""
+"RosterChief heeft een verbinding nodig om actuele clubinformatie te tonen. "
+"Controleer je verbinding en probeer opnieuw."
+
+msgid ""
+"Registration is open for more than one season. Pick the one this is for."
+msgstr "Inschrijven is open voor meer dan één seizoen. Kies voor welk dit is."
+
+msgid "Registrations"
+msgstr "Inschrijvingen"
+
+#, python-format
+msgid "&minus;&euro; %(amount)s family discount"
+msgstr "&minus;&euro; %(amount)s gezinskorting"
+
+#, python-format
+msgid "&euro; %(amount)s if you pay early"
+msgstr "&euro; %(amount)s als je vroeg betaalt"
+
+msgid ""
+"The club reviews your registration and then sends the invoice. You'll find "
+"it under Payments & dues."
+msgstr ""
+"De club bekijkt je inschrijving en stuurt daarna de factuur. Je vindt ze "
+"onder Betalingen en lidgeld."
 
 msgid "The shop is closed"
 msgstr "De shop is gesloten"

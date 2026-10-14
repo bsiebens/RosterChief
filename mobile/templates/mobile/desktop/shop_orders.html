@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to the shop" as back_label %}{% url "mobile:shop_home" as shop_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=shop_url label=back_label width="max-w-[760px]" %}
     <div class="mx-auto w-full max-w-[760px]">
         {% if rows %}
             <div class="card">

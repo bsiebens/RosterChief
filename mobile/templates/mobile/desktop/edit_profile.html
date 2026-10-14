@@ -28,7 +28,7 @@
                     {% for error in form.profile_photo.errors %}<p class="mt-1 text-xs text-club-dark">{{ error }}</p>{% endfor %}
                 </div>
             </div>
-            <p class="px-4.5 pt-3.5 text-[13px] text-muted">{% trans "This picture is shown to everyone in the club's apps. The official player picture is set by the club." %}</p>
+            <p class="px-4.5 pt-3.5 pb-4.5 text-[13px] text-muted">{% trans "This picture is shown to everyone in the club's apps. The official player picture is set by the club." %}</p>
             {% if show_photo_consent %}
                 <label class="flex items-center gap-2.5 p-4.5 text-[15px] text-ink">
                     {{ form.photo_public_consent }}

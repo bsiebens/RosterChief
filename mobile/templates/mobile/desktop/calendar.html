@@ -2,7 +2,7 @@
 {% load i18n lucide %}
 
 {% comment %}
-    The Calendar on desktop: the redesigned screen's rows (mobile/_calendar_row.html -- one per event, with inline In / Out per person and role, blocked / referee / official rows included) and month grid (_calendar_month.html), in iOS's readable-width (720) column. The filter menu, person-scope menu and List / Month switch sit in a toolbar on the page rather than on a navy header; all three are plain links / a GET form like on the phone. Event links open the event sheet (a centred modal here).
+    The Calendar on desktop: the redesigned screen's rows (mobile/_calendar_row.html -- one per event, with inline In / Out per person and role, blocked / referee / official rows included) and month grid (_calendar_month.html), as the iPad-style split: the month grid (sticky, left) beside the agenda or the selected day's events (right). The filter menu and person-scope menu sit in a toolbar on the page rather than on a navy header; all three are plain links / a GET form like on the phone. Event links open the event sheet (a centred modal here).
 {% endcomment %}
 
 {% block header_extra %}
@@ -52,78 +52,17 @@
             </div>
         </details>
     {% endif %}
-    <div class="header-seg">
-        <a href="{{ list_url }}" aria-label="{% trans "List" %}" {% if view_mode == "list" %}aria-current="true"{% endif %}>{% lucide "list" size=15 stroke_width=2.6 %}</a>
-        <a href="{{ month_url }}" aria-label="{% trans "Month" %}" {% if view_mode == "month" %}aria-current="true"{% endif %}>{% lucide "calendar" size=15 stroke_width=2.6 %}</a>
-    </div>
 {% endblock header_extra %}
 
 {% block content %}
-    <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4" {% if scroll_today %}data-scroll-today{% endif %}>
-        {% if not managed_people %}
-            <div class="m-card p-6 text-center">
-                <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
-                <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
-            </div>
-        {% elif view_mode == "month" %}
-            <div class="m-card overflow-hidden p-4">
-                {% include "mobile/_calendar_month.html" %}
-            </div>
-        {% elif not has_groups %}
-            {% if earlier_url %}
-                <a class="block text-center text-[13px] font-semibold text-club-dark dark:text-club" href="{{ earlier_url }}">{% trans "Show earlier events" %}</a>
-            {% endif %}
-            {% trans "Nothing scheduled" as empty_title %}
-            {% if kind_filter == "game" %}
-                {% trans "No games scheduled." as empty_text %}
-            {% elif kind_filter == "training" %}
-                {% trans "No practices scheduled." as empty_text %}
-            {% else %}
-                {% trans "Nothing on the calendar right now." as empty_text %}
-            {% endif %}
-            {% include "mobile/_state.html" with kind="empty" icon="calendar" title=empty_title text=empty_text %}
-        {% else %}
-            {% if earlier_url %}
-                <a class="block text-center text-[13px] font-semibold text-club-dark dark:text-club" href="{{ earlier_url }}">{% trans "Show earlier events" %}</a>
-            {% endif %}
-
-            {% for month in earlier_months %}
-                <section>
-                    <div class="px-0.5 pb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
-                    <div class="m-card flex flex-col gap-px overflow-hidden bg-line">
-                        {% for group in month.items %}{% include "mobile/_calendar_row.html" %}{% endfor %}
-                    </div>
-                </section>
-            {% endfor %}
-
-            {% if this_week %}
-                <section>
-                    <div class="px-0.5 pb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "This week" %}</div>
-                    <div class="m-card flex flex-col gap-px overflow-hidden bg-line">
-                        {% for group in this_week %}{% include "mobile/_calendar_row.html" %}{% endfor %}
-                    </div>
-                </section>
-            {% endif %}
-
-            {% if next_week %}
-                <section>
-                    <div class="px-0.5 pb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Next week" %}</div>
-                    <div class="m-card flex flex-col gap-px overflow-hidden bg-line">
-                        {% for group in next_week %}{% include "mobile/_calendar_row.html" %}{% endfor %}
-                    </div>
-                </section>
-            {% endif %}
-
-            {% for month in later_months %}
-                <section>
-                    <div class="px-0.5 pb-2 font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ month.month_start|date:"F Y" }}</div>
-                    <div class="m-card flex flex-col gap-px overflow-hidden bg-line">
-                        {% for group in month.items %}{% include "mobile/_calendar_row.html" %}{% endfor %}
-                    </div>
-                </section>
-            {% endfor %}
-        {% endif %}
-    </div>
+    {% if not managed_people %}
+        <div class="m-card mx-auto max-w-[720px] p-6 text-center">
+            <p class="font-display text-lg font-extrabold text-ink uppercase">{% trans "No one to show yet" %}</p>
+            <p class="mt-1 text-sm text-muted">{% trans "Once you're linked to a member record, their schedule will show up here." %}</p>
+        </div>
+    {% else %}
+        {% include "mobile/desktop/_calendar_split.html" %}
+    {% endif %}
 
     {% include "mobile/_event_sheet_shell.html" %}
 {% endblock content %}

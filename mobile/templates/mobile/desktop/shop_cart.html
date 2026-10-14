@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to the shop" as back_label %}{% url "mobile:shop_home" as shop_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=shop_url label=back_label %}
     {% if items %}
         {% if has_unavailable %}
             <p class="mx-auto mb-4 w-full max-w-[900px] text-sm font-medium text-club-dark">{% trans "Some items are no longer available. Remove them to place your order." %}</p>

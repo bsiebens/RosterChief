@@ -2,10 +2,10 @@ from django.utils.translation import gettext_lazy as _
 from django.views.generic import TemplateView
 
 from .club_switch import club_picker_rows
-from .mixins import MemberAppMixin
+from .mixins import PersonScopeMixin
 
 
-class ClubPickerView(MemberAppMixin, TemplateView):
+class ClubPickerView(PersonScopeMixin, TemplateView):
     """ "Choose Your Club" -- every club the account is tied to (iOS ClubPicker). Gated like
     the rest of the member app, so it only opens on a club the account belongs to."""
 

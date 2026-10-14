@@ -123,10 +123,9 @@ class DesktopScreenTests(MemberScreenFixture, TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, DESKTOP_SHELL)
-        self.assertContains(response, "max-w-[720px]")
+        self.assertContains(response, 'id="cal-split"')
         self.assertContains(response, "answer-btn-line")
         self.assertContains(response, 'id="event-sheet"')
-        self.assertContains(response, "header-seg")
 
     def test_calendar_empty_and_month_render(self):
         empty = self.get_desktop(reverse("mobile:calendar"))
@@ -135,7 +134,7 @@ class DesktopScreenTests(MemberScreenFixture, TestCase):
 
         month = self.get_desktop(reverse("mobile:calendar") + "?view=month")
         self.assertEqual(month.status_code, 200)
-        self.assertContains(month, 'id="month-pane"')
+        self.assertContains(month, 'id="cal-grid"')
         self.assertContains(month, "month-cell")
 
     def test_remaining_desktop_screens_still_render(self):

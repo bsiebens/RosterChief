@@ -105,12 +105,22 @@
                         {% if open_dues_count %}<span class="pill pill-sm pill-danger shrink-0">{% blocktrans count counter=open_dues_count %}{{ counter }} OPEN{% plural %}{{ counter }} OPEN{% endblocktrans %}</span>{% endif %}
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
-                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:notifications" %}">
+                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:notification_settings" %}">
                         <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Notifications" %}</span>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
+                    {% if live_game_updates_enabled %}
+                        <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:live_game_updates" %}">
+                            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Live game updates" %}</span>
+                            {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                        </a>
+                    {% endif %}
                     <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:calendar_feed_settings" %}">
                         <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Calendar sync" %}</span>
+                        {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+                    </a>
+                    <a class="flex items-center gap-3 border-b border-rule px-4.5 py-3" href="{% url "mobile:security" %}">
+                        <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "Security" %}</span>
                         {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
                     </a>
                     {% if has_multiple_clubs %}

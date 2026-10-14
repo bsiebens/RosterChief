@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to the shop" as back_label %}{% url "mobile:shop_home" as shop_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=shop_url label=back_label %}
     <div class="mx-auto grid w-full max-w-[900px] grid-cols-1 gap-8 md:grid-cols-2">
         <div class="card overflow-hidden">
             {% if product.image %}

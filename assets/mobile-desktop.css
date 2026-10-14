@@ -792,6 +792,36 @@
         border: 2px solid #fff;
     }
 
+    /* Shop header buttons and back buttons: one outline pill, theme-aware (bg-surface, not #fff). */
+    .shop-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        height: 2.25rem;
+        padding-inline: 0.875rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-stroke);
+        background: var(--color-surface);
+        color: var(--color-ink);
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.8125rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        position: relative;
+    }
+
+    .shop-btn:hover {
+        background: var(--color-subhead);
+    }
+
+    .shop-btn .desktop-notidot {
+        top: -6px;
+        right: -6px;
+        border-color: var(--color-surface);
+    }
+
     /* Nav (sidebar) -- copied verbatim from management.css. */
     .nav-item {
         display: flex;

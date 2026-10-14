@@ -2,6 +2,8 @@
 {% load i18n lucide %}
 
 {% block content %}
+    {% trans "Back to my orders" as back_label %}{% url "mobile:shop_orders" as orders_url %}
+    {% include "mobile/desktop/_shop_back.html" with href=orders_url label=back_label width="max-w-[680px]" %}
     <div class="mx-auto flex w-full max-w-[680px] flex-col gap-4">
         <div class="card flex items-center justify-between p-4.5">
             <div>
