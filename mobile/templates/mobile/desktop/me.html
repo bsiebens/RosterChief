@@ -10,7 +10,7 @@
     {% else %}
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
             <div class="flex flex-col gap-4">
-                <div class="card flex items-center gap-4 bg-gradient-to-br from-ink to-navy p-6 text-white">
+                <div class="card flex items-center gap-4 bg-gradient-to-br from-night to-navy p-6 text-white">
                     {% include "mobile/_avatar.html" with person=me size_class="h-14 w-14" text_class="text-xl" bg_class="bg-club" content_class="text-club-content" %}
                     <div class="min-w-0">
                         <div class="font-display text-xl font-extrabold uppercase">{{ me.get_full_name }}</div>
@@ -47,7 +47,7 @@
                 </div>
 
                 {% if staff_assignments %}
-                    <div class="card bg-ink text-white">
+                    <div class="card bg-night text-white">
                         <div class="border-b px-4.5 py-3.5" style="border-color: var(--color-hairline)"><span class="card-title text-white">{% trans "Teams I coach/manage" %}</span></div>
                         {% for assignment in staff_assignments %}
                             <a class="flex items-center gap-3 border-b px-4.5 py-3 last:border-b-0" style="border-color: var(--color-hairline)" href="{% url "management:home" %}" hx-boost="false">

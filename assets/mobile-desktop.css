@@ -30,6 +30,9 @@
     --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
     --color-ink: #0b1220;
+    --color-night: #0b1220;
+    --color-surface: #ffffff;
+    --color-emphasis: #0b1220;
     --color-navy: #101e36;
     --color-steel: #1b2b47;
     --color-hairline: #1e2b42;
@@ -92,6 +95,45 @@
     --color-referee: #7c5cfc;
 
     --radius-box: 0.75rem; /* matches management's rounded-xl cards, not mobile's 14px */
+}
+
+/* Dark mode: follows the system, like the iOS app's Color(light:dark:) tokens. Only the
+   tokens that differ are redefined; utilities read them through var(--color-*). */
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --color-ink: #f1f4f9;
+        --color-surface: #151d2c;
+        --color-emphasis: #33496f;
+        --color-paper: #0b1018;
+        --color-line: #222c3c;
+        --color-rule: #1c2535;
+        --color-edge: #2e3a4f;
+        --color-stroke: #3a475c;
+        --color-muted: #8e9aad;
+        --color-dim: #76839a;
+        --color-slate: #b4bece;
+        --color-subhead: #111826;
+        --color-row-sel: #1c1a24;
+        --color-row-focus: #121c2c;
+        --color-row-warn: #1d1b14;
+
+        --color-ok-bg: #10291d;
+        --color-ok-border: #1d4a33;
+        --color-ok-text: #5fd49a;
+        --color-warn-bg: #2d2310;
+        --color-warn-border: #4d3b17;
+        --color-warn-text: #f3b655;
+        --color-warn-deep: #f3b655;
+        --color-danger-bg: #2d1519;
+        --color-danger-border: #5a2a31;
+        --color-info-bg: #0f2630;
+        --color-info-border: #1d4556;
+        --color-info-text: #6cd0f0;
+        --color-referee-bg: #231c3f;
+        --color-referee-border: #3d3070;
+        --color-referee-text: #b6a2ff;
+    }
 }
 
 /* --- fonts: identical set to management.css/mobile.css, same self-hosted files. --- */

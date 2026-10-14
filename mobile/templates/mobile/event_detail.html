@@ -201,7 +201,7 @@
                                         <input type="hidden" name="status" value="dropout">
                                         <input type="hidden" name="next" value="event_detail">
                                         <label class="mb-1 block text-xs font-semibold text-muted">{% trans "Let the coach know why -- they'll be notified right away" %}</label>
-                                        <textarea class="h-16 w-full rounded-lg border border-stroke bg-white p-2 text-sm text-ink" name="note" x-model="reason" placeholder="{% trans "e.g. sick, injured, running late..." %}"></textarea>
+                                        <textarea class="h-16 w-full rounded-lg border border-stroke bg-surface p-2 text-sm text-ink" name="note" x-model="reason" placeholder="{% trans "e.g. sick, injured, running late..." %}"></textarea>
                                         <div class="mt-2 grid grid-cols-2 gap-2">
                                             <button type="button" class="btn btn-secondary h-9 text-xs" @click="asking = false">{% trans "Cancel" %}</button>
                                             <button type="submit" class="btn btn-dark h-9 text-xs">{% trans "Send" %}</button>

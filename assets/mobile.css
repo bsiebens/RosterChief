@@ -30,7 +30,10 @@
     --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
-    --color-ink: #0b1220;
+    --color-ink: #0b1220; /* text colour; flips in dark mode */
+    --color-night: #0b1220; /* fixed dark surface (coach shell, dark buttons) */
+    --color-surface: #ffffff; /* cards, tab bar, inputs */
+    --color-emphasis: #0b1220;
     --color-navy: var(--tenant-navy, #101e36);
     --color-steel: #1b2b47;
     --color-hairline: #1e2b42;
@@ -76,7 +79,7 @@
     /* Referee sign-up accent -- deliberately distinct from game/training/other's
        club-red/info-blue/warn-amber (mobile/_calendar_row.html) so a "needs a
        referee" row stands out from the member's own RSVP rows at a glance. */
-    --color-referee: #7c4dff;
+    --color-referee: #7c5cfc;
     --color-referee-bg: #f1ecff;
     --color-referee-border: #d9caff;
     --color-referee-text: #5b2fd6;
@@ -86,7 +89,48 @@
     --color-row-warn: #fffdf6;
     --color-subhead: #f8f9fa;
 
+    --color-official: #0d9488;
+
     --radius-box: 0.875rem; /* 14px -- mobile card radius, see the file banner */
+}
+
+/* Dark mode: follows the system, like the iOS app's Color(light:dark:) tokens. Only the
+   tokens that differ are redefined; utilities read them through var(--color-*). */
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --color-ink: #f1f4f9;
+        --color-surface: #151d2c;
+        --color-emphasis: #33496f;
+        --color-paper: #0b1018;
+        --color-line: #222c3c;
+        --color-rule: #1c2535;
+        --color-edge: #2e3a4f;
+        --color-stroke: #3a475c;
+        --color-muted: #8e9aad;
+        --color-dim: #76839a;
+        --color-slate: #b4bece;
+        --color-subhead: #111826;
+        --color-row-sel: #1c1a24;
+        --color-row-focus: #121c2c;
+        --color-row-warn: #1d1b14;
+
+        --color-ok-bg: #10291d;
+        --color-ok-border: #1d4a33;
+        --color-ok-text: #5fd49a;
+        --color-warn-bg: #2d2310;
+        --color-warn-border: #4d3b17;
+        --color-warn-text: #f3b655;
+        --color-warn-deep: #f3b655;
+        --color-danger-bg: #2d1519;
+        --color-danger-border: #5a2a31;
+        --color-info-bg: #0f2630;
+        --color-info-border: #1d4556;
+        --color-info-text: #6cd0f0;
+        --color-referee-bg: #231c3f;
+        --color-referee-border: #3d3070;
+        --color-referee-text: #b6a2ff;
+    }
 }
 
 /* --- fonts: identical set to management.css/controlpanel.css, same self-hosted files. --- */
@@ -274,7 +318,7 @@
     }
 
     .role-switcher-item-active {
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
     }
 
@@ -290,7 +334,7 @@
        the doc's fixed 26px, which was standing in for it. */
     .tab-bar {
         flex-shrink: 0;
-        background: #fff;
+        background: var(--color-surface);
         border-top: 1px solid var(--color-line);
         padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
         display: flex;
@@ -357,7 +401,7 @@
     }
 
     .btn-dark {
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
     }
 
@@ -367,7 +411,7 @@
     }
 
     .btn-secondary {
-        background: #fff;
+        background: var(--color-surface);
         border: 1.5px solid var(--color-stroke);
         color: var(--color-ink);
     }
@@ -444,7 +488,7 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        background: #fff;
+        background: var(--color-surface);
         border: 1.5px solid var(--color-line);
         border-radius: 999px;
         padding: 4px 10px 4px 4px;
@@ -495,13 +539,13 @@
     /* --- Cards ---------------------------------------------------------------------- */
 
     .m-card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid var(--color-line);
         border-radius: var(--radius-box);
     }
 
     .m-card-dark {
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         border-radius: var(--radius-box);
     }
@@ -542,7 +586,7 @@
         margin-right: 0.75rem;
         border: none;
         border-radius: 0.375rem;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         font-family: var(--font-display);
         font-weight: 800;
@@ -573,7 +617,7 @@
 
     .coach-header {
         padding: max(env(safe-area-inset-top), 14px) 16px 22px;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         flex-shrink: 0;
     }
@@ -587,7 +631,7 @@
     .coach-tab-bar {
         flex-shrink: 0;
         position: relative; /* anchors the "+" action's popup menu */
-        background: var(--color-ink);
+        background: var(--color-night);
         border-top: 1px solid var(--color-hairline);
         padding: 8px 8px max(env(safe-area-inset-bottom), 26px);
         display: flex;
@@ -844,7 +888,7 @@
         font-size: 0.8125rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        background: var(--color-ink);
+        background: var(--color-night);
         color: #fff;
         border: 1px solid transparent;
         cursor: pointer;
@@ -921,7 +965,7 @@
     }
 
     .card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid var(--color-line);
         border-radius: var(--radius-box);
     }
@@ -949,7 +993,7 @@
         padding: 0.875rem 1rem;
         border-radius: var(--radius-box);
         border: 1px solid var(--color-line);
-        background: #fff;
+        background: var(--color-surface);
         font-size: 0.875rem;
     }
 
@@ -995,7 +1039,7 @@
         width: 100%;
         border: 1px solid var(--color-edge);
         border-radius: 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
         color: var(--color-ink);
         font-family: var(--font-sans);
         font-size: 0.9375rem;
@@ -1070,7 +1114,7 @@
     }
 
     .bg-base-100 {
-        background: #fff;
+        background: var(--color-surface);
     }
 
     /* static/js/searchable-select.js's dropdown -- the script is shared with
@@ -1135,7 +1179,7 @@
         height: 3rem;
         border: 1px solid var(--color-edge);
         border-radius: 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
         font-family: var(--font-mono);
         font-size: 1.25rem;
         color: var(--color-ink);

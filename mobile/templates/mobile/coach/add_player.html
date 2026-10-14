@@ -23,13 +23,13 @@
     </form>
 
     <div class="flex gap-2">
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?{% if search_query %}q={{ search_query|urlencode }}{% endif %}">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if not filter_param %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?{% if search_query %}q={{ search_query|urlencode }}{% endif %}">
             {% trans "All" %}
         </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "suggested" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=suggested{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "suggested" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?filter=suggested{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
             {% trans "Suggested" %}
         </a>
-        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "no_team" %}bg-ink text-white{% else %}border border-line bg-white text-muted{% endif %}" href="?filter=no_team{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
+        <a class="flex h-9 flex-1 items-center justify-center rounded-full font-display text-xs font-extrabold tracking-wide uppercase {% if filter_param == "no_team" %}bg-night text-white{% else %}border border-line bg-surface text-muted{% endif %}" href="?filter=no_team{% if search_query %}&q={{ search_query|urlencode }}{% endif %}">
             {% trans "No team" %}
         </a>
     </div>

@@ -21,7 +21,7 @@
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
             <div class="flex flex-col gap-4">
                 {% if hero_attendance %}
-                    <div class="card overflow-hidden bg-gradient-to-br from-ink to-navy p-6 text-white" {% if club.event_background %}style="background-image: linear-gradient(rgba(11,18,32,.75), rgba(16,30,54,.85)), url('{{ club.event_background.url }}'); background-size: cover; background-position: center;"{% endif %}>
+                    <div class="card overflow-hidden bg-gradient-to-br from-night to-navy p-6 text-white" {% if club.event_background %}style="background-image: linear-gradient(rgba(11,18,32,.75), rgba(16,30,54,.85)), url('{{ club.event_background.url }}'); background-size: cover; background-position: center;"{% endif %}>
                         <div class="font-mono text-xs tracking-wide text-on-dark uppercase">{% blocktrans with date=hero_attendance.event.start|date:"D d M" %}Next up &middot; {{ date }}{% endblocktrans %}</div>
                         <div class="mt-1 font-display text-2xl font-extrabold uppercase">{{ hero_attendance.event.title }}</div>
                         <div class="mt-2 flex flex-wrap gap-4 text-sm text-on-dark">

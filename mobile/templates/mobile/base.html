@@ -17,7 +17,7 @@
     navigation (swapping <body>'s children, pushing the URL) instead of a
     full browser reload -- the SPA-like feel without an SPA. Only <body>'s
     *children* swap, not the tag itself, so anything that crosses into the
-    differently-styled Coach shell (coach/base.html: bg-ink vs this page's
+    differently-styled Coach shell (coach/base.html: bg-night vs this page's
     bg-paper, its own hx-headers/data attrs) is marked hx-boost="false" to
     force a real navigation instead -- a boosted cross-shell swap would leave
     the OLD shell's <body> class/attributes in place under the NEW shell's
@@ -38,6 +38,7 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
         <meta name="theme-color" content="{{ club.primary_color|default:"#101e36" }}">
+        <meta name="color-scheme" content="light dark">
         <meta name="apple-mobile-web-app-capable" content="yes">
         {# Solid, not black-translucent: iOS 26 blurs whatever is drawn under a translucent status bar, which smeared the header crest/title. #}
         <meta name="apple-mobile-web-app-status-bar-style" content="black">
