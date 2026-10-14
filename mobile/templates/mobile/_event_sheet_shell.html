@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load i18n lucide %}
 {% comment %}
     The bottom sheet an event opens in over Home and the Calendar (iOS: the EventReplySheet). Closed it is invisible and costs nothing; static/js/mobile-sheet.js opens it on any tap on an event link, fetches the event's own fragment (``?sheet=1``, mobile/_event_sheet.html) into #event-sheet-content and, once a sheet has been used to answer something, refreshes the screen underneath when it closes. Without JavaScript the same links are plain links to the full event page.
 {% endcomment %}
@@ -6,6 +6,7 @@
     <div class="sticky top-0 z-30 -mx-4 -mb-6 flex h-6 items-center justify-center" data-sheet-handle>
         <span class="block h-[5px] w-9 rounded-full bg-white/60"></span>
     </div>
+    <div class="sheet-close-wrap" style="--sheet-close-bg: rgba(0, 0, 0, 0.45); --sheet-close-fg: #fff"><button type="button" class="sheet-close pressable" data-sheet-close aria-label="{% trans "Close" %}"><span>{% lucide "x" size=18 stroke_width=2.6 %}</span></button></div>
     <div id="event-sheet-content"></div>
     <template id="event-sheet-loading">
         <div class="flex h-64 items-center justify-center" role="status" aria-label="{% trans "Loading" %}">

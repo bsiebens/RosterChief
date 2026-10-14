@@ -1442,6 +1442,36 @@
         animation: rc-fade 0.2s ease;
     }
 
+    /* Close button for a bottom sheet: sticky at the top right, takes no layout space. */
+    .sheet-close-wrap {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        display: flex;
+        justify-content: flex-end;
+        height: 0;
+    }
+
+    .sheet-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: 2px 4px 0 0;
+    }
+
+    .sheet-close > span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: var(--sheet-close-bg, var(--color-rule));
+        color: var(--sheet-close-fg, var(--color-ink));
+    }
+
     .sheet-handle {
         width: 36px;
         height: 5px;
@@ -1468,6 +1498,15 @@
     :focus-visible {
         outline: 2px solid var(--color-club-dark);
         outline-offset: 2px;
+    }
+
+    /* Inside a clipped card (overflow-hidden) an outset ring is cut off on three sides; draw it inside. */
+    .m-card :focus-visible {
+        outline-offset: -2px;
+    }
+
+    dialog.sheet:focus {
+        outline: none;
     }
 
     .app-header :focus-visible,

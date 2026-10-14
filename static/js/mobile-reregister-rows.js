@@ -14,6 +14,8 @@
         // A server-rendered <dialog open> is non-modal -- reopen it as a modal.
         if (dialog.open && !dialog.matches(":modal")) dialog.close();
         if (!dialog.open) dialog.showModal();
+        dialog.setAttribute("tabindex", "-1");
+        dialog.focus({ preventScroll: true });
     };
 
     if (dialog.hasAttribute("data-autoopen")) openModal();

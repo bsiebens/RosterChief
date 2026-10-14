@@ -3,11 +3,6 @@
     <section aria-labelledby="squad-players">
         <div class="mb-2 flex items-center justify-between">
             <h2 id="squad-players" class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Players" %} <span class="ml-1 text-sm text-dim tabular-nums">{{ roster|length }}</span></h2>
-            {% if can_manage_active_team %}
-                <a class="flex min-h-11 items-center gap-1 font-display text-xs font-extrabold tracking-wide text-club-dark uppercase" href="{% url "mobile:coach_add_player" %}">
-                    {% lucide "user-plus" size=14 %} {% trans "Add" %}
-                </a>
-            {% endif %}
         </div>
         <div class="m-card overflow-hidden">
             {% for membership in roster %}

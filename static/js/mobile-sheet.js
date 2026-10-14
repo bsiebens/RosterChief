@@ -49,6 +49,9 @@
         if (!dialog || typeof dialog.showModal !== "function") return false;
         dialog.dataset.dirty = "";
         if (!dialog.open) dialog.showModal();
+        // Start on the sheet itself, not its first link (an auto-focused row drew a stray focus outline).
+        dialog.setAttribute("tabindex", "-1");
+        dialog.focus({ preventScroll: true });
         loadSheet(url);
         return true;
     }

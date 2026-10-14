@@ -12,6 +12,15 @@
 {% block main_attrs %}data-refreshable{% endblock main_attrs %}
 
 {% block content %}
+    <div class="-mt-1 flex min-h-8 items-center justify-between">
+        <h1 class="font-display text-[26px] leading-none font-extrabold tracking-wide text-ink uppercase">{% trans "Squad" %}</h1>
+        {% if active_team and can_manage_active_team %}
+            <a class="icon-btn pressable flex h-11 w-11 items-center justify-center text-club-dark" href="{% url "mobile:coach_add_player" %}" aria-label="{% trans "Add a player" %}">
+                {% lucide "circle-plus" size=32 %}
+            </a>
+        {% endif %}
+    </div>
+
     {% if not active_team %}
         {% include "mobile/_state.html" with kind="empty" icon="users" title=_("Not staffing a team yet") %}
     {% else %}

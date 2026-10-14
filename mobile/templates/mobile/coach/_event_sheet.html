@@ -7,6 +7,7 @@
     in swapped content.
 {% endcomment %}
 <dialog class="sheet sheet-large" id="event-sheet" aria-label="{{ event.title }}">
+    <div class="sheet-close-wrap"><button type="button" class="sheet-close pressable" onclick="this.closest('dialog').close()" aria-label="{% trans "Close" %}"><span>{% lucide "x" size=18 stroke_width=2.6 %}</span></button></div>
     <div class="sheet-handle" id="event-sheet-handle"></div>
     <div class="flex flex-col gap-4 pb-4">
         {% include "mobile/coach/_event_body.html" %}
@@ -28,5 +29,7 @@
             startY = null;
         }, { passive: true });
         sheet.showModal();
+        sheet.setAttribute("tabindex", "-1");
+        sheet.focus({ preventScroll: true });
     })();
 </script>
