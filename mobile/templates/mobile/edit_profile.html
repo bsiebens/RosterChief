@@ -44,10 +44,14 @@
                     </div>
                 </div>
                 <div class="h-px bg-rule"></div>
-                <label class="flex items-center gap-2.5 p-3.5 text-[15px] text-ink">
-                    {{ form.photo_public_consent }}
-                    {{ form.photo_public_consent.label }}
-                </label>
+                <p class="p-3.5 text-[13px] text-muted">{% trans "This picture is shown to everyone in the club's apps. The official player picture is set by the club." %}</p>
+                {% if show_photo_consent %}
+                    <div class="h-px bg-rule"></div>
+                    <label class="flex items-center gap-2.5 p-3.5 text-[15px] text-ink">
+                        {{ form.photo_public_consent }}
+                        {{ form.photo_public_consent.label }}
+                    </label>
+                {% endif %}
             </div>
         </div>
 

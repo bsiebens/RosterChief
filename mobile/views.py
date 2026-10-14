@@ -1557,6 +1557,7 @@ class EditProfileView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             team_rows=team_rows,
             saved=self.request.GET.get("saved") == "1",
             has_profile_photo=bool(member.profile_photo),
+            show_photo_consent=bool(member.player_photo) or member.photo_public_consent,
             guardian_rows=guardian_rows,
             open_requirement_names=open_requirement_names,
             open_requirement_summary=", ".join(open_requirement_names),
