@@ -2,7 +2,7 @@
 
 ``evaluate()`` runs from the ``check_push_health`` job every few minutes. It computes the problems
 that exist *now* (a provider down or degraded over the last hour, a stuck retry queue, a provider
-that has devices but no credentials, a backed-up outbox) and reconciles them with ``PushAlert``
+that had credentials and lost them, a backed-up outbox) and reconciles them with ``PushAlert``
 rows: a new problem opens an alert and mails the platform admins, a still-open one is repeated at
 most every ``REMINDER_INTERVAL``, a worse one (degraded -> down) is mailed at once, and one that is
 gone is resolved with a "recovered" mail. The mail goes out through email, never push: push is the
@@ -22,7 +22,7 @@ from django.utils.translation import gettext as _
 from rosterchief.mail import send_message
 
 from . import monitoring
-from .models import OutboxEntry, PushAlert
+from .models import OutboxEntry, ProviderConfigState, PushAlert
 
 REMINDER_INTERVAL = timedelta(hours=6)
 HEALTH_WINDOW = timedelta(hours=1)
@@ -67,23 +67,42 @@ def _queue_problems(now) -> list[Problem]:
     return [Problem("retry_queue", CRITICAL, _("The push retry queue is stuck"), details)]
 
 
+_CONFIG_PROVIDERS = (("apns", "apns"), ("fcm", "fcm"), ("webpush", "vapid"))
+
+
+def track_configuration(config=None, now=None) -> None:
+    """Remember which providers have credentials, and when one that did loses them. A provider that has never
+    been configured stays quiet; only the configured -> not configured switch is an incident, and it lasts
+    until the credentials are back."""
+    config = config or monitoring.configuration()
+    now = now or timezone.now()
+    for provider, config_key in _CONFIG_PROVIDERS:
+        configured = bool(config[config_key])
+        state, created = ProviderConfigState.objects.get_or_create(provider=provider, defaults={"configured": configured, "changed_at": now})
+        if created:
+            continue
+        if configured and (not state.configured or state.lost_at):
+            state.configured, state.lost_at, state.changed_at = True, None, now
+            state.save(update_fields=["configured", "lost_at", "changed_at"])
+        elif not configured and state.configured:
+            state.configured, state.lost_at, state.changed_at = False, now, now
+            state.save(update_fields=["configured", "lost_at", "changed_at"])
+
+
 def _config_problems() -> list[Problem]:
-    config = monitoring.configuration()
     problems = []
-    for key, label, mismatch in (
-        ("apns", monitoring.PROVIDER_LABELS["apns"], _device_mismatch(config, "ios")),
-        ("fcm", monitoring.PROVIDER_LABELS["fcm"], _device_mismatch(config, "android")),
-        ("webpush", monitoring.PROVIDER_LABELS["webpush"], config["web_mismatch"]),
-    ):
-        if mismatch:
-            problems.append(
-                Problem(
-                    f"config:{key}",
-                    WARNING,
-                    _("%(provider)s is not configured but devices are registered for it") % {"provider": label},
-                    [_("Notifications to those devices cannot be delivered until the credentials are set on the server.")],
-                )
+    for state in ProviderConfigState.objects.filter(lost_at__isnull=False):
+        label = monitoring.PROVIDER_LABELS.get(state.provider, state.provider)
+        problems.append(
+            Problem(
+                f"config:{state.provider}",
+                WARNING,
+                _("%(provider)s is no longer configured") % {"provider": label},
+                [
+                    _("Its credentials were set before and are gone since %(when)s, so notifications through it cannot be delivered. Restore them on the server.") % {"when": timezone.localtime(state.lost_at).strftime("%d/%m %H:%M")},
+                ],
             )
+        )
     return problems
 
 
@@ -161,6 +180,7 @@ def evaluate(now=None) -> dict:
 
     now = now or timezone.now()
     sandbox.expire_if_due(now)  # a sandbox period that ran out is recorded and ends here
+    track_configuration(now=now)
     problems = {problem.key: problem for problem in current_problems(now)}
     open_alerts = {alert.key: alert for alert in PushAlert.objects.filter(resolved_at__isnull=True)}
     counts = {"opened": 0, "reminded": 0, "escalated": 0, "resolved": 0}

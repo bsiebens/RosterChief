@@ -26,7 +26,8 @@
                 <input type="search" name="q" value="{{ search }}" placeholder="{% trans 'Name, email, licence no.' %}" class="input w-56 pl-9" data-autosubmit>
             </div>
             <select name="status" class="select w-auto" onchange="this.form.submit()">
-                <option value="">{% trans "Any status" %}</option>
+                <option value="all" {% if selected_status == "all" %}selected{% endif %}>{% trans "Any status" %}</option>
+                <option value="" {% if not selected_status %}selected{% endif %}>{% trans "Active & pending" %}</option>
                 {% for value, label in status_choices %}
                     <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label|capfirst }}</option>
                 {% endfor %}
