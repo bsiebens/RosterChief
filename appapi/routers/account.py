@@ -92,13 +92,32 @@ def _preferences_out(user) -> dict:
     for club in services.clubs_for(user):
         effective = preferences.matrix(user, club)
         people = [
-            {"member_id": person.pk, "name": str(person), "is_self": person.pk == getattr(me, "pk", None), "overrides": preferences.overrides(user, club, person), "effective": preferences.matrix(user, club, person)}
+            {
+                "member_id": person.pk,
+                "name": str(person),
+                "is_self": person.pk == getattr(me, "pk", None),
+                "overrides": preferences.overrides(user, club, person),
+                "effective": preferences.matrix(user, club, person),
+                "master": preferences.master_matrix(user, club, person),
+                "master_overrides": preferences.master_overrides(user, club, person),
+            }
             for person in managed_people(me, club)
         ]
-        clubs.append({"club_slug": club.slug, "club_name": club.name, "overrides": preferences.overrides(user, club), "effective": effective, "people": people})
+        clubs.append(
+            {
+                "club_slug": club.slug,
+                "club_name": club.name,
+                "overrides": preferences.overrides(user, club),
+                "effective": effective,
+                "master": preferences.master_matrix(user, club),
+                "master_overrides": preferences.master_overrides(user, club),
+                "people": people,
+            }
+        )
     return {
         "categories": [{"key": value, "label": str(label), "description": str(descriptions[value]), "android_channel_id": channels[value]["id"], "android_importance": channels[value]["importance"]} for value, label in NotificationCategory.choices],
         "defaults": preferences.matrix(user),
+        "master_defaults": preferences.master_matrix(user),
         "clubs": clubs,
     }
 
@@ -148,6 +167,10 @@ def update_notification_preferences(request, payload: NotificationPreferencesIn)
     if unknown:
         raise ApiError(422, "validation_error", fields={"changes": [_("Unknown category: %(category)s.") % {"category": ", ".join(unknown)}]})
     with transaction.atomic():
+        if payload.master_push is not None:
+            preferences.set_master(request.user, club, NotificationPreference.Channel.PUSH, payload.master_push, member=person)
+        if payload.master_email is not None:
+            preferences.set_master(request.user, club, NotificationPreference.Channel.EMAIL, payload.master_email, member=person)
         for change in payload.changes:
             if change.push is not None:
                 preferences.set_preference(request.user, club, change.category, NotificationPreference.Channel.PUSH, change.push, member=person)

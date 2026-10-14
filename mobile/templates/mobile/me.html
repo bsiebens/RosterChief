@@ -156,6 +156,13 @@
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
             </a>
             <div class="h-px bg-rule"></div>
+            {% if has_multiple_clubs %}
+            <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:club_picker" %}">
+                <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Switch club" %}</span>
+                {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}
+            </a>
+            <div class="h-px bg-rule"></div>
+            {% endif %}
             <a class="pressable flex items-center gap-3 p-3.5" href="{% url "mobile:bug_list" %}">
                 <span class="flex-1 text-[15px] font-medium text-ink">{% trans "Report a bug" %}</span>
                 {% lucide "chevron-right" size=18 class="shrink-0 text-dim" %}

@@ -30,9 +30,11 @@
     {% endif %}
 
     {% if managed_people %}
+        {% include "mobile/_followed_games.html" with slot="live" %}
         {% for card in member_cards %}
             {% include "mobile/_home_card.html" %}
         {% endfor %}
+        {% include "mobile/_followed_games.html" with slot="rest" %}
 
         {% if open_tasks %}
             <div class="m-card p-4">
@@ -172,7 +174,7 @@
             {% endif %}
         </div>
 
-        {% if not member_cards and not needs_answer_view and not open_tasks and not dues_rows and not forms_to_complete and not news_items %}
+        {% if not followed_live and not followed_rest and not member_cards and not needs_answer_view and not open_tasks and not dues_rows and not forms_to_complete and not news_items %}
             {% trans "All Caught Up" as caught_up_title %}
             {% trans "Nothing needs your attention right now." as caught_up_text %}
             {% include "mobile/_state.html" with kind="empty" icon="circle-check" title=caught_up_title text=caught_up_text %}

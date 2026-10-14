@@ -70,6 +70,8 @@ class NotificationPersonPreferencesOut(Schema):
     is_self: bool = Field(description="The account holder; otherwise a child the account is a parent or guardian of in this club.")
     overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches set for this person in this club (for notifications about them).")
     effective: dict[str, dict[str, bool]] = Field(description="What applies for this person: the club's effective switches with the person's overrides on top.")
+    master: dict[str, bool] | None = Field(None, description="The \"All push\" / \"All emails\" master switches that apply for this person, `{push, email}`. When one is false nothing is sent on that channel, whatever `effective` says.")
+    master_overrides: dict[str, bool] | None = Field(None, description="Only the master switches set for exactly this person, `{push?, email?}`.")
 
 
 class NotificationClubPreferencesOut(Schema):
@@ -77,6 +79,8 @@ class NotificationClubPreferencesOut(Schema):
     club_name: str
     overrides: dict[str, NotificationOverridesOut] = Field(description="Only the switches this club overrides, `{category: {push?, email?}}`. Everything else is inherited from `defaults`.")
     effective: dict[str, dict[str, bool]] = Field(description="What applies in this club: the defaults with the overrides on top, `{category: {push, email}}`.")
+    master: dict[str, bool] | None = Field(None, description="The \"All push\" / \"All emails\" master switches that apply in this club, `{push, email}`. When one is false nothing is sent on that channel, whatever `effective` says.")
+    master_overrides: dict[str, bool] | None = Field(None, description="Only the master switches set for exactly this club, `{push?, email?}`.")
     people: list[NotificationPersonPreferencesOut] = Field(description="The people this account manages in this club (itself and its children), each with their own switches.")
 
 
@@ -84,6 +88,7 @@ class NotificationPreferencesOut(Schema):
     categories: list[NotificationCategoryOut]
     defaults: dict[str, dict[str, bool]] = Field(description="The all-clubs switches, `{category: {push, email}}`. No stored row means on. The in-app inbox is never switchable.")
     clubs: list[NotificationClubPreferencesOut]
+    master_defaults: dict[str, bool] | None = Field(None, description="The all-clubs \"All push\" / \"All emails\" master switches, `{push, email}`. No stored row means on; off silences that channel entirely, whatever the per-category switches say.")
 
 
 class NotificationChangeIn(Schema):
@@ -95,7 +100,9 @@ class NotificationChangeIn(Schema):
 class NotificationPreferencesIn(Schema):
     club_slug: str | None = Field(None, description="`null`: the all-clubs defaults. A club slug: an override for just that club.")
     member_id: uuid.UUID | None = Field(None, description="With `club_slug`: a switch for notifications about just this person (one of `people` of that club). 422 for anyone else, or without `club_slug`.")
-    changes: list[NotificationChangeIn]
+    changes: list[NotificationChangeIn] = Field(default_factory=list)
+    master_push: bool | None = Field(None, description="Set the \"All push\" master for this scope. Off: no push at all in this scope, whatever the categories say. Omit to leave it as it is.")
+    master_email: bool | None = Field(None, description="Set the \"All emails\" master for this scope. Off: no email at all (attachments such as invoices excepted), whatever the categories say. Omit to leave it as it is.")
 
 
 class QuietHoursOut(Schema):

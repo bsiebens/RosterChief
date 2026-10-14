@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import coach_evaluation_views, coach_views, views
+from . import club_picker_views, coach_evaluation_views, coach_views, views
 
 app_name = "mobile"
 
@@ -19,9 +19,13 @@ urlpatterns = [
     path("official-signups/<uuid:signup_id>/respond/", views.OfficialSignupRespondView.as_view(), name="official_signup_respond"),
     path("event-tasks/<uuid:task_id>/respond/", views.EventTaskRespondView.as_view(), name="event_task_respond"),
     path("events/<uuid:pk>/", views.EventDetailView.as_view(), name="event_detail"),
+    path("events/<uuid:pk>/follow/", views.GameFollowView.as_view(), name="game_follow"),
+    path("events/<uuid:pk>/timeline/", views.GameTimelineView.as_view(), name="game_timeline"),
+    path("home/followed-games/", views.FollowedGamesView.as_view(), name="followed_games"),
     path("news/", views.NewsListView.as_view(), name="news_list"),
     path("news/<slug:slug>/", views.NewsDetailView.as_view(), name="news_detail"),
     path("me/", views.MeView.as_view(), name="me"),
+    path("me/clubs/", club_picker_views.ClubPickerView.as_view(), name="club_picker"),
     path("me/forms/", views.FormsListView.as_view(), name="forms_list"),
     path("me/payments/", views.PaymentsView.as_view(), name="payments"),
     path("me/dues-invoices/<uuid:pk>/pdf/", views.DuesInvoicePdfView.as_view(), name="dues_invoice_pdf"),

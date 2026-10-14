@@ -6,6 +6,7 @@ routes here yet.
 
 import datetime
 import json
+import uuid
 from collections import defaultdict
 from decimal import Decimal
 
@@ -48,7 +49,7 @@ from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeS
 from events.services.agenda import KIND_FILTERS as AGENDA_KIND_FILTERS
 from events.services.agenda import member_agenda
 from events.services.calendar import agenda_groups
-from events.services.game_push import followed_team_ids, set_followed_teams
+from events.services.game_push import follow_event, followed_team_ids, set_followed_teams, unfollow_event
 from events.services.member_view import member_event_view
 from events.services.officials import OfficialAssignmentError, accept_official_signup, decline_official_signup
 from events.services.referees import RefereeAssignmentError, accept_referee_signup, decline_referee_signup
@@ -85,10 +86,11 @@ from shop.services.inventory import annotate_availability, annotate_cart_variant
 from shop.services.invoices import ShopInvoicePDFError, render_invoice_pdf
 from teams.models import StaffAssignment, Team, TeamMembership
 
+from .club_switch import has_multiple_clubs
 from .forms import _INPUT_CLASSES, _TEXTAREA_CLASSES, MemberProfileForm, style_dynamic_form
 from .mixins import DesktopTemplateMixin, MemberAppMixin, PersonScopeMixin, ShopScopeMixin, shop_enabled
 from .models import CalendarFeedToken, PushSubscription
-from .services import event_ui
+from .services import event_ui, game_ui
 from .services.calendar_feed import build_feed
 from .services.home import home_summary
 from .services.icons import ICON_SIZES, get_fallback_icon
@@ -282,9 +284,18 @@ class LiveGameUpdatesView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         following = followed_team_ids(self.request.user, self.request.club)
         teams = Team.objects.filter(club=self.request.club).order_by("name")
         kwargs.setdefault("team_rows", [{"team": team, "following": team.pk in following} for team in teams])
+        kwargs.setdefault("followed_games", game_ui.directly_followed_games(self.request.user, self.request.club))
         return super().get_context_data(**kwargs)
 
     def post(self, request, *args, **kwargs):
+        # One followed game's "Stop following" (iOS: Following > Individual games > Unfollow).
+        unfollow_id = request.POST.get("unfollow_game")
+        if unfollow_id:
+            event = Event.objects.filter(pk=unfollow_id, club=request.club, kind=Event.EventKind.GAME).first() if _is_uuid(unfollow_id) else None
+            if event is not None:
+                unfollow_event(request.user, request.club, event)
+                notify(request, f"s|{_('Saved')}|{_('You no longer follow this game.')}")
+            return redirect("mobile:live_game_updates")
         set_followed_teams(request.user, request.club, request.POST.getlist("team"))
         notify(request, f"s|{_('Saved')}|{_('Your live game updates have been updated.')}")
         return redirect("mobile:live_game_updates")
@@ -340,6 +351,8 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         kwargs.setdefault("choices", User.EmailNotifications.choices)
         kwargs.setdefault("current", self.request.user.email_notifications)
         kwargs["category_rows"] = [{"key": key, "label": label, "push": effective[key]["push"], "email": effective[key]["email"], "overridden": key in overridden} for key, label in NotificationCategory.choices]
+        kwargs["master"] = notification_preferences.master_matrix(self.request.user, club, person)
+        kwargs["customised"] = bool(overridden) or bool(notification_preferences.master_overrides(self.request.user, club, person))
         kwargs["selected_person"] = person
         kwargs["children"] = self.managed_people[1:]
         hours = quiet_hours.get(self.request.user)
@@ -354,6 +367,8 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
             return self._save_categories(request)
         if "reset_category" in request.POST:
             return self._reset_category(request)
+        if "reset_all" in request.POST:
+            return self._reset_all(request)
         if "quiet_hours" in request.POST:
             return self._save_quiet_hours(request)
         value = request.POST.get("email_notifications")
@@ -368,8 +383,18 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         """Writes rows only where a switch differs from what already applies here (for the chosen person)."""
         person = self._notification_person(request)
         effective = notification_preferences.matrix(request.user, request.club, person)
+        masters = notification_preferences.master_matrix(request.user, request.club, person)
+        for channel in NotificationPreference.Channel.values:
+            if "master_switches" not in request.POST:  # older forms never send the masters: leave them alone
+                break
+            wanted_master = f"master__{channel}" in request.POST
+            if wanted_master != masters[channel]:
+                notification_preferences.set_master(request.user, request.club, channel, wanted_master, member=person)
+                masters[channel] = wanted_master
         for category in NotificationCategory.values:
             for channel in NotificationPreference.Channel.values:
+                if not masters[channel]:  # the category boxes of a channel switched off as a whole are disabled: nothing to read from them
+                    continue
                 wanted = f"{channel}__{category}" in request.POST
                 if wanted != effective[category][channel]:
                     notification_preferences.set_preference(request.user, request.club, category, channel, wanted, member=person)
@@ -386,6 +411,12 @@ class NotificationSettingsView(PersonScopeMixin, LoginRequiredMixin, TemplateVie
         person = self._notification_person(request)
         notification_preferences.reset(request.user, request.club, category, member=person)
         notify(request, f"s|{_('Saved')}|{_('This category follows your default again.')}")
+        return redirect(self._redirect_url(person))
+
+    def _reset_all(self, request):
+        person = self._notification_person(request)
+        notification_preferences.reset(request.user, request.club, None, member=person)
+        notify(request, f"s|{_('Saved')}|{_('All switches follow your default again.')}")
         return redirect(self._redirect_url(person))
 
     def _save_quiet_hours(self, request):
@@ -454,7 +485,28 @@ def _event_context(view, event, *, in_sheet=False, error=None) -> dict:
         "maps_url": event_ui.maps_url(event.location, request.META.get("HTTP_USER_AGENT", "")),
         "in_sheet": in_sheet,
         "sheet_error": error,
+        **_game_context(request, event),
     }
+
+
+def _is_uuid(value) -> bool:
+    try:
+        uuid.UUID(str(value))
+    except ValueError:
+        return False
+    return True
+
+
+def _game_context(request, event) -> dict:
+    """The follow toggle and the timeline card of a game (club has the ``game_timeline`` flag)."""
+    if event.kind != Event.EventKind.GAME:
+        return {}
+    if not flag_is_active(request, "game_timeline"):
+        return {}
+    context = {"game_tl": game_ui.timeline_context(event)}
+    if game_ui.is_followable(event):
+        context["game_follow"] = game_ui.follow_context(request.user, request.club, event)
+    return context
 
 
 def render_event_sheet(view, event, error=None):
@@ -494,6 +546,11 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     screen_title = _("Home")
     active_tab = "home"
 
+    def _followed_context(self):
+        """Followed games (iOS FollowedGameCard): live ones above the cards, the rest below."""
+        games = game_ui.home_followed_games(self.request.user, self.request.club, flag_is_active(self.request, "game_timeline"))
+        return {"followed_live": [game for game in games if game["status"] == "live"], "followed_rest": [game for game in games if game["status"] != "live"]}
+
     def get_context_data(self, **kwargs):
         # The cards themselves (and their caps) are mobile.services.home, shared with the
         # app API's GET /home.
@@ -524,6 +581,7 @@ class HomeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             # (see club.services.sponsors.active_sponsors) rather than once per
             # session, same as the public-website sponsor strip it shares logic with.
             sponsors=active_sponsors(self.request.club, randomize=True),
+            **self._followed_context(),
             **kwargs,
         )
 
@@ -917,6 +975,53 @@ class EventDetailView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
         return HttpResponseRedirect(_return_url(request, reverse("mobile:home")))
 
 
+class GameFollowView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Follow / stop following one game (the app API's PUT / DELETE /events/{id}/follow, through
+    the same events.services.game_push). Answers with the toggle fragment for htmx; a game followed
+    through a followed team stays followed (unfollow the team on Me > Live game updates)."""
+
+    def post(self, request, *args, **kwargs):
+        if not flag_is_active(request, "game_timeline"):
+            raise Http404("Game timelines aren't available for this club.")
+        event = get_object_or_404(Event.objects.prefetch_related("teams"), pk=kwargs["pk"], club=request.club)
+        if event.kind != Event.EventKind.GAME:
+            return HttpResponseBadRequest(_("Only games can be followed."))
+        if request.POST.get("follow") == "1":
+            follow_event(request.user, request.club, event)
+        else:
+            unfollow_event(request.user, request.club, event)
+        if not request.headers.get("HX-Request"):
+            return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": event.pk}))
+        response = render(request, "mobile/_game_follow.html", {"follow": game_ui.follow_context(request.user, request.club, event), "in_sheet": request.POST.get("surface") == "sheet"})
+        add_never_cache_headers(response)
+        return response
+
+
+class GameTimelineView(PersonScopeMixin, LoginRequiredMixin, View):
+    """The game timeline card as a fragment -- what a live game's card re-fetches every 15 s."""
+
+    def get(self, request, *args, **kwargs):
+        if not flag_is_active(request, "game_timeline"):
+            raise Http404("Game timelines aren't available for this club.")
+        event = get_object_or_404(Event.objects.select_related("location", "opponent").prefetch_related("teams"), pk=kwargs["pk"], club=request.club, kind=Event.EventKind.GAME)
+        response = render(request, "mobile/_game_timeline.html", {"tl": game_ui.timeline_context(event)})
+        add_never_cache_headers(response)
+        return response
+
+
+class FollowedGamesView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Home's followed-game cards as out-of-band fragments (live slot + the rest), polled while any is live."""
+
+    def get(self, request, *args, **kwargs):
+        if not flag_is_active(request, "game_timeline"):
+            raise Http404("Game timelines aren't available for this club.")
+        games = game_ui.home_followed_games(request.user, request.club, True)
+        context = {"followed_live": [game for game in games if game["status"] == "live"], "followed_rest": [game for game in games if game["status"] != "live"], "slot": "both", "oob": True}
+        response = render(request, "mobile/_followed_games.html", context)
+        add_never_cache_headers(response)
+        return response
+
+
 class NewsListView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
     """ "All news" -- what Home's own news card links to once there's more than
     NEWS_LIMIT items to show. Unlike Home's own teaser (team-relevant items
@@ -1095,6 +1200,7 @@ class MeView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
             vouchers=vouchers,
             open_forms_count=open_forms_count,
             registration_open=registration_open,
+            has_multiple_clubs=has_multiple_clubs(self.request),
             available_languages=[get_language_info(code) for code, _name in settings.LANGUAGES],
             **kwargs,
         )
@@ -1613,7 +1719,7 @@ class ReRegisterView(PersonScopeMixin, LoginRequiredMixin, TemplateView):
 
     @staticmethod
     def _label_kept_jersey_numbers(priced_rows, current_numbers):
-        """"Keep #7" for the number the person already wears in the chosen team, "#8" for the rest."""
+        """ "Keep #7" for the number the person already wears in the chosen team, "#8" for the rest."""
         for form, entry, _price in priced_rows:
             member = entry.existing_member
             team = entry.requested_team

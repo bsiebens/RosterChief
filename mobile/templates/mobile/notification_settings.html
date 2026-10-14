@@ -38,10 +38,24 @@
     {% endif %}
     <p class="text-sm text-muted">{% trans "Choose per kind of notification whether it reaches you as a push message (app and browser) and by email. The inbox in the app always shows everything." %}</p>
 
-    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line overflow-hidden">
+    <form method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false" class="m-card divide-y divide-line overflow-hidden" x-data="{ push: {{ master.push|yesno:"true,false" }}, email: {{ master.email|yesno:"true,false" }} }">
         {% csrf_token %}
         <input type="hidden" name="category_switches" value="1">
+        <input type="hidden" name="master_switches" value="1">
         {% if selected_person %}<input type="hidden" name="person" value="{{ selected_person.pk }}">{% endif %}
+        <div class="flex items-center gap-2 p-3.5">
+            <span class="flex-1 text-xs font-semibold text-dim uppercase">{% trans "All channels" %}</span>
+            {% if customised %}<span class="rounded-full bg-line px-2 py-0.5 text-xs font-semibold text-ink">{% trans "Customised" %}</span>{% endif %}
+        </div>
+        <label class="flex items-center gap-3 p-3.5">
+            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "All push" %}</span>
+            <input type="checkbox" name="master__push" class="h-5 w-5 accent-ink" x-model="push" {% if master.push %}checked{% endif %}>
+        </label>
+        <label class="flex items-center gap-3 p-3.5">
+            <span class="flex-1 text-[15px] font-semibold text-ink">{% trans "All emails" %}</span>
+            <input type="checkbox" name="master__email" class="h-5 w-5 accent-ink" x-model="email" {% if master.email %}checked{% endif %}>
+        </label>
+        <p class="p-3.5 text-xs text-dim">{% trans "Switching one of these off stops everything on that channel, whatever the switches below say." %}</p>
         <table class="w-full text-left">
             <thead>
                 <tr class="text-xs font-semibold text-dim uppercase">
@@ -62,14 +76,14 @@
                             {% endif %}
                         </th>
                         <td class="p-2 text-center">
-                            <label class="inline-flex h-11 w-11 items-center justify-center">
-                                <input type="checkbox" name="push__{{ row.key }}" class="h-5 w-5 accent-ink" {% if row.push %}checked{% endif %}>
+                            <label class="inline-flex h-11 w-11 items-center justify-center" :class="push || 'opacity-40'">
+                                <input type="checkbox" name="push__{{ row.key }}" class="h-5 w-5 accent-ink" :disabled="!push" {% if row.push %}checked{% endif %}>
                                 <span class="sr-only">{% blocktrans with name=row.label %}Push: {{ name }}{% endblocktrans %}</span>
                             </label>
                         </td>
                         <td class="p-2 text-center">
-                            <label class="inline-flex h-11 w-11 items-center justify-center">
-                                <input type="checkbox" name="email__{{ row.key }}" class="h-5 w-5 accent-ink" {% if row.email %}checked{% endif %}>
+                            <label class="inline-flex h-11 w-11 items-center justify-center" :class="email || 'opacity-40'">
+                                <input type="checkbox" name="email__{{ row.key }}" class="h-5 w-5 accent-ink" :disabled="!email" {% if row.email %}checked{% endif %}>
                                 <span class="sr-only">{% blocktrans with name=row.label %}Email: {{ name }}{% endblocktrans %}</span>
                             </label>
                         </td>
@@ -77,10 +91,18 @@
                 {% endfor %}
             </tbody>
         </table>
-        <div class="p-3.5">
+        <div class="flex items-center gap-3 p-3.5">
             <button class="btn-rc btn-rc-primary" type="submit">{% trans "Save" %}</button>
+            {% if customised %}<button type="submit" form="reset-all" class="text-sm font-semibold text-ink underline">{% trans "Reset all" %}</button>{% endif %}
         </div>
     </form>
+    {% if customised %}
+        <form id="reset-all" method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false">
+            {% csrf_token %}
+            <input type="hidden" name="reset_all" value="1">
+            {% if selected_person %}<input type="hidden" name="person" value="{{ selected_person.pk }}">{% endif %}
+        </form>
+    {% endif %}
     {% for row in category_rows %}
         {% if row.overridden %}
             <form id="reset-{{ row.key }}" method="post" action="{% url "mobile:notification_settings" %}" hx-boost="false">

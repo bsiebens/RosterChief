@@ -34,5 +34,24 @@
         {% endif %}
     </form>
 
+    {% if followed_games %}
+        <h2 class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Individual games" %}</h2>
+        <div class="m-card divide-y divide-line">
+            {% for game in followed_games %}
+                <div class="flex items-center gap-3 p-3.5">
+                    <a class="min-w-0 flex-1" href="{% url "mobile:event_detail" game.pk %}">
+                        <span class="block truncate text-[15px] font-semibold text-ink">{{ game.title }}</span>
+                        <span class="block truncate text-[13px] text-muted">{{ game.start|date:"D d M, H:i" }}</span>
+                    </a>
+                    <form method="post" action="{% url "mobile:live_game_updates" %}" hx-boost="false">
+                        {% csrf_token %}
+                        <input type="hidden" name="unfollow_game" value="{{ game.pk }}">
+                        <button class="answer-btn answer-btn-line" type="submit">{% trans "Unfollow" %}</button>
+                    </form>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
     <p class="text-xs text-dim">{% trans "Notifications arrive on this device only once you've allowed notifications for the app." %}</p>
 {% endblock content %}

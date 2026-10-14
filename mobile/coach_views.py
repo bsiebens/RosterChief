@@ -5,14 +5,13 @@ club/season plumbing already factored into club.services.access -- see
 mobile/coach_mixins.py's CoachScopeMixin for the shared scaffolding.
 """
 
-
 from urllib.parse import urlsplit
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Q
-from django.http import Http404, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
@@ -25,6 +24,8 @@ from django.views.generic import TemplateView, View
 from waffle import flag_is_active
 
 from appapi import coach_events as api_coach_events
+from appapi.errors import ApiError
+from appapi.idempotency import idempotent
 from club.models import ClubMembership, Season
 from club.services.access import can_add_news, can_manage_evaluations, current_season, get_current_season
 from controlpanel.messages import notify
@@ -227,6 +228,32 @@ def is_inline_request(request):
     return request.headers.get("HX-Request") == "true" and request.headers.get("HX-Boosted") != "true"
 
 
+def run_once(request, work):
+    """Run ``work()`` -> ``(status, payload)`` at most once per ``Idempotency-Key``
+    header (appapi.idempotency, the same store the native apps use). The PWA's
+    offline queue (static/js/mobile-offline-queue.js) generates a key per action and
+    keeps it across retries, so a replay after a lost response returns the stored
+    payload instead of applying (or notifying) twice.
+
+    ``payload`` is a small JSON-able dict (toast, status_text, ...) -- never the
+    rendered HTML and never the private coach note; the caller re-renders the
+    *current* state from it. Non-2xx statuses release the key (retry allowed).
+    Returns ``(status, payload)``; ``payload`` is None for a key-level problem
+    (409 still in progress / 422 key reused), which the caller answers bare."""
+    try:
+        return idempotent(request, work)
+    except ApiError as error:
+        return error.status, None
+
+
+def tag_result(response, status):
+    """Mark an inline response whose action was refused (validation etc.), so the offline queue
+    can tell "saved" from "answered with an error toast" -- both are HTTP 200 for htmx to swap."""
+    if status >= 300:
+        response["X-Offline-Result"] = "error"
+    return response
+
+
 def _answer_for_status(status):
     """The three-way answer (+ reset) a stored Attendance.status reads as to a
     coach: selected counts as In, not-selected/excused as Out."""
@@ -286,7 +313,16 @@ class CoachAttendanceView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
     def dispatch(self, request, *args, **kwargs):
         response = super().dispatch(request, *args, **kwargs)
         patch_cache_control(response, no_store=True, private=True)
+        if request.method == "GET" and response.status_code == 200 and not is_inline_request(request) and self.page_is_free_of_private_notes(kwargs.get("event_id")):
+            # Opt-in for the service worker's read-only offline copy (mobile/templates/mobile/sw.js):
+            # only a page that carries no private coach note may be stored on the device.
+            response["X-Offline-Cache"] = "1"
         return response
+
+    def page_is_free_of_private_notes(self, event_id):
+        if event_id is None or self.active_team is None:
+            return False
+        return not Attendance.objects.filter(event_id=event_id, event__club=self.request.club).exclude(Q(coach_note__isnull=True) | Q(coach_note="")).exists()
 
     def get_event(self):
         if self.active_team is None:
@@ -389,10 +425,18 @@ class CoachAttendanceCheckInView(CoachAttendanceView):
         if wanted not in ("true", "false"):
             return HttpResponseBadRequest()
         wanted_value = wanted == "true"
-        with transaction.atomic():
-            attendance = get_object_or_404(Attendance.objects.select_for_update(), pk=kwargs["attendance_id"], event=event)
-            record_check_in(attendance, showed_up=None if attendance.showed_up == wanted_value else wanted_value)
-        return self.finish(request, status_text=_("Saved"))
+
+        def work():
+            with transaction.atomic():
+                attendance = get_object_or_404(Attendance.objects.select_for_update(), pk=kwargs["attendance_id"], event=event)
+                record_check_in(attendance, showed_up=None if attendance.showed_up == wanted_value else wanted_value)
+            return 200, {"status_text": str(_("Saved"))}
+
+        # Idempotency-Key replays must not flip the toggle back (the value above is a toggle when it matches).
+        status, payload = run_once(request, work)
+        if payload is None:
+            return HttpResponse(status=status)
+        return self.finish(request, status_text=payload["status_text"])
 
 
 class CoachAttendanceEditView(CoachAttendanceView):
@@ -414,23 +458,34 @@ class CoachAttendanceEditView(CoachAttendanceView):
 
         status = request.POST.get("status", "")
         raw_note = request.POST.get("coach_note")
-        if raw_note is not None and len(raw_note.strip()) > COACH_NOTE_MAX:
-            return self._error(_("The note is too long (500 characters at most)."))
+        notify_player = request.POST.get("notify") == "on"
 
-        try:
-            with transaction.atomic():
-                attendance = get_object_or_404(Attendance.objects.select_for_update().select_related("event", "member"), pk=kwargs["attendance_id"], event=event)
-                was_in_lineup = attendance.status == Attendance.AttendanceStatus.SELECTED
-                note = None
-                if raw_note is not None and raw_note.strip() != (attendance.coach_note or "").strip():
-                    note = raw_note.strip()
-                set_answer_as_coach(attendance, status, note, coach=self.me, notify=request.POST.get("notify") == "on")
-        except CoachAnswerError as error:
-            return self._error(str(error.message))
+        def work():
+            if raw_note is not None and len(raw_note.strip()) > COACH_NOTE_MAX:
+                return 422, {"error": str(_("The note is too long (500 characters at most)."))}
+            try:
+                with transaction.atomic():
+                    attendance = get_object_or_404(Attendance.objects.select_for_update().select_related("event", "member"), pk=kwargs["attendance_id"], event=event)
+                    was_in_lineup = attendance.status == Attendance.AttendanceStatus.SELECTED
+                    note = None
+                    if raw_note is not None and raw_note.strip() != (attendance.coach_note or "").strip():
+                        note = raw_note.strip()
+                    set_answer_as_coach(attendance, status, note, coach=self.me, notify=notify_player)
+            except CoachAnswerError as error:
+                return 422, {"error": str(error.message)}
+            # The private coach note is deliberately never part of this payload (it is stored in the idempotency table).
+            return 200, {
+                "toast": {"kind": "ok", "title": str(_("Answer saved")), "text": str(_("“%(member)s” updated.") % {"member": attendance.member})},
+                "status_text": str(_("Saved")),
+                "needs_lineup_swap": was_in_lineup and status == "absent",
+            }
 
-        title = _("Answer saved")
-        text = _("“%(member)s” updated.") % {"member": attendance.member}
-        return self.finish(request, toast={"kind": "ok", "title": title, "text": text}, status_text=_("Saved"), needs_lineup_swap=was_in_lineup and status == "absent")
+        result, payload = run_once(request, work)
+        if payload is None:
+            return HttpResponse(status=result)
+        if result >= 300:
+            return tag_result(self._error(payload["error"]), result)
+        return self.finish(request, toast=payload["toast"], status_text=payload["status_text"], needs_lineup_swap=payload["needs_lineup_swap"])
 
     def _error(self, message):
         toast = {"kind": "error", "title": _("Couldn't save"), "text": message}
@@ -1660,14 +1715,21 @@ class CoachLineupToggleView(CoachLineupView):
             return HttpResponseForbidden()
 
         event = self.get_event()
-        with transaction.atomic():
-            lineup, _created = Lineup.objects.select_for_update().get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
-            attendance = get_object_or_404(Attendance.objects.exclude(status__in=UNAVAILABLE_STATUSES).select_related("member"), event=event, member_id=kwargs["member_id"])
-            # The client says what it wants (so a double tap or a retry can't flip it back).
-            wants_selected = request.POST.get("selected") == "true"
-            if wants_selected != LineupSelection.objects.filter(lineup=lineup, member=attendance.member).exists():
-                toggle_selection(lineup, attendance.member)
-        return self.finish(request, status_text=_("Picks saved. Nobody has been told yet."))
+        # The client says what it wants (so a double tap or a retry can't flip it back).
+        wants_selected = request.POST.get("selected") == "true"
+
+        def work():
+            with transaction.atomic():
+                lineup, _created = Lineup.objects.select_for_update().get_or_create(event=event, defaults={"team": self.active_team, "created_by": self.me})
+                attendance = get_object_or_404(Attendance.objects.exclude(status__in=UNAVAILABLE_STATUSES).select_related("member"), event=event, member_id=kwargs["member_id"])
+                if wants_selected != LineupSelection.objects.filter(lineup=lineup, member=attendance.member).exists():
+                    toggle_selection(lineup, attendance.member)
+            return 200, {"status_text": str(_("Picks saved. Nobody has been told yet."))}
+
+        status, payload = run_once(request, work)
+        if payload is None:
+            return HttpResponse(status=status)
+        return self.finish(request, status_text=payload["status_text"])
 
 
 class CoachLineupPublishView(CoachLineupView):
@@ -1697,37 +1759,39 @@ class CoachLineupPublishView(CoachLineupView):
         lineup = get_object_or_404(Lineup, event=event)
         action = request.POST.get("action", "publish_now")
         inline = is_inline_request(request)
-        has_picks = LineupSelection.objects.filter(lineup=lineup).exists()
-        toast = None
 
-        if inline and action != "cancel_schedule" and not has_picks:
-            toast = {"kind": "error", "title": _("Couldn't publish"), "text": _("Pick at least one player first.")}
-        elif action == "schedule":
-            when = parse_datetime(request.POST.get("publish_at", ""))
-            if when is not None and timezone.is_naive(when):
-                when = timezone.make_aware(when)
-            if when is None or when <= timezone.now():
-                toast = {"kind": "error", "title": _("Could not schedule"), "text": _("Pick a date and time in the future.")}
-            else:
+        def work():
+            """Returns (200, {toast}) or (422, {toast}); the toast is all a replay needs, so a
+            repeated Idempotency-Key never publishes (or notifies) a second time."""
+            has_picks = LineupSelection.objects.filter(lineup=lineup).exists()
+            if inline and action != "cancel_schedule" and not has_picks:
+                return 422, {"toast": {"kind": "error", "title": str(_("Couldn't publish")), "text": str(_("Pick at least one player first."))}}
+            if action == "schedule":
+                when = parse_datetime(request.POST.get("publish_at", ""))
+                if when is not None and timezone.is_naive(when):
+                    when = timezone.make_aware(when)
+                if when is None or when <= timezone.now():
+                    return 422, {"toast": {"kind": "error", "title": str(_("Could not schedule")), "text": str(_("Pick a date and time in the future."))}}
                 schedule_lineup_publish(lineup, when)
-                toast = {"kind": "ok", "title": _("Publish scheduled"), "text": _("The line-up will publish itself automatically at that time.")}
-        elif action == "cancel_schedule":
-            cancel_scheduled_publish(lineup)
-            toast = {"kind": "ok", "title": _("Schedule cancelled"), "text": _("Publish it manually whenever you are ready.")}
-        else:
+                return 200, {"toast": {"kind": "ok", "title": str(_("Publish scheduled")), "text": str(_("The line-up will publish itself automatically at that time."))}}
+            if action == "cancel_schedule":
+                cancel_scheduled_publish(lineup)
+                return 200, {"toast": {"kind": "ok", "title": str(_("Schedule cancelled")), "text": str(_("Publish it manually whenever you are ready."))}}
             was_already_published = lineup.published_at is not None
             newly_selected, newly_dropped = changes_on_publish(lineup)
             told = len(newly_selected) + len(newly_dropped)
             publish_lineup(lineup)
             if inline:
                 text = _("Nobody needed to be told.") if not told else ngettext("%(count)d player was told.", "%(count)d players were told.", told) % {"count": told}
-                toast = {"kind": "ok", "title": _("Published"), "text": text}
-            elif was_already_published:
-                toast = {"kind": "ok", "title": _("Line-up updated"), "text": _("Anyone whose status changed has been notified.")}
-            else:
-                toast = {"kind": "ok", "title": _("Line-up published"), "text": _("Selected players have been notified.")}
+                return 200, {"toast": {"kind": "ok", "title": str(_("Published")), "text": str(text)}}
+            if was_already_published:
+                return 200, {"toast": {"kind": "ok", "title": str(_("Line-up updated")), "text": str(_("Anyone whose status changed has been notified."))}}
+            return 200, {"toast": {"kind": "ok", "title": str(_("Line-up published")), "text": str(_("Selected players have been notified."))}}
 
-        return self.finish(request, toast=toast, status_text="")
+        status, payload = run_once(request, work)
+        if payload is None:
+            return HttpResponse(status=status)
+        return tag_result(self.finish(request, toast=payload["toast"], status_text=""), status)
 
 
 class CoachSquadView(CoachScopeMixin, LoginRequiredMixin, TemplateView):

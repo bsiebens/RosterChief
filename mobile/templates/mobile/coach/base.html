@@ -67,6 +67,8 @@
 
 {% block extra_body %}
     <script src="{% static "js/searchable-select.js" %}" defer></script>
+    {% comment %}Offline queue for attendance/line-up saves (see the file's header comment). data-user tags queued entries so another account on the same device never replays them.{% endcomment %}
+    <script src="{% static "js/mobile-offline-queue.js" %}" defer data-user="{{ request.user.pk }}" data-msg-queued="{% trans "Saved offline. Will sync (%(count)d)" %}" data-msg-synced="{% trans "Synced %(count)d offline changes" %}" data-msg-retry="{% trans "Retry" %}" data-msg-discard="{% trans "Discard" %}" data-msg-failed="{% trans "A change saved offline could not be synced." %}" data-msg-conflict="{% trans "A change saved offline was refused by the server (the event may have changed)." %}" data-msg-session="{% trans "Your session has ended. Sign in again, then retry." %}" data-msg-live-only="{% trans "You're offline. This needs a connection, try again when you're back online." %}" data-msg-no-queue="{% trans "You're offline. Your change was not saved." %}"></script>
     <div id="sheet-host"></div>
     {% block coach_extra_body %}{% endblock coach_extra_body %}
 {% endblock extra_body %}

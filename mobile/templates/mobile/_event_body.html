@@ -44,6 +44,13 @@
     {% endif %}
 </div>
 
+{% if game_follow %}
+    {% include "mobile/_game_follow.html" with follow=game_follow %}
+{% endif %}
+{% if game_tl %}
+    {% include "mobile/_game_timeline.html" with tl=game_tl %}
+{% endif %}
+
 {% if your_answers %}
     <div class="m-card p-3.5">
         <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Your answers" %}</span>
