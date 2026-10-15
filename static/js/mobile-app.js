@@ -96,6 +96,11 @@ window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };
 (function () {
     "use strict";
 
+    // hx-boost swaps <body> and re-runs this script on every navigation, while document/body
+    // listeners survive the swap -- without this guard each visit stacked another copy of every handler.
+    if (window.__rcAppInit) return;
+    window.__rcAppInit = true;
+
     const msg = (key, fallback) => (document.body && document.body.dataset[key]) || fallback;
     const hasHtmx = () => typeof window.htmx !== "undefined" && typeof window.htmx.ajax === "function";
 
@@ -218,16 +223,7 @@ window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };
         toastTimer = setTimeout(() => toastEl && toastEl.remove(), 8000);
     }
 
-    // Top banners -- the same strip Django messages render in base.html -- for htmx actions that
-    // answer `HX-Trigger: {"rc:banner": {"level", "title", "body", "link": {"href", "label"}}}`.
-    // Every banner (server-rendered or not) dismisses itself after a few seconds.
-    const BANNER_ICONS = {
-        success: '<path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/>',
-        error: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
-        warning: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
-        info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
-    };
-    const BANNER_CSS = { success: "alert-success", error: "alert-error", warning: "alert-warning", info: "alert-info" };
+    // Server-rendered flash banners (see base.html) dismiss themselves after a few seconds.
     const BANNER_MS = 5000;
 
     function dismissBanner(el) {
@@ -257,45 +253,6 @@ window.rosterchiefPush = { subscribe, unsubscribe, isSubscribed };
         });
     }
 
-    function showBanner(spec) {
-        const level = BANNER_CSS[spec.level] ? spec.level : "info";
-        const inner = document.querySelector("main > div");
-        if (!inner) return;
-        let wrap = inner.querySelector(":scope > [data-flash]");
-        if (!wrap) {
-            wrap = document.createElement("div");
-            wrap.className = "-mx-4 -mt-4 flex flex-col";
-            wrap.setAttribute("data-flash", "");
-            inner.prepend(wrap);
-        }
-        const el = document.createElement("div");
-        el.className = "m-flash " + BANNER_CSS[level] + (wrap.children.length ? " border-t-2 border-white" : "");
-        el.setAttribute("role", "alert");
-        el.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + BANNER_ICONS[level] + "</svg>";
-        const text = document.createElement("div");
-        const title = document.createElement("div");
-        title.className = "font-display text-sm font-bold tracking-wide uppercase";
-        title.textContent = spec.title || "";
-        const body = document.createElement("div");
-        body.className = "text-sm";
-        body.textContent = spec.body || "";
-        text.append(title, body);
-        if (spec.link && spec.link.href && String(spec.link.href).startsWith("/")) {
-            const a = document.createElement("a");
-            a.className = "mt-1 inline-block text-sm font-semibold underline";
-            a.href = spec.link.href;
-            a.textContent = spec.link.label || "";
-            text.append(a);
-        }
-        el.append(text);
-        wrap.append(el);
-        window.scrollTo({ top: 0, behavior: "smooth" });
-        armBanners();
-    }
-
-    document.body.addEventListener("rc:banner", (e) => {
-        if (e.detail && typeof e.detail === "object") showBanner(e.detail.value && typeof e.detail.value === "object" ? e.detail.value : e.detail);
-    });
     document.addEventListener("DOMContentLoaded", armBanners);
     document.addEventListener("htmx:afterSettle", armBanners);
     armBanners();

@@ -342,14 +342,11 @@ class ShopProductParityTests(ShopTestBase):
         self.assertContains(response, 'name="beneficiary"')
         self.assertContains(response, "Mila")
 
-    def test_adding_with_htmx_answers_with_the_top_banner_not_a_redirect(self):
+    def test_adding_with_htmx_answers_with_a_toast_not_a_redirect(self):
         response = self.client.post(self._url(), {"variant": str(self.small.pk), "quantity": "2", "personalization_number": "7", "personalization_name": "Somers"}, HTTP_HOST=HOST, headers={"HX-Request": "true"})
 
         self.assertEqual(response.status_code, 204)
-        banner = json.loads(response["HX-Trigger"])["rc:banner"]
-        self.assertEqual(banner["level"], "success")
-        self.assertEqual(banner["title"], "Added to cart")
-        self.assertEqual(banner["link"]["href"], reverse("mobile:shop_cart"))
+        self.assertIn("added to your cart", json.loads(response["HX-Trigger"])["rc:toast"])
         item = CartItem.objects.get()
         self.assertEqual((item.quantity, item.personalization_number, item.personalization_name), (2, "7", "Somers"))
 
