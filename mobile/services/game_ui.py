@@ -124,6 +124,8 @@ def timeline_context(event) -> dict:
     our_side = data["our_side"]
     ours = ", ".join(team.name for team in event.teams.all()) or _("Us")
     theirs = event.opponent.name if event.opponent_id else _("Them")
+    ours_logo = event.club.logo.url if event.club.logo else ""
+    theirs_logo = event.opponent.logo.url if event.opponent_id and event.opponent.logo else ""
     home_score, away_score = data["home_score"], data["away_score"]
     final = data["final"] or data["status"] == "final"
     decided = home_score is not None and away_score is not None and home_score != away_score
@@ -135,6 +137,8 @@ def timeline_context(event) -> dict:
         "status_label": final_label(data["decided_in"]) if data["status"] == "final" else _("Live"),
         "home_name": ours if our_side == "home" else theirs,
         "away_name": ours if our_side == "away" else theirs,
+        "home_logo": ours_logo if our_side == "home" else theirs_logo,
+        "away_logo": ours_logo if our_side == "away" else theirs_logo,
         "home_dim": final and decided and home_score < away_score,
         "away_dim": final and decided and away_score < home_score,
         "rows": [_row(event, item, our_side) for item in data["events"]],

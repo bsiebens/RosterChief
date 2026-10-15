@@ -2,7 +2,7 @@
 {% comment %}
     One followed game on Home (iOS FollowedGameCard): dark card, live ones with a club-coloured ring and "Live - P2 - 04:31", scheduled ones with their start, finished ones with the final score. Expects ``game`` (appapi.presenters.followed_game_out + pk/start/location from mobile.services.game_ui.home_followed_games). Taps open the event sheet.
 {% endcomment %}
-<a class="block rounded-[14px] bg-ink px-4 text-white {% if game.status == "live" %}py-[18px] ring-2 ring-club{% else %}py-3.5{% endif %}" href="{% url "mobile:event_detail" game.pk %}">
+<a class="block rounded-[14px] bg-night px-4 text-white {% if game.status == "live" %}py-[18px] ring-2 ring-club{% else %}py-3.5{% endif %}" href="{% url "mobile:event_detail" game.pk %}">
     <div class="flex items-center gap-2">
         {% if game.status == "live" %}
             <span class="flex items-center gap-1.5 font-display text-[13px] font-extrabold tracking-wide uppercase"><span class="block h-2 w-2 animate-pulse rounded-full bg-club"></span>{% trans "Live" %}{% if game.period %} &middot; P{{ game.period }}{% endif %}{% if game.clock %} &middot; {{ game.clock }}{% endif %}</span>
