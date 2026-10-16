@@ -72,9 +72,9 @@ def _carry_guardians_into(club, season):
     if previous is None:
         return
 
-    guardians = ClubMembership.objects.filter(club=club, season=previous, kind=ClubMembership.Kind.GUARDIAN)
+    guardians = ClubMembership.objects.filter(club=club, season=previous, kind__in=[ClubMembership.Kind.GUARDIAN, ClubMembership.Kind.STAFF])
     ClubMembership.objects.bulk_create(
-        [ClubMembership(club=club, member_id=guardian.member_id, season=season, kind=ClubMembership.Kind.GUARDIAN, status=guardian.status, signed_up_at=guardian.signed_up_at) for guardian in guardians],
+        [ClubMembership(club=club, member_id=guardian.member_id, season=season, kind=guardian.kind, status=guardian.status, signed_up_at=guardian.signed_up_at) for guardian in guardians],
         ignore_conflicts=True,
     )
 

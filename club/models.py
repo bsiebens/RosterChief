@@ -349,6 +349,11 @@ class ClubMembership(ClubScopedModel):
     class Kind(models.TextChoices):
         MEMBER = "member", _("member")
         GUARDIAN = "guardian", _("guardian")
+        #: Attached to the club as staff (a trainer, a volunteer, a board member ...) without
+        #: playing. Like a guardian: not a member, owes no fee, left out of every member
+        #: list/KPI and of the "member without a team" checks. Grants no access by itself
+        #: -- that stays with ClubRole / StaffAssignment.
+        STAFF = "staff", _("staff")
 
     class StatusChoices(models.TextChoices):
         ACTIVE = "active", _("active")
@@ -370,7 +375,9 @@ class ClubMembership(ClubScopedModel):
         max_length=20,
         choices=Kind.choices,
         default=Kind.MEMBER,
-        help_text=_("A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee. A parent who also plays is a member."),
+        help_text=_(
+            "A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee. A parent who also plays is a member. Staff are attached without playing: not counted as members, no fee, no access rights by themselves."
+        ),
     )
 
     license = models.CharField(_("license"), max_length=250, blank=True)
@@ -425,6 +432,12 @@ class ClubMembership(ClubScopedModel):
         return self.kind == self.Kind.GUARDIAN
 
     @property
+    def is_member(self) -> bool:
+        """Counts as a member: holds a membership and may owe a fee. A guardian or a staff
+        entry is attached to the club without being one."""
+        return self.kind == self.Kind.MEMBER
+
+    @property
     def open_requirement_count(self) -> int:
         """How many active onboarding requirements this membership hasn't resolved
         yet (completed or bypassed) -- see OnboardingRequirement's docstring for why
@@ -443,8 +456,8 @@ class ClubMembership(ClubScopedModel):
         validate_club_scope(self, self.club_id, same_club_fields=("season",))
         # A guardian owes nothing -- they're not a member. Caught here rather than
         # silently zeroed on save so a mistaken import row says so out loud.
-        if self.is_guardian and self.fee_amount:
-            raise ValidationError({"fee_amount": _("A guardian doesn't hold a membership, so they can't owe a fee.")})
+        if not self.is_member and self.fee_amount:
+            raise ValidationError({"fee_amount": _("A guardian or staff entry doesn't hold a membership, so it can't owe a fee.")})
 
 
 class FeePayment(UUIDModel):

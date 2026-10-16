@@ -77,9 +77,10 @@
             <div class="flex items-center gap-1 rounded-full bg-steel p-1">
                 <a href="{% querystring kind=None page=None %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if selected_kind == "member" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Members" %}</a>
                 <a href="{% querystring kind="guardian" page=None %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if selected_kind == "guardian" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Guardians" %}</a>
-                <a href="{% querystring kind="both" page=None %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if selected_kind == "both" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Both" %}</a>
+                <a href="{% querystring kind="staff" page=None %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if selected_kind == "staff" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "Staff" %}</a>
+                <a href="{% querystring kind="both" page=None %}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if selected_kind == "both" %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}">{% trans "All" %}</a>
             </div>
-            <span class="font-mono text-xs text-dim">{% trans "Guardians have no fee and aren't counted as members." %}</span>
+            <span class="font-mono text-xs text-dim">{% trans "Guardians and staff have no fee and aren't counted as members." %}</span>
         </div>
     </div>
 {% endblock filter_strip %}
@@ -145,7 +146,7 @@
                         </td>
                         {% if requirements_configured %}
                             <td>
-                                {% if member.current_membership and not member.current_membership.is_guardian %}
+                                {% if member.current_membership and member.current_membership.is_member %}
                                     <span class="badge badge-sm {% if member.current_membership.onboarding_open %}badge-warning{% else %}badge-success{% endif %}">
                                         {{ member.current_membership.completed_requirements }}/{{ total_requirements }}
                                     </span>
@@ -156,7 +157,7 @@
                         {% endif %}
                         {% if is_club_admin %}
                             <td>
-                                {% if member.current_membership and not member.current_membership.is_guardian %}
+                                {% if member.current_membership and member.current_membership.is_member %}
                                     <span class="badge badge-sm
                                         {% if member.current_membership.fee_status == "paid" %}badge-success
                                         {% elif member.current_membership.fee_status == "partially_paid" %}badge-warning
