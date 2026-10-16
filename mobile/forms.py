@@ -9,7 +9,7 @@ from teams.services.numbers import is_number_available
 #: management/controlpanel's templatetags/field.html (which builds widget
 #: classes at render time for their daisyUI-shaped inputs), so this app's one
 #: form so far just bakes its own classes straight into the widget.
-_INPUT_CLASSES = "h-11 w-full rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
+_INPUT_CLASSES = "h-11 w-full min-w-0 max-w-full appearance-none rounded-lg border border-stroke bg-paper px-3 text-[15px] text-ink placeholder:text-dim focus:border-ink focus:outline-none"
 
 #: Same look as _INPUT_CLASSES, sized for a multi-line body instead of a
 #: single-line value -- a fixed height (not h-11) plus vertical padding a
