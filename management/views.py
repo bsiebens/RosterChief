@@ -538,15 +538,15 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
 
         fee_status = self.request.GET.get("fee_status", "not_paid")
         if fee_status == "not_paid":
-            # Literally "does not have a paid status" -- unpaid, partially paid, and
-            # waived all qualify; the dropdown can narrow to any single one of those.
+            # "Still owes something" -- unpaid or partially paid. Waived is a paid status
+            # (nothing is owed), so it drops out like paid; the dropdown can pick any single one.
             # A cancelled membership is excluded regardless of its own stale
             # fee_status (cancel_membership never touches it, since nothing is
             # genuinely owed on it any more) -- otherwise it kept reading as
             # "still needs attention" here forever. Someone who explicitly
             # wants to see it anyway can still pick Cancelled from the Status
             # filter below, together with fee_status=all.
-            memberships = memberships.exclude(fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.PARTIALLY_PAID]).exclude(status=ClubMembership.StatusChoices.CANCELLED)
+            memberships = memberships.exclude(fee_status__in=[ClubMembership.FeeStatus.PAID, ClubMembership.FeeStatus.WAIVED]).exclude(status=ClubMembership.StatusChoices.CANCELLED)
         elif fee_status and fee_status != "all":
             memberships = memberships.filter(fee_status=fee_status)
 
@@ -625,7 +625,7 @@ class MembershipListView(ClubAdminRequiredMixin, ListView):
             kpi_partial=partial,
             kpi_unpaid=unpaid,
             kpi_waived=waived,
-            kpi_paid_rate=round(100 * paid / total) if total else None,
+            kpi_paid_rate=round(100 * (paid + waived) / total) if total else None,
             kpi_overdue_invoices=overdue_count,
             send_invoice_form=SendDuesInvoicesForm(),
             **kwargs,
@@ -7599,14 +7599,12 @@ def signup_queue_count(club, season):
     return sum(1 for membership in memberships if not (membership.status == ClubMembership.StatusChoices.ACTIVE and membership.onboarding_open == 0 and membership.fee_status in clean_fee_statuses))
 
 
-class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
+class SignupDashboardView(MemberAdminRequiredMixin, TemplateView):
     """Every current-season MEMBER-kind membership, checklist status and fee status
     side by side, plus which teams they've been placed on so far -- the D3-inspired
-    admin queue for processing this season's sign-ups end to end. Admin-only: fee
-    status feeds this page directly (see MembershipListView, its own separate
-    Finance-side page for actually recording payment), so it sits on the same side
-    of that boundary, unlike the rest of the Members section which MEMBER_ADMIN can
-    also reach.
+    admin queue for processing this season's sign-ups end to end. ADMIN or
+    MEMBER_ADMIN: it is people-processing work. Recording payment stays on the
+    separate admin-only Finance page (see MembershipListView).
 
     A registration-originated membership doesn't show up here at all until its
     own invoice has been reviewed and confirmed on the Registrations screen
@@ -7686,7 +7684,7 @@ class SignupDashboardView(ClubAdminRequiredMixin, TemplateView):
         )
 
 
-class SignupApproveAllCleanView(ClubAdminRequiredMixin, View):
+class SignupApproveAllCleanView(MemberAdminRequiredMixin, View):
     """Bulk-activates every membership that's both paid up and has resolved its
     whole checklist -- see club.services.onboarding.approve_all_clean for exactly
     what "clean" means; it's the only path to ACTIVE, deliberately manual even
@@ -7707,7 +7705,7 @@ class SignupApproveAllCleanView(ClubAdminRequiredMixin, View):
         return redirect("management:signup_list")
 
 
-class SignupApproveOneView(ClubAdminRequiredMixin, View):
+class SignupApproveOneView(MemberAdminRequiredMixin, View):
     """The detail panel's own "Approve" button -- club.services.onboarding.approve_one
     for a single membership, same rule as the bulk version above."""
 
@@ -7726,7 +7724,7 @@ class SignupApproveOneView(ClubAdminRequiredMixin, View):
         return redirect("management:signup_list")
 
 
-class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
+class SignupPlaceInTeamView(MemberAdminRequiredMixin, View):
     """Rosters one member from the Sign-up page onto a team for the current season
     -- see SignupTeamPlacementForm for why this bypasses eligible_roster_members'
     active-only filter on purpose.
@@ -7788,7 +7786,7 @@ class SignupPlaceInTeamView(ClubAdminRequiredMixin, View):
         return redirect("management:signup_list")
 
 
-class SignupCancelView(ClubAdminRequiredMixin, View):
+class SignupCancelView(MemberAdminRequiredMixin, View):
     """Withdraws one person's sign-up -- see club.services.cancellation.
     cancel_membership for the soft-cancel-vs-delete-the-member split."""
 
@@ -7806,7 +7804,7 @@ class SignupCancelView(ClubAdminRequiredMixin, View):
         return redirect("management:signup_list")
 
 
-class SignupLinkToMemberView(ClubAdminRequiredMixin, View):
+class SignupLinkToMemberView(MemberAdminRequiredMixin, View):
     """Fixes an accidental duplicate -- see club.services.signup_linking.
     link_to_existing_member."""
 
