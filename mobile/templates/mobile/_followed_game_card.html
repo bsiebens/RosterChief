@@ -19,7 +19,7 @@
             {% if "game" in game.via %}{% trans "Following" %}{% else %}{% trans "Team" %}{% endif %}
         </span>
     </div>
-    <div class="relative mt-3 flex items-center gap-2">
+    <div class="relative mt-3 flex items-baseline gap-2">
         <span class="min-w-0 flex-1 text-center font-display text-xs font-bold tracking-wide uppercase"><span class="block truncate">{{ game.home.name }}</span></span>
         <span class="shrink-0 font-display {% if game.status == "live" %}text-[40px]{% else %}text-[34px]{% endif %} leading-none font-extrabold">{% if game.home.score is not None and game.away.score is not None %}{{ game.home.score }} &ndash; {{ game.away.score }}{% elif game.status == "live" %}0 &ndash; 0{% else %}{% trans "vs" %}{% endif %}</span>
         <span class="min-w-0 flex-1 text-center font-display text-xs font-bold tracking-wide uppercase"><span class="block truncate">{{ game.away.name }}</span></span>
