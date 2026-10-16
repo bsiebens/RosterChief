@@ -551,6 +551,28 @@ def club_charts(club):
     }
 
 
+def club_people_counts(club, season=None):
+    """How many admins, staff, members and guardians a club has -- each person counted once,
+    under the highest of those roles they hold (admin > staff > member > guardian), so the four
+    numbers add up to the club's people. Staff = marked as staff, or holding a team staff
+    assignment this season; members and guardians are read from this season's memberships (all
+    seasons when the club has none running)."""
+    admins = set(ClubRole.objects.filter(club=club, role=ClubRole.Roles.ADMIN).values_list("member_id", flat=True))
+
+    memberships = ClubMembership.objects.filter(club=club)
+    if season:
+        memberships = memberships.filter(season=season)
+    by_kind = {kind: set(memberships.filter(kind=kind).values_list("member_id", flat=True)) for kind in ClubMembership.Kind.values}
+
+    assignments = StaffAssignment.objects.filter(team__club=club)
+    if season:
+        assignments = assignments.filter(season=season)
+    staff = (by_kind[ClubMembership.Kind.STAFF] | set(assignments.values_list("member_id", flat=True))) - admins
+    members = by_kind[ClubMembership.Kind.MEMBER] - admins - staff
+    guardians = by_kind[ClubMembership.Kind.GUARDIAN] - admins - staff - members
+    return {"admins": len(admins), "staff": len(staff), "members": len(members), "guardians": len(guardians)}
+
+
 def club_statistics(club):
     """Stat groups for one club. Add new groups here as the domain grows.
 
@@ -589,7 +611,19 @@ def club_statistics(club):
         unpaid_count=Count("id", filter=Q(payment_status__in=OWED_STATUSES)),
     )
 
+    people = club_people_counts(club, season)
+
     return [
+        {
+            "title": _("People"),
+            "icon": "contact",
+            "stats": [
+                (_("Admins"), people["admins"]),
+                (_("Staff"), people["staff"]),
+                (_("Members"), people["members"]),
+                (_("Guardians"), people["guardians"]),
+            ],
+        },
         {
             "title": _("Members"),
             "icon": "users",

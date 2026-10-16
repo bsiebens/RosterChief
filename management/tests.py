@@ -16,6 +16,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
 from django.core import mail
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
@@ -10307,6 +10308,23 @@ class MemberListKindFilterTests(ManagementTestBase):
 
         self.assertContains(response, "Pat Guardian")
         self.assertNotContains(response, "Cody Kid")
+
+    def test_staff_marked_people_stay_out_of_the_default_list_and_show_under_staff(self):
+        trainer = Member.objects.create(first_name="Terry", last_name="Trainer")
+        ClubMembership.objects.create(club=self.club, member=trainer, season=self.season, kind=ClubMembership.Kind.STAFF, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertNotContains(self.get(), "Terry Trainer")
+        staff = self.get("staff")
+        self.assertContains(staff, "Terry Trainer")
+        self.assertNotContains(staff, "Cody Kid")
+        self.assertNotContains(staff, "Pat Guardian")
+
+    def test_a_staff_membership_owes_no_fee(self):
+        trainer = Member.objects.create(first_name="Terry", last_name="Trainer")
+        membership = ClubMembership(club=self.club, member=trainer, season=self.season, kind=ClubMembership.Kind.STAFF, fee_amount=Decimal("10.00"))
+
+        with self.assertRaises(ValidationError):
+            membership.full_clean()
 
     def test_kind_both_shows_everyone(self):
         response = self.get("both")

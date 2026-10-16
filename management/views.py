@@ -62,6 +62,7 @@ from club.services.access import (
     groups_manageable_by,
     is_club_admin,
     members_visible_to,
+    staff_people,
     teams_managed_by,
     teams_staffed_by,
 )
@@ -415,6 +416,8 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         kind = self.request.GET.get("kind", "member")
         if kind == "guardian":
             members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=_guardians_only(self.request.club))
+        elif kind == "staff":
+            members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=staff_people(self.request.club))
         elif kind == "both":
             members = members_visible_to(self.request.user, self.request.club, include_guardians=True)
         else:
@@ -1134,7 +1137,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         # A guardian isn't rostered anywhere, so there's never an attendance
         # row to show -- same "member, not guardian" gate the fee-status row
         # above already uses.
-        show_attendance = current_membership is not None and not current_membership.is_guardian
+        show_attendance = current_membership is not None and current_membership.is_member
         attendance_sparkline = member_attendance_sparkline(self.object, season) if show_attendance else []
         attendance_counts = member_attendance_counts(self.object, season) if show_attendance else None
 

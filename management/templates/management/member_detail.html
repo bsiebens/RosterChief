@@ -99,6 +99,11 @@
                         {% lucide "users" size=16 %}
                         <span>{% trans "Guardian: attached to the club as a parent of a member. Holds the login, owes no fee, and is not counted as a member." %}</span>
                     </div>
+                {% elif current_membership.kind == "staff" %}
+                    <div class="alert alert-warning">
+                        {% lucide "users" size=16 %}
+                        <span>{% trans "Staff: attached to the club without playing. Owes no fee, is not counted as a member and gets no access rights from this alone." %}</span>
+                    </div>
                 {% endif %}
                 <dl>
                     <div class="flex items-center justify-between gap-4 py-2">
@@ -121,7 +126,7 @@
                             </span>
                         </dd>
                     </div>
-                    {% if not current_membership.is_guardian %}
+                    {% if current_membership.is_member %}
                         <div class="flex items-center justify-between gap-4 py-2">
                             <dt class="text-sm text-muted">{% trans "Fee status" %}</dt>
                             <dd>
