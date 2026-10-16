@@ -14,11 +14,11 @@
             {% if card.event.opponent_id %}
                 {% with ours=club.logo theirs=card.event.opponent.logo %}
                     {% if card.event.is_home_game %}
-                        {% if ours %}<img class="pointer-events-none absolute top-1/2 left-0 h-44 w-44 -translate-x-10 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ ours.url }}" alt="">{% endif %}
-                        {% if theirs %}<img class="pointer-events-none absolute top-1/2 right-0 h-44 w-44 translate-x-10 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ theirs.url }}" alt="">{% endif %}
+                        {% if ours %}<img class="pointer-events-none absolute top-1/2 left-0 h-44 w-44 -translate-x-10 -translate-y-1/2 object-contain opacity-25" src="{{ ours.url }}" alt="">{% endif %}
+                        {% if theirs %}<img class="pointer-events-none absolute top-1/2 right-0 h-44 w-44 translate-x-10 -translate-y-1/2 object-contain opacity-25" src="{{ theirs.url }}" alt="">{% endif %}
                     {% else %}
-                        {% if theirs %}<img class="pointer-events-none absolute top-1/2 left-0 h-44 w-44 -translate-x-10 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ theirs.url }}" alt="">{% endif %}
-                        {% if ours %}<img class="pointer-events-none absolute top-1/2 right-0 h-44 w-44 translate-x-10 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ ours.url }}" alt="">{% endif %}
+                        {% if theirs %}<img class="pointer-events-none absolute top-1/2 left-0 h-44 w-44 -translate-x-10 -translate-y-1/2 object-contain opacity-25" src="{{ theirs.url }}" alt="">{% endif %}
+                        {% if ours %}<img class="pointer-events-none absolute top-1/2 right-0 h-44 w-44 translate-x-10 -translate-y-1/2 object-contain opacity-25" src="{{ ours.url }}" alt="">{% endif %}
                     {% endif %}
                 {% endwith %}
             {% endif %}
