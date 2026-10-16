@@ -57,6 +57,7 @@ urlpatterns = [
     path("admins/<uuid:pk>/update/", views.PlatformAdminUpdateView.as_view(), name="admin_update"),
     path("admins/<uuid:pk>/revoke/", views.PlatformAdminRevokeView.as_view(), name="admin_revoke"),
     path("users/", views.UserDebugView.as_view(), name="user_debug"),
+    path("users/devices/<uuid:pk>/remove/", views.UserDebugDeviceRemoveView.as_view(), name="user_debug_device_remove"),
     path("push/", views.PushMonitoringView.as_view(), name="push_monitoring"),
     path("push/sandbox/", views.PushSandboxView.as_view(), name="push_sandbox"),
     path("push/sandbox/clear/", views.PushSandboxClearView.as_view(), name="push_sandbox_clear"),
