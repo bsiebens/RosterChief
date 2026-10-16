@@ -14,7 +14,8 @@
         {% else %}
             <span class="font-display text-xs font-extrabold tracking-wide text-on-dark uppercase">{{ game.start|date:"D d M · H:i" }}</span>
         {% endif %}
-        <span class="ml-auto flex items-center gap-1 font-display text-[11px] font-extrabold tracking-wide text-on-dark-dim uppercase">
+        {% if game.location %}<span class="min-w-0 truncate font-display text-xs font-bold tracking-wide text-on-dark-dim uppercase">&middot; {{ game.location.name }}</span>{% endif %}
+        <span class="ml-auto flex shrink-0 items-center gap-1 font-display text-[11px] font-extrabold tracking-wide text-on-dark-dim uppercase">
             {% lucide "star" size=11 stroke_width=2.4 fill="currentColor" %}
             {% if "game" in game.via %}{% trans "Following" %}{% else %}{% trans "Team" %}{% endif %}
         </span>
@@ -24,5 +25,4 @@
         <span class="shrink-0 font-display {% if game.status == "live" %}text-[40px]{% else %}text-[34px]{% endif %} leading-none font-extrabold">{% if game.home.score is not None and game.away.score is not None %}{{ game.home.score }} &ndash; {{ game.away.score }}{% elif game.status == "live" %}0 &ndash; 0{% else %}{% trans "vs" %}{% endif %}</span>
         <span class="min-w-0 flex-1 text-center font-display text-xs font-bold tracking-wide uppercase"><span class="block truncate">{{ game.away.name }}</span></span>
     </div>
-    {% if game.location %}<p class="relative mt-3 truncate text-[13px] text-on-dark">{{ game.location.name }}</p>{% endif %}
 </a>
