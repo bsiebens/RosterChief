@@ -3549,7 +3549,8 @@ class MembershipListViewTests(ManagementTestBase):
         self.assertEqual(response.context["kpi_partial"], 1)
         self.assertEqual(response.context["kpi_unpaid"], 2)
         self.assertEqual(response.context["kpi_waived"], 1)
-        self.assertEqual(response.context["kpi_paid_rate"], 20)
+        # Waived counts as settled: (1 paid + 1 waived) of 5.
+        self.assertEqual(response.context["kpi_paid_rate"], 40)
 
     def test_a_cancelled_memberships_stale_fee_status_does_not_count_toward_the_kpis(self):
         # cancel_membership never touches fee_status -- a cancelled membership
@@ -3562,6 +3563,18 @@ class MembershipListViewTests(ManagementTestBase):
 
         self.assertEqual(response.context["kpi_total"], 1)
         self.assertEqual(response.context["kpi_unpaid"], 1)
+
+    def test_the_default_list_leaves_out_paid_and_waived_but_keeps_unpaid_and_partial(self):
+        paid = self.make_membership("Paid", "One", fee_status=ClubMembership.FeeStatus.PAID)
+        waived = self.make_membership("Waived", "One", fee_status=ClubMembership.FeeStatus.WAIVED)
+        unpaid = self.make_membership("Unpaid", "One")
+        partial = self.make_membership("Partial", "One", fee_status=ClubMembership.FeeStatus.PARTIALLY_PAID)
+
+        memberships = list(self.club_get("membership_list").context["memberships"])
+
+        self.assertCountEqual(memberships, [unpaid, partial])
+        self.assertNotIn(paid, memberships)
+        self.assertNotIn(waived, memberships)
 
     def test_a_cancelled_unpaid_membership_is_excluded_from_the_default_list(self):
         cancelled = self.make_membership("Cancelled", "Two", status=ClubMembership.StatusChoices.CANCELLED, fee_status=ClubMembership.FeeStatus.UNPAID)
@@ -3585,7 +3598,7 @@ class MembershipListViewTests(ManagementTestBase):
         found = next(row for row in response.context["memberships"] if row.pk == cancelled.pk)
         self.assertIsNone(found.record_payment_form)
 
-    def test_default_list_excludes_paid_but_includes_waived(self):
+    def test_default_list_excludes_paid_and_waived_but_includes_unpaid(self):
         paid = self.make_membership("Paid", "One", fee_status=ClubMembership.FeeStatus.PAID)
         unpaid = self.make_membership("Unpaid", "One", fee_status=ClubMembership.FeeStatus.UNPAID)
         waived = self.make_membership("Waived", "One", fee_status=ClubMembership.FeeStatus.WAIVED)
@@ -3595,7 +3608,7 @@ class MembershipListViewTests(ManagementTestBase):
         ids = {m.pk for m in response.context["memberships"]}
         self.assertNotIn(paid.pk, ids)
         self.assertIn(unpaid.pk, ids)
-        self.assertIn(waived.pk, ids)
+        self.assertNotIn(waived.pk, ids)
 
     def test_fee_status_filter_narrows_to_one_value(self):
         unpaid = self.make_membership("Unpaid", "One", fee_status=ClubMembership.FeeStatus.UNPAID)
@@ -11635,8 +11648,8 @@ class SignupDashboardTests(ManagementTestBase):
 
 class MemberAdminAccessTests(ManagementTestBase):
     """MEMBER_ADMIN: full read/write on people, teams, referee setup, and onboarding
-    requirements -- but not Finance/Shop, Club identity, Sponsors, Roles, or the
-    Sign-up page (all of those stay ClubAdminRequiredMixin, real admin only)."""
+    requirements -- but not Finance/Shop, Club identity, Sponsors or Roles (those stay ClubAdminRequiredMixin, real admin only). Sign-up is
+    people-processing, so MEMBER_ADMIN reaches it."""
 
     def setUp(self):
         self.member_admin_user = User.objects.create_user(email="memberadmin@example.com", password="pw-secret-123")
@@ -11690,8 +11703,8 @@ class MemberAdminAccessTests(ManagementTestBase):
     def test_cannot_reach_sponsors(self):
         self.assertEqual(self.club_get("sponsor_list").status_code, 403)
 
-    def test_cannot_reach_signup(self):
-        self.assertEqual(self.club_get("signup_list").status_code, 403)
+    def test_can_reach_signup(self):
+        self.assertEqual(self.club_get("signup_list").status_code, 200)
 
     def test_cannot_reach_positions(self):
         self.assertEqual(self.club_get("position_create").status_code, 403)

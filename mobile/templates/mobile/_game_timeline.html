@@ -17,8 +17,8 @@
                     </div>
                     <div class="relative mt-3 flex items-center justify-center gap-2 py-3">
                         {% comment %}Each side's crest as a large, faint watermark behind its score (iOS GameTimelineCard).{% endcomment %}
-                        {% if tl.home_logo %}<img class="pointer-events-none absolute top-1/2 left-0 h-28 w-28 -translate-x-3 -translate-y-1/2 object-contain opacity-15" src="{{ tl.home_logo }}" alt="">{% endif %}
-                        {% if tl.away_logo %}<img class="pointer-events-none absolute top-1/2 right-0 h-28 w-28 translate-x-3 -translate-y-1/2 object-contain opacity-15" src="{{ tl.away_logo }}" alt="">{% endif %}
+                        {% if tl.home_logo %}<img class="pointer-events-none absolute top-1/2 left-0 h-28 w-28 -translate-x-3 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ tl.home_logo }}" alt="">{% endif %}
+                        {% if tl.away_logo %}<img class="pointer-events-none absolute top-1/2 right-0 h-28 w-28 translate-x-3 -translate-y-1/2 object-contain opacity-25 brightness-0 invert" src="{{ tl.away_logo }}" alt="">{% endif %}
                         <div class="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 {% if tl.home_dim %}text-on-dark-faint{% endif %}">
                             <span class="max-w-full truncate font-display text-[11px] font-bold tracking-wide uppercase">{{ tl.home_name }}</span>
                             <span class="font-display text-[34px] leading-none font-extrabold">{{ data.home_score|default_if_none:"–" }}</span>

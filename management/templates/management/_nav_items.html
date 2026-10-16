@@ -15,13 +15,12 @@
 <div>
     <a class="nav-item {% if nav_section == 'members' %}active{% endif %}" href="{% url 'management:member_list' %}">
         {% lucide "users" size=17 %} {% trans "Members" %}
-        {% if is_club_admin and signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}
+        {% if can_manage_members and signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}
     </a>
     {% if nav_section == 'members' %}
         <div class="flex flex-col">
             <a class="nav-subitem {% if nav == 'member_list' %}active{% endif %}" href="{% url 'management:member_list' %}">{% trans "All members" %}</a>
-            {% if is_club_admin %}
-                {# Sign-up is admin only (finance-adjacent -- fee status feeds it) even though parent claims/households/groups below open up to MEMBER_ADMIN too. #}
+            {% if can_manage_members %}
                 <a class="nav-subitem {% if nav == 'signup_list' %}active{% endif %}" href="{% url 'management:signup_list' %}">
                     {% trans "Sign-up" %}
                     {% if signup_pending_count %}<span class="badge badge-error badge-xs ml-auto">{{ signup_pending_count }}</span>{% endif %}

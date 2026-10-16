@@ -389,8 +389,8 @@ def sidebar_counters(request):
 
     The first is gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
     matching how _nav_items.html itself gates that link -- a coach never sees
-    it, so there's no reason to run the query for them. Registrations/Sign-up
-    are gated tighter, on is_club_admin alone: both live behind links the nav
+    it, so there's no reason to run the query for them. Registrations
+    is gated tighter, on is_club_admin alone: both live behind links the nav
     itself only ever shows to a real ADMIN, not a MEMBER_ADMIN. Always an int
     when shown, never hidden at 0: "the queue is empty" and "nobody checked"
     have to read differently.
@@ -410,12 +410,14 @@ def sidebar_counters(request):
         # (checked inside the function itself).
         counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club)
 
-    if get_club_admin(request):
         from management.views import signup_queue_count
+
+        counters["signup_pending_count"] = signup_queue_count(club, get_current_season(request))
+
+    if get_club_admin(request):
         from registration.services.invoicing import registrations_awaiting_confirmation
 
         counters["registrations_awaiting_count"] = len(registrations_awaiting_confirmation(club))
-        counters["signup_pending_count"] = signup_queue_count(club, get_current_season(request))
 
     return counters
 

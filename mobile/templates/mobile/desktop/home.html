@@ -25,10 +25,10 @@
         <div class="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
             <div class="flex min-w-0 flex-col gap-4">
                 {% include "mobile/_followed_games.html" with slot="live" %}
+                {% include "mobile/_followed_games.html" with slot="rest" %}
                 {% for card in member_cards %}
                     {% include "mobile/_home_card.html" %}
                 {% endfor %}
-                {% include "mobile/_followed_games.html" with slot="rest" %}
 
                 {% if not followed_live and not followed_rest and not member_cards and not needs_answer_view and not open_tasks and not dues_rows and not forms_to_complete and not news_items %}
                     {% trans "All Caught Up" as caught_up_title %}
