@@ -1253,6 +1253,37 @@
         display: none;
     }
 
+    /* Close button for the sheet: sticky at the top right, takes no layout space (same as mobile.css). */
+    .sheet-close-wrap {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        display: flex;
+        justify-content: flex-end;
+        height: 0;
+    }
+
+    .sheet-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: var(--sheet-close-top, 2px) 4px 0 0;
+        cursor: pointer;
+    }
+
+    .sheet-close > span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: var(--sheet-close-bg, var(--color-rule));
+        color: var(--sheet-close-fg, var(--color-ink));
+    }
+
     @keyframes rc-fade {
         from {
             opacity: 0;
