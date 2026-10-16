@@ -777,6 +777,25 @@ class StatisticsTests(TestCase):
         self.assertEqual(groups["Shop"]["Outstanding"], Decimal("20.00"))
         self.assertEqual(groups["Shop"]["Orders unpaid"], 1)
 
+    def test_people_counts_each_person_once_under_their_highest_role(self):
+        def person(name):
+            return Member.objects.create(first_name=name, last_name="X")
+
+        admin, coach, marked_staff, player, parent, admin_who_coaches = (person(n) for n in ("Admin", "Coach", "Marked", "Player", "Parent", "Both"))
+        ClubRole.objects.update_or_create(club=self.club, member=admin, defaults={"role": ClubRole.Roles.ADMIN})
+        ClubRole.objects.update_or_create(club=self.club, member=admin_who_coaches, defaults={"role": ClubRole.Roles.ADMIN})
+        ClubMembership.objects.create(club=self.club, member=marked_staff, season=self.season, kind=ClubMembership.Kind.STAFF)
+        ClubMembership.objects.create(club=self.club, member=player, season=self.season, kind=ClubMembership.Kind.MEMBER)
+        ClubMembership.objects.create(club=self.club, member=parent, season=self.season, kind=ClubMembership.Kind.GUARDIAN)
+        team = Team.objects.create(club=self.club, name="First", short_name="1st")
+        position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach, season=self.season, position=position)
+        StaffAssignment.objects.create(team=team, member=admin_who_coaches, season=self.season, position=position)
+
+        people = self.groups_for(self.club)["People"]
+
+        self.assertEqual(people, {"Admins": 2, "Staff": 2, "Members": 1, "Guardians": 1})
+
     def test_events_this_season_counts_events_with_a_derived_season_too(self):
         # Event.season is usually left blank and derived from the start date (see
         # events.models.Event's own help text) -- "This season" must not undercount

@@ -182,6 +182,21 @@ def _guardians_only(club: Club) -> QuerySet[Member]:
     )
 
 
+def staff_people(club: Club) -> QuerySet[Member]:
+    """People who are staff of ``club``: marked as staff (ClubMembership kind STAFF) or holding a
+    team staff assignment. Neither counts as a member -- see ClubMembership.Kind."""
+    return Member.objects.filter(Q(member_of__club=club, member_of__kind=ClubMembership.Kind.STAFF) | Q(staff_assignments__team__club=club)).distinct()
+
+
+def _staff_only(club: Club) -> QuerySet[Member]:
+    """People whose only tie to ``club`` is being marked as staff: left out of the default member
+    list like guardians are (they show under the Staff tab). Anyone who also plays, has a roster
+    spot, a staff assignment or an admin/editor role stays visible."""
+    return Member.objects.filter(member_of__club=club, member_of__kind=ClubMembership.Kind.STAFF).exclude(
+        Q(member_of__club=club, member_of__kind=ClubMembership.Kind.MEMBER) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR])
+    )
+
+
 def members_visible_to(user: User, club: Club, *, include_guardians: bool = False) -> QuerySet[Member]:
     """Members the user may see.
 
@@ -198,7 +213,7 @@ def members_visible_to(user: User, club: Club, *, include_guardians: bool = Fals
     """
     if is_club_admin(user, club):
         attached = Member.objects.filter(Q(member_of__club=club) | Q(team_memberships__team__club=club) | Q(staff_assignments__team__club=club) | Q(roles__club=club)).distinct()
-        return attached if include_guardians else attached.exclude(pk__in=_guardians_only(club))
+        return attached if include_guardians else attached.exclude(pk__in=_guardians_only(club)).exclude(pk__in=_staff_only(club))
 
     me = Member.objects.filter(user=user).first()
     if me is None:
