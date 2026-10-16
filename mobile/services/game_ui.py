@@ -156,6 +156,10 @@ def home_followed_games(user, club, flag_on: bool) -> list[dict]:
         card["event_obj"] = row["event"]
         card["pk"] = row["event"].pk
         card["location"] = row["event"].location
+        event = row["event"]
+        ours_logo = event.club.logo.url if event.club.logo else ""
+        theirs_logo = event.opponent.logo.url if event.opponent_id and event.opponent.logo else ""
+        card["home_logo"], card["away_logo"] = (ours_logo, theirs_logo) if event.is_home_game else (theirs_logo, ours_logo)
         card["start"] = row["event"].start
         card["finished_label"] = final_label(card["decided_in"]) if card["status"] == "finished" else ""
         cards.append(card)
