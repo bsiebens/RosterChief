@@ -12,7 +12,7 @@ commits, off the polling thread. Decisions behind the rules here (§9):
 - **What:** every notifiable moment kind. A moment that isn't ``notifiable``
   (a catch-up after an outage) is never pushed.
 - **How much:** the moments one poll detected go out as *one* push per
-  account (coalesced: "Goal for us by ..., 4-2" and "Penalty ..." in one
+  account (coalesced: "GOAL Sharks U16: ..." and "Penalty ..." in one
   message). No cap per game -- every poll that found something sends one.
 - **Where:** every channel through notifications.dispatch (native APNs/FCM
   devices, web push) -- no Notification/inbox row per goal. Each channel is
@@ -29,9 +29,10 @@ from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
+from django.utils.translation import ngettext
 
 from events.models import Event, EventFollow, GameFollow, GameMoment
-from events.services.game_moments import describe_moment
+from events.services.game_moments import PENALTY_KIND_LABELS, person_label
 from notifications.dispatch import dispatch_to_user
 from notifications.models import NotificationCategory
 
@@ -46,12 +47,79 @@ def followers(event) -> list:
     return list(get_user_model().objects.filter(pk__in=user_ids, is_active=True))
 
 
-def compose(event, moments) -> tuple[str, str]:
-    """(title, body) for one push: "1st vs Rivals FC" over one line per moment."""
+def _team_names(event) -> tuple[str, str]:
+    """(ours, theirs) as people know them: our team(s)' short names, the opponent's name."""
     ours = ", ".join(team.short_name or team.name for team in event.teams.all())
-    title = _("%(ours)s vs %(opponent)s") % {"ours": ours, "opponent": event.opponent.name} if event.opponent_id else ours
-    body = "\n".join(describe_moment(moment) for moment in moments)
-    return title, body
+    return ours, event.opponent.name if event.opponent_id else _("Opponent")
+
+
+def score_line(event, score) -> str:
+    """ "Sharks U16 4-2 Bulldogs Liège", the home team first: at an away location the opponent leads
+    (and the score flips with it). No location, or a home one, reads ours first."""
+    ours, theirs = _team_names(event)
+    ours_goals, theirs_goals = score.get("for", 0), score.get("against", 0)
+    if event.location_id is not None and not event.location.is_home:
+        return f"{theirs} {theirs_goals}\u2013{ours_goals} {ours}"
+    return f"{ours} {ours_goals}\u2013{theirs_goals} {theirs}"
+
+
+def push_line(event, moment) -> str:
+    """One translated line for a push: what happened, to which team, and who."""
+    ours, theirs = _team_names(event)
+    payload = moment.payload or {}
+    kinds = GameMoment.Kind
+    ours_side = moment.kind in (kinds.GOAL_FOR, kinds.PENALTY_FOR, kinds.PENALTY_SHOT_FOR)
+    team = ours if ours_side else theirs
+    if moment.kind == kinds.GAME_STARTED:
+        return _("\U0001f3d2 The game has started")
+    if moment.kind in (kinds.GOAL_FOR, kinds.GOAL_AGAINST):
+        values = {"team": team, "player": person_label(payload.get("scorer")) or "?"}
+        # Only our own goals name the assists; an opponent's is just the scorer.
+        assists = [name for name in (person_label(person) for person in payload.get("assists") or []) if name] if ours_side else []
+        if assists:
+            values["assists"] = ", ".join(assists)
+            return ngettext("\U0001f945 GOAL %(team)s: %(player)s \u00b7 assist %(assists)s", "\U0001f945 GOAL %(team)s: %(player)s \u00b7 assists %(assists)s", len(assists)) % values
+        return _("\U0001f945 GOAL %(team)s: %(player)s") % values
+    if moment.kind == kinds.GOAL_CANCELLED:
+        return _("\u21a9\ufe0f Goal taken back")
+    if moment.kind in (kinds.PENALTY_FOR, kinds.PENALTY_AGAINST):
+        reason = payload.get("description") or ""
+        if payload.get("kind") not in (None, "", "minor"):
+            reason = _("%(reason)s (%(kind)s)") % {"reason": reason, "kind": str(PENALTY_KIND_LABELS.get(payload["kind"], payload["kind"])).lower()}
+        line = _("\U0001f6a8 Penalty %(team)s: %(player)s") % {"team": team, "player": person_label(payload.get("player")) or "?"}
+        details = [reason] if reason else []
+        if payload.get("minutes"):
+            details.append(_("%(minutes)s min") % {"minutes": payload["minutes"]})
+        return " \u00b7 ".join([line, *details])
+    if moment.kind in (kinds.PENALTY_SHOT_FOR, kinds.PENALTY_SHOT_AGAINST):
+        return _("\U0001f3af Penalty shot for %(team)s") % {"team": team}
+    if moment.kind == kinds.PERIOD_ENDED:
+        return _("\u23f8 End of period %(period)s") % {"period": payload.get("period") or ""}
+    if moment.kind == kinds.GAME_FINAL:
+        return _("\U0001f3c1 Full time")
+    return moment.get_kind_display()
+
+
+def compose(event, moments) -> tuple[str, str]:
+    """(title, body) for one push. The title is the score ("Sharks U16 4\u20132 Bulldogs Li\u00e8ge", home team
+    first) as of the latest moment in the batch that carries one -- or the result ("Sharks U16 win 4\u20132") for the final, or
+    "Sharks U16 vs Bulldogs Li\u00e8ge" while there's no score yet. The body is one line per moment."""
+    ours, theirs = _team_names(event)
+    last = next((moment for moment in reversed(moments) if (moment.payload or {}).get("score")), moments[-1])
+    score = (last.payload or {}).get("score")
+    body_lines = [push_line(event, moment) for moment in moments]
+    if not score:
+        return _("%(ours)s vs %(opponent)s") % {"ours": ours, "opponent": theirs}, "\n".join(body_lines)
+    if last.kind == GameMoment.Kind.GAME_FINAL:
+        goals = f"{score.get('for', 0)}\u2013{score.get('against', 0)}"
+        if score.get("for", 0) > score.get("against", 0):
+            title = _("%(team)s win %(score)s") % {"team": ours, "score": goals}
+        elif score.get("for", 0) < score.get("against", 0):
+            title = _("%(team)s lose %(score)s") % {"team": ours, "score": goals}
+        else:
+            title = _("Draw %(score)s") % {"score": goals}
+        return title, "\n".join([_("\U0001f3c1 Final \u00b7 %(line)s") % {"line": score_line(event, score)}, *body_lines[:-1]])
+    return score_line(event, score), "\n".join(body_lines)
 
 
 def _event_url(event) -> str:

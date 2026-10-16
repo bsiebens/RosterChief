@@ -5094,7 +5094,43 @@ class GamePushTests(GameTimelineTestBase):
 
         _reached, native = self.deliver(game, [ours, theirs])
 
-        self.assertEqual(native.call_args.kwargs["texts"]("en")[1].splitlines(), ["Goal for us by Sam (#9) (assist: Ann (#7)), 1-0.", "Goal against by Sam (#9), 1-0."])
+        self.assertEqual(native.call_args.kwargs["texts"]("en")[1].splitlines(), ["🥅 GOAL 1st: Sam (#9) · assist Ann (#7)", "🥅 GOAL Olympia Heist: Sam (#9)"])
+
+    def title(self, game, moments):
+        game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
+        _reached, native = self.deliver(game, moments)
+        return native.call_args.kwargs["texts"]("en")
+
+    def test_an_away_game_leads_with_the_opponent_and_flips_the_score(self):
+        away = Location.objects.create(club=self.club, name="Away Ground", address="2 St", city="Town", zip_code="1000", country="BE")
+        game = self.make_game(is_live=True, location=away)
+
+        title, _body = self.title(game, [self.moment(game, "goal_for:g1", score={"for": 3, "against": 1})])
+
+        self.assertEqual(title, "Olympia Heist 1\u20133 1st")
+
+    def test_a_home_game_leads_with_our_team(self):
+        home = Location.objects.filter(club=self.club, is_home=True).first() or Location.objects.create(club=self.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        game = self.make_game(is_live=True, location=home)
+
+        title, _body = self.title(game, [self.moment(game, "goal_for:g1", score={"for": 3, "against": 1})])
+
+        self.assertEqual(title, "1st 3\u20131 Olympia Heist")
+
+    def test_the_final_reads_as_a_win_a_loss_or_a_draw(self):
+        game = self.make_game(is_live=True)
+        for score, expected in (({"for": 4, "against": 2}, "1st win 4\u20132"), ({"for": 2, "against": 4}, "1st lose 2\u20134"), ({"for": 3, "against": 3}, "Draw 3\u20133")):
+            GameMoment.objects.filter(event=game).delete()
+            final = GameMoment.objects.create(event=game, key="final", kind=GameMoment.Kind.GAME_FINAL, game_seconds=3600, payload={"score": score})
+            title, body = self.title(game, [final])
+            self.assertEqual(title, expected)
+            self.assertEqual(body.splitlines()[0].split(" \u00b7 ")[0], "\U0001f3c1 Final")
+
+    def test_a_game_start_has_no_score_so_the_title_is_the_fixture(self):
+        game = self.make_game(is_live=True)
+        started = GameMoment.objects.create(event=game, key="start", kind=GameMoment.Kind.GAME_STARTED, game_seconds=0, payload={})
+
+        self.assertEqual(self.title(game, [started]), ("1st vs Olympia Heist", "\U0001f3d2 The game has started"))
 
     def test_game_pushes_are_dispatched_in_the_game_category(self):
         game = self.make_game(is_live=True)
@@ -5118,8 +5154,8 @@ class GamePushTests(GameTimelineTestBase):
         self.assertEqual(native.call_args.kwargs["club"], self.club)
         self.assertEqual(native.call_args.kwargs["thread_id"], str(game.pk))
         body = native.call_args.kwargs["texts"]("en")[1]
-        self.assertEqual(body.splitlines(), ["Goal for us by Sam (#9), 1-0.", "Penalty for the opponent: Rex, Tripping."])
-        self.assertEqual(native.call_args.kwargs["texts"]("en")[0], "1st vs Olympia Heist")
+        self.assertEqual(body.splitlines(), ["🥅 GOAL 1st: Sam (#9)", "🚨 Penalty Olympia Heist: Rex · Tripping"])
+        self.assertEqual(native.call_args.kwargs["texts"]("en")[0], "1st 1\u20130 Olympia Heist")
         self.assertEqual(native.call_args.kwargs["data"]["target"], {"type": "event", "id": str(game.pk)})
         self.assertEqual(GameMoment.objects.filter(event=game, delivered_at__isnull=False).count(), 2)
 
@@ -5153,10 +5189,10 @@ class GamePushTests(GameTimelineTestBase):
 
         bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}
         self.assertEqual({call.kwargs["thread_id"] for call in gateway.publish.call_args_list}, {str(game.pk)})
-        self.assertEqual(bodies["nl-NL"], "Doelpunt voor ons van Sam (#9), 1-0.")
-        self.assertEqual(bodies["en-GB"], "Goal for us by Sam (#9), 1-0.")
-        self.assertEqual(bodies[""], "Goal for us by Sam (#9), 1-0.")
-        self.assertEqual(bodies["fr-FR"], "Goal for us by Sam (#9), 1-0.")
+        self.assertEqual(bodies["nl-NL"], "🥅 DOELPUNT 1st: Sam (#9)")
+        self.assertEqual(bodies["en-GB"], "🥅 GOAL 1st: Sam (#9)")
+        self.assertEqual(bodies[""], "🥅 GOAL 1st: Sam (#9)")
+        self.assertEqual(bodies["fr-FR"], "🥅 GOAL 1st: Sam (#9)")
 
     def test_an_android_device_is_reached_through_a_gateway_that_supports_it(self):
         from appapi.models import PushDevice
@@ -5172,7 +5208,7 @@ class GamePushTests(GameTimelineTestBase):
             reached = game_push.deliver_moments(game.pk, [goal.pk])
 
         self.assertEqual(reached, 1)
-        self.assertEqual({(device.installation_id, device.platform, body) for device, body in RecordingGateway.sent}, {("pixel", "android", "Doelpunt voor ons van Sam (#9), 1-0."), ("gone", "android", "Goal for us by Sam (#9), 1-0.")})
+        self.assertEqual({(device.installation_id, device.platform, body) for device, body in RecordingGateway.sent}, {("pixel", "android", "🥅 DOELPUNT 1st: Sam (#9)"), ("gone", "android", "🥅 GOAL 1st: Sam (#9)")})
         dead.refresh_from_db()
         self.assertFalse(dead.enabled)  # the gateway reported its token dead
         self.assertTrue(PushDevice.objects.get(installation_id="pixel").enabled)
@@ -5194,7 +5230,7 @@ class GamePushTests(GameTimelineTestBase):
         with mock.patch("mobile.channels.send_push_to_user", return_value=0) as send:
             game_push.deliver_moments(game.pk, [goal.pk])
 
-        self.assertEqual(send.call_args.kwargs["body"], "Goal for us by Sam (#9), 1-0.")
+        self.assertEqual(send.call_args.kwargs["body"], "🥅 GOAL 1st: Sam (#9)")
 
     def test_there_is_no_cap_per_game(self):
         game = self.make_game(is_live=True)
