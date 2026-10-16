@@ -31,10 +31,10 @@
 
     {% if managed_people %}
         {% include "mobile/_followed_games.html" with slot="live" %}
+        {% include "mobile/_followed_games.html" with slot="rest" %}
         {% for card in member_cards %}
             {% include "mobile/_home_card.html" %}
         {% endfor %}
-        {% include "mobile/_followed_games.html" with slot="rest" %}
 
         {% if open_tasks %}
             <div class="m-card p-4">

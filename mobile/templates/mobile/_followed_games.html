@@ -1,5 +1,5 @@
 {% comment %}
-    Home's followed games, in two slots like the iOS Home: the live ones above the member cards (#followed-live, refreshing itself every 20 s while any is live) and the rest below them (#followed-rest). mobile:followed_games returns both with ``oob`` set so one poll updates both. Expects ``followed_live``, ``followed_rest`` and ``slot`` ("live" | "rest" | "both"), ``oob``.
+    Home's followed games, in two slots like the iOS Home: the live ones first (#followed-live, refreshing itself every 20 s while any is live) and the rest right after them (#followed-rest), both above the member cards. mobile:followed_games returns both with ``oob`` set so one poll updates both. Expects ``followed_live``, ``followed_rest`` and ``slot`` ("live" | "rest" | "both"), ``oob``.
 {% endcomment %}
 {% if slot == "live" or slot == "both" %}
     <div id="followed-live" class="flex flex-col gap-4{% if not followed_live %} hidden{% endif %}" {% if followed_live %}hx-get="{% url "mobile:followed_games" %}" hx-trigger="every 20s [!document.hidden]" hx-swap="none" hx-push-url="false"{% endif %} {% if oob %}hx-swap-oob="true"{% endif %}>
