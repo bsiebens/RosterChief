@@ -376,7 +376,8 @@ class ClubMembership(ClubScopedModel):
         choices=Kind.choices,
         default=Kind.MEMBER,
         help_text=_(
-            "A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee. A parent who also plays is a member. Staff are attached without playing: not counted as members, no fee, no access rights by themselves."
+            "A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee."
+            " A parent who also plays is a member. Staff are attached without playing: not counted as members, no fee, no access rights by themselves."
         ),
     )
 
