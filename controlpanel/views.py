@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import date_format
+from django.utils.http import urlencode
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
@@ -120,6 +121,21 @@ class UserDebugView(PlatformSuperuserRequiredMixin, TemplateView):
             context["devices"] = user_debug.devices(account)
             context["notifications"] = user_debug.notification_section(account)
         return super().get_context_data(**context, **kwargs)
+
+
+class UserDebugDeviceRemoveView(PlatformSuperuserRequiredMixin, View):
+    """Delete one native push install from the user debug screen. With no enabled, recently seen device
+    left, the account falls back to web push (mobile.services.push.send_push_to_user skips accounts
+    with native push). The app registers itself again the next time the user opens it."""
+
+    def post(self, request, pk):
+        from appapi.models import PushDevice
+
+        device = get_object_or_404(PushDevice.objects.select_related("user"), pk=pk)
+        email = device.user.email
+        device.delete()
+        notify(request, f"s|{_('Device removed')}|" + _("%(email)s no longer has this native push device.") % {"email": email})
+        return redirect(f"{reverse('controlpanel:user_debug')}?{urlencode({'email': email})}")
 
 
 class PushMonitoringView(PlatformSuperuserRequiredMixin, TemplateView):

@@ -173,7 +173,7 @@ def record_moments(sender, *, event, previous, current, first_fetch, **kwargs):
     schedule_delivery(event, recorded)
 
 
-def _who(person) -> str:
+def person_label(person) -> str:
     if not person:
         return ""
     number = person.get("number")
@@ -190,13 +190,13 @@ def describe_moment(moment: GameMoment) -> str:
     if moment.kind == GameMoment.Kind.GOAL_FOR:
         # Our own goals name who assisted; an opponent's goal is just the scorer (below), and an
         # unassisted one reads as it always has.
-        assists = [name for name in (_who(person) for person in payload.get("assists") or []) if name]
+        assists = [name for name in (person_label(person) for person in payload.get("assists") or []) if name]
         if assists:
             template = ngettext("Goal for us by %(player)s (assist: %(assists)s), %(score)s.", "Goal for us by %(player)s (assists: %(assists)s), %(score)s.", len(assists))
-            return template % {"player": _who(payload.get("scorer")) or "?", "assists": ", ".join(assists), "score": score_text}
-        return _("Goal for us by %(player)s, %(score)s.") % {"player": _who(payload.get("scorer")) or "?", "score": score_text}
+            return template % {"player": person_label(payload.get("scorer")) or "?", "assists": ", ".join(assists), "score": score_text}
+        return _("Goal for us by %(player)s, %(score)s.") % {"player": person_label(payload.get("scorer")) or "?", "score": score_text}
     if moment.kind == GameMoment.Kind.GOAL_AGAINST:
-        return _("Goal against by %(player)s, %(score)s.") % {"player": _who(payload.get("scorer")) or "?", "score": score_text}
+        return _("Goal against by %(player)s, %(score)s.") % {"player": person_label(payload.get("scorer")) or "?", "score": score_text}
     if moment.kind == GameMoment.Kind.GOAL_CANCELLED:
         return _("A goal was taken back, %(score)s.") % {"score": score_text}
     if moment.kind in (GameMoment.Kind.PENALTY_FOR, GameMoment.Kind.PENALTY_AGAINST):
@@ -204,7 +204,7 @@ def describe_moment(moment: GameMoment) -> str:
         reason = payload.get("description") or ""
         if payload.get("kind") not in (None, "", "minor"):
             reason = _("%(reason)s (%(kind)s)") % {"reason": reason, "kind": str(PENALTY_KIND_LABELS.get(payload["kind"], payload["kind"])).lower()}
-        return template % {"player": _who(payload.get("player")) or "?", "reason": reason}
+        return template % {"player": person_label(payload.get("player")) or "?", "reason": reason}
     if moment.kind == GameMoment.Kind.PENALTY_SHOT_FOR:
         return _("Penalty shot for us.")
     if moment.kind == GameMoment.Kind.PENALTY_SHOT_AGAINST:

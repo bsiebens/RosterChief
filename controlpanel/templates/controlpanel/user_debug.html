@@ -1,8 +1,8 @@
 {% extends "controlpanel/base.html" %}
-{% load i18n lucide %}
+{% load i18n lucide ui %}
 
 {% comment %}
-    Platform-wide, read-only debug view of one account (controlpanel.views.UserDebugView, data from
+    Platform-wide debug view of one account (read-only apart from removing a native push device) (controlpanel.views.UserDebugView, data from
     controlpanel.services.user_debug). Personal data (phones, birth dates, pictures, push tokens)
     is deliberately never rendered here. A notification switch with no stored row is on.
 {% endcomment %}
@@ -115,17 +115,25 @@
             <h3 class="font-display font-extrabold tracking-[.06em] text-ink uppercase">{% trans "Push devices" %}</h3>
             {% if devices %}
                 <table class="table mt-2 w-full text-sm">
-                    <thead><tr><th class="text-left">{% trans "Platform" %}</th><th class="text-left">{% trans "Environment" %}</th><th class="text-left">{% trans "App" %}</th><th class="text-left">{% trans "Locale" %}</th><th class="text-left">{% trans "State" %}</th><th class="text-left">{% trans "Last seen" %}</th></tr></thead>
+                    <thead><tr><th class="text-left">{% trans "Platform" %}</th><th class="text-left">{% trans "Environment" %}</th><th class="text-left">{% trans "App" %}</th><th class="text-left">{% trans "Locale" %}</th><th class="text-left">{% trans "State" %}</th><th class="text-left">{% trans "Last seen" %}</th><th></th></tr></thead>
                     <tbody>
                         {% for device in devices %}
                             <tr>
                                 <td>{{ device.get_platform_display }}</td><td>{{ device.get_environment_display }}</td><td>{{ device.app_version|default:"–" }}</td><td>{{ device.locale|default:"–" }}</td>
                                 <td>{% if device.enabled %}<span class="badge badge-success">{% trans "enabled" %}</span>{% else %}<span class="badge badge-error">{% trans "token rejected" %}</span>{% endif %}</td>
                                 <td>{{ device.last_seen|date:"d/m/Y H:i" }}</td>
+                                <td class="text-right"><button class="btn btn-xs btn-outline btn-error" type="button" onclick="document.getElementById('{{ device.pk|dom_id:"device_remove_modal" }}').showModal()" data-testid="remove-device">{% lucide "trash-2" size=12 %} {% trans "Remove" %}</button></td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                {% trans "Remove this device?" as remove_title %}
+                {% trans "The account stops receiving native pushes on it and gets web push instead (if it has a web subscription). The app registers the device again when the user next opens it." as remove_body %}
+                {% trans "Remove" as remove_label %}
+                {% for device in devices %}
+                    {% url "controlpanel:user_debug_device_remove" device.pk as remove_url %}
+                    {% include "controlpanel/_confirm_modal.html" with modal_id=device.pk|dom_id:"device_remove_modal" title=remove_title body=remove_body action_url=remove_url submit_label=remove_label %}
+                {% endfor %}
             {% else %}
                 <p class="mt-2 text-sm text-slate">{% trans "No registered devices." %}</p>
             {% endif %}

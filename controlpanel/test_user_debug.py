@@ -69,3 +69,28 @@ class UserDebugViewTests(ControlPanelTestBase):
         response = self.client.get(self.url, {"email": "person@example.com"})
         self.assertContains(response, "No member profile")
         self.assertContains(response, "Not attached to any club")
+
+    def _device(self, user):
+        from appapi.models import PushDevice
+
+        return PushDevice.objects.create(user=user, installation_id="install-1", platform="ios", push_token="tok")
+
+    def test_remove_device_deletes_it_and_returns_to_the_account(self):
+        from appapi.models import PushDevice
+
+        device = self._device(self.person)
+        response = self.client.get(self.url, {"email": "person@example.com"})
+        self.assertContains(response, "remove-device")
+        response = self.client.post(reverse("controlpanel:user_debug_device_remove", args=[device.pk]))
+        self.assertRedirects(response, f"{self.url}?email=Person%40example.com", fetch_redirect_response=False)
+        self.assertFalse(PushDevice.objects.filter(pk=device.pk).exists())
+
+    def test_remove_device_requires_a_platform_superuser(self):
+        from appapi.models import PushDevice
+
+        device = self._device(self.person)
+        staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)
+        enrol_mfa(staff)
+        self.client.force_login(staff)
+        self.assertEqual(self.client.post(reverse("controlpanel:user_debug_device_remove", args=[device.pk])).status_code, 403)
+        self.assertTrue(PushDevice.objects.filter(pk=device.pk).exists())
