@@ -5136,7 +5136,7 @@ class GamePushTests(GameTimelineTestBase):
         title, body = self.title(game, [penalty])
 
         self.assertEqual(title, "First Team 2\u20131 Olympia Heist")
-        self.assertEqual(body, "PENALTY Olympia Heist · S. Brais (#2) · Roughing · 2 min · P1 15:00")
+        self.assertEqual(body, "PENALTY Olympia Heist · Brais Stoffels (#2) · Roughing · 2 min · P1 15:00")
 
     def test_a_game_start_reads_as_a_goalless_scoreboard(self):
         game = self.make_game(is_live=True)

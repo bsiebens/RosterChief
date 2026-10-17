@@ -8,16 +8,16 @@ poll found into one push). Rules that hold for all of them:
   It is the score as of the latest moment known, so it is the same shape for a goal, a penalty, a
   period end and the final.
 * **Body line** = ``HEADLINE TEAM`` in capitals, then details separated by `` . ``:
-  ``GOAL Sharks U16 . B. Elsen (#19) . assist T. Janssens . P2 34:12``.
+  ``GOAL Sharks U16 . Elsen Bob (#19) . assist Janssens Tom (#7) . P2 34:12``.
 * Our team is its full team name ("Sharks U16"), theirs the opponent's name; a player is
-  "B. Elsen (#19)" (the source lists "Elsen Bob": surname first, so the last word is the given name).
+  "Elsen Bob (#19)" -- the name exactly as the source lists it (surname first; it carries no separate first/last name to shorten).
 * No emojis. Words are translated (events/locale/<lang>/django.po); penalty reasons come from the
   competition's own data and are shown as delivered.
 
 Examples (title / body):
 
-    Sharks U16 1-0 Leuven Chiefs  /  GOAL Sharks U16 . B. Elsen (#19) . P1 04:10
-    Sharks U16 1-0 Leuven Chiefs  /  PENALTY Leuven Chiefs . S. Brais (#2) . Roughing . 2 min . P1 06:45
+    Sharks U16 1-0 Leuven Chiefs  /  GOAL Sharks U16 . Elsen Bob (#19) . P1 04:10
+    Sharks U16 1-0 Leuven Chiefs  /  PENALTY Leuven Chiefs . Stoffels Brais (#2) . Roughing . 2 min . P1 06:45
     Sharks U16 1-0 Leuven Chiefs  /  END OF PERIOD 1
     Sharks U16 4-2 Leuven Chiefs  /  FINAL . Sharks U16 win
 """
@@ -44,11 +44,11 @@ def team_names(event) -> tuple[str, str]:
 
 
 def person(value) -> str:
-    """ "B. Elsen (#19)" from a stored {"name": "Elsen Bob", "number": 19}; "" when there is none."""
+    """ "Elsen Bob (#19)" from a stored {"name": "Elsen Bob", "number": 19}, the name exactly as the
+    source delivers it (surname first); "" when there is none."""
     if not value:
         return ""
-    words = (value.get("name") or "").split()
-    name = f"{words[-1][0]}. {' '.join(words[:-1])}" if len(words) > 1 else " ".join(words)
+    name = (value.get("name") or "").strip()
     number = value.get("number")
     return f"{name} (#{number})".strip() if number is not None else name
 
