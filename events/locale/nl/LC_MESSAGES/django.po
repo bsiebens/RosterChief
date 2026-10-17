@@ -213,46 +213,40 @@ msgstr "Wedstrijdtuchtstraf"
 msgid "Match penalty"
 msgstr "Matchstraf"
 
-msgid "🏒 The game has started"
-msgstr "🏒 De wedstrijd is begonnen"
+msgid "GOAL %(team)s"
+msgstr "DOELPUNT %(team)s"
 
-msgid "↩️ Goal taken back"
-msgstr "↩️ Doelpunt afgekeurd"
+msgid "GOAL TAKEN BACK"
+msgstr "DOELPUNT AFGEKEURD"
 
-msgid "🚨 Penalty %(team)s: %(player)s"
-msgstr "🚨 Straf %(team)s: %(player)s"
+msgid "PENALTY %(team)s"
+msgstr "STRAF %(team)s"
 
 msgid "%(minutes)s min"
 msgstr "%(minutes)s min"
 
-msgid "🎯 Penalty shot for %(team)s"
-msgstr "🎯 Strafworp voor %(team)s"
+msgid "PENALTY SHOT %(team)s"
+msgstr "STRAFWORP %(team)s"
 
-msgid "⏸ End of period %(period)s"
-msgstr "⏸ Einde van periode %(period)s"
+msgid "END OF PERIOD %(period)s"
+msgstr "EINDE PERIODE %(period)s"
 
-msgid "🏁 Full time"
-msgstr "🏁 Einde wedstrijd"
+msgid "GAME STARTED"
+msgstr "WEDSTRIJD BEGONNEN"
 
-msgid "%(team)s win %(score)s"
-msgstr "%(team)s winnen %(score)s"
+msgid "FINAL"
+msgstr "EINDSTAND"
 
-msgid "%(team)s lose %(score)s"
-msgstr "%(team)s verliezen %(score)s"
+msgid "%(team)s win"
+msgstr "%(team)s wint"
 
-msgid "Draw %(score)s"
-msgstr "Gelijkspel %(score)s"
-
-msgid "🏁 Final · %(line)s"
-msgstr "🏁 Eindstand · %(line)s"
-
-msgid "🥅 GOAL %(team)s: %(player)s"
-msgstr "🥅 DOELPUNT %(team)s: %(player)s"
+msgid "Draw"
+msgstr "Gelijkspel"
 
 msgid "Opponent"
 msgstr "Tegenstander"
 
-msgid "🥅 GOAL %(team)s: %(player)s · assist %(assists)s"
-msgid_plural "🥅 GOAL %(team)s: %(player)s · assists %(assists)s"
-msgstr[0] "🥅 DOELPUNT %(team)s: %(player)s · assist %(assists)s"
-msgstr[1] "🥅 DOELPUNT %(team)s: %(player)s · assists %(assists)s"
+msgid "assist %(assists)s"
+msgid_plural "assists %(assists)s"
+msgstr[0] "assist %(assists)s"
+msgstr[1] "assists %(assists)s"
