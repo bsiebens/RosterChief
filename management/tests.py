@@ -10319,6 +10319,19 @@ class MemberListKindFilterTests(ManagementTestBase):
         self.assertNotContains(staff, "Cody Kid")
         self.assertNotContains(staff, "Pat Guardian")
 
+    def test_staff_tab_ignores_staff_assignments_and_guardian_tab_ignores_playing(self):
+        coach = Member.objects.create(first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach, season=self.season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE)
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")
+        position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach, season=self.season, position=position)
+        playing_parent = Member.objects.create(first_name="Penny", last_name="Playing")
+        ClubMembership.objects.create(club=self.club, member=playing_parent, season=self.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=team, member=playing_parent, season=self.season, position=Position.objects.create(club=self.club, name="Forward", short_name="FW"))
+
+        self.assertNotContains(self.get("staff"), "Cara Coach")
+        self.assertContains(self.get("guardian"), "Penny Playing")
+
     def test_a_staff_membership_owes_no_fee(self):
         trainer = Member.objects.create(first_name="Terry", last_name="Trainer")
         membership = ClubMembership(club=self.club, member=trainer, season=self.season, kind=ClubMembership.Kind.STAFF, fee_amount=Decimal("10.00"))

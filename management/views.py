@@ -50,7 +50,6 @@ from club.mixins import (
 )
 from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
 from club.services.access import (
-    _guardians_only,
     can_add_news,
     can_edit_news,
     can_manage_evaluations,
@@ -62,7 +61,6 @@ from club.services.access import (
     groups_manageable_by,
     is_club_admin,
     members_visible_to,
-    staff_people,
     teams_managed_by,
     teams_staffed_by,
 )
@@ -410,14 +408,16 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         # ?kind= turns that silent exclusion into an explicit, visible choice:
         # "member" (default) matches the page's original behaviour exactly,
         # "guardian" flips it to show only the excluded guardians, "both" shows
-        # everyone. _guardians_only is intersected with members_visible_to (not
+        # everyone. The kind filters are intersected with members_visible_to (not
         # queried club-wide on its own) so a non-admin still only ever sees
         # guardians of someone already visible to them.
         kind = self.request.GET.get("kind", "member")
-        if kind == "guardian":
-            members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=_guardians_only(self.request.club))
-        elif kind == "staff":
-            members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=staff_people(self.request.club))
+        # Guardians/Staff tabs: exactly the kind set on the member's current-season membership (the
+        # same one the list shows per row) -- nothing inferred from roster spots, staff assignments or roles.
+        season = get_current_season(self.request)
+        if kind in ("guardian", "staff"):
+            tagged = ClubMembership.objects.filter(club=self.request.club, season=season, kind=ClubMembership.Kind(kind))
+            members = members_visible_to(self.request.user, self.request.club, include_guardians=True).filter(pk__in=tagged.values("member_id"))
         elif kind == "both":
             members = members_visible_to(self.request.user, self.request.club, include_guardians=True)
         else:
@@ -428,7 +428,6 @@ class MemberListView(ClubStaffRequiredMixin, ListView):
         # Status/fee status/team all key off the *current* season's ClubMembership --
         # a member's status/fee last season (or next) isn't what "filter by Pending"
         # means on a page showing everyone's standing right now.
-        season = get_current_season(self.request)
         self.selected_status = self.request.GET.get("status", "")
         self.selected_fee_status = self.request.GET.get("fee_status", "")
         self.selected_team = self.request.GET.get("team", "")
