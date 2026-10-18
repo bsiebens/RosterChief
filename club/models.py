@@ -38,10 +38,49 @@ def club_event_background_path(instance: Club, filename: str) -> str:
     return f"clubs/{instance.slug}/event-background/{filename}"
 
 
+class Sport(models.Model):
+    """A sport clubs and competitions can be assigned to. Platform-wide and maintained from the control
+    panel's Features page; ``Club.sport_type`` / ``Competition.sport_type`` store its ``code`` (the
+    value the apps' API also reports), so a code never changes once created."""
+
+    code = models.SlugField(_("code"), max_length=20, unique=True, help_text=_("Stored on clubs and competitions and reported by the API; can't be changed after creating."))
+    name = models.CharField(_("name"), max_length=100)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = _("sport")
+        verbose_name_plural = _("sports")
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def is_protected(self):
+        """The fallback every club/competition defaults to; it always has to exist."""
+        return self.code == Club.SportType.OTHER
+
+    def usage(self) -> tuple[int, int]:
+        """(clubs, competitions) currently using this sport."""
+        from events.models import Competition
+
+        return Club.objects.filter(sport_type=self.code).count(), Competition.objects.filter(sport_type=self.code).count()
+
+
+def sport_choices():
+    """Live choices for ``sport_type`` fields: the Sport rows, or the built-ins before the table exists/is seeded."""
+    from django.db import DatabaseError
+
+    try:
+        choices = list(Sport.objects.values_list("code", "name"))
+    except DatabaseError:
+        choices = []
+    return choices or list(Club.SportType.choices)
+
+
 class Club(UUIDModel):
     class SportType(models.TextChoices):
-        """Which sport this club plays. Only two options for now -- expand this as
-        more sport-specific competition fetchers (see events.competition) are added."""
+        """The built-in sports (seeded as Sport rows) that code refers to by name; the full, editable
+        list lives in the Sport table."""
 
         ICE_HOCKEY = "ice_hockey", _("Ice hockey")
         OTHER = "other", _("Other")
@@ -130,7 +169,7 @@ class Club(UUIDModel):
     sport_type = models.CharField(
         _("sport"),
         max_length=20,
-        choices=SportType.choices,
+        choices=sport_choices,
         default=SportType.OTHER,
         help_text=_("Which sport this club plays -- determines which competitions and score fetchers are relevant to it."),
     )

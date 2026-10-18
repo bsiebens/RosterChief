@@ -46,6 +46,11 @@ class UserDebugViewTests(ControlPanelTestBase):
         self.assertContains(response, "News")
         self.assertEqual(len(response.context["notifications"]["scopes"]), 2)
 
+    def test_command_bar_keeps_the_superuser_tabs_while_looking_up_another_account(self):
+        response = self.client.get(self.url, {"email": "person@example.com"})
+        self.assertEqual(response.context["user"], self.root)
+        self.assertContains(response, reverse("controlpanel:push_monitoring"))
+
     def test_account_without_anything_saved(self):
         response = self.client.get(self.url, {"email": "person@example.com"})
         self.assertContains(response, "Nothing saved")

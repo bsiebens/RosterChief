@@ -314,8 +314,14 @@ class Command(MaintenanceAwareCommand):
 
     def _fill_rosters(self, club: Club, season: Season, teams: dict, positions: dict):
         filler_names = [
-            ("Skyler", "Moreau"), ("Reese", "Haddad"), ("Quinn", "Ibrahim"), ("Rowan", "Petit"),
-            ("Emerson", "Vance"), ("Blake", "Torres"), ("Sasha", "Novotny"), ("Charlie", "Lindgren"),
+            ("Skyler", "Moreau"),
+            ("Reese", "Haddad"),
+            ("Quinn", "Ibrahim"),
+            ("Rowan", "Petit"),
+            ("Emerson", "Vance"),
+            ("Blake", "Torres"),
+            ("Sasha", "Novotny"),
+            ("Charlie", "Lindgren"),
         ]
         team_cycle = [teams["u10"], teams["u12"], teams["u14"]]
         position_cycle = [positions["forward"], positions["defense"], positions["goalkeeper"]]

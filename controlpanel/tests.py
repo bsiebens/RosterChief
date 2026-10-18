@@ -24,7 +24,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from bugs.models import BugReport
 from bugs.services import add_note
-from club.models import Club, ClubMembership, ClubRole, Season
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager, Sport
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
@@ -1390,6 +1390,15 @@ class MfaPendingTests(TestCase):
 
         self.assertNotIn(user, admins_pending_mfa())
 
+    def test_shop_and_evaluation_managers_are_pending_like_the_middleware_demands(self):
+        # RequireMFAMiddleware locks these out too, so the dashboard must list them.
+        for email, grant in [("shop@example.com", ShopManager), ("eval@example.com", EvaluationManager)]:
+            user = User.objects.create_user(email=email, password="pw-secret-123")
+            member = Member.objects.create(first_name=email[:4], last_name="Manager", user=user)
+            grant.objects.create(club=self.club, member=member)
+
+            self.assertIn(user, admins_pending_mfa())
+
     def test_each_pending_admin_is_counted_once(self):
         # Two elevated roles in two clubs is still one person to chase.
         other = Club.objects.create(name="Feyenoord")
@@ -2730,3 +2739,33 @@ class AnnouncementManagementTests(TestCase):
         response = self.client.get(reverse("controlpanel:announcement_list"))
 
         self.assertContains(response, "Heads up")
+
+
+class SportManagementTests(ControlPanelTestBase):
+    def test_features_page_lists_seeded_sports(self):
+        response = self.client.get(reverse("controlpanel:features"))
+        self.assertContains(response, "Ice hockey")
+        self.assertContains(response, "New sport")
+
+    def test_create_makes_the_sport_a_choice_on_clubs(self):
+        self.client.post(reverse("controlpanel:sport_create"), {"name": "Baseball", "code": "baseball"})
+        self.assertIn(("baseball", "Baseball"), Club._meta.get_field("sport_type").choices)
+
+    def test_update_renames_but_keeps_the_code(self):
+        sport = Sport.objects.get(code="ice_hockey")
+        self.client.post(reverse("controlpanel:sport_update", args=[sport.pk]), {"name": "Hockey on ice", "code": "changed"})
+        sport.refresh_from_db()
+        self.assertEqual((sport.name, sport.code), ("Hockey on ice", "ice_hockey"))
+
+    def test_delete_refuses_fallback_and_in_use_sports_but_removes_unused_ones(self):
+        self.client.post(reverse("controlpanel:sport_delete", args=[Sport.objects.get(code="other").pk]))
+        self.assertTrue(Sport.objects.filter(code="other").exists())
+
+        used = Sport.objects.create(code="rugby", name="Rugby")
+        Club.objects.filter(pk=self.club.pk).update(sport_type="rugby")
+        self.client.post(reverse("controlpanel:sport_delete", args=[used.pk]))
+        self.assertTrue(Sport.objects.filter(code="rugby").exists())
+
+        Club.objects.filter(pk=self.club.pk).update(sport_type="other")
+        self.client.post(reverse("controlpanel:sport_delete", args=[used.pk]))
+        self.assertFalse(Sport.objects.filter(code="rugby").exists())

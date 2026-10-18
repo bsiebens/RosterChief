@@ -71,13 +71,7 @@ def is_number_available(pool, season: Season, number: int, *, for_member: Member
     if NumberReservation.objects.filter(pool=pool, number=number).exists():
         return False
 
-    holders = numbers_taken(pool, season).get(number, [])
-    for holder in holders:
-        if for_member is not None and holder.pk == for_member.pk:
-            continue
-        if not _age_gap_exempts(holder, for_member, pool.min_age_gap_years):
-            return False
-    return True
+    return _holders_allow(numbers_taken(pool, season).get(number, []), pool, for_member)
 
 
 def has_unresolved_conflict(holders: list[Member], *, min_age_gap_years: int = DEFAULT_MIN_AGE_GAP_YEARS) -> bool:
@@ -99,7 +93,15 @@ def has_unresolved_conflict(holders: list[Member], *, min_age_gap_years: int = D
 
 def available_numbers(pool, season: Season, *, for_member: Member | None = None) -> list[int]:
     """``pool``'s full range, minus whatever is_number_available rejects."""
-    return [number for number in range(pool.min_number, pool.max_number + 1) if is_number_available(pool, season, number, for_member=for_member)]
+    # Same rule as is_number_available, but the reservations and holders are read once for the whole range
+    # rather than re-queried per number (a 1-99 pool was ~400 queries).
+    reserved = set(NumberReservation.objects.filter(pool=pool).values_list("number", flat=True))
+    taken = numbers_taken(pool, season)
+    return [number for number in range(pool.min_number, pool.max_number + 1) if number not in reserved and _holders_allow(taken.get(number, []), pool, for_member)]
+
+
+def _holders_allow(holders: list[Member], pool, for_member: Member | None) -> bool:
+    return all((for_member is not None and holder.pk == for_member.pk) or _age_gap_exempts(holder, for_member, pool.min_age_gap_years) for holder in holders)
 
 
 def member_current_number(member: Member, pool, season: Season) -> int | None:

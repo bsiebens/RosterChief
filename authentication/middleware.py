@@ -31,28 +31,28 @@ EXEMPT_PREFIXES = ("/accounts/", "/static/", "/media/", "/__reload__/")
 ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN)
 
 
+def privileged_members():
+    """Members whose own grants make a second factor mandatory: any elevated ClubRole, a
+    ShopManager/EvaluationManager grant, or the derived coach-manager role -- a
+    management-position StaffAssignment in the season covering today (the same test as
+    club.services.access.is_coach_manager, applied to every club at once, since the
+    middleware runs before the tenant is resolved). The one definition behind both the
+    gate below and the control panel's "admins without MFA" count."""
+    today = timezone.localdate()
+    member = OuterRef("pk")
+    return Member.objects.filter(
+        Exists(ClubRole.objects.filter(member=member, role__in=ELEVATED_ROLES))
+        | Exists(ShopManager.objects.filter(member=member))
+        | Exists(EvaluationManager.objects.filter(member=member))
+        | Exists(StaffAssignment.objects.filter(member=member, position__management_position=True, season__start_date__lte=today, season__end_date__gte=today))
+    )
+
+
 def mfa_required_for(user) -> bool:
     """Privileged users must hold a second factor."""
     if user.is_staff or user.is_superuser:
         return True
-    # One query over the user's Member record: any elevated
-    # ClubRole, a ShopManager/EvaluationManager grant, or the derived
-    # coach-manager role -- a management-position StaffAssignment in the season
-    # covering today (the same test as club.services.access.is_coach_manager,
-    # applied to every club at once, since this middleware runs before the
-    # tenant is resolved).
-    today = timezone.localdate()
-    member = OuterRef("pk")
-    return (
-        Member.objects.filter(user=user)
-        .filter(
-            Exists(ClubRole.objects.filter(member=member, role__in=ELEVATED_ROLES))
-            | Exists(ShopManager.objects.filter(member=member))
-            | Exists(EvaluationManager.objects.filter(member=member))
-            | Exists(StaffAssignment.objects.filter(member=member, position__management_position=True, season__start_date__lte=today, season__end_date__gte=today))
-        )
-        .exists()
-    )
+    return privileged_members().filter(user=user).exists()
 
 
 class RequireMFAMiddleware:
