@@ -330,11 +330,9 @@ def group_by_family(members, club):
         # anything once it's scoped to *this* family's membership row.
         fm.member.role_in_family = fm.role
         fm.member.role_in_family_display = fm.get_role_display()
-        # A login-less child can be granted one right from the table -- parents/
-        # guardians already get one when added (add_parent_to_family/register_family
-        # both call get_or_create_login_member), so in practice this is only ever
-        # None for a child, but the check is on the actual state, not the role alone.
-        if fm.role == FamilyMembership.FamilyRole.CHILD and fm.member.user_id is None:
+        # Anyone without a login can be granted one right from the table, whatever
+        # their role in the family -- the check is on the actual state, not the role.
+        if fm.member.user_id is None:
             fm.member.grant_login_form = GrantLoginForm(initial={"email": fm.member.email})
         else:
             fm.member.grant_login_form = None
@@ -1161,6 +1159,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
             attach_to_family_form=AttachToFamilyForm(club=self.request.club, member=self.object),
+            grant_login_form=GrantLoginForm(initial={"email": self.object.email}) if is_admin and self.object.user_id is None else None,
             current_membership=current_membership,
             checklist=checklist_for(current_membership) if current_membership else [],
             membership_history=ClubMembership.objects.filter(club=self.request.club, member=self.object).select_related("season").order_by("-season__start_date"),
