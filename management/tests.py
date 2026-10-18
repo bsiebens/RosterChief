@@ -10,6 +10,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import openpyxl
+from allauth.account.models import EmailAddress
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -2857,6 +2858,8 @@ class MemberGrantLoginTests(ManagementTestBase):
         self.assertIsNotNone(self.child.user)
         self.assertEqual(self.child.user.email, "cody.kid@example.com")
         self.assertFalse(self.child.user.has_usable_password())
+        # Vouched for by the admin, so sign-in must not ask them to confirm it again.
+        self.assertTrue(EmailAddress.objects.filter(user=self.child.user, email="cody.kid@example.com", verified=True, primary=True).exists())
 
     def test_an_email_already_in_use_is_rejected(self):
         User.objects.create_user(email="taken@example.com", password="pw-secret-123")

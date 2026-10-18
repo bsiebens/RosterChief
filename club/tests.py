@@ -1311,14 +1311,14 @@ class BrandingTests(TestCase):
         response = self.login_page("rosterchief.app")
 
         self.assertTemplateUsed(response, "controlpanel/_auth_base.html")
-        self.assertTemplateNotUsed(response, "_club_base.html")
+        self.assertTemplateNotUsed(response, "mobile/_auth_base.html")
         self.assertContains(response, "RosterChief")
         self.assertIsNone(response.context["club"])
 
     def test_a_club_subdomain_gets_the_club_skin(self):
         response = self.login_page("ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertTemplateNotUsed(response, "controlpanel/_auth_base.html")
         self.assertContains(response, "Ajax United")
         self.assertEqual(response.context["club"], self.club)
@@ -1341,29 +1341,23 @@ class BrandingTests(TestCase):
 
         self.assertContains(self.login_page("ajax-united.rosterchief.app"), "clubs/ajax-united/crest.png")
 
-    def test_a_club_logo_gets_a_primary_coloured_ring(self):
-        self.club.logo = "clubs/ajax-united/crest.png"
-        self.club.save()
-
-        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "ring-primary")
-
     def test_a_club_colour_overrides_the_theme(self):
         self.club.primary_color = "#1e40af"
         self.club.save()
 
-        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--color-primary: #1e40af")
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--tenant-navy: #1e40af")
 
     def test_no_colour_means_no_override(self):
-        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-primary")
+        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--tenant-navy")
 
     def test_a_club_secondary_colour_overrides_the_theme(self):
         self.club.secondary_color = "#be185d"
         self.club.save()
 
-        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--color-secondary: #be185d")
+        self.assertContains(self.login_page("ajax-united.rosterchief.app"), "--tenant-club: #be185d")
 
     def test_no_secondary_colour_means_no_override(self):
-        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--color-secondary")
+        self.assertNotContains(self.login_page("ajax-united.rosterchief.app"), "--tenant-club")
 
 
 @override_settings(
@@ -1394,7 +1388,7 @@ class ManagementBrandingTests(TestCase):
 
         response = self.client.get(reverse("account_change_password"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertTemplateNotUsed(response, "management/_auth_base.html")
 
     def test_the_change_password_screen_gets_the_management_skin_after_visiting_manage(self):
@@ -1450,7 +1444,7 @@ class ManagementBrandingTests(TestCase):
         # an ambiguous case and keeps the old default.
         response = self.client.get(reverse("account_login"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertTemplateNotUsed(response, "management/_auth_base.html")
 
     def test_a_member_without_management_access_is_not_left_management_branded(self):
@@ -1467,7 +1461,7 @@ class ManagementBrandingTests(TestCase):
 
         response = self.client.get(reverse("account_logout"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "_club_base.html")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
         self.assertTemplateNotUsed(response, "management/_auth_base.html")
 
 
@@ -1490,13 +1484,12 @@ class MobileBrandingTests(TestCase):
         member = Member.objects.create(user=cls.member_user, first_name="Mo", last_name="Member")
         ClubMembership.objects.create(club=cls.club, member=member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
 
-    def test_the_logout_screen_stays_on_the_public_skin_without_a_visit_to_the_app(self):
+    def test_the_logout_screen_gets_the_app_skin_without_a_visit_to_the_app(self):
         self.client.force_login(self.member_user)
 
         response = self.client.get(reverse("account_logout"), HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertTemplateUsed(response, "_club_base.html")
-        self.assertTemplateNotUsed(response, "mobile/_auth_base.html")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
 
     def test_the_logout_screen_gets_the_mobile_skin_after_visiting_the_app(self):
         self.client.force_login(self.member_user)
