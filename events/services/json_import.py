@@ -8,6 +8,9 @@ other clubs taking part only listed on the competition label. Same two-step
 preview/confirm flow though: ``build_plan`` is pure with respect to the
 request, and the location of every game is picked by staff in the preview.
 
+Rows on the same date, start time and city are merged into one play day (the file
+lists some days once per team and some once for all of them); the first row's id is kept.
+
 File format::
 
     {
@@ -147,7 +150,10 @@ def build_plan(club, raw: str | bytes) -> JSONImportPlan:
     )
     existing_by_id = {event.external_game_id: event for event in Event.objects.filter(club=club, competition=plan.competition, external_source_id=source).exclude(external_game_id="").prefetch_related("teams").select_related("location")}
 
+    # Rows on the same date, start time and city are one play day: the file sometimes lists a day once
+    # per team and sometimes once with all of them, so those rows are merged (first row's id wins).
     seen_ids, missing_teams = set(), []
+    merged: dict[tuple, dict] = {}
     for index, game in enumerate(payload["games"], 1):
         where = _("Game %(number)s") % {"number": index}
         if not isinstance(game, dict):
@@ -170,9 +176,20 @@ def build_plan(club, raw: str | bytes) -> JSONImportPlan:
             elif team not in teams:
                 teams.append(team)
 
-        hosted = bool(game.get("hosted_by_us"))
         city = _text(game.get("city"), "city", where)
-        label = _label(game, str(payload.get("our_code") or ""))
+        entry = merged.get((start, city.casefold()))
+        if entry is None:
+            merged[(start, city.casefold())] = {"id": game_id, "start": start, "end": end, "city": city, "teams": teams, "hosted": bool(game.get("hosted_by_us")), "participants": list(game.get("participants") or []), "ice": game.get("ice")}
+            continue
+        entry["end"] = max((moment for moment in (entry["end"], end) if moment), default=None)
+        entry["teams"].extend(team for team in teams if team not in entry["teams"])
+        entry["hosted"] = entry["hosted"] or bool(game.get("hosted_by_us"))
+        entry["participants"].extend(name for name in game.get("participants") or [] if name not in entry["participants"])
+        entry["ice"] = entry["ice"] or game.get("ice")
+
+    for entry in merged.values():
+        game_id, start, end, city, teams, hosted = entry["id"], entry["start"], entry["end"], entry["city"], entry["teams"], entry["hosted"]
+        label = _label(entry, str(payload.get("our_code") or ""))
         existing = existing_by_id.get(game_id)
         planned = PlannedGame(external_game_id=game_id, start=start, end=end, city=city, teams=teams, hosted_by_us=hosted, label=label, suggested_location=suggested_location(club, city, hosted))
 
