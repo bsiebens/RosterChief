@@ -4,7 +4,21 @@ from waffle import flag_is_active
 
 from members.models import Group
 
-from .services.access import can_add_news, can_edit_news, can_manage_evaluations, can_manage_forms, can_manage_members, can_manage_shop, can_publish_news, groups_manageable_by, has_management_access, is_club_admin, is_coach_manager, teams_managed_by
+from .services.access import (
+    can_add_news,
+    can_edit_news,
+    can_manage_evaluations,
+    can_manage_forms,
+    can_manage_members,
+    can_manage_referees,
+    can_manage_shop,
+    can_publish_news,
+    groups_manageable_by,
+    has_management_access,
+    is_club_admin,
+    is_coach_manager,
+    teams_managed_by,
+)
 
 
 class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
@@ -58,6 +72,16 @@ class MemberAdminRequiredMixin(ClubStaffRequiredMixin):
 
     def test_func(self):
         return can_manage_members(self.request.user, self.request.club)
+
+
+class RefereeAdminRequiredMixin(ClubStaffRequiredMixin):
+    """ADMIN, a platform superuser, MEMBER_ADMIN, or a RefereeManager grant -- the
+    referee management dashboard and the per-event referee assignment views.
+    Referee levels and a member's eligibility stay on MemberAdminRequiredMixin.
+    See can_manage_referees / club.models.RefereeManager."""
+
+    def test_func(self):
+        return can_manage_referees(self.request.user, self.request.club)
 
 
 class FeatureFlagMixin:
@@ -179,6 +203,13 @@ class OfficialsAdminRequiredMixin(FeatureFlagMixin, ClubAdminRequiredMixin):
     """Officials assignment/fee/PDF -- ADMIN only, once "officials" is on.
     Mirrors EventRefereeAssignView/RemoveView/FeeUpdateView/FormPdfView's own
     ClubAdminRequiredMixin."""
+
+    feature_flag = OFFICIALS_FLAG
+
+
+class OfficialsRefereeAdminRequiredMixin(FeatureFlagMixin, RefereeAdminRequiredMixin):
+    """Officials assignment/fee/PDF -- the same people who arrange referees, once
+    "officials" is on."""
 
     feature_flag = OFFICIALS_FLAG
 

@@ -10,6 +10,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import openpyxl
+from allauth.account.models import EmailAddress
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -27,7 +28,7 @@ from waffle import get_waffle_flag_model
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
 from bugs.models import BugNote, BugReport
-from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, RefereeManager, Season, ShopManager, Sponsor
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
@@ -2857,6 +2858,8 @@ class MemberGrantLoginTests(ManagementTestBase):
         self.assertIsNotNone(self.child.user)
         self.assertEqual(self.child.user.email, "cody.kid@example.com")
         self.assertFalse(self.child.user.has_usable_password())
+        # Vouched for by the admin, so sign-in must not ask them to confirm it again.
+        self.assertTrue(EmailAddress.objects.filter(user=self.child.user, email="cody.kid@example.com", verified=True, primary=True).exists())
 
     def test_an_email_already_in_use_is_rejected(self):
         User.objects.create_user(email="taken@example.com", password="pw-secret-123")
@@ -4472,7 +4475,7 @@ class HomeViewTests(ManagementTestBase):
         self.assertContains(response, 'id="signups-chart"')
         self.assertContains(response, "Renewal rate")
         self.assertContains(response, "Orders unpaid")
-        self.assertContains(response, "md:grid-cols-4")
+        self.assertContains(response, "md:grid-cols-5")
 
     def test_non_admin_staff_does_not_see_the_financial_sections(self):
         self.client.force_login(self.make_coach("coach6@example.com"))
@@ -4484,7 +4487,7 @@ class HomeViewTests(ManagementTestBase):
         self.assertNotContains(response, 'id="signups-chart"')
         self.assertNotContains(response, "Renewal rate")
         self.assertNotContains(response, "Orders unpaid")
-        self.assertContains(response, "md:grid-cols-3")
+        self.assertContains(response, "md:grid-cols-4")
 
     def test_the_season_pill_shows_the_season_years_not_the_short_name(self):
         self.client.force_login(self.admin_user)
@@ -8273,28 +8276,55 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         response = self.club_get("referee_management")
 
         self.assertTrue(RefereeSignup.objects.filter(event=game, member=self.referee, status=RefereeSignup.Status.INVITED).exists())
-        self.assertContains(response, "Invited, no response yet")
+        self.assertContains(response, "Not responded yet")
         self.assertContains(response, str(self.referee))
 
-    def test_no_pending_invite_shown_once_the_game_is_full(self):
-        game = self.make_game(max_referees=1)
-        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
-        other_referee = Member.objects.create(first_name="Other", last_name="Ref")
-        RefereeSignup.objects.create(event=game, member=other_referee, status=RefereeSignup.Status.INVITED)
+    def test_a_signed_up_referee_gets_a_confirm_button_that_assigns_them(self):
+        game = self.make_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        signup.status = RefereeSignup.Status.ACCEPTED
+        signup.save()
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
-        self.assertNotContains(response, "Invited, no response yet")
+        self.assertContains(response, "Signed up")
+        self.assertContains(response, "Confirm")
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
 
-    def test_self_signed_up_referee_is_flagged_distinctly_from_an_admin_assignment(self):
+        self.club_post("event_referee_assign", {"member": self.referee.pk}, game.pk)
+
+        self.assertTrue(EventReferee.objects.filter(event=game, member=self.referee).exists())
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.CONFIRMED)
+
+    def test_declined_referees_are_listed(self):
+        game = self.make_game()
+        RefereeSignup.objects.filter(event=game, member=self.referee).update(status=RefereeSignup.Status.DECLINED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, "Declined:")
+
+    def test_confirm_is_disabled_once_the_game_is_full(self):
+        game = self.make_game(max_referees=1)
+        add_external_referee(game, "Guest Ref", assigned_by=self.admin_member)
+        RefereeSignup.objects.filter(event=game, member=self.referee).update(status=RefereeSignup.Status.ACCEPTED)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("referee_management")
+
+        self.assertContains(response, "This game is already full")
+
+    def test_a_referee_row_without_assigned_by_is_no_longer_flagged_as_self_sign_up(self):
         game = self.make_game()
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=None)
         self.client.force_login(self.admin_user)
 
         response = self.club_get("referee_management")
 
-        self.assertContains(response, "Self sign-up")
+        self.assertNotContains(response, "Self sign-up")
 
     def test_workload_stats_count_games_refereed_this_season(self):
         game_one = self.make_game()
@@ -16199,3 +16229,79 @@ class JSONImportViewTests(ManagementTestBase):
 
         self.assertIn(self.club_get("json_import").status_code, (302, 403))
         self.assertEqual(Event.objects.filter(club=self.club).count(), 0)
+
+
+class RefereeManagerTests(ManagementTestBase):
+    """RefereeManager is an additive grant (like ShopManager): it opens the referee
+    management dashboard and the per-event assignment views, and nothing else
+    people-related."""
+
+    def make_referee_admin(self, email="ref-admin@example.com"):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Rita", last_name="RefAdmin")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeManager.objects.create(club=self.club, member=member)
+        enrol_mfa(user)
+        return user
+
+    def test_an_admin_can_grant_referee_admin(self):
+        target = Member.objects.create(first_name="Target", last_name="Person")
+        ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("role_create", {"member": str(target.pk), "role": "referee_admin"})
+
+        self.assertRedirects(response, reverse("management:role_list"))
+        self.assertTrue(RefereeManager.objects.filter(club=self.club, member=target).exists())
+        self.assertContains(self.club_get("role_list"), "Referee admins")
+
+    def test_a_referee_admin_cannot_grant_roles(self):
+        target = Member.objects.create(first_name="Target", last_name="Person")
+        ClubMembership.objects.create(club=self.club, member=target, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        self.client.force_login(self.make_referee_admin())
+
+        response = self.club_post("role_create", {"member": str(target.pk), "role": "referee_admin"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(RefereeManager.objects.filter(club=self.club, member=target).exists())
+
+    def test_an_admin_can_revoke_referee_admin(self):
+        user = self.make_referee_admin()
+        grant = RefereeManager.objects.get(club=self.club, member__user=user)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("referee_admin_revoke", {}, grant.pk)
+
+        self.assertRedirects(response, reverse("management:role_list"))
+        self.assertFalse(RefereeManager.objects.filter(pk=grant.pk).exists())
+
+    def test_a_referee_admin_cannot_revoke_their_own_grant(self):
+        user = self.make_referee_admin()
+        grant = RefereeManager.objects.get(club=self.club, member__user=user)
+        self.client.force_login(user)
+
+        self.assertEqual(self.club_post("referee_admin_revoke", {}, grant.pk).status_code, 403)
+        self.assertTrue(RefereeManager.objects.filter(pk=grant.pk).exists())
+
+    def test_a_referee_admin_reaches_the_dashboard_and_sees_its_nav_item(self):
+        self.client.force_login(self.make_referee_admin())
+
+        self.assertEqual(self.club_get("referee_management").status_code, 200)
+        self.assertContains(self.club_get("referee_management"), reverse("management:referee_management"))
+
+    def test_a_referee_admin_does_not_get_people_or_settings_ground(self):
+        self.client.force_login(self.make_referee_admin())
+
+        self.assertEqual(self.club_get("referee_level_create").status_code, 403)
+        self.assertEqual(self.club_get("role_list").status_code, 403)
+        self.assertNotContains(self.club_get("home"), reverse("management:signup_list"))
+
+    def test_a_plain_staff_member_still_cannot_reach_the_dashboard(self):
+        user = User.objects.create_user(email="editor@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Ed", last_name="Editor")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member).update(role=ClubRole.Roles.EDITOR)
+        enrol_mfa(user)
+        self.client.force_login(user)
+
+        self.assertEqual(self.club_get("referee_management").status_code, 403)

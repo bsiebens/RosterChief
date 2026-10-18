@@ -648,7 +648,7 @@
                 "type": "null"
               }
             ],
-            "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.",
+            "description": "Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `confirmed`, `declined`) for `referee`/`official`, null for `blocked`.",
             "title": "Status"
           },
           "total_tasks": {
@@ -7698,7 +7698,7 @@
             "type": "string"
           },
           "status": {
-            "description": "`invited`, `accepted` or `declined`.",
+            "description": "`invited`, `accepted` (signed up, waiting for the club), `confirmed` (the club picked them) or `declined`.",
             "title": "Status",
             "type": "string"
           }
@@ -9724,7 +9724,7 @@
     },
     "/api/app/v1/events/{event_id}/referee-signups/{signup_id}/respond": {
       "post": {
-        "description": "For a managed person's referee invite. `409 signup_unavailable` when it can't be\naccepted (e.g. every referee slot is taken); the invite stays open.",
+        "description": "For a managed person's referee invite. `409 signup_unavailable` when it can't be\naccepted. Accepting only records interest (`status` `accepted`); the club confirms who goes\n(`status` `confirmed`). Declining after being confirmed withdraws the assignment.",
         "operationId": "appapi_routers_member_respond_referee",
         "parameters": [
           {

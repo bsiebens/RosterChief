@@ -45,9 +45,9 @@
                     <input type="hidden" name="return" value="{{ return_url }}">
                     {% if line.type == "rsvp" %}<input type="hidden" name="member_id" value="{{ line.person.pk }}">{% endif %}
                     <div class="flex min-h-[34px] items-center gap-2">
-                        <div class="min-w-0 flex-1">
-                            <div class="truncate text-sm font-semibold text-ink">{{ line.name }}</div>
-                            {% if line.editable and line.show_pill %}<span class="pill pill-sm {{ line.pill_class }}">{{ line.pill_label }}</span>{% endif %}
+                        <div class="flex min-w-0 flex-1 items-center gap-2">
+                            <span class="min-w-0 truncate text-sm font-semibold text-ink">{{ line.name }}</span>
+                            {% if line.editable and line.show_pill %}<span class="pill pill-sm {{ line.pill_class }} shrink-0">{{ line.pill_label }}</span>{% endif %}
                         </div>
                         <span class="w-[58px] shrink-0 truncate font-display text-[11px] font-extrabold tracking-wider text-muted uppercase">{{ line.role_label }}</span>
                         <div class="flex w-[134px] shrink-0 justify-end gap-1.5">

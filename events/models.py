@@ -395,17 +395,20 @@ class RefereeSignup(UUIDModel):
     automatically (events.services.referees.sync_referee_invites, wired from
     events/signals.py) the moment a home game needs a club-arranged referee,
     for every currently-eligible member (teams.RefereeProfile). Accepting
-    (events.services.referees.accept_referee_signup) creates a real
-    EventReferee row via the same capacity-checked assign_referee every admin
-    assignment goes through (assigned_by=None marks it self-service) -- this
-    table only ever tracks the invite/response, never payment/capacity, so
-    the desktop referee-management screen stays the single source of truth
-    for who's actually refereeing.
+    (accept_referee_signup) only records interest (ACCEPTED) -- it is never an
+    automatic assignment. Staff confirm from the referee-management screen
+    (confirm_referee_signup -> the capacity-checked assign_referee), which
+    creates the EventReferee row and moves the signup to CONFIRMED. This table
+    never tracks payment/capacity; EventReferee stays the source of truth for
+    who's actually refereeing.
     """
 
     class Status(models.TextChoices):
         INVITED = "invited", _("invited")
-        ACCEPTED = "accepted", _("accepted")
+        #: "I want to come" -- interest only; creates no assignment and uses no capacity.
+        ACCEPTED = "accepted", _("signed up")
+        #: Staff picked them: an EventReferee/EventOfficial row exists.
+        CONFIRMED = "confirmed", _("confirmed")
         DECLINED = "declined", _("declined")
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="referee_signups", verbose_name=_("event"))
@@ -488,7 +491,10 @@ class OfficialSignup(UUIDModel):
 
     class Status(models.TextChoices):
         INVITED = "invited", _("invited")
-        ACCEPTED = "accepted", _("accepted")
+        #: "I want to come" -- interest only; creates no assignment and uses no capacity.
+        ACCEPTED = "accepted", _("signed up")
+        #: Staff picked them: an EventReferee/EventOfficial row exists.
+        CONFIRMED = "confirmed", _("confirmed")
         DECLINED = "declined", _("declined")
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="official_signups", verbose_name=_("event"))

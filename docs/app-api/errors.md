@@ -30,7 +30,7 @@ safe to show as is. `fields` only appears on `422` (`{"field": ["message", …]}
 | 409 | `event_started` | RSVP after the event started: refresh the event; answers are read-only now. |
 | 409 | `rsvp_closed` | The reply deadline passed. Only a line-up `dropout` is still possible. |
 | 409 | `not_in_lineup` | `dropout` from someone who isn't selected: refresh the event. |
-| 409 | `signup_unavailable` | A referee/official invite can't be accepted (e.g. all slots taken). The invite stays open. |
+| 409 | `signup_unavailable` | A referee/official invite can't be accepted (e.g. the game is no longer a club-arranged home game). The invite stays open. |
 | 409 | `task_unavailable` | The task is full, or this account already has a slot. Refresh the event. |
 | 409 | `form_unavailable` | The form is closed, not open yet, or the maximum number of responses was reached. |
 | 409 | `shop_closed` | The club closed the shop for now: hide the shop's catalogue and cart (orders stay readable). |

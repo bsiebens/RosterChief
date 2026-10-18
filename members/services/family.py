@@ -3,6 +3,7 @@ linked to each other -- either together as a new family, or one at a time onto a
 existing one.
 """
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -119,10 +120,15 @@ def grant_login(member, email):
     get_or_create_login_member; they set one via the reset-link flow. Unlike that
     function, this attaches the login to a specific, already-existing Member rather
     than finding-or-creating one -- the caller's form has already checked the email
-    isn't already in use."""
+    isn't already in use.
+
+    The address is recorded as verified: an admin vouching for it is the
+    confirmation, so ACCOUNT_EMAIL_VERIFICATION = "mandatory" must not make them
+    confirm it again before their first sign-in."""
     user = User.objects.create(email=email.lower(), is_active=True)
     user.set_unusable_password()
     user.save(update_fields=["password"])
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
 
     member.user = user
     member.save(update_fields=["user"])

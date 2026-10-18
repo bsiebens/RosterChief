@@ -8,7 +8,7 @@ without a tie the whole app 404s, exactly as if the page didn't exist.
 
 from django.db.models import Q
 
-from club.models import Club, ClubMembership, ClubRole, EvaluationManager, ShopManager
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, RefereeManager, ShopManager
 from club.services.access import is_platform_superuser
 from members.models import FamilyMembership, Member
 from teams.models import StaffAssignment
@@ -55,6 +55,6 @@ def has_club_tie(user, club: Club) -> bool:
 
     if ClubRole.objects.filter(club=club, member=member).exists():
         return True
-    if ShopManager.objects.filter(club=club, member=member).exists() or EvaluationManager.objects.filter(club=club, member=member).exists():
+    if any(grant.objects.filter(club=club, member=member).exists() for grant in (ShopManager, EvaluationManager, RefereeManager)):
         return True
     return StaffAssignment.objects.filter(member=member, team__club=club).exists()

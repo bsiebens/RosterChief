@@ -400,13 +400,13 @@ Row types:
 | `type` | Show | Action |
 |---|---|---|
 | `rsvp` | the event with the person's `status` | open the event |
-| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`), a confirmed duty (`accepted`) or a "can't make it" (`declined`, kept until the game starts) | respond to `signup_id` (a declined one can still be accepted) |
+| `referee`, `official` | "Referee?" / "Official?" (`status` `invited`), "signed up, waiting for the club" (`accepted` -- interest only) or a confirmed duty (`confirmed`, the club picked them) or a "can't make it" (`declined`, kept until the game starts) | respond to `signup_id` (a declined one can still be accepted) |
 | `blocked` | the event greyed out with `blocked_requirements` ("Medical certificate") | none: the club must clear it |
 
 ### Event
 
 `GET /events/{id}`: the event, `answers` (one per invited managed person, with their `note`),
-a published `lineup`, `referee_signups` / `official_signups` (invited, accepted, or declined until
+a published `lineup`, `referee_signups` / `official_signups` (invited, accepted, confirmed, or declined until
 the game starts -- the same rule as the calendar), `tasks`, `blocked` people and the squad's
 `squad_summary` (counts only).
 
@@ -424,7 +424,7 @@ the game starts -- the same rule as the calendar), `tasks`, `blocked` people and
 
 **Referee / official invites:** `POST /events/{id}/referee-signups/{signup_id}/respond` (or
 `official-signups`) with `{"response": "accept" | "decline"}`. `409 signup_unavailable` means it
-couldn't be accepted (e.g. full).
+couldn't be accepted (e.g. no longer a club-arranged home game).
 
 **Tasks** ("bring fruit"): `POST` or `DELETE /events/{id}/tasks/{task_id}/claim`. A slot is
 taken by the account itself, not per child. Others see it as "<Family> family".

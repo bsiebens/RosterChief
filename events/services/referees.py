@@ -151,7 +151,7 @@ def assign_referee(event, member, *, assigned_by):
     # as good as a yes. Without this a directly assigned referee kept showing
     # as "invited, no response yet", and one never invited had no signup row
     # at all, so the game never showed up among their own duties in the app.
-    RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    RefereeSignup.objects.update_or_create(event=event, member=member, defaults={"status": RefereeSignup.Status.CONFIRMED, "responded_at": timezone.now()})
     if assigned_by is not None:
         # A staff pick, made in the management app: the person didn't take this themselves, so
         # tell them. (Self-service accepts pass assigned_by=None -- they just did it.)
@@ -180,15 +180,15 @@ def add_external_referee(event, name, *, assigned_by):
 
 @transaction.atomic
 def remove_referee(referee):
-    """Staff taking a referee off a game (management app). The person's own sign-up is
-    set to declined, so the game stops showing as a confirmed duty in their app (and isn't
-    re-offered by the automatic invite sync), and they are told. An external referee has
+    """Staff taking a referee off a game (management app). The person's own sign-up goes
+    back to ACCEPTED (still interested, no longer picked), so the game stops showing as a
+    confirmed duty in their app but stays on the interest list, and they are told. An external referee has
     no account behind them: only the assignment goes."""
     event, member = referee.event, referee.member
     referee.delete()
     if member is None:
         return
-    RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.DECLINED, responded_at=timezone.now())
+    RefereeSignup.objects.filter(event=event, member=member).update(status=RefereeSignup.Status.ACCEPTED, responded_at=timezone.now())
 
     def body():
         return _("You have been removed as a referee for %(event)s.") % {"event": event.title}
@@ -242,24 +242,33 @@ def sync_referee_invites(event, *, notify=True):
 
 @transaction.atomic
 def accept_referee_signup(signup):
-    """Confirms `signup`'s member as an actual referee for the game --
-    routed through the exact same assign_referee every admin assignment
-    uses (assigned_by=None marks it self-service), so capacity is enforced
-    once, in one place, and the desktop referee-management screen sees the
-    new assignment with no separate sync step. Raises RefereeAssignmentError
-    unchanged if the game's already full -- `signup` is left INVITED so the
-    referee can retry if a slot frees up."""
-    assign_referee(signup.event, signup.member, assigned_by=None)
-    signup.status = RefereeSignup.Status.ACCEPTED
-    signup.responded_at = timezone.now()
-    signup.save(update_fields=["status", "responded_at"])
+    """Records that `signup`'s member wants to come (ACCEPTED) -- interest only. It
+    creates no EventReferee and uses no capacity: staff pick who actually goes from the
+    referee-management screen (confirm_referee_signup). Someone staff already confirmed
+    stays CONFIRMED. Raises RefereeAssignmentError if the game no longer needs a club-arranged referee
+    (e.g. it was moved away from home)."""
+    if not needs_referee_management(signup.event):
+        raise RefereeAssignmentError(_("Referees can only sign up for home games of club-managed teams."))
+    if signup.status != RefereeSignup.Status.CONFIRMED:
+        signup.status = RefereeSignup.Status.ACCEPTED
+        signup.responded_at = timezone.now()
+        signup.save(update_fields=["status", "responded_at"])
+    return signup
+
+
+@transaction.atomic
+def confirm_referee_signup(signup, *, assigned_by):
+    """Staff pick `signup`'s member for the game: the capacity-checked assign_referee
+    (which marks the signup CONFIRMED and tells the member). Raises RefereeAssignmentError
+    when the game is full or the member is already assigned; the signup is left as it was."""
+    assign_referee(signup.event, signup.member, assigned_by=assigned_by)
+    signup.refresh_from_db()
     return signup
 
 
 @transaction.atomic
 def decline_referee_signup(signup):
-    """Declines `signup`. If they were assigned -- by accepting themselves or
-    by staff (assign_referee marks the signup ACCEPTED either way) -- the
+    """Declines `signup`. If they were assigned -- by staff (assign_referee marks the signup CONFIRMED) -- the
     EventReferee row goes too, so the assignment and the member's own answer
     never disagree and the desktop screen stops counting someone who can't
     make it. In that case only, the game's own manager(s) are told

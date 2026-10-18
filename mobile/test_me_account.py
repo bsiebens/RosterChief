@@ -354,8 +354,9 @@ class LoginSkinTests(TestCase):
         self.assertContains(response, 'class="btn-rc btn-rc-primary"')
         self.assertContains(response, 'name="color-scheme" content="light dark"')
 
-    def test_public_login_keeps_the_original_layout(self):
+    def test_a_direct_visit_to_login_gets_the_app_layout(self):
+        # An emailed link or bookmark never touched /app/, so no session flag is set.
         response = self.client.get(reverse("account_login"), HTTP_HOST=HOST)
 
-        self.assertNotContains(response, "btn-rc")
-        self.assertContains(response, "Sign In")
+        self.assertTemplateUsed(response, "mobile/_auth_base.html")
+        self.assertContains(response, "btn-rc")

@@ -1733,7 +1733,18 @@ class CalendarRefereeSignupTests(TestCase):
 
         self.assertNotContains(response, "Reply needed")
 
-    def test_accepted_signup_shows_a_confirmed_pill(self):
+    def test_confirmed_signup_shows_a_confirmed_pill(self):
+        signup = RefereeSignup.objects.get(event=self.game, member=self.member)
+        signup.status = RefereeSignup.Status.CONFIRMED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "Reply needed")
+
+    def test_accepted_signup_waits_for_confirmation(self):
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
         signup.status = RefereeSignup.Status.ACCEPTED
         signup.save()
@@ -1741,7 +1752,8 @@ class CalendarRefereeSignupTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Confirmed")
+        self.assertContains(response, "Signed up")
+        self.assertNotContains(response, "Confirmed")
         self.assertNotContains(response, "Reply needed")
 
     def test_training_filter_excludes_referee_rows(self):
@@ -1838,7 +1850,20 @@ class CalendarOfficialSignupTests(TestCase):
 
         self.assertNotContains(response, "Reply needed")
 
-    def test_accepted_signup_shows_a_confirmed_pill(self):
+    def test_confirmed_signup_shows_a_confirmed_pill(self):
+        self._enable_officials_flag()
+        self.game.teams.add(self.team)
+        signup = OfficialSignup.objects.get(event=self.game, member=self.member)
+        signup.status = OfficialSignup.Status.CONFIRMED
+        signup.save()
+        self.client.force_login(self.user)
+
+        response = self._get()
+
+        self.assertContains(response, "Confirmed")
+        self.assertNotContains(response, "Reply needed")
+
+    def test_accepted_signup_waits_for_confirmation(self):
         self._enable_officials_flag()
         self.game.teams.add(self.team)
         signup = OfficialSignup.objects.get(event=self.game, member=self.member)
@@ -1848,8 +1873,8 @@ class CalendarOfficialSignupTests(TestCase):
 
         response = self._get()
 
-        self.assertContains(response, "Confirmed")
-        self.assertNotContains(response, "Reply needed")
+        self.assertContains(response, "Signed up")
+        self.assertNotContains(response, "Confirmed")
 
     def test_training_filter_excludes_official_rows(self):
         self._enable_officials_flag()
@@ -1892,17 +1917,17 @@ class RefereeSignupRespondViewTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_accept_creates_a_real_assignment(self):
+    def test_accept_only_records_interest(self):
         self.client.force_login(self.user)
 
         response = self._post("accept")
 
         self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
-        self.assertTrue(EventReferee.objects.filter(event=self.game, member=self.member).exists())
+        self.assertFalse(EventReferee.objects.filter(event=self.game, member=self.member).exists())
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
         self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
 
-    def test_accept_shows_an_error_when_the_game_is_already_full(self):
+    def test_accept_is_fine_when_the_game_is_already_full(self):
         self.game.max_referees = 0
         self.game.save(update_fields=["max_referees"])
         self.client.force_login(self.user)
@@ -1912,7 +1937,7 @@ class RefereeSignupRespondViewTests(TestCase):
         self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
         self.assertFalse(EventReferee.objects.filter(event=self.game, member=self.member).exists())
         signup = RefereeSignup.objects.get(event=self.game, member=self.member)
-        self.assertEqual(signup.status, RefereeSignup.Status.INVITED)
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
 
     def test_decline_marks_the_signup_declined(self):
         self.client.force_login(self.user)
@@ -1952,7 +1977,8 @@ class RefereeSignupRespondViewTests(TestCase):
         response = self.client.post(reverse("mobile:referee_signup_respond", kwargs={"signup_id": child_signup.pk}), {"response": "accept"}, HTTP_HOST="ajax-united.rosterchief.app")
 
         self.assertRedirects(response, reverse("mobile:calendar"), fetch_redirect_response=False)
-        self.assertTrue(EventReferee.objects.filter(event=self.game, member=child).exists())
+        child_signup.refresh_from_db()
+        self.assertEqual(child_signup.status, RefereeSignup.Status.ACCEPTED)
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -2151,8 +2177,8 @@ class EventDetailScreenTests(TestCase):
         self.assertContains(response, "I'll ref")
         self.assertNotContains(response, "Confirmed")
 
-    def test_accepted_referee_signup_shows_a_confirmed_pill_with_a_retract_action(self):
-        RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+    def test_confirmed_referee_signup_shows_a_confirmed_pill_with_a_retract_action(self):
+        RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.CONFIRMED)
         self.client.force_login(self.user)
 
         response = self._get()
@@ -2162,7 +2188,7 @@ class EventDetailScreenTests(TestCase):
         self.assertContains(response, "Can't make it after all")
 
     def test_retracting_an_accepted_referee_signup_removes_the_assignment_and_notifies_the_manager(self):
-        signup = RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.ACCEPTED)
+        signup = RefereeSignup.objects.create(event=self.event, member=self.member, status=RefereeSignup.Status.CONFIRMED)
         EventReferee.objects.create(event=self.event, member=self.member, assigned_by=None)
         manager = Member.objects.create(first_name="Cara", last_name="Coach")
         management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
@@ -2177,9 +2203,9 @@ class EventDetailScreenTests(TestCase):
         self.assertFalse(EventReferee.objects.filter(event=self.event, member=self.member).exists())
         self.assertTrue(Notification.objects.filter(member=manager, title="Referee dropped out").exists())
 
-    def test_accepted_official_signup_shows_a_confirmed_pill_with_a_retract_action(self):
+    def test_confirmed_official_signup_shows_a_confirmed_pill_with_a_retract_action(self):
         get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
-        OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.ACCEPTED)
+        OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.CONFIRMED)
         self.client.force_login(self.user)
 
         response = self._get()
@@ -2190,7 +2216,7 @@ class EventDetailScreenTests(TestCase):
 
     def test_retracting_an_accepted_official_signup_removes_the_assignment_and_notifies_the_manager(self):
         get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
-        signup = OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.ACCEPTED)
+        signup = OfficialSignup.objects.create(event=self.event, member=self.member, status=OfficialSignup.Status.CONFIRMED)
         EventOfficial.objects.create(event=self.event, member=self.member, assigned_by=None)
         manager = Member.objects.create(first_name="Cara", last_name="Coach")
         management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)

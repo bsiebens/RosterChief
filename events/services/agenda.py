@@ -54,7 +54,7 @@ def member_agenda(club, people, *, kind: str | None = None, officials_enabled: b
     rows += [{"type": "rsvp", "event": attendance.event, "member": attendance.member, "attendance": attendance} for attendance in attendances]
 
     def signup_rows(row_type, model):
-        queryset = in_window(not_finished(model.objects.filter(member__in=people, status__in=[model.Status.INVITED, model.Status.ACCEPTED])))
+        queryset = in_window(not_finished(model.objects.filter(member__in=people, status__in=[model.Status.INVITED, model.Status.ACCEPTED, model.Status.CONFIRMED])))
         if include_declined:
             # A "no" stays visible until the game starts (the person may change their mind),
             # which is earlier than the end-of-game cut-off the other sign-ups use.

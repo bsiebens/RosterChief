@@ -93,6 +93,43 @@
         </div>
 
         {% comment %}
+            RefereeManager -- same additive-grant shape as ShopManager above: its
+            own section, granted through the same modal ("Referee admin" is one of
+            ClubRoleAssignForm's dropdown values), revoked through its own view.
+        {% endcomment %}
+        <div class="card card-body">
+            <div>
+                <h2 class="card-title">{% trans "Referee admins" %}</h2>
+                <p class="text-sm text-muted">{% trans "Can use the referee management page and confirm who referees each game, without needing the Member admin or Admin role." %}</p>
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Member" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grant in referee_admins %}
+                        <tr>
+                            <td class="font-semibold text-ink">{{ grant.member }}</td>
+                            <td class="text-right">
+                                <form method="post" action="{% url 'management:referee_admin_revoke' grant.pk %}">
+                                    {% csrf_token %}
+                                    <button class="btn btn-outline btn-error btn-xs gap-1" type="submit">{% lucide "x" size=13 %} {% trans "Revoke" %}</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="2" class="py-4 text-center text-muted">{% trans "No one has been granted referee admin yet." %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% comment %}
             EvaluationManager -- same additive-grant shape as ShopManager above,
             same reasoning: its own section, granted through the same modal
             ("Evaluation manager" is one of ClubRoleAssignForm's dropdown values),

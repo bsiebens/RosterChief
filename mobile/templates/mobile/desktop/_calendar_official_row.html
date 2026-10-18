@@ -19,7 +19,7 @@
             {% if row.event.location %}&middot; {{ row.event.location.name }}{% endif %}
         </div>
     </div>
-    <span class="pill {% if row.official_signup.status == "accepted" %}pill-info{% else %}pill-neutral{% endif %} shrink-0">
-        {% if row.official_signup.status == "accepted" %}{% trans "Confirmed" %}{% else %}{% trans "Reply needed" %}{% endif %}
+    <span class="pill {% if row.official_signup.status == "confirmed" %}pill-info{% elif row.official_signup.status == "accepted" %}pill-warn{% else %}pill-neutral{% endif %} shrink-0">
+        {% if row.official_signup.status == "confirmed" %}{% trans "Confirmed" %}{% elif row.official_signup.status == "accepted" %}{% trans "Signed up" %}{% else %}{% trans "Reply needed" %}{% endif %}
     </span>
 </a>

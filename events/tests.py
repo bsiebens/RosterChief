@@ -68,6 +68,7 @@ from .services.officials import (
     accept_official_signup,
     add_external_official,
     assign_official,
+    confirm_official_signup,
     decline_official_signup,
     eligible_officials,
     needs_official_management,
@@ -81,6 +82,7 @@ from .services.referees import (
     accept_referee_signup,
     add_external_referee,
     assign_referee,
+    confirm_referee_signup,
     conflicting_events,
     decline_referee_signup,
     eligible_referees,
@@ -2420,14 +2422,14 @@ class RefereeServiceTests(EventsTestBase):
         self.assertEqual(assignment.member, self.referee)
         self.assertEqual(assignment.assigned_by, self.alice)
 
-    def test_removing_a_referee_declines_their_signup_and_tells_them(self):
+    def test_removing_a_referee_returns_their_signup_to_interested_and_tells_them(self):
         game = self.make_home_game()
         assignment = assign_referee(game, self.referee, assigned_by=self.alice)
 
         remove_referee(assignment)
 
         self.assertFalse(EventReferee.objects.filter(pk=assignment.pk).exists())
-        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.DECLINED)
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.ACCEPTED)
         self.assertEqual(Notification.objects.filter(member=self.referee, title="Referee assignment removed").count(), 1)
 
     def test_removing_an_external_referee_notifies_nobody(self):
@@ -2457,23 +2459,23 @@ class RefereeServiceTests(EventsTestBase):
 
         self.assertFalse(Notification.objects.filter(member=self.referee, title="Referee assignment").exists())
 
-    def test_assign_referee_settles_an_open_invite_as_accepted(self):
+    def test_assign_referee_settles_an_open_invite_as_confirmed(self):
         game = self.make_home_game()
         RefereeSignup.objects.get_or_create(event=game, member=self.referee)  # usually already invited on creation
 
         assign_referee(game, self.referee, assigned_by=self.alice)
 
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
-        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
+        self.assertEqual(signup.status, RefereeSignup.Status.CONFIRMED)
         self.assertIsNotNone(signup.responded_at)
 
-    def test_assign_referee_creates_an_accepted_signup_when_never_invited(self):
+    def test_assign_referee_creates_a_confirmed_signup_when_never_invited(self):
         # So the game shows up among the referee's own duties in the app.
         game = self.make_home_game()
 
         assign_referee(game, self.referee, assigned_by=self.alice)
 
-        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.ACCEPTED)
+        self.assertEqual(RefereeSignup.objects.get(event=game, member=self.referee).status, RefereeSignup.Status.CONFIRMED)
 
     def test_assign_referee_rejects_an_away_game(self):
         game = self.make_home_game(location=self.away_ground)
@@ -2634,28 +2636,61 @@ class RefereeSignupServiceTests(EventsTestBase):
 
         self.assertFalse(RefereeSignup.objects.filter(event=game).exists())
 
-    def test_accept_creates_a_real_event_referee_assignment(self):
+    def test_accept_only_records_interest(self):
         game = self.make_home_game()
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
 
         accept_referee_signup(signup)
 
-        assignment = EventReferee.objects.get(event=game, member=self.referee)
-        self.assertIsNone(assignment.assigned_by)
+        self.assertFalse(EventReferee.objects.filter(event=game, member=self.referee).exists())
         signup.refresh_from_db()
         self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
         self.assertIsNotNone(signup.responded_at)
 
-    def test_accept_raises_when_the_game_is_already_full(self):
+    def test_accept_works_even_when_the_game_is_already_full(self):
         game = self.make_home_game(max_referees=1)
         add_external_referee(game, "Guest Referee", assigned_by=None)
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
 
-        with self.assertRaises(RefereeAssignmentError):
-            accept_referee_signup(signup)
+        accept_referee_signup(signup)
 
         signup.refresh_from_db()
-        self.assertEqual(signup.status, RefereeSignup.Status.INVITED)
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
+
+    def test_accepting_again_does_not_downgrade_a_confirmed_signup(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        accept_referee_signup(signup)
+        confirm_referee_signup(signup, assigned_by=self.alice)
+
+        accept_referee_signup(signup)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.CONFIRMED)
+
+    def test_confirm_creates_the_assignment_and_tells_the_referee(self):
+        game = self.make_home_game()
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        accept_referee_signup(signup)
+
+        confirm_referee_signup(signup, assigned_by=self.alice)
+
+        self.assertEqual(EventReferee.objects.get(event=game, member=self.referee).assigned_by, self.alice)
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.CONFIRMED)
+        self.assertEqual(Notification.objects.filter(member=self.referee, title="Referee assignment").count(), 1)
+
+    def test_confirm_raises_when_the_game_is_already_full(self):
+        game = self.make_home_game(max_referees=1)
+        add_external_referee(game, "Guest Referee", assigned_by=None)
+        signup = RefereeSignup.objects.get(event=game, member=self.referee)
+        accept_referee_signup(signup)
+
+        with self.assertRaises(RefereeAssignmentError):
+            confirm_referee_signup(signup, assigned_by=self.alice)
+
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
 
     def test_decline_marks_the_signup_declined(self):
         game = self.make_home_game()
@@ -2667,10 +2702,11 @@ class RefereeSignupServiceTests(EventsTestBase):
         self.assertEqual(signup.status, RefereeSignup.Status.DECLINED)
         self.assertIsNotNone(signup.responded_at)
 
-    def test_decline_after_accepting_removes_the_self_service_assignment(self):
+    def test_decline_after_being_confirmed_removes_the_assignment(self):
         game = self.make_home_game()
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
         accept_referee_signup(signup)
+        confirm_referee_signup(signup, assigned_by=self.alice)
 
         decline_referee_signup(signup)
 
@@ -2693,6 +2729,7 @@ class RefereeSignupServiceTests(EventsTestBase):
         game = self.make_home_game()
         signup = RefereeSignup.objects.get(event=game, member=self.referee)
         accept_referee_signup(signup)
+        confirm_referee_signup(signup, assigned_by=self.alice)
         manager = Member.objects.create(first_name="Cara", last_name="Coach")
         management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
         StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)
@@ -2826,13 +2863,13 @@ class OfficialServiceTests(OfficialsTestBase):
         self.assertEqual(assignment.event, game)
         self.assertEqual(assignment.member, self.official)
 
-    def test_removing_an_official_declines_their_signup_and_tells_them(self):
+    def test_removing_an_official_returns_their_signup_to_interested_and_tells_them(self):
         game = self.make_home_game()
         assignment = assign_official(game, self.official, assigned_by=self.alice)
 
         remove_official(assignment)
 
-        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.DECLINED)
+        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.ACCEPTED)
         self.assertEqual(Notification.objects.filter(member=self.official, title="Official assignment removed").count(), 1)
 
     def test_a_staff_assignment_notifies_the_official(self):
@@ -2853,13 +2890,13 @@ class OfficialServiceTests(OfficialsTestBase):
 
         self.assertFalse(Notification.objects.filter(member=self.official, title="Official assignment").exists())
 
-    def test_assign_official_settles_an_open_invite_as_accepted(self):
+    def test_assign_official_settles_an_open_invite_as_confirmed(self):
         game = self.make_home_game()
         OfficialSignup.objects.get_or_create(event=game, member=self.official)  # usually already invited on creation
 
         assign_official(game, self.official, assigned_by=self.alice)
 
-        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.ACCEPTED)
+        self.assertEqual(OfficialSignup.objects.get(event=game, member=self.official).status, OfficialSignup.Status.CONFIRMED)
 
     def test_assign_official_rejects_once_at_capacity(self):
         game = self.make_home_game(max_officials=1)
@@ -2938,21 +2975,42 @@ class OfficialSignupServiceTests(OfficialsTestBase):
         game = self.make_home_game()
         self.assertTrue(OfficialSignup.objects.filter(event=game, member=self.official, status=OfficialSignup.Status.INVITED).exists())
 
-    def test_accept_creates_a_real_event_official_assignment(self):
+    def test_accept_only_records_interest(self):
         game = self.make_home_game()
         signup = OfficialSignup.objects.get(event=game, member=self.official)
 
         accept_official_signup(signup)
 
-        assignment = EventOfficial.objects.get(event=game, member=self.official)
-        self.assertIsNone(assignment.assigned_by)
+        self.assertFalse(EventOfficial.objects.filter(event=game, member=self.official).exists())
         signup.refresh_from_db()
         self.assertEqual(signup.status, OfficialSignup.Status.ACCEPTED)
 
-    def test_decline_after_accepting_removes_the_self_service_assignment(self):
+    def test_confirm_creates_the_assignment_and_tells_the_official(self):
         game = self.make_home_game()
         signup = OfficialSignup.objects.get(event=game, member=self.official)
         accept_official_signup(signup)
+
+        confirm_official_signup(signup, assigned_by=self.alice)
+
+        self.assertTrue(EventOfficial.objects.filter(event=game, member=self.official).exists())
+        signup.refresh_from_db()
+        self.assertEqual(signup.status, OfficialSignup.Status.CONFIRMED)
+        self.assertEqual(Notification.objects.filter(member=self.official, title="Official assignment").count(), 1)
+
+    def test_confirm_raises_when_the_game_is_already_full(self):
+        game = self.make_home_game(max_officials=1)
+        add_external_official(game, "Guest Official", assigned_by=None)
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+        accept_official_signup(signup)
+
+        with self.assertRaises(OfficialAssignmentError):
+            confirm_official_signup(signup, assigned_by=self.alice)
+
+    def test_decline_after_being_confirmed_removes_the_assignment(self):
+        game = self.make_home_game()
+        signup = OfficialSignup.objects.get(event=game, member=self.official)
+        accept_official_signup(signup)
+        confirm_official_signup(signup, assigned_by=self.alice)
 
         decline_official_signup(signup)
 
@@ -2972,6 +3030,7 @@ class OfficialSignupServiceTests(OfficialsTestBase):
         game = self.make_home_game()
         signup = OfficialSignup.objects.get(event=game, member=self.official)
         accept_official_signup(signup)
+        confirm_official_signup(signup, assigned_by=self.alice)
         manager = Member.objects.create(first_name="Cara", last_name="Coach")
         management_position = Position.objects.create(club=self.club, name="Head coach", short_name="HC", staff_position=True, management_position=True)
         StaffAssignment.objects.create(team=self.team, member=manager, season=self.season, position=management_position)

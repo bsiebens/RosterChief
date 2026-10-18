@@ -32,8 +32,6 @@
                 </div>
                 {% if official.assigned_by %}
                     <span class="text-xs text-muted">{% blocktrans with name=official.assigned_by %}Assigned by {{ name }}{% endblocktrans %}</span>
-                {% elif not official.is_external %}
-                    <span class="badge badge-outline badge-xs w-fit">{% trans "Self sign-up" %}</span>
                 {% endif %}
             </div>
 
@@ -91,10 +89,40 @@
 {% endwith %}
 
 {% if pending_official_signups %}
-    <p class="mt-2 text-xs text-muted">
-        {% blocktrans count counter=pending_official_signups|length %}Invited, no response yet: {% plural %}Invited, no response yet: {% endblocktrans %}
-        {% for signup in pending_official_signups %}{{ signup.member }}{% if not forloop.last %}, {% endif %}{% endfor %}
-    </p>
+    <div class="mt-3 flex flex-col gap-2 border-t border-rule pt-3">
+        <span class="font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Sign-ups" %}</span>
+        {% if pending_official_signups.interested %}
+            <ul class="divide-y divide-line">
+                {% for signup in pending_official_signups.interested %}
+                    <li class="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                        <span class="text-sm font-semibold text-ink">{{ signup.member }} <span class="badge badge-warning badge-xs">{% trans "Signed up" %}</span></span>
+                        {% if can_manage_referees %}
+                            <form method="post" action="{% url 'management:event_official_assign' event.pk %}">
+                                {% csrf_token %}
+                                {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                                <input type="hidden" name="member" value="{{ signup.member_id }}">
+                                <button class="btn btn-outline btn-xs gap-1" type="submit" {% if officials_full %}disabled title="{% trans 'This game is already full' %}"{% endif %}>{% lucide "check" size=12 %} {% trans "Confirm" %}</button>
+                            </form>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="text-sm text-muted">{% trans "Nobody has signed up yet." %}</p>
+        {% endif %}
+        {% if pending_official_signups.waiting %}
+            <p class="text-xs text-muted">
+                {% trans "Not responded yet:" %}
+                {% for signup in pending_official_signups.waiting %}{{ signup.member }}{% if not forloop.last %}, {% endif %}{% endfor %}
+            </p>
+        {% endif %}
+        {% if pending_official_signups.declined %}
+            <p class="text-xs text-muted">
+                {% trans "Declined:" %}
+                {% for signup in pending_official_signups.declined %}{{ signup.member }}{% if not forloop.last %}, {% endif %}{% endfor %}
+            </p>
+        {% endif %}
+    </div>
 {% endif %}
 
 {% if can_manage_referees and not officials_full %}

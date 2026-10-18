@@ -10,7 +10,7 @@ action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news
 from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
-from club.services.access import can_add_news, can_manage_members, get_club_admin, get_current_season, has_management_access, is_coach_manager
+from club.services.access import can_add_news, can_manage_members, can_manage_referees, get_club_admin, get_current_season, has_management_access, is_coach_manager
 from members.services.lookup import get_request_member
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -298,7 +298,7 @@ def active_nav_section(request):
 def is_admin(request):
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"is_club_admin": False, "can_manage_members": False}
+        return {"is_club_admin": False, "can_manage_members": False, "can_manage_referees": False}
 
     return {
         "is_club_admin": get_club_admin(request),
@@ -306,6 +306,9 @@ def is_admin(request):
         # (Members/Teams/Referee setup/Onboarding requirements) -- real ADMIN (which
         # already includes the platform-superuser bypass) or MEMBER_ADMIN.
         "can_manage_members": can_manage_members(request.user, club),
+        # The Referee management nav item (and its missing-referee badge): ADMIN,
+        # MEMBER_ADMIN or a referee admin grant.
+        "can_manage_referees": can_manage_referees(request.user, club),
     }
 
 
@@ -389,7 +392,7 @@ def sidebar_counters(request):
     from), and registrations awaiting invoice confirmation
     (registration.services.invoicing.registrations_awaiting_confirmation).
 
-    The first is gated on can_manage_members (real ADMIN or MEMBER_ADMIN),
+    The first is gated on can_manage_referees (ADMIN, MEMBER_ADMIN or a referee admin),
     matching how _nav_items.html itself gates that link -- a coach never sees
     it, so there's no reason to run the query for them. Registrations
     is gated tighter, on is_club_admin alone: both live behind links the nav
@@ -402,7 +405,7 @@ def sidebar_counters(request):
     if club is None or not request.user.is_authenticated:
         return counters
 
-    if can_manage_members(request.user, club):
+    if can_manage_referees(request.user, club):
         # Imported here rather than at module level to keep this module's own
         # import graph small -- management.views pulls in most of the app's
         # models/services, none of which any other context processor here needs.
@@ -412,6 +415,7 @@ def sidebar_counters(request):
         # (checked inside the function itself).
         counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club)
 
+    if can_manage_members(request.user, club):
         from management.views import signup_queue_count
 
         counters["signup_pending_count"] = signup_queue_count(club, get_current_season(request))

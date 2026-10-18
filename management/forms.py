@@ -1049,7 +1049,7 @@ class EventSeriesForm(EventAudienceFormMixin, forms.ModelForm):
 
 class ClubRoleAssignForm(forms.ModelForm):
     """Grant a club-wide role to a member already affiliated with this club --
-    "Shop admin"/"Evaluation manager" ride along in the same dropdown even
+    "Shop admin"/"Referee admin"/"Evaluation manager" ride along in the same dropdown even
     though neither is really a ClubRole (see club.models.ShopManager's own
     docstring): one grant button/one dropdown on the roles page, not a
     separately-triggered mechanism per additive grant. management.views.
@@ -1059,6 +1059,7 @@ class ClubRoleAssignForm(forms.ModelForm):
     same one."""
 
     SHOP_ADMIN = "shop_admin"
+    REFEREE_ADMIN = "referee_admin"
     EVALUATION_MANAGER = "evaluation_manager"
 
     # Deliberately NOT in Meta.fields below -- a ModelForm's _post_clean() calls
@@ -1067,7 +1068,9 @@ class ClubRoleAssignForm(forms.ModelForm):
     # model-level choices (which don't include either) and silently fail the whole
     # form. Declaring it here instead keeps it a real, validated form field without
     # ever touching the model instance.
-    role = forms.ChoiceField(label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin")), (EVALUATION_MANAGER, _("evaluation manager"))])
+    role = forms.ChoiceField(
+        label=_("Role"), choices=[*(choice for choice in ClubRole.Roles.choices if choice[0] != ClubRole.Roles.MEMBER), (SHOP_ADMIN, _("shop admin")), (REFEREE_ADMIN, _("referee admin")), (EVALUATION_MANAGER, _("evaluation manager"))]
+    )
 
     class Meta:
         model = ClubRole

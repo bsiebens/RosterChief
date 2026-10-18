@@ -317,7 +317,7 @@ class AttendanceOut(Schema):
 class SignupOut(Schema):
     id: uuid.UUID
     member_id: uuid.UUID
-    status: str = Field(description="`invited`, `accepted` or `declined`.")
+    status: str = Field(description="`invited`, `accepted` (signed up, waiting for the club), `confirmed` (the club picked them) or `declined`.")
 
 
 class AuthorOut(Schema):
@@ -464,7 +464,7 @@ class CalendarItemOut(Schema):
     type: str = Field(description="`rsvp`, `referee`, `official` or `blocked`. Ignore unknown types.")
     event: EventOut
     member_id: uuid.UUID
-    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `declined`) for `referee`/`official`, null for `blocked`.")
+    status: str | None = Field(description="Attendance status for `rsvp`, sign-up status (`invited`, `accepted`, `confirmed`, `declined`) for `referee`/`official`, null for `blocked`.")
     signup_id: uuid.UUID | None
     blocked_requirements: list[str] = Field(description="For `blocked`: the club requirements (e.g. a medical form) that keep this person off the event.")
     open_tasks: int = Field(description=OPEN_TASKS_HELP + " The same for every row of one event.")

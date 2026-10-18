@@ -750,6 +750,29 @@ class ShopManager(ClubScopedModel):
         return f"{self.club} - {self.member}"
 
 
+class RefereeManager(ClubScopedModel):
+    """An additive grant, not a ClubRole value -- same shape as ShopManager, and
+    for the same reason: arranging referees for home games (the referee
+    management dashboard, confirming who referees, the payment form) is its own
+    job that a volunteer can hold without full people-management access, and
+    can't cost someone their existing ClubRole. Club-wide and season-independent
+    -- see club.services.access.can_manage_referees.
+    """
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_manager_grants", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("referee manager")
+        verbose_name_plural = _("referee managers")
+        ordering = ["club", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["club", "member"], name="unique_referee_manager_per_club"),
+        ]
+
+    def __str__(self):
+        return f"{self.club} - {self.member}"
+
+
 class EvaluationManager(ClubScopedModel):
     """An additive grant, not a ClubRole value -- same shape as ShopManager, and
     for the same reason: evaluating players is its own trust boundary (a

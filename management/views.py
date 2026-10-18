@@ -42,13 +42,14 @@ from club.mixins import (
     NewsAuthorRequiredMixin,
     NewsEditRequiredMixin,
     NewsPublisherRequiredMixin,
-    OfficialsAdminRequiredMixin,
     OfficialsManagerRequiredMixin,
+    OfficialsRefereeAdminRequiredMixin,
     OfficialsStaffRequiredMixin,
+    RefereeAdminRequiredMixin,
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor
+from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, RefereeManager, Season, ShopManager, Sponsor
 from club.services.access import (
     can_add_news,
     can_edit_news,
@@ -63,6 +64,9 @@ from club.services.access import (
     members_visible_to,
     teams_managed_by,
     teams_staffed_by,
+)
+from club.services.access import (
+    can_manage_referees as can_manage_referees_for,
 )
 from club.services.cancellation import cancel_membership
 from club.services.fees import mark_as_paid, record_payment, remaining_balance
@@ -1968,11 +1972,13 @@ class ClubRoleListView(ClubAdminRequiredMixin, ListView):
         sections = [(value, label, ROLE_DESCRIPTIONS.get(value, ""), [role for role in self.object_list if role.role == value]) for value, label in ClubRole.Roles.choices if value != ClubRole.Roles.MEMBER]
         shop_admins = ShopManager.objects.filter(club=self.request.club).select_related("member")
         evaluation_managers = EvaluationManager.objects.filter(club=self.request.club).select_related("member")
+        referee_admins = RefereeManager.objects.filter(club=self.request.club).select_related("member")
         return super().get_context_data(
             sections=sections,
             role_form=ClubRoleAssignForm(club=self.request.club),
             shop_admins=shop_admins,
             evaluation_managers=evaluation_managers,
+            referee_admins=referee_admins,
             **kwargs,
         )
 
@@ -2002,6 +2008,14 @@ class ClubRoleCreateView(ClubAdminRequiredMixin, RedirectOnInvalidMixin, FormVie
                 notify(self.request, f"s|{_('Shop admin granted')}|{_('“%(member)s” can now manage the shop.') % {'member': member}}")
             else:
                 notify(self.request, f"s|{_('Already a shop admin')}|{_('“%(member)s” already manages the shop.') % {'member': member}}")
+            return redirect("management:role_list")
+
+        if role == ClubRoleAssignForm.REFEREE_ADMIN:
+            _grant, created = RefereeManager.objects.get_or_create(club=self.request.club, member=member)
+            if created:
+                notify(self.request, f"s|{_('Referee admin granted')}|{_('“%(member)s” can now manage referees.') % {'member': member}}")
+            else:
+                notify(self.request, f"s|{_('Already a referee admin')}|{_('“%(member)s” already manages referees.') % {'member': member}}")
             return redirect("management:role_list")
 
         if role == ClubRoleAssignForm.EVALUATION_MANAGER:
@@ -2047,6 +2061,19 @@ class ShopManagerRevokeView(ClubAdminRequiredMixin, View):
         member = grant.member
         grant.delete()
         notify(request, f"w|{_('Shop admin revoked')}|{_('“%(member)s” no longer manages the shop.') % {'member': member}}")
+        return redirect("management:role_list")
+
+
+class RefereeManagerRevokeView(ClubAdminRequiredMixin, View):
+    """Granting referee admin goes through ClubRoleCreateView (the roles page's
+    one "Grant role" flow) -- but revoking still needs its own view, same
+    reasoning as ShopManagerRevokeView: RefereeManager isn't a ClubRole row."""
+
+    def post(self, request, pk):
+        grant = get_object_or_404(RefereeManager, pk=pk, club=request.club)
+        member = grant.member
+        grant.delete()
+        notify(request, f"w|{_('Referee admin revoked')}|{_('“%(member)s” no longer manages referees.') % {'member': member}}")
         return redirect("management:role_list")
 
 
@@ -3376,6 +3403,19 @@ class EventListView(ClubStaffRequiredMixin, ListView):
         return context
 
 
+def _signup_groups(signups, model):
+    """Splits a game's not-yet-confirmed referee/official sign-ups for the assignment panel:
+    ``interested`` (signed up, waiting for staff to confirm), ``waiting`` (invited, no
+    response yet) and ``declined``. Confirmed ones are the EventReferee/EventOfficial rows
+    the panel lists on its own."""
+    groups = {"interested": [], "waiting": [], "declined": []}
+    for signup in signups:
+        key = {model.Status.ACCEPTED: "interested", model.Status.INVITED: "waiting", model.Status.DECLINED: "declined"}.get(signup.status)
+        if key:
+            groups[key].append(signup)
+    return groups
+
+
 class EventDetailView(ClubStaffRequiredMixin, DetailView):
     template_name = "management/event_detail.html"
     context_object_name = "event"
@@ -3398,16 +3438,16 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         # per-status sections, so there's exactly one query, not two.
         attendance_groups = [{"value": value, "label": label, "rows": rows_by_status.get(value, [])} for value, label in Attendance.AttendanceStatus.choices]
 
-        # Admin-only for now, unlike can_manage's other actions (edit, fetch info, ...) --
+        # Narrower than can_manage's other actions (edit, fetch info, ...) --
         # a team manager/coach still sees the Referees panel (who's assigned, capacity),
         # just not the assign/remove controls. See EventRefereeAssignView/RemoveView.
-        can_manage_referees = is_club_admin(user, club)
+        can_manage_referees = can_manage_referees_for(user, club)
 
         referee_management_needed = needs_referee_management(event)
         referees = []
         referee_candidates = []
         referees_full = False
-        pending_signups = []
+        pending_signups = {}
         if referee_management_needed:
             referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
             referees_full = len(referees) >= event.max_referees
@@ -3419,7 +3459,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
                     candidate.has_conflict = bool(conflicts)
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
             if can_manage_referees:
-                pending_signups = list(event.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member"))
+                pending_signups = _signup_groups(event.referee_signups.exclude(status=RefereeSignup.Status.CONFIRMED).select_related("member"), RefereeSignup)
 
         # Same shape as the referee block above, gated additionally on the
         # "officials" flag -- a club that's never turned it on gets none of
@@ -3429,7 +3469,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         officials = []
         official_candidates = []
         officials_full = False
-        pending_official_signups = []
+        pending_official_signups = {}
         if officials_enabled:
             official_management_needed = needs_official_management(event)
             if official_management_needed:
@@ -3443,7 +3483,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
                         candidate.has_conflict = bool(conflicts)
                         candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
                 if can_manage_referees:
-                    pending_official_signups = list(event.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member"))
+                    pending_official_signups = _signup_groups(event.official_signups.exclude(status=OfficialSignup.Status.CONFIRMED).select_related("member"), OfficialSignup)
 
         tasks = list(event.tasks.prefetch_related("claims__member").order_by("created_at"))
         for task in tasks:
@@ -3494,7 +3534,7 @@ def _redirect_next_or(request, fallback_url):
     return redirect(fallback_url)
 
 
-class EventRefereeAssignView(ClubAdminRequiredMixin, View):
+class EventRefereeAssignView(RefereeAdminRequiredMixin, View):
     """Reachable via the assign control on the event detail page's Referees
     panel, or the referee management dashboard -- POST-only, no standalone
     template. Admin-only for now (unlike most event actions, which a team
@@ -3520,7 +3560,7 @@ class EventRefereeAssignView(ClubAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
-class EventRefereeRemoveView(ClubAdminRequiredMixin, View):
+class EventRefereeRemoveView(RefereeAdminRequiredMixin, View):
     def get_event(self):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
 
@@ -3533,7 +3573,7 @@ class EventRefereeRemoveView(ClubAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
-class EventRefereeAddExternalView(ClubAdminRequiredMixin, View):
+class EventRefereeAddExternalView(RefereeAdminRequiredMixin, View):
     """Log a non-member referee (federation-appointed, most often) against a
     game -- reachable from the same Referees panel as EventRefereeAssignView,
     on both the event detail page and the referee management dashboard."""
@@ -3569,7 +3609,7 @@ class EventFeesUpdateView(ClubAdminRequiredMixin, View):
     page reload. Each row's fields arrive prefixed ``referee_<pk>-`` /
     ``official_<pk>-`` (the panels' ``pk|dom_id:"referee"``); a row whose fields weren't posted (its panel isn't on the
     page) or didn't change is left alone. Officials are only touched while the
-    "officials" feature is on (OfficialsAdminRequiredMixin's own gate). A row
+    "officials" feature is on (OfficialsRefereeAdminRequiredMixin's own gate). A row
     that doesn't validate is reported and skipped; the others are still saved.
     Redirects next-aware, like the assign/remove views."""
 
@@ -3603,7 +3643,7 @@ class EventFeesUpdateView(ClubAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[pk]))
 
 
-class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
+class EventRefereeFormPdfView(RefereeAdminRequiredMixin, View):
     """Downloadable PDF of the referee payment form for one game, modeled on
     the club's existing paper form -- club header (legal name if set, else
     plain name; address from the club's own legal address, or its home
@@ -3630,7 +3670,7 @@ class EventRefereeFormPdfView(ClubAdminRequiredMixin, View):
         return response
 
 
-class EventOfficialAssignView(OfficialsAdminRequiredMixin, View):
+class EventOfficialAssignView(OfficialsRefereeAdminRequiredMixin, View):
     """The officials counterpart to EventRefereeAssignView -- same shape,
     same reasoning."""
 
@@ -3652,7 +3692,7 @@ class EventOfficialAssignView(OfficialsAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
-class EventOfficialRemoveView(OfficialsAdminRequiredMixin, View):
+class EventOfficialRemoveView(OfficialsRefereeAdminRequiredMixin, View):
     def get_event(self):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
 
@@ -3665,7 +3705,7 @@ class EventOfficialRemoveView(OfficialsAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
-class EventOfficialAddExternalView(OfficialsAdminRequiredMixin, View):
+class EventOfficialAddExternalView(OfficialsRefereeAdminRequiredMixin, View):
     """The officials counterpart to EventRefereeAddExternalView."""
 
     def get_event(self):
@@ -3691,7 +3731,7 @@ class EventOfficialAddExternalView(OfficialsAdminRequiredMixin, View):
         return fallback
 
 
-class EventOfficialFormPdfView(OfficialsAdminRequiredMixin, View):
+class EventOfficialFormPdfView(OfficialsRefereeAdminRequiredMixin, View):
     """The officials counterpart to EventRefereeFormPdfView -- a separate PDF
     (own heading, lists EventOfficial rows), reusing the same
     render_pdf/resolve_document_address/referee_form_colors helpers."""
@@ -3876,7 +3916,7 @@ def games_missing_referee_or_official_count(club):
     return len(missing_ids)
 
 
-class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
+class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
     """One-stop admin view of every upcoming home game that needs a
     club-arranged referee (federation-managed teams never appear here, see
     events.services.referees.needs_referee_management), with inline
@@ -3981,7 +4021,7 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
             game.fees_pending = any(referee.fee_pending for referee in game.referee_rows)
-            game.pending_signups = list(game.referee_signups.filter(status=RefereeSignup.Status.INVITED).select_related("member")) if not game.referees_full else []
+            game.pending_signups = _signup_groups(game.referee_signups.exclude(status=RefereeSignup.Status.CONFIRMED).select_related("member"), RefereeSignup)
             if game.needs_referees and not game.referees_full:
                 game.referee_candidates = list(eligible_referees(game))
                 conflicts_by_member = conflicting_events_for_members(game.referee_candidates, game)
@@ -3995,7 +4035,7 @@ class RefereeManagementDashboardView(MemberAdminRequiredMixin, TemplateView):
             game.officials_full = len(game.official_rows) >= game.max_officials
             game.official_candidates = []
             game.official_fees_pending = any(official.fee_pending for official in game.official_rows)
-            game.pending_official_signups = list(game.official_signups.filter(status=OfficialSignup.Status.INVITED).select_related("member")) if not game.officials_full else []
+            game.pending_official_signups = _signup_groups(game.official_signups.exclude(status=OfficialSignup.Status.CONFIRMED).select_related("member"), OfficialSignup)
             if game.needs_officials and not game.officials_full:
                 game.official_candidates = list(eligible_officials(game))
                 conflicts_by_member = conflicting_events_for_members(game.official_candidates, game)

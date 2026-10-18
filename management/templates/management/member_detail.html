@@ -39,6 +39,10 @@
                     <dd class="font-mono text-sm font-semibold text-ink">{{ member.phone.as_international|default:"—" }}</dd>
                 </div>
                 <div class="flex items-center justify-between gap-4 py-2">
+                    <dt class="text-sm text-muted">{% trans "Email" %}</dt>
+                    <dd class="font-mono text-sm font-semibold text-ink">{{ member.email|default:"—" }}</dd>
+                </div>
+                <div class="flex items-center justify-between gap-4 py-2">
                     <dt class="text-sm text-muted">{% trans "Emergency phone" %}</dt>
                     <dd class="font-mono text-sm font-semibold text-ink">{{ member.emergency_phone.as_international|default:"—" }}</dd>
                 </div>

@@ -1,6 +1,6 @@
 {% load i18n %}
 {% comment %}
-    One referee or official sign-up card (iOS "Signing up as referee/official"): per person Accept / Decline, or -- once accepted -- a "Confirmed" pill with a retract action. Params: ``signups``, ``heading``, ``respond_url`` (url name), ``accent`` ("referee" or "official") and ``accept_label``.
+    One referee or official sign-up card (iOS "Signing up as referee/official"): per person Accept / Decline, or -- once accepted -- a "Signed up" pill (waiting for staff to confirm) that becomes "Confirmed" once staff pick them, with a retract action either way. Params: ``signups``, ``heading``, ``respond_url`` (url name), ``accent`` ("referee" or "official") and ``accept_label``.
 {% endcomment %}
 <div class="m-card p-3.5">
     <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{{ heading }}</span>
@@ -10,10 +10,14 @@
             <div>
                 <div class="mb-2 flex items-center justify-between gap-2.5">
                     <span class="text-base font-semibold text-ink">{{ signup.member.get_full_name }}</span>
-                    {% if signup.status == "accepted" %}<span class="pill {% if accent == "referee" %}pill-referee{% else %}pill-info{% endif %} shrink-0">{% trans "Confirmed" %}</span>{% endif %}
+                    {% if signup.status == "confirmed" %}
+                        <span class="pill {% if accent == "referee" %}pill-referee{% else %}pill-info{% endif %} shrink-0">{% trans "Confirmed" %}</span>
+                    {% elif signup.status == "accepted" %}
+                        <span class="pill pill-warn shrink-0">{% trans "Signed up -- waiting for confirmation" %}</span>
+                    {% endif %}
                 </div>
                 {% url respond_url signup.pk as respond_action %}
-                {% if signup.status == "accepted" %}
+                {% if signup.status == "accepted" or signup.status == "confirmed" %}
                     {% include "mobile/_event_form_open.html" with action=respond_action %}
                         <input type="hidden" name="response" value="decline">
                         <button type="submit" class="answer-btn answer-btn-sm w-full">{% trans "Can't make it after all" %}</button>
