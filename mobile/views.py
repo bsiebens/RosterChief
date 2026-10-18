@@ -799,9 +799,9 @@ class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
     parent) -- from a Calendar row (mobile/_calendar_referee_row.html) or
     the same event's own detail page (event_detail.html's own "Refereeing"
     card, for the same signup). Routes through events.services.referees.
-    accept_referee_signup/decline_referee_signup, so capacity is enforced
-    in the one place the desktop admin flow already enforces it, and the
-    referee-management screen sees the result with no separate sync step.
+    accept_referee_signup/decline_referee_signup. Accepting only records
+    interest: the club confirms who actually goes from the referee-management
+    screen, so no capacity is involved here.
     Boosted (no explicit hx-boost="false") -- unlike event_detail's own
     RSVP forms, nothing here is Alpine-owned/toggled, so there's no
     htmx/Alpine conflict to dodge."""
@@ -816,9 +816,9 @@ class RefereeSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
         if response == "accept":
             try:
                 accept_referee_signup(signup)
-                body = _("%(name)s is confirmed to referee -- see you there.") % {"name": signup.member.get_full_name()}
+                body = _("%(name)s is signed up to referee -- the club will confirm who goes.") % {"name": signup.member.get_full_name()}
                 if not sheet:
-                    notify(request, f"s|{_('Referee sign-up confirmed')}|{body}")
+                    notify(request, f"s|{_('Signed up to referee')}|{body}")
             except RefereeAssignmentError as exc:
                 sheet_error = str(exc)
                 if not sheet:
@@ -851,9 +851,9 @@ class OfficialSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
         if response == "accept":
             try:
                 accept_official_signup(signup)
-                body = _("%(name)s is confirmed as an official -- see you there.") % {"name": signup.member.get_full_name()}
+                body = _("%(name)s is signed up as an official -- the club will confirm who goes.") % {"name": signup.member.get_full_name()}
                 if not sheet:
-                    notify(request, f"s|{_('Official sign-up confirmed')}|{body}")
+                    notify(request, f"s|{_('Signed up as official')}|{body}")
             except OfficialAssignmentError as exc:
                 sheet_error = str(exc)
                 if not sheet:

@@ -119,8 +119,10 @@ class EventUiHelperTests(TestCase):
 
     def test_signup_pills_name_where_the_reply_stands(self):
         self.assertEqual(str(event_ui.signup_pill("referee", "invited")[0]), "Reply needed")
-        self.assertEqual(event_ui.signup_pill("referee", "accepted")[1], "pill-referee")
-        self.assertEqual(event_ui.signup_pill("official", "accepted")[1], "pill-info")
+        self.assertEqual(str(event_ui.signup_pill("referee", "accepted")[0]), "Signed up")
+        self.assertEqual(str(event_ui.signup_pill("referee", "confirmed")[0]), "Confirmed")
+        self.assertEqual(event_ui.signup_pill("referee", "confirmed")[1], "pill-referee")
+        self.assertEqual(event_ui.signup_pill("official", "confirmed")[1], "pill-info")
         self.assertEqual(str(event_ui.signup_pill("official", "declined")[0]), "Declined")
 
     def test_month_paging_urls_step_a_month(self):
@@ -887,7 +889,8 @@ class EventSheetTests(MemberScreenFixture, TestCase):
 
         self.assertEqual(after.status_code, 200)
         self.assertTemplateUsed(after, "mobile/_event_sheet.html")
-        self.assertContains(after, "Confirmed")
+        self.assertContains(after, "Signed up")
+        self.assertNotContains(after, "Confirmed")
         signup.refresh_from_db()
         self.assertEqual(signup.status, RefereeSignup.Status.ACCEPTED)
 

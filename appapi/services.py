@@ -5,7 +5,7 @@ nothing here re-decides who may see what."""
 from django.conf import settings
 from waffle import get_waffle_flag_model
 
-from club.models import Club, ClubMembership, ClubRole, EvaluationManager, ShopManager
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, RefereeManager, ShopManager
 from club.services.access import is_platform_superuser, teams_staffed_by
 from members.models import FamilyMembership, Member
 from members.services.family import managed_people
@@ -87,6 +87,7 @@ def _candidate_club_ids(member: Member) -> set:
     ids |= set(ClubRole.objects.filter(member=member).values_list("club_id", flat=True))
     ids |= set(ShopManager.objects.filter(member=member).values_list("club_id", flat=True))
     ids |= set(EvaluationManager.objects.filter(member=member).values_list("club_id", flat=True))
+    ids |= set(RefereeManager.objects.filter(member=member).values_list("club_id", flat=True))
     ids |= set(StaffAssignment.objects.filter(member=member).values_list("team__club_id", flat=True))
     return ids
 

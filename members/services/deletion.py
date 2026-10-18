@@ -27,6 +27,7 @@ from members.models import Family, FamilyMembership
 #: member, same as the membership itself).
 _CLUB_HISTORY_RELATIONS = (
     ("shop_manager_grants", "club"),
+    ("referee_manager_grants", "club"),
     ("evaluation_manager_grants", "club"),
     ("group_memberships", "group__club"),
     ("referee_profiles", "club"),

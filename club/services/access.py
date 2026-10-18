@@ -21,7 +21,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from authentication.models import User
-from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, RefereeManager, Season, ShopManager
 from events.models import Event
 from members.models import FamilyMembership, Group, Member
 from rosterchief.request_cache import cached_on_request
@@ -100,8 +100,8 @@ def can_manage_members(user: User, club: Club) -> bool:
 
 
 def has_management_access(user: User, club: Club) -> bool:
-    """Anyone with real authority in the club: ADMIN/EDITOR/MEMBER_ADMIN, a platform
-    superuser, or *any* current-season staff assignment (coach, team manager,
+    """Anyone with real authority in the club: ADMIN/EDITOR/MEMBER_ADMIN, a referee
+    admin grant, a platform superuser, or *any* current-season staff assignment (coach, team manager,
     physio, ...).
 
     Deliberately excludes the plain MEMBER role -- every signed-up player (or club
@@ -111,7 +111,7 @@ def has_management_access(user: User, club: Club) -> bool:
     if is_platform_superuser(user):
         return True
     elevated = ClubRole.objects.filter(member__user=user, club=club, role__in=(ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN)).exists()
-    return elevated or teams_staffed_by(user, club).exists()
+    return elevated or is_referee_admin(user, club) or teams_staffed_by(user, club).exists()
 
 
 def is_coach_manager(user: User, club: Club) -> bool:
@@ -263,6 +263,20 @@ def is_shop_admin(user: User, club: Club) -> bool:
 
 def can_manage_shop(user: User, club: Club) -> bool:
     return is_club_admin(user, club) or is_shop_admin(user, club)
+
+
+def is_referee_admin(user: User, club: Club) -> bool:
+    """An additive grant (club.models.RefereeManager), not a ClubRole value --
+    same shape as is_shop_admin, for the same reason: see that model's own
+    docstring."""
+    return RefereeManager.objects.filter(member__user=user, club=club).exists()
+
+
+def can_manage_referees(user: User, club: Club) -> bool:
+    """The gate for the referee management dashboard and the per-event referee/official
+    assignment views: ADMIN, MEMBER_ADMIN or a RefereeManager grant. Referee levels
+    and a member's eligibility stay with can_manage_members alone."""
+    return can_manage_members(user, club) or is_referee_admin(user, club)
 
 
 def is_evaluation_manager(user: User, club: Club) -> bool:

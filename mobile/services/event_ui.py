@@ -118,10 +118,13 @@ def rsvp_pill(status) -> tuple:
 
 
 def signup_pill(kind, status) -> tuple:
-    """(label, css class) of a referee/official sign-up: an accepted one is "Confirmed" in the
-    role's own accent, an invite waits for a reply, a declined one says so."""
-    if status == "accepted":
+    """(label, css class) of a referee/official sign-up: a confirmed one (staff picked them) is
+    "Confirmed" in the role's own accent, an accepted one is only "Signed up" until staff
+    confirm, an invite waits for a reply, a declined one says so."""
+    if status == "confirmed":
         return (_("Confirmed"), "pill-referee" if kind == "referee" else "pill-info")
+    if status == "accepted":
+        return (_("Signed up"), "pill-warn")
     if status == "declined":
         return (_("Declined"), "pill-danger")
     return (_("Reply needed"), "pill-neutral")
@@ -161,7 +164,7 @@ def _answer(row):
             return False
         return None
     status = row["signup"].status
-    if status == RefereeSignup.Status.ACCEPTED:
+    if status in (RefereeSignup.Status.ACCEPTED, RefereeSignup.Status.CONFIRMED):
         return True
     if status == RefereeSignup.Status.DECLINED:
         return False

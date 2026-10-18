@@ -364,7 +364,8 @@ def _respond(scope, signup, response: str, accept, decline, error_class) -> dict
 @router.post("/events/{event_id}/referee-signups/{signup_id}/respond", response={200: SignupOut, **ERRORS, 409: ErrorOut}, summary="Accept or decline refereeing")
 def respond_referee(request, event_id: uuid.UUID, signup_id: uuid.UUID, payload: SignupResponseIn):
     """For a managed person's referee invite. `409 signup_unavailable` when it can't be
-    accepted (e.g. every referee slot is taken); the invite stays open."""
+    accepted. Accepting only records interest (`status` `accepted`); the club confirms who goes
+    (`status` `confirmed`). Declining after being confirmed withdraws the assignment."""
     scope = club_scope(request)
     signup = get_object_or_404(RefereeSignup.objects.select_related("event", "member"), pk=signup_id, event_id=event_id, event__club=scope.club, member__in=scope.people)
     return _respond(scope, signup, payload.response, accept_referee_signup, decline_referee_signup, RefereeAssignmentError)

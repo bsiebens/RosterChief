@@ -58,10 +58,10 @@ def _enrol_newly_privileged_user(sender, instance, created, **kwargs):
 
 
 def _mfa_grant_senders():
-    from club.models import EvaluationManager, ShopManager
+    from club.models import EvaluationManager, RefereeManager, ShopManager
     from teams.models import StaffAssignment
 
-    return (ShopManager, EvaluationManager, StaffAssignment)
+    return (ShopManager, EvaluationManager, RefereeManager, StaffAssignment)
 
 
 def start_auto_mfa_enrolment():

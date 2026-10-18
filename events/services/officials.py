@@ -122,7 +122,7 @@ def assign_official(event, member, *, assigned_by):
     # Same as referees.assign_referee: an assignment settles the member's
     # invite, so they don't show as "no response yet" and the game appears
     # among their own duties in the app.
-    OfficialSignup.objects.update_or_create(event=event, member=member, defaults={"status": OfficialSignup.Status.ACCEPTED, "responded_at": timezone.now()})
+    OfficialSignup.objects.update_or_create(event=event, member=member, defaults={"status": OfficialSignup.Status.CONFIRMED, "responded_at": timezone.now()})
     if assigned_by is not None:
         # A staff pick from the management app -- tell them. Self-service accepts pass
         # assigned_by=None: they just did it themselves.
@@ -151,12 +151,12 @@ def add_external_official(event, name, *, assigned_by):
 @transaction.atomic
 def remove_official(official):
     """Staff taking an official off a game (management app) -- the officials counterpart
-    to referees.remove_referee: their sign-up is set to declined and they are told."""
+    to referees.remove_referee: their sign-up goes back to ACCEPTED (still interested, not picked) and they are told."""
     event, member = official.event, official.member
     official.delete()
     if member is None:
         return
-    OfficialSignup.objects.filter(event=event, member=member).update(status=OfficialSignup.Status.DECLINED, responded_at=timezone.now())
+    OfficialSignup.objects.filter(event=event, member=member).update(status=OfficialSignup.Status.ACCEPTED, responded_at=timezone.now())
 
     def body():
         return _("You have been removed as an official for %(event)s.") % {"event": event.title}
@@ -210,20 +210,33 @@ def sync_official_invites(event, *, notify=True):
 
 @transaction.atomic
 def accept_official_signup(signup):
-    """Confirms `signup`'s member as an actual official for the game --
-    routed through the same assign_official every admin assignment uses
-    (assigned_by=None marks it self-service)."""
-    assign_official(signup.event, signup.member, assigned_by=None)
-    signup.status = OfficialSignup.Status.ACCEPTED
-    signup.responded_at = timezone.now()
-    signup.save(update_fields=["status", "responded_at"])
+    """Records that `signup`'s member wants to come (ACCEPTED) -- interest only. It
+    creates no EventOfficial and uses no capacity: staff pick who actually goes from the
+    official-management screen (confirm_official_signup). Someone staff already confirmed
+    stays CONFIRMED. Raises OfficialAssignmentError if the game no longer needs a club-arranged official
+    (e.g. it was moved away from home)."""
+    if not needs_official_management(signup.event):
+        raise OfficialAssignmentError(_("Officials can only sign up for home games of club-managed teams."))
+    if signup.status != OfficialSignup.Status.CONFIRMED:
+        signup.status = OfficialSignup.Status.ACCEPTED
+        signup.responded_at = timezone.now()
+        signup.save(update_fields=["status", "responded_at"])
+    return signup
+
+
+@transaction.atomic
+def confirm_official_signup(signup, *, assigned_by):
+    """Staff pick `signup`'s member for the game: the capacity-checked assign_official
+    (which marks the signup CONFIRMED and tells the member). Raises OfficialAssignmentError
+    when the game is full or the member is already assigned; the signup is left as it was."""
+    assign_official(signup.event, signup.member, assigned_by=assigned_by)
+    signup.refresh_from_db()
     return signup
 
 
 @transaction.atomic
 def decline_official_signup(signup):
-    """Declines `signup`. If they were assigned -- by accepting themselves or
-    by staff (assign_official marks the signup ACCEPTED either way) -- the
+    """Declines `signup`. If they were assigned -- by staff (assign_official marks the signup CONFIRMED) -- the
     EventOfficial row goes too, so the assignment and the member's own
     answer never disagree -- and, in that case only, tells the game's own
     manager(s), same reasoning as decline_referee_signup's own retraction

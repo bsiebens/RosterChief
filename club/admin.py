@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, Season, ShopManager, Sponsor, Sport
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, RefereeManager, Season, ShopManager, Sponsor, Sport
 
 
 @admin.register(Club)
@@ -82,6 +82,14 @@ class ClubRoleAdmin(admin.ModelAdmin):
 
 @admin.register(ShopManager)
 class ShopManagerAdmin(admin.ModelAdmin):
+    list_display = ["club__name", "member__last_name", "member__first_name"]
+    search_fields = ["club__name", "member__last_name", "member__first_name"]
+    list_filter = ["club"]
+    raw_id_fields = ["member"]
+
+
+@admin.register(RefereeManager)
+class RefereeManagerAdmin(admin.ModelAdmin):
     list_display = ["club__name", "member__last_name", "member__first_name"]
     search_fields = ["club__name", "member__last_name", "member__first_name"]
     list_filter = ["club"]

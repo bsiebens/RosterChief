@@ -85,7 +85,7 @@ def member_event_view(event, club, people, me, *, officials_enabled: bool, inclu
         return view
 
     def signups(model):
-        statuses = [model.Status.INVITED, model.Status.ACCEPTED]
+        statuses = [model.Status.INVITED, model.Status.ACCEPTED, model.Status.CONFIRMED]
         if include_declined and not view["started"]:
             statuses.append(model.Status.DECLINED)
         return list(model.objects.filter(event=event, member__in=people, status__in=statuses).select_related("member"))

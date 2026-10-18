@@ -19,7 +19,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import timezone
 
-from club.models import ClubRole, EvaluationManager, ShopManager
+from club.models import ClubRole, EvaluationManager, RefereeManager, ShopManager
 from members.models import Member
 from teams.models import StaffAssignment
 
@@ -33,7 +33,7 @@ ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.ME
 
 def privileged_members():
     """Members whose own grants make a second factor mandatory: any elevated ClubRole, a
-    ShopManager/EvaluationManager grant, or the derived coach-manager role -- a
+    ShopManager/EvaluationManager/RefereeManager grant, or the derived coach-manager role -- a
     management-position StaffAssignment in the season covering today (the same test as
     club.services.access.is_coach_manager, applied to every club at once, since the
     middleware runs before the tenant is resolved). The one definition behind both the
@@ -44,6 +44,7 @@ def privileged_members():
         Exists(ClubRole.objects.filter(member=member, role__in=ELEVATED_ROLES))
         | Exists(ShopManager.objects.filter(member=member))
         | Exists(EvaluationManager.objects.filter(member=member))
+        | Exists(RefereeManager.objects.filter(member=member))
         | Exists(StaffAssignment.objects.filter(member=member, position__management_position=True, season__start_date__lte=today, season__end_date__gte=today))
     )
 

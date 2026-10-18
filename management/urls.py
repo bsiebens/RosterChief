@@ -64,6 +64,7 @@ urlpatterns = [
     path("roles/new/", views.ClubRoleCreateView.as_view(), name="role_create"),
     path("roles/<uuid:pk>/revoke/", views.ClubRoleRevokeView.as_view(), name="role_revoke"),
     path("roles/shop-admins/<uuid:pk>/revoke/", views.ShopManagerRevokeView.as_view(), name="shop_admin_revoke"),
+    path("roles/referee-admins/<uuid:pk>/revoke/", views.RefereeManagerRevokeView.as_view(), name="referee_admin_revoke"),
     path("roles/evaluation-managers/<uuid:pk>/revoke/", views.EvaluationManagerRevokeView.as_view(), name="evaluation_manager_revoke"),
     path("groups/", views.GroupListView.as_view(), name="group_list"),
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),

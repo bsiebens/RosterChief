@@ -229,9 +229,12 @@ ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.
 > Finance/Club identity/role-granting — see `club.services.access.can_manage_members`)
 > isn't reflected below either. Treat this table as the target shape; verify the real
 > enum before writing code against it. Note also that not every club-wide grant is a
-> `ClubRole` value: `ShopManager` and `EvaluationManager` (§5.8) are deliberately separate,
-> additive models instead — see their own docstrings for why (forcing either into this
+> `ClubRole` value: `ShopManager`, `EvaluationManager` (§5.8) and `RefereeManager` are deliberately separate,
+> additive models instead — see their own docstrings for why (forcing any of them into this
 > single-`ClubRole`-per-member slot would cost someone their existing role just to hold it).
+> `RefereeManager` ("referee admin") opens the referee management dashboard and the per-event
+> referee/official assignment views (`can_manage_referees` = ADMIN, MEMBER_ADMIN or the grant);
+> referee levels and member eligibility stay `can_manage_members`.
 
 | Role         | Grants (representative)                                                       |
 |--------------|--------------------------------------------------------------------------------|
@@ -851,9 +854,14 @@ EventReferee(UUIDModel)            # club implied by event
   `ASSUMED_EVENT_DURATION` is also what `Event.save()` writes into `end` for a GAME with none
   set (below) — the *other* event kinds still leave `end` blank rather than defaulting it, so
   this read-time fallback still matters for them.
-- **`assigned_by` is required for now** (admin-only assignment). A future self-service
-  sign-up would make it nullable to mean "the referee signed themself up" rather than adding
-  a parallel model — see §7.
+- **Sign-up is interest, never assignment.** Eligible referees/officials get a
+  `RefereeSignup`/`OfficialSignup` invite (`INVITED`); saying yes in the app only sets
+  `ACCEPTED` ("signed up", no `EventReferee` row, no capacity used). Staff pick who goes from
+  the management panel (`confirm_referee_signup` / `confirm_official_signup` → the
+  capacity-checked `assign_*`, which creates the row, sets the signup `CONFIRMED` and notifies
+  the member). The app shows "Signed up" until `CONFIRMED`. Removing an assignment returns the
+  signup to `ACCEPTED`; declining after being confirmed deletes the assignment and tells the
+  game's managers. `assigned_by` is therefore always the confirming/assigning staff member.
 - **The referee payment form is a downloadable PDF** (`event_referee_form_pdf`,
   `EventRefereeFormPdfView`, admin-only, WeasyPrint via `management/pdf.py`'s lazy-import
   pattern), modeled directly on the club's existing paper form: game details, referee names,
