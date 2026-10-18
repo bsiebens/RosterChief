@@ -842,6 +842,22 @@
         min-height: 6rem;
     }
 
+    .input:disabled,
+    .select:disabled,
+    .textarea:disabled,
+    .file-input:has(input:disabled),
+    .file-input:disabled {
+        background: var(--color-paper);
+        color: var(--color-muted);
+        cursor: not-allowed;
+    }
+
+    .checkbox:disabled,
+    .toggle:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
     .input-error,
     .select-error,
     .textarea-error {

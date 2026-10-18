@@ -106,7 +106,13 @@ def team_number_pools(club, season=None):
     if season is None:
         return {}
     teams = Team.objects.filter(club=club, pool__isnull=False).select_related("pool")
-    return {str(team.pk): available_numbers(team.pool, season) for team in teams}
+    by_pool = {}  # teams sharing a pool share its numbers -- work it out once per pool
+    result = {}
+    for team in teams:
+        if team.pool_id not in by_pool:
+            by_pool[team.pool_id] = available_numbers(team.pool, season)
+        result[str(team.pk)] = by_pool[team.pool_id]
+    return result
 
 
 def variant_prices(club, season=None):
