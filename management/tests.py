@@ -16110,6 +16110,24 @@ class JSONImportViewTests(ManagementTestBase):
         self.assertContains(response, f'<option value="{self.away.pk}" selected>')
         self.assertNotContains(response, "hosts this day, but the location")
 
+    def test_rows_on_the_same_date_start_and_city_become_one_game_with_all_their_teams(self):
+        self.client.force_login(self.admin_user)
+        games = [
+            {"id": "u8", "date": "2027-10-18", "start": "11:45", "end": "13:00", "city": "Mechelen", "teams": ["U8"], "hosted_by_us": True, "participants": ["COP"]},
+            {"id": "u10", "date": "2027-10-18", "start": "11:45", "end": "13:45", "city": "mechelen", "teams": ["U10", "U8"], "participants": ["COP", "IHC"]},
+            {"id": "later", "date": "2027-10-18", "start": "15:00", "city": "Mechelen", "teams": ["U10"], "hosted_by_us": True},
+        ]
+
+        self.upload(self.payload(games=games))
+        self.club_post("json_import_confirm", {"location_u8": str(self.home.pk), "location_later": str(self.home.pk)})
+
+        events = Event.objects.filter(club=self.club).order_by("start")
+        self.assertEqual(events.count(), 2)
+        merged = events.first()
+        self.assertEqual(merged.external_game_id, "u8")
+        self.assertEqual({team.pk for team in merged.teams.all()}, {self.u8.pk, self.u10.pk})
+        self.assertEqual(merged.competition_label, "IHC")
+
     def test_an_unknown_team_is_a_form_error_listing_the_club_teams(self):
         self.client.force_login(self.admin_user)
 
