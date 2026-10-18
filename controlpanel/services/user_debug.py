@@ -23,7 +23,6 @@ RECENT_DELIVERIES = 15
 def account_info(user) -> dict:
     addresses = list(EmailAddress.objects.filter(user=user).order_by("-primary", "email"))
     return {
-        "user": user,
         "email_addresses": addresses,
         "authenticators": sorted(Authenticator.objects.filter(user=user).values_list("type", flat=True)),
     }
