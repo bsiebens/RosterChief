@@ -131,6 +131,8 @@ _NAV_SECTIONS = {
     "dfel_import_confirm": "event_list",
     "ijnl_import": "event_list",
     "ijnl_import_confirm": "event_list",
+    "json_import": "event_list",
+    "json_import_confirm": "event_list",
     "fixture_recheck": "event_list",
     "fixture_recheck_confirm": "event_list",
     "event_series_create": "event_list",

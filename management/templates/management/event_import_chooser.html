@@ -36,6 +36,10 @@
                 <p class="text-sm text-muted">{% trans "Import a team's fixtures from its IJNL team page." %}</p>
             </a>
         {% endif %}
+        <a class="card card-body gap-2" href="{% url 'management:json_import' %}">
+            <h2 class="card-title">{% lucide "file-up" size=18 %} {% trans "JSON file" %}</h2>
+            <p class="text-sm text-muted">{% trans "Import multi-team play days (development games) from a prepared JSON file." %}</p>
+        </a>
         {% if fixture_import_enabled %}
             <a class="card card-body gap-2" href="{% url 'management:fixture_recheck' %}">
                 <h2 class="card-title">{% lucide "refresh-cw" size=18 %} {% trans "Re-check imported fixtures" %}</h2>
@@ -44,7 +48,4 @@
         {% endif %}
     </div>
 
-    {% if not fixture_import_enabled %}
-        <p class="text-sm text-muted">{% trans "No importers are enabled for this club." %}</p>
-    {% endif %}
 {% endblock panel %}

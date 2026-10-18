@@ -95,7 +95,7 @@ from evaluations.services import (
     submit_evaluation,
 )
 from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, GameTimeline, Location, OfficialSignup, Opponent, RefereeSignup
-from events.services import dfel_import, ijnl_import, import_sources
+from events.services import dfel_import, ijnl_import, import_sources, json_import
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
@@ -181,6 +181,7 @@ from .forms import (
     GroupBulkAddFormSet,
     GroupForm,
     IJNLImportForm,
+    JSONImportForm,
     LocationForm,
     MemberForm,
     MemberImportUploadForm,
@@ -4442,6 +4443,80 @@ class IJNLImportConfirmView(FeatureRequiredMixin, View):
 
         body = _("%(created)s created, %(updated)s updated, %(deleted)s deleted.") % result
         notify(request, f"s|{_('Fixtures imported')}|{body}")
+        return redirect("management:event_list")
+
+
+JSON_IMPORT_SESSION_KEY = "json_import_raw"
+
+
+def _json_import_rows(plan, post=None) -> list[dict]:
+    """One preview row per planned game: the location currently picked (the posted one on a re-render,
+    else the suggestion) and the home/away warning for it, if any."""
+    locations_by_id = {str(location.pk): location for location in plan.location_choices}
+    rows = []
+    for planned in plan.games:
+        if post is not None:
+            selected = locations_by_id.get(post.get(f"location_{planned.external_game_id}", ""))
+        else:
+            selected = planned.suggested_location
+        rows.append({"planned": planned, "is_update": planned.event is not None, "selected": selected, "warning": json_import.home_warning(planned, selected)})
+    return rows
+
+
+def _render_json_import_preview(request, plan, post=None, *, needs_ack=False):
+    return render(request, "management/json_import_preview.html", {"plan": plan, "rows": _json_import_rows(plan, post), "needs_ack": needs_ack})
+
+
+class JSONImportView(ClubAdminRequiredMixin, View):
+    """Step 1 of the JSON play-day import: upload the file, then review every game --
+    with its location picked from the club's own and checked against who hosts -- before
+    anything is saved. See events.services.json_import."""
+
+    def get(self, request):
+        return render(request, "management/json_import_form.html", {"form": JSONImportForm()})
+
+    def post(self, request):
+        form = JSONImportForm(request.POST, request.FILES)
+        if not form.is_valid():
+            return render(request, "management/json_import_form.html", {"form": form})
+
+        try:
+            raw = form.cleaned_data["file"].read().decode("utf-8-sig")
+            plan = json_import.build_plan(request.club, raw)
+        except UnicodeDecodeError:
+            form.add_error("file", _("The file isn't UTF-8 text."))
+            return render(request, "management/json_import_form.html", {"form": form})
+        except json_import.JSONImportError as error:
+            form.add_error("file", str(error))
+            return render(request, "management/json_import_form.html", {"form": form})
+
+        request.session[JSON_IMPORT_SESSION_KEY] = raw
+        return _render_json_import_preview(request, plan)
+
+
+class JSONImportConfirmView(ClubAdminRequiredMixin, View):
+    """Step 2: re-reads the stashed file against the current DB and applies it with the locations
+    picked in the preview. A pick that contradicts who hosts the day sends the preview back with the
+    warnings, and is only applied once explicitly acknowledged."""
+
+    def post(self, request):
+        raw = request.session.get(JSON_IMPORT_SESSION_KEY)
+        if not raw:
+            notify(request, f"w|{_('Nothing to import')}|{_('Start over by uploading the file again.')}")
+            return redirect("management:json_import")
+
+        try:
+            plan = json_import.build_plan(request.club, raw)
+        except json_import.JSONImportError:
+            notify(request, f"e|{_('Could not import')}|{_('Something went wrong re-reading the uploaded file. Try again.')}")
+            return redirect("management:json_import")
+
+        if any(row["warning"] for row in _json_import_rows(plan, request.POST)) and not request.POST.get("acknowledge_warnings"):
+            return _render_json_import_preview(request, plan, request.POST, needs_ack=True)
+
+        request.session.pop(JSON_IMPORT_SESSION_KEY, None)
+        result = json_import.apply_plan(plan, {planned.external_game_id: request.POST.get(f"location_{planned.external_game_id}", "") for planned in plan.games})
+        notify(request, f"s|{_('Games imported')}|{_('%(created)s created, %(updated)s updated.') % result}")
         return redirect("management:event_list")
 
 

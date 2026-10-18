@@ -1,0 +1,100 @@
+{% extends "management/base.html" %}
+{% load lucide i18n %}
+
+{% comment %}Step 2 of the JSON play-day import: one row per game with a location dropdown and the home/away check for the picked location.{% endcomment %}
+{% block heading %}{% trans "Review import" %}{% endblock heading %}
+
+{% block panel %}
+    <div class="alert alert-info">
+        {% lucide "info" size=16 %}
+        <span>{% blocktrans with source=plan.source title=plan.title %}Importing “{{ source }}” as “{{ title }}” events. Pick the location of every game; days hosted by the club belong on the home location.{% endblocktrans %}</span>
+    </div>
+
+    {% if needs_ack %}
+        <div class="alert alert-warning">
+            {% lucide "triangle-alert" size=16 %}
+            <span>{% trans "Some locations don't match who hosts the day. Fix them below, or tick the box at the bottom to import anyway." %}</span>
+        </div>
+    {% endif %}
+
+    <form method="post" action="{% url 'management:json_import_confirm' %}">
+        {% csrf_token %}
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title text-base">{% lucide "calendar-plus" size=18 %} {% blocktrans count counter=rows|length %}{{ counter }} game to create or update{% plural %}{{ counter }} games to create or update{% endblocktrans %}</h2>
+
+                {% if rows %}
+                    <div class="overflow-x-auto overflow-y-visible">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>{% trans "Start" %}</th>
+                                    <th>{% trans "Teams" %}</th>
+                                    <th>{% trans "Organiser" %}</th>
+                                    <th>{% trans "City in file" %}</th>
+                                    <th>{% trans "Location" %}</th>
+                                    <th>{% trans "Details" %}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in rows %}
+                                    <tr>
+                                        <td class="font-mono text-xs whitespace-nowrap">{{ row.planned.start|date:"Y-m-d H:i" }}</td>
+                                        <td>{{ row.planned.team_names }}</td>
+                                        <td>
+                                            {% if row.planned.hosted_by_us %}
+                                                <span class="badge badge-warning">{% trans "Us (home)" %}</span>
+                                            {% else %}
+                                                <span class="text-xs text-muted">{% trans "Away" %}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-xs whitespace-nowrap text-muted">{{ row.planned.city }}</td>
+                                        <td>
+                                            <select name="location_{{ row.planned.external_game_id }}" class="select w-full">
+                                                <option value="">&mdash;</option>
+                                                {% for location in plan.location_choices %}
+                                                    <option value="{{ location.pk }}" {% if row.selected.pk == location.pk %}selected{% endif %}>{{ location.name }}{% if location.is_home %} ({% trans "home" %}){% endif %}</option>
+                                                {% endfor %}
+                                            </select>
+                                            {% if row.warning %}
+                                                <div class="pt-1 text-xs">{% lucide "triangle-alert" size=12 %} {{ row.warning }}</div>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-xs text-muted">
+                                            {% if row.is_update %}
+                                                {% for field, change in row.planned.changes.items %}
+                                                    <div><span class="font-semibold text-ink">{{ field }}:</span> <span class="line-through">{{ change.0|default:"—" }}</span> &rarr; {{ change.1 }}</div>
+                                                {% endfor %}
+                                            {% else %}
+                                                {{ row.planned.label }}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+
+                {% if plan.unchanged_count %}
+                    <p class="text-sm text-muted">{% blocktrans count counter=plan.unchanged_count %}{{ counter }} game is already up to date.{% plural %}{{ counter }} games are already up to date.{% endblocktrans %}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if needs_ack %}
+            <label class="label cursor-pointer justify-start gap-2 pt-4">
+                <input type="checkbox" class="checkbox" name="acknowledge_warnings" value="1">
+                <span>{% trans "Import anyway, I've checked the warnings" %}</span>
+            </label>
+        {% endif %}
+
+        <div class="card-actions justify-start pt-4">
+            <a class="btn btn-outline gap-2" href="{% url 'management:json_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Back" %}</a>
+            {% if rows %}
+                <button class="btn btn-primary gap-2" type="submit">{% lucide "check" size=16 %} {% trans "Confirm import" %}</button>
+            {% endif %}
+        </div>
+    </form>
+{% endblock panel %}

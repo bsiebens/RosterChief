@@ -943,6 +943,13 @@ class IJNLImportForm(forms.Form):
         return url
 
 
+class JSONImportForm(forms.Form):
+    """Step 1 of importing multi-team play days from a JSON file -- see
+    events.services.json_import for the file format."""
+
+    file = forms.FileField(label=_("JSON file"), help_text=_("A .json file with a “games” list, as prepared for this import."), widget=forms.ClearableFileInput(attrs={"accept": ".json,application/json"}))
+
+
 class FixtureRecheckForm(forms.Form):
     """The "Re-check all imported fixtures" season picker -- see
     management.views.FixtureRecheckView. Submitted via GET, so it's always
