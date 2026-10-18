@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
 from billing.models import DuePayment, Plan, PlanPrice, Subscription
-from club.models import Club
+from club.models import Club, Sport
 from club.validators import LOGO_ACCEPT
 from events.models import Competition, Location
 
@@ -101,6 +101,19 @@ class CompetitionForm(forms.ModelForm):
         help_texts = {
             "module": _("Dotted path to the Python module implementing this competition's data source, e.g. events.services.competitions.cehl."),
         }
+
+
+class SportForm(forms.ModelForm):
+    """Create: name + code. Edit: the name only -- the code is what clubs and competitions store."""
+
+    class Meta:
+        model = Sport
+        fields = ["name", "code"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            del self.fields["code"]
 
 
 class PlanForm(forms.ModelForm):

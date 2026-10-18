@@ -7,7 +7,7 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
-from club.models import Club, Season
+from club.models import Club, Season, sport_choices
 from members.models import Group, Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
 from teams.models import Team
@@ -685,7 +685,7 @@ class Competition(models.Model):
     sport_type = models.CharField(
         _("sport"),
         max_length=20,
-        choices=Club.SportType.choices,
+        choices=sport_choices,
         default=Club.SportType.OTHER,
         help_text=_("Which sport this competition is for."),
     )

@@ -31,12 +31,12 @@ from billing.services.plans import delete_plan, plan_deletion_impact
 from bugs.forms import BugAdminForm, BugNoteForm
 from bugs.models import BugReport
 from bugs.services import add_note, update_bug
-from club.models import Club, ClubRole
+from club.models import Club, ClubRole, Sport
 from events.models import Competition, Location
 from features.jobs import JOB_REGISTRY
 from features.models import EmailSuppression, JobToggle, Maintenance
 
-from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SubscriptionForm, TrialForm
+from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SportForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services import user_debug
@@ -630,8 +630,16 @@ class FeatureListView(PlatformStaffRequiredMixin, TemplateView):
         for competition in competitions:
             competition.edit_form = CompetitionForm(instance=competition)
 
+        sports = list(Sport.objects.all())
+        for sport in sports:
+            sport.edit_form = SportForm(instance=sport)
+            sport.clubs_using, sport.competitions_using = sport.usage()
+            sport.in_use = bool(sport.clubs_using or sport.competitions_using)
+
         return super().get_context_data(
             nav="features",
+            sports=sports,
+            sport_form=SportForm(),
             flags=flags,
             flag_form=FlagForm(),
             competitions=competitions,
@@ -711,6 +719,57 @@ class FlagUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateV
 
     def get_success_url(self):
         return reverse("controlpanel:features")
+
+
+class SportCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
+    """POST-only, from the "New sport" modal on the features page."""
+
+    model = Sport
+    form_class = SportForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Sport created')}|" + _("Sport “%(name)s” created.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:features")
+
+
+class SportUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """POST-only, from a sport's "Edit" modal on the features page (renames it; the code stays)."""
+
+    model = Sport
+    form_class = SportForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:features"
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Sport updated')}|" + _("Sport “%(name)s” updated.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:features")
+
+
+class SportDeleteView(PlatformStaffRequiredMixin, View):
+    """Refuses the fallback sport and any sport a club or competition still uses (it would be left with a value that isn't a choice)."""
+
+    def post(self, request, pk):
+        sport = get_object_or_404(Sport, pk=pk)
+        if sport.is_protected:
+            notify(request, f"e|{_('Sport not deleted')}|" + _("“%(name)s” is the fallback sport and can't be deleted.") % {"name": sport.name})
+        elif any(sport.usage()):
+            clubs, competitions = sport.usage()
+            notify(request, f"e|{_('Sport not deleted')}|" + _("“%(name)s” is still used by %(clubs)s club(s) and %(competitions)s competition(s).") % {"name": sport.name, "clubs": clubs, "competitions": competitions})
+        else:
+            name = sport.name
+            sport.delete()
+            notify(request, f"w|{_('Sport deleted')}|" + _("Sport “%(name)s” has been deleted.") % {"name": name})
+        return redirect("controlpanel:features")
 
 
 class CompetitionCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):
