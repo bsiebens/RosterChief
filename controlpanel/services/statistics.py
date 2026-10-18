@@ -20,7 +20,7 @@ from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
-from authentication.middleware import ELEVATED_ROLES
+from authentication.middleware import privileged_members
 from billing.models import Due, DuePayment, Invoice, Subscription
 from billing.services.dues import dues_in_grace, dues_overdue, subscriptions_due_for_renewal
 from bugs.models import BugReport
@@ -190,10 +190,12 @@ def admins_pending_mfa():
 
     They are locked out until they do (RequireMFAMiddleware redirects them to the
     enrolment page), so this is a support queue rather than a statistic. The rule is
-    the middleware's own: platform staff, plus anyone holding an elevated ClubRole.
+    the middleware's own (authentication.middleware.privileged_members): platform staff, plus
+    anyone holding an elevated ClubRole, a shop/evaluation manager grant or a current
+    management staff position. Counts accounts, so someone who is admin of two clubs is one.
     """
     User = get_user_model()
-    elevated = User.objects.filter(Q(is_staff=True) | Q(is_superuser=True) | Q(member__roles__role__in=ELEVATED_ROLES))
+    elevated = User.objects.filter(Q(is_staff=True) | Q(is_superuser=True) | Q(pk__in=privileged_members().values("user")))
 
     return elevated.exclude(pk__in=Authenticator.objects.values("user")).distinct()
 

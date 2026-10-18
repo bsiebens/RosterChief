@@ -24,7 +24,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from bugs.models import BugReport
 from bugs.services import add_note
-from club.models import Club, ClubMembership, ClubRole, Season, Sport
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager, Sport
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
@@ -1389,6 +1389,15 @@ class MfaPendingTests(TestCase):
         ClubRole.objects.create(club=self.club, member=member, role=ClubRole.Roles.MEMBER)
 
         self.assertNotIn(user, admins_pending_mfa())
+
+    def test_shop_and_evaluation_managers_are_pending_like_the_middleware_demands(self):
+        # RequireMFAMiddleware locks these out too, so the dashboard must list them.
+        for email, grant in [("shop@example.com", ShopManager), ("eval@example.com", EvaluationManager)]:
+            user = User.objects.create_user(email=email, password="pw-secret-123")
+            member = Member.objects.create(first_name=email[:4], last_name="Manager", user=user)
+            grant.objects.create(club=self.club, member=member)
+
+            self.assertIn(user, admins_pending_mfa())
 
     def test_each_pending_admin_is_counted_once(self):
         # Two elevated roles in two clubs is still one person to chase.
