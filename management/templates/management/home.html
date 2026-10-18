@@ -274,7 +274,7 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 gap-3.5 {% if is_club_admin %}md:grid-cols-4{% else %}md:grid-cols-3{% endif %}">
+    <div class="grid grid-cols-1 gap-3.5 {% if is_club_admin %}md:grid-cols-5{% else %}md:grid-cols-4{% endif %}">
         {% for group in groups %}
             {% if group.title != "Shop" or is_club_admin %}
                 <div class="card p-4">
