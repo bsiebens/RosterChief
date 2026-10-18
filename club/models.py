@@ -347,13 +347,13 @@ class Season(ClubScopedModel):
 
 class ClubMembership(ClubScopedModel):
     class Kind(models.TextChoices):
-        MEMBER = "member", _("member")
-        GUARDIAN = "guardian", _("guardian")
+        MEMBER = "member", _("Member")
+        GUARDIAN = "guardian", _("Guardian")
         #: Attached to the club as staff (a trainer, a volunteer, a board member ...) without
         #: playing. Like a guardian: not a member, owes no fee, left out of every member
         #: list/KPI and of the "member without a team" checks. Grants no access by itself
         #: -- that stays with ClubRole / StaffAssignment.
-        STAFF = "staff", _("staff")
+        STAFF = "staff", _("Staff")
 
     class StatusChoices(models.TextChoices):
         ACTIVE = "active", _("active")

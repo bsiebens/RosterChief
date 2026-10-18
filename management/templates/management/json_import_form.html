@@ -1,0 +1,35 @@
+{% extends "management/base.html" %}
+{% load lucide ui i18n %}
+
+{% block heading %}{% trans "Import from JSON file" %}{% endblock heading %}
+
+{% block panel %}
+    <div class="card w-full">
+        <div class="card-body">
+            <p class="text-sm text-muted">
+                {% blocktrans %}Upload a prepared JSON file of play days. Nothing is created yet: you'll see every game
+                with its teams and location, can pick the right location and get a warning when it doesn't match who hosts the day,
+                before anything is saved.{% endblocktrans %}
+            </p>
+
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+
+                {% for error in form.non_field_errors %}
+                    <div class="alert alert-error">
+                        <span>{{ error }}</span>
+                    </div>
+                {% endfor %}
+
+                {% for field in form %}
+                    {% form_field field %}
+                {% endfor %}
+
+                <div class="card-actions justify-start pt-4">
+                    <a class="btn btn-outline gap-2" href="{% url 'management:event_import' %}">{% lucide "arrow-left" size=16 %} {% trans "Cancel" %}</a>
+                    <button class="btn btn-primary gap-2" type="submit">{% lucide "upload" size=16 %} {% trans "Upload and preview" %}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock panel %}

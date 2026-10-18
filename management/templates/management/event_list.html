@@ -4,7 +4,7 @@
 {% block heading %}{% trans "Events" %}{% endblock heading %}
 
 {% block actions %}
-    {% if is_club_admin and fixture_import_enabled %}
+    {% if is_club_admin %}
         <a class="btn btn-outline gap-2" href="{% url 'management:event_import' %}">{% lucide "download" size=16 %} {% trans "Import" %}</a>
     {% endif %}
     {% if can_create %}

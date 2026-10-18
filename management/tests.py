@@ -9510,9 +9510,8 @@ class RBIHFImportViewTests(ManagementTestBase):
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("event_list")
-
-        self.assertNotContains(response, reverse("management:event_import"))
+        # The Import button is always there for an admin now (the JSON importer needs no flag); this source just isn't offered on the chooser.
+        self.assertNotContains(self.club_get("event_import"), reverse("management:rbihf_import"))
 
     def test_button_hidden_from_a_non_admin_even_with_the_flag_active(self):
         self.activate_flag()
@@ -9716,9 +9715,8 @@ class DFELImportViewTests(ManagementTestBase):
     def test_button_hidden_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
 
-        response = self.club_get("event_list")
-
-        self.assertNotContains(response, reverse("management:event_import"))
+        # The Import button is always there for an admin now (the JSON importer needs no flag); this source just isn't offered on the chooser.
+        self.assertNotContains(self.club_get("event_import"), reverse("management:dfel_import"))
 
     def test_the_import_views_404_when_the_flag_is_not_active(self):
         self.client.force_login(self.admin_user)
@@ -9845,9 +9843,9 @@ class IJNLImportViewTests(ManagementTestBase):
     def post_form(self, url=IJNL_TEAM_URL, **extra):
         return self.club_post("ijnl_import", {"url": url, "team": str(self.team.pk), "season": str(self.season.pk), **extra})
 
-    def test_button_shows_only_with_the_flag_active(self):
+    def test_source_is_offered_only_with_the_flag_active(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
+        self.assertNotContains(self.club_get("event_import"), reverse("management:ijnl_import"))
 
         self.activate_flag()
         cache.clear()
@@ -10135,13 +10133,13 @@ class FixtureRecheckViewTests(FixtureImportTestMixin, ManagementTestBase):
 
         self.assertEqual(self.club_get("fixture_recheck").status_code, 403)
 
-    def test_event_list_button_follows_either_flag(self):
+    def test_recheck_card_follows_either_flag(self):
         self.client.force_login(self.admin_user)
-        self.assertNotContains(self.club_get("event_list"), reverse("management:event_import"))
+        self.assertNotContains(self.club_get("event_import"), reverse("management:fixture_recheck"))
 
         self.activate_flag("DFEL")
 
-        self.assertContains(self.club_get("event_list"), reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:fixture_recheck"))
 
     @mock.patch("events.services.import_sources.fetch", side_effect=fake_source_fetch)
     def test_preview_namespaces_each_entrys_fields(self, mock_fetch):
@@ -10318,6 +10316,19 @@ class MemberListKindFilterTests(ManagementTestBase):
         self.assertContains(staff, "Terry Trainer")
         self.assertNotContains(staff, "Cody Kid")
         self.assertNotContains(staff, "Pat Guardian")
+
+    def test_staff_tab_ignores_staff_assignments_and_guardian_tab_ignores_playing(self):
+        coach = Member.objects.create(first_name="Cara", last_name="Coach")
+        ClubMembership.objects.create(club=self.club, member=coach, season=self.season, kind=ClubMembership.Kind.MEMBER, status=ClubMembership.StatusChoices.ACTIVE)
+        team = Team.objects.create(club=self.club, name="U12", short_name="U12")
+        position = Position.objects.create(club=self.club, name="Coach", short_name="C", staff_position=True)
+        StaffAssignment.objects.create(team=team, member=coach, season=self.season, position=position)
+        playing_parent = Member.objects.create(first_name="Penny", last_name="Playing")
+        ClubMembership.objects.create(club=self.club, member=playing_parent, season=self.season, kind=ClubMembership.Kind.GUARDIAN, status=ClubMembership.StatusChoices.ACTIVE)
+        TeamMembership.objects.create(team=team, member=playing_parent, season=self.season, position=Position.objects.create(club=self.club, name="Forward", short_name="FW"))
+
+        self.assertNotContains(self.get("staff"), "Cara Coach")
+        self.assertContains(self.get("guardian"), "Penny Playing")
 
     def test_a_staff_membership_owes_no_fee(self):
         trainer = Member.objects.create(first_name="Terry", last_name="Trainer")
@@ -13098,10 +13109,13 @@ class EventImportChooserTests(ManagementTestBase):
         self.assertNotContains(response, reverse("management:rbihf_import"))
         self.assertNotContains(response, reverse("management:ijnl_import"))
 
-    def test_says_so_when_no_importer_is_enabled(self):
+    def test_offers_only_the_json_import_when_no_fixture_importer_is_enabled(self):
         self.client.force_login(self.admin_user)
 
-        self.assertContains(self.club_get("event_import"), "No importers are enabled")
+        response = self.club_get("event_import")
+
+        self.assertContains(response, reverse("management:json_import"))
+        self.assertNotContains(response, reverse("management:fixture_recheck"))
 
     def test_is_admin_only(self):
         self.enable("DFEL")
@@ -16056,3 +16070,100 @@ class DiscountLimitManagementTests(ShopTestBase):
         [listed] = response.context["discounts"]
         self.assertEqual(listed.use_count, 1)
         self.assertContains(response, "1 of 3")
+
+
+class JSONImportViewTests(ManagementTestBase):
+    """The Import > JSON file flow: upload, preview with a location per game and a home/away check, confirm."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.u8 = Team.objects.create(club=cls.club, name="Sharks U8", short_name="U8")
+        cls.u10 = Team.objects.create(club=cls.club, name="Sharks U10", short_name="U10")
+        cls.home = Location.objects.create(club=cls.club, name="Mechelen ice", address="1 Rink", city="Mechelen", zip_code="2800", country="BE", is_home=True)
+        cls.away = Location.objects.create(club=cls.club, name="Hasselt ice", address="2 Rink", city="Hasselt", zip_code="3500", country="BE")
+
+    def payload(self, **overrides):
+        games = [
+            {"id": "a", "date": "2027-10-18", "start": "11:45", "end": "13:45", "city": "Mechelen", "teams": ["U10"], "hosted_by_us": True, "participants": ["COP", "IHC"], "ice": "cross-ice"},
+            {"id": "b", "date": "2027-10-17", "start": "17:30", "city": "Hasselt", "teams": ["U8", "U10"], "hosted_by_us": False},
+        ]
+        return {"source": "Calendar", "our_code": "COP", "games": games, **overrides}
+
+    def upload(self, payload):
+        file = SimpleUploadedFile("games.json", json.dumps(payload).encode(), content_type="application/json")
+        return self.club_post("json_import", {"file": file})
+
+    def test_an_admin_sees_the_import_button_and_card(self):
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_list"), reverse("management:event_import"))
+        self.assertContains(self.club_get("event_import"), reverse("management:json_import"))
+
+    def test_the_preview_preselects_the_home_location_for_a_hosted_day_and_the_city_otherwise(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.upload(self.payload())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{self.home.pk}" selected>')
+        self.assertContains(response, f'<option value="{self.away.pk}" selected>')
+        self.assertNotContains(response, "hosts this day, but the location")
+
+    def test_an_unknown_team_is_a_form_error_listing_the_club_teams(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.upload(self.payload(games=[{"id": "x", "date": "2027-10-18", "start": "11:45", "city": "Mechelen", "teams": ["U12"], "hosted_by_us": True}]))
+
+        self.assertContains(response, "U12")
+        self.assertContains(response, "Sharks U10")
+        self.assertEqual(Event.objects.filter(club=self.club).count(), 0)
+
+    def test_confirm_creates_one_game_event_per_entry_with_all_its_teams_and_no_opponent(self):
+        self.client.force_login(self.admin_user)
+        self.upload(self.payload())
+
+        response = self.club_post("json_import_confirm", {"location_a": str(self.home.pk), "location_b": str(self.away.pk)})
+
+        self.assertRedirects(response, reverse("management:event_list"), fetch_redirect_response=False, target_status_code=200)
+        event_b = Event.objects.get(club=self.club, external_game_id="b")
+        self.assertEqual((event_b.title, event_b.kind, event_b.opponent_id, event_b.location_id), ("Development game", Event.EventKind.GAME, None, self.away.pk))
+        self.assertEqual(set(event_b.teams.all()), {self.u8, self.u10})
+        event_a = Event.objects.get(club=self.club, external_game_id="a")
+        self.assertEqual(event_a.competition_label, "cross-ice · IHC")
+        self.assertTrue(event_a.is_home_game)
+
+    def test_a_location_contradicting_the_host_needs_acknowledging(self):
+        self.client.force_login(self.admin_user)
+        self.upload(self.payload())
+
+        response = self.club_post("json_import_confirm", {"location_a": str(self.away.pk), "location_b": str(self.away.pk)})
+
+        self.assertContains(response, "hosts this day, but the location")
+        self.assertEqual(Event.objects.filter(club=self.club).count(), 0)
+
+        response = self.club_post("json_import_confirm", {"location_a": str(self.away.pk), "location_b": str(self.away.pk), "acknowledge_warnings": "1"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Event.objects.filter(club=self.club).count(), 2)
+
+    def test_reuploading_updates_rather_than_duplicates(self):
+        self.client.force_login(self.admin_user)
+        self.upload(self.payload())
+        self.club_post("json_import_confirm", {"location_a": str(self.home.pk), "location_b": str(self.away.pk)})
+
+        moved = self.payload()
+        moved["games"][0]["start"] = "12:45"
+        response = self.upload(moved)
+
+        self.assertContains(response, "1 game is already up to date")
+        self.club_post("json_import_confirm", {"location_a": str(self.home.pk)})
+        self.assertEqual(Event.objects.filter(club=self.club).count(), 2)
+        self.assertEqual(timezone.localtime(Event.objects.get(external_game_id="a").start).strftime("%H:%M"), "12:45")
+
+    def test_a_coach_cannot_use_the_import(self):
+        coach = User.objects.create_user(email="coach-json@example.com", password="pw-secret-123")
+        self.client.force_login(coach)
+
+        self.assertIn(self.club_get("json_import").status_code, (302, 403))
+        self.assertEqual(Event.objects.filter(club=self.club).count(), 0)
