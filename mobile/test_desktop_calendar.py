@@ -16,7 +16,8 @@ class DesktopCalendarSplitTests(MemberScreenFixture, TestCase):
         self.client.force_login(self.user)
 
     def test_desktop_shows_grid_and_agenda_side_by_side(self):
-        event = self.make_event(title="Practice", start=at(1))
+        # Today, not tomorrow: on a Sunday tomorrow lands in "Next week" and the "This week" header never renders.
+        event = self.make_event(title="Practice", start=at(0))
         self.invite(event, self.member, Status.NO_RESPONSE)
 
         response = self.get(reverse("mobile:calendar"), HTTP_USER_AGENT=DESKTOP_UA)
