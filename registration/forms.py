@@ -108,7 +108,7 @@ class RegistrationEntryRowForm(forms.Form):
             # simultaneously-open registration windows.
             variants = ProductVariant.objects.filter(product__in=available_registration_products(club, season=season), is_active=True).select_related("product__category").order_by("product__name", "name")
             self.fields["product_variant"].queryset = variants
-            self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.product.name} — {variant.name} (€{variant.effective_price})"
+            self.fields["product_variant"].label_from_instance = lambda variant: f"{variant.full_name} (€{variant.effective_price})"
 
         all_numbers = {number for numbers in self.team_number_pools.values() for number in numbers}
         # team_number_pools is computed with no specific member in mind, so a

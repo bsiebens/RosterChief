@@ -216,7 +216,13 @@ class ProductVariant(UUIDModel):
         ]
 
     def __str__(self):
-        return f"{self.product} — {self.name}"
+        return self.full_name
+
+    @property
+    def full_name(self):
+        """"Product — Option", or just the product's name for the option that *is* the product
+        (shop.services.variants.ensure_default_variant)."""
+        return self.product.name if self.name == self.product.name else f"{self.product.name} — {self.name}"
 
     @property
     def effective_price(self):
