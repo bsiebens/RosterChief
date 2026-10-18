@@ -2818,14 +2818,28 @@ class MemberGrantLoginTests(ManagementTestBase):
 
         self.assertNotContains(response, reverse("management:member_grant_login", args=[self.child.pk]))
 
-    def test_no_button_for_a_parent(self):
+    def test_button_for_a_login_less_parent_too_but_not_one_with_a_login(self):
         parent = Member.objects.create(first_name="Pat", last_name="Parent")
         FamilyMembership.objects.create(family=self.family, member=parent, role=FamilyMembership.FamilyRole.PARENT)
         ClubMembership.objects.create(club=self.club, member=parent, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
 
-        response = self.club_get("family_detail", self.family.pk)
+        self.assertContains(self.club_get("family_detail", self.family.pk), reverse("management:member_grant_login", args=[parent.pk]))
 
-        self.assertNotContains(response, reverse("management:member_grant_login", args=[parent.pk]))
+        parent.user = User.objects.create_user(email="pat@example.com", password="pw-secret-123")
+        parent.save()
+
+        self.assertNotContains(self.club_get("family_detail", self.family.pk), reverse("management:member_grant_login", args=[parent.pk]))
+
+    def test_member_page_offers_the_button_to_anyone_without_a_login(self):
+        loner = Member.objects.create(first_name="Lou", last_name="Loner")
+        ClubMembership.objects.create(club=self.club, member=loner, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        self.assertContains(self.club_get("member_detail", loner.pk), reverse("management:member_grant_login", args=[loner.pk]))
+
+        loner.user = User.objects.create_user(email="lou@example.com", password="pw-secret-123")
+        loner.save()
+
+        self.assertNotContains(self.club_get("member_detail", loner.pk), reverse("management:member_grant_login", args=[loner.pk]))
 
     def test_the_form_is_prefilled_with_the_childs_contact_email_if_set(self):
         self.child.email = "cody.kid@example.com"

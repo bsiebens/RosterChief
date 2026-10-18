@@ -25,7 +25,7 @@ def _lines(row) -> list[dict]:
     lines = []
     for entry in row["entries"]:
         if entry.product_variant_id:
-            label = f"{entry.product_variant.product.name} — {entry.product_variant.name}"
+            label = entry.product_variant.full_name
         else:
             label = str(entry.get_entry_kind_display())
         lines.append({"label": label, "team": str(entry.requested_team) if entry.requested_team_id else None, "price": money(entry.price), "discount": money(entry.discount_amount) if entry.discount_amount > 0 else None})

@@ -17,6 +17,9 @@
 {% endblock topbar_context %}
 
 {% block actions %}
+    {% if grant_login_form %}
+        <button class="btn btn-outline gap-2" type="button" onclick="document.getElementById('grant_login_modal').showModal()">{% lucide "key-round" size=16 %} {% trans "Grant login" %}</button>
+    {% endif %}
     {% if is_club_admin %}
         <a class="btn btn-outline gap-2" href="{% url 'management:member_update' member.pk %}">{% lucide "pencil" size=16 %} {% trans "Edit" %}</a>
     {% endif %}
@@ -102,7 +105,7 @@
                 {% elif current_membership.kind == "staff" %}
                     <div class="alert alert-warning">
                         {% lucide "users" size=16 %}
-                        <span>{% trans "Staff: attached to the club without playing. Owes no fee, is not counted as a member and gets no access rights from this alone." %}</span>
+                        <span>{% trans "Staff: attached to the club without playing. Is not counted as a member and gets no access rights from this alone." %}</span>
                     </div>
                 {% endif %}
                 <dl>
@@ -377,6 +380,14 @@
             </div>
         {% endif %}
     </div>
+
+    {% if grant_login_form %}
+        {% url 'management:member_grant_login' member.pk as grant_login_url %}
+        {% trans "Grant login" as grant_login_title %}
+        {% trans "Grant" as grant_login_submit_label %}
+        {% trans "They'll be able to sign in with this email once you confirm." as grant_login_blurb %}
+        {% include "controlpanel/_modal_form.html" with modal_id="grant_login_modal" title=grant_login_title form=grant_login_form action_url=grant_login_url submit_label=grant_login_submit_label submit_icon="key-round" blurb=grant_login_blurb %}
+    {% endif %}
 
     {% if is_club_admin %}
         {% url 'management:member_referee_eligibility_update' member.pk as referee_eligibility_url %}

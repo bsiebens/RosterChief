@@ -2435,3 +2435,26 @@ class InventoryTests(TestCase):
         [row] = inventory_overview(self.club)
 
         self.assertEqual((row.on_hand, row.committed), (3, 2))
+
+
+class DefaultVariantTests(TestCase):
+    def test_registration_product_without_options_gets_one_named_after_it(self):
+        from shop.services.variants import ensure_default_variant
+
+        club = Club.objects.create(name="Default Variant FC", slug="default-variant-fc")
+        product = Product.objects.create(club=club, name="Weekly training", product_type=Product.ProductType.MEMBERSHIP, price=410)
+        variant = ensure_default_variant(product)
+        self.assertEqual(variant.full_name, "Weekly training")
+        self.assertEqual(variant.effective_price, 410)
+        self.assertIsNone(ensure_default_variant(product))  # idempotent
+
+    def test_merchandise_and_products_with_options_are_left_alone(self):
+        from shop.services.variants import ensure_default_variant
+
+        club = Club.objects.create(name="Default Variant FC 2", slug="default-variant-fc-2")
+        merch = Product.objects.create(club=club, name="Cap", product_type=Product.ProductType.MERCHANDISE, price=10)
+        self.assertIsNone(ensure_default_variant(merch))
+        membership = Product.objects.create(club=club, name="Player", product_type=Product.ProductType.MEMBERSHIP, price=10)
+        ProductVariant.objects.create(product=membership, name="U12")
+        self.assertIsNone(ensure_default_variant(membership))
+        self.assertEqual(membership.variants.count(), 1)

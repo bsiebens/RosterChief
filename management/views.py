@@ -146,6 +146,7 @@ from shop.services.payments import record_payment as record_shop_payment
 from shop.services.pricing import order_total
 from shop.services.production import in_production_lines, mark_line_received, mark_lines_in_production, pending_production_lines, production_receiving_summary, receive_production, sync_production_status
 from shop.services.stats import order_kpis, quantity_sold_by_product, quantity_sold_by_variant
+from shop.services.variants import ensure_default_variant
 from shop.services.vouchers import delete_manual_consumption, record_manual_consumption, voucher_history
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members, place_member_on_team
@@ -329,11 +330,9 @@ def group_by_family(members, club):
         # anything once it's scoped to *this* family's membership row.
         fm.member.role_in_family = fm.role
         fm.member.role_in_family_display = fm.get_role_display()
-        # A login-less child can be granted one right from the table -- parents/
-        # guardians already get one when added (add_parent_to_family/register_family
-        # both call get_or_create_login_member), so in practice this is only ever
-        # None for a child, but the check is on the actual state, not the role alone.
-        if fm.role == FamilyMembership.FamilyRole.CHILD and fm.member.user_id is None:
+        # Anyone without a login can be granted one right from the table, whatever
+        # their role in the family -- the check is on the actual state, not the role.
+        if fm.member.user_id is None:
             fm.member.grant_login_form = GrantLoginForm(initial={"email": fm.member.email})
         else:
             fm.member.grant_login_form = None
@@ -1160,6 +1159,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
             add_child_form=AddChildForm(),
             add_parent_form=AddParentForm(),
             attach_to_family_form=AttachToFamilyForm(club=self.request.club, member=self.object),
+            grant_login_form=GrantLoginForm(initial={"email": self.object.email}) if is_admin and self.object.user_id is None else None,
             current_membership=current_membership,
             checklist=checklist_for(current_membership) if current_membership else [],
             membership_history=ClubMembership.objects.filter(club=self.request.club, member=self.object).select_related("season").order_by("-season__start_date"),
@@ -5140,6 +5140,7 @@ class ProductCreateView(ShopManagerRequiredMixin, View):
             product.club = request.club
             product.save()
             ProductVariant.objects.bulk_create([ProductVariant(product=product, name=row["name"], price=row.get("price")) for row in variant_formset.cleaned_data if row.get("name")])
+            ensure_default_variant(product)
             ProductRegistrantDiscountTier.objects.bulk_create(
                 [ProductRegistrantDiscountTier(product=product, min_registrants=row["min_registrants"], discount_type=row["discount_type"], discount_amount=row["discount_amount"]) for row in tier_formset.cleaned_data if row.get("min_registrants")]
             )
@@ -5201,6 +5202,7 @@ class ProductUpdateView(ShopManagerRequiredMixin, View):
 
         with transaction.atomic():
             form.save()
+            ensure_default_variant(product)
             product.registrant_discount_tiers.all().delete()
             ProductRegistrantDiscountTier.objects.bulk_create(
                 [ProductRegistrantDiscountTier(product=product, min_registrants=row["min_registrants"], discount_type=row["discount_type"], discount_amount=row["discount_amount"]) for row in tier_formset.cleaned_data if row.get("min_registrants")]

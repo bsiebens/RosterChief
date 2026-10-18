@@ -389,7 +389,7 @@ class ClubMembership(ClubScopedModel):
         MEMBER = "member", _("Member")
         GUARDIAN = "guardian", _("Guardian")
         #: Attached to the club as staff (a trainer, a volunteer, a board member ...) without
-        #: playing. Like a guardian: not a member, owes no fee, left out of every member
+        #: playing. Like a guardian: not a member, left out of every member
         #: list/KPI and of the "member without a team" checks. Grants no access by itself
         #: -- that stays with ClubRole / StaffAssignment.
         STAFF = "staff", _("Staff")
@@ -416,7 +416,7 @@ class ClubMembership(ClubScopedModel):
         default=Kind.MEMBER,
         help_text=_(
             "A guardian is attached to the club only as a parent of a member -- they hold the login, but don't count as a member themselves and owe no fee."
-            " A parent who also plays is a member. Staff are attached without playing: not counted as members, no fee, no access rights by themselves."
+            " A parent who also plays is a member. Staff are attached without playing: not counted as members, no access rights by themselves."
         ),
     )
 
