@@ -153,12 +153,13 @@ class GameSnapshot:
     is_live: bool
     home_score: int | None
     away_score: int | None
-    timeline: dict | None          # the §2.2 document, or None if this source/game has none
-    raw: str | None = None         # the payload it was parsed from, kept for re-parsing (§3.4)
+    timeline: dict | None  # the §2.2 document, or None if this source/game has none
+    raw: str | None = None  # the payload it was parsed from, kept for re-parsing (§3.4)
+
 
 class CompetitionBaseClass:
     def fetch_snapshot(self, event) -> GameSnapshot: ...
-    def update_game_information(self, event) -> None:   # now a template method, not per source
+    def update_game_information(self, event) -> None:  # now a template method, not per source
         apply_snapshot(event, self.fetch_snapshot(event))
 ```
 
@@ -217,7 +218,7 @@ enough to re-parse every stored game when a parser improves, without keeping a g
 signal per poll that changed something:
 
 ```python
-game_timeline_changed = Signal()   # sender=Event; kwargs: added, removed, changed, previous_status, status, first_fetch
+game_timeline_changed = Signal()  # sender=Event; kwargs: added, removed, changed, previous_status, status, first_fetch
 ```
 
 A small, pure `derive_moments(event, diff) -> list[Moment]` turns that into the things a human
@@ -267,7 +268,7 @@ Everything above is built so this part is a subscriber, not a rewrite:
 
 ```python
 @receiver(game_timeline_changed)
-def notify_game_moments(sender, **diff): ...   # derive_moments → filter by rules → deliver
+def notify_game_moments(sender, **diff): ...  # derive_moments → filter by rules → deliver
 ```
 
 How it plugs into what exists:

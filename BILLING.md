@@ -166,12 +166,12 @@ field names (`Subscription.tier` → `plan`, `Subscription.post_trial_tier` → 
 
 ```python
 class Plan(UUIDModel):
-    name, slug, description, is_active          # unchanged
+    name, slug, description, is_active  # unchanged
 
-    duration_months    = PositiveSmallIntegerField(default=12,  validators=[MinValueValidator(1)])
-    renewal_lead_days  = PositiveSmallIntegerField(default=30)
-    grace_days         = PositiveSmallIntegerField(default=30)
-    is_trial           = BooleanField(default=False)
+    duration_months = PositiveSmallIntegerField(default=12, validators=[MinValueValidator(1)])
+    renewal_lead_days = PositiveSmallIntegerField(default=30)
+    grace_days = PositiveSmallIntegerField(default=30)
+    is_trial = BooleanField(default=False)
 ```
 
 `is_trial` is an explicit flag rather than "price == 0" — a genuinely free tier is not a trial, and
@@ -199,13 +199,15 @@ for free — no extra column needed.
 The predicates change meaning even though only one changes shape:
 
 ```python
-def is_in_grace(self, today=None):      # period running, unpaid, not yet archivable
+def is_in_grace(self, today=None):  # period running, unpaid, not yet archivable
     return self.is_owing and self.period_start <= today <= self.grace_until
 
-def is_overdue(self, today=None):       # unchanged logic, new meaning of grace_until
+
+def is_overdue(self, today=None):  # unchanged logic, new meaning of grace_until
     return self.is_owing and self.grace_until < today
 
-def days_until_archive(self, today=None):   # new — drives the countdown in the banner
+
+def days_until_archive(self, today=None):  # new — drives the countdown in the banner
     return (self.grace_until - today).days
 ```
 
@@ -247,7 +249,7 @@ A new service — `billing/services/notices.py` — returns one small object for
 ```python
 @dataclass(frozen=True)
 class BillingNotice:
-    level: str                  # "info" | "warning" | "error"
+    level: str  # "info" | "warning" | "error"
     due: Due
     amount_outstanding: Decimal
     grace_until: date
