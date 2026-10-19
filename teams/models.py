@@ -387,13 +387,15 @@ class RefereeProfile(ClubScopedModel):
         level is set, and its validity hasn't passed."""
         return self.level_id is not None and self.is_currently_valid
 
-    def eligible_team_ids(self, level_team_ids=None):
+    def eligible_team_ids(self, level_team_ids=None, *, ignore_validity=False):
         """The ids of the teams this profile may referee: what the level allows
         (including whatever it inherits, transitively -- RefereeLevel.eligible_team_ids)
         minus the teams explicitly marked as not allowed. Empty whenever the profile
         isn't currently eligible. Pass ``level_team_ids`` when it is already resolved
-        (RefereeLevel.eligible_team_ids_by_level) to skip walking the level's chain."""
-        if not self.is_eligible:
+        (RefereeLevel.eligible_team_ids_by_level) to skip walking the level's chain.
+        ``ignore_validity`` answers "which teams would they qualify for were the validity
+        still running" -- how the assign dropdowns list lapsed referees as "(expired)"."""
+        if self.level_id is None or not (ignore_validity or self.is_currently_valid):
             return set()
         if level_team_ids is None:
             level_team_ids = self.level.eligible_team_ids()

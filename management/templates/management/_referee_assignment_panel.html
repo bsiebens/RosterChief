@@ -149,7 +149,7 @@
                 <select name="member" class="select w-auto">
                     {% for candidate in referee_candidates %}
                         <option value="{{ candidate.pk }}" {% if candidate.has_conflict %}title="{% blocktrans with events=candidate.conflict_titles %}Also expected at: {{ events }}{% endblocktrans %}"{% endif %}>
-                            {{ candidate }}{% if candidate.has_conflict %} ⚠{% endif %}
+                            {{ candidate }}{% if candidate.referee_expired %} ({% trans "expired" %}){% endif %}{% if candidate.has_conflict %} ⚠{% endif %}
                         </option>
                     {% endfor %}
                 </select>

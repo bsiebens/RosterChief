@@ -110,7 +110,18 @@ from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
-from events.services.referees import RefereeAssignmentError, add_external_referee, assign_referee, conflicting_events_for_members, eligible_referees, needs_referee_management, remove_referee, retract_ineligible_invites, set_referee_fee
+from events.services.referees import (
+    RefereeAssignmentError,
+    add_external_referee,
+    assign_referee,
+    conflicting_events_for_members,
+    eligible_referees,
+    needs_referee_management,
+    referee_roster,
+    remove_referee,
+    retract_ineligible_invites,
+    set_referee_fee,
+)
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
@@ -3452,7 +3463,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
             referees_full = len(referees) >= event.max_referees
             if can_manage_referees and not referees_full:
-                referee_candidates = list(eligible_referees(event))
+                referee_candidates = list(eligible_referees(event, include_expired=True))
                 conflicts_by_member = conflicting_events_for_members(referee_candidates, event)
                 for candidate in referee_candidates:
                     conflicts = conflicts_by_member[candidate.pk]
@@ -3547,7 +3558,7 @@ class EventRefereeAssignView(RefereeAdminRequiredMixin, View):
 
     def post(self, request, pk):
         event = self.get_event()
-        member = get_object_or_404(eligible_referees(event), pk=request.POST.get("member"))
+        member = get_object_or_404(eligible_referees(event, include_expired=True), pk=request.POST.get("member"))
         assigned_by = Member.objects.filter(user=request.user).first()
 
         try:
@@ -4015,6 +4026,7 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
         queryset = Event.objects.filter(pk__in=buckets[need_choice]).order_by("start").select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
         games = list(queryset)
 
+        referee_roster_cache = referee_roster(club)
         for game in games:
             game.needs_referees = needs_referee_management(game)
             game.referee_rows = list(game.referees.all())
@@ -4023,7 +4035,7 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
             game.fees_pending = any(referee.fee_pending for referee in game.referee_rows)
             game.pending_signups = _signup_groups(game.referee_signups.exclude(status=RefereeSignup.Status.CONFIRMED).select_related("member"), RefereeSignup)
             if game.needs_referees and not game.referees_full:
-                game.referee_candidates = list(eligible_referees(game))
+                game.referee_candidates = list(eligible_referees(game, include_expired=True, roster=referee_roster_cache))
                 conflicts_by_member = conflicting_events_for_members(game.referee_candidates, game)
                 for candidate in game.referee_candidates:
                     conflicts = conflicts_by_member[candidate.pk]
