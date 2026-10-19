@@ -7608,6 +7608,19 @@ class EventRefereeManagementTests(ManagementTestBase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(EventReferee.objects.filter(event=game).exists())
 
+    def test_an_expired_but_otherwise_eligible_referee_can_be_assigned_and_is_labelled(self):
+        game = self.make_game()
+        expired = Member.objects.create(first_name="Lapsed", last_name="Ref")
+        RefereeProfile.objects.create(club=self.club, member=expired, level=self.level, valid_until=timezone.localdate() - datetime.timedelta(days=3))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("event_detail", game.pk)
+        self.assertContains(response, "Lapsed Ref (expired)")
+        self.assertNotContains(response, f"{self.referee} (expired)")
+
+        self.club_post("event_referee_assign", {"member": str(expired.pk)}, game.pk)
+        self.assertTrue(EventReferee.objects.filter(event=game, member=expired).exists())
+
     def test_cannot_assign_someone_not_eligible_via_a_crafted_post(self):
         game = self.make_game()
         ineligible = Member.objects.create(first_name="Not", last_name="Eligible")

@@ -50,10 +50,20 @@ def needs_official_management(event) -> bool:
     at all: a home game or tournament (Event.is_home_fixture) with at least
     one club-managed (for officials) team. A federation-managed team's home
     fixtures are entirely out of scope."""
-    return event.is_home_fixture and event.teams.filter(official_management=Team.OfficialManagement.CLUB).exists()
+    return event.is_home_fixture and bool(_club_managed_team_ids(event))
 
 
-def eligible_officials(event):
+def _club_managed_team_ids(event) -> set:
+    # In Python over .all() so a prefetched ``teams`` (the bulk resync) costs no query per game.
+    return {team.pk for team in event.teams.all() if team.official_management == Team.OfficialManagement.CLUB}
+
+
+def official_level_teams(club) -> dict:
+    """``{level pk: eligible team ids}``, resolved once for bulk callers of eligible_officials."""
+    return {level.pk: level.eligible_team_ids() for level in OfficialLevel.objects.filter(club=club).select_related("inherits_from")}
+
+
+def eligible_officials(event, *, level_teams=None):
     """Members who could act as an official for `event`: their
     OfficialProfile has a level qualifying for one of its club-managed
     teams (directly, or via whatever that level inherits from), and is
@@ -62,8 +72,10 @@ def eligible_officials(event):
     if not needs_official_management(event):
         return Member.objects.none()
 
-    team_ids = set(event.teams.filter(official_management=Team.OfficialManagement.CLUB).values_list("id", flat=True))
-    qualifying_level_ids = [level.pk for level in OfficialLevel.objects.filter(club=event.club) if level.eligible_team_ids() & team_ids]
+    team_ids = _club_managed_team_ids(event)
+    if level_teams is None:
+        level_teams = official_level_teams(event.club)
+    qualifying_level_ids = [level_pk for level_pk, level_team_ids in level_teams.items() if level_team_ids & team_ids]
     assigned_ids = event.officials.values_list("member_id", flat=True)
     today = timezone.localdate()
 
@@ -179,7 +191,7 @@ def set_official_fee(official, *, fee=None, km=None, km_rate=None, no_fee=False)
     return official
 
 
-def sync_official_invites(event, *, notify=True):
+def sync_official_invites(event, *, notify=True, level_teams=None):
     """Invites every currently-eligible, not-yet-invited official to `event`
     -- wired from the same signal points as sync_referee_invites
     (events/signals.py's post_save(Event) and the Event.teams m2m).
@@ -194,7 +206,7 @@ def sync_official_invites(event, *, notify=True):
         return []
 
     already_invited_ids = set(OfficialSignup.objects.filter(event=event).values_list("member_id", flat=True))
-    new_members = [member for member in eligible_officials(event) if member.pk not in already_invited_ids]
+    new_members = [member for member in eligible_officials(event, level_teams=level_teams) if member.pk not in already_invited_ids]
     if not new_members:
         return []
 

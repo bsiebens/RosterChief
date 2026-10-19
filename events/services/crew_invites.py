@@ -20,8 +20,8 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 
 from events.models import Event
-from events.services.officials import sync_official_invites
-from events.services.referees import sync_referee_invites
+from events.services.officials import official_level_teams, officials_enabled_for, sync_official_invites
+from events.services.referees import referee_roster, sync_referee_invites
 from notifications.models import NotificationCategory
 from notifications.services import notify_members
 
@@ -48,12 +48,24 @@ def resync_upcoming_invites(club=None, *, now=None) -> dict:
 
     new_referees: dict = {}  # club -> {member: [events]}
     new_officials: dict = {}
+    # Who is eligible is the same for every game of a club: resolved once per club here, not
+    # once per game inside the sync functions (which is what made a profile save crawl).
+    rosters: dict = {}
+    level_teams: dict = {}
+    officials_on: dict = {}
     for event in events:
         if not event.is_home_fixture:
             continue
-        for member in sync_referee_invites(event, notify=False):
+        club_id = event.club_id
+        if club_id not in rosters:
+            rosters[club_id] = referee_roster(event.club)
+            officials_on[club_id] = officials_enabled_for(event.club)
+            level_teams[club_id] = official_level_teams(event.club) if officials_on[club_id] else {}
+        for member in sync_referee_invites(event, notify=False, roster=rosters[club_id]):
             new_referees.setdefault(event.club, {}).setdefault(member, []).append(event)
-        for member in sync_official_invites(event, notify=False):
+        if not officials_on[club_id]:
+            continue
+        for member in sync_official_invites(event, notify=False, level_teams=level_teams[club_id]):
             new_officials.setdefault(event.club, {}).setdefault(member, []).append(event)
 
     referee_texts = {
