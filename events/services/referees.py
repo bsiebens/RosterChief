@@ -25,6 +25,7 @@ e.g. a federation-appointed referee the club still needs to pay.
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import BooleanField, Case, When
 from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
@@ -53,30 +54,56 @@ def needs_referee_management(event) -> bool:
     club-managed team. A federation-managed team's home fixtures are entirely
     out of scope for the referee tools -- the federation appoints referees
     for those, not the club."""
-    return event.is_home_fixture and event.teams.filter(referee_management=Team.RefereeManagement.CLUB).exists()
+    return event.is_home_fixture and bool(_club_managed_team_ids(event))
 
 
-def eligible_referees(event):
+def _club_managed_team_ids(event) -> set:
+    # In Python over .all() (not a .filter()) so a prefetched ``teams`` -- the bulk resync
+    # in events.services.crew_invites -- costs no query per game.
+    return {team.pk for team in event.teams.all() if team.referee_management == Team.RefereeManagement.CLUB}
+
+
+def referee_roster(club):
+    """Everyone with a referee level and a validity date, resolved once: ``[(member_id,
+    expired, team_ids)]``, where team_ids is what they'd qualify for were the validity still
+    running. Passed to eligible_referees to evaluate many games without redoing this per game."""
+    team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(club)
+    today = timezone.localdate()
+    profiles = RefereeProfile.objects.filter(club=club, level__isnull=False, valid_until__isnull=False).prefetch_related("excluded_teams")
+    return [(profile.member_id, profile.valid_until < today, profile.eligible_team_ids(team_ids_by_level.get(profile.level_id, set()), ignore_validity=True)) for profile in profiles]
+
+
+def eligible_referees(event, *, include_expired=False, roster=None):
     """Members who could referee `event`: their RefereeProfile is currently valid and
     allows one of its club-managed teams -- what the level qualifies for (directly, or via
     whatever that level inherits from) minus the teams explicitly marked as not allowed
     for that person -- minus whoever is already assigned. Empty unless
     needs_referee_management.
 
+    ``include_expired`` also returns people whose validity has lapsed but who would
+    otherwise qualify, flagged ``referee_expired`` -- for the staff assign dropdowns, where
+    a manager may still pick them; invites (sync_referee_invites) never include them.
+    ``roster`` is a precomputed referee_roster(event.club) for bulk callers.
+
     Levels resolved to ids first (RefereeLevel.eligible_team_ids can't be
     expressed as a single ORM lookup once inheritance is transitive), and the
-    profile check done per profile for the same reason plus the exclusions -- a
-    club has a handful of levels and a few dozen referees, so this stays cheap."""
+    profile check done per profile for the same reason plus the exclusions."""
     if not needs_referee_management(event):
         return Member.objects.none()
 
-    team_ids = set(event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
-    team_ids_by_level = RefereeLevel.eligible_team_ids_by_level(event.club)
-    profiles = RefereeProfile.objects.filter(club=event.club, level__isnull=False, valid_until__gte=timezone.localdate()).prefetch_related("excluded_teams")
-    member_ids = [profile.member_id for profile in profiles if profile.eligible_team_ids(team_ids_by_level.get(profile.level_id, set())) & team_ids]
+    team_ids = _club_managed_team_ids(event)
+    if roster is None:
+        roster = referee_roster(event.club)
+    qualifying = [(member_id, expired) for member_id, expired, allowed in roster if allowed & team_ids and (include_expired or not expired)]
+    expired_ids = [member_id for member_id, expired in qualifying if expired]
     assigned_ids = event.referees.values_list("member_id", flat=True)
 
-    return Member.objects.filter(pk__in=member_ids).exclude(pk__in=assigned_ids).distinct()
+    return (
+        Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying])
+        .exclude(pk__in=assigned_ids)
+        .annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField()))
+        .distinct()
+    )
 
 
 def retract_ineligible_invites(profile):
@@ -87,10 +114,9 @@ def retract_ineligible_invites(profile):
     many invites were withdrawn."""
     allowed = profile.eligible_team_ids() if profile.level_id else set()
     withdrawn = 0
-    invites = RefereeSignup.objects.filter(member=profile.member, event__club=profile.club, event__start__gt=timezone.now(), status=RefereeSignup.Status.INVITED).select_related("event")
+    invites = RefereeSignup.objects.filter(member=profile.member, event__club=profile.club, event__start__gt=timezone.now(), status=RefereeSignup.Status.INVITED).select_related("event").prefetch_related("event__teams")
     for invite in invites:
-        club_teams = set(invite.event.teams.filter(referee_management=Team.RefereeManagement.CLUB).values_list("id", flat=True))
-        if not (allowed & club_teams):
+        if not (allowed & _club_managed_team_ids(invite.event)):
             invite.delete()
             withdrawn += 1
     return withdrawn
@@ -212,7 +238,7 @@ def set_referee_fee(referee, *, fee=None, km=None, km_rate=None, no_fee=False):
     return referee
 
 
-def sync_referee_invites(event, *, notify=True):
+def sync_referee_invites(event, *, notify=True, roster=None):
     """Invites every currently-eligible, not-yet-invited referee to `event` --
     the referee-facing counterpart to events.sync_event_attendances, wired
     from the same signal points (events/signals.py's post_save(Event) and
@@ -226,7 +252,7 @@ def sync_referee_invites(event, *, notify=True):
         return []
 
     already_invited_ids = set(RefereeSignup.objects.filter(event=event).values_list("member_id", flat=True))
-    new_members = [member for member in eligible_referees(event) if member.pk not in already_invited_ids]
+    new_members = [member for member in eligible_referees(event, roster=roster) if member.pk not in already_invited_ids]
     if not new_members:
         return []
 
