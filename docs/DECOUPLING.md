@@ -1,6 +1,7 @@
 # DECOUPLING.md — Technology options, frontend/backend split, and a faster way to build (design)
 
 Status: **proposal, no code changed.** Branch `claude/architecture-decoupling-research`, 2026-10-21.
+Follow-up: `DECOUPLING-ADMIN.md` (moving management/control panel off server rendering).
 Companion to `ARCHITECTURE.md` (models, tenancy, RBAC), `API.md` (native-app API) and `DEPLOYMENT.md`.
 
 Where this document and the code disagree, the code wins. Numbers below were measured from the tree
@@ -19,8 +20,8 @@ path handles the update. Section 6 turns that into concrete rules.
    parity with the PWA. `api/` is a public read-only API. Services (`events/services`,
    `club/services`, …) hold the rules. Rewriting the backend would throw away the most expensive,
    best-tested asset: ~5,500 tests, 384 commits in 6 weeks, ~250 migrations of production-shaped schema.
-2. **The cost is in the two big server-rendered surfaces**, `management/` (28k lines, 119
-   templates, 8k-line `views.py`) and `mobile/` (21k lines, 132 templates, a PWA with a service
+2. **The cost is in the two big server-rendered surfaces**, `management/` (≈12k lines of code
+   plus 16k lines of tests, 119 templates, 8k-line `views.py`) and `mobile/` (21k lines incl. ≈8k of tests, 132 templates, a PWA with a service
    worker and an offline queue). They are the part where a decoupled frontend *could* pay off, and
    also where a rewrite is the riskiest and slowest.
 3. **Recommendation: evolve, don't replace.**
@@ -46,8 +47,8 @@ path handles the update. Section 6 turns that into concrete rules.
 | Tenancy | Row-based, `club` FK on `ClubScopedModel`, subdomain → `request.club` (`club/tenancy.py`) | `User` is the only global model |
 | RBAC | Service layer, `club/services/access.py` + object scopes (coach, parent) | not Django groups/guardian |
 | APIs | `/api/v1/` public read-only (ninja, wildcard CORS); `/api/app/v1/` authenticated (ninja, 17 routers, no CORS); `/api/auth/app/v1/` (allauth headless, JWT, MFA, passkeys) | OpenAPI snapshot at `docs/app-api/openapi-app-v1.json`; push via SNS |
-| Admin UI | `management/` 28k lines, 119 templates, htmx on 74 templates, Alpine on 23 | Tailwind 4 + daisyUI 5, 6 separate CSS bundles |
-| Member PWA | `mobile/` 21k lines, 132 templates, `sw.js`, ~43 KB of hand-written JS (offline queue, sheets) | the largest hand-maintained client-side logic |
+| Admin UI | `management/` ≈12k lines of code (8k `views.py`, 2.2k `forms.py`) + 16k lines / 1,316 tests, 119 templates, htmx on 74 templates, Alpine on 23 | Tailwind 4 + daisyUI 5, 6 separate CSS bundles |
+| Member PWA | `mobile/` 21k lines (incl. ≈8k of tests), 132 templates, `sw.js`, ~43 KB of hand-written JS (offline queue, sheets) | the largest hand-maintained client-side logic |
 | Platform admin | `controlpanel/` 6k lines, 29 templates | |
 | Tests | ~5,500 `def test_`, parallel runner, `--fast` tier (3,124 tests on the skip list), CI shards | full suite ≈ 25–40 s on 10 cores per the runner docstring (will have grown) |
 | Build | `npm run build` produces 6 Tailwind bundles; multi-stage Dockerfile; images built on GitHub runners | |
@@ -87,7 +88,7 @@ a finished OpenAPI contract, two big server-rendered UIs, Dutch/English i18n.
 
 | Option | What it is | Pros | Cons / risks | Verdict |
 |---|---|---|---|---|
-| **A. Keep PWA (status quo)** | Django templates + htmx + Alpine, service worker | zero rewrite; shares i18n, auth, templates with the rest | 43 KB bespoke offline JS to maintain; no store presence; weakest push on iOS; `mobile/` is 21k lines of Python plus 132 templates to evolve in lock-step with the API | baseline |
+| **A. Keep PWA (status quo)** | Django templates + htmx + Alpine, service worker | zero rewrite; shares i18n, auth, templates with the rest | 43 KB bespoke offline JS to maintain; no store presence; weakest push on iOS; `mobile/` is ≈13k lines of Python code plus 132 templates to evolve in lock-step with the API | baseline |
 | **B. Expo / React Native + TypeScript, generated client** | native apps from one TS codebase; typed client via `openapi-typescript`/`orval`/`hey-api` from `openapi-app-v1.json` | store presence, real push (backend already has SNS gateway), offline storage, large hiring pool, shares TS tooling with any future web client; generated types give contract tests for free | second language/toolchain; store review (payments posture is already pay-at-pickup, `API.md` §12); two native build pipelines (EAS reduces this) | **recommended for the native app** |
 | C. Flutter | Dart UI toolkit | very consistent UI across platforms | Dart is a new language for the team; OpenAPI Dart generators exist but I did not verify their quality (**UNVERIFIED**); smaller overlap with web skills | viable second choice if pixel-identical UI matters |
 | D. Capacitor wrapping the existing PWA | WebView shell + plugins | fastest route to a store listing; reuses 132 templates | still a web UI in a shell; cookies/session story vs the token-only API (`API.md` says no cookies); native feel is the weakest. One source ranked it last for mobile-specific work | only as a **stopgap** for store presence |
@@ -98,7 +99,7 @@ a finished OpenAPI contract, two big server-rendered UIs, Dutch/English i18n.
 
 | Option | Verdict |
 |---|---|
-| Keep Django templates + htmx + Alpine + Tailwind | **Recommended.** The admin is form-and-table heavy, role-gated and permission-rich; server rendering keeps every permission decision in Django and avoids writing ~28k lines worth of API plus a SPA. |
+| Keep Django templates + htmx + Alpine + Tailwind | **Recommended.** The admin is form-and-table heavy, role-gated and permission-rich; server rendering keeps every permission decision in Django and avoids writing a ~290-route API plus a SPA (but see `DECOUPLING-ADMIN.md` for the case where that is wanted). |
 | React/Next admin on a new management API (`/api/manage/v1`) | Highest cost, lowest return. Only revisit if a specific screen needs rich client state (drag-drop lineup editor, timeline editor). Build that as an **island** instead. |
 | Admin frameworks (Refine, react-admin, Django Unfold/Jazzmin) | Unfold-style admin skins don't match the bespoke per-club RBAC UI; Refine/react-admin need the management API anyway. Not recommended. |
 | Islands: small Vite-built TS components mounted in templates for 2–3 rich screens | **Recommended where needed** (§5.3). |
