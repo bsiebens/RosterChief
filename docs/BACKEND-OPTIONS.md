@@ -13,6 +13,8 @@ tests), 118 model classes, 169 foreign keys, 250 migrations. Claims about third-
 from general knowledge and were **not re-verified in this session** unless a source is linked; they are
 marked **UNVERIFIED** where a decision depends on them.
 
+> **Outcome (2026-10-21): the owner chose to keep Django.** Existing data structure stays as is; additions may follow later. This document is kept as the reference for the options and for the schema-freeze guard (§7.1), which should be adapted to "no destructive/altering changes, additive migrations allowed". Next step is `PERFORMANCE.md`.
+
 ---
 
 ## 1. TL;DR

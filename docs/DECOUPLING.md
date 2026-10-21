@@ -13,6 +13,8 @@ path handles the update. Section 6 turns that into concrete rules.
 
 > **Update 2026-10-21:** the owner has tightened the constraint to a **fully frozen schema (no DDL at all)**, with backend technology now open to change. See `BACKEND-OPTIONS.md`. Under that rule the following items here are withdrawn: PostgreSQL RLS (§5.7), the Django Tasks database backend (§4.4/§5.6), and the expand/contract rules in §6 (kept only as the procedure if the freeze is ever relaxed).
 
+> **Update 2026-10-21 (later): decision recorded.** Django stays as the backend. Existing structure is not restructured (no rename/drop/type change); **additions are allowed later** through normal Django migrations. This relaxes the "no DDL at all" note above: RLS and a database-backed task queue are possible again as additions, but are not planned. Performance work is documented in `PERFORMANCE.md` (measured; most gains need no schema change) and should come **before** any new frontend, since all frontends share the same services.
+
 ---
 
 ## 1. TL;DR
