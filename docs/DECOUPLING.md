@@ -1,7 +1,7 @@
 # DECOUPLING.md — Technology options, frontend/backend split, and a faster way to build (design)
 
 Status: **proposal, no code changed.** Branch `claude/architecture-decoupling-research`, 2026-10-21.
-Follow-up: `DECOUPLING-ADMIN.md` (moving management/control panel off server rendering).
+Follow-ups: `DECOUPLING-ADMIN.md` (moving management/control panel off server rendering), `BACKEND-OPTIONS.md` (backend technology under a frozen schema).
 Companion to `ARCHITECTURE.md` (models, tenancy, RBAC), `API.md` (native-app API) and `DEPLOYMENT.md`.
 
 Where this document and the code disagree, the code wins. Numbers below were measured from the tree
@@ -10,6 +10,8 @@ on 2026-10-21; many sources were vendor blogs, so items I could not confirm are 
 
 **Hard constraint (from the brief):** the database schema does not change unless a migration/transition
 path handles the update. Section 6 turns that into concrete rules.
+
+> **Update 2026-10-21:** the owner has tightened the constraint to a **fully frozen schema (no DDL at all)**, with backend technology now open to change. See `BACKEND-OPTIONS.md`. Under that rule the following items here are withdrawn: PostgreSQL RLS (§5.7), the Django Tasks database backend (§4.4/§5.6), and the expand/contract rules in §6 (kept only as the procedure if the freeze is ever relaxed).
 
 ---
 
