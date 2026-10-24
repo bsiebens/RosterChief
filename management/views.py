@@ -1537,7 +1537,7 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         scope = self.request.GET.get("games")
         scope = scope if scope in SCOPES else "all"
         context["scope"] = scope
-        friendlies = self.request.GET.get("friendlies") == "1"
+        friendlies = self.request.GET.get("friendlies") != "0"
         competition = self.request.GET.get("competition", "")
         context["friendlies"] = friendlies
         analytics = team_analytics(self.object, season, scope, friendlies, competition) if season is not None else None
@@ -1549,11 +1549,11 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         context["competition"] = competition
 
         def query(**changes):
-            params = {"season": season.pk if season else "", "games": scope, "friendlies": "1" if friendlies else "", "competition": competition, **changes}
+            params = {"season": season.pk if season else "", "games": scope, "friendlies": "" if friendlies else "0", "competition": competition, **changes}
             return urlencode({key: value for key, value in params.items() if value})
 
         context["scopes"] = [(key, label, query(games=key)) for key, label in (("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5")))]
-        context["friendlies_query"] = query(friendlies="" if friendlies else "1")
+        context["friendlies_query"] = query(friendlies="0" if friendlies else "")
         return context
 
 

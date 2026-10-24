@@ -199,7 +199,7 @@ def played_games(team, season, friendlies=True):
 
 def _leaderboard(stats, *types, limit=LEADERS):
     """Our players ranked by the summed ``value`` of ``types``: [{name, number, member_id, total, pct}], ``pct`` being the share of the top total (for a bar)."""
-    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None, "member": None})
+    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None, "member": None, "goals": 0})
     # The same name under a different jersey number is the same player (a number change, or a typo in the source), so rows
     # group by member, else by name -- an unmatched row whose name is a matched member's joins that member.
     member_by_name = {_tokens(stat.player_name): stat.member for stat in stats if stat.member_id and stat.player_name}
@@ -211,14 +211,16 @@ def _leaderboard(stats, *types, limit=LEADERS):
         key = member.pk if member else name_key or stat.player_number
         entry = totals[key]
         entry["total"] += stat.value
+        entry["goals"] += stat.value if stat.stat_type == GOAL else 0
         entry["member_id"] = member.pk if member else None
         entry["member"] = member
         entry["number"] = stat.player_number
         entry["name"] = member.get_full_name() if member else stat.player_name
-    ranked = sorted((entry for entry in totals.values() if entry["name"] or entry["number"] is not None), key=lambda entry: (-entry["total"], entry["name"]))
+    ranked = sorted((entry for entry in totals.values() if entry["name"] or entry["number"] is not None), key=lambda entry: (-entry["total"], -entry["goals"], entry["name"]))
     ranked = ranked[:limit]
     top = ranked[0]["total"] if ranked else 0
     for entry in ranked:
+        entry["initials"] = "".join(part[0] for part in entry["name"].split()[:2]).upper()
         entry["pct"] = round(100 * entry["total"] / top) if top else 0
     return ranked
 
@@ -228,7 +230,7 @@ def _percent(numerator, denominator):
 
 
 #: Game-clock buckets for the "when are goals scored" table, in minutes (regulation is 60).
-MINUTE_BUCKETS = ((0, 10), (10, 20), (20, 30), (30, 40), (40, 50), (50, 60))
+MINUTE_BUCKETS = tuple((start, start + 5) for start in range(0, 60, 5))
 
 
 #: The game filters the analytics page offers (its ``?games=`` values).
@@ -282,7 +284,7 @@ def _opponents(games):
     return sorted(table.values(), key=lambda row: (-row["games"], row["name"]))
 
 
-def team_analytics(team, season, scope="all", friendlies=False, competition="") -> dict:
+def team_analytics(team, season, scope="all", friendlies=True, competition="") -> dict:
     """Everything the team analytics page shows for ``team`` in ``season``, narrowed to ``scope`` (one of SCOPES),
     to one ``competition`` (a name from the returned ``competitions``) and, unless ``friendlies``, without friendly games."""
     all_games = played_games(team, season, friendlies)

@@ -16430,8 +16430,8 @@ class TeamAnalyticsTests(ManagementTestBase):
         self.assertEqual(analytics["pk_pct"], 0.0)  # and they scored on it
         self.assertEqual(analytics["pp_opportunities"], 0)
         self.assertEqual(analytics["goalies"][0]["name"], "Gus Goalie")
-        self.assertEqual(analytics["goal_minutes"][2]["for"], 0)
-        self.assertEqual(analytics["goal_minutes"][5]["for"], 1)  # 3000 s = minute 50
+        self.assertEqual(analytics["goal_minutes"][4]["for"], 0)
+        self.assertEqual(analytics["goal_minutes"][10]["for"], 1)  # 3000 s = minute 50
         self.assertEqual(analytics["opponents"][0]["games"], 1)
         self.assertEqual(analytics["game_rows"][0]["pim_for"], 2)
 
