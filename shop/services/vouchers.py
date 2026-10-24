@@ -31,12 +31,18 @@ def record_manual_consumption(voucher, *, amount: Decimal, note: str, recorded_b
 
 @transaction.atomic
 def delete_manual_consumption(consumption: VoucherConsumption) -> None:
+    """Deletes ``consumption`` and gives its amount back to the voucher. The voucher is locked
+    first and the consumption re-read under that lock, so of two concurrent deletes only the
+    one that still finds it restores the amount (see shop.services.payments.delete_payment)."""
     voucher = consumption.voucher
     locked = lock_voucher(voucher)
-    locked.consumed_amount = max(locked.consumed_amount - consumption.amount, Decimal("0"))
+    current = VoucherConsumption.objects.filter(pk=consumption.pk).first()
+    if current is None:  # a concurrent request already deleted it (and restored it)
+        return
+    locked.consumed_amount = max(locked.consumed_amount - current.amount, Decimal("0"))
     locked.save(update_fields=["consumed_amount"])
     voucher.consumed_amount = locked.consumed_amount
-    consumption.delete()
+    current.delete()
 
 
 def voucher_history(voucher):
