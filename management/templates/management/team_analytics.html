@@ -4,18 +4,27 @@
 {% block panel_title %}{% trans "Analytics" %}{% endblock panel_title %}
 {% block heading %}{{ team.name }} · {% trans "Analytics" %}{% endblock heading %}
 
-{% block topbar_context %}
+{% block filter_strip %}
     {% if seasons %}
-        <form method="get" class="flex items-center gap-2">
-            <select name="season" class="select w-auto">
-                {% for season in seasons %}
-                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
+        <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+            <form method="get" class="flex flex-wrap items-center gap-2">
+                <input type="hidden" name="games" value="{{ scope }}">
+                <select name="season" class="select w-auto" onchange="this.form.submit()">
+                    {% for season in seasons %}
+                        <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
+                    {% endfor %}
+                </select>
+                <noscript><button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button></noscript>
+            </form>
+            <div class="flex-1"></div>
+            <div class="flex items-center gap-1 rounded-full bg-steel p-1">
+                {% for key, label in scopes %}
+                    <a href="?{% if selected_season %}season={{ selected_season.pk }}&amp;{% endif %}games={{ key }}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if key == scope %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}" {% if key == scope %}aria-current="true"{% endif %}>{{ label }}</a>
                 {% endfor %}
-            </select>
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
-        </form>
+            </div>
+        </div>
     {% endif %}
-{% endblock topbar_context %}
+{% endblock filter_strip %}
 
 {% block actions %}
     <a class="btn btn-outline gap-2" href="{% url 'management:team_detail' team.pk %}{% if selected_season %}?season={{ selected_season.pk }}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Back to team" %}</a>
@@ -25,117 +34,324 @@
     {% if not analytics or not analytics.games %}
         <div class="alert alert-warning">{% trans "No finished games with a score for this team in the selected season yet." %}</div>
     {% else %}
-        <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Record (W-D-L)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.record.won }}-{{ analytics.record.drawn }}-{{ analytics.record.lost }}</div><div class="text-xs text-muted">{% blocktrans count counter=analytics.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Goals for / against" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.goals_for }} / {{ analytics.goals_against }}</div><div class="text-xs text-muted">{% trans "Difference" %}: {{ analytics.goal_difference|stringformat:"+d" }}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Per game (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.avg_for }} / {{ analytics.avg_against }}</div><div class="text-xs text-muted">{% trans "Clean sheets" %}: {{ analytics.clean_sheets }}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Penalty minutes (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.pim_for }} / {{ analytics.pim_against }}</div><div class="text-xs text-muted">{% trans "Per game" %}: {{ analytics.avg_pim|default_if_none:"–" }}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Power-play goals (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.pp_goals_for }} / {{ analytics.pp_goals_against }}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Power play / penalty kill" %}</div><div class="font-mono text-xl font-semibold">{% if analytics.pp_pct is not None %}{{ analytics.pp_pct }}%{% else %}–{% endif %} / {% if analytics.pk_pct is not None %}{{ analytics.pk_pct }}%{% else %}–{% endif %}</div><div class="text-xs text-muted">{{ analytics.pp_opportunities }} / {{ analytics.pk_opportunities }} {% trans "opportunities" %}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Shots for / against" %}</div><div class="font-mono text-xl font-semibold">{% if analytics.shot_games %}{{ analytics.shots_for }} / {{ analytics.shots_against }}{% else %}–{% endif %}</div><div class="text-xs text-muted">{% trans "Shooting" %} {{ analytics.shooting_pct|default_if_none:"–" }}% · {% trans "Saves" %} {{ analytics.save_pct|default_if_none:"–" }}%</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Game-winning goals" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.game_winning_goals }}</div></div>
-            <div class="card p-4"><div class="text-xs text-muted">{% trans "Empty-net goals" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.empty_net_goals }}</div></div>
-            <div class="card p-4">
-                <div class="text-xs text-muted">{% trans "Form (last 5)" %}</div>
-                <div class="flex gap-1">{% for game in analytics.form %}<span class="badge {% if game.result == 'W' %}badge-success{% elif game.result == 'L' %}badge-error{% else %}badge-outline{% endif %}">{{ game.result }}</span>{% endfor %}</div>
+        {# ---- hero: record, goals, running goal difference ---- #}
+        <section class="grid gap-6 rounded-2xl bg-ink p-6 text-white lg:grid-cols-[1fr_1.1fr_1.4fr] lg:gap-0">
+            <div class="flex flex-col justify-between gap-6 lg:pr-8">
+                <div>
+                    <div class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{% blocktrans count counter=analytics.games %}Record · W-D-L · {{ counter }} game{% plural %}Record · W-D-L · {{ counter }} games{% endblocktrans %}</div>
+                    <div class="mt-2 font-display text-8xl leading-none font-extrabold tracking-tight">{{ analytics.record.won }}–{{ analytics.record.drawn }}–{{ analytics.record.lost }}</div>
+                </div>
+                <div>
+                    <div class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{% trans "Form · oldest → latest" %}</div>
+                    <div class="mt-2 flex gap-2">
+                        {% for game in analytics.form %}
+                            <span class="flex size-11 items-center justify-center rounded-lg font-display text-2xl font-extrabold {% if game.result == 'W' %}bg-white text-ink{% elif game.result == 'L' %}bg-club text-club-content{% else %}bg-steel text-on-dark{% endif %}">{{ game.result }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
             </div>
-        </div>
+
+            <div class="flex flex-col justify-between gap-6 lg:border-l lg:border-hairline lg:px-8">
+                <div>
+                    <div class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{% trans "Goals for / against" %}</div>
+                    <div class="mt-2 flex items-baseline gap-3 font-display text-8xl leading-none font-extrabold">
+                        <span>{{ analytics.goals_for }}</span><span class="text-4xl font-medium text-on-dark-faint">/</span><span class="text-club">{{ analytics.goals_against }}</span>
+                        <span class="ml-auto text-3xl {% if analytics.goal_difference < 0 %}text-club{% else %}text-white{% endif %}">{{ analytics.goal_difference|stringformat:"+d" }}</span>
+                    </div>
+                    <div class="mt-3 flex gap-1.5" aria-hidden="true">
+                        <span class="h-2 rounded-full bg-white" style="flex: {{ analytics.goals_for }} 1 0"></span>
+                        <span class="h-2 rounded-full bg-club" style="flex: {{ analytics.goals_against }} 1 0"></span>
+                    </div>
+                </div>
+                <div class="flex gap-8">
+                    <div><div class="font-mono text-xl font-semibold">{{ analytics.avg_for|floatformat:2 }}</div><div class="text-sm text-on-dark">{% trans "scored per game" %}</div></div>
+                    <div><div class="font-mono text-xl font-semibold text-club">{{ analytics.avg_against|floatformat:2 }}</div><div class="text-sm text-on-dark">{% trans "conceded per game" %}</div></div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-3 lg:border-l lg:border-hairline lg:pl-8">
+                <div class="flex items-center justify-between">
+                    <div class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{% trans "Goal difference, running" %}</div>
+                    <span class="rounded-full bg-steel px-2.5 py-0.5 text-xs font-semibold">{% blocktrans with diff=analytics.trend.last|stringformat:"+d" %}{{ diff }} last game{% endblocktrans %}</span>
+                </div>
+                <div class="relative mx-4 h-32 flex-1">
+                    <svg class="absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                        <line x1="0" x2="100" y1="{{ analytics.trend.zero_y|stringformat:'.2f' }}" y2="{{ analytics.trend.zero_y|stringformat:'.2f' }}" class="stroke-on-dark-faint" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"></line>
+                        <polygon points="{{ analytics.trend.area }}" class="fill-club/20"></polygon>
+                        <polyline points="{{ analytics.trend.line }}" class="fill-none stroke-club" stroke-width="2.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
+                    </svg>
+                    {% for point in analytics.trend.points %}
+                        {% if point.game %}
+                            <span class="absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-club {% if forloop.last %}bg-white{% else %}bg-ink{% endif %}" style="left: {{ point.x|stringformat:'.2f' }}%; top: {{ point.y|stringformat:'.2f' }}%"></span>
+                            <span class="absolute -translate-x-1/2 font-mono text-[11px] font-semibold text-on-dark" style="left: {{ point.x|stringformat:'.2f' }}%; top: calc({{ point.y|stringformat:'.2f' }}% + 0.5rem)">{{ point.value|stringformat:"d" }}</span>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="mx-4 flex justify-between font-mono text-[11px] text-on-dark">
+                    <span>{% trans "start" %}</span>
+                    {% for point in analytics.trend.points %}{% if point.game %}<span>{{ point.game.start|date:"j M" }}</span>{% endif %}{% endfor %}
+                </div>
+            </div>
+        </section>
 
         {% if analytics.shot_games and analytics.shot_games < analytics.games %}
-            <p class="mt-3 text-sm text-muted">{% blocktrans with with_shots=analytics.shot_games total=analytics.games %}Shot figures cover {{ with_shots }} of {{ total }} games — only some competitions report shots.{% endblocktrans %}</p>
+            <p class="text-sm text-muted">{% blocktrans with with_shots=analytics.shot_games total=analytics.games %}Shot figures cover {{ with_shots }} of {{ total }} games — only some competitions report shots.{% endblocktrans %}</p>
         {% endif %}
         {% if analytics.timeline_games < analytics.games %}
-            <p class="mt-3 text-sm text-muted">{% blocktrans with with_detail=analytics.timeline_games total=analytics.games %}Goal, penalty and player figures cover {{ with_detail }} of {{ total }} games — the ones with a game timeline.{% endblocktrans %}</p>
+            <p class="text-sm text-muted">{% blocktrans with with_detail=analytics.timeline_games total=analytics.games %}Goal, penalty and player figures cover {{ with_detail }} of {{ total }} games — the ones with a game timeline.{% endblocktrans %}</p>
         {% endif %}
 
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <div class="card overflow-hidden">
-                <table class="table">
-                    <thead><tr><th>{% trans "Home / away" %}</th><th>{% trans "Games" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
-                    <tbody>
-                        <tr><td>{% trans "Home" %}</td><td>{{ analytics.split.home.games }}</td><td>{{ analytics.split.home.gf }}</td><td>{{ analytics.split.home.ga }}</td></tr>
-                        <tr><td>{% trans "Away" %}</td><td>{{ analytics.split.away.games }}</td><td>{{ analytics.split.away.gf }}</td><td>{{ analytics.split.away.ga }}</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card overflow-hidden">
-                <table class="table">
-                    <thead><tr><th>{% trans "Period" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
-                    <tbody>
-                        {% for period in analytics.periods %}
-                            <tr><td>{{ period.label }}</td><td>{{ period.for }}</td><td>{{ period.against }}</td></tr>
-                        {% empty %}
-                            <tr><td colspan="3" class="text-muted">{% trans "No timeline data yet." %}</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <div class="card overflow-hidden">
-                <table class="table">
-                    <thead><tr><th>{% trans "Game minute" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
-                    <tbody>
-                        {% for bucket in analytics.goal_minutes %}
-                            <tr><td>{{ bucket.label }}</td><td>{{ bucket.for }}</td><td>{{ bucket.against }}</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <div class="card overflow-hidden">
-                <table class="table">
-                    <thead><tr><th>{% trans "Goalie" %}</th><th class="text-right">{% trans "Goals against" %}</th></tr></thead>
-                    <tbody>
-                        {% for row in analytics.goalies %}
-                            <tr><td>{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</td><td class="text-right font-mono font-semibold">{{ row.total }}</td></tr>
-                        {% empty %}
-                            <tr><td colspan="2" class="text-muted">{% trans "No goalie data yet." %}</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <p class="p-3 text-xs text-muted">{% trans "Goals against while a goalie was in the net, from the timeline's goalie changes (empty-net goals excluded)." %}</p>
-            </div>
-        </div>
-
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-            {% trans "Top scorers" as scorers_title %}
-            {% trans "Top assists" as assists_title %}
-            {% trans "Top points (goals + assists)" as points_title %}
-            {% trans "Top offenders (penalty minutes)" as offenders_title %}
-            {% include "management/_analytics_leaderboard.html" with title=scorers_title rows=analytics.top_scorers %}
-            {% include "management/_analytics_leaderboard.html" with title=assists_title rows=analytics.top_assists %}
-            {% include "management/_analytics_leaderboard.html" with title=points_title rows=analytics.top_points %}
-            {% include "management/_analytics_leaderboard.html" with title=offenders_title rows=analytics.top_offenders %}
-        </div>
-
-        <div class="card mt-4 overflow-hidden">
-            <table class="table">
-                <thead><tr><th>{% trans "Opponent" %}</th><th>{% trans "Games" %}</th><th>{% trans "W-D-L" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
-                <tbody>
-                    {% for row in analytics.opponents %}
-                        <tr><td>{{ row.name|default:"–" }}</td><td>{{ row.games }}</td><td>{{ row.won }}-{{ row.drawn }}-{{ row.lost }}</td><td>{{ row.gf }}</td><td>{{ row.ga }}</td></tr>
+        <div class="grid gap-4 lg:grid-cols-3">
+            {# ---- game by game ---- #}
+            <section class="card p-6 lg:col-span-2">
+                <div class="flex items-center justify-between gap-4">
+                    <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Game by game" %}</h2>
+                    <div class="flex gap-4 text-sm text-slate">
+                        <span class="flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-ink"></span>{% trans "Goals for" %}</span>
+                        <span class="flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-club"></span>{% trans "Goals against" %}</span>
+                    </div>
+                </div>
+                <div class="mt-6 flex gap-3 overflow-x-auto">
+                    {% for bar in analytics.game_bars %}
+                        <div class="flex min-w-20 flex-1 flex-col items-center">
+                            <div class="flex h-36 w-full flex-col items-center justify-end pt-6">
+                                <span class="mb-1 shrink-0 font-mono text-sm font-bold text-ink">{{ bar.for }}</span>
+                                <div class="w-3/5 max-w-24 min-h-[3px] shrink-0 rounded-t-md bg-ink" style="height: {{ bar.for_pct }}%"></div>
+                            </div>
+                            <div class="h-0.5 w-full bg-ink"></div>
+                            <div class="flex h-36 w-full flex-col items-center pb-6">
+                                <div class="w-3/5 max-w-24 min-h-[3px] shrink-0 rounded-b-md bg-club" style="height: {{ bar.against_pct }}%"></div>
+                                <span class="mt-1 shrink-0 font-mono text-sm font-bold text-club-dark">{{ bar.against }}</span>
+                            </div>
+                            <span class="mt-3 rounded-md px-2 py-0.5 font-mono text-xs font-bold {% if bar.result == 'W' %}bg-ink text-white{% elif bar.result == 'L' %}bg-danger-bg text-club-dark{% else %}bg-rule text-slate{% endif %}">{{ bar.result }}{{ bar.for }}–{{ bar.against }}</span>
+                            <span class="mt-2 max-w-full truncate text-sm font-semibold text-ink">{{ bar.event.opponent.name|default:"–" }}</span>
+                            <span class="font-mono text-[11px] text-muted">{{ bar.event.start|date:"j M" }} · {% if bar.event.is_home_game %}{% trans "Home" %}{% else %}{% trans "Away" %}{% endif %}</span>
+                        </div>
                     {% endfor %}
-                </tbody>
-            </table>
+                </div>
+            </section>
+
+            {# ---- special teams ---- #}
+            <section class="card flex flex-col p-6">
+                <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Special teams" %}</h2>
+                <div class="mt-6 grid grid-cols-2 gap-4 text-center">
+                    <div>
+                        <div class="relative mx-auto size-28">
+                            <svg class="size-full -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
+                                <circle cx="50" cy="50" r="44" fill="none" class="stroke-rule" stroke-width="9"></circle>
+                                {% if analytics.pp_pct %}<circle cx="50" cy="50" r="44" fill="none" class="stroke-ink" stroke-width="9" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ analytics.pp_pct|stringformat:'.1f' }} 100"></circle>{% endif %}
+                            </svg>
+                            <span class="absolute inset-0 flex items-center justify-center font-display text-3xl font-extrabold text-ink">{% if analytics.pp_pct is not None %}{{ analytics.pp_pct }}%{% else %}–{% endif %}</span>
+                        </div>
+                        <div class="mt-2 text-[15px] font-bold text-ink">{% trans "Power play" %}</div>
+                        <div class="text-xs text-muted">{% blocktrans with goals=analytics.pp_goals_for chances=analytics.pp_opportunities %}{{ goals }} goals · {{ chances }} chances{% endblocktrans %}</div>
+                    </div>
+                    <div>
+                        <div class="relative mx-auto size-28">
+                            <svg class="size-full -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
+                                <circle cx="50" cy="50" r="44" fill="none" class="stroke-rule" stroke-width="9"></circle>
+                                {% if analytics.pk_pct %}<circle cx="50" cy="50" r="44" fill="none" class="stroke-ink" stroke-width="9" stroke-linecap="round" pathLength="100" stroke-dasharray="{{ analytics.pk_pct|stringformat:'.1f' }} 100"></circle>{% endif %}
+                            </svg>
+                            <span class="absolute inset-0 flex items-center justify-center font-display text-3xl font-extrabold text-ink">{% if analytics.pk_pct is not None %}{{ analytics.pk_pct }}%{% else %}–{% endif %}</span>
+                        </div>
+                        <div class="mt-2 text-[15px] font-bold text-ink">{% trans "Penalty kill" %}</div>
+                        <div class="text-xs text-muted">{% blocktrans with killed=analytics.pk_killed total=analytics.pk_opportunities %}{{ killed }} of {{ total }} killed{% endblocktrans %}</div>
+                    </div>
+                </div>
+                <div class="mt-auto grid grid-cols-2 gap-3 pt-6">
+                    <div class="rounded-xl bg-paper p-3">
+                        <div class="text-xs text-muted">{% trans "PP goals for / against" %}</div>
+                        <div class="mt-1 font-mono text-xl font-semibold text-ink">{{ analytics.pp_goals_for }} <span class="text-dim">/</span> {{ analytics.pp_goals_against }}</div>
+                    </div>
+                    <div class="rounded-xl bg-paper p-3">
+                        <div class="text-xs text-muted">{% trans "Penalty min. for / against" %}</div>
+                        <div class="mt-1 font-mono text-xl font-semibold text-ink">{{ analytics.pim_for }} <span class="text-dim">/</span> <span class="text-club-dark">{{ analytics.pim_against }}</span></div>
+                    </div>
+                    {% if analytics.shot_games %}
+                        <div class="col-span-2 rounded-xl bg-paper p-3">
+                            <div class="text-xs text-muted">{% trans "Shots for / against" %}</div>
+                            <div class="mt-1 flex items-baseline justify-between gap-3">
+                                <span class="font-mono text-xl font-semibold text-ink">{{ analytics.shots_for }} <span class="text-dim">/</span> <span class="text-club-dark">{{ analytics.shots_against }}</span></span>
+                                <span class="font-mono text-xs text-muted">{% trans "Shooting" %} {{ analytics.shooting_pct|default_if_none:"–" }}% · {% trans "Saves" %} {{ analytics.save_pct|default_if_none:"–" }}%</span>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
         </div>
 
-        <div class="card mt-4 overflow-hidden">
-            <table class="table">
-                <thead><tr><th>{% trans "Date" %}</th><th>{% trans "Opponent" %}</th><th>{% trans "Score" %}</th><th>{% trans "PIM for" %}</th><th>{% trans "PIM against" %}</th></tr></thead>
-                <tbody>
-                    {% for row in analytics.game_rows %}
-                        <tr>
-                            <td>{{ row.event.start|date:"SHORT_DATE_FORMAT" }}</td>
-                            <td>{{ row.event.opponent.name|default:"–" }}</td>
-                            <td class="font-mono">{{ row.event.score_for }}–{{ row.event.score_against }}</td>
-                            <td>{{ row.pim_for|default_if_none:"–" }}</td>
-                            <td>{{ row.pim_against|default_if_none:"–" }}</td>
+        <div class="grid gap-4 lg:grid-cols-3">
+            {# ---- when goals happen ---- #}
+            <section class="card p-6 lg:col-span-2">
+                <div class="flex items-start justify-between gap-4">
+                    <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "When goals happen" %}</h2>
+                    {% if analytics.busiest_minutes %}
+                        <p class="text-right text-sm text-slate">{% blocktrans with label=analytics.busiest_minutes.label gf=analytics.busiest_minutes.for ga=analytics.busiest_minutes.against %}Minutes {{ label }} are the wildest stretch: {{ gf }} for, {{ ga }} against.{% endblocktrans %}</p>
+                    {% endif %}
+                </div>
+                <div class="mt-6 grid gap-8 md:grid-cols-[1.2fr_1fr]">
+                    <div>
+                        <div class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{% trans "By game minute" %}</div>
+                        <div class="mt-3 flex h-40 items-end gap-3 border-b-2 border-ink pt-6">
+                            {% for bucket in analytics.goal_minutes %}
+                                <div class="flex h-full flex-1 items-end justify-center gap-1">
+                                    <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ bucket.for }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ bucket.for_pct }}%"></div></div>
+                                    <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ bucket.against }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ bucket.against_pct }}%"></div></div>
+                                </div>
+                            {% empty %}
+                                <p class="text-sm text-muted">{% trans "No timeline data yet." %}</p>
+                            {% endfor %}
+                        </div>
+                        <div class="mt-2 flex gap-3 font-mono text-[11px] text-muted">
+                            {% for bucket in analytics.goal_minutes %}<span class="flex-1 text-center">{{ bucket.label }}'</span>{% endfor %}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{% trans "By period · for ← → against" %}</div>
+                        <div class="mt-3 flex flex-col gap-3">
+                            {% for period in analytics.periods %}
+                                <div class="grid grid-cols-[1.25rem_1fr_2rem_1fr_1.25rem] items-center gap-2">
+                                    <span class="text-right font-mono text-sm font-bold text-ink">{{ period.for }}</span>
+                                    <div class="flex justify-end"><div class="h-5 min-w-1 rounded-sm bg-ink" style="width: {{ period.for_pct }}%"></div></div>
+                                    <span class="text-center font-display text-lg font-extrabold text-ink">{% if period.label|length == 1 %}P{% endif %}{{ period.label }}</span>
+                                    <div class="flex"><div class="h-5 min-w-1 rounded-sm bg-club" style="width: {{ period.against_pct }}%"></div></div>
+                                    <span class="font-mono text-sm font-bold text-club-dark">{{ period.against }}</span>
+                                </div>
+                            {% empty %}
+                                <p class="text-sm text-muted">{% trans "No timeline data yet." %}</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {# ---- home vs away ---- #}
+            <section class="card flex flex-col gap-5 p-6">
+                <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Home vs away" %}</h2>
+                {% trans "Home" as home_label %}
+                {% trans "Away" as away_label %}
+                {% include "management/_analytics_split.html" with label=home_label row=analytics.split.home %}
+                <div class="h-px bg-line"></div>
+                {% include "management/_analytics_split.html" with label=away_label row=analytics.split.away %}
+            </section>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-3">
+            {# ---- points leaders: CSS-only tabs (radio inputs), no JS ---- #}
+            <section class="card group/lead flex flex-col gap-5 p-6">
+                <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Points leaders" %}</h2>
+                <div class="hidden group-has-[#lead-points:checked]/lead:block">{% include "management/_analytics_leaderboard.html" with rows=analytics.top_points %}</div>
+                <div class="hidden group-has-[#lead-goals:checked]/lead:block">{% include "management/_analytics_leaderboard.html" with rows=analytics.top_scorers %}</div>
+                <div class="hidden group-has-[#lead-assists:checked]/lead:block">{% include "management/_analytics_leaderboard.html" with rows=analytics.top_assists %}</div>
+                <div class="mt-auto flex gap-2">
+                    <input type="radio" name="leaders" id="lead-points" class="peer/points sr-only" checked>
+                    <label for="lead-points" class="cursor-pointer rounded-full border border-edge px-3.5 py-1 text-[13px] font-semibold text-slate peer-checked/points:border-ink peer-checked/points:bg-ink peer-checked/points:text-white peer-focus-visible/points:ring-2">{% trans "Points" %}</label>
+                    <input type="radio" name="leaders" id="lead-goals" class="peer/goals sr-only">
+                    <label for="lead-goals" class="cursor-pointer rounded-full border border-edge px-3.5 py-1 text-[13px] font-semibold text-slate peer-checked/goals:border-ink peer-checked/goals:bg-ink peer-checked/goals:text-white peer-focus-visible/goals:ring-2">{% trans "Goals" %}</label>
+                    <input type="radio" name="leaders" id="lead-assists" class="peer/assists sr-only">
+                    <label for="lead-assists" class="cursor-pointer rounded-full border border-edge px-3.5 py-1 text-[13px] font-semibold text-slate peer-checked/assists:border-ink peer-checked/assists:bg-ink peer-checked/assists:text-white peer-focus-visible/assists:ring-2">{% trans "Assists" %}</label>
+                </div>
+            </section>
+
+            {# ---- discipline ---- #}
+            <section class="card flex flex-col p-6">
+                <div class="flex items-baseline justify-between gap-3">
+                    <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Discipline" %}</h2>
+                    <span class="text-sm text-muted">{% trans "penalty minutes" %}</span>
+                </div>
+                {% if analytics.timeline_games %}
+                    <div class="mt-6 flex h-32 items-end gap-3 border-b-2 border-ink pt-6">
+                        {% for row in analytics.game_rows reversed %}
+                            <div class="flex h-full flex-1 items-end justify-center gap-1">
+                                <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ row.pim_for|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ row.pim_for_pct }}%"></div></div>
+                                <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ row.pim_against|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ row.pim_against_pct }}%"></div></div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <div class="mt-2 flex gap-3 font-mono text-[11px] text-muted">
+                        {% for row in analytics.game_rows reversed %}<span class="flex-1 text-center">{{ row.event.start|date:"j/n" }}</span>{% endfor %}
+                    </div>
+                    <p class="mt-4 text-sm text-slate">{% blocktrans with theirs=analytics.pim_against ours=analytics.pim_for avg=analytics.avg_pim|default_if_none:"–" %}Opponents sat <strong>{{ theirs }}</strong> minutes to our <strong>{{ ours }}</strong> · {{ avg }} per game{% endblocktrans %}</p>
+                    {% if analytics.top_offenders %}
+                        <div class="mt-4 font-mono text-[11px] tracking-[.14em] text-muted uppercase">{% trans "In the box" %}</div>
+                        <div class="mt-2 flex flex-wrap gap-2">
+                            {% for row in analytics.top_offenders %}<span class="rounded-full bg-rule px-3 py-1 text-[13px] font-semibold text-ink">{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }} · {{ row.total }}</span>{% endfor %}
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <p class="mt-6 text-sm text-muted">{% trans "No timeline data yet." %}</p>
+                {% endif %}
+            </section>
+
+            {# ---- in goal ---- #}
+            <section class="card flex flex-col p-6">
+                <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "In goal" %}</h2>
+                <p class="mt-3 text-sm text-slate">{% blocktrans with total=analytics.goals_against %}Who was in net for the {{ total }} goals against{% endblocktrans %}</p>
+                <div class="mt-3 flex h-9 gap-px overflow-hidden rounded-md font-mono text-sm font-bold text-white" aria-hidden="true">
+                    {% for row in analytics.goalies %}<div class="flex items-center justify-center {% if forloop.first %}bg-ink{% else %}bg-muted{% endif %}" style="flex: {{ row.total }} 1 0">{{ row.total }}</div>{% endfor %}
+                    {% if analytics.goalie_unattributed %}<div class="flex items-center justify-center bg-rule text-slate" style="flex: {{ analytics.goalie_unattributed }} 1 0">{{ analytics.goalie_unattributed }}</div>{% endif %}
+                </div>
+                <ul class="mt-4 flex flex-col gap-2 text-[15px] text-ink">
+                    {% for row in analytics.goalies %}
+                        <li class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm {% if forloop.first %}bg-ink{% else %}bg-muted{% endif %}"></span><span class="min-w-0 flex-1 truncate font-semibold">{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</span><span class="font-mono text-sm font-semibold">{{ row.total }} {% trans "GA" %}</span></li>
+                    {% endfor %}
+                    {% if analytics.goalie_unattributed %}
+                        <li class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm bg-rule"></span><span class="min-w-0 flex-1 truncate">{% trans "No goalie on the timeline" %}</span><span class="font-mono text-sm font-semibold">{{ analytics.goalie_unattributed }} {% trans "GA" %}</span></li>
+                    {% elif not analytics.goalies %}
+                        <li class="text-sm text-muted">{% trans "No goalie data yet." %}</li>
+                    {% endif %}
+                </ul>
+                <p class="mt-auto pt-6 text-xs text-muted">{% trans "Goals against while a goalie was in the net, from the timeline's goalie changes (empty-net goals excluded)." %}</p>
+            </section>
+        </div>
+
+        {# ---- results ---- #}
+        <section class="card p-6">
+            <div class="flex flex-wrap items-baseline justify-between gap-3">
+                <h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase">{% trans "Results" %}</h2>
+                <div class="flex gap-5 text-sm text-slate">
+                    <span>{% trans "Clean sheets" %} <strong class="font-mono text-ink">{{ analytics.clean_sheets }}</strong></span>
+                    <span>{% trans "Game-winning goals" %} <strong class="font-mono text-ink">{{ analytics.game_winning_goals }}</strong></span>
+                    <span>{% trans "Empty-net goals" %} <strong class="font-mono text-ink">{{ analytics.empty_net_goals }}</strong></span>
+                </div>
+            </div>
+            <div class="mt-4 overflow-x-auto">
+                <table class="w-full min-w-[40rem] text-left">
+                    <thead>
+                        <tr class="border-b border-line font-mono text-[11px] tracking-[.14em] text-muted uppercase">
+                            <th class="py-2 font-normal">{% trans "Date" %}</th>
+                            <th class="py-2 font-normal">{% trans "Opponent" %}</th>
+                            <th class="py-2 font-normal">{% trans "Venue" %}</th>
+                            <th class="py-2 font-normal">{% trans "Result" %}</th>
+                            <th class="w-1/3 py-2 font-normal">{% trans "Goals" %}</th>
+                            <th class="py-2 text-right font-normal">{% trans "PIM F/A" %}</th>
                         </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            <p class="p-3 text-xs text-muted">{% trans "Plus/minus isn't shown: game timelines don't record who is on the ice." %}</p>
-        </div>
+                    </thead>
+                    <tbody>
+                        {% for row in analytics.game_rows %}
+                            <tr class="border-b border-rule last:border-0">
+                                <td class="py-3.5 pr-4 font-mono text-sm text-slate">{{ row.event.start|date:"j M" }}</td>
+                                <td class="py-3.5 pr-4 text-[15px] font-semibold text-ink">{{ row.event.opponent.name|default:"–" }}</td>
+                                <td class="py-3.5 pr-4 text-sm text-slate">{% if row.event.is_home_game %}{% trans "Home" %}{% else %}{% trans "Away" %}{% endif %}</td>
+                                <td class="py-3.5 pr-4">
+                                    <span class="inline-flex items-center gap-2">
+                                        <span class="flex size-6 items-center justify-center rounded-md font-mono text-xs font-bold {% if row.result == 'W' %}bg-ink text-white{% elif row.result == 'L' %}bg-danger-bg text-club-dark{% else %}bg-rule text-slate{% endif %}">{{ row.result }}</span>
+                                        <span class="font-display text-2xl leading-none font-extrabold text-ink">{{ row.for }}–{{ row.against }}</span>
+                                    </span>
+                                </td>
+                                <td class="py-3.5 pr-4">
+                                    <div class="flex gap-1" style="width: {{ row.total_pct }}%" aria-hidden="true">
+                                        <span class="h-2 rounded-full bg-ink" style="flex: {{ row.for }} 1 0"></span>
+                                        <span class="h-2 rounded-full bg-club" style="flex: {{ row.against }} 1 0"></span>
+                                    </div>
+                                </td>
+                                <td class="py-3.5 text-right font-mono text-sm text-ink">{{ row.pim_for|default_if_none:"–" }} / {{ row.pim_against|default_if_none:"–" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="mt-3 text-xs text-muted">{% trans "Plus/minus isn't shown: game timelines don't record who is on the ice." %}</p>
+        </section>
     {% endif %}
 {% endblock panel %}

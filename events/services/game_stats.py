@@ -177,8 +177,8 @@ def played_games(team, season):
     return list(Event.objects.filter(in_season, teams=team, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False).select_related("opponent", "location").order_by("start"))
 
 
-def _leaderboard(stats, *types):
-    """Our players ranked by the summed ``value`` of ``types``: [{name, number, member_id, total}]."""
+def _leaderboard(stats, *types, limit=LEADERS):
+    """Our players ranked by the summed ``value`` of ``types``: [{name, number, member_id, total, pct}], ``pct`` being the share of the top total (for a bar)."""
     totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None})
     for stat in stats:
         if not stat.is_ours or stat.stat_type not in types:
@@ -190,7 +190,11 @@ def _leaderboard(stats, *types):
         entry["number"] = stat.player_number
         entry["name"] = stat.member.get_full_name() if stat.member_id else stat.player_name
     ranked = sorted((entry for entry in totals.values() if entry["name"] or entry["number"] is not None), key=lambda entry: (-entry["total"], entry["name"]))
-    return ranked[:LEADERS]
+    ranked = ranked[:limit]
+    top = ranked[0]["total"] if ranked else 0
+    for entry in ranked:
+        entry["pct"] = round(100 * entry["total"] / top) if top else 0
+    return ranked
 
 
 def _percent(numerator, denominator):
@@ -199,6 +203,44 @@ def _percent(numerator, denominator):
 
 #: Game-clock buckets for the "when are goals scored" table, in minutes (regulation is 60).
 MINUTE_BUCKETS = ((0, 10), (10, 20), (20, 30), (30, 40), (40, 50), (50, 60))
+
+
+#: The game filters the analytics page offers (its ``?games=`` values).
+SCOPES = ("all", "home", "away", "last5")
+
+
+def _in_scope(games, scope):
+    if scope == "home":
+        return [game for game in games if game.is_home_game]
+    if scope == "away":
+        return [game for game in games if not game.is_home_game]
+    if scope == "last5":
+        return games[-5:]
+    return games
+
+
+def _scaled(rows, *keys):
+    """Add a ``<key>_pct`` (0-100, against the largest value across ``keys``) to each row, for drawing bars."""
+    top = max((row[key] or 0 for row in rows for key in keys), default=0)
+    for row in rows:
+        for key in keys:
+            row[f"{key}_pct"] = round(100 * (row[key] or 0) / top) if top else 0
+    return rows
+
+
+def _trend(games):
+    """The running goal difference after each game, as points in a 0-100 box (y grows downwards) for an SVG sparkline."""
+    values, running = [0], 0
+    for game in games:
+        running += game.score_for - game.score_against
+        values.append(running)
+    low, high = min(values), max(values)
+    span = (high - low) or 1
+    steps = len(values) - 1 or 1
+    points = [{"x": round(100 * index / steps, 2), "y": round(14 + 72 * (high - value) / span, 2), "value": value, "game": games[index - 1] if index else None} for index, value in enumerate(values)]
+    zero_y = round(14 + 72 * high / span, 2)
+    line = " ".join(f"{point['x']},{point['y']}" for point in points)
+    return {"points": points, "line": line, "area": f"{line} {points[-1]['x']},{zero_y} 0,{zero_y}", "zero_y": zero_y, "last": values[-1] - values[-2] if len(values) > 1 else 0}
 
 
 def _opponents(games):
@@ -214,26 +256,33 @@ def _opponents(games):
     return sorted(table.values(), key=lambda row: (-row["games"], row["name"]))
 
 
-def team_analytics(team, season) -> dict:
-    """Everything the team analytics page shows for ``team`` in ``season``."""
-    games = played_games(team, season)
+def team_analytics(team, season, scope="all") -> dict:
+    """Everything the team analytics page shows for ``team`` in ``season``, narrowed to ``scope`` (one of SCOPES)."""
+    games = _in_scope(played_games(team, season), scope)
     stats = list(GameStat.objects.filter(team=team, event__in=[game.pk for game in games]).select_related("member"))
 
     record = {"won": 0, "drawn": 0, "lost": 0}
-    split = {"home": {"games": 0, "gf": 0, "ga": 0}, "away": {"games": 0, "gf": 0, "ga": 0}}
-    form, clean_sheets = [], 0
+    split = {side: {"games": 0, "won": 0, "drawn": 0, "lost": 0, "gf": 0, "ga": 0} for side in ("home", "away")}
+    form, game_bars, clean_sheets = [], [], 0
     for game in games:
         result = "won" if game.score_for > game.score_against else "lost" if game.score_for < game.score_against else "drawn"
         record[result] += 1
         form.append({"result": result[0].upper(), "event": game})
+        game_bars.append({"event": game, "result": result[0].upper(), "for": game.score_for, "against": game.score_against})
         clean_sheets += game.score_against == 0
         where = split["home" if game.is_home_game else "away"]
         where["games"] += 1
+        where[result] += 1
         where["gf"] += game.score_for
         where["ga"] += game.score_against
     goals_for = sum(game.score_for for game in games)
     goals_against = sum(game.score_against for game in games)
     played = len(games)
+    for where in split.values():
+        where["diff"] = where["gf"] - where["ga"]
+        where["avg_for"] = round(where["gf"] / where["games"], 1) if where["games"] else None
+        where["avg_against"] = round(where["ga"] / where["games"], 1) if where["games"] else None
+        where["share_for"] = round(100 * where["gf"] / (where["gf"] + where["ga"])) if where["gf"] + where["ga"] else 50
 
     def total(stat_type, ours, **meta):
         return sum(stat.value for stat in stats if stat.stat_type == stat_type and stat.is_ours is ours and all(stat.meta.get(k) in v if isinstance(v, tuple) else stat.meta.get(k) == v for k, v in meta.items()))
@@ -260,15 +309,37 @@ def team_analytics(team, season) -> dict:
     if overtime["for"] or overtime["against"]:
         minutes.append(overtime)
 
+    period_rows = _scaled([{"label": label, **value} for label, value in sorted(periods.items())], "for", "against")
+    _scaled(minutes, "for", "against")
+    busiest = max(minutes, key=lambda row: row["for"] + row["against"])
+    busiest = busiest if busiest["for"] + busiest["against"] else None
+
     per_game_pim = defaultdict(lambda: {"for": 0, "against": 0})
     for stat in stats:
         if stat.stat_type == PIM:
             per_game_pim[stat.event_id]["for" if stat.is_ours else "against"] += stat.value
-    game_rows = [{"event": game, "pim_for": per_game_pim[game.pk]["for"] if game.pk in per_game_pim else None, "pim_against": per_game_pim[game.pk]["against"] if game.pk in per_game_pim else None} for game in reversed(games)]
+    game_rows = [
+        {
+            "event": game,
+            "result": bar["result"],
+            "for": game.score_for,
+            "against": game.score_against,
+            "pim_for": per_game_pim[game.pk]["for"] if game.pk in per_game_pim else None,
+            "pim_against": per_game_pim[game.pk]["against"] if game.pk in per_game_pim else None,
+        }
+        for game, bar in zip(reversed(games), reversed(game_bars), strict=True)
+    ]
+    busiest_game = max((row["for"] + row["against"] for row in game_rows), default=0)
+    for row in game_rows:  # a common scale, so the results table's goal bars compare across games
+        row["total_pct"] = round(100 * (row["for"] + row["against"]) / busiest_game) if busiest_game else 0
+    _scaled(game_rows, "pim_for", "pim_against")
+    _scaled(game_bars, "for", "against")
 
     pim_for, pim_against = total(PIM, True), total(PIM, False)
     pp_goals_for, pp_goals_against = total(GOAL, True, strength=POWER_PLAY), total(GOAL, False, strength=POWER_PLAY)
     points = _leaderboard(stats, GOAL, ASSIST)
+    goalies = _leaderboard(stats, CONCEDED, limit=None)
+    goalies_total = sum(row["total"] for row in goalies)
     return {
         "games": played,
         "timeline_games": len({stat.event_id for stat in stats}),
@@ -289,7 +360,7 @@ def team_analytics(team, season) -> dict:
         "pp_goals_against": pp_goals_against,
         "game_winning_goals": total(GOAL, True, game_winning=True),
         "empty_net_goals": total(GOAL, True, empty_net=True),
-        "periods": [{"label": label, **value} for label, value in sorted(periods.items())],
+        "periods": period_rows,
         "top_scorers": _leaderboard(stats, GOAL),
         "top_assists": _leaderboard(stats, ASSIST),
         "top_points": points,
@@ -301,10 +372,15 @@ def team_analytics(team, season) -> dict:
         "save_pct": _percent(shots_against - shot_goals_against, shots_against),
         "pp_opportunities": total(PP_OPPORTUNITY, True),
         "pk_opportunities": total(PP_OPPORTUNITY, False),
+        "pk_killed": total(PP_OPPORTUNITY, False) - pp_goals_against,
         "pp_pct": _percent(pp_goals_for, total(PP_OPPORTUNITY, True)),
         "pk_pct": _percent(total(PP_OPPORTUNITY, False) - pp_goals_against, total(PP_OPPORTUNITY, False)),
         "goal_minutes": minutes,
         "opponents": _opponents(games),
         "game_rows": game_rows,
-        "goalies": _leaderboard(stats, CONCEDED),
+        "goalies": goalies,
+        "goalie_unattributed": max(goals_against - goalies_total, 0),
+        "busiest_minutes": busiest,
+        "game_bars": game_bars,
+        "trend": _trend(games) if games else None,
     }
