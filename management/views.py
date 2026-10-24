@@ -35,6 +35,7 @@ from club.mixins import (
     ClubStaffRequiredMixin,
     EvaluationManagerRequiredMixin,
     EventManagerRequiredMixin,
+    FeatureFlagMixin,
     FeatureRequiredMixin,
     FormManagerRequiredMixin,
     ManagementPositionRequiredMixin,
@@ -105,6 +106,7 @@ from events.services.calendar import add_months, agenda_groups, month_bounds, mo
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.dfel_import import DFELImportError, fetch_schedule
 from events.services.game_moments import describe_moment
+from events.services.game_stats import team_analytics
 from events.services.game_timeline import display_timeline
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
@@ -1511,6 +1513,29 @@ def fixture_import_sources_for_display(team) -> list[dict]:
             }
         )
     return rows
+
+
+class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
+    """A team's season in numbers -- results, goals, penalty minutes, leaderboards. Behind the
+    "analytics" flag (404 where it's off); visible to the same staff as the team's own page."""
+
+    feature_flag = "analytics"
+    template_name = "management/team_analytics.html"
+    context_object_name = "team"
+
+    def get_queryset(self):
+        user, club = self.request.user, self.request.club
+        if can_manage_members(user, club):
+            return Team.objects.filter(club=club)
+        return teams_staffed_by(user, club)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        season = selected_season_from_request(self.request, self.request.club)
+        context["seasons"] = Season.objects.filter(club=self.request.club).order_by("-start_date")
+        context["selected_season"] = season
+        context["analytics"] = team_analytics(self.object, season) if season is not None else None
+        return context
 
 
 class TeamDetailView(ClubStaffRequiredMixin, DetailView):

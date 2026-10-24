@@ -623,6 +623,7 @@ class GameMoment(UUIDModel):
         PENALTY_AGAINST = "penalty_against", _("penalty against")
         PENALTY_SHOT_FOR = "penalty_shot_for", _("penalty shot for")
         PENALTY_SHOT_AGAINST = "penalty_shot_against", _("penalty shot against")
+        PERIOD_STARTED = "period_started", _("period started")
         PERIOD_ENDED = "period_ended", _("period ended")
         GAME_FINAL = "game_final", _("game final")
 
@@ -643,6 +644,56 @@ class GameMoment(UUIDModel):
 
     def __str__(self):
         return f"{self.event} - {self.get_kind_display()}"
+
+
+class GameStat(ClubScopedModel):
+    """One countable thing a player (or the opposition) did in a game -- a goal, an
+    assist, penalty minutes -- flattened out of the game's timeline so team analytics
+    can sum it with a query instead of reading JSON (events.services.game_stats).
+
+    Deliberately sport-agnostic: ``stat_type`` is a free slug ("goal", "assist",
+    "penalty_minutes" for ice hockey; a later sport adds its own) and ``value`` is how
+    much of it this row counts (1 for a goal, the minutes for a penalty). Anything
+    sport-specific (strength, penalty code, ...) rides along in ``meta``.
+
+    One row per (game, team of ours, source event, stat type): a game shared by two of
+    the club's teams is recorded once for each, so a team's page just filters on
+    ``team``. ``is_ours`` is resolved from the club's own side, like Event.score_for.
+    ``member`` is matched to the roster when the timeline's jersey number or name
+    allows; it stays empty for opponents and for players that couldn't be matched
+    (``player_name`` / ``player_number`` always keep what the source said).
+    """
+
+    class StatType(models.TextChoices):
+        GOAL = "goal", _("goal")
+        ASSIST = "assist", _("assist")
+        PENALTY_MINUTES = "penalty_minutes", _("penalty minutes")
+        SHOT = "shot", _("shot on goal")
+        POWER_PLAY_OPPORTUNITY = "pp_opportunity", _("power-play opportunity")
+        GOAL_CONCEDED = "goal_conceded", _("goal conceded")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="stats", verbose_name=_("event"))
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="game_stats", verbose_name=_("team"))
+    season = models.ForeignKey(Season, on_delete=models.CASCADE, null=True, blank=True, related_name="game_stats", verbose_name=_("season"))
+    stat_type = models.CharField(_("stat"), max_length=30, db_index=True)
+    value = models.PositiveSmallIntegerField(_("value"), default=1)
+    is_ours = models.BooleanField(_("our side"), help_text=_("Whether the club's own side did this (False: the opposition)."))
+    member = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="game_stats", verbose_name=_("member"))
+    player_name = models.CharField(_("player name"), max_length=255, blank=True)
+    player_number = models.PositiveSmallIntegerField(_("player number"), null=True, blank=True)
+    period = models.CharField(_("period"), max_length=10, blank=True)
+    game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
+    source_key = models.CharField(_("source key"), max_length=255, help_text=_("The timeline event this came from (plus the slot, for several rows from one event)."))
+    meta = models.JSONField(_("details"), default=dict, blank=True)
+
+    class Meta:
+        verbose_name = _("game stat")
+        verbose_name_plural = _("game stats")
+        indexes = [models.Index(fields=["team", "season", "stat_type"])]
+        constraints = [models.UniqueConstraint(fields=["event", "team", "stat_type", "source_key"], name="unique_game_stat_per_source")]
+
+    def __str__(self):
+        return f"{self.event} - {self.stat_type} {self.value}"
 
 
 class GameFollow(ClubScopedModel):

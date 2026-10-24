@@ -2,7 +2,27 @@ from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
-from .models import Attendance, Competition, Event, EventFollow, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameFollow, GameMoment, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from .models import (
+    Attendance,
+    Competition,
+    Event,
+    EventFollow,
+    EventOfficial,
+    EventReferee,
+    EventSeries,
+    EventTask,
+    EventTaskClaim,
+    GameFollow,
+    GameMoment,
+    GameStat,
+    GameTimeline,
+    Lineup,
+    LineupSelection,
+    Location,
+    OfficialSignup,
+    Opponent,
+    RefereeSignup,
+)
 
 
 @admin.register(Opponent)
@@ -268,3 +288,19 @@ class EventTaskClaimAdmin(admin.ModelAdmin):
     list_display = ["task", "member", "claimed_at"]
     search_fields = ["task__title", "member__first_name", "member__last_name"]
     raw_id_fields = ["task", "member"]
+
+
+@admin.register(GameStat)
+class GameStatAdmin(admin.ModelAdmin):
+    """Derived from the game timelines (events.services.game_stats) and rebuilt on every
+    sync -- an existing row is shown read-only so a hand edit can't survive the next one."""
+
+    list_display = ["event", "team", "stat_type", "value", "is_ours", "player_name", "member"]
+    list_filter = ["stat_type", "is_ours"]
+    search_fields = ["event__title", "player_name"]
+    raw_id_fields = ["event", "member"]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return []
+        return [field.name for field in self.model._meta.fields]
