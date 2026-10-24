@@ -1,9 +1,10 @@
 {% load i18n %}
-{% comment %}One leaderboard panel of the analytics "Points leaders" card: rows of #number, name, a bar relative to the top total, and the total. Expects `rows`.{% endcomment %}
+{% comment %}One leaderboard panel of the analytics "Points leaders" card: rows of #number, name, an avatar when matched to a member, a bar relative to the top total, and the total. Expects `rows`.{% endcomment %}
 <ol class="flex flex-col gap-3">
     {% for row in rows %}
         <li class="flex items-center gap-3">
             <span class="w-9 shrink-0 font-mono text-xs text-muted">{% if row.number is not None %}#{{ row.number }}{% endif %}</span>
+            {% if row.member %}{% include "management/_avatar.html" with person=row.member size_class="h-9 w-9" text_class="text-xs" %}{% endif %}
             <div class="min-w-0 flex-1">
                 <div class="truncate text-[15px] font-semibold text-ink">{{ row.name }}</div>
                 <div class="mt-1 h-1.5 rounded-full bg-rule"><div class="h-full rounded-full {% if forloop.first %}bg-club{% else %}bg-ink{% endif %}" style="width: {{ row.pct }}%"></div></div>

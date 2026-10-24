@@ -9,17 +9,27 @@
         <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
             <form method="get" class="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="games" value="{{ scope }}">
+                {% if friendlies %}<input type="hidden" name="friendlies" value="1">{% endif %}
                 <select name="season" class="select w-auto" onchange="this.form.submit()">
                     {% for season in seasons %}
                         <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
                     {% endfor %}
                 </select>
+                {% if analytics.competitions|length > 1 or competition %}
+                    <select name="competition" class="select w-auto" aria-label="{% trans "Competition" %}" onchange="this.form.submit()">
+                        <option value="">{% trans "All competitions" %}</option>
+                        {% for name in analytics.competitions %}
+                            <option value="{{ name }}" {% if name == competition %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                {% endif %}
+                <a href="?{{ friendlies_query }}" class="btn btn-outline gap-2" aria-pressed="{% if friendlies %}true{% else %}false{% endif %}">{% if friendlies %}{% lucide "check" size=14 %}{% endif %} {% trans "Include friendlies" %}</a>
                 <noscript><button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button></noscript>
             </form>
             <div class="flex-1"></div>
             <div class="flex items-center gap-1 rounded-full bg-steel p-1">
-                {% for key, label in scopes %}
-                    <a href="?{% if selected_season %}season={{ selected_season.pk }}&amp;{% endif %}games={{ key }}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if key == scope %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}" {% if key == scope %}aria-current="true"{% endif %}>{{ label }}</a>
+                {% for key, label, query in scopes %}
+                    <a href="?{{ query }}" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {% if key == scope %}bg-white text-ink{% else %}text-on-dark hover:text-white{% endif %}" {% if key == scope %}aria-current="true"{% endif %}>{{ label }}</a>
                 {% endfor %}
             </div>
         </div>

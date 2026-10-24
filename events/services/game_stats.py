@@ -33,26 +33,38 @@ def _tokens(name: str) -> frozenset:
 
 
 class _Roster:
-    """The team's season roster, to match a timeline person to a Member: by jersey number when
-    exactly one player wears it, otherwise by the same set of name words."""
+    """The team's season roster, to match a timeline person to a Member from the jersey number
+    and the name together: the number picks the player when exactly one wears it and the name
+    doesn't contradict it; otherwise the name decides (the same words, or one name containing
+    the other, e.g. "Jan Kowalski" / "Jan van Kowalski"), so a changed number still matches."""
 
     def __init__(self, team, season):
         memberships = TeamMembership.objects.filter(team=team, season=season).select_related("member") if season is not None else []
         by_number = defaultdict(list)
-        self.by_name = {}
+        self.names = {}
         for membership in memberships:
+            member_id = membership.member_id
             if membership.jersey_number is not None:
-                by_number[membership.jersey_number].append(membership.member_id)
-            self.by_name[_tokens(membership.member.get_full_name())] = membership.member_id
+                by_number[membership.jersey_number].append(member_id)
+            self.names[member_id] = _tokens(membership.member.get_full_name())
         self.by_number = {number: ids[0] for number, ids in by_number.items() if len(ids) == 1}
+
+    def _by_name(self, tokens) -> int | None:
+        exact = [member_id for member_id, words in self.names.items() if words == tokens]
+        if len(exact) == 1:
+            return exact[0]
+        # A name that contains / is contained in a roster name, with at least a first and last word in common.
+        partial = [member_id for member_id, words in self.names.items() if len(words & tokens) >= 2 and (words <= tokens or tokens <= words)]
+        return partial[0] if len(partial) == 1 else None
 
     def match(self, person) -> int | None:
         person = person or {}
-        number = person.get("number")
-        if number is not None and number in self.by_number:
-            return self.by_number[number]
         tokens = _tokens(person.get("name", ""))
-        return self.by_name.get(tokens) if tokens else None
+        by_name = self._by_name(tokens) if tokens else None
+        by_number = self.by_number.get(person.get("number"))
+        if by_number is not None and (not tokens or self.names[by_number] & tokens):
+            return by_number
+        return by_name
 
 
 def event_season(event):
@@ -170,25 +182,39 @@ def ensure_game_stats(event: Event, document: dict) -> bool:
 LEADERS = 5
 
 
-def played_games(team, season):
-    """The team's finished games with a score, friendlies included."""
+def competition_name(game):
+    """What the analytics filter calls a game's competition: its label, else the competition itself."""
+    return game.competition_label or game.competition
+
+
+def played_games(team, season, friendlies=True):
+    """The team's finished games with a score; ``friendlies=False`` leaves the friendly games out."""
     # Event.season is "explicit, else derived from the start date" (events/models.py), so a game with no stored season still belongs to the season its date falls in.
     in_season = Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)
-    return list(Event.objects.filter(in_season, teams=team, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False).select_related("opponent", "location").order_by("start"))
+    games = Event.objects.filter(in_season, teams=team, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False)
+    if not friendlies:
+        games = games.filter(is_friendly=False)
+    return list(games.select_related("opponent", "location").order_by("start"))
 
 
 def _leaderboard(stats, *types, limit=LEADERS):
     """Our players ranked by the summed ``value`` of ``types``: [{name, number, member_id, total, pct}], ``pct`` being the share of the top total (for a bar)."""
-    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None})
+    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None, "member": None})
+    # The same name under a different jersey number is the same player (a number change, or a typo in the source), so rows
+    # group by member, else by name -- an unmatched row whose name is a matched member's joins that member.
+    member_by_name = {_tokens(stat.player_name): stat.member for stat in stats if stat.member_id and stat.player_name}
     for stat in stats:
         if not stat.is_ours or stat.stat_type not in types:
             continue
-        key = stat.member_id or (stat.player_name, stat.player_number)
+        name_key = _tokens(stat.player_name)
+        member = stat.member if stat.member_id else member_by_name.get(name_key)
+        key = member.pk if member else name_key or stat.player_number
         entry = totals[key]
         entry["total"] += stat.value
-        entry["member_id"] = stat.member_id
+        entry["member_id"] = member.pk if member else None
+        entry["member"] = member
         entry["number"] = stat.player_number
-        entry["name"] = stat.member.get_full_name() if stat.member_id else stat.player_name
+        entry["name"] = member.get_full_name() if member else stat.player_name
     ranked = sorted((entry for entry in totals.values() if entry["name"] or entry["number"] is not None), key=lambda entry: (-entry["total"], entry["name"]))
     ranked = ranked[:limit]
     top = ranked[0]["total"] if ranked else 0
@@ -256,9 +282,14 @@ def _opponents(games):
     return sorted(table.values(), key=lambda row: (-row["games"], row["name"]))
 
 
-def team_analytics(team, season, scope="all") -> dict:
-    """Everything the team analytics page shows for ``team`` in ``season``, narrowed to ``scope`` (one of SCOPES)."""
-    games = _in_scope(played_games(team, season), scope)
+def team_analytics(team, season, scope="all", friendlies=False, competition="") -> dict:
+    """Everything the team analytics page shows for ``team`` in ``season``, narrowed to ``scope`` (one of SCOPES),
+    to one ``competition`` (a name from the returned ``competitions``) and, unless ``friendlies``, without friendly games."""
+    all_games = played_games(team, season, friendlies)
+    competitions = sorted({name for game in all_games if (name := competition_name(game))})
+    if competition:
+        all_games = [game for game in all_games if competition_name(game) == competition]
+    games = _in_scope(all_games, scope)
     stats = list(GameStat.objects.filter(team=team, event__in=[game.pk for game in games]).select_related("member"))
 
     record = {"won": 0, "drawn": 0, "lost": 0}
@@ -341,6 +372,7 @@ def team_analytics(team, season, scope="all") -> dict:
     goalies = _leaderboard(stats, CONCEDED, limit=None)
     goalies_total = sum(row["total"] for row in goalies)
     return {
+        "competitions": competitions,
         "games": played,
         "timeline_games": len({stat.event_id for stat in stats}),
         "record": record,
