@@ -9,7 +9,7 @@
         <div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
             <form method="get" class="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="games" value="{{ scope }}">
-                {% if friendlies %}<input type="hidden" name="friendlies" value="1">{% endif %}
+                {% if not friendlies %}<input type="hidden" name="friendlies" value="0">{% endif %}
                 <select name="season" class="select w-auto" onchange="this.form.submit()">
                     {% for season in seasons %}
                         <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
@@ -202,17 +202,17 @@
                 <div class="mt-6 grid gap-8 md:grid-cols-[1.2fr_1fr]">
                     <div>
                         <div class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{% trans "By game minute" %}</div>
-                        <div class="mt-3 flex h-40 items-end gap-3 border-b-2 border-ink pt-6">
+                        <div class="mt-3 flex h-40 items-end gap-1 border-b-2 border-ink pt-6">
                             {% for bucket in analytics.goal_minutes %}
-                                <div class="flex h-full flex-1 items-end justify-center gap-1">
-                                    <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ bucket.for }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ bucket.for_pct }}%"></div></div>
-                                    <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ bucket.against }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ bucket.against_pct }}%"></div></div>
+                                <div class="flex h-full flex-1 items-end justify-center gap-px">
+                                    <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ bucket.for }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ bucket.for_pct }}%"></div></div>
+                                    <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ bucket.against }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ bucket.against_pct }}%"></div></div>
                                 </div>
                             {% empty %}
                                 <p class="text-sm text-muted">{% trans "No timeline data yet." %}</p>
                             {% endfor %}
                         </div>
-                        <div class="mt-2 flex gap-3 font-mono text-[11px] text-muted">
+                        <div class="mt-2 flex gap-1 font-mono text-[9px] text-muted">
                             {% for bucket in analytics.goal_minutes %}<span class="flex-1 text-center">{{ bucket.label }}'</span>{% endfor %}
                         </div>
                     </div>
@@ -272,13 +272,13 @@
                 {% if analytics.timeline_games %}
                     <div class="mt-6 flex h-32 items-end gap-3 border-b-2 border-ink pt-6">
                         {% for row in analytics.game_rows reversed %}
-                            <div class="flex h-full flex-1 items-end justify-center gap-1">
-                                <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ row.pim_for|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ row.pim_for_pct }}%"></div></div>
-                                <div class="flex h-full w-4 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ row.pim_against|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ row.pim_against_pct }}%"></div></div>
+                            <div class="flex h-full flex-1 items-end justify-center gap-px">
+                                <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ row.pim_for|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ row.pim_for_pct }}%"></div></div>
+                                <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ row.pim_against|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ row.pim_against_pct }}%"></div></div>
                             </div>
                         {% endfor %}
                     </div>
-                    <div class="mt-2 flex gap-3 font-mono text-[11px] text-muted">
+                    <div class="mt-2 flex gap-1 font-mono text-[9px] text-muted">
                         {% for row in analytics.game_rows reversed %}<span class="flex-1 text-center">{{ row.event.start|date:"j/n" }}</span>{% endfor %}
                     </div>
                     <p class="mt-4 text-sm text-slate">{% blocktrans with theirs=analytics.pim_against ours=analytics.pim_for avg=analytics.avg_pim|default_if_none:"–" %}Opponents sat <strong>{{ theirs }}</strong> minutes to our <strong>{{ ours }}</strong> · {{ avg }} per game{% endblocktrans %}</p>

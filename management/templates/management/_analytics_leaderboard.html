@@ -4,7 +4,7 @@
     {% for row in rows %}
         <li class="flex items-center gap-3">
             <span class="w-9 shrink-0 font-mono text-xs text-muted">{% if row.number is not None %}#{{ row.number }}{% endif %}</span>
-            {% if row.member %}{% include "management/_avatar.html" with person=row.member size_class="h-9 w-9" text_class="text-xs" %}{% endif %}
+            {% if row.member %}{% include "management/_avatar.html" with person=row.member size_class="h-9 w-9" text_class="text-xs" %}{% else %}<span class="avatar avatar-placeholder shrink-0"><div class="h-9 w-9 rounded-full text-xs">{{ row.initials }}</div></span>{% endif %}
             <div class="min-w-0 flex-1">
                 <div class="truncate text-[15px] font-semibold text-ink">{{ row.name }}</div>
                 <div class="mt-1 h-1.5 rounded-full bg-rule"><div class="h-full rounded-full {% if forloop.first %}bg-club{% else %}bg-ink{% endif %}" style="width: {{ row.pct }}%"></div></div>
