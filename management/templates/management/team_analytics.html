@@ -44,6 +44,44 @@
     {% if not analytics or not analytics.games %}
         <div class="alert alert-warning">{% trans "No finished games with a score for this team in the selected season yet." %}</div>
     {% else %}
+        {% if analytics.strength_warnings %}
+            <section class="mb-6 rounded-2xl border border-line bg-white p-6" aria-labelledby="strength-warnings-title">
+                <h2 id="strength-warnings-title" class="flex items-center gap-2 text-[15px] font-bold text-ink">{% lucide "triangle-alert" size=18 %} {% trans "Goal strengths to check" %}</h2>
+                <p class="mt-1 text-sm text-muted">{% trans "The strength recorded for these goals doesn't match the penalties in the game. Power-play and penalty-kill numbers use the recorded strength, so confirm or correct each one." %}</p>
+                <ul class="mt-4 divide-y divide-line">
+                    {% for warning in analytics.strength_warnings %}
+                        <li class="flex flex-wrap items-center gap-x-6 gap-y-3 py-3">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-semibold text-ink">
+                                    <a class="hover:underline" href="{% url 'management:event_detail' warning.event.pk %}">{{ warning.event.title }} · {{ warning.event.start|date:"j M Y" }}</a>
+                                </div>
+                                <div class="text-sm text-muted">
+                                    {% if warning.ours %}{% trans "Our goal" %}{% else %}{% trans "Opponent goal" %}{% endif %} · {% blocktrans with period=warning.period time=warning.time %}period {{ period }}, {{ time }}{% endblocktrans %}{% if warning.player %} · {{ warning.player }}{% endif %}
+                                </div>
+                                <div class="mt-1 text-sm text-ink">
+                                    {% blocktrans with recorded=warning.recorded_label expected=warning.expected_label %}Recorded as {{ recorded }}, the penalties say {{ expected }}.{% endblocktrans %}
+                                </div>
+                                {% if warning.penalties %}
+                                    <div class="text-xs text-muted">
+                                        {% trans "In the box:" %}
+                                        {% for penalty in warning.penalties %}{{ penalty.time }} {% if penalty.ours %}{% trans "us" %}{% else %}{% trans "them" %}{% endif %}{% if penalty.player %} {{ penalty.player }}{% endif %} ({{ penalty.kind }}){% if not forloop.last %} · {% endif %}{% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <form method="post" action="{% url 'management:team_analytics_strength' team.pk %}" class="flex flex-wrap gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="event" value="{{ warning.event.pk }}">
+                                <input type="hidden" name="goal" value="{{ warning.goal }}">
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <button class="btn btn-primary btn-sm gap-1.5" type="submit" name="strength" value="{{ warning.expected }}">{% lucide "wrench" size=14 %} {% blocktrans with expected=warning.expected_label %}Count as {{ expected }}{% endblocktrans %}</button>
+                                <button class="btn btn-outline btn-sm gap-1.5" type="submit" name="strength" value="{{ warning.keep }}">{% lucide "check" size=14 %} {% trans "Keep as recorded" %}</button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+
         {# ---- hero: record, goals, running goal difference ---- #}
         <section class="grid gap-6 rounded-2xl bg-ink p-6 text-white lg:grid-cols-[1fr_1.1fr_1.4fr] lg:gap-0">
             <div class="flex flex-col justify-between gap-6 lg:pr-8">
@@ -281,7 +319,13 @@
                     <div class="mt-2 flex gap-1 font-mono text-[9px] text-muted">
                         {% for row in analytics.game_rows reversed %}<span class="flex-1 text-center">{{ row.event.start|date:"j/n" }}</span>{% endfor %}
                     </div>
-                    <p class="mt-4 text-sm text-slate">{% blocktrans with theirs=analytics.pim_against ours=analytics.pim_for avg=analytics.avg_pim|default_if_none:"–" %}Opponents sat <strong>{{ theirs }}</strong> minutes to our <strong>{{ ours }}</strong> · {{ avg }} per game{% endblocktrans %}</p>
+                    <p class="mt-4 text-sm text-slate">
+                        {% if analytics.game_misconduct_minutes %}
+                            {% blocktrans with theirs=analytics.pim_against ours=analytics.pim_for avg=analytics.avg_pim|default_if_none:"–" clean=analytics.avg_pim_excl_game_misconducts|default_if_none:"–" %}Opponents sat <strong>{{ theirs }}</strong> minutes to our <strong>{{ ours }}</strong> · <strong>{{ avg }}</strong> per game including game misconducts (<strong>{{ clean }}</strong> excluding them){% endblocktrans %}
+                        {% else %}
+                            {% blocktrans with theirs=analytics.pim_against ours=analytics.pim_for avg=analytics.avg_pim|default_if_none:"–" %}Opponents sat <strong>{{ theirs }}</strong> minutes to our <strong>{{ ours }}</strong> · {{ avg }} per game{% endblocktrans %}
+                        {% endif %}
+                    </p>
                     {% if analytics.top_offenders %}
                         <div class="mt-4 font-mono text-[11px] tracking-[.14em] text-muted uppercase">{% trans "In the box" %}</div>
                         <div class="mt-2 flex flex-wrap gap-2">

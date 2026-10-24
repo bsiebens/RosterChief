@@ -16330,6 +16330,7 @@ class TeamAnalyticsTests(ManagementTestBase):
     @classmethod
     def setUpTestData(cls):
         super().setUpTestData()
+        Club.objects.filter(pk=cls.club.pk).update(sport_type=Club.SportType.ICE_HOCKEY)  # analytics only read ice hockey timelines
         cls.team = Team.objects.create(club=cls.club, name="Analytics A", short_name="AA")
         cls.other_team = Team.objects.create(club=cls.club, name="Analytics B", short_name="AB")
         cls.scorer = Member.objects.create(first_name="Sam", last_name="Scorer")
@@ -16399,6 +16400,108 @@ class TeamAnalyticsTests(ManagementTestBase):
         cache.clear()
 
         self.assertNotContains(self.club_get("team_detail", self.team.pk), reverse("management:team_analytics", args=[self.team.pk]))
+
+    def test_average_penalty_minutes_per_game_is_also_given_without_game_misconducts(self):
+        penalties = [
+            {"id": "m1", "type": "penalty", "period": "1", "seconds": 100, "side": "away", "penalty": {"player": {"name": "Pat Penalty", "number": 3}, "kind": "minor", "minutes": 2}},
+            {"id": "m2", "type": "penalty", "period": "2", "seconds": 1500, "side": "away", "penalty": {"player": {"name": "Pat Penalty", "number": 3}, "kind": "game_misconduct", "minutes": 20}},
+        ]
+        sync_game_stats(self.game, {"events": penalties})
+
+        analytics = team_analytics(self.team, self.season)
+        response = self.club_get("team_analytics", self.team.pk)
+
+        self.assertEqual((analytics["pim_for"], analytics["avg_pim"], analytics["game_misconduct_minutes"], analytics["avg_pim_excl_game_misconducts"]), (22, 22.0, 20, 2.0))
+        self.assertContains(response, "per game including game misconducts")
+
+    def test_there_is_no_second_penalty_average_without_game_misconducts(self):
+        sync_game_stats(self.game, self.document)
+
+        analytics = team_analytics(self.team, self.season)
+
+        self.assertEqual((analytics["game_misconduct_minutes"], analytics["avg_pim_excl_game_misconducts"]), (0, None))
+        self.assertNotContains(self.club_get("team_analytics", self.team.pk), "including game misconducts")
+
+    def test_page_and_button_are_hidden_for_a_club_playing_another_sport(self):
+        Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.OTHER)
+
+        self.assertNotContains(self.club_get("team_detail", self.team.pk), reverse("management:team_analytics", args=[self.team.pk]))
+        self.assertEqual(self.club_get("team_analytics", self.team.pk).status_code, 404)
+
+    # Our side is "away" (no location). The opponent's minor runs from 1:40 to 3:40, so our goal at 2:10 is a power-play goal.
+    flagged_document = {
+        "events": [
+            {"id": "p1", "type": "penalty", "period": "1", "seconds": 100, "time": "01:40", "side": "home", "penalty": {"player": {"name": "Them Penalty", "number": 4}, "kind": "minor", "minutes": 2}},
+            {"id": "g1", "type": "goal", "period": "1", "seconds": 130, "time": "02:10", "side": "away", "goal": {"scorer": {"name": "Sam Scorer", "number": 78}, "assists": [], "strength": "EQ"}},
+        ]
+    }
+
+    def flagged_game(self):
+        GameTimeline.objects.create(event=self.game, source="test", data=self.flagged_document, status=GameTimeline.Status.FINAL)
+        sync_game_stats(self.game, self.flagged_document)
+
+    def test_a_goal_that_conflicts_with_the_penalties_is_flagged_on_the_page(self):
+        self.flagged_game()
+
+        analytics = team_analytics(self.team, self.season)
+        response = self.club_get("team_analytics", self.team.pk)
+
+        [warning] = analytics["strength_warnings"]
+        self.assertEqual((warning["goal"], warning["recorded"], warning["expected"], warning["ours"], warning["time"]), ("g1", "EQ", "PP1", True, "02:10"))
+        self.assertEqual(analytics["pp_goals_for"], 0)
+        self.assertContains(response, "Goal strengths to check")
+        self.assertContains(response, reverse("management:team_analytics_strength", args=[self.team.pk]))
+
+    def test_fixing_the_strength_counts_the_goal_as_power_play_and_clears_the_warning(self):
+        self.flagged_game()
+
+        response = self.club_post("team_analytics_strength", {"event": self.game.pk, "goal": "g1", "strength": "PP1"}, self.team.pk)
+
+        self.assertRedirects(response, reverse("management:team_analytics", args=[self.team.pk]), fetch_redirect_response=False)
+        analytics = team_analytics(self.team, self.season)
+        self.assertEqual((analytics["pp_goals_for"], analytics["strength_warnings"]), (1, []))
+        self.assertEqual(GameTimeline.objects.get(event=self.game).strength_overrides, {"g1": "PP1"})
+        goal = GameStat.objects.get(event=self.game, stat_type=GameStat.StatType.GOAL, source_key="g1")
+        self.assertEqual((goal.meta["strength"], goal.meta["strength_source"]), ("PP1", "EQ"))
+
+    def test_keeping_the_recorded_strength_clears_the_warning_without_changing_the_count(self):
+        self.flagged_game()
+
+        self.club_post("team_analytics_strength", {"event": self.game.pk, "goal": "g1", "strength": "EQ", "next": f"{reverse('management:team_analytics', args=[self.team.pk])}?games=home"}, self.team.pk)
+
+        analytics = team_analytics(self.team, self.season)
+        self.assertEqual((analytics["pp_goals_for"], analytics["strength_warnings"]), (0, []))
+
+    def test_a_confirmed_strength_survives_the_stats_being_rebuilt(self):
+        self.flagged_game()
+        self.club_post("team_analytics_strength", {"event": self.game.pk, "goal": "g1", "strength": "PP1"}, self.team.pk)
+
+        self.assertFalse(ensure_game_stats(self.game, self.flagged_document))  # still in agreement with the stored overrides
+        sync_game_stats(self.game, self.flagged_document)
+
+        self.assertEqual(team_analytics(self.team, self.season)["pp_goals_for"], 1)
+
+    def test_fixing_rejects_an_unknown_goal_strength_or_a_game_of_another_team(self):
+        self.flagged_game()
+        other_game = Event.objects.create(club=self.club, title="Other", kind=Event.EventKind.GAME, season=self.season, start=timezone.now())
+        other_game.teams.add(self.other_team)
+        GameTimeline.objects.create(event=other_game, source="test", data=self.flagged_document, status=GameTimeline.Status.FINAL)
+
+        for data in (
+            {"event": self.game.pk, "goal": "nope", "strength": "PP1"},
+            {"event": self.game.pk, "goal": "p1", "strength": "PP1"},  # a penalty, not a goal
+            {"event": self.game.pk, "goal": "g1", "strength": "DP"},
+            {"event": other_game.pk, "goal": "g1", "strength": "PP1"},
+        ):
+            with self.subTest(data=data):
+                self.assertEqual(self.club_post("team_analytics_strength", data, self.team.pk).status_code, 404)
+        self.assertEqual(GameTimeline.objects.get(event=self.game).strength_overrides, {})
+
+    def test_fixing_is_not_available_in_a_club_playing_another_sport(self):
+        self.flagged_game()
+        Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.OTHER)
+
+        self.assertEqual(self.club_post("team_analytics_strength", {"event": self.game.pk, "goal": "g1", "strength": "PP1"}, self.team.pk).status_code, 404)
 
     def test_coach_of_another_team_gets_404(self):
         position = Position.objects.create(club=self.club, name="Coach AB", short_name="CAB", staff_position=True, management_position=True)

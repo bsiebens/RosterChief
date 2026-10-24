@@ -15,8 +15,9 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from club.models import Season
-from events.models import Event, GameStat
+from club.models import Club, Season
+from events.models import Event, GameStat, GameTimeline
+from events.services.strength_check import STRENGTH_LABELS, strength_conflicts
 from teams.models import TeamMembership
 
 GOAL, ASSIST, PIM = GameStat.StatType.GOAL, GameStat.StatType.ASSIST, GameStat.StatType.PENALTY_MINUTES
@@ -24,6 +25,11 @@ SHOT, PP_OPPORTUNITY, CONCEDED = GameStat.StatType.SHOT, GameStat.StatType.POWER
 #: Penalty kinds that put the other side on a power play (a major or misconduct isn't counted when the source says so).
 POWER_PLAY_KINDS = ("minor", "bench_minor", "double_minor", "major", "")
 POWER_PLAY = ("PP1", "PP2")
+
+
+def analytics_supported(club) -> bool:
+    """Whether team analytics exist for ``club``'s sport -- the timeline stats are ice hockey only today."""
+    return club is not None and club.sport_type == Club.SportType.ICE_HOCKEY
 
 
 def _tokens(name: str) -> frozenset:
@@ -72,8 +78,10 @@ def event_season(event):
     return event.season or Season.covering(event.club_id, timezone.localtime(event.start).date())
 
 
-def _rows_for(event, team, document, roster) -> list[GameStat]:
+def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
     our_side = "home" if event.is_home_game else "away"
+    overrides = overrides or {}
+    conflicts = strength_conflicts(document, overrides)
     rows = []
 
     def add(item, stat_type, person, *, value=1, slot="", meta=None, ours=None):
@@ -109,7 +117,12 @@ def _rows_for(event, team, document, roster) -> list[GameStat]:
             goalie = change.get("player") if change.get("action") == "in" else None
         elif item["type"] == "goal":
             goal = item.get("goal") or {}
-            meta = {"strength": goal.get("strength") or "", "empty_net": bool(goal.get("empty_net")), "penalty_shot": bool(goal.get("penalty_shot")), "game_winning": bool(goal.get("game_winning"))}
+            meta = {"strength": overrides.get(item["id"]) or goal.get("strength") or "", "empty_net": bool(goal.get("empty_net")), "penalty_shot": bool(goal.get("penalty_shot")), "game_winning": bool(goal.get("game_winning"))}
+            if item["id"] in overrides:
+                meta["strength_source"] = goal.get("strength") or ""
+            if conflict := conflicts.get(item["id"]):  # the recorded strength disagrees with the penalties (see strength_check)
+                meta["strength_suspect"] = conflict["expected"]
+                meta["strength_penalties"] = [{**penalty, "ours": penalty["side"] == our_side} for penalty in conflict["penalties"]]
             add(item, GOAL, goal.get("scorer"), meta=meta)
             for index, assist in enumerate(goal.get("assists") or []):
                 add(item, ASSIST, assist, slot=f"#a{index}")
@@ -140,9 +153,10 @@ def _rows_for(event, team, document, roster) -> list[GameStat]:
 
 def _expected_rows(event: Event, document: dict) -> list[GameStat]:
     """The rows ``document`` should produce, one set per team of the club playing the game."""
+    overrides = GameTimeline.objects.filter(event=event).values_list("strength_overrides", flat=True).first() or {}
     rows = []
     for team in event.teams.all():
-        rows.extend(_rows_for(event, team, document, _Roster(team, event_season(event))))
+        rows.extend(_rows_for(event, team, document, _Roster(team, event_season(event)), overrides))
     return rows
 
 
@@ -284,6 +298,39 @@ def _opponents(games):
     return sorted(table.values(), key=lambda row: (-row["games"], row["name"]))
 
 
+def _clock(seconds):
+    return f"{seconds // 60:02d}:{seconds % 60:02d}" if seconds is not None else ""
+
+
+def strength_warnings(stats, games) -> list[dict]:
+    """The goals in ``stats`` whose strength conflicts with their game's penalties (meta ``strength_suspect``, set when
+    the rows were synced -- see strength_check), oldest game first. ``recorded`` / ``expected`` are strengths, ``*_label`` how they read."""
+    by_pk = {game.pk: game for game in games}
+    warnings = []
+    for stat in stats:
+        expected = stat.meta.get("strength_suspect")
+        if stat.stat_type != GOAL or not expected or stat.event_id not in by_pk:
+            continue
+        recorded = stat.meta.get("strength") or "EQ"
+        warnings.append(
+            {
+                "event": by_pk[stat.event_id],
+                "goal": stat.source_key,
+                "ours": stat.is_ours,
+                "player": f"#{stat.player_number} {stat.player_name}".strip() if stat.player_number is not None else stat.player_name,
+                "period": stat.period,
+                "time": _clock(stat.game_seconds),
+                "recorded": recorded,
+                "recorded_label": STRENGTH_LABELS.get(recorded, recorded),
+                "keep": recorded if recorded in STRENGTH_LABELS else "EQ",  # what "keep as recorded" stores (a source's own exotic code reads as even strength)
+                "expected": expected,
+                "expected_label": STRENGTH_LABELS[expected],
+                "penalties": stat.meta.get("strength_penalties") or [],
+            }
+        )
+    return sorted(warnings, key=lambda row: (row["event"].start, row["event"].pk, row["period"], row["time"]))
+
+
 def team_analytics(team, season, scope="all", friendlies=True, competition="") -> dict:
     """Everything the team analytics page shows for ``team`` in ``season``, narrowed to ``scope`` (one of SCOPES),
     to one ``competition`` (a name from the returned ``competitions``) and, unless ``friendlies``, without friendly games."""
@@ -369,6 +416,7 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
     _scaled(game_bars, "for", "against")
 
     pim_for, pim_against = total(PIM, True), total(PIM, False)
+    game_misconduct_minutes = total(PIM, True, kind="game_misconduct")
     pp_goals_for, pp_goals_against = total(GOAL, True, strength=POWER_PLAY), total(GOAL, False, strength=POWER_PLAY)
     points = _leaderboard(stats, GOAL, ASSIST)
     goalies = _leaderboard(stats, CONCEDED, limit=None)
@@ -390,8 +438,12 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
         "pim_for": pim_for,
         "pim_against": pim_against,
         "avg_pim": round(pim_for / played, 1) if played else None,
+        # Our game misconducts (20 min each) skew the per-game average, so it's also given without them -- None when there are none.
+        "game_misconduct_minutes": game_misconduct_minutes,
+        "avg_pim_excl_game_misconducts": round((pim_for - game_misconduct_minutes) / played, 1) if played and game_misconduct_minutes else None,
         "pp_goals_for": pp_goals_for,
         "pp_goals_against": pp_goals_against,
+        "strength_warnings": strength_warnings(stats, games),
         "game_winning_goals": total(GOAL, True, game_winning=True),
         "empty_net_goals": total(GOAL, True, empty_net=True),
         "periods": period_rows,

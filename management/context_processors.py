@@ -11,6 +11,7 @@ from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
 from club.services.access import can_add_news, can_manage_members, can_manage_referees, get_club_admin, get_current_season, has_management_access, is_coach_manager
+from events.services.game_stats import analytics_supported
 from members.services.lookup import get_request_member
 
 #: Every management URL name, mapped to the nav item it should light up --
@@ -382,7 +383,8 @@ def feature_sections(request):
         "fixture_import_enabled": any(flag_is_active(request, flag) for flag in ("RBIHF", "DFEL", "IJNL")),
         "officials_enabled": flag_is_active(request, "officials"),
         "evaluations_enabled": flag_is_active(request, "evaluations"),
-        "analytics_enabled": flag_is_active(request, "analytics"),
+        # Only for sports the analytics know how to read (ice hockey): a club playing anything else gets no button.
+        "analytics_enabled": analytics_supported(club) and flag_is_active(request, "analytics"),
     }
 
 

@@ -106,7 +106,7 @@ from events.services.calendar import add_months, agenda_groups, month_bounds, mo
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.dfel_import import DFELImportError, fetch_schedule
 from events.services.game_moments import describe_moment
-from events.services.game_stats import SCOPES, team_analytics
+from events.services.game_stats import SCOPES, analytics_supported, sync_game_stats, team_analytics
 from events.services.game_timeline import display_timeline
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
@@ -124,6 +124,7 @@ from events.services.referees import (
     retract_ineligible_invites,
     set_referee_fee,
 )
+from events.services.strength_check import STRENGTH_LABELS, STRENGTHS
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
 from formbuilder.models import FormSend
@@ -1525,6 +1526,8 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
 
     def get_queryset(self):
         user, club = self.request.user, self.request.club
+        if not analytics_supported(club):  # the stats only read ice hockey timelines: another sport has no analytics page
+            return Team.objects.none()
         if can_manage_members(user, club):
             return Team.objects.filter(club=club)
         return teams_staffed_by(user, club)
@@ -1534,6 +1537,7 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         season = selected_season_from_request(self.request, self.request.club)
         context["seasons"] = Season.objects.filter(club=self.request.club).order_by("-start_date")
         context["selected_season"] = season
+        context["strengths"] = [(key, label) for key, label in STRENGTH_LABELS.items()]
         scope = self.request.GET.get("games")
         scope = scope if scope in SCOPES else "all"
         context["scope"] = scope
@@ -1555,6 +1559,31 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         context["scopes"] = [(key, label, query(games=key)) for key, label in (("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5")))]
         context["friendlies_query"] = query(friendlies="0" if friendlies else "")
         return context
+
+
+class TeamAnalyticsStrengthView(TeamAnalyticsView):
+    """Fixes (or confirms) the strength of one goal a team's analytics flagged: stores it on the game's timeline
+    (``GameTimeline.strength_overrides``, which a re-fetch of the timeline leaves alone) and re-syncs the game's stats.
+    Same visibility as the analytics page."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        team = self.get_object()
+        game = get_object_or_404(Event.objects.filter(club=request.club, teams=team, kind=Event.EventKind.GAME), pk=request.POST.get("event"))
+        timeline = get_object_or_404(GameTimeline, event=game)
+        goal, strength = request.POST.get("goal", ""), request.POST.get("strength", "")
+        if strength not in STRENGTHS or not any(item.get("id") == goal and item["type"] == "goal" for item in (timeline.data or {}).get("events", [])):
+            raise Http404
+        timeline.strength_overrides = {**timeline.strength_overrides, goal: strength}
+        timeline.save(update_fields=["strength_overrides"])
+        sync_game_stats(game, timeline.data)
+
+        notify(request, f"s|{_('Goal strength saved')}|{_('The goal is now counted as %(strength)s.') % {'strength': STRENGTH_LABELS[strength]}}")
+        next_url = request.POST.get("next", "")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+            return redirect(next_url)
+        return redirect("management:team_analytics", pk=team.pk)
 
 
 class TeamDetailView(ClubStaffRequiredMixin, DetailView):

@@ -32,7 +32,7 @@ from django.utils.translation import gettext_lazy as _lazy
 from events.models import Event, GameTimeline
 from events.services.game_moments import PENALTY_KIND_LABELS, game_timeline_changed
 from events.services.game_stats import ensure_game_stats, sync_game_stats
-from events.services.timeline_parsers import SERIOUS_PENALTIES, finalize_document
+from events.services.timeline_parsers import SERIOUS_PENALTIES, finalize_document, parse_cehl, parse_hockeydata, parse_ijnl
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,28 @@ def store(event, fetched: TimelineFetch) -> tuple[GameTimeline, bool]:
         except Exception:  # analytics must never break the timeline update, like the moments above
             logger.exception("game_timeline.stats_sync_failed event_id=%s", event.pk)
     return timeline, changed
+
+
+#: Sources whose stored ``raw`` payload is all their parser needs (RBIHF's parser also needs the game's own roster data, so it can't be re-run from ``raw``).
+REPARSERS = {"IJNL": parse_ijnl, "DFEL": parse_hockeydata, "CEHL": parse_cehl}
+
+
+def reparse(timeline: GameTimeline, *, save: bool = True) -> bool:
+    """Re-runs the source's parser on the timeline's stored ``raw`` payload, for after a parser fix -- no fetch, and
+    none of the "timeline changed" signals (moments, pushes) a real change sends. Returns whether the document changed
+    (and, with ``save``, was stored); a timeline without a ``raw`` payload or a re-parsable source is left alone."""
+    parser = REPARSERS.get(timeline.source)
+    if parser is None or not timeline.raw:
+        return False
+    document = finalize_document(parser(timeline.raw))
+    document["status"] = status_for(timeline.event, document)
+    digest = document_hash(document)
+    if digest == timeline.data_hash:
+        return False
+    timeline.data, timeline.data_hash, timeline.status = document, digest, document["status"]
+    if save:
+        timeline.save(update_fields=["data", "data_hash", "status"])
+    return True
 
 
 def record_error(event, error) -> None:

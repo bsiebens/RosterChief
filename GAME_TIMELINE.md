@@ -141,6 +141,20 @@ Notifications and API clients both need to recognise "the same goal" across poll
   #22) changes the id, so the diff sees a removal plus an addition. §4 handles that explicitly
   rather than pretending ids are perfect.
 
+### 2.4 Goal strength checks and corrections
+
+Sources get a goal's `strength` wrong now and then (IJNL reads a missing badge as `EQ`). When a timeline's stats are synced
+(`events.services.game_stats`), `events.services.strength_check` replays the penalties per side (IIHF: minor / bench minor /
+double minor / major / match cost a skater, misconducts don't; two at a time; a goal against a team that is a skater down ends its
+earliest minor, never a major) and flags goals whose strength class (PP / SH / EQ) disagrees: `GameStat.meta["strength_suspect"]`.
+Overtime, shoot-outs, penalty shots, empty-net goals and goals on the very second a penalty starts or ends are not judged.
+The team analytics page lists the flagged goals; staff either count the goal as the suggested strength or keep it as recorded.
+Either choice is stored in `GameTimeline.strength_overrides` (`{timeline event id: strength}`), survives re-fetches, is applied when the
+stats are built, and stops the goal being flagged.
+
+IJNL's completed games also carry the lineups and team statistics: assists get their jersey number from the lineup tables (the
+timeline only links their names), and the scoreboard's Powerplay / Strafminuten become `team_stats`.
+
 ## 3. Fetching
 
 ### 3.1 One snapshot per poll
