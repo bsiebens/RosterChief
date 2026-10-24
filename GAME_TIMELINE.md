@@ -230,6 +230,7 @@ would call news, from the club's point of view (ours/theirs via `is_home_game`):
 | `goal_for` / `goal_against` | added goal event; includes scorer, assists, strength, score after |
 | `goal_cancelled` | a goal event removed while the score went *down*. A removal without a score change is treated as an id correction, not news. |
 | `penalty_for` / `penalty_against` | added penalty event |
+| `period_started` | added `period_start` |
 | `period_ended` | added `period_end`, with the period score |
 | `game_final` | status → final, with the result and `decided_in` |
 
@@ -364,7 +365,7 @@ Deviations from §3.1, both to keep the score path untouched:
     newest event, i.e. a catch-up after an outage.
 - **Storage:** `events.GameMoment` (`events/migrations/0043`), recorded by `record_moments`
   (connected in `events/signals.py`). `unique(event, key)` makes a repeat a no-op. `key` is the
-  kind plus the timeline event id; `period_ended` and the game-level kinds use the period or the
+  kind plus the timeline event id; `period_started`, `period_ended` and the game-level kinds use the period or the
   kind itself. `delivered_at` is reserved for phase 4.
 - **Visibility (decided):** a "Detected moments" list under the management event page's
   timeline card, with catch-ups flagged, plus a read-only Django admin. Moments are not exposed on

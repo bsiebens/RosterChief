@@ -108,6 +108,10 @@ def penalty_shot(event, moment) -> str:
     return _line(_("PENALTY SHOT %(team)s") % {"team": team}, clock(moment.payload or {}))
 
 
+def period_started(event, moment) -> str:
+    return _("START OF PERIOD %(period)s") % {"period": (moment.payload or {}).get("period") or ""}
+
+
 def period_ended(event, moment) -> str:
     return _("END OF PERIOD %(period)s") % {"period": (moment.payload or {}).get("period") or ""}
 
@@ -137,6 +141,7 @@ LINES = {
     GameMoment.Kind.PENALTY_AGAINST: penalty,
     GameMoment.Kind.PENALTY_SHOT_FOR: penalty_shot,
     GameMoment.Kind.PENALTY_SHOT_AGAINST: penalty_shot,
+    GameMoment.Kind.PERIOD_STARTED: period_started,
     GameMoment.Kind.PERIOD_ENDED: period_ended,
     GameMoment.Kind.GAME_FINAL: game_final,
 }

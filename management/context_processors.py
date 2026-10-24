@@ -74,6 +74,7 @@ _NAV_SECTIONS = {
     "team_update": "team_list",
     "team_delete": "team_list",
     "team_detail": "team_list",
+    "team_analytics": "team_list",
     "team_roster_add": "team_list",
     "team_bulk_add": "team_list",
     "team_roster_update": "team_list",
@@ -359,7 +360,17 @@ def feature_sections(request):
     is_club_admin check those all already require."""
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"shop_enabled": False, "forms_enabled": False, "rbihf_enabled": False, "dfel_enabled": False, "ijnl_enabled": False, "fixture_import_enabled": False, "officials_enabled": False, "evaluations_enabled": False}
+        return {
+            "shop_enabled": False,
+            "forms_enabled": False,
+            "rbihf_enabled": False,
+            "dfel_enabled": False,
+            "ijnl_enabled": False,
+            "fixture_import_enabled": False,
+            "officials_enabled": False,
+            "evaluations_enabled": False,
+            "analytics_enabled": False,
+        }
 
     return {
         "shop_enabled": flag_is_active(request, "shop"),
@@ -371,6 +382,7 @@ def feature_sections(request):
         "fixture_import_enabled": any(flag_is_active(request, flag) for flag in ("RBIHF", "DFEL", "IJNL")),
         "officials_enabled": flag_is_active(request, "officials"),
         "evaluations_enabled": flag_is_active(request, "evaluations"),
+        "analytics_enabled": flag_is_active(request, "analytics"),
     }
 
 

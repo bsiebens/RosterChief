@@ -1,0 +1,141 @@
+{% extends "management/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% trans "Analytics" %}{% endblock panel_title %}
+{% block heading %}{{ team.name }} · {% trans "Analytics" %}{% endblock heading %}
+
+{% block topbar_context %}
+    {% if seasons %}
+        <form method="get" class="flex items-center gap-2">
+            <select name="season" class="select w-auto">
+                {% for season in seasons %}
+                    <option value="{{ season.pk }}" {% if season.pk == selected_season.pk %}selected{% endif %}>{% trans "Season" %} {{ season.start_date|date:"Y" }} - {{ season.end_date|date:"Y" }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-outline gap-2" type="submit">{% lucide "filter" size=14 %} {% trans "View" %}</button>
+        </form>
+    {% endif %}
+{% endblock topbar_context %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'management:team_detail' team.pk %}{% if selected_season %}?season={{ selected_season.pk }}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Back to team" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% if not analytics or not analytics.games %}
+        <div class="alert alert-warning">{% trans "No finished games with a score for this team in the selected season yet." %}</div>
+    {% else %}
+        <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Record (W-D-L)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.record.won }}-{{ analytics.record.drawn }}-{{ analytics.record.lost }}</div><div class="text-xs text-muted">{% blocktrans count counter=analytics.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Goals for / against" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.goals_for }} / {{ analytics.goals_against }}</div><div class="text-xs text-muted">{% trans "Difference" %}: {{ analytics.goal_difference|stringformat:"+d" }}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Per game (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.avg_for }} / {{ analytics.avg_against }}</div><div class="text-xs text-muted">{% trans "Clean sheets" %}: {{ analytics.clean_sheets }}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Penalty minutes (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.pim_for }} / {{ analytics.pim_against }}</div><div class="text-xs text-muted">{% trans "Per game" %}: {{ analytics.avg_pim|default_if_none:"–" }}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Power-play goals (for / against)" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.pp_goals_for }} / {{ analytics.pp_goals_against }}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Power play / penalty kill" %}</div><div class="font-mono text-xl font-semibold">{% if analytics.pp_pct is not None %}{{ analytics.pp_pct }}%{% else %}–{% endif %} / {% if analytics.pk_pct is not None %}{{ analytics.pk_pct }}%{% else %}–{% endif %}</div><div class="text-xs text-muted">{{ analytics.pp_opportunities }} / {{ analytics.pk_opportunities }} {% trans "opportunities" %}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Shots for / against" %}</div><div class="font-mono text-xl font-semibold">{% if analytics.shot_games %}{{ analytics.shots_for }} / {{ analytics.shots_against }}{% else %}–{% endif %}</div><div class="text-xs text-muted">{% trans "Shooting" %} {{ analytics.shooting_pct|default_if_none:"–" }}% · {% trans "Saves" %} {{ analytics.save_pct|default_if_none:"–" }}%</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Game-winning goals" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.game_winning_goals }}</div></div>
+            <div class="card p-4"><div class="text-xs text-muted">{% trans "Empty-net goals" %}</div><div class="font-mono text-xl font-semibold">{{ analytics.empty_net_goals }}</div></div>
+            <div class="card p-4">
+                <div class="text-xs text-muted">{% trans "Form (last 5)" %}</div>
+                <div class="flex gap-1">{% for game in analytics.form %}<span class="badge {% if game.result == 'W' %}badge-success{% elif game.result == 'L' %}badge-error{% else %}badge-outline{% endif %}">{{ game.result }}</span>{% endfor %}</div>
+            </div>
+        </div>
+
+        {% if analytics.shot_games and analytics.shot_games < analytics.games %}
+            <p class="mt-3 text-sm text-muted">{% blocktrans with with_shots=analytics.shot_games total=analytics.games %}Shot figures cover {{ with_shots }} of {{ total }} games — only some competitions report shots.{% endblocktrans %}</p>
+        {% endif %}
+        {% if analytics.timeline_games < analytics.games %}
+            <p class="mt-3 text-sm text-muted">{% blocktrans with with_detail=analytics.timeline_games total=analytics.games %}Goal, penalty and player figures cover {{ with_detail }} of {{ total }} games — the ones with a game timeline.{% endblocktrans %}</p>
+        {% endif %}
+
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+            <div class="card overflow-hidden">
+                <table class="table">
+                    <thead><tr><th>{% trans "Home / away" %}</th><th>{% trans "Games" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
+                    <tbody>
+                        <tr><td>{% trans "Home" %}</td><td>{{ analytics.split.home.games }}</td><td>{{ analytics.split.home.gf }}</td><td>{{ analytics.split.home.ga }}</td></tr>
+                        <tr><td>{% trans "Away" %}</td><td>{{ analytics.split.away.games }}</td><td>{{ analytics.split.away.gf }}</td><td>{{ analytics.split.away.ga }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card overflow-hidden">
+                <table class="table">
+                    <thead><tr><th>{% trans "Period" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
+                    <tbody>
+                        {% for period in analytics.periods %}
+                            <tr><td>{{ period.label }}</td><td>{{ period.for }}</td><td>{{ period.against }}</td></tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="text-muted">{% trans "No timeline data yet." %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+            <div class="card overflow-hidden">
+                <table class="table">
+                    <thead><tr><th>{% trans "Game minute" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
+                    <tbody>
+                        {% for bucket in analytics.goal_minutes %}
+                            <tr><td>{{ bucket.label }}</td><td>{{ bucket.for }}</td><td>{{ bucket.against }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card overflow-hidden">
+                <table class="table">
+                    <thead><tr><th>{% trans "Goalie" %}</th><th class="text-right">{% trans "Goals against" %}</th></tr></thead>
+                    <tbody>
+                        {% for row in analytics.goalies %}
+                            <tr><td>{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</td><td class="text-right font-mono font-semibold">{{ row.total }}</td></tr>
+                        {% empty %}
+                            <tr><td colspan="2" class="text-muted">{% trans "No goalie data yet." %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="p-3 text-xs text-muted">{% trans "Goals against while a goalie was in the net, from the timeline's goalie changes (empty-net goals excluded)." %}</p>
+            </div>
+        </div>
+
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+            {% trans "Top scorers" as scorers_title %}
+            {% trans "Top assists" as assists_title %}
+            {% trans "Top points (goals + assists)" as points_title %}
+            {% trans "Top offenders (penalty minutes)" as offenders_title %}
+            {% include "management/_analytics_leaderboard.html" with title=scorers_title rows=analytics.top_scorers %}
+            {% include "management/_analytics_leaderboard.html" with title=assists_title rows=analytics.top_assists %}
+            {% include "management/_analytics_leaderboard.html" with title=points_title rows=analytics.top_points %}
+            {% include "management/_analytics_leaderboard.html" with title=offenders_title rows=analytics.top_offenders %}
+        </div>
+
+        <div class="card mt-4 overflow-hidden">
+            <table class="table">
+                <thead><tr><th>{% trans "Opponent" %}</th><th>{% trans "Games" %}</th><th>{% trans "W-D-L" %}</th><th>{% trans "GF" %}</th><th>{% trans "GA" %}</th></tr></thead>
+                <tbody>
+                    {% for row in analytics.opponents %}
+                        <tr><td>{{ row.name|default:"–" }}</td><td>{{ row.games }}</td><td>{{ row.won }}-{{ row.drawn }}-{{ row.lost }}</td><td>{{ row.gf }}</td><td>{{ row.ga }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card mt-4 overflow-hidden">
+            <table class="table">
+                <thead><tr><th>{% trans "Date" %}</th><th>{% trans "Opponent" %}</th><th>{% trans "Score" %}</th><th>{% trans "PIM for" %}</th><th>{% trans "PIM against" %}</th></tr></thead>
+                <tbody>
+                    {% for row in analytics.game_rows %}
+                        <tr>
+                            <td>{{ row.event.start|date:"SHORT_DATE_FORMAT" }}</td>
+                            <td>{{ row.event.opponent.name|default:"–" }}</td>
+                            <td class="font-mono">{{ row.event.score_for }}–{{ row.event.score_against }}</td>
+                            <td>{{ row.pim_for|default_if_none:"–" }}</td>
+                            <td>{{ row.pim_against|default_if_none:"–" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p class="p-3 text-xs text-muted">{% trans "Plus/minus isn't shown: game timelines don't record who is on the ice." %}</p>
+        </div>
+    {% endif %}
+{% endblock panel %}

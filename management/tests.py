@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
@@ -19,6 +19,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.template.loader import render_to_string
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
@@ -33,11 +34,13 @@ from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoic
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
-from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, Location, Opponent, RefereeSignup
+from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameStat, GameTimeline, Location, Opponent, RefereeSignup
 from events.services import ijnl_import, import_sources
 from events.services.calendar import week_bounds
 from events.services.dfel_import import DFELImportError
+from events.services.game_stats import ensure_game_stats, sync_game_stats, team_analytics
 from events.services.game_timeline import TimelineFetch
+from events.services.game_timeline import settle as settle_timeline
 from events.services.game_timeline import store as store_game_timeline
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
@@ -16318,3 +16321,147 @@ class RefereeManagerTests(ManagementTestBase):
         self.client.force_login(user)
 
         self.assertEqual(self.club_get("referee_management").status_code, 403)
+
+
+class TeamAnalyticsTests(ManagementTestBase):
+    """The analytics page behind the "analytics" flag: gated, scoped like the team page, and
+    summing GameStat rows synced from game timelines (events.services.game_stats)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="Analytics A", short_name="AA")
+        cls.other_team = Team.objects.create(club=cls.club, name="Analytics B", short_name="AB")
+        cls.scorer = Member.objects.create(first_name="Sam", last_name="Scorer")
+        TeamMembership.objects.create(team=cls.team, member=cls.scorer, season=cls.season, jersey_number=78)
+        # No location -> not a home game, so "away" is the club's side.
+        cls.game = Event.objects.create(club=cls.club, title="Game", kind=Event.EventKind.GAME, season=cls.season, start=timezone.now() - datetime.timedelta(days=2), score_for=3, score_against=1)
+        cls.game.teams.add(cls.team)
+        cls.document = {
+            "events": [
+                {"id": "g1", "type": "goal", "period": "1", "seconds": 60, "side": "away", "goal": {"scorer": {"name": "Sam Scorer", "number": 78}, "assists": [{"name": "Al Assist", "number": 9}], "strength": "PP1", "game_winning": True}},
+                {"id": "g2", "type": "goal", "period": "2", "seconds": 90, "side": "home", "goal": {"scorer": {"name": "Them Scorer", "number": 5}, "assists": []}},
+                {"id": "p1", "type": "penalty", "period": "2", "seconds": 200, "side": "away", "penalty": {"player": {"name": "Pat Penalty", "number": 3}, "minutes": 4}},
+                {"id": "p2", "type": "penalty", "period": "3", "seconds": 300, "side": "home", "penalty": {"player": {"name": "Other", "number": 8}, "minutes": 2}},
+            ]
+        }
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="analytics")
+        flag.clubs.add(self.club)
+        self.client.force_login(self.admin_user)
+
+    def test_sync_flattens_the_timeline_and_matches_the_roster(self):
+        sync_game_stats(self.game, self.document)
+
+        goal = GameStat.objects.get(event=self.game, stat_type=GameStat.StatType.GOAL, is_ours=True)
+        self.assertEqual(goal.member, self.scorer)
+        self.assertEqual(GameStat.objects.filter(stat_type=GameStat.StatType.ASSIST).count(), 1)
+        self.assertEqual(GameStat.objects.filter(stat_type=GameStat.StatType.PENALTY_MINUTES, is_ours=False).get().value, 2)
+
+    def test_resync_replaces_rows(self):
+        sync_game_stats(self.game, self.document)
+        sync_game_stats(self.game, self.document)
+
+        self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)
+
+    def test_analytics_sums_goals_penalties_and_leaders(self):
+        sync_game_stats(self.game, self.document)
+
+        analytics = team_analytics(self.team, self.season)
+
+        self.assertEqual((analytics["goals_for"], analytics["goals_against"]), (3, 1))
+        self.assertEqual((analytics["pim_for"], analytics["pim_against"]), (4, 2))
+        self.assertEqual(analytics["pp_goals_for"], 1)
+        self.assertEqual(analytics["game_winning_goals"], 1)
+        self.assertEqual(analytics["top_scorers"][0]["name"], "Sam Scorer")
+        self.assertEqual(analytics["top_offenders"][0]["name"], "Pat Penalty")
+
+    def test_page_renders_for_admin(self):
+        sync_game_stats(self.game, self.document)
+
+        response = self.club_get("team_analytics", self.team.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sam Scorer")
+
+    def test_page_404s_when_the_flag_is_off(self):
+        get_waffle_flag_model().objects.get(name="analytics").clubs.remove(self.club)
+
+        self.assertEqual(self.club_get("team_analytics", self.team.pk).status_code, 404)
+
+    def test_analytics_button_hidden_when_the_flag_is_off(self):
+        self.assertContains(self.club_get("team_detail", self.team.pk), reverse("management:team_analytics", args=[self.team.pk]))
+        get_waffle_flag_model().objects.get(name="analytics").clubs.remove(self.club)
+        cache.clear()
+
+        self.assertNotContains(self.club_get("team_detail", self.team.pk), reverse("management:team_analytics", args=[self.team.pk]))
+
+    def test_coach_of_another_team_gets_404(self):
+        position = Position.objects.create(club=self.club, name="Coach AB", short_name="CAB", staff_position=True, management_position=True)
+        user = User.objects.create_user(email="analytics-coach@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Cy", last_name="Coach")
+        StaffAssignment.objects.create(team=self.other_team, member=member, season=self.season, position=position)
+        self.client.force_login(user)
+
+        self.assertEqual(self.club_get("team_analytics", self.team.pk).status_code, 404)
+        self.assertEqual(self.club_get("team_analytics", self.other_team.pk).status_code, 200)
+
+    def test_extra_metrics_from_shots_power_plays_goalies_and_minutes(self):
+        document = {
+            "events": [
+                {"id": "gi", "type": "goalie_change", "period": "1", "seconds": 0, "side": "away", "goalie_change": {"player": {"name": "Gus Goalie", "number": 1}, "action": "in"}},
+                {"id": "p2", "type": "penalty", "period": "1", "seconds": 100, "side": "away", "penalty": {"player": {"name": "Pat Penalty", "number": 3}, "minutes": 2, "kind": "minor"}},
+                {"id": "g2", "type": "goal", "period": "1", "seconds": 130, "side": "home", "goal": {"scorer": {"name": "Them Scorer", "number": 5}, "assists": [], "strength": "PP1"}},
+                {"id": "g3", "type": "goal", "period": "3", "seconds": 3000, "side": "away", "goal": {"scorer": {"name": "Sam Scorer", "number": 78}, "assists": []}},
+            ],
+            "team_stats": {"home": {"shots_on_goal": 10, "pp_opportunities": 1}, "away": {"shots_on_goal": 30}},
+        }
+        sync_game_stats(self.game, document)
+
+        analytics = team_analytics(self.team, self.season)
+
+        self.assertEqual((analytics["shots_for"], analytics["shots_against"]), (30, 10))
+        self.assertEqual(analytics["save_pct"], 90.0)  # 1 conceded on 10 shots
+        self.assertEqual(analytics["pk_opportunities"], 1)  # the source's own count for the other side
+        self.assertEqual(analytics["pk_pct"], 0.0)  # and they scored on it
+        self.assertEqual(analytics["pp_opportunities"], 0)
+        self.assertEqual(analytics["goalies"][0]["name"], "Gus Goalie")
+        self.assertEqual(analytics["goal_minutes"][2]["for"], 0)
+        self.assertEqual(analytics["goal_minutes"][5]["for"], 1)  # 3000 s = minute 50
+        self.assertEqual(analytics["opponents"][0]["games"], 1)
+        self.assertEqual(analytics["game_rows"][0]["pim_for"], 2)
+
+    def test_page_renders_the_extra_sections(self):
+        sync_game_stats(self.game, self.document)
+
+        self.assertContains(self.club_get("team_analytics", self.team.pk), "Plus/minus")
+
+    def test_ensure_game_stats_repairs_missing_and_stale_rows_only(self):
+        self.assertTrue(ensure_game_stats(self.game, self.document))
+        self.assertFalse(ensure_game_stats(self.game, self.document))
+        GameStat.objects.filter(event=self.game, stat_type=GameStat.StatType.ASSIST).delete()
+
+        self.assertTrue(ensure_game_stats(self.game, self.document))
+        self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)
+
+    def test_rebuild_command_backfills_stored_timelines(self):
+        GameTimeline.objects.create(event=self.game, source="test", data=self.document, status=GameTimeline.Status.FINAL)
+
+        call_command("rebuild_game_stats", "--dry-run", stdout=StringIO())
+        self.assertFalse(GameStat.objects.exists())
+        call_command("rebuild_game_stats", stdout=StringIO())
+
+        self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)
+
+    def test_settle_brings_stats_in_agreement_with_an_unchanged_timeline(self):
+        timeline = GameTimeline.objects.create(event=self.game, source="test", data=self.document, data_hash="x", status=GameTimeline.Status.FINAL)
+
+        with mock.patch("events.services.game_timeline.fetch_and_store", return_value="unchanged"):
+            outcome = settle_timeline(timeline, None)
+
+        self.assertEqual(outcome, "finalized")
+        self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)

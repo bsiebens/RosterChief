@@ -10,6 +10,9 @@ of the competition's own flag, and never allowed to break the score update: a
 failure is recorded on the GameTimeline row (``last_error``, previous data
 kept) and logged.
 
+Every stored timeline also has its per-player GameStat rows (events.services.game_stats):
+written when a changed document is stored, and re-checked when a game settles.
+
 Federations correct a timeline after the final whistle (an assist added, a
 scorer fixed), while poll_live_game_results stops polling a game once it's
 seen finishing -- ``settle_timelines`` (the nightly settle_game_timelines job)
@@ -28,6 +31,7 @@ from django.utils.translation import gettext_lazy as _lazy
 
 from events.models import Event, GameTimeline
 from events.services.game_moments import PENALTY_KIND_LABELS, game_timeline_changed
+from events.services.game_stats import ensure_game_stats, sync_game_stats
 from events.services.timeline_parsers import SERIOUS_PENALTIES, finalize_document
 
 logger = logging.getLogger(__name__)
@@ -97,6 +101,10 @@ def store(event, fetched: TimelineFetch) -> tuple[GameTimeline, bool]:
     timeline.save()
     if changed:
         game_timeline_changed.send(sender=Event, event=event, previous=previous, current=document, first_fetch=first_fetch)
+        try:
+            sync_game_stats(event, document)
+        except Exception:  # analytics must never break the timeline update, like the moments above
+            logger.exception("game_timeline.stats_sync_failed event_id=%s", event.pk)
     return timeline, changed
 
 
@@ -153,6 +161,10 @@ def settle(timeline: GameTimeline, competition) -> str:
     if outcome != UNCHANGED:
         return outcome
     timeline.refresh_from_db()
+    # An unchanged document never went through store()'s sync, so make sure its stats
+    # (GameStat) agree with it before it's marked finalized and left alone for good.
+    if timeline.data and ensure_game_stats(timeline.event, timeline.data):
+        logger.info("game_timeline.stats_repaired event_id=%s", timeline.event_id)
     if timeline.status != GameTimeline.Status.FINAL:
         return outcome
     timeline.finalized_at = timezone.now()
