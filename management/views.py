@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.utils.functional import cached_property
-from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
@@ -1537,8 +1537,23 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         scope = self.request.GET.get("games")
         scope = scope if scope in SCOPES else "all"
         context["scope"] = scope
-        context["scopes"] = [("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5"))]
-        context["analytics"] = team_analytics(self.object, season, scope) if season is not None else None
+        friendlies = self.request.GET.get("friendlies") == "1"
+        competition = self.request.GET.get("competition", "")
+        context["friendlies"] = friendlies
+        analytics = team_analytics(self.object, season, scope, friendlies, competition) if season is not None else None
+        # A competition no longer among the (friendly-filtered) games is dropped rather than leaving an empty page.
+        if analytics is not None and competition and competition not in analytics["competitions"]:
+            competition = ""
+            analytics = team_analytics(self.object, season, scope, friendlies)
+        context["analytics"] = analytics
+        context["competition"] = competition
+
+        def query(**changes):
+            params = {"season": season.pk if season else "", "games": scope, "friendlies": "1" if friendlies else "", "competition": competition, **changes}
+            return urlencode({key: value for key, value in params.items() if value})
+
+        context["scopes"] = [(key, label, query(games=key)) for key, label in (("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5")))]
+        context["friendlies_query"] = query(friendlies="" if friendlies else "1")
         return context
 
 
