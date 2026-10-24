@@ -10,10 +10,17 @@ building the UI around it.
 
 import importlib
 
+from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 
 from events.models import Competition
 from events.services.game_timeline import refresh_timeline
+
+#: A source's "live" flag can read false for a moment mid-game (a stopped clock, a
+#: timeout), so a live game only counts as ended after this many consecutive
+#: not-live reads -- one blip must not mark it final or stop the live-score poll.
+NOT_LIVE_READS_TO_END = 3
+NOT_LIVE_READS_TTL = 60 * 60
 
 
 class CompetitionFetchError(Exception):
@@ -49,15 +56,34 @@ def fetch_game_info(event) -> bool:
     if source is None:
         return False
 
+    was_live = event.is_live
     try:
         source.update_game_information(event=event)
     except Exception as error:
         raise CompetitionFetchError(_("Could not fetch game info from “%(name)s”: %(error)s") % {"name": event.competition, "error": error}) from error
 
+    _debounce_not_live(event, was_live)
+
     # Same instance, so a source can reuse the payload the score fetch just
     # downloaded. Gated on its own flag; never raises (see game_timeline).
     refresh_timeline(event, source)
     return True
+
+
+def _debounce_not_live(event, was_live: bool) -> None:
+    """Keeps a live game live until the source has said "not live"
+    NOT_LIVE_READS_TO_END times in a row (the source's update has already saved
+    False by now, so it is put back)."""
+    key = f"events:not-live-reads:{event.pk}"
+    if event.is_live or not was_live:
+        cache.delete(key)
+        return
+    cache.add(key, 0, NOT_LIVE_READS_TTL)
+    if cache.incr(key) < NOT_LIVE_READS_TO_END:
+        event.is_live = True
+        event.save(update_fields=["is_live"])
+    else:
+        cache.delete(key)
 
 
 def competition_for(event):

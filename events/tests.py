@@ -3682,6 +3682,23 @@ class PollLiveGameResultsTests(EventsTestBase):
         self.assertTrue(game.is_live)
         self.assertIsNone(game.live_score_polling_done_at)
 
+        # A single not-live read (or two) is a blip, not the final whistle.
+        for _read in range(2):
+            with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=False, score_a=1, score_b=4)):
+                call_command("poll_live_game_results")
+            game.refresh_from_db()
+            self.assertTrue(game.is_live)
+            self.assertIsNone(game.live_score_polling_done_at)
+
+        # A live read in between resets the streak.
+        with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=True)):
+            call_command("poll_live_game_results")
+        for _read in range(2):
+            with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=False)):
+                call_command("poll_live_game_results")
+        game.refresh_from_db()
+        self.assertTrue(game.is_live)
+
         with mock.patch("events.competition.hockey.requests.get", return_value=self.mock_response(live=False, score_a=1, score_b=4)):
             call_command("poll_live_game_results")
         game.refresh_from_db()
@@ -4331,7 +4348,8 @@ class RBIHFStandingsRefreshTests(ImportSourcesTestBase):
         response.json.return_value = {"live": False, "scoreA": 2, "scoreB": 3}
 
         with mock.patch("events.competition.hockey.requests.get", return_value=response), mock.patch("events.management.commands.poll_live_game_results.refresh_for_finished_game") as mock_refresh:
-            call_command("poll_live_game_results")
+            for _read in range(3):  # a game only counts as finished after 3 consecutive not-live reads
+                call_command("poll_live_game_results")
 
         mock_refresh.assert_called_once_with(game)
 
