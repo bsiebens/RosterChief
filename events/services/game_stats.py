@@ -12,7 +12,10 @@ import unicodedata
 from collections import defaultdict
 
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
+from club.models import Season
 from events.models import Event, GameStat
 from teams.models import TeamMembership
 
@@ -52,6 +55,11 @@ class _Roster:
         return self.by_name.get(tokens) if tokens else None
 
 
+def event_season(event):
+    """The event's own season, else the one its start date falls in (Event.season is "explicit, else derived")."""
+    return event.season or Season.covering(event.club_id, timezone.localtime(event.start).date())
+
+
 def _rows_for(event, team, document, roster) -> list[GameStat]:
     our_side = "home" if event.is_home_game else "away"
     rows = []
@@ -64,7 +72,7 @@ def _rows_for(event, team, document, roster) -> list[GameStat]:
                 club_id=event.club_id,
                 event=event,
                 team=team,
-                season_id=event.season_id,
+                season_id=getattr(event_season(event), "pk", None),
                 stat_type=stat_type,
                 value=value,
                 is_ours=ours,
@@ -122,7 +130,7 @@ def _expected_rows(event: Event, document: dict) -> list[GameStat]:
     """The rows ``document`` should produce, one set per team of the club playing the game."""
     rows = []
     for team in event.teams.all():
-        rows.extend(_rows_for(event, team, document, _Roster(team, event.season)))
+        rows.extend(_rows_for(event, team, document, _Roster(team, event_season(event))))
     return rows
 
 
@@ -164,7 +172,9 @@ LEADERS = 5
 
 def played_games(team, season):
     """The team's finished games with a score, friendlies included."""
-    return list(Event.objects.filter(teams=team, season=season, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False).select_related("opponent", "location").order_by("start"))
+    # Event.season is "explicit, else derived from the start date" (events/models.py), so a game with no stored season still belongs to the season its date falls in.
+    in_season = Q(season=season) | Q(season__isnull=True, start__date__gte=season.start_date, start__date__lte=season.end_date)
+    return list(Event.objects.filter(in_season, teams=team, kind=Event.EventKind.GAME, cancelled=False, is_live=False, score_for__isnull=False, score_against__isnull=False).select_related("opponent", "location").order_by("start"))
 
 
 def _leaderboard(stats, *types):
@@ -207,7 +217,7 @@ def _opponents(games):
 def team_analytics(team, season) -> dict:
     """Everything the team analytics page shows for ``team`` in ``season``."""
     games = played_games(team, season)
-    stats = list(GameStat.objects.filter(team=team, season=season, event__in=[game.pk for game in games]).select_related("member"))
+    stats = list(GameStat.objects.filter(team=team, event__in=[game.pk for game in games]).select_related("member"))
 
     record = {"won": 0, "drawn": 0, "lost": 0}
     split = {"home": {"games": 0, "gf": 0, "ga": 0}, "away": {"games": 0, "gf": 0, "ga": 0}}
