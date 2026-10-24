@@ -106,7 +106,7 @@ from events.services.calendar import add_months, agenda_groups, month_bounds, mo
 from events.services.competitions import CompetitionFetchError, fetch_game_info
 from events.services.dfel_import import DFELImportError, fetch_schedule
 from events.services.game_moments import describe_moment
-from events.services.game_stats import team_analytics
+from events.services.game_stats import SCOPES, team_analytics
 from events.services.game_timeline import display_timeline
 from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
@@ -1534,7 +1534,11 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         season = selected_season_from_request(self.request, self.request.club)
         context["seasons"] = Season.objects.filter(club=self.request.club).order_by("-start_date")
         context["selected_season"] = season
-        context["analytics"] = team_analytics(self.object, season) if season is not None else None
+        scope = self.request.GET.get("games")
+        scope = scope if scope in SCOPES else "all"
+        context["scope"] = scope
+        context["scopes"] = [("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5"))]
+        context["analytics"] = team_analytics(self.object, season, scope) if season is not None else None
         return context
 
 

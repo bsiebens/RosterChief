@@ -1,16 +1,16 @@
 {% load i18n %}
-<div class="card overflow-hidden">
-    <table class="table">
-        <thead><tr><th colspan="2">{{ title }}</th></tr></thead>
-        <tbody>
-            {% for row in rows %}
-                <tr>
-                    <td>{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</td>
-                    <td class="text-right font-mono font-semibold">{{ row.total }}</td>
-                </tr>
-            {% empty %}
-                <tr><td colspan="2" class="text-muted">{% trans "No data yet." %}</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+{% comment %}One leaderboard panel of the analytics "Points leaders" card: rows of #number, name, a bar relative to the top total, and the total. Expects `rows`.{% endcomment %}
+<ol class="flex flex-col gap-3">
+    {% for row in rows %}
+        <li class="flex items-center gap-3">
+            <span class="w-9 shrink-0 font-mono text-xs text-muted">{% if row.number is not None %}#{{ row.number }}{% endif %}</span>
+            <div class="min-w-0 flex-1">
+                <div class="truncate text-[15px] font-semibold text-ink">{{ row.name }}</div>
+                <div class="mt-1 h-1.5 rounded-full bg-rule"><div class="h-full rounded-full {% if forloop.first %}bg-club{% else %}bg-ink{% endif %}" style="width: {{ row.pct }}%"></div></div>
+            </div>
+            <span class="w-8 shrink-0 text-right font-display text-3xl leading-none font-extrabold text-ink">{{ row.total }}</span>
+        </li>
+    {% empty %}
+        <li class="text-sm text-muted">{% trans "No data yet." %}</li>
+    {% endfor %}
+</ol>

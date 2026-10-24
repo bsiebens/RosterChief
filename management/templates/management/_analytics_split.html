@@ -1,0 +1,20 @@
+{% load i18n %}
+{% comment %}One home/away block of the analytics "Home vs away" card. Expects `label` and `row` (the team_analytics split entry).{% endcomment %}
+<div>
+    <div class="flex items-baseline justify-between">
+        <span class="font-display text-2xl leading-none font-extrabold text-ink uppercase">{{ label }}</span>
+        <span class="font-display text-2xl leading-none font-extrabold {% if row.diff < 0 %}text-club{% else %}text-ink{% endif %}">{{ row.diff|stringformat:"+d" }}</span>
+    </div>
+    {% if row.games %}
+        <div class="mt-2 flex h-7 overflow-hidden rounded-md font-mono text-xs font-bold text-white">
+            <div class="flex min-w-7 items-center bg-ink px-2" style="width: {{ row.share_for }}%">{{ row.gf }}</div>
+            <div class="flex min-w-7 flex-1 items-center justify-end bg-club px-2">{{ row.ga }}</div>
+        </div>
+        <div class="mt-2 flex justify-between font-mono text-xs text-muted">
+            <span>{% blocktrans count counter=row.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %} · {{ row.won }}-{{ row.drawn }}-{{ row.lost }}</span>
+            <span>{{ row.avg_for }}-{{ row.avg_against }} {% trans "per game" %}</span>
+        </div>
+    {% else %}
+        <p class="mt-2 text-sm text-muted">{% trans "No games yet." %}</p>
+    {% endif %}
+</div>
