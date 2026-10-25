@@ -115,3 +115,8 @@ def evaluation_outcomes_pdf(context: dict) -> bytes:
 def number_list_pdf(context: dict) -> bytes:
     html = render_to_string("management/number_list_pdf.html", context)
     return render_pdf(html)
+
+
+def team_analytics_pdf(context: dict) -> bytes:
+    html = render_to_string("management/team_analytics_pdf.html", context)
+    return render_pdf(html)

@@ -79,6 +79,7 @@ urlpatterns = [
     path("teams/new/", views.TeamCreateView.as_view(), name="team_create"),
     path("teams/<uuid:pk>/", views.TeamDetailView.as_view(), name="team_detail"),
     path("teams/<uuid:pk>/analytics/", views.TeamAnalyticsView.as_view(), name="team_analytics"),
+    path("teams/<uuid:pk>/analytics/pdf/", views.TeamAnalyticsPdfView.as_view(), name="team_analytics_pdf"),
     path("teams/<uuid:pk>/analytics/strength/", views.TeamAnalyticsStrengthView.as_view(), name="team_analytics_strength"),
     path("teams/<uuid:pk>/edit/", views.TeamUpdateView.as_view(), name="team_update"),
     path("teams/<uuid:pk>/delete/", views.TeamDeleteView.as_view(), name="team_delete"),

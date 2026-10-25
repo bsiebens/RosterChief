@@ -1,0 +1,212 @@
+{% load i18n %}
+
+{% comment %}
+    Rendered by WeasyPrint, not a browser -- same standalone-document convention as number_list_pdf.html.
+    The team analytics page as a shareable summary: the same numbers (events.services.game_stats.team_analytics)
+    as plain tables, no charts. Filters (season, game scope, friendlies, competition) are the page's own.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ team.name }} — {% trans "Analytics" %}</title>
+        <style>
+            @page {
+                size: A4;
+                margin: 16mm;
+                @bottom-center {
+                    content: "{{ club.name }} — {{ team.name }} — " counter(page) " / " counter(pages);
+                    font-size: 8pt;
+                    color: #666;
+                }
+            }
+            body { font-family: sans-serif; font-size: 9pt; color: #111; line-height: 1.35; }
+            h1 { font-size: 18pt; margin: 0 0 1.5mm; }
+            h2 { font-size: 10.5pt; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 1.5px solid #9ca3af; page-break-after: avoid; }
+            .muted { color: #6b7280; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 4mm; border-bottom: 1px solid #e5e7eb; }
+            .generated { font-size: 8.5pt; text-align: right; }
+            .tiles { display: flex; flex-wrap: wrap; margin: 4mm -1.5mm 0; }
+            .tile { box-sizing: border-box; width: 31.5%; margin: 1.5mm; padding: 2.5mm 3mm; border: 1px solid #e5e7eb; border-radius: 1.5mm; }
+            .tile .value { font-size: 14pt; font-weight: bold; }
+            .tile .label { font-size: 7.5pt; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4pt; }
+            .tile .note { font-size: 7.5pt; color: #4b5563; }
+            .columns { display: flex; }
+            .columns > div { flex: 1; margin-right: 6mm; }
+            .columns > div:last-child { margin-right: 0; }
+            table { width: 100%; border-collapse: collapse; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.4pt; color: #6b7280; border-bottom: 1px solid #9ca3af; padding: 0 2mm 1.2mm 0; }
+            td { padding: 1.2mm 2mm 1.2mm 0; border-bottom: 1px solid #f0f1f3; }
+            .num { text-align: right; font-family: monospace; white-space: nowrap; }
+            .result { font-weight: bold; }
+            .warning { margin-top: 5mm; padding: 2.5mm 3mm; border: 1px solid #f0a22e; background: #fff7e6; border-radius: 1.5mm; font-size: 8.5pt; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div>
+                <h1>{{ team.name }}</h1>
+                <div class="muted">
+                    {{ club.name }} — {% trans "Analytics" %} — {% trans "Season" %} {{ selected_season.start_date|date:"Y" }} - {{ selected_season.end_date|date:"Y" }}
+                </div>
+                <div class="muted">
+                    {{ scope_label }}{% if competition %} · {{ competition }}{% endif %} ·
+                    {% if friendlies %}{% trans "friendlies included" %}{% else %}{% trans "friendlies excluded" %}{% endif %}
+                </div>
+            </div>
+            <div class="muted generated">
+                {% blocktrans with generated=generated_at|date:"j F Y, H:i" %}Generated {{ generated }}{% endblocktrans %}
+            </div>
+        </div>
+
+        <div class="tiles">
+            <div class="tile">
+                <div class="value">{{ analytics.record.won }}–{{ analytics.record.drawn }}–{{ analytics.record.lost }}</div>
+                <div class="label">{% trans "Record · W-D-L" %}</div>
+                <div class="note">{% blocktrans count counter=analytics.games %}{{ counter }} game{% plural %}{{ counter }} games{% endblocktrans %} · {% blocktrans with points=analytics.points_table %}{{ points }} points{% endblocktrans %}</div>
+            </div>
+            <div class="tile">
+                <div class="value">{{ analytics.goals_for }} / {{ analytics.goals_against }}</div>
+                <div class="label">{% trans "Goals for / against" %}</div>
+                <div class="note">{{ analytics.goal_difference|stringformat:"+d" }} · {{ analytics.avg_for|floatformat:2 }} / {{ analytics.avg_against|floatformat:2 }} {% trans "per game" %}</div>
+            </div>
+            <div class="tile">
+                <div class="value">{% if analytics.pp_pct is not None %}{{ analytics.pp_pct }}%{% else %}–{% endif %}</div>
+                <div class="label">{% trans "Power play" %}</div>
+                <div class="note">{% blocktrans with goals=analytics.pp_goals_for chances=analytics.pp_opportunities %}{{ goals }} goals · {{ chances }} chances{% endblocktrans %}</div>
+            </div>
+            <div class="tile">
+                <div class="value">{% if analytics.pk_pct is not None %}{{ analytics.pk_pct }}%{% else %}–{% endif %}</div>
+                <div class="label">{% trans "Penalty kill" %}</div>
+                <div class="note">{% blocktrans with killed=analytics.pk_killed total=analytics.pk_opportunities %}{{ killed }} of {{ total }} killed{% endblocktrans %}</div>
+            </div>
+            <div class="tile">
+                <div class="value">{{ analytics.pim_for }} / {{ analytics.pim_against }}</div>
+                <div class="label">{% trans "Penalty min. for / against" %}</div>
+                <div class="note">
+                    {% if analytics.game_misconduct_minutes %}
+                        {% blocktrans with avg=analytics.avg_pim|default_if_none:"–" clean=analytics.avg_pim_excl_game_misconducts|default_if_none:"–" %}{{ avg }} per game including game misconducts ({{ clean }} excluding them){% endblocktrans %}
+                    {% else %}
+                        {% blocktrans with avg=analytics.avg_pim|default_if_none:"–" %}{{ avg }} per game{% endblocktrans %}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="tile">
+                <div class="value">{{ analytics.clean_sheets }}</div>
+                <div class="label">{% trans "Clean sheets" %}</div>
+            </div>
+            {% if analytics.shot_games %}
+                <div class="tile">
+                    <div class="value">{{ analytics.shots_for }} / {{ analytics.shots_against }}</div>
+                    <div class="label">{% trans "Shots for / against" %}</div>
+                    <div class="note">{% blocktrans count counter=analytics.shot_games %}{{ counter }} game with shot data{% plural %}{{ counter }} games with shot data{% endblocktrans %}</div>
+                </div>
+                <div class="tile">
+                    <div class="value">{% if analytics.shooting_pct is not None %}{{ analytics.shooting_pct }}%{% else %}–{% endif %} / {% if analytics.save_pct is not None %}{{ analytics.save_pct }}%{% else %}–{% endif %}</div>
+                    <div class="label">{% trans "Shooting % / save %" %}</div>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if analytics.strength_warnings %}
+            <div class="warning">
+                {% blocktrans count counter=analytics.strength_warnings|length %}{{ counter }} goal has a strength that doesn't match the penalties in its game; the power-play and penalty-kill numbers may be off until it is checked.{% plural %}{{ counter }} goals have a strength that doesn't match the penalties in their game; the power-play and penalty-kill numbers may be off until they are checked.{% endblocktrans %}
+            </div>
+        {% endif %}
+
+        <h2>{% trans "Home and away" %}</h2>
+        <table>
+            <thead>
+                <tr><th></th><th class="num">{% trans "Games" %}</th><th class="num">{% trans "W-D-L" %}</th><th class="num">{% trans "Goals" %}</th><th class="num">{% trans "Diff." %}</th><th class="num">{% trans "Per game" %}</th></tr>
+            </thead>
+            <tbody>
+                {% for label, row in analytics.split.items %}
+                    <tr>
+                        <td>{% if label == "home" %}{% trans "Home" %}{% else %}{% trans "Away" %}{% endif %}</td>
+                        <td class="num">{{ row.games }}</td>
+                        <td class="num">{{ row.won }}-{{ row.drawn }}-{{ row.lost }}</td>
+                        <td class="num">{{ row.gf }}-{{ row.ga }}</td>
+                        <td class="num">{{ row.diff|stringformat:"+d" }}</td>
+                        <td class="num">{% if row.games %}{{ row.avg_for }}-{{ row.avg_against }}{% else %}–{% endif %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2>{% trans "Goals by period and game minute" %}</h2>
+        <div class="columns">
+            <div>
+                <table>
+                    <thead><tr><th>{% trans "Period" %}</th><th class="num">{% trans "For" %}</th><th class="num">{% trans "Against" %}</th></tr></thead>
+                    <tbody>
+                        {% for row in analytics.periods %}<tr><td>{{ row.label }}</td><td class="num">{{ row.for }}</td><td class="num">{{ row.against }}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div>
+                <table>
+                    <thead><tr><th>{% trans "Minutes" %}</th><th class="num">{% trans "For" %}</th><th class="num">{% trans "Against" %}</th></tr></thead>
+                    <tbody>
+                        {% for row in analytics.goal_minutes %}{% if row.for or row.against %}<tr><td>{{ row.label }}</td><td class="num">{{ row.for }}</td><td class="num">{{ row.against }}</td></tr>{% endif %}{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <h2>{% trans "Players" %}</h2>
+        <div class="columns">
+            {% for title, rows in leaderboards %}
+                {% if rows %}
+                    <div>
+                        <table>
+                            <thead><tr><th>{{ title }}</th><th class="num"></th></tr></thead>
+                            <tbody>
+                                {% for row in rows %}<tr><td>{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</td><td class="num">{{ row.total }}</td></tr>{% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        {% if analytics.goalies %}
+            <h2>{% trans "Goalies" %}</h2>
+            <table>
+                <thead><tr><th>{% trans "Goalie" %}</th><th class="num">{% trans "Goals conceded" %}</th></tr></thead>
+                <tbody>
+                    {% for row in analytics.goalies %}<tr><td>{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</td><td class="num">{{ row.total }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+
+        <h2>{% trans "Games" %}</h2>
+        <table>
+            <thead>
+                <tr><th>{% trans "Date" %}</th><th>{% trans "Opponent" %}</th><th></th><th class="num">{% trans "Score" %}</th><th class="num">{% trans "Penalty min." %}</th></tr>
+            </thead>
+            <tbody>
+                {% for row in analytics.game_rows %}
+                    <tr>
+                        <td>{{ row.event.start|date:"j M Y" }}</td>
+                        <td>{% if row.event.is_home_game %}{% trans "vs" %}{% else %}@{% endif %} {{ row.event.opponent.name|default:row.event.title }}</td>
+                        <td class="result">{{ row.result }}</td>
+                        <td class="num">{{ row.for }}–{{ row.against }}</td>
+                        <td class="num">{{ row.pim_for|default_if_none:"–" }} / {{ row.pim_against|default_if_none:"–" }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if analytics.opponents|length > 1 %}
+            <h2>{% trans "Opponents" %}</h2>
+            <table>
+                <thead><tr><th>{% trans "Opponent" %}</th><th class="num">{% trans "Games" %}</th><th class="num">{% trans "W-D-L" %}</th><th class="num">{% trans "Goals" %}</th></tr></thead>
+                <tbody>
+                    {% for row in analytics.opponents %}<tr><td>{{ row.name }}</td><td class="num">{{ row.games }}</td><td class="num">{{ row.won }}-{{ row.drawn }}-{{ row.lost }}</td><td class="num">{{ row.gf }}-{{ row.ga }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </body>
+</html>
