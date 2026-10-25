@@ -104,11 +104,23 @@ def delete_payment(payment) -> None:
     """Deletes ``payment``; a confirmed voucher payment gives its amount back
     to the voucher, onto the voucher's *current* balance (read under a row
     lock), not whatever was loaded alongside the payment. Leaves the order's
-    payment_status to the caller (see PaymentDeleteView)."""
+    payment_status to the caller (see PaymentDeleteView).
+
+    The voucher is locked first (the same order record_payment takes it in),
+    and the payment is re-read under that lock: of two concurrent deletes of
+    the same payment, only the one that still finds it credits the voucher
+    back -- the other has nothing left to delete or restore. What's credited
+    is the row as it is now, not the possibly stale instance passed in."""
     voucher = payment.voucher
-    was_confirmed = payment.status == Payment.PaymentStatus.CONFIRMED
-    amount = payment.amount
-    payment.delete()
+    if voucher is not None:
+        lock_voucher(voucher)
+
+    current = Payment.objects.filter(pk=payment.pk).first()
+    if current is None:  # a concurrent request already deleted it (and credited it back)
+        return
+    was_confirmed = current.status == Payment.PaymentStatus.CONFIRMED
+    amount = current.amount
+    current.delete()
 
     if voucher is not None and was_confirmed:
         locked = lock_voucher(voucher)

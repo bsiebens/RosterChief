@@ -2172,6 +2172,46 @@ class VoucherConcurrencyTests(TestCase):
         self.voucher.refresh_from_db()
         self.assertEqual(self.voucher.consumed_amount, Decimal("5.00"))
 
+    def test_deleting_the_same_voucher_payment_twice_restores_it_once(self):
+        from .services.payments import delete_payment
+
+        payment = record_payment(self.order_a, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=Voucher.objects.get(pk=self.voucher.pk))
+        record_payment(self.order_b, amount=Decimal("5.00"), method=Payment.PaymentMethod.VOUCHER, voucher=Voucher.objects.get(pk=self.voucher.pk))
+        first, second = Payment.objects.select_related("voucher").get(pk=payment.pk), Payment.objects.select_related("voucher").get(pk=payment.pk)  # both requests loaded it before either deleted it
+
+        delete_payment(first)
+        delete_payment(second)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("5.00"))  # the other payment's 5.00 stays used
+        self.assertFalse(Payment.objects.filter(pk=payment.pk).exists())
+
+    def test_a_voucher_payment_refunded_in_the_meantime_is_not_credited_back(self):
+        from .services.payments import delete_payment
+
+        payment = record_payment(self.order_a, amount=Decimal("10.00"), method=Payment.PaymentMethod.VOUCHER, voucher=Voucher.objects.get(pk=self.voucher.pk))
+        loaded = Payment.objects.select_related("voucher").get(pk=payment.pk)  # still shows confirmed
+        Payment.objects.filter(pk=payment.pk).update(status=Payment.PaymentStatus.REFUNDED)
+
+        delete_payment(loaded)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("10.00"))
+
+    def test_deleting_the_same_manual_consumption_twice_restores_it_once(self):
+        from .models import VoucherConsumption
+        from .services.vouchers import delete_manual_consumption, record_manual_consumption
+
+        consumption = record_manual_consumption(Voucher.objects.get(pk=self.voucher.pk), amount=Decimal("10.00"), note="cash")
+        record_payment(self.order_a, amount=Decimal("5.00"), method=Payment.PaymentMethod.VOUCHER, voucher=Voucher.objects.get(pk=self.voucher.pk))
+        first, second = VoucherConsumption.objects.select_related("voucher").get(pk=consumption.pk), VoucherConsumption.objects.select_related("voucher").get(pk=consumption.pk)
+
+        delete_manual_consumption(first)
+        delete_manual_consumption(second)
+
+        self.voucher.refresh_from_db()
+        self.assertEqual(self.voucher.consumed_amount, Decimal("5.00"))
+
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
 class ShopCartRepricingAndThrottleViewTests(TestCase):

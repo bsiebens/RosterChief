@@ -593,6 +593,9 @@ class GameTimeline(UUIDModel):
     changed_at = models.DateTimeField(_("changed at"), null=True, blank=True, help_text=_("Last time the timeline actually changed."))
     finalized_at = models.DateTimeField(_("finalized at"), null=True, blank=True, help_text=_("Set once a finished game's timeline stopped changing; it isn't re-fetched after that."))
     last_error = models.TextField(_("last error"), blank=True, help_text=_("The last fetch/parse error, if the latest attempt failed; the previous data is kept."))
+    strength_overrides = models.JSONField(
+        _("strength overrides"), default=dict, blank=True, help_text=_("Goal strengths staff corrected or confirmed, {timeline event id: strength}. Applied to the game's stats, and kept when the timeline is fetched again.")
+    )
 
     class Meta:
         verbose_name = _("game timeline")

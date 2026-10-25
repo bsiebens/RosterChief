@@ -16,7 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _lazy
@@ -34,7 +34,7 @@ from teams.models import OfficialLevel, OfficialProfile, Position, RefereeLevel,
 
 from .admin import EventAdminForm
 from .competition.hockey import CEHL, DFEL, IJNL, RBIHF
-from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
+from .models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameStat, GameTimeline, Lineup, LineupSelection, Location, OfficialSignup, Opponent, RefereeSignup
 from .services import (
     blocked_upcoming_events_for_member,
     cancel_occurrence,
@@ -54,6 +54,7 @@ from .services import (
     propagate_series,
     rbihf_standings,
     record_check_in,
+    strength_check,
     team_attendance_rate,
     team_no_shows,
     timeline_parsers,
@@ -62,6 +63,7 @@ from .services.attendance import member_attendance_counts, notify_newly_invited
 from .services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from .services.competitions import CompetitionFetchError, fetch_game_info
 from .services.crew_invites import _notify_new_invites, resync_upcoming_invites
+from .services.game_stats import sync_game_stats
 from .services.lineup import cancel_scheduled_publish, notify_dropout, publish_lineup, schedule_lineup_publish, selected_members_by_position, toggle_selection
 from .services.officials import (
     OfficialAssignmentError,
@@ -4485,6 +4487,24 @@ class TimelineParserTests(TestCase):
         self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["rbihf"]["periods"]], [("1", 0, 0), ("2", 3, 2), ("3", 2, 0)])
         self.assertEqual([(p["label"], p["home"], p["away"]) for p in documents["ijnl"]["periods"]], [("1", 3, 0), ("2", 1, 0), ("3", 0, 0)])
 
+    def test_a_completed_ijnl_game_gets_assist_numbers_from_the_lineups_and_the_team_statistics(self):
+        document = timeline_parsers.finalize_document(timeline_parsers.parse_ijnl(timeline_fixture("ijnl_game_49a66dbb.json")))
+
+        goals = [event["goal"] for event in document["events"] if event["type"] == "goal"]
+        self.assertEqual((document["score"], document["status"], len(goals)), ({"home": 3, "away": 4}, "final", 7))
+        self.assertEqual([[assist["number"] for assist in goal["assists"]] for goal in goals], [[62, 87], [], [19], [87], [], [], []])
+        # The same jersey number on both teams (#20) resolves per side.
+        self.assertEqual(document["team_stats"], {"home": {"pp_goals": 0, "pp_opportunities": 3, "penalty_minutes": 6}, "away": {"pp_goals": 0, "pp_opportunities": 3, "penalty_minutes": 6}})
+
+    def test_ijnl_assists_without_a_lineup_keep_their_name_only(self):
+        payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
+        payload["sections"].pop("lineups")
+
+        document = timeline_parsers.parse_ijnl(json.dumps(payload))
+
+        [first] = [event["goal"] for event in document["events"] if event["type"] == "goal"][:1]
+        self.assertEqual(first["assists"], [{"name": "Player 62"}, {"name": "Player 87"}])
+
     def test_penalty_kinds_are_normalized_and_fill_in_minutes(self):
         self.assertEqual(timeline_parsers.normalize_penalty_kind("game miscodunct"), "game_misconduct")  # RBIHF's own spelling
         self.assertEqual(timeline_parsers.normalize_penalty_kind("Double Minor"), "double_minor")
@@ -4768,6 +4788,138 @@ class GameTimelineFetchTests(GameTimelineTestBase):
         mock_key.assert_called_once_with("70779", "21691")
         mock_report.assert_called_with("key", "c441c652")
         self.assertEqual(fetched.document["source"], "DFEL")
+
+
+def penalty_event(seconds, side, kind="minor", minutes=None):
+    return {
+        "id": f"p{seconds}{side}",
+        "type": "penalty",
+        "period": "1",
+        "seconds": seconds,
+        "time": f"{seconds // 60:02d}:{seconds % 60:02d}",
+        "side": side,
+        "penalty": {"player": {"name": "Pat", "number": 9}, "kind": kind, "minutes": minutes or {"minor": 2, "major": 5, "misconduct": 10}.get(kind, 2)},
+    }
+
+
+def goal_event(seconds, side, strength="EQ", **goal):
+    return {"id": f"g{seconds}{side}", "type": "goal", "period": "1" if seconds <= 1200 else "2", "seconds": seconds, "side": side, "goal": {"scorer": {"name": "Sam", "number": 7}, "assists": [], "strength": strength, **goal}}
+
+
+class StrengthCheckTests(SimpleTestCase):
+    """events.services.strength_check: a goal's recorded strength against the penalties in the game."""
+
+    def conflicts(self, *events, overrides=None):
+        return {goal: found["expected"] for goal, found in strength_check.strength_conflicts({"events": list(events)}, overrides).items()}
+
+    def test_the_real_ijnl_game_flags_the_goal_scored_during_a_running_minor(self):
+        document = timeline_parsers.parse_ijnl(timeline_fixture("ijnl_game_49a66dbb.json"))
+
+        conflicts = strength_check.strength_conflicts(document)
+
+        # 17:40 minor on the away side, home scored at 18:09 but the source says even strength; every other goal agrees with the penalties.
+        self.assertEqual({goal: found["expected"] for goal, found in conflicts.items()}, {"ijnl:goal:home:18:09::/clubs-en-spelers/speler/p54": "PP1"})
+        [found] = conflicts.values()
+        self.assertEqual([(penalty["side"], penalty["time"], penalty["kind"]) for penalty in found["penalties"]], [("away", "17:40", "minor")])
+
+    def test_a_minor_costs_two_minutes_of_power_play(self):
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), goal_event(219, "home", "EQ")), {"g219home": "PP1"})
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), goal_event(221, "home", "EQ")), {})
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), goal_event(150, "home", "PP1")), {})
+
+    def test_a_goal_on_the_power_play_ends_a_minor_but_not_a_major(self):
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), goal_event(130, "home", "PP1"), goal_event(150, "home", "PP1")), {"g150home": "EQ"})
+        self.assertEqual(self.conflicts(penalty_event(100, "away", "major"), goal_event(130, "home", "PP1"), goal_event(150, "home", "EQ")), {"g150home": "PP1"})
+
+    def test_a_misconduct_does_not_put_the_team_a_skater_down(self):
+        self.assertEqual(self.conflicts(penalty_event(100, "away", "misconduct"), goal_event(130, "home", "PP1")), {"g130home": "EQ"})
+        self.assertEqual(self.conflicts(penalty_event(100, "away", "misconduct"), goal_event(130, "home", "EQ")), {})
+
+    def test_two_minors_make_a_five_on_three_and_a_short_handed_goal_is_not_even_strength(self):
+        two_down = [penalty_event(100, "away"), penalty_event(110, "away")]
+        self.assertEqual(self.conflicts(*two_down, goal_event(130, "home", "EQ")), {"g130home": "PP2"})
+        self.assertEqual(self.conflicts(*two_down, goal_event(130, "home", "PP1")), {})  # PP1 or PP2 are both a power play
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), goal_event(130, "away", "EQ")), {"g130away": "SH1"})
+
+    def test_a_goal_only_cancels_one_of_two_minors_and_a_double_minor_keeps_its_second_half(self):
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), penalty_event(110, "away"), goal_event(130, "home", "PP2"), goal_event(150, "home", "PP1")), {})
+        double = penalty_event(0, "away", "double_minor", 4)
+        self.assertEqual(self.conflicts(double, goal_event(60, "home", "PP1"), goal_event(150, "home", "PP1"), goal_event(190, "home", "EQ")), {})
+        self.assertEqual(self.conflicts(double, goal_event(60, "home", "PP1"), goal_event(190, "home", "PP1")), {"g190home": "EQ"})
+
+    def test_coincidental_minors_are_even_strength(self):
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), penalty_event(100, "home"), goal_event(130, "home", "EQ")), {})
+
+    def test_goals_the_timeline_cannot_judge_are_left_alone(self):
+        minor = penalty_event(100, "away")
+        self.assertEqual(self.conflicts(minor, goal_event(100, "home", "EQ")), {})  # same second: a delayed penalty
+        self.assertEqual(self.conflicts(minor, goal_event(220, "home", "EQ")), {})  # the minor ends on this very second
+        self.assertEqual(self.conflicts(minor, goal_event(130, "home", "EQ", empty_net=True)), {})
+        self.assertEqual(self.conflicts(minor, goal_event(130, "home", "EQ", penalty_shot=True)), {})
+        self.assertEqual(self.conflicts(minor, goal_event(130, "home", "PS")), {})
+        self.assertEqual(self.conflicts(penalty_event(3500, "away"), goal_event(3650, "home", "EQ")), {})  # overtime
+        self.assertEqual(self.conflicts({**goal_event(130, "home", "EQ"), "seconds": None}), {})
+
+    def test_a_penalty_the_other_side_scored_on_at_the_same_second_is_waived(self):
+        self.assertEqual(self.conflicts(goal_event(100, "home", "EQ"), penalty_event(100, "away"), goal_event(150, "away", "EQ")), {})
+
+    def test_a_corrected_or_confirmed_strength_stops_being_flagged(self):
+        events = [penalty_event(100, "away"), goal_event(130, "home", "EQ")]
+
+        self.assertEqual(self.conflicts(*events), {"g130home": "PP1"})
+        self.assertEqual(self.conflicts(*events, overrides={"g130home": "PP1"}), {})
+        self.assertEqual(self.conflicts(*events, overrides={"g130home": "EQ"}), {})  # "keep as recorded" is a decision too
+
+
+class ReparseStoredTimelinesTests(GameTimelineTestBase):
+    """game_timeline.reparse / rebuild_game_stats --reparse: a parser fix reaches games stored before it, from their saved raw payload."""
+
+    def stored_ijnl_game(self):
+        """A game stored by the older parser: its document has no assist numbers, its raw payload is the real response."""
+        game = self.make_game(competition="IJNL", external_game_id="49a66dbb")
+        payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
+        old = {**payload, "sections": {key: value for key, value in payload["sections"].items() if key != "lineups"}}
+        document = timeline_parsers.finalize_document(timeline_parsers.parse_ijnl(json.dumps(old)))
+        timeline = GameTimeline.objects.create(event=game, source="IJNL", data=document, data_hash=game_timeline.document_hash(document), raw=timeline_fixture("ijnl_game_49a66dbb.json"), status=GameTimeline.Status.FINAL)
+        return game, timeline
+
+    def assist_numbers(self, timeline):
+        return [[assist.get("number") for assist in event["goal"]["assists"]] for event in timeline.data["events"] if event["type"] == "goal"]
+
+    def test_reparse_applies_the_current_parser_to_the_stored_payload_without_any_signals(self):
+        _game, timeline = self.stored_ijnl_game()
+        moments = GameMoment.objects.count()
+        self.assertEqual(self.assist_numbers(timeline)[0], [None, None])
+
+        self.assertTrue(game_timeline.reparse(timeline))
+
+        timeline.refresh_from_db()
+        self.assertEqual(self.assist_numbers(timeline)[0], [62, 87])
+        self.assertEqual(timeline.data["team_stats"]["home"]["pp_opportunities"], 3)
+        self.assertEqual(timeline.status, GameTimeline.Status.FINAL)
+        self.assertEqual(GameMoment.objects.count(), moments)
+        self.assertFalse(game_timeline.reparse(timeline))  # now in agreement
+
+    def test_reparse_leaves_sources_and_timelines_it_cannot_re_run_alone(self):
+        _game, timeline = self.stored_ijnl_game()
+        timeline.source = "RBIHF"  # its parser needs the game's roster data as well
+        self.assertFalse(game_timeline.reparse(timeline))
+        timeline.source, timeline.raw = "IJNL", ""
+        self.assertFalse(game_timeline.reparse(timeline))
+
+    def test_the_command_reparses_then_rebuilds_the_stats(self):
+        game, timeline = self.stored_ijnl_game()
+        sync_game_stats(game, timeline.data)
+        self.assertEqual(set(GameStat.objects.filter(event=game, stat_type=GameStat.StatType.ASSIST).values_list("player_number", flat=True)), {None})
+
+        call_command("rebuild_game_stats", "--reparse", "--dry-run", stdout=StringIO())
+        timeline.refresh_from_db()
+        self.assertEqual(self.assist_numbers(timeline)[0], [None, None])  # a dry run changes nothing
+        out = StringIO()
+        call_command("rebuild_game_stats", "--reparse", stdout=out)
+
+        self.assertIn("Re-parsed 1 timelines", out.getvalue())
+        self.assertEqual(sorted(GameStat.objects.filter(event=game, stat_type=GameStat.StatType.ASSIST).values_list("player_number", flat=True)), [19, 62, 87, 87])
 
 
 class SettleGameTimelinesTests(GameTimelineTestBase):

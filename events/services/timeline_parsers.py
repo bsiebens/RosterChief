@@ -518,9 +518,49 @@ def _ijnl_player(info) -> dict:
     return player(name.get_text(strip=True) if name else "", (number.get_text(strip=True).lstrip("#") if number else None))
 
 
+def _ijnl_numbers(lineups_html: str) -> dict:
+    """{"home"|"away": {player page link or lower-cased name: jersey number}} from the lineups tab. The
+    timeline names the assists as bare links without a number, which the roster tables do give."""
+    numbers = {"home": {}, "away": {}}
+    cards = BeautifulSoup(lineups_html or "", "html.parser").select(".mp-lineup-grid > .mp-card")
+    for side, card in zip(("home", "away"), cards, strict=False):
+        for row in card.select("tbody tr"):
+            link, cells = row.select_one("a.mp-roster-player"), row.find_all("td")
+            number = cells[0].get_text(strip=True) if cells else ""
+            if link is None or not number.isdigit():
+                continue
+            numbers[side][link.get("href", "")] = int(number)
+            name = link.find_all("span", recursive=False)[-1].get_text(" ", strip=True) if link.find("span", recursive=False) else link.get_text(" ", strip=True)
+            numbers[side][_name_key(name)] = int(number)
+    return numbers
+
+
+def _name_key(name: str) -> str:
+    return re.sub(r"\s+", " ", name or "").strip().lower()
+
+
+def _ijnl_team_stats(scoreboard) -> dict:
+    """The scoreboard's "Teamstatistieken" row ("0/3 Powerplay 0/3", "6 Strafminuten 6") as the
+    document's ``team_stats``: goals / opportunities and penalty minutes per side."""
+    stats = {"home": {}, "away": {}}
+    for span in scoreboard.select(".mp-score-stats > span"):
+        values, label = span.find_all("b"), span.find("small")
+        if len(values) != 2 or label is None:
+            continue
+        name = label.get_text(strip=True).lower()
+        for side, value in zip(("home", "away"), values, strict=True):
+            text = value.get_text(strip=True)
+            if name == "powerplay" and (match := re.fullmatch(r"(\d+)\s*/\s*(\d+)", text)):
+                stats[side]["pp_goals"], stats[side]["pp_opportunities"] = int(match.group(1)), int(match.group(2))
+            elif name == "strafminuten" and text.isdigit():
+                stats[side]["penalty_minutes"] = int(text)
+    return {side: values for side, values in stats.items() if values}
+
+
 def parse_ijnl(game_json: str) -> dict:
     """From an IJNL game ``/data`` response (``part=live`` or core): the
-    timeline section, plus the scoreboard's per-period scores and the state."""
+    timeline section, plus the scoreboard's per-period scores, team statistics and
+    the state, and the lineups' jersey numbers for the assists."""
     try:
         payload = json.loads(game_json)
     except ValueError as error:
@@ -530,10 +570,11 @@ def parse_ijnl(game_json: str) -> dict:
 
     sections = payload.get("sections") or {}
     if "timeline" in sections:
-        timeline_html, scoreboard_html = sections.get("timeline") or "", sections.get("scoreboard") or ""
+        timeline_html, scoreboard_html, lineups_html = sections.get("timeline") or "", sections.get("scoreboard") or "", sections.get("lineups") or ""
     else:
-        timeline_html = scoreboard_html = payload.get("html") or ""
+        timeline_html = scoreboard_html = lineups_html = payload.get("html") or ""
     soup = BeautifulSoup(timeline_html, "html.parser")
+    numbers = _ijnl_numbers(lineups_html)
 
     events = []
     for item in soup.select("li.mp-event"):
@@ -550,7 +591,9 @@ def parse_ijnl(game_json: str) -> dict:
 
         if kind == "goal":
             badges = {badge.get_text(strip=True).upper() for badge in item.select("abbr.mp-badge")}
-            goal = {"scorer": _ijnl_player(info), "assists": [player(link.get_text(strip=True)) for link in (line.find_all("a") if line else [])]}
+            known = numbers.get(side or "", {})
+            assists = [player(link.get_text(strip=True), known.get(link.get("href", ""), known.get(_name_key(link.get_text(strip=True))))) for link in (line.find_all("a") if line else [])]
+            goal = {"scorer": _ijnl_player(info), "assists": assists}
             strength = next((badge for badge in ("PP2", "PP1", "PP", "SH2", "SH1", "SH", "PS") if badge in badges), None)
             goal["strength"] = {"PP": "PP1", "SH": "SH1"}.get(strength, strength) if strength else "EQ"
             goal["empty_net"] = "EN" in badges
@@ -593,6 +636,8 @@ def parse_ijnl(game_json: str) -> dict:
     score_spans = scoreboard.select(".mp-score > span")
     if len(score_spans) == 2 and all(span.get_text(strip=True).isdigit() for span in score_spans):
         document["score"] = {"home": int(score_spans[0].get_text(strip=True)), "away": int(score_spans[1].get_text(strip=True))}
+    if team_stats := _ijnl_team_stats(scoreboard):
+        document["team_stats"] = team_stats
     if payload.get("state") in IJNL_STATES:
         document["status"] = IJNL_STATES[payload["state"]]
     return document
