@@ -135,6 +135,12 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
                 if (penalty.get("kind") or "") in POWER_PLAY_KINDS:
                     opportunities["away" if side == "home" else "home"] += 1
 
+    # A source that only gives goalie totals (IJNL, entered after the game: who played and what they conceded) and no goalie
+    # changes attributes the goals conceded from those.
+    if not any(row.stat_type == CONCEDED for row in rows):
+        for index, goalie in enumerate((document.get("goalies") or {}).get(our_side) or []):
+            add({"id": f"goalies:{our_side}:{index}", "side": our_side}, CONCEDED, goalie.get("player"), value=goalie.get("against") or 0, meta={"seconds_played": goalie.get("seconds")}, ours=True)
+
     # Team totals the source gives (hockeydata): shots, and the power plays it counted. Without
     # them, a power play is counted from the other side's penalties above.
     stats = document.get("team_stats") or {}

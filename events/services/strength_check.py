@@ -7,6 +7,8 @@ short; a misconduct (10) or game misconduct (20) puts the player in the box with
 skater. At most two penalties are served at once (later ones wait their turn), and a goal against a
 team that is a skater down ends its earliest-expiring minor -- but never a major.
 
+One player's penalties on the same second (a 2+2) are served one after the other, so cost a single skater.
+
 A goal is only judged when the penalty timeline can say for sure: not in overtime or a shoot-out,
 not for penalty shots and empty-net goals, and not when a penalty starts or ends on the very
 second of the goal (a delayed penalty's goal waives the minor, and the clock can't order those).
@@ -103,6 +105,7 @@ def strength_conflicts(document: dict, overrides: dict | None = None) -> dict:
     queues = {"home": [], "away": []}
     conflicts = {}
     clock, group, edge = 0, 0, False
+    groups = {}  # (side, second, player) -> the group a player's penalties of that second share
     for event in events:
         seconds = event["seconds"]
         if seconds > clock:  # events sharing a second share what ran out on it
@@ -113,10 +116,15 @@ def strength_conflicts(document: dict, overrides: dict | None = None) -> dict:
         if event["type"] == "penalty":
             penalty = event.get("penalty") or {}
             kind = _kind(penalty)
-            group += 1
             person = penalty.get("player") or {}
             who = f"#{person['number']} {person.get('name', '')}".strip() if person.get("number") is not None else person.get("name", "")
-            entries = _entries(kind, seconds, group, {"time": event.get("time") or "", "player": who, "kind": kind, "side": side})
+            # One player can only sit one penalty at a time: two for the same player on the same second (a 2+2) are
+            # served consecutively, like a double minor, so they share a group.
+            key = (side, seconds, who) if who and (kind in SERVED or kind == DOUBLE_MINOR) else None
+            if key is None or key not in groups:
+                group += 1
+                groups[key] = group
+            entries = _entries(kind, seconds, groups[key], {"time": event.get("time") or "", "player": who, "kind": kind, "side": side})
             # A minor the other side scored on the same second (a delayed penalty) is waived rather than served.
             if (other, seconds) in goals_by_side and entries and entries[0]["cancellable"]:
                 entries = entries[1:]

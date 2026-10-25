@@ -175,6 +175,12 @@ def settle_candidates(now=None):
 FINALIZED = "finalized"
 
 
+def awaiting_goalies(timeline: GameTimeline) -> bool:
+    """IJNL's goalies are entered after the game (they're not part of the timeline itself), so its games aren't
+    finalized until they show up -- the nightly settle keeps fetching them for the rest of the settle window."""
+    return timeline.source == "IJNL" and not (timeline.data or {}).get("goalies")
+
+
 def settle(timeline: GameTimeline, competition) -> str:
     """Re-fetches one finished game. A final timeline that came back unchanged
     is marked finalized and won't be fetched again. Returns FINALIZED, or
@@ -187,7 +193,7 @@ def settle(timeline: GameTimeline, competition) -> str:
     # (GameStat) agree with it before it's marked finalized and left alone for good.
     if timeline.data and ensure_game_stats(timeline.event, timeline.data):
         logger.info("game_timeline.stats_repaired event_id=%s", timeline.event_id)
-    if timeline.status != GameTimeline.Status.FINAL:
+    if timeline.status != GameTimeline.Status.FINAL or awaiting_goalies(timeline):
         return outcome
     timeline.finalized_at = timezone.now()
     timeline.save(update_fields=["finalized_at"])
