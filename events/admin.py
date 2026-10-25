@@ -6,6 +6,7 @@ from .models import (
     Attendance,
     Competition,
     Event,
+    EventAttachment,
     EventFollow,
     EventOfficial,
     EventReferee,
@@ -61,6 +62,21 @@ class EventTaskInline(admin.TabularInline):
     model = EventTask
     extra = 0
     raw_id_fields = ["created_by"]
+
+
+class EventAttachmentInline(admin.TabularInline):
+    model = EventAttachment
+    extra = 0
+    fields = ["name", "file", "size", "uploaded_by"]
+    readonly_fields = ["size"]
+    raw_id_fields = ["uploaded_by"]
+
+
+@admin.register(EventAttachment)
+class EventAttachmentAdmin(admin.ModelAdmin):
+    list_display = ["name", "event", "size", "uploaded_by", "created"]
+    search_fields = ["name", "event__title"]
+    raw_id_fields = ["event", "uploaded_by"]
 
 
 @admin.register(EventSeries)
@@ -137,7 +153,7 @@ class EventAdmin(admin.ModelAdmin):
     search_fields = ["title"]
     date_hierarchy = "start"
     autocomplete_fields = ["season", "series", "location", "opponent", "teams", "groups", "invited_members", "excluded_members"]
-    inlines = [AttendanceInline, EventRefereeInline, EventOfficialInline, EventTaskInline]
+    inlines = [AttendanceInline, EventRefereeInline, EventOfficialInline, EventTaskInline, EventAttachmentInline]
     fieldsets = [
         [None, {"fields": ["title", "kind", "season"]}],
         [_("Series"), {"fields": ["series", "detached", "cancelled"]}],
