@@ -28,7 +28,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from club.models import ClubMembership
-from events.models import Attendance, Event, EventSeries
+from events.models import Attendance, Event, EventAttachment, EventSeries
 from events.services import live_activity, notify_newly_invited, sync_event_attendances
 from events.services.crew_invites import resync_upcoming_invites
 from events.services.game_moments import game_timeline_changed, record_moments
@@ -174,3 +174,11 @@ def resync_invites_on_eligibility_change(sender, instance, **kwargs):
 def resync_invites_on_eligibility_m2m_change(sender, instance, action, **kwargs):
     if action in ("post_add", "post_remove", "post_clear"):
         _resync_after_commit(instance.club)
+
+
+@receiver(post_delete, sender=EventAttachment)
+def delete_attachment_file(sender, instance, **kwargs):
+    """The file lives in private storage, outside the database -- an event deleted with its
+    attachments (cascade) would otherwise leave them on disk forever."""
+    if instance.file:
+        instance.file.delete(save=False)

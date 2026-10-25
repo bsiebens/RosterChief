@@ -1,0 +1,42 @@
+{% load i18n lucide ui %}
+{% comment %}
+    Files attached to the event for the invited people to open (events.models.EventAttachment) -- team managers of this event's own teams/groups, or admins, can upload and delete (EventAttachmentUploadView/DeleteView, gated via club.mixins.EventManagerRequiredMixin same as editing the event). Parents see the same list in the member app.
+
+    Context: event, attachments, attachment_form, can_manage.
+{% endcomment %}
+<div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="card-title">{% lucide "paperclip" size=18 %} {% trans "Attachments" %}</h2>
+    {% if can_manage %}
+        <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ event.pk|dom_id:"attachment_upload_modal" }}').showModal()">{% lucide "upload" size=14 %} {% trans "Upload" %}</button>
+    {% endif %}
+</div>
+<ul class="divide-y divide-rule">
+    {% for attachment in attachments %}
+        <li class="flex flex-wrap items-center justify-between gap-3 py-2.5">
+            <a class="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink hover:underline" href="{% url 'management:event_attachment_download' event.pk attachment.pk %}">
+                {% lucide "file" size=14 %} <span class="truncate">{{ attachment.name }}</span>
+                <span class="shrink-0 text-xs font-normal text-muted">{{ attachment.size|filesizeformat }}</span>
+            </a>
+            {% if can_manage %}
+                <button class="btn btn-outline btn-xs btn-error" type="button" onclick="document.getElementById('{{ attachment.pk|dom_id:"attachment_delete_modal" }}').showModal()">{% lucide "trash-2" size=12 %} {% trans "Delete" %}</button>
+            {% endif %}
+        </li>
+    {% empty %}
+        <li class="py-2.5 text-sm text-muted">{% trans "No attachments yet." %}</li>
+    {% endfor %}
+</ul>
+
+{% if can_manage %}
+    {% trans "Upload attachments" as upload_title %}
+    {% trans "Upload" as upload_label %}
+    {% url 'management:event_attachment_upload' event.pk as attachment_upload_url %}
+    {% include "controlpanel/_modal_form.html" with modal_id=event.pk|dom_id:"attachment_upload_modal" title=upload_title form=attachment_form action_url=attachment_upload_url submit_label=upload_label submit_icon="upload" %}
+
+    {% trans "Delete attachment" as delete_title %}
+    {% trans "Delete" as delete_label %}
+    {% for attachment in attachments %}
+        {% url 'management:event_attachment_delete' event.pk attachment.pk as attachment_delete_url %}
+        {% blocktrans with name=attachment.name asvar delete_body %}Delete “{{ name }}”? This cannot be undone.{% endblocktrans %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=attachment.pk|dom_id:"attachment_delete_modal" title=delete_title body=delete_body action_url=attachment_delete_url submit_label=delete_label %}
+    {% endfor %}
+{% endif %}

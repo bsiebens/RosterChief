@@ -177,6 +177,44 @@
         "title": "AppVersions",
         "type": "object"
       },
+      "AttachmentOut": {
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The file name as uploaded.",
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "description": "Bytes.",
+            "title": "Size",
+            "type": "integer"
+          },
+          "url": {
+            "description": "Path to download it (`GET /events/{id}/attachments/{attachment_id}`); needs the same bearer token.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "size",
+          "created",
+          "url"
+        ],
+        "title": "AttachmentOut",
+        "type": "object"
+      },
       "AttendanceCountsOut": {
         "properties": {
           "checked_in": {
@@ -2813,6 +2851,14 @@
             "title": "Answers",
             "type": "array"
           },
+          "attachments": {
+            "description": "Files the team's managers attached (schedule, map, forms); empty unless a managed person is invited to this event.",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentOut"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "blocked": {
             "description": "Managed people kept off this event by open club requirements.",
             "items": {
@@ -2902,6 +2948,7 @@
           "referee_signups",
           "official_signups",
           "tasks",
+          "attachments",
           "squad_summary",
           "follow"
         ],
@@ -9292,6 +9339,81 @@
           }
         ],
         "summary": "One event",
+        "tags": [
+          "member"
+        ]
+      }
+    },
+    "/api/app/v1/events/{event_id}/attachments/{attachment_id}": {
+      "get": {
+        "description": "For the event's managers and staff, and whoever answers for an invited person; anyone else gets `404`.",
+        "operationId": "appapi_routers_member_event_attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "The file, as a download."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "AppAuth": []
+          }
+        ],
+        "summary": "Download an event attachment",
         "tags": [
           "member"
         ]

@@ -1240,6 +1240,18 @@ class NewsPhotoUploadForm(forms.Form):
     images = MultipleFileField(label=_("Photos"))
 
 
+class EventAttachmentUploadForm(forms.Form):
+    files = MultipleFileField(label=_("Attachments"), help_text=_("One or more files -- documents or pictures, up to 10 MB each."))
+
+    def clean_files(self):
+        from events.services.attachments import validate_attachment_file
+
+        files = self.cleaned_data["files"]
+        for uploaded in files:
+            validate_attachment_file(uploaded)
+        return files
+
+
 class NewsPublishForm(forms.Form):
     published_at = forms.DateTimeField(
         label=_("Publish date"),

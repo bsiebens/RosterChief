@@ -1,15 +1,19 @@
 import datetime
+import secrets
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import SuspiciousFileOperation
 from django.db import models
 from django.db.models import Q
+from django.utils.text import get_valid_filename
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
 from club.models import Club, Season, sport_choices
 from members.models import Group, Member
 from rosterchief.base import ClubScopedModel, UUIDModel, validate_club_scope
+from rosterchief.storage import get_private_storage
 from teams.models import Team
 
 #: How long a game is assumed to run when no explicit `end` is given -- set on
@@ -562,6 +566,41 @@ class EventTaskClaim(UUIDModel):
         return f"{self.task} - {self.member}"
 
 
+def event_attachment_path(attachment, filename):
+    """``event-attachments/<event id>/<random>-<safe file name>`` in private storage. The random
+    prefix keeps two uploads with the same name apart and makes the path unguessable; the original
+    name is kept (made safe for a filesystem) only so a download is recognisable."""
+    try:
+        safe_name = get_valid_filename(filename)
+    except SuspiciousFileOperation:  # a name like "." or "" has nothing usable left
+        safe_name = "file"
+    if len(safe_name) > 100:
+        stem, dot, extension = safe_name.rpartition(".")
+        safe_name = f"{stem[: 100 - len(extension) - 1]}.{extension}" if dot and len(extension) < 10 else safe_name[:100]
+    return f"event-attachments/{attachment.event_id}/{secrets.token_hex(8)}-{safe_name}"
+
+
+class EventAttachment(UUIDModel):
+    """A file a team manager/admin attaches to an event (a tournament schedule, a map, a
+    consent form) for the invited people to open. Stored privately and only ever streamed
+    through an authenticated view (events.services.attachments.can_view_attachments decides
+    who), never a public /media link."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("event"))
+    file = models.FileField(_("file"), storage=get_private_storage, upload_to=event_attachment_path, max_length=255)
+    name = models.CharField(_("name"), max_length=255, help_text=_("The file name as uploaded -- what a download is called."))
+    size = models.PositiveIntegerField(_("size"), default=0, help_text=_("Bytes."))
+    uploaded_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("uploaded by"))
+
+    class Meta:
+        verbose_name = _("event attachment")
+        verbose_name_plural = _("event attachments")
+        ordering = ["event", "created"]
+
+    def __str__(self):
+        return f"{self.event} - {self.name}"
+
+
 class GameTimeline(UUIDModel):
     """What happened during one game -- goals and who scored them, penalties,
     goalie changes, time-outs, period scores -- as fetched from the game's
@@ -674,6 +713,7 @@ class GameStat(ClubScopedModel):
         SHOT = "shot", _("shot on goal")
         POWER_PLAY_OPPORTUNITY = "pp_opportunity", _("power-play opportunity")
         GOAL_CONCEDED = "goal_conceded", _("goal conceded")
+        GOALIE_SECONDS = "goalie_seconds", _("goalie time in net (seconds)")
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="stats", verbose_name=_("event"))
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="game_stats", verbose_name=_("team"))

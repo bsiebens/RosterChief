@@ -130,6 +130,16 @@ def task_out(task) -> dict:
     }
 
 
+def attachment_out(attachment) -> dict:
+    return {
+        "id": attachment.pk,
+        "name": attachment.name,
+        "size": attachment.size,
+        "created": attachment.created,
+        "url": f"/events/{attachment.event_id}/attachments/{attachment.pk}",
+    }
+
+
 def _absolute(request, url: str | None) -> str | None:
     return request.build_absolute_uri(url) if url else None
 

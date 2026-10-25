@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, HttpResponseRedirect
@@ -29,8 +30,9 @@ from appapi.idempotency import idempotent
 from club.models import ClubMembership, Season
 from club.services.access import can_add_news, can_manage_evaluations, current_season, get_current_season
 from controlpanel.messages import notify
-from events.models import Attendance, Event, EventSeries, EventTask, Lineup, LineupSelection, Location, Opponent
+from events.models import Attendance, Event, EventAttachment, EventSeries, EventTask, Lineup, LineupSelection, Location, Opponent
 from events.services import detach_occurrence, generate_occurrences, propagate_series
+from events.services.attachments import add_attachments
 from events.services.attendance import COACH_NOTE_MAX, CoachAnswerError, member_attendance_counts, player_attendance_rankings, record_check_in, set_answer_as_coach
 from events.services.calendar import agenda_groups
 from events.services.coach import COACH_EVENT_KINDS, IN_STATUSES, LINEUP_EVENT_KINDS, OUT_STATUSES, notify_event_cancelled, notify_event_changed, remind_silent, still_current_events
@@ -39,7 +41,7 @@ from events.services.notifications import dispatch_notify_new_event
 from events.services.officials import needs_official_management, officials_enabled_for
 from events.services.recurrence import cancel_occurrence
 from events.services.referees import needs_referee_management
-from management.forms import EventForm, EventSeriesForm, EventTaskForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm, _location_label
+from management.forms import EventAttachmentUploadForm, EventForm, EventSeriesForm, EventTaskForm, LocationForm, NewsForm, NewsPhotoUploadForm, OpponentForm, _location_label
 from management.recurrence_ui import describe_rrule, parse_rrule
 from members.models import Member
 from members.services.family import claim_label_for
@@ -954,6 +956,8 @@ class CoachEventDetailView(CoachScopeMixin, LoginRequiredMixin, TemplateView):
         return super().get_context_data(
             event=event,
             tasks=tasks,
+            attachments=list(event.attachments.all()),
+            attachment_form=EventAttachmentUploadForm(),
             series_summary=series_summary,
             can_edit_pattern=can_edit_pattern,
             is_sheet=_is_sheet_request(self.request),
@@ -1085,6 +1089,45 @@ class CoachEventTaskDeleteView(CoachScopeMixin, LoginRequiredMixin, View):
         title = task.title
         task.delete()
         notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this event.") % {"title": title})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEventAttachmentUploadView(CoachScopeMixin, LoginRequiredMixin, View):
+    """The Attachments card's "Upload": one or more files onto an event of the active team.
+    Managers only (``can_manage_active_team``); everyone on the staff can open them."""
+
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        form = EventAttachmentUploadForm(request.POST, request.FILES)
+        try:
+            if not form.is_valid():
+                raise ValidationError([message for errors in form.errors.values() for message in errors])
+            added = add_attachments(event, form.cleaned_data["files"], self.me)
+        except ValidationError as error:
+            notify(request, f"e|{_('Could not upload')}|{' '.join(error.messages)}")
+        else:
+            notify(request, f"s|{_('Uploaded')}|" + ngettext("%(count)s file was attached to this event.", "%(count)s files were attached to this event.", len(added)) % {"count": len(added)})
+        return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
+
+
+class CoachEventAttachmentDeleteView(CoachScopeMixin, LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        if self.active_team is None:
+            raise Http404
+        if not self.can_manage_active_team:
+            return HttpResponseForbidden()
+
+        event = get_object_or_404(Event, pk=kwargs["pk"], club=request.club, teams=self.active_team)
+        attachment = get_object_or_404(EventAttachment, pk=kwargs["attachment_pk"], event=event)
+        name = attachment.name
+        attachment.file.delete(save=False)
+        attachment.delete()
+        notify(request, f"w|{_('Attachment deleted')}|" + _("“%(name)s” was removed from this event.") % {"name": name})
         return HttpResponseRedirect(reverse("mobile:coach_event_detail", kwargs={"pk": event.pk}))
 
 

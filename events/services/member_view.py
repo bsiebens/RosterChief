@@ -60,7 +60,7 @@ def member_event_view(event, club, people, me, *, officials_enabled: bool, inclu
     """Keys: ``rsvp_closed``, ``started``, ``lineup`` (the published one or ``None``) and
     ``lineup_categories``; ``referee_signups`` / ``official_signups`` (managed people's
     open or accepted invites -- plus declined ones until the event starts, with
-    ``include_declined``, as the app API's calendar does); ``tasks``; ``your_answers`` (``{"member", "attendance",
+    ``include_declined``, as the app API's calendar does); ``tasks``; ``attachments`` (the event's files, only when a managed person is invited); ``your_answers`` (``{"member", "attendance",
     "membership"}`` per invited managed person); ``blocked_signups`` (``{"member",
     "requirements"}`` for managed people kept off by onboarding); ``squad_summary``."""
     now = now or timezone.now()
@@ -77,6 +77,7 @@ def member_event_view(event, club, people, me, *, officials_enabled: bool, inclu
         "referee_signups": [],
         "official_signups": [],
         "tasks": event_tasks(event, me),
+        "attachments": [],
         "your_answers": [],
         "blocked_signups": [],
         "squad_summary": squad_summary(event),
@@ -111,4 +112,7 @@ def member_event_view(event, club, people, me, *, officials_enabled: bool, inclu
                     view["blocked_signups"].append({"member": person, "requirements": requirements})
             continue
         view["your_answers"].append({"member": person, "attendance": attendance, "membership": memberships_by_member.get(person.pk)})
+    # Attachments are for the invited: anyone answering for an invited person gets the list.
+    if view["your_answers"]:
+        view["attachments"] = list(event.attachments.all())
     return view

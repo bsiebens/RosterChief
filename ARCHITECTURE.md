@@ -793,6 +793,16 @@ still name only *one* of them (the requested team on `/teams/{id}/games/`, else 
 name) opposite the opponent; they're kept unchanged for external sites already reading them,
 but a multi-team game should be read through `teams`.
 
+**`EventAttachment`** *(built)* — files a team manager/admin attaches to an event (schedule, map,
+consent form). `file` is in **private storage** (`event-attachments/<event id>/<random>-<name>`), so it is
+only ever streamed through an authenticated view (`events.services.attachments.attachment_response`,
+always `as_attachment`), never a `/media` link. Upload/delete use the same authority as editing the event
+(`EventManagerRequiredMixin` on the management site; `can_manage_active_team` in Coach mode). Who may *open*
+one is `can_view_attachments`: admins, managers/staff of the event's teams, group managers, and whoever
+answers for an invited person (own member or parent of an invited child) — `member_event_view` only returns
+`attachments` in that case, so the member app/desktop event page lists them. Limits: 10 MB per file,
+20 per event, document/image extensions only. The `post_delete` signal removes the stored file.
+
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**
 only (`Event.is_home_game`), staff-assigned for now (self-service subscribe is a planned

@@ -99,8 +99,9 @@ from evaluations.services import (
     start_session,
     submit_evaluation,
 )
-from events.models import Attendance, Event, EventOfficial, EventReferee, EventSeries, EventTask, GameTimeline, Location, OfficialSignup, Opponent, RefereeSignup
+from events.models import Attendance, Event, EventAttachment, EventOfficial, EventReferee, EventSeries, EventTask, GameTimeline, Location, OfficialSignup, Opponent, RefereeSignup
 from events.services import dfel_import, ijnl_import, import_sources, json_import
+from events.services.attachments import add_attachments, attachment_response
 from events.services.attendance import member_attendance_counts, member_attendance_sparkline, player_attendance_rankings, players_who_missed_recent_practices, team_attendance_rate, team_no_shows
 from events.services.calendar import add_months, agenda_groups, month_bounds, month_grid, season_grid, week_bounds, week_grid
 from events.services.competitions import CompetitionFetchError, fetch_game_info
@@ -183,6 +184,7 @@ from .forms import (
     DFELImportForm,
     DiscountForm,
     EvaluationChecklistForm,
+    EventAttachmentUploadForm,
     EventForm,
     EventOfficialFeeForm,
     EventRefereeFeeForm,
@@ -3624,6 +3626,8 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             pending_official_signups=pending_official_signups,
             tasks=tasks,
             task_form=task_form,
+            attachments=list(event.attachments.all()),
+            attachment_form=EventAttachmentUploadForm(),
             game_timeline=game_timeline,
             game_timeline_view=display_timeline(game_timeline, event) if game_timeline else None,
             game_moments=[(moment, describe_moment(moment)) for moment in event.moments.all()] if game_timeline else [],
@@ -3938,6 +3942,67 @@ class EventTaskDeleteView(EventManagerRequiredMixin, View):
         task.delete()
         notify(request, f"w|{_('Task deleted')}|" + _("“%(title)s” was removed from this event.") % {"title": title})
         return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
+class EventAttachmentUploadView(EventManagerRequiredMixin, View):
+    """ "Upload" on the event detail page's Attachments panel -- same authority as editing the
+    event (club.mixins.EventManagerRequiredMixin)."""
+
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def post(self, request, pk):
+        event = self.get_event()
+        form = EventAttachmentUploadForm(request.POST, request.FILES)
+        try:
+            if not form.is_valid():
+                raise ValidationError([message for errors in form.errors.values() for message in errors])
+            added = add_attachments(event, form.cleaned_data["files"], Member.objects.filter(user=request.user).first())
+        except ValidationError as error:
+            notify(request, f"e|{_('Could not upload')}|{' '.join(error.messages)}")
+        else:
+            notify(request, f"s|{_('Uploaded')}|" + ngettext("%(count)s file was attached to this event.", "%(count)s files were attached to this event.", len(added)) % {"count": len(added)})
+        return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
+class EventAttachmentDeleteView(EventManagerRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def post(self, request, pk, attachment_pk):
+        event = self.get_event()
+        attachment = get_object_or_404(EventAttachment.objects.filter(event=event), pk=attachment_pk)
+        name = attachment.name
+        attachment.file.delete(save=False)
+        attachment.delete()
+        notify(request, f"w|{_('Attachment deleted')}|" + _("“%(name)s” was removed from this event.") % {"name": name})
+        return redirect(reverse("management:event_detail", args=[event.pk]))
+
+
+class EventAttachmentDownloadView(EventManagerRequiredMixin, View):
+    def get_event(self):
+        return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
+
+    def get_teams(self):
+        return self.get_event().teams.all()
+
+    def get_groups(self):
+        return self.get_event().groups.all()
+
+    def get(self, request, pk, attachment_pk):
+        return attachment_response(get_object_or_404(EventAttachment.objects.filter(event=self.get_event()), pk=attachment_pk))
 
 
 def _club_games_needing_management(club, lookup, *, upcoming_only=False, season=None):

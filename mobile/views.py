@@ -44,9 +44,10 @@ from club.services.invoicing import invoice_pdf as dues_invoice_pdf
 from club.services.onboarding import checklist_for
 from club.services.sponsors import active_sponsors
 from controlpanel.messages import notify
-from events.models import Attendance, Event, EventTask, OfficialSignup, RefereeSignup
+from events.models import Attendance, Event, EventAttachment, EventTask, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS as AGENDA_KIND_FILTERS
 from events.services.agenda import member_agenda
+from events.services.attachments import attachment_response, can_view_attachments
 from events.services.calendar import agenda_groups
 from events.services.game_push import follow_event, followed_team_ids, set_followed_teams, unfollow_event
 from events.services.member_view import member_event_view
@@ -477,6 +478,7 @@ def _event_context(view, event, *, in_sheet=False, error=None) -> dict:
         "referee_signups": member_view["referee_signups"],
         "official_signups": member_view["official_signups"],
         "tasks": member_view["tasks"],
+        "attachments": member_view["attachments"],
         "your_answers": event_ui.shape_answers(member_view, event),
         "blocked_signups": member_view["blocked_signups"],
         "squad_summary": member_view["squad_summary"],
@@ -871,6 +873,18 @@ class OfficialSignupRespondView(PersonScopeMixin, LoginRequiredMixin, View):
         if request.POST.get("next") == "event_detail":
             return HttpResponseRedirect(reverse("mobile:event_detail", kwargs={"pk": signup.event_id}))
         return HttpResponseRedirect(_return_url(request, reverse("mobile:calendar")))
+
+
+class EventAttachmentDownloadView(PersonScopeMixin, LoginRequiredMixin, View):
+    """Opens one of an event's attachments -- the managers, the team's staff, and whoever answers
+    for an invited person (events.services.attachments.can_view_attachments). Anyone else gets a
+    404 that doesn't confirm the file exists."""
+
+    def get(self, request, pk, attachment_pk):
+        attachment = get_object_or_404(EventAttachment.objects.select_related("event"), pk=attachment_pk, event_id=pk, event__club=request.club)
+        if not can_view_attachments(request.user, request.club, attachment.event, self.managed_people):
+            raise Http404("No such file.")
+        return attachment_response(attachment)
 
 
 class EventTaskRespondView(PersonScopeMixin, LoginRequiredMixin, View):
