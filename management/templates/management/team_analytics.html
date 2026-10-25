@@ -37,6 +37,9 @@
 {% endblock filter_strip %}
 
 {% block actions %}
+    {% if analytics.games %}
+        <a class="btn btn-outline gap-2" href="{% url 'management:team_analytics_pdf' team.pk %}?{{ request.GET.urlencode }}">{% lucide "file-down" size=16 %} {% trans "Export to PDF" %}</a>
+    {% endif %}
     <a class="btn btn-outline gap-2" href="{% url 'management:team_detail' team.pk %}{% if selected_season %}?season={{ selected_season.pk }}{% endif %}">{% lucide "arrow-left" size=16 %} {% trans "Back to team" %}</a>
 {% endblock actions %}
 

@@ -249,7 +249,7 @@ from .forms import (
     _text_from_options,
     bulk_add_member_label,
 )
-from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, number_list_colors, number_list_pdf, referee_form_colors
+from .pdf import PDFExportError, evaluation_outcomes_pdf, event_official_form_pdf, event_referee_form_pdf, membership_list_pdf, number_list_colors, number_list_pdf, referee_form_colors, team_analytics_pdf
 from .pdf_previews import PDF_PREVIEWS, PDF_PREVIEWS_BY_KEY, render_pdf_preview
 from .recurrence_ui import describe_rrule
 from .shop_export import build_production_export, pop_production_export, stash_production_export
@@ -1559,6 +1559,32 @@ class TeamAnalyticsView(FeatureFlagMixin, ClubStaffRequiredMixin, DetailView):
         context["scopes"] = [(key, label, query(games=key)) for key, label in (("all", _("All games")), ("home", _("Home")), ("away", _("Away")), ("last5", _("Last 5")))]
         context["friendlies_query"] = query(friendlies="0" if friendlies else "")
         return context
+
+
+class TeamAnalyticsPdfView(TeamAnalyticsView):
+    """The analytics page as a printable summary for sharing -- the same season, game scope, friendlies and
+    competition filters as the page it is opened from (whatever query string it currently has), the same numbers."""
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        context = self.get_context_data(object=self.object, club=request.club, generated_at=timezone.now())
+        analytics = context["analytics"]
+        back = f"{reverse('management:team_analytics', args=[self.object.pk])}?{request.GET.urlencode()}"
+        if not analytics or not analytics["games"]:
+            notify(request, f"e|{_('PDF unavailable')}|{_('There are no finished games with a score to export.')}")
+            return redirect(back)
+        context["scope_label"] = next((label for key, label, _query in context["scopes"] if key == context["scope"]), "")
+        context["leaderboards"] = [(_("Top scorers"), analytics["top_scorers"]), (_("Top assists"), analytics["top_assists"]), (_("Top points"), analytics["top_points"]), (_("In the box (penalty min.)"), analytics["top_offenders"])]
+
+        try:
+            pdf = team_analytics_pdf(context)
+        except PDFExportError as error:
+            notify(request, f"e|{_('PDF unavailable')}|{error}")
+            return redirect(back)
+
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="analytics-{slugify(self.object.name)}-{context["selected_season"].start_date:%Y}.pdf"'
+        return response
 
 
 class TeamAnalyticsStrengthView(TeamAnalyticsView):

@@ -16422,6 +16422,45 @@ class TeamAnalyticsTests(ManagementTestBase):
         self.assertEqual((analytics["game_misconduct_minutes"], analytics["avg_pim_excl_game_misconducts"]), (0, None))
         self.assertNotContains(self.club_get("team_analytics", self.team.pk), "including game misconducts")
 
+    def test_pdf_export_carries_the_page_s_numbers_and_filters(self):
+        sync_game_stats(self.game, self.document)
+
+        with mock.patch("management.pdf.render_pdf", side_effect=lambda html: html.encode()):
+            response = self.club_get("team_analytics_pdf", self.team.pk, params={"games": "away", "friendlies": "0"})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn("Analytics A", body)
+        self.assertIn("Sam Scorer", body)  # a leaderboard entry
+        self.assertIn("friendlies excluded", body)
+        self.assertIn("Away", body)
+
+    def test_pdf_export_downloads_as_a_pdf(self):
+        sync_game_stats(self.game, self.document)
+
+        with mock.patch("management.views.team_analytics_pdf", return_value=b"%PDF-fake"):
+            response = self.club_get("team_analytics_pdf", self.team.pk)
+
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(f'attachment; filename="analytics-analytics-a-{self.season.start_date:%Y}.pdf"', response["Content-Disposition"])
+
+    def test_pdf_export_without_finished_games_or_pdf_libraries_goes_back_to_the_page(self):
+        Event.objects.filter(pk=self.game.pk).update(score_for=None, score_against=None)
+        page = reverse("management:team_analytics", args=[self.team.pk])
+
+        self.assertRedirects(self.club_get("team_analytics_pdf", self.team.pk), page + "?", fetch_redirect_response=False)
+        Event.objects.filter(pk=self.game.pk).update(score_for=3, score_against=1)
+        with mock.patch("management.views.team_analytics_pdf", side_effect=PDFExportError("no native libs")):
+            self.assertRedirects(self.club_get("team_analytics_pdf", self.team.pk), page + "?", fetch_redirect_response=False)
+
+    def test_pdf_export_is_only_for_ice_hockey_and_the_button_follows_the_page(self):
+        sync_game_stats(self.game, self.document)
+        pdf_url = reverse("management:team_analytics_pdf", args=[self.team.pk])
+
+        self.assertContains(self.club_get("team_analytics", self.team.pk, params={"games": "away"}), f"{pdf_url}?games=away")
+        Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.OTHER)
+        self.assertEqual(self.club_get("team_analytics_pdf", self.team.pk).status_code, 404)
+
     def test_page_and_button_are_hidden_for_a_club_playing_another_sport(self):
         Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.OTHER)
 

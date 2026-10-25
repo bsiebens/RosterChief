@@ -9,6 +9,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 import requests
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.cache import cache
@@ -4492,9 +4493,24 @@ class TimelineParserTests(TestCase):
 
         goals = [event["goal"] for event in document["events"] if event["type"] == "goal"]
         self.assertEqual((document["score"], document["status"], len(goals)), ({"home": 3, "away": 4}, "final", 7))
-        self.assertEqual([[assist["number"] for assist in goal["assists"]] for goal in goals], [[62, 87], [], [19], [87], [], [], []])
+        self.assertEqual([[assist["number"] for assist in goal["assists"]] for goal in goals], [[62, 87], [], [19, 4], [87], [], [4], []])
         # The same jersey number on both teams (#20) resolves per side.
-        self.assertEqual(document["team_stats"], {"home": {"pp_goals": 0, "pp_opportunities": 3, "penalty_minutes": 6}, "away": {"pp_goals": 0, "pp_opportunities": 3, "penalty_minutes": 6}})
+        self.assertEqual(document["team_stats"], {"home": {"pp_goals": 1, "pp_opportunities": 3, "penalty_minutes": 6}, "away": {"pp_goals": 1, "pp_opportunities": 3, "penalty_minutes": 6}})
+
+    def test_ijnl_goalies_who_played_come_from_the_lineups_and_a_listed_backup_is_left_out(self):
+        document = timeline_parsers.parse_ijnl(timeline_fixture("ijnl_game_49a66dbb.json"))
+
+        self.assertEqual(
+            document["goalies"],
+            {"home": [{"player": {"name": "Player 55", "number": 55}, "seconds": 3600, "against": 4}], "away": [{"player": {"name": "Player 30", "number": 30}, "seconds": 3600, "against": 3}]},  # the away backup (#1, 0:00, 0 against) didn't play
+        )
+
+    def test_an_ijnl_game_without_goalies_entered_yet_has_none(self):
+        payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
+        payload["sections"]["lineups"] = payload["sections"]["lineups"].replace("60:00", "0:00")  # nobody has playing time or goals against yet
+        payload["sections"]["lineups"] = payload["sections"]["lineups"].replace("<td>4</td>", "<td>0</td>").replace("<td>3</td>", "<td>0</td>")
+
+        self.assertNotIn("goalies", timeline_parsers.parse_ijnl(json.dumps(payload)))
 
     def test_ijnl_assists_without_a_lineup_keep_their_name_only(self):
         payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
@@ -4847,6 +4863,19 @@ class StrengthCheckTests(SimpleTestCase):
         self.assertEqual(self.conflicts(double, goal_event(60, "home", "PP1"), goal_event(150, "home", "PP1"), goal_event(190, "home", "EQ")), {})
         self.assertEqual(self.conflicts(double, goal_event(60, "home", "PP1"), goal_event(190, "home", "PP1")), {"g190home": "EQ"})
 
+    def test_two_penalties_for_the_same_player_at_the_same_time_are_served_one_after_the_other(self):
+        # A 2+2: one player in the box, so the team is one skater down (not two), for up to four minutes.
+        twice = [penalty_event(100, "away"), {**penalty_event(100, "away"), "id": "p100away2"}]
+        self.assertEqual(self.conflicts(*twice, goal_event(130, "home", "EQ")), {"g130home": "PP1"})  # not a 5-on-3
+        self.assertEqual(self.conflicts(*twice, goal_event(130, "home", "PP2")), {})  # (PP1 or PP2 are both a power play)
+        self.assertEqual(self.conflicts(*twice, goal_event(330, "home", "PP1")), {})  # still serving the second minor at 3:30 (100 + 2 x 120 = 340)
+        self.assertEqual(self.conflicts(*twice, goal_event(345, "home", "PP1")), {"g345home": "EQ"})
+        # A goal on the power play ends the first minor; the second starts then and runs two more minutes.
+        self.assertEqual(self.conflicts(*twice, goal_event(130, "home", "PP1"), goal_event(240, "home", "PP1"), goal_event(260, "home", "EQ")), {})
+        # Two different players at the same time are still a 5-on-3.
+        other = {**penalty_event(100, "away"), "id": "p100away2", "penalty": {**penalty_event(100, "away")["penalty"], "player": {"name": "Other", "number": 12}}}
+        self.assertEqual(self.conflicts(penalty_event(100, "away"), other, goal_event(130, "home", "EQ")), {"g130home": "PP2"})
+
     def test_coincidental_minors_are_even_strength(self):
         self.assertEqual(self.conflicts(penalty_event(100, "away"), penalty_event(100, "home"), goal_event(130, "home", "EQ")), {})
 
@@ -4919,7 +4948,54 @@ class ReparseStoredTimelinesTests(GameTimelineTestBase):
         call_command("rebuild_game_stats", "--reparse", stdout=out)
 
         self.assertIn("Re-parsed 1 timelines", out.getvalue())
-        self.assertEqual(sorted(GameStat.objects.filter(event=game, stat_type=GameStat.StatType.ASSIST).values_list("player_number", flat=True)), [19, 62, 87, 87])
+        self.assertEqual(sorted(GameStat.objects.filter(event=game, stat_type=GameStat.StatType.ASSIST).values_list("player_number", flat=True)), [4, 4, 19, 62, 87, 87])
+
+
+class IJNLGoalieTests(GameTimelineTestBase):
+    """IJNL enters its goalies after the game: they become the goals conceded, and a game isn't settled before they are in."""
+
+    def fetch(self, *, goalies):
+        payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
+        if not goalies:
+            payload["sections"].pop("lineups")
+        return game_timeline.TimelineFetch(document=timeline_parsers.parse_ijnl(json.dumps(payload)), raw=json.dumps(payload))
+
+    def test_the_goalies_become_the_goals_conceded_by_our_side(self):
+        game = self.make_game(competition="IJNL", external_game_id="49a66dbb")  # a home game: our goalie is the home one
+
+        game_timeline.store(game, self.fetch(goalies=True))
+
+        rows = GameStat.objects.filter(event=game, stat_type=GameStat.StatType.GOAL_CONCEDED)  # the timeline's own goalie changes attribute each goal
+        self.assertEqual((sum(row.value for row in rows), {row.player_name for row in rows}, {row.is_ours for row in rows}), (4, {"Player 55"}, {True}))
+
+    def test_without_goalie_changes_in_the_timeline_the_lineup_totals_are_used(self):
+        game = self.make_game(competition="IJNL", external_game_id="49a66dbb")
+        payload = json.loads(timeline_fixture("ijnl_game_49a66dbb.json"))
+        timeline = BeautifulSoup(payload["sections"]["timeline"], "html.parser")
+        for item in timeline.select('li.mp-event[data-event="goalie"]'):
+            item.decompose()
+        payload["sections"]["timeline"] = str(timeline)
+
+        game_timeline.store(game, game_timeline.TimelineFetch(document=timeline_parsers.parse_ijnl(json.dumps(payload))))
+
+        [conceded] = GameStat.objects.filter(event=game, stat_type=GameStat.StatType.GOAL_CONCEDED)
+        self.assertEqual((conceded.player_name, conceded.player_number, conceded.value, conceded.is_ours, conceded.meta), ("Player 55", 55, 4, True, {"seconds_played": 3600}))
+
+    def test_a_game_is_not_settled_until_its_goalies_are_in(self):
+        self.enable("IJNL", "game_timeline")
+        game = self.make_game(competition="IJNL", external_game_id="49a66dbb", start=timezone.now() - timedelta(hours=5))
+        game_timeline.store(game, self.fetch(goalies=False))
+
+        def settle(goalies):
+            with mock.patch("events.competition.hockey.IJNL.fetch_timeline", side_effect=lambda event: self.fetch(goalies=goalies)):
+                call_command("settle_game_timelines")
+            game.timeline.refresh_from_db()
+            return game.timeline.finalized_at
+
+        self.assertIsNone(settle(goalies=False))  # unchanged and final, but no goalies yet: fetched again tomorrow
+        self.assertIsNone(settle(goalies=True))  # the goalies arrive: a change
+        self.assertTrue(GameStat.objects.filter(event=game, stat_type=GameStat.StatType.GOAL_CONCEDED).exists())
+        self.assertIsNotNone(settle(goalies=True))  # and now it stays that way
 
 
 class SettleGameTimelinesTests(GameTimelineTestBase):

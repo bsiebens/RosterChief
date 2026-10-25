@@ -535,6 +535,25 @@ def _ijnl_numbers(lineups_html: str) -> dict:
     return numbers
 
 
+def _ijnl_goalies(lineups_html: str) -> dict:
+    """{"home"|"away": [{"player", "seconds", "against"}]} from the lineups tab's Goalies tables (number, name, playing
+    time, goals against) -- the goalies who actually played, not a listed backup. Entered after the game, so it is
+    empty until then (the timeline itself has no goalie changes)."""
+    goalies = {}
+    cards = BeautifulSoup(lineups_html or "", "html.parser").select(".mp-lineup-grid > .mp-card")
+    for side, card in zip(("home", "away"), cards, strict=False):
+        for row in card.select("table[data-sort-table$=goalies] tbody tr"):
+            link, cells = row.select_one("a.mp-roster-player"), row.find_all("td")
+            if link is None or len(cells) < 4:
+                continue
+            name = link.find_all("span", recursive=False)[-1].get_text(" ", strip=True) if link.find("span", recursive=False) else link.get_text(" ", strip=True)
+            seconds = clock_seconds(cells[2].get_text(strip=True)) or 0
+            against = int(cells[3].get_text(strip=True)) if cells[3].get_text(strip=True).isdigit() else 0
+            if seconds or against:
+                goalies.setdefault(side, []).append({"player": player(name, cells[0].get_text(strip=True)), "seconds": seconds, "against": against})
+    return goalies
+
+
 def _name_key(name: str) -> str:
     return re.sub(r"\s+", " ", name or "").strip().lower()
 
@@ -638,6 +657,8 @@ def parse_ijnl(game_json: str) -> dict:
         document["score"] = {"home": int(score_spans[0].get_text(strip=True)), "away": int(score_spans[1].get_text(strip=True))}
     if team_stats := _ijnl_team_stats(scoreboard):
         document["team_stats"] = team_stats
+    if goalies := _ijnl_goalies(lineups_html):
+        document["goalies"] = goalies
     if payload.get("state") in IJNL_STATES:
         document["status"] = IJNL_STATES[payload["state"]]
     return document
