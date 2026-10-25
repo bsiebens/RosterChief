@@ -13,8 +13,9 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from ninja import Query, Router
 
-from events.models import Attendance, Event, EventTask, EventTaskClaim, GameTimeline, OfficialSignup, RefereeSignup
+from events.models import Attendance, Event, EventAttachment, EventTask, EventTaskClaim, GameTimeline, OfficialSignup, RefereeSignup
 from events.services.agenda import KIND_FILTERS, member_agenda
+from events.services.attachments import attachment_response, can_view_attachments
 from events.services.game_push import FOLLOWED_GAME_LOOKBACK, follow_event, follow_state, followed_event_ids, followed_games, followed_team_ids, set_followed_teams, unfollow_event
 from events.services.game_timeline import timeline_for_api
 from events.services.member_view import event_tasks, member_event_view
@@ -27,7 +28,7 @@ from teams.models import Team
 
 from ..errors import ApiError
 from ..models import LiveActivity, PushDevice
-from ..presenters import attendance_out, event_out, followed_game_out, money, news_summary, season_out, signup_out, task_out
+from ..presenters import attachment_out, attendance_out, event_out, followed_game_out, money, news_summary, season_out, signup_out, task_out
 from ..schemas import AttendanceOut, CalendarOut, ErrorOut, EventDetailOut, FollowStateOut, GameFollowsIn, GameFollowsOut, HomeOut, LiveActivityIn, LiveActivityOut, RsvpIn, SignupOut, SignupResponseIn, TaskOut
 from ..scope import club_scope
 
@@ -223,10 +224,26 @@ def event_detail(request, event_id: uuid.UUID):
         "referee_signups": [signup_out(signup) for signup in view["referee_signups"]],
         "official_signups": [signup_out(signup) for signup in view["official_signups"]],
         "tasks": [task_out(task) for task in view["tasks"]],
+        "attachments": [attachment_out(attachment) for attachment in view["attachments"]],
         "squad_summary": {key: view["squad_summary"][key] for key in ("total", "responded", "in_count", "out_count", "no_reply_count")} if view["squad_summary"] else None,
         "follow": follow_state(request.user, scope.club, event) if event.kind == Event.EventKind.GAME and scope.feature("game_timeline") else {"directly": False, "via_team": False},
         "game_timeline": _game_timeline(scope, event),
     }
+
+
+@router.get(
+    "/events/{event_id}/attachments/{attachment_id}",
+    response={200: None, **ERRORS},
+    summary="Download an event attachment",
+    openapi_extra={"responses": {200: {"description": "The file, as a download.", "content": {"application/octet-stream": {}}}}},
+)
+def event_attachment(request, event_id: uuid.UUID, attachment_id: uuid.UUID):
+    """For the event's managers and staff, and whoever answers for an invited person; anyone else gets `404`."""
+    scope = club_scope(request)
+    attachment = get_object_or_404(EventAttachment.objects.select_related("event"), pk=attachment_id, event_id=event_id, event__club=scope.club)
+    if not can_view_attachments(request.user, scope.club, attachment.event, scope.people):
+        raise ApiError(404, "not_found")
+    return attachment_response(attachment)
 
 
 def _game_timeline(scope, event):

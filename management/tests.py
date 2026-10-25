@@ -16381,6 +16381,24 @@ class TeamAnalyticsTests(ManagementTestBase):
         self.assertEqual(analytics["top_scorers"][0]["name"], "Sam Scorer")
         self.assertEqual(analytics["top_offenders"][0]["name"], "Pat Penalty")
 
+    def test_goalie_time_in_net_comes_from_the_goalie_changes(self):
+        starter, backup = {"name": "Gus Goalie", "number": 1}, {"name": "Bo Backup", "number": 30}
+        document = {
+            "events": [
+                {"id": "gc1", "type": "goalie_change", "period": "1", "seconds": 0, "side": "away", "goalie_change": {"player": starter, "action": "in"}},
+                {"id": "g2", "type": "goal", "period": "1", "seconds": 600, "side": "home", "goal": {"scorer": {"name": "Them Scorer", "number": 5}, "assists": []}},
+                {"id": "gc2", "type": "goalie_change", "period": "2", "seconds": 1800, "side": "away", "goalie_change": {"player": starter, "action": "out"}},
+                {"id": "gc3", "type": "goalie_change", "period": "2", "seconds": 1800, "side": "away", "goalie_change": {"player": backup, "action": "in"}},
+                {"id": "pe3", "type": "period_end", "period": "3", "seconds": 3600, "side": "home"},
+            ]
+        }
+        sync_game_stats(self.game, document)
+
+        goalies = {row["name"]: row for row in team_analytics(self.team, self.season)["goalies"]}
+
+        self.assertEqual((goalies["Gus Goalie"]["minutes"], goalies["Gus Goalie"]["total"], goalies["Gus Goalie"]["gaa"]), (30, 1, 2.0))
+        self.assertEqual((goalies["Bo Backup"]["minutes"], goalies["Bo Backup"]["total"], goalies["Bo Backup"]["gaa"]), (30, 0, 0.0))
+
     def test_page_renders_for_admin(self):
         sync_game_stats(self.game, self.document)
 

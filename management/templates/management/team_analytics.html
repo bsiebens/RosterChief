@@ -313,7 +313,7 @@
                 {% if analytics.timeline_games %}
                     <div class="mt-6 flex h-32 items-end gap-3 border-b-2 border-ink pt-6">
                         {% for row in analytics.game_rows reversed %}
-                            <div class="flex h-full flex-1 items-end justify-center gap-px">
+                            <div class="flex h-full flex-1 items-end justify-center gap-1.5">
                                 <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-ink">{{ row.pim_for|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-ink" style="height: {{ row.pim_for_pct }}%"></div></div>
                                 <div class="flex h-full w-2 flex-col items-center justify-end"><span class="shrink-0 font-mono text-[11px] font-bold text-club-dark">{{ row.pim_against|default_if_none:"–" }}</span><div class="w-full min-h-[3px] shrink-0 rounded-t-sm bg-club" style="height: {{ row.pim_against_pct }}%"></div></div>
                             </div>
@@ -350,7 +350,7 @@
                 </div>
                 <ul class="mt-4 flex flex-col gap-2 text-[15px] text-ink">
                     {% for row in analytics.goalies %}
-                        <li class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm {% if forloop.first %}bg-ink{% else %}bg-muted{% endif %}"></span><span class="min-w-0 flex-1 truncate font-semibold">{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</span><span class="font-mono text-sm font-semibold">{{ row.total }} {% trans "GA" %}</span></li>
+                        <li class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm {% if forloop.first %}bg-ink{% else %}bg-muted{% endif %}"></span><span class="min-w-0 flex-1 truncate font-semibold">{% if row.number is not None %}#{{ row.number }} {% endif %}{{ row.name }}</span><span class="shrink-0 font-mono text-sm font-semibold">{{ row.total }} {% trans "GA" %}{% if row.minutes is not None %} <span class="text-muted">· {{ row.minutes }} {% trans "min" %} · {{ row.gaa }} {% trans "GAA" %}</span>{% endif %}</span></li>
                     {% endfor %}
                     {% if analytics.goalie_unattributed %}
                         <li class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm bg-rule"></span><span class="min-w-0 flex-1 truncate">{% trans "No goalie on the timeline" %}</span><span class="font-mono text-sm font-semibold">{{ analytics.goalie_unattributed }} {% trans "GA" %}</span></li>
@@ -358,7 +358,7 @@
                         <li class="text-sm text-muted">{% trans "No goalie data yet." %}</li>
                     {% endif %}
                 </ul>
-                <p class="mt-auto pt-6 text-xs text-muted">{% trans "Goals against while a goalie was in the net, from the timeline's goalie changes (empty-net goals excluded)." %}</p>
+                <p class="mt-auto pt-6 text-xs text-muted">{% trans "Goals against while a goalie was in the net, from the timeline's goalie changes (empty-net goals excluded). Minutes are the time between a goalie going in and out; GAA is goals against per 60 minutes in net." %}</p>
             </section>
         </div>
 

@@ -158,6 +158,10 @@
     {% include "mobile/_event_tasks.html" %}
 {% endif %}
 
+{% if attachments %}
+    {% include "mobile/_event_attachments.html" %}
+{% endif %}
+
 {% if squad_summary %}
     <div class="m-card p-3.5">
         <div class="flex items-center justify-between">
@@ -211,7 +215,7 @@
     {% include "mobile/_event_signups.html" with signups=official_signups heading=signups_heading respond_url="mobile:official_signup_respond" accent="official" accept_label=signups_accept %}
 {% endif %}
 
-{% if not your_answers and not squad_summary and not lineup and not referee_signups and not blocked_signups and not tasks and not official_signups %}
+{% if not your_answers and not squad_summary and not lineup and not referee_signups and not blocked_signups and not tasks and not attachments and not official_signups %}
     <div class="m-card p-6 text-center">
         <p class="text-sm text-muted">{% trans "No one you manage is invited to this event." %}</p>
     </div>

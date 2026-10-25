@@ -1,0 +1,16 @@
+{% load i18n lucide %}
+{% comment %}
+    Files a team manager attached to the event (events.models.EventAttachment), for whoever answers for an invited person. Read-only here; each row downloads through mobile:event_attachment (private storage, never a direct link). Shared by the phone page, the event sheet and the desktop page. Expects ``attachments`` in scope.
+{% endcomment %}
+<div class="m-card p-3.5">
+    <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Attachments" %}</span>
+    <div class="mt-3 flex flex-col gap-2">
+        {% for attachment in attachments %}
+            <a class="flex items-center gap-2.5 rounded-lg border border-line p-2.5" href="{% url "mobile:event_attachment" attachment.event_id attachment.pk %}" hx-boost="false" download>
+                {% lucide "paperclip" size=16 %}
+                <span class="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{{ attachment.name }}</span>
+                <span class="shrink-0 text-xs text-muted">{{ attachment.size|filesizeformat }}</span>
+            </a>
+        {% endfor %}
+    </div>
+</div>

@@ -4,7 +4,7 @@
     (event_detail.html), same layout as the iOS CoachEventDetailView: kind chips + title, a score
     row for a game, the info card, the Attendance/Line-up links, the manager actions, and the
     PWA's own task list. Renders its blocks as siblings so the including container sets the gap.
-    Needs: event, tasks, series_summary, can_edit_pattern, return_url, can_manage_active_team.
+    Needs: event, tasks, attachments, attachment_form, series_summary, can_edit_pattern, return_url, can_manage_active_team.
 {% endcomment %}
 <div>
     <h1 class="pr-12 font-display text-[26px] leading-none font-extrabold text-ink uppercase">{{ event.title }}</h1>
@@ -160,4 +160,38 @@
             <p class="text-sm text-muted">{% trans "No tasks yet." %}</p>
         {% endfor %}
     </div>
+</div>
+
+<div class="m-card p-4">
+    <span class="font-display text-xs font-extrabold tracking-wide text-muted uppercase">{% trans "Attachments" %}</span>
+    <p class="mt-1 text-xs text-muted">{% trans "Shown to the parents and players invited to this event." %}</p>
+
+    <div class="mt-3 flex flex-col gap-2">
+        {% for attachment in attachments %}
+            <div class="flex items-center gap-2 rounded-lg border border-line p-2.5">
+                <a class="flex min-w-0 flex-1 items-center gap-2" href="{% url "mobile:event_attachment" event.pk attachment.pk %}" hx-boost="false" download>
+                    {% lucide "paperclip" size=16 %}
+                    <span class="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{{ attachment.name }}</span>
+                    <span class="shrink-0 text-xs text-muted">{{ attachment.size|filesizeformat }}</span>
+                </a>
+                {% if can_manage_active_team %}
+                    {% trans "Delete this attachment? This cannot be undone." as delete_attachment_confirm_text %}
+                    <form method="post" action="{% url "mobile:coach_event_attachment_delete" event.pk attachment.pk %}" hx-boost="false" onsubmit="return confirm('{{ delete_attachment_confirm_text|escapejs }}')">
+                        {% csrf_token %}
+                        <button class="btn btn-secondary btn-sm" type="submit" aria-label="{% trans "Delete" %}">{% lucide "trash-2" size=14 %}</button>
+                    </form>
+                {% endif %}
+            </div>
+        {% empty %}
+            <p class="text-sm text-muted">{% trans "No attachments yet." %}</p>
+        {% endfor %}
+    </div>
+
+    {% if can_manage_active_team %}
+        <form class="mt-3 flex flex-col gap-2" method="post" action="{% url "mobile:coach_event_attachment_upload" event.pk %}" enctype="multipart/form-data" hx-boost="false">
+            {% csrf_token %}
+            <input type="file" name="files" multiple required aria-label="{% trans "Attachments" %}" class="text-sm">
+            <button class="btn btn-dark btn-sm" type="submit">{% lucide "upload" size=14 %} {% trans "Upload" %}</button>
+        </form>
+    {% endif %}
 </div>

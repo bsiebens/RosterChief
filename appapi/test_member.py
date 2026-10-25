@@ -19,7 +19,7 @@ from waffle import get_waffle_flag_model
 from appapi.presenters import game_status
 from appapi.scope import ClubScope
 from club.models import Club, ClubMembership, OnboardingRequirement
-from events.models import Attendance, Event, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
+from events.models import Attendance, Event, EventAttachment, EventTask, EventTaskClaim, Lineup, LineupSelection, OfficialSignup, RefereeSignup
 from events.services.agenda import member_agenda
 from events.services.attendance import notify_newly_invited
 from events.services.game_timeline import TimelineFetch
@@ -314,6 +314,26 @@ class EventDetailTests(ClubApiTestCase):
         self.assertTrue(body["tasks"][0]["claimed_by_me"])
         self.assertTrue(body["tasks"][0]["is_full"])
         self.assertIsNone(body["lineup"])
+
+    def test_attachments_listed_and_downloadable_for_an_invited_family(self):
+        event = self.event(title="Tournament", kind=Event.EventKind.TOURNAMENT)
+        self.invite(event, member=self.child)
+        attachment = EventAttachment.objects.create(event=event, file=SimpleUploadedFile("plan.pdf", b"%PDF"), name="plan.pdf", size=4)
+
+        body = self.get(f"/events/{event.pk}").json()
+        download = self.get(f"/events/{event.pk}/attachments/{attachment.pk}")
+
+        self.assertEqual([(a["name"], a["size"], a["url"]) for a in body["attachments"]], [("plan.pdf", 4, f"/events/{event.pk}/attachments/{attachment.pk}")])
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(b"".join(download.streaming_content), b"%PDF")
+
+    def test_attachments_hidden_when_nobody_in_the_family_is_invited(self):
+        event = self.event(title="Tournament", kind=Event.EventKind.TOURNAMENT)
+        self.invite(event, member=self.stranger())
+        attachment = EventAttachment.objects.create(event=event, file=SimpleUploadedFile("plan.pdf", b"%PDF"), name="plan.pdf", size=4)
+
+        self.assertEqual(self.get(f"/events/{event.pk}").json()["attachments"], [])
+        self.assertEqual(self.get(f"/events/{event.pk}/attachments/{attachment.pk}").status_code, 404)
 
     def test_published_lineup_and_dropout_flag(self):
         team = Team.objects.create(club=self.club, name="U12", short_name="U12")

@@ -22,6 +22,9 @@ from teams.models import TeamMembership
 
 GOAL, ASSIST, PIM = GameStat.StatType.GOAL, GameStat.StatType.ASSIST, GameStat.StatType.PENALTY_MINUTES
 SHOT, PP_OPPORTUNITY, CONCEDED = GameStat.StatType.SHOT, GameStat.StatType.POWER_PLAY_OPPORTUNITY, GameStat.StatType.GOAL_CONCEDED
+GOALIE_SECONDS = GameStat.StatType.GOALIE_SECONDS
+#: GameStat.value is a PositiveSmallIntegerField.
+_MAX_STAT_VALUE = 32767
 #: Penalty kinds that put the other side on a power play (a major or misconduct isn't counted when the source says so).
 POWER_PLAY_KINDS = ("minor", "bench_minor", "double_minor", "major", "")
 POWER_PLAY = ("PP1", "PP2")
@@ -107,6 +110,20 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
         )
 
     goalie = None  # who is in our net right now, as far as the timeline says
+    goalie_since = 0
+    goalie_stints = 0
+    # The game's length on the timeline's clock: the last period end, else the last thing that happened.
+    period_ends = [item["seconds"] for item in document.get("events", []) if item.get("type") == "period_end" and item.get("seconds") is not None]
+    game_end = max(period_ends, default=max((item["seconds"] for item in document.get("events", []) if item.get("seconds") is not None), default=0))
+
+    def close_stint(at):
+        """Books the time our current goalie has been in net since he came in."""
+        nonlocal goalie_stints
+        duration = min(max(at - goalie_since, 0), _MAX_STAT_VALUE)
+        if goalie and duration:
+            add({"id": f"goalie_time:{our_side}:{goalie_stints}", "side": our_side, "seconds": goalie_since}, GOALIE_SECONDS, goalie, value=duration, ours=True)
+            goalie_stints += 1
+
     opportunities = {"home": 0, "away": 0}
     for item in document.get("events", []):
         side = item.get("side")
@@ -114,7 +131,10 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
             continue
         if item["type"] == "goalie_change" and side == our_side:
             change = item.get("goalie_change") or {}
+            now = item.get("seconds") or 0
+            close_stint(now)
             goalie = change.get("player") if change.get("action") == "in" else None
+            goalie_since = now
         elif item["type"] == "goal":
             goal = item.get("goal") or {}
             meta = {"strength": overrides.get(item["id"]) or goal.get("strength") or "", "empty_net": bool(goal.get("empty_net")), "penalty_shot": bool(goal.get("penalty_shot")), "game_winning": bool(goal.get("game_winning"))}
@@ -135,11 +155,15 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
                 if (penalty.get("kind") or "") in POWER_PLAY_KINDS:
                     opportunities["away" if side == "home" else "home"] += 1
 
+    close_stint(game_end)
+
     # A source that only gives goalie totals (IJNL, entered after the game: who played and what they conceded) and no goalie
     # changes attributes the goals conceded from those.
-    if not any(row.stat_type == CONCEDED for row in rows):
+    if not any(row.stat_type in (CONCEDED, GOALIE_SECONDS) for row in rows):
         for index, goalie in enumerate((document.get("goalies") or {}).get(our_side) or []):
             add({"id": f"goalies:{our_side}:{index}", "side": our_side}, CONCEDED, goalie.get("player"), value=goalie.get("against") or 0, meta={"seconds_played": goalie.get("seconds")}, ours=True)
+            if goalie.get("seconds"):
+                add({"id": f"goalies:{our_side}:{index}", "side": our_side}, GOALIE_SECONDS, goalie.get("player"), value=min(goalie["seconds"], _MAX_STAT_VALUE), ours=True)
 
     # Team totals the source gives (hockeydata): shots, and the power plays it counted. Without
     # them, a power play is counted from the other side's penalties above.
@@ -219,7 +243,7 @@ def played_games(team, season, friendlies=True):
 
 def _leaderboard(stats, *types, limit=LEADERS):
     """Our players ranked by the summed ``value`` of ``types``: [{name, number, member_id, total, pct}], ``pct`` being the share of the top total (for a bar)."""
-    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None, "member": None, "goals": 0})
+    totals = defaultdict(lambda: {"total": 0, "name": "", "number": None, "member_id": None, "member": None, "goals": 0, "seconds": 0})
     # The same name under a different jersey number is the same player (a number change, or a typo in the source), so rows
     # group by member, else by name -- an unmatched row whose name is a matched member's joins that member.
     member_by_name = {_tokens(stat.player_name): stat.member for stat in stats if stat.member_id and stat.player_name}
@@ -230,7 +254,10 @@ def _leaderboard(stats, *types, limit=LEADERS):
         member = stat.member if stat.member_id else member_by_name.get(name_key)
         key = member.pk if member else name_key or stat.player_number
         entry = totals[key]
-        entry["total"] += stat.value
+        if stat.stat_type == GOALIE_SECONDS:  # time in net rides along; it isn't part of the ranking total
+            entry["seconds"] += stat.value
+        else:
+            entry["total"] += stat.value
         entry["goals"] += stat.value if stat.stat_type == GOAL else 0
         entry["member_id"] = member.pk if member else None
         entry["member"] = member
@@ -425,7 +452,10 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
     game_misconduct_minutes = total(PIM, True, kind="game_misconduct")
     pp_goals_for, pp_goals_against = total(GOAL, True, strength=POWER_PLAY), total(GOAL, False, strength=POWER_PLAY)
     points = _leaderboard(stats, GOAL, ASSIST)
-    goalies = _leaderboard(stats, CONCEDED, limit=None)
+    goalies = _leaderboard(stats, CONCEDED, GOALIE_SECONDS, limit=None)
+    for goalie in goalies:  # time in net, and goals against per 60 minutes of it, when the timeline says how long he played
+        goalie["minutes"] = round(goalie["seconds"] / 60) if goalie["seconds"] else None
+        goalie["gaa"] = round(goalie["total"] * 3600 / goalie["seconds"], 2) if goalie["seconds"] else None
     goalies_total = sum(row["total"] for row in goalies)
     return {
         "competitions": competitions,
