@@ -6,12 +6,12 @@ specific to *this* app and will bite you if you treat it as a generic Django dep
 
 ## Branching & release model (git flow)
 
-Two long-lived branches, both on GitHub, both protected (`deploy/configure-branch-protection.sh`):
+Two long-lived branches, both on GitHub, both protected (`../deploy/configure-branch-protection.sh`):
 
-| Branch | Role | Updated by | Builds/deploys |
-|---|---|---|---|
-| `development` | Integration — where feature branches land | `feature/*`/`fix/*` PRs, squash-merged | `.github/workflows/build-and-push.yml` pushes `:development`, then auto-deploys the throwaway dev/test instance (`deploy-dev` job) |
-| `main` | Production | `release/*`/`hotfix/*` PRs, **merge commit** (not squash) | Same workflow also tags `vX.Y.Z` (read from `pyproject.toml`), pushes that tag, and cuts a GitHub Release. Deploying it to production stays a human's call — `deploy/deploy-prod.sh`, which only ever deploys `origin/main` or a `vX.Y.Z` tag |
+| Branch        | Role                                      | Updated by                                                | Builds/deploys                                                                                                                                                                                                                                   |
+|---------------|-------------------------------------------|-----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `development` | Integration — where feature branches land | `feature/*`/`fix/*` PRs, squash-merged                    | `../.github/workflows/build-and-push.yml` pushes `:development`, then auto-deploys the throwaway dev/test instance (`deploy-dev` job)                                                                                                            |
+| `main`        | Production                                | `release/*`/`hotfix/*` PRs, **merge commit** (not squash) | Same workflow also tags `vX.Y.Z` (read from `../pyproject.toml`), pushes that tag, and cuts a GitHub Release. Deploying it to production stays a human's call — `deploy/deploy-prod.sh`, which only ever deploys `origin/main` or a `vX.Y.Z` tag |
 
 **Day to day:**
 
@@ -24,14 +24,14 @@ gh pr create --base development                 # squash-merge once test is gree
 ```
 
 **Small, self-contained fixes may be pushed to `development` directly**, skipping the branch/PR
-ceremony — `deploy/configure-branch-protection.sh` leaves `enforce_admins` off there (`main`
+ceremony — `../deploy/configure-branch-protection.sh` leaves `enforce_admins` off there (`main`
 keeps it on: even the repo owner goes through a release/hotfix PR to reach production). Still
 prefer a PR for anything that benefits from CI running *before* it lands rather than after —
 this is a deliberate convenience for a solo maintainer, not a reason to skip judgment. Note
 GitHub's `enforce_admins` is all-or-nothing: turning it off to skip the PR requirement also
 lets an admin force-push or delete `development`, not just commit to it directly.
 
-**`deploy/cut-release.sh` automates both sequences below**, up to an open PR into `main` that
+**`../deploy/cut-release.sh` automates both sequences below**, up to an open PR into `main` that
 you then merge yourself:
 
 ```bash
@@ -42,7 +42,7 @@ deploy/cut-release.sh hotfix 0.7.15 <commit>...      # ship main + these develop
 It shows what it's about to ship and asks before changing anything (`--yes` skips the prompt).
 It refuses a version that's already tagged or isn't newer than the latest release, and it won't
 run with uncommitted changes. Before it changes anything it **audits the dependencies that would
-ship** -- `pip-audit` on `uv.lock` (as CI's `audit` job does, honouring
+ship** -- `pip-audit` on `../uv.lock` (as CI's `audit` job does, honouring
 `.github/pip-audit-ignore.txt`) and `npm audit` on the runtime JS. On a finding it prints the
 advisories and the update commands (`uv lock --upgrade-package <name>`, `npm audit fix
 --omit=dev`) and exits without touching anything: fix it on `development`, push, run it again.
@@ -71,12 +71,12 @@ gh pr create --base main --title "Release 0.5.0"       # merge with a real merge
 **No back-merge into `development` after a release.** A release branch is never anything
 `development` doesn't already have, plus the version bump — every change on it landed on
 `development` first, via the ordinary `feature/*`/`fix/*` flow. There's nothing to bring back;
-`development`'s own `pyproject.toml` just stays at whatever it last was until the *next*
+`development`'s own `../pyproject.toml` just stays at whatever it last was until the *next*
 release branch re-bumps it, which is cosmetic (nothing reads it except that footer) and costs
 nothing. Back-merging anyway would only buy a second `test`+`build` CI run for a
 one-line diff — pure waste, not safety.
 
-The `main` merge triggers the workflow: it reads `0.5.0` back out of `pyproject.toml`, tags the
+The `main` merge triggers the workflow: it reads `0.5.0` back out of `../pyproject.toml`, tags the
 merge commit `v0.5.0`, pushes that tag, and opens a GitHub Release with auto-generated notes.
 Deploy it with `deploy/deploy-prod.sh --version v0.5.0` — an explicit, reviewed version number,
 not a floating branch tag (see "Deploying updates" below).
@@ -107,13 +107,12 @@ flow onto that would have meant reconciling two diverged CI setups for no benefi
 branches now start the new rules from the same point.
 
 **GitHub can't enforce "squash into development, merge-commit into main" as a hard setting** —
-the three merge-button methods (squash/merge/rebase) are a repo-wide toggle
-(Settings → General → Pull Requests: leave squash and merge commits both enabled, rebase off,
+the three merge-button methods (squash/merge/rebase) are a repo-wide toggle (Settings → General → Pull Requests: leave squash and merge commits both enabled, rebase off,
 so there's no third inconsistent option), not something scoped per target branch. The closest
 real, enforceable lever is `development`'s own "require linear history" branch protection
 rule, which GitHub *does* apply per-branch and which hard-blocks a merge-commit button from
 even being offered there. `main` deliberately leaves that rule off, so a release/hotfix PR can
-land as a real merge commit — see `deploy/configure-branch-protection.sh`.
+land as a real merge commit — see `../deploy/configure-branch-protection.sh`.
 
 **Required check on both branches: the `test` job** (lint + full suite) — nothing else is
 required (see that script's own comment on why zero required approvals is the right default
@@ -125,9 +124,8 @@ for a solo maintainer, and where to change it once that stops being true).
 Tenancy is subdomain-based (`ajax.rosterchief.app`), so the certificate must cover
 `*.rosterchief.app`. Let's Encrypt **will not issue a wildcard over HTTP-01** — only over
 DNS-01, which means the TLS terminator needs API access to your DNS zone. That is why
-`deploy/caddy/Dockerfile` builds Caddy *with* a DNS provider plugin, and why
-`CLOUDFLARE_API_TOKEN` is a required variable rather than a nicety. Swap the plugin
-(`caddy-dns/route53`, `caddy-dns/digitalocean`, …) if your DNS lives elsewhere.
+`../deploy/caddy/Dockerfile` builds Caddy *with* a DNS provider plugin, and why
+`CLOUDFLARE_API_TOKEN` is a required variable rather than a nicety. Swap the plugin (`caddy-dns/route53`, `caddy-dns/digitalocean`, …) if your DNS lives elsewhere.
 
 DNS needs two records, both pointing at the server:
 
@@ -140,8 +138,7 @@ The bundled Caddyfile assumes both are **proxied** through Cloudflare (orange cl
 `CF-Connecting-IP` only from Cloudflare's published ranges, which is how the visitor's real
 address reaches Django (see 3). With proxying on, set Cloudflare's **SSL/TLS mode to
 "Full (strict)"** — "Flexible" talks plain HTTP to the origin, Caddy redirects that to HTTPS,
-and every page becomes a redirect loop. The API token needs **Zone → DNS → Edit** and
-**Zone → Zone → Read** on the zone (Cloudflare's "Edit zone DNS" template gives exactly that).
+and every page becomes a redirect loop. The API token needs **Zone → DNS → Edit** and **Zone → Zone → Read** on the zone (Cloudflare's "Edit zone DNS" template gives exactly that).
 
 **2. Redis is not optional, even on one server.**
 `waffle` caches each feature flag's targeting in the Django cache, and `LocMemCache` is
@@ -167,7 +164,7 @@ rate limits key on it. Any proxy in front of `web` **must** set that header — 
 a client-supplied `X-Real-IP` through lets anyone pick the address the rate limits see.
 
 **4. Uploads must move to object storage before the second app server.**
-Club logos go to `MEDIA_ROOT` on local disk by default. `compose.yaml` mounts a `media_data`
+Club logos go to `MEDIA_ROOT` on local disk by default. `../compose.yaml` mounts a `media_data`
 volume, shared read-write with `web` and read-only with `caddy`, so uploads both survive a
 rebuild and get served by Caddy directly (`handle_path /media/*` in the Caddyfile) rather than
 round-tripping through a gunicorn worker. `rosterchief/urls.py` still serves `/media/*` itself
@@ -190,8 +187,7 @@ it says `sudo`.
 
 ### Preparing the server
 
-Docker with the **compose v2 plugin** (`docker compose`, not the old `docker-compose`),
-**buildx** (compose uses it to build the Caddy image) and git.
+Docker with the **compose v2 plugin** (`docker compose`, not the old `docker-compose`), **buildx** (compose uses it to build the Caddy image) and git.
 
 **Debian / Ubuntu** — Docker's own packages (the distro's `docker.io` often lacks the plugins):
 
@@ -230,7 +226,7 @@ plugins on every distro; `/usr/libexec/docker/cli-plugins` works too.) Amazon Li
 has no cron — install `cronie` when you get to "Backups".
 
 The deploy user also needs to write the backups directory, because every deploy takes a
-backup first (`deploy/deploy-local.sh` → `deploy/backup.sh /var/backups/rosterchief`) and the
+backup first (`../deploy/deploy-local.sh` → `deploy/backup.sh /var/backups/rosterchief`) and the
 nightly cron job runs as root. Create it once, owned by the deploy user; root can still write
 into it:
 
@@ -285,8 +281,7 @@ docker compose exec web python manage.py check --deploy
 docker compose exec web python manage.py sendtestemail you@example.com
 ```
 
-`check --deploy` is what catches an env file that forgot the HTTPS flags: they default to
-**off** in code, because defaulting them to `not DEBUG` would redirect every test request to
+`check --deploy` is what catches an env file that forgot the HTTPS flags: they default to **off** in code, because defaulting them to `not DEBUG` would redirect every test request to
 https and break the suite anywhere `DEBUG` is unset.
 
 **Outgoing mail has to work before anyone can sign in.** Email verification is mandatory: an
@@ -300,7 +295,7 @@ docker compose exec web python manage.py shell -c "from allauth.account.models i
 
 If the first `migrate` fails with `password authentication failed for user "rosterchief_app"`,
 look at `docker compose logs db` for `10-app-role.sh: APP_DB_USER and APP_DB_PASSWORD must be
-set`: `.env` was incomplete on the very first start, so the role was never created — and the
+set`: `../.env` was incomplete on the very first start, so the role was never created — and the
 init scripts only ever run on an *empty* volume. Fix `.env`, then `docker compose down -v` (this
 deletes the half-initialised database — only ever do it on a first install) and start again.
 Otherwise the password in `DJANGO_DATABASE_URL` doesn't match `APP_DB_PASSWORD`.
@@ -315,51 +310,51 @@ copy), and the one-time setup on your own computer under "Deploying updates".
 
 ### Environment variables
 
-**`.env`** — read by `docker compose` itself, for variable substitution in `compose.yaml` and
+**`../.env`** — read by `docker compose` itself, for variable substitution in `../compose.yaml` and
 by `deploy/backup.sh`. Never seen by Django.
 
-| Variable | Required | What |
-|---|---|---|
-| `ROSTERCHIEF_BASE_DOMAIN` | yes | for Caddy's site address — same value as in `.env.production` |
-| `ACME_EMAIL` | yes | Let's Encrypt account email |
-| `CLOUDFLARE_API_TOKEN` | yes | DNS-01 token, see "Cloudflare" above |
-| `POSTGRES_DB` / `POSTGRES_USER` | no (`rosterchief` / `rosterchief`) | database name and the **superuser** |
-| `POSTGRES_PASSWORD` | yes | superuser password |
-| `APP_DB_USER` / `APP_DB_PASSWORD` | yes, before the first `db` start | the app's own role (default `rosterchief_app`) — see "Database roles" |
-| `BACKUP_AGE_RECIPIENT` | yes, once backups leave the box | age public key backups are encrypted to — see "Backups" |
-| `IMAGE_TAG` | no (`main`) | production: leave it at `main`, `deploy-prod.sh`/`deploy-local.sh` pass the tag they deploy (see "Rollback"). Test server: `development` (see "Deploying with one command") |
-| `WEB_PORT` | no (`8001`) | `compose.behind-proxy.yaml` only |
+| Variable                          | Required                           | What                                                                                                                                                                        |
+|-----------------------------------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `ROSTERCHIEF_BASE_DOMAIN`         | yes                                | for Caddy's site address — same value as in `.env.production`                                                                                                               |
+| `ACME_EMAIL`                      | yes                                | Let's Encrypt account email                                                                                                                                                 |
+| `CLOUDFLARE_API_TOKEN`            | yes                                | DNS-01 token, see "Cloudflare" above                                                                                                                                        |
+| `POSTGRES_DB` / `POSTGRES_USER`   | no (`rosterchief` / `rosterchief`) | database name and the **superuser**                                                                                                                                         |
+| `POSTGRES_PASSWORD`               | yes                                | superuser password                                                                                                                                                          |
+| `APP_DB_USER` / `APP_DB_PASSWORD` | yes, before the first `db` start   | the app's own role (default `rosterchief_app`) — see "Database roles"                                                                                                       |
+| `BACKUP_AGE_RECIPIENT`            | yes, once backups leave the box    | age public key backups are encrypted to — see "Backups"                                                                                                                     |
+| `IMAGE_TAG`                       | no (`main`)                        | production: leave it at `main`, `deploy-prod.sh`/`deploy-local.sh` pass the tag they deploy (see "Rollback"). Test server: `development` (see "Deploying with one command") |
+| `WEB_PORT`                        | no (`8001`)                        | `../compose.behind-proxy.yaml` only                                                                                                                                         |
 
-**`.env.production`** — read by Django (python-decouple) inside `web`. `.env.production.example`
+**`.env.production`** — read by Django (python-decouple) inside `web`. `../.env.production.example`
 has all but the rarely-needed last row, with comments.
 
-| Variable | Required | What |
-|---|---|---|
-| `DJANGO_SECRET_KEY` | yes | checked by `deploy/deploy-local.sh` before a deploy starts |
-| `MFA_ENCRYPTION_KEY` | yes | see "Two-factor secrets"; also checked before a deploy starts |
-| `DJANGO_DEBUG` | `False` | see "Keep DJANGO_DEBUG=False" below |
-| `DJANGO_ALLOWED_HOSTS` | yes | `.rosterchief.app` (leading dot = every club subdomain) |
-| `ROSTERCHIEF_BASE_DOMAIN` | yes | `rosterchief.app` — tenant resolution, the shared session cookie **and** the WebAuthn RP ID; changing it later invalidates every passkey |
-| `ROSTERCHIEF_RP_NAME` | no (`RosterChief`) | name the browser shows in passkey prompts |
-| `DJANGO_DATABASE_URL` | yes | `postgres://rosterchief_app:<APP_DB_PASSWORD>@db:5432/rosterchief` |
-| `DJANGO_REDIS_URL` | yes | `redis://redis:6379/0` — see "The five things…", 2 |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | no | `https://rosterchief.app` at most, **never** `https://*.rosterchief.app` (that would let any club subdomain post to any other). The CSRF token lives in the session (`CSRF_USE_SESSIONS`), so the old `DJANGO_CSRF_COOKIE_DOMAIN` is ignored — delete it if your file still has it |
-| `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE`, `DJANGO_SECURE_HSTS_*` | yes | the HTTPS flags — off in code, on in the example |
-| `DJANGO_STATICFILES_BACKEND` | yes | `whitenoise.storage.CompressedManifestStaticFilesStorage`, matching what the image's `collectstatic` built |
-| `DJANGO_EMAIL_*`, `DJANGO_DEFAULT_FROM_EMAIL` (or `RESEND_API_KEY`) | yes | SMTP (or Resend). Unset, mail is printed to the log and never sent — and nobody can verify an address, so nobody new can sign in |
-| `ROSTERCHIEF_BILLING_CONTACT_EMAIL`, `ROSTERCHIEF_CONTACT_EMAIL` | no | reply-to for billing mail; where "Book a demo" requests go (defaults to the maintainer's address) |
-| `DJANGO_VAPID_PUBLIC_KEY` / `DJANGO_VAPID_PRIVATE_KEY` / `DJANGO_VAPID_ADMIN_EMAIL` | no | Web Push for the mobile app; without a private key push is silently off. Generate a pair on your own machine with `uv run vapid --gen` |
-| `AWS_STORAGE_BUCKET_NAME` and the other `AWS_*` | no | uploads to S3-compatible storage — see "The five things…", 4 |
-| `APP_PUSH_APNS_*` | no | push for the native iOS app straight through Apple's APNs — see "Native app push". Without them the app works, just without pushes |
-| `APP_PUSH_FCM_*` | no | push for the native Android app through Firebase Cloud Messaging — see "Native app push". Without them Android works, just without pushes |
-| `APP_MIN_VERSION_IOS` / `APP_MIN_VERSION_ANDROID` | no (`1.0.0`) | oldest app version still allowed; older apps show "update required" |
-| `DJANGO_TIME_ZONE` | no (`Europe/Brussels`) | also the timezone of the job schedule |
-| `DJANGO_SESSION_COOKIE_DOMAIN`, `DJANGO_SERVER_EMAIL`, `DJANGO_EMAIL_USE_SSL`, `DJANGO_EMAIL_TIMEOUT`, `DJANGO_INTERNAL_IPS`, `DJANGO_DB_CONN_MAX_AGE` (60), `DJANGO_PERFORMANCE_LOGGING*` | no | rarely needed; see `rosterchief/settings.py` |
+| Variable                                                                                                                                                                                   | Required               | What                                                                                                                                                                                                                                                                               |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `DJANGO_SECRET_KEY`                                                                                                                                                                        | yes                    | checked by `../deploy/deploy-local.sh` before a deploy starts                                                                                                                                                                                                                      |
+| `MFA_ENCRYPTION_KEY`                                                                                                                                                                       | yes                    | see "Two-factor secrets"; also checked before a deploy starts                                                                                                                                                                                                                      |
+| `DJANGO_DEBUG`                                                                                                                                                                             | `False`                | see "Keep DJANGO_DEBUG=False" below                                                                                                                                                                                                                                                |
+| `DJANGO_ALLOWED_HOSTS`                                                                                                                                                                     | yes                    | `.rosterchief.app` (leading dot = every club subdomain)                                                                                                                                                                                                                            |
+| `ROSTERCHIEF_BASE_DOMAIN`                                                                                                                                                                  | yes                    | `rosterchief.app` — tenant resolution, the shared session cookie **and** the WebAuthn RP ID; changing it later invalidates every passkey                                                                                                                                           |
+| `ROSTERCHIEF_RP_NAME`                                                                                                                                                                      | no (`RosterChief`)     | name the browser shows in passkey prompts                                                                                                                                                                                                                                          |
+| `DJANGO_DATABASE_URL`                                                                                                                                                                      | yes                    | `postgres://rosterchief_app:<APP_DB_PASSWORD>@db:5432/rosterchief`                                                                                                                                                                                                                 |
+| `DJANGO_REDIS_URL`                                                                                                                                                                         | yes                    | `redis://redis:6379/0` — see "The five things…", 2                                                                                                                                                                                                                                 |
+| `DJANGO_CSRF_TRUSTED_ORIGINS`                                                                                                                                                              | no                     | `https://rosterchief.app` at most, **never** `https://*.rosterchief.app` (that would let any club subdomain post to any other). The CSRF token lives in the session (`CSRF_USE_SESSIONS`), so the old `DJANGO_CSRF_COOKIE_DOMAIN` is ignored — delete it if your file still has it |
+| `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE`, `DJANGO_SECURE_HSTS_*`                                                                          | yes                    | the HTTPS flags — off in code, on in the example                                                                                                                                                                                                                                   |
+| `DJANGO_STATICFILES_BACKEND`                                                                                                                                                               | yes                    | `whitenoise.storage.CompressedManifestStaticFilesStorage`, matching what the image's `collectstatic` built                                                                                                                                                                         |
+| `DJANGO_EMAIL_*`, `DJANGO_DEFAULT_FROM_EMAIL` (or `RESEND_API_KEY`)                                                                                                                        | yes                    | SMTP (or Resend). Unset, mail is printed to the log and never sent — and nobody can verify an address, so nobody new can sign in                                                                                                                                                   |
+| `ROSTERCHIEF_BILLING_CONTACT_EMAIL`, `ROSTERCHIEF_CONTACT_EMAIL`                                                                                                                           | no                     | reply-to for billing mail; where "Book a demo" requests go (defaults to the maintainer's address)                                                                                                                                                                                  |
+| `DJANGO_VAPID_PUBLIC_KEY` / `DJANGO_VAPID_PRIVATE_KEY` / `DJANGO_VAPID_ADMIN_EMAIL`                                                                                                        | no                     | Web Push for the mobile app; without a private key push is silently off. Generate a pair on your own machine with `uv run vapid --gen`                                                                                                                                             |
+| `AWS_STORAGE_BUCKET_NAME` and the other `AWS_*`                                                                                                                                            | no                     | uploads to S3-compatible storage — see "The five things…", 4                                                                                                                                                                                                                       |
+| `APP_PUSH_APNS_*`                                                                                                                                                                          | no                     | push for the native iOS app straight through Apple's APNs — see "Native app push". Without them the app works, just without pushes                                                                                                                                                 |
+| `APP_PUSH_FCM_*`                                                                                                                                                                           | no                     | push for the native Android app through Firebase Cloud Messaging — see "Native app push". Without them Android works, just without pushes                                                                                                                                          |
+| `APP_MIN_VERSION_IOS` / `APP_MIN_VERSION_ANDROID`                                                                                                                                          | no (`1.0.0`)           | oldest app version still allowed; older apps show "update required"                                                                                                                                                                                                                |
+| `DJANGO_TIME_ZONE`                                                                                                                                                                         | no (`Europe/Brussels`) | also the timezone of the job schedule                                                                                                                                                                                                                                              |
+| `DJANGO_SESSION_COOKIE_DOMAIN`, `DJANGO_SERVER_EMAIL`, `DJANGO_EMAIL_USE_SSL`, `DJANGO_EMAIL_TIMEOUT`, `DJANGO_INTERNAL_IPS`, `DJANGO_DB_CONN_MAX_AGE` (60), `DJANGO_PERFORMANCE_LOGGING*` | no                     | rarely needed; see `../rosterchief/settings.py`                                                                                                                                                                                                                                    |
 
 ### Deploying updates
 
 Deploys run **from your own machine**; you never have to log into the server for them.
-`deploy/deploy-prod.sh` opens one SSH session and does exactly what you would do by hand:
+`../deploy/deploy-prod.sh` opens one SSH session and does exactly what you would do by hand:
 update the server's checkout, then run the server's own `deploy/deploy-local.sh` from it.
 
 **One-time setup on your machine:**
@@ -372,7 +367,7 @@ cp deploy/.env.deploy.example deploy/.env.prod.local    # gitignored, never comm
 Check that `ssh <user>@<host>` works without a password prompt (key-based login), that the
 SSH user can run `docker` on the server, and that it owns `/var/backups/rosterchief` (see
 "Preparing the server"). `BASE_DOMAIN` (default `rosterchief.app`, for the health check) and
-`COMPOSE_FILE` (default `compose.yaml`) can be exported in the same file if yours differ.
+`COMPOSE_FILE` (default `../compose.yaml`) can be exported in the same file if yours differ.
 
 **Every deploy:**
 
@@ -391,21 +386,21 @@ What happens, in order:
    `vX.Y.Z` and exists (CI creates it when a release PR merges into `main`); without, it refuses
    if your local `main` has commits GitHub doesn't (the server pulls from GitHub).
 2. **On the server:** `git fetch`, then `checkout main` + `reset --hard origin/main` — or, with
-   `--version`, a detached checkout of the tag. Untracked files — `.env`, `.env.production` —
+   `--version`, a detached checkout of the tag. Untracked files — `../.env`, `.env.production` —
    are never touched.
-3. **On the server, `deploy/deploy-local.sh`** from that fresh checkout:
-   - checks `.env.production` has non-empty `DJANGO_SECRET_KEY` and `MFA_ENCRYPTION_KEY`
-     (and that `.env` exists) **before** any container is touched; notes it if
-     `BACKUP_AGE_RECIPIENT` is missing;
-   - `up -d --remove-orphans db redis`, then starts `caddy` without touching `web` — and
-     recreates `caddy` when `deploy/caddy/Caddyfile` changed (the running copy is compared
-     with the checkout), so Caddyfile changes apply on deploy;
-   - backs up (`deploy/backup.sh` into `BACKUP_DIR`, default `/var/backups/rosterchief` —
-     database and uploads, encrypted when `BACKUP_AGE_RECIPIENT` is set). Skipped, with a
-     note, when `web` isn't running (a first deploy: nothing to back up yet);
-   - pulls the image, runs `migrate --noinput` in a one-off container, recreates `web`;
-   - polls `https://rosterchief.app/healthz` for up to a minute, and prints the last 40 `web`
-     log lines (and exits non-zero) if it never answers.
+3. **On the server, `../deploy/deploy-local.sh`** from that fresh checkout:
+    - checks `.env.production` has non-empty `DJANGO_SECRET_KEY` and `MFA_ENCRYPTION_KEY`
+      (and that `../.env` exists) **before** any container is touched; notes it if
+      `BACKUP_AGE_RECIPIENT` is missing;
+    - `up -d --remove-orphans db redis`, then starts `caddy` without touching `web` — and
+      recreates `caddy` when `../deploy/caddy/Caddyfile` changed (the running copy is compared
+      with the checkout), so Caddyfile changes apply on deploy;
+    - backs up (`../deploy/backup.sh` into `BACKUP_DIR`, default `/var/backups/rosterchief` —
+      database and uploads, encrypted when `BACKUP_AGE_RECIPIENT` is set). Skipped, with a
+      note, when `web` isn't running (a first deploy: nothing to back up yet);
+    - pulls the image, runs `migrate --noinput` in a one-off container, recreates `web`;
+    - polls `https://rosterchief.app/healthz` for up to a minute, and prints the last 40 `web`
+      log lines (and exits non-zero) if it never answers.
 
 If anything fails, the script stops at that step and says why; `web` keeps running the old
 image until the restart step. A failed *migration* has already been preceded by the backup —
@@ -413,7 +408,7 @@ see "Rollback" for when you need it.
 
 **Caddy config changes apply automatically** (a second or two of downtime while `caddy` is
 recreated; certificates are kept in the `caddy_data` volume). Only a change to
-`deploy/caddy/Dockerfile` (the Caddy build itself, rare) needs a manual rebuild after the deploy:
+`../deploy/caddy/Dockerfile` (the Caddy build itself, rare) needs a manual rebuild after the deploy:
 
 ```bash
 docker compose build caddy && docker compose up -d --force-recreate caddy
@@ -421,7 +416,7 @@ docker compose build caddy && docker compose up -d --force-recreate caddy
 
 #### Deploying while logged into the server
 
-`deploy/deploy-local.sh` is the same deploy without the SSH part — `deploy-prod.sh` runs this
+`../deploy/deploy-local.sh` is the same deploy without the SSH part — `deploy-prod.sh` runs this
 very script. Update the checkout yourself first, then run it from the repo root:
 
 ```bash
@@ -435,7 +430,7 @@ IMAGE_TAG=v0.7.8 deploy/deploy-local.sh         # an exact release: tag checkout
 SKIP_BACKUP=1 deploy/deploy-local.sh            # not recommended
 ```
 
-`deploy/deploy-dev.sh` (the test server, see "Behind an existing Caddy") reads the same
+`../deploy/deploy-dev.sh` (the test server, see "Behind an existing Caddy") reads the same
 `SSH_HOST`/`SSH_USER`/`REMOTE_DIR`/`SSH_KEY_FILE` variables — keep a separate
 `deploy/.env.dev.local` for it.
 
@@ -471,7 +466,7 @@ this order; delete this list once 0.7.8 is live everywhere.
    email changes need the confirmation mail. Check the SMTP/Resend settings in `.env.production`
    (`sendtestemail`, see "First deploy") and that **"pause automated email"** is off in the
    control panel: it also holds back allauth's confirmation mails.
-6. Backups: install `age`, put `BACKUP_AGE_RECIPIENT` in `.env`, make `/var/backups/rosterchief`
+6. Backups: install `age`, put `BACKUP_AGE_RECIPIENT` in `../.env`, make `/var/backups/rosterchief`
    writable by the deploy user and (re)do the cron line — all in "Backups". Remove an old
    `deploy/restore-check.sh` cron line if you have one. `deploy-local.sh` only *warns* when the
    recipient is missing, and then the pre-deploy backup is plaintext.
@@ -538,8 +533,7 @@ these are done):
 
   On the test server itself (console or an already-trusted session), check it matches:
   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. Then store it:
-  `gh secret set DEV_SSH_KNOWN_HOSTS --repo bsiebens/RosterChief < dev_known_hosts`.
-  (Non-standard SSH port: `ssh-keyscan -p <port> …`.) The job now runs in a GitHub
+  `gh secret set DEV_SSH_KNOWN_HOSTS --repo bsiebens/RosterChief < dev_known_hosts`. (Non-standard SSH port: `ssh-keyscan -p <port> …`.) The job now runs in a GitHub
   Environment called `dev`; you can add protection rules to it under Settings → Environments.
 - **Strong `DJANGO_SECRET_KEY` on both servers.** `migrate`/`check` now refuse (system check
   `rosterchief.E001`) a key shorter than 50 characters, one with few distinct characters, or one
@@ -552,7 +546,7 @@ these are done):
 - **Shop licence flag.** The member shop now also needs the club's `shop` feature flag (the
   management side already did). Check on the control panel's Features page that every club with
   its shop open has `shop` switched on — otherwise its members' shop disappears.
-- **Caddy is rebuilt from pinned versions** (`deploy/caddy/Dockerfile` now pins Caddy 2.11.4 and
+- **Caddy is rebuilt from pinned versions** (`../deploy/caddy/Dockerfile` now pins Caddy 2.11.4 and
   the Cloudflare plugin v0.2.4 by digest). The deploy recreates `caddy` when the Caddyfile
   changes but doesn't rebuild the image, so after the deploy run once:
   `docker compose build caddy && docker compose up -d --force-recreate caddy`.
@@ -577,8 +571,7 @@ these are done):
 - **Deploys stop on configuration errors:** after migrating, `deploy-local.sh` runs
   `check --deploy --fail-level ERROR` before restarting `web`.
 - **Dependency audit in CI:** a new `audit` job checks Python and npm packages for known
-  vulnerabilities on every push; accepted advisories go in `.github/pip-audit-ignore.txt`.
-
+  vulnerabilities on every push; accepted advisories go in `../.github/pip-audit-ignore.txt`.
 
 **After deploying** (on the production server, from the checkout; do 1 on the test server too,
 with `docker compose -f compose.behind-proxy.yaml`):
@@ -594,7 +587,7 @@ with `docker compose -f compose.behind-proxy.yaml`):
    docker compose exec web python manage.py purge_public_member_photos
    ```
 
-   It only touches `members/` in public storage. A photo the migration couldn't find in either
+   It only touches `../members` in public storage. A photo the migration couldn't find in either
    place is logged (`Member photo … not found in either storage`) and its row left as is — check
    the migrate output in the deploy log. From now on photos are in the nightly
    `private-media-…` backup, so that archive grows by their size. With S3 versioning on, the
@@ -607,19 +600,18 @@ with `docker compose -f compose.behind-proxy.yaml`):
    lines change) would give a slightly different figure; when staff re-save a line of such an
    order, its discounts and total are recomputed and agree again.
 
-3. **Backups become append-only** (`deploy/backup.sh` and the backup server, see "Backups" for
+3. **Backups become append-only** (`../deploy/backup.sh` and the backup server, see "Backups" for
    the why and every command). Do this *after* the deploy, in one sitting: once the key line
    carries the `-P` list, the old `backup.sh` (renames, remote pruning) can't upload any more,
    and the new one expects the `incoming` folder.
 
    a. **Backup server** (your admin login): create `incoming`, make `.ssh` and
-      `authorized_keys` root-owned, create the archive directory and install the archive job —
-      "Backups", step 2. Replace the upload key's line in `authorized_keys` with the one with
-      `-P …` from step 3.4. If you added your own computer's key to the account for restores
-      (the old step 6), remove it: restores now use your admin login.
+   `authorized_keys` root-owned, create the archive directory and install the archive job —
+   "Backups", step 2. Replace the upload key's line in `authorized_keys` with the one with
+   `-P …` from step 3.4. If you added your own computer's key to the account for restores (the old step 6), remove it: restores now use your admin login.
 
    b. Move the backups already there into the archive, once (they keep their dates, so pruning
-      carries on where it was):
+   carries on where it was):
 
       ```bash
       sudo sh -c 'mv ~rosterchief-backup/rosterchief/*.age /var/lib/rosterchief-backups/archive/ && chown root:root /var/lib/rosterchief-backups/archive/*'
@@ -628,13 +620,13 @@ with `docker compose -f compose.behind-proxy.yaml`):
    c. `sudo crontab -e` on the backup server: the archive line from step 5.
 
    d. **Production server**, as root: `rclone config update offsite set_modtime false`, and in
-      root's crontab change `BACKUP_REMOTE=offsite:rosterchief` to
-      `BACKUP_REMOTE=offsite:rosterchief/incoming` and drop any `REMOTE_KEEP_DAYS=…` (retention
-      is `ARCHIVE_KEEP_DAYS` on the backup server now).
+   root's crontab change `BACKUP_REMOTE=offsite:rosterchief` to
+   `BACKUP_REMOTE=offsite:rosterchief/incoming` and drop any `REMOTE_KEEP_DAYS=…` (retention
+   is `ARCHIVE_KEEP_DAYS` on the backup server now).
 
    e. Test as in step 4 (the `sftp` check from step 3.5 too: `rmdir` must be refused). The first
-      run has no `.offsite-sent` yet, so it uploads every `.age` file still on the server — the
-      archive job drops the ones it already has (identical re-uploads) and archives the rest.
+   run has no `.offsite-sent` yet, so it uploads every `.age` file still on the server — the
+   archive job drops the ones it already has (identical re-uploads) and archives the rest.
 
 ### Upgrade notes: 0.7.10
 
@@ -650,7 +642,7 @@ photos in bulk; see "Bulk-importing member photos" below. Deploy it the usual wa
 ### Upgrade notes: 0.7.12
 
 No manual steps. From this release on, every deploy writes the tag it deployed into the
-server's `.env` as `IMAGE_TAG=` (see "Rollback"), so a by-hand `docker compose run … web` uses the
+server's `../.env` as `IMAGE_TAG=` (see "Rollback"), so a by-hand `docker compose run … web` uses the
 deployed image instead of an older local `:main`. The first 0.7.12 deploy sets it. Any
 `IMAGE_TAG` value already in `.env` is replaced.
 
@@ -678,7 +670,7 @@ than assuming DEBUG implies it is there — but the reason to keep it off is not
 
 ### One dependency comes from git
 
-`django-lucide` is our fork (`[tool.uv.sources]` in `pyproject.toml`, pinned by `uv.lock` to a
+`django-lucide` is our fork (`[tool.uv.sources]` in `../pyproject.toml`, pinned by `uv.lock` to a
 commit), so **uv shells out to `git`** to fetch it. `python:*-slim` has no git, which is why
 the image builds the virtualenv in a **separate stage** that installs git, and copies the
 finished `.venv` into a runtime stage that does not have it — a build tool has no business in
@@ -689,7 +681,7 @@ Two consequences worth knowing:
 - The build needs **network access to GitHub**, and the fork must stay reachable. If that ever
   becomes awkward (a private runner, an air-gapped build), publish the fork to a private index
   or vendor the wheel, and the git stage disappears.
-- `uv.lock` pins the exact commit, so the build is reproducible even though the source is a
+- `../uv.lock` pins the exact commit, so the build is reproducible even though the source is a
   branch. Don't build with `--no-frozen`.
 
 ## Migrations
@@ -704,17 +696,17 @@ docker compose run --rm web python manage.py migrate
 docker compose up -d --no-deps web
 ```
 
-(`deploy/deploy-local.sh`, which `deploy/deploy-prod.sh` runs, does exactly this, plus a backup
+(`../deploy/deploy-local.sh`, which `deploy/deploy-prod.sh` runs, does exactly this, plus a backup
 first — see "Deploying updates". On the test server add `-f compose.behind-proxy.yaml`.)
 
 ## Database roles
 
 The app does not connect as the Postgres superuser. Two roles:
 
-| Role | Set by | Used by |
-|---|---|---|
-| `POSTGRES_USER` (default `rosterchief`) — superuser | `.env` (`POSTGRES_USER`/`POSTGRES_PASSWORD`) | the image's first-boot init, `deploy/backup.sh`, `deploy/restore-check.sh` (all via `docker compose exec db`, over the container's local socket) |
-| `APP_DB_USER` (default `rosterchief_app`) — `NOSUPERUSER NOCREATEDB NOCREATEROLE` | `.env` (`APP_DB_USER`/`APP_DB_PASSWORD`) | `web` and every `manage.py` one-off, through `DJANGO_DATABASE_URL` in `.env.production` |
+| Role                                                                              | Set by                                          | Used by                                                                                                                                             |
+|-----------------------------------------------------------------------------------|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `POSTGRES_USER` (default `rosterchief`) — superuser                               | `../.env` (`POSTGRES_USER`/`POSTGRES_PASSWORD`) | the image's first-boot init, `../deploy/backup.sh`, `deploy/restore-check.sh` (all via `docker compose exec db`, over the container's local socket) |
+| `APP_DB_USER` (default `rosterchief_app`) — `NOSUPERUSER NOCREATEDB NOCREATEROLE` | `../.env` (`APP_DB_USER`/`APP_DB_PASSWORD`)     | `web` and every `../manage.py` one-off, through `DJANGO_DATABASE_URL` in `.env.production`                                                          |
 
 The app role **owns** the database and its `public` schema, so `migrate` can create and alter
 tables; what it cannot do is anything outside that database — read other databases, create
@@ -723,7 +715,7 @@ leaked `DJANGO_DATABASE_URL` stays inside the app's own data.
 
 ### On a fresh volume
 
-`deploy/postgres/10-app-role.sh` is mounted into `/docker-entrypoint-initdb.d`, so the first
+`../deploy/postgres/10-app-role.sh` is mounted into `/docker-entrypoint-initdb.d`, so the first
 `docker compose up -d db` on an empty `pgdata` volume creates the app role for you: a
 `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` role that owns the
 database and its `public` schema, with `CONNECT` revoked from `PUBLIC`. Set
@@ -807,7 +799,7 @@ docker compose up -d --no-deps --force-recreate web     # env_file changes need 
 curl -fsS https://rosterchief.app/healthz
 ```
 
-Nothing changes for backups: `deploy/backup.sh` and `deploy/restore-check.sh` keep running
+Nothing changes for backups: `../deploy/backup.sh` and `deploy/restore-check.sh` keep running
 `pg_dump`/`psql` as `POSTGRES_USER` inside the `db` container (local socket, no password). The
 dump records the app role as owner, so restoring it needs that role to exist — it does on this
 server; on a brand-new one, bring `db` up with the same `APP_DB_*` first. To roll back, point
@@ -815,11 +807,11 @@ server; on a brand-new one, bring `db` up with the same `APP_DB_*` first. To rol
 
 ## Two-factor secrets (`MFA_ENCRYPTION_KEY`)
 
-TOTP secrets and recovery-code seeds are stored Fernet-encrypted (`authentication/crypto.py`),
+TOTP secrets and recovery-code seeds are stored Fernet-encrypted (`../authentication/crypto.py`),
 under `MFA_ENCRYPTION_KEY` in `.env.production`. Passkeys hold no secret server-side and are
 unaffected.
 
-- **Required outside `DJANGO_DEBUG=True`.** `deploy/deploy-local.sh` refuses to start a deploy
+- **Required outside `DJANGO_DEBUG=True`.** `../deploy/deploy-local.sh` refuses to start a deploy
   when the line is missing or empty. A key that is present but malformed (or can't decrypt what's
   stored) is caught by the `authentication.E001` system check, which fails `migrate` and `check` —
   so the deploy stops before `web` restarts — and any TOTP sign-in would error. Local dev and the
@@ -833,16 +825,14 @@ unaffected.
   backup key below). Lose it and every TOTP user is locked out of their authenticator *and*
   their recovery codes; a staff account then needs its authenticators deleted in the admin
   and re-enrolled. It sits next to the ciphertext in no backup, which is the point.
-- **Rotate:** put the new key first, the old one after it, comma-separated
-  (`MFA_ENCRYPTION_KEY=new,old`), then recreate `web` (`docker compose up -d --no-deps
+- **Rotate:** put the new key first, the old one after it, comma-separated (`MFA_ENCRYPTION_KEY=new,old`), then recreate `web` (`docker compose up -d --no-deps
   --force-recreate web`). New writes use the first; every key in the list decrypts. Existing
   values are not re-encrypted (only a user re-enrolling writes a fresh secret), so keep the old
   key in the list for good.
 
 **Upgrading an existing deployment:** add `MFA_ENCRYPTION_KEY` to `.env.production` *before*
 deploying the release that introduces it (0.7.8 — see "Upgrade notes: 0.7.8"). Migration
-`authentication.0006_encrypt_mfa_secrets` then encrypts the existing plaintext secrets in place
-(idempotent). Values not yet encrypted are still read correctly, so there is no window where
+`authentication.0006_encrypt_mfa_secrets` then encrypts the existing plaintext secrets in place (idempotent). Values not yet encrypted are still read correctly, so there is no window where
 sign-in breaks. It is reversible with `manage.py migrate authentication 0005`, which decrypts
 them again — required before rolling back to a release older than 0.7.8, which can't read the
 encrypted form.
@@ -850,8 +840,7 @@ encrypted form.
 ## Scheduled jobs
 
 All eighteen platform jobs run from **one in-process scheduler inside `web` itself** —
-`features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn
-**workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
+`../features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn **workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
 lease makes exactly one worker the one that runs the schedule, so a recycled worker hands it
 over within seconds. It must never live in the gunicorn *master*: the master forks every worker,
 and a lock held by any other thread at that instant is copied locked into the child — the
@@ -863,26 +852,26 @@ every image — nothing left to configure by hand on a new box. Each job is a
 and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording base
 class every one of them runs through.
 
-| Job (management command) | Cadence | What it does |
-|---|---|---|
-| `extend_event_series` | daily 03:00 | materialises recurring event occurrences so the calendar never runs dry |
-| `send_deadline_reminders` | daily 07:00 | nudges whoever hasn't answered an event, a week before its deadline (or start) |
-| `publish_scheduled_lineups` | every 15 min | publishes any coach-scheduled line-up whose publish time has arrived |
-| `sync_crew_invites` | hourly | creates any missing referee/official invites for upcoming home games (a safety net: eligibility can change after a game was scheduled -- a new referee/official, a level's teams, the officials feature switched on) |
-| `poll_live_game_results` | every minute | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings) |
-| `check_fixture_sources` | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
-| `refresh_standings` | daily 01:00 | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish |
-| `settle_game_timelines` | daily 01:30 | re-fetches the timelines (goals, penalties, …) of games that finished 3h–7 days ago until they stop changing, then marks them finalized — clubs with the `game_timeline` flag only (see GAME_TIMELINE.md) |
-| `renew_subscriptions` | daily 04:00 | opens the next billing period for clubs whose current one is running out |
-| `send_billing_reminders --commit` | daily 05:00 | emails club admins about outstanding platform fees, once per escalation level |
-| `archive_overdue_clubs --commit` | daily 06:00 | archives clubs unpaid past their grace period |
-| `generate_seasons` | monthly, 1st 05:00 | generates the next 2 years of seasons for every active club |
-| `notify_published_news` | every 15 min | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet |
-| `send_form_reminders` | daily 07:30 | nudges whoever hasn't submitted a form send yet, a few days before it closes |
-| `publish_scheduled_announcements` | every 5 min | pushes any platform announcement whose scheduled time has arrived |
-| `retry_failed_deliveries` | every 2 min | sends again the push/email deliveries that failed transiently (backoff 1/5/30 min, 4 attempts), then purges delivery-log rows (sent 14 days, failed/dead 60) |
-| `process_outbox` | every minute | delivers the notification / live-game-push outbox entries a restart or crash left behind (backoff 1/5/30 min, 5 attempts, at-least-once), returns entries stuck in processing > 5 min, purges done (3 days) and failed (30) entries |
-| `check_push_health` | every 5 min | emails the platform admins when push is unhealthy (provider down/degraded, retry queue or outbox stuck, provider not configured) — once per outage, reminder every 6 h, recovery notice; see "Push health alerts" |
+| Job (management command)          | Cadence              | What it does                                                                                                                                                                                                                                                    |
+|-----------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `extend_event_series`             | daily 03:00          | materialises recurring event occurrences so the calendar never runs dry                                                                                                                                                                                         |
+| `send_deadline_reminders`         | daily 07:00          | nudges whoever hasn't answered an event, a week before its deadline (or start)                                                                                                                                                                                  |
+| `publish_scheduled_lineups`       | every 15 min         | publishes any coach-scheduled line-up whose publish time has arrived                                                                                                                                                                                            |
+| `sync_crew_invites`               | hourly               | creates any missing referee/official invites for upcoming home games (a safety net: eligibility can change after a game was scheduled -- a new referee/official, a level's teams, the officials feature switched on)                                            |
+| `poll_live_game_results`          | every minute         | refreshes score/live status from each game's competition data source, from 20 min before kickoff through 1h after its planned end (or until it's seen finishing — which also refreshes that game's teams' RBIHF standings)                                      |
+| `check_fixture_sources`           | weekly, Monday 06:15 | re-checks each team's stored RBIHF/DFEL/IJNL fixture lists (`Team.import_sources`) for the current season and sends each club's admins one notification if games moved, appeared or disappeared, or a list could not be fetched — never imports anything itself |
+| `refresh_standings`               | daily 01:00          | recomputes the league standings of each team imported from RBIHF (current season, clubs with the `RBIHF` flag) for the public API — also refreshed per team the moment `poll_live_game_results` sees one of its games finish                                    |
+| `settle_game_timelines`           | daily 01:30          | re-fetches the timelines (goals, penalties, …) of games that finished 3h–7 days ago until they stop changing, then marks them finalized — clubs with the `game_timeline` flag only (see GAME_TIMELINE.md)                                                       |
+| `renew_subscriptions`             | daily 04:00          | opens the next billing period for clubs whose current one is running out                                                                                                                                                                                        |
+| `send_billing_reminders --commit` | daily 05:00          | emails club admins about outstanding platform fees, once per escalation level                                                                                                                                                                                   |
+| `archive_overdue_clubs --commit`  | daily 06:00          | archives clubs unpaid past their grace period                                                                                                                                                                                                                   |
+| `generate_seasons`                | monthly, 1st 05:00   | generates the next 2 years of seasons for every active club                                                                                                                                                                                                     |
+| `notify_published_news`           | every 15 min         | notifies the audience of any published news item whose publish time has arrived and hasn't been notified yet                                                                                                                                                    |
+| `send_form_reminders`             | daily 07:30          | nudges whoever hasn't submitted a form send yet, a few days before it closes                                                                                                                                                                                    |
+| `publish_scheduled_announcements` | every 5 min          | pushes any platform announcement whose scheduled time has arrived                                                                                                                                                                                               |
+| `retry_failed_deliveries`         | every 2 min          | sends again the push/email deliveries that failed transiently (backoff 1/5/30 min, 4 attempts), then purges delivery-log rows (sent 14 days, failed/dead 60)                                                                                                    |
+| `process_outbox`                  | every minute         | delivers the notification / live-game-push outbox entries a restart or crash left behind (backoff 1/5/30 min, 5 attempts, at-least-once), returns entries stuck in processing > 5 min, purges done (3 days) and failed (30) entries                             |
+| `check_push_health`               | every 5 min          | emails the platform admins when push is unhealthy (provider down/degraded, retry queue or outbox stuck, provider not configured) — once per outage, reminder every 6 h, recovery notice; see "Push health alerts"                                               |
 
 Cadences above are the human-readable label each job's `JOB_REGISTRY` entry carries (also
 shown on the control panel's **Jobs** tab); the actual trigger the scheduler runs from is that
@@ -945,7 +934,7 @@ pays close to the *full* import cost again). **Host cron** fixed the memory prob
 and the once-a-minute `poll_live_game_results` ran as a single persistent process instead of
 1,440 container starts a day) but traded it for an operational one: the schedule lived in
 `/etc/cron.d/rosterchief` on the host, outside git, provisioned by hand on every new box, with
-nothing to stop it drifting from `features/jobs.py`'s own idea of the schedule.
+nothing to stop it drifting from `../features/jobs.py`'s own idea of the schedule.
 
 The in-process scheduler keeps Celery's actual lesson (no persistent worker *pool*, no
 forking, no broker) while fixing what made cron itself annoying: the schedule is a Python
@@ -970,7 +959,7 @@ docker compose run --rm --no-deps -v "$PWD/photos:/import:ro" web \
     python manage.py import_member_photos <club-slug> /import
 ```
 
-- `docker compose run` starts the image named by `IMAGE_TAG` in `.env`, which each deploy sets
+- `docker compose run` starts the image named by `IMAGE_TAG` in `../.env`, which each deploy sets
   to the tag it deployed (from 0.7.12 on). "Unknown command: 'import_member_photos'" means
   `.env` still points at an older image. Check with `grep IMAGE_TAG .env`, or put the release
   in front of the command: `IMAGE_TAG=v0.7.12 docker compose run …`.
@@ -1035,12 +1024,13 @@ panel's **Jobs** tab (see that class's own docstring). Every command accepts
 `--ignore-maintenance` for the rare case you genuinely mean to run one by hand during a
 window.
 
-`deploy/deploy-local.sh` (and so `deploy/deploy-prod.sh`, which runs it over `ssh -t`) does this
+`../deploy/deploy-local.sh` (and so `deploy/deploy-prod.sh`, which runs it over `ssh -t`) does this
 for you: it enters maintenance mode before the backup and migration, and once the new image is
 healthy asks whether to reopen the platform (Enter = yes). Answering anything but `y` -- or a failed deploy,
 or no terminal -- leaves it closed and prints the command to reopen it (also available from
 the control panel). `NO_MAINTENANCE=1` skips the whole thing; `MAINTENANCE_MESSAGE="..."` sets
-what clubs see. `deploy/deploy-prod.sh --reopen` (or `REOPEN_MAINTENANCE=1`) reopens the platform by itself once the deploy is healthy, with no prompt -- for unattended deploys; a failed deploy still leaves it closed. A first deploy (no running web yet) has nothing to close and skips it.
+what clubs see. `deploy/deploy-prod.sh --reopen` (or `REOPEN_MAINTENANCE=1`) reopens the platform by itself once the deploy is healthy, with no prompt -- for unattended deploys; a failed deploy still leaves it closed. A first deploy (no running web
+yet) has nothing to close and skips it.
 
 The state lives in Redis as well as the database, so it takes effect on **every worker and
 every server at once** — a per-process cache would leave some workers still serving clubs.
@@ -1055,16 +1045,16 @@ just reports `push_enabled: false` and nothing is sent to it.
 
 **What you need, at a glance**
 
-| | iOS | Android |
-|---|---|---|
-| Account | Apple Developer Program | Firebase project (free Spark plan is enough) |
-| Credential | a `.p8` APNs key (+ Key ID, Team ID) | a service-account JSON key |
+|                 | iOS                                                                     | Android                                                                                   |
+|-----------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| Account         | Apple Developer Program                                                 | Firebase project (free Spark plan is enough)                                              |
+| Credential      | a `.p8` APNs key (+ Key ID, Team ID)                                    | a service-account JSON key                                                                |
 | Server env vars | `APP_PUSH_APNS_KEY_ID`, `_TEAM_ID`, `_BUNDLE_ID`, `_KEY` or `_KEY_FILE` | `APP_PUSH_FCM_CREDENTIALS` or `_CREDENTIALS_FILE` (`_PROJECT_ID`, `_CHANNEL_ID` optional) |
-| In the app | Push Notifications capability; sends its APNs device token | `google-services.json` of the same Firebase project; sends its FCM registration token |
-| Register with | `POST /api/app/v1/devices` with `platform: "ios"` | `POST /api/app/v1/devices` with `platform: "android"` |
+| In the app      | Push Notifications capability; sends its APNs device token              | `google-services.json` of the same Firebase project; sends its FCM registration token     |
+| Register with   | `POST /api/app/v1/devices` with `platform: "ios"`                       | `POST /api/app/v1/devices` with `platform: "android"`                                     |
 
 Do it once per server: production and the test server may share the same keys, bundle ID /
-Firebase project, but each keeps its own `.env`. A phone registers with exactly one server (the
+Firebase project, but each keeps its own `../.env`. A phone registers with exactly one server (the
 base domain it signed in on), so pushes never double up.
 
 Web Push for the installable web app (PWA) is separate: see `DJANGO_VAPID_*` above. An account
@@ -1107,8 +1097,7 @@ proven with a real device.
 
 1. [developer.apple.com](https://developer.apple.com/account) → **Certificates, Identifiers
    & Profiles** → **Keys** → **+**. Name it (e.g. `RosterChief push`), tick **Apple Push
-   Notifications service (APNs)** and download the `.p8` file. Apple lets you download it
-   **once**; keep it safe.
+   Notifications service (APNs)** and download the `.p8` file. Apple lets you download it **once**; keep it safe.
 2. Note the **Key ID** (10 characters, shown on the key) and your **Team ID** (top right of
    the account page, or *Membership details*).
 3. The app's identifier must have the **Push Notifications** capability. The bundle ID is
@@ -1118,7 +1107,7 @@ One key works for both the sandbox and production APNs hosts.
 
 ### Step 2 — Configure the server
 
-In `.env.production` (`.env.example` lists the names):
+In `.env.production` (`../.env.example` lists the names):
 
 ```bash
 APP_PUSH_APNS_KEY_ID=ABC123DEFG
@@ -1130,7 +1119,7 @@ APP_PUSH_APNS_KEY=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY----
 # APP_PUSH_APNS_KEY_FILE=/run/secrets/apns.p8
 ```
 
-Redeploy (`deploy/deploy-prod.sh`). Phones that registered earlier start receiving pushes as
+Redeploy (`../deploy/deploy-prod.sh`). Phones that registered earlier start receiving pushes as
 soon as the app registers again, which it does on every launch.
 
 Live Activities need nothing extra on the server (they use the same key; the `.push-type.liveactivity`
@@ -1157,13 +1146,13 @@ for device in PushDevice.objects.filter(user__email='you@example.com', enabled=T
 
 Each line should end in `True True` and the phone should buzz. What the output means:
 
-| You see | Cause |
-|---|---|
-| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after Apple reported its token dead. It re-registers on the next launch |
-| `False` in the third column | no APNs key configured (the iOS side of the gateway is missing), or the device is not iOS |
-| `False` in the fourth column | Apple says the token is dead (`BadDeviceToken`/`Unregistered`): usually a debug build's token sent to the production host or the other way round. Check the build's `environment` |
-| an `ApnsError` | Apple refused the request: `InvalidProviderToken` = wrong Key ID/Team ID/key, `TopicDisallowed` = the bundle ID doesn't match the key's team, `TooManyProviderTokenUpdates` = restart loops |
-| `True True` but nothing arrives | notifications are off for the app in iOS Settings, or Focus is on |
+| You see                         | Cause                                                                                                                                                                                       |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| no lines                        | the app never registered (not signed in, or notifications refused), or the device was disabled after Apple reported its token dead. It re-registers on the next launch                      |
+| `False` in the third column     | no APNs key configured (the iOS side of the gateway is missing), or the device is not iOS                                                                                                   |
+| `False` in the fourth column    | Apple says the token is dead (`BadDeviceToken`/`Unregistered`): usually a debug build's token sent to the production host or the other way round. Check the build's `environment`           |
+| an `ApnsError`                  | Apple refused the request: `InvalidProviderToken` = wrong Key ID/Team ID/key, `TopicDisallowed` = the bundle ID doesn't match the key's team, `TooManyProviderTokenUpdates` = restart loops |
+| `True True` but nothing arrives | notifications are off for the app in iOS Settings, or Focus is on                                                                                                                           |
 
 ### Rotating or revoking
 
@@ -1188,7 +1177,7 @@ revoke the old key on the Apple Developer site.
 
 ### Step 2 — Configure the server
 
-In `.env.production` (`.env.production.example` lists the names):
+In `.env.production` (`../.env.production.example` lists the names):
 
 ```bash
 # The service-account JSON on one line (collapse it with: jq -c . service-account.json) ...
@@ -1201,7 +1190,7 @@ APP_PUSH_FCM_CREDENTIALS={"type":"service_account","project_id":"my-project","pr
 # APP_PUSH_FCM_CHANNEL_ID=notifications
 ```
 
-Redeploy (`deploy/deploy-prod.sh`). Android phones that registered earlier start receiving
+Redeploy (`../deploy/deploy-prod.sh`). Android phones that registered earlier start receiving
 pushes as soon as the app registers again, which it does on every launch. FCM has no sandbox:
 debug and release builds use the same endpoint, and the device's `environment` is ignored.
 
@@ -1235,14 +1224,14 @@ for device in PushDevice.objects.filter(user__email='you@example.com', platform=
 
 Each line should end in `True True` and the phone should show the notification. What the output means:
 
-| You see | Cause |
-|---|---|
-| no lines | the app never registered (not signed in, or notifications refused), or the device was disabled after FCM reported its token dead. It re-registers on the next launch |
-| `False` in the second column | no FCM credentials configured (the Android side of the gateway is missing), or the device is not Android |
-| `False` in the third column | FCM says the token is dead (`UNREGISTERED`): the app was uninstalled or its data cleared, or the token belongs to another Firebase project than the service account's |
-| an `FcmError` | FCM refused the request. `403`/`PERMISSION_DENIED` = the Firebase Cloud Messaging API is off for the project or the service account lacks the role; `SENDER_ID_MISMATCH` = the app's `google-services.json` is from a different project; `QUOTA_EXCEEDED`/`429` = back off |
-| a `google.auth` error or a `KeyError: 'project_id'` | the credentials JSON is malformed (a lost `\n` in the private key, or a truncated one-line value) |
-| `True True` but nothing arrives | notifications are off for the app in Android settings, the channel was never created, or battery optimisation is killing a background-restricted app |
+| You see                                             | Cause                                                                                                                                                                                                                                                                      |
+|-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| no lines                                            | the app never registered (not signed in, or notifications refused), or the device was disabled after FCM reported its token dead. It re-registers on the next launch                                                                                                       |
+| `False` in the second column                        | no FCM credentials configured (the Android side of the gateway is missing), or the device is not Android                                                                                                                                                                   |
+| `False` in the third column                         | FCM says the token is dead (`UNREGISTERED`): the app was uninstalled or its data cleared, or the token belongs to another Firebase project than the service account's                                                                                                      |
+| an `FcmError`                                       | FCM refused the request. `403`/`PERMISSION_DENIED` = the Firebase Cloud Messaging API is off for the project or the service account lacks the role; `SENDER_ID_MISMATCH` = the app's `google-services.json` is from a different project; `QUOTA_EXCEEDED`/`429` = back off |
+| a `google.auth` error or a `KeyError: 'project_id'` | the credentials JSON is malformed (a lost `\n` in the private key, or a truncated one-line value)                                                                                                                                                                          |
+| `True True` but nothing arrives                     | notifications are off for the app in Android settings, the channel was never created, or battery optimisation is killing a background-restricted app                                                                                                                       |
 
 ### Rotating or revoking
 
@@ -1354,11 +1343,10 @@ test.rosterchief.app, *.test.rosterchief.app {
    permissions error whose text does not say so. Widen the token, or mint a second one and use the snippet form.
 2. **Both hostnames must be listed.** `*.test.rosterchief.app` does **not** match
    `test.rosterchief.app` — a wildcard covers exactly one label. Leave the bare host out and
-   the club subdomains have a certificate while the control panel does not. Hence the comma.
-   (Wildcards are also only one level deep: `ajax.test.…` yes, `a.b.test.…` no.)
+   the club subdomains have a certificate while the control panel does not. Hence the comma. (Wildcards are also only one level deep: `ajax.test.…` yes, `a.b.test.…` no.)
 3. **Caddy must have the DNS plugin.** Stock `caddy` cannot answer a DNS-01 challenge at all.
    `caddy add-package github.com/caddy-dns/cloudflare`, or run a Caddy built like
-   `deploy/caddy/Dockerfile`. (If DNS-01 already works on the box, you have it.)
+   `../deploy/caddy/Dockerfile`. (If DNS-01 already works on the box, you have it.)
 4. **The token must be in *Caddy's* environment**, not your shell's — `{env.…}` reads the
    process it runs in:
 
@@ -1437,9 +1425,9 @@ echo "<token>" | docker login ghcr.io -u <your-github-username> --password-stdin
 ```
 
 Public is reasonable here: the image contains no secrets, only application code and
-dependencies (all secrets are `.env`/`.env.production`, never baked in).
+dependencies (all secrets are `../.env`/`.env.production`, never baked in).
 
-After that, `deploy/deploy-dev.sh` does a full deploy over SSH (the first run also creates the
+After that, `../deploy/deploy-dev.sh` does a full deploy over SSH (the first run also creates the
 database; then create a superuser with
 `docker compose -f compose.behind-proxy.yaml run --rm web python manage.py createsuperuser`):
 
@@ -1450,13 +1438,12 @@ deploy/deploy-dev.sh --push             # push the branch first, then deploy
 ```
 
 It runs from your machine and does the work on the server in one SSH session: check that
-`.env` and `.env.production` exist, `git fetch` + `reset --hard origin/<branch>` (a deploy
+`../.env` and `.env.production` exist, `git fetch` + `reset --hard origin/<branch>` (a deploy
 target only receives deploys; the checkout matters for `compose.behind-proxy.yaml` and
 `deploy/postgres/`, the app code comes from the image), pull `:<branch>`, `up -d db redis`, run
 migrations *explicitly*, recreate only `web`, and poll `http://127.0.0.1:<WEB_PORT>/healthz`
 (`WEB_PORT` read from the server's `.env`). The pull, the migration and the restart all use
-the branch's image (`IMAGE_TAG=<branch>`, exported for the whole run). Unlike production: no backup, no env-key preflight
-(a missing `MFA_ENCRYPTION_KEY` surfaces as a failed `migrate`), and it never touches the host's
+the branch's image (`IMAGE_TAG=<branch>`, exported for the whole run). Unlike production: no backup, no env-key preflight (a missing `MFA_ENCRYPTION_KEY` surfaces as a failed `migrate`), and it never touches the host's
 Caddy.
 
 It refuses to deploy a branch whose local commits are not pushed — the server pulls from git,
@@ -1467,7 +1454,7 @@ see "Deploying updates" above for keeping them in `deploy/.env.dev.local`.
 
 #### Where the image comes from
 
-The app image is **not** built on the server. `.github/workflows/build-and-push.yml` (workflow
+The app image is **not** built on the server. `../.github/workflows/build-and-push.yml` (workflow
 `CI`) builds it on GitHub's own runners on every push to `development` or `main` and pushes it
 to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>` — plus, on
 `main` only, `:vX.Y.Z` (see "Branching & release model" above). The server only ever
@@ -1476,11 +1463,9 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
 **Nothing reaches the registry untested.** The same workflow runs jobs in order:
 
 1. `test` — `ruff check` + the full suite. Runs on every push *and* every pull request, against
-   any branch. The suite is split over four parallel `test (N/4)` jobs
-   (`uv run python manage.py test --shard=N/4`, split by test class); `test` itself only gathers
+   any branch. The suite is split over four parallel `test (N/4)` jobs (`uv run python manage.py test --shard=N/4`, split by test class); `test` itself only gathers
    their results, so it stays the one check name branch protection and `build` wait on.
-2. `build` — only on a push to `development` or `main`, and only once `test` has passed
-   (`needs: test`). Builds the image once locally (not pushed yet), boots it, and curls its own
+2. `build` — only on a push to `development` or `main`, and only once `test` has passed (`needs: test`). Builds the image once locally (not pushed yet), boots it, and curls its own
    `/healthz` before building-and-pushing the real, published tags — catching a broken
    entrypoint or a missing static file that no unit test would ever see. On `main` specifically,
    it also tags/pushes the release's `vX.Y.Z` git tag and cuts a GitHub Release.
@@ -1491,20 +1476,20 @@ to `ghcr.io/bsiebens/rosterchief`, tagged `:<branch>` and `:<branch>-<short-sha>
    redundant.
 
 **How much of the suite, and on which database.** Production runs Postgres, the quick feedback
-loop runs the in-memory sqlite `rosterchief/test_runner.py` uses locally, and the full suite takes a
+loop runs the in-memory sqlite `../rosterchief/test_runner.py` uses locally, and the full suite takes a
 few minutes on a hosted runner. So each event runs the suite **once**, in the tier and on the
 database that fits it (a small `plan` job decides):
 
-| Event | Tests | Database |
-|---|---|---|
-| pull request into `main` (every release/hotfix) | **full**, 4 shards | Postgres: a Postgres-only break is caught *before* it merges |
-| push to `main` | full, 4 shards | Postgres |
-| nightly (`schedule`, 05:00 UTC, on `main`) | full, 4 shards | Postgres |
-| push to `development` | **fast**, 2 shards | Postgres |
-| any other pull request (a feature branch into `development`) | fast, 2 shards | sqlite |
+| Event                                                        | Tests              | Database                                                     |
+|--------------------------------------------------------------|--------------------|--------------------------------------------------------------|
+| pull request into `main` (every release/hotfix)              | **full**, 4 shards | Postgres: a Postgres-only break is caught *before* it merges |
+| push to `main`                                               | full, 4 shards     | Postgres                                                     |
+| nightly (`schedule`, 05:00 UTC, on `main`)                   | full, 4 shards     | Postgres                                                     |
+| push to `development`                                        | **fast**, 2 shards | Postgres                                                     |
+| any other pull request (a feature branch into `development`) | fast, 2 shards     | sqlite                                                       |
 
 The **fast tier** (`manage.py test --fast`) skips the tests listed in
-`rosterchief/fast_suite_skip.txt`: those whose every covered line is also covered by another test.
+`../rosterchief/fast_suite_skip.txt`: those whose every covered line is also covered by another test.
 Roughly a third of the suite then reproduces the whole suite's line coverage, in two jobs instead
 of four, which about halves the billed CI time of a feature-branch run. Nothing is deleted, and a release can never reach `main` without the full suite
 passing on its PR. The list is generated and **verified** by `deploy/refresh_fast_suite.py` (~5
@@ -1517,19 +1502,18 @@ everything. A scheduled run never builds, tags or deploys anything, and there is
 Postgres workflow.
 
 **`test` is a required status check on both `development` and `main`** —
-`deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the
+`../deploy/configure-branch-protection.sh` sets this (and the rest of branch protection) from the
 command line; see "Branching & release model" above for what it configures and why.
 
-**Auto-deploying the dev instance.** The `deploy-dev` job runs `deploy/deploy-dev.sh` over SSH
-the same way a person would, and is skipped entirely unless these repo secrets are set
-(Settings → Secrets and variables → Actions):
+**Auto-deploying the dev instance.** The `deploy-dev` job runs `../deploy/deploy-dev.sh` over SSH
+the same way a person would, and is skipped entirely unless these repo secrets are set (Settings → Secrets and variables → Actions):
 
-| Secret | Value |
-|---|---|
-| `DEV_SSH_HOST` | the dev server's host/IP (the box this section is about) |
-| `DEV_SSH_USER` | the SSH user on that box |
-| `DEV_SSH_KEY` | a private key authorized on that box, scoped to deploys only |
-| `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/deploy/RosterChief` |
+| Secret           | Value                                                        |
+|------------------|--------------------------------------------------------------|
+| `DEV_SSH_HOST`   | the dev server's host/IP (the box this section is about)     |
+| `DEV_SSH_USER`   | the SSH user on that box                                     |
+| `DEV_SSH_KEY`    | a private key authorized on that box, scoped to deploys only |
+| `DEV_REMOTE_DIR` | the checkout path there, e.g. `/home/deploy/RosterChief`     |
 
 Worth tightening later: these currently live as plain repo secrets, readable by any workflow
 run regardless of which branch triggered it. Moving them into a GitHub **Environment** named
@@ -1540,14 +1524,14 @@ malicious PR (repo secrets are available to `pull_request_target`/workflow-dispa
 way branch-restricted environment secrets are not). Not done here only because it's a UI step
 this document can describe but not perform for you.
 
-Production is deliberately **not** wired to auto-deploy — `deploy/deploy-prod.sh` stays a
+Production is deliberately **not** wired to auto-deploy — `../deploy/deploy-prod.sh` stays a
 human's call, with its own env preflight, backup-before-migrate and main-or-release-tag-only
 guardrails intact. If
 that ever changes, gate it behind a `production` Environment with **required reviewers** —
 the one GitHub feature that makes "auto-deploy to prod" mean "one click to approve", not "one
 merge to prod."
 
-**Deploying a specific version**: `deploy/deploy-dev.sh` always pulls `:<branch>` (latest for
+**Deploying a specific version**: `../deploy/deploy-dev.sh` always pulls `:<branch>` (latest for
 that branch) — fine for the dev instance, which is meant to track `development`'s tip. For
 production, deploy the release tag, never a floating branch tag:
 `deploy/deploy-prod.sh --version v0.5.0` (see "Deploying updates"). It checks out the same tag
@@ -1557,19 +1541,19 @@ on the server, so the compose file and deploy scripts match the image.
 as a release — short SHAs (7 characters) come from the GitHub Actions run or
 `git log --oneline`. There's no `deploy-prod.sh` flag for it; log in, check out that commit, and
 run `IMAGE_TAG=main-<short-sha> deploy/deploy-local.sh` (see "Deploying while logged into the
-server"). Don't edit `IMAGE_TAG` in the server's `.env`; each deploy records the tag it
+server"). Don't edit `IMAGE_TAG` in the server's `../.env`; each deploy records the tag it
 deployed there itself — see "Rollback".
 
 ## Backups
 
-Everything that carries state is backed up by one script, `deploy/backup.sh`, run nightly by
+Everything that carries state is backed up by one script, `../deploy/backup.sh`, run nightly by
 root's cron on the production server — and before every deploy, as the deploy user (see
 "Deploying updates"):
 
-| What | File |
-|---|---|
-| The database | `db-<date>.sql.gz.age` |
-| Public uploads (logos, images) — only while they're on local disk | `media-<date>.tar.gz.age` |
+| What                                                                        | File                              |
+|-----------------------------------------------------------------------------|-----------------------------------|
+| The database                                                                | `db-<date>.sql.gz.age`            |
+| Public uploads (logos, images) — only while they're on local disk           | `media-<date>.tar.gz.age`         |
 | Private uploads (member photos, onboarding documents, medical certificates) | `private-media-<date>.tar.gz.age` |
 
 Each file is **encrypted** on the server with [age](https://age-encryption.org) before it is
@@ -1577,8 +1561,7 @@ stored or copied anywhere. The server only has the *public* key: it can encrypt,
 gets hold of the server or the backup location can read the backups. The *private* key, which
 decrypts them, lives only with you.
 
-`<date>` is `YYYY-MM-DD-HHMM`. The files are kept for 14 days on the server
-(`/var/backups/rosterchief`) and — the part that actually protects you — copied every night to
+`<date>` is `YYYY-MM-DD-HHMM`. The files are kept for 14 days on the server (`/var/backups/rosterchief`) and — the part that actually protects you — copied every night to
 a **second server over SSH**, where they are kept for 60 days. A backup on the same disk as
 the database survives a bad migration, not a dead server.
 
@@ -1589,7 +1572,7 @@ before they encrypt or delete the live data. So:
 1. Production uploads into one folder on the backup server, `~rosterchief-backup/rosterchief/incoming`
    (`BACKUP_REMOTE=offsite:rosterchief/incoming`), with a key whose `sftp-server` refuses to
    remove, rename or change any file — it can only create files and write to them.
-2. Every 15 minutes a root job on the backup server (`deploy/backup-server/archive-incoming.sh`)
+2. Every 15 minutes a root job on the backup server (`../deploy/backup-server/archive-incoming.sh`)
    copies each finished upload into `/var/lib/rosterchief-backups/archive` — root-only; the
    upload account can't even list it — and deletes it from `incoming`. Pruning after 60 days
    happens there too, not from production.
@@ -1665,8 +1648,8 @@ Binaries in `/usr/local/bin` (the Amazon Linux install above) are **not** on cro
 
 3. Store the private key safely, **not on the production server**:
 
-   - in your password manager (paste the whole file as a secure note), **and**
-   - one offline copy (USB stick or printed, in a drawer/safe).
+    - in your password manager (paste the whole file as a secure note), **and**
+    - one offline copy (USB stick or printed, in a drawer/safe).
 
    Lose it and the backups can never be opened. Anyone who has it can read them. Store the
    production `MFA_ENCRYPTION_KEY` next to it — you need both to rebuild the server.
@@ -1741,7 +1724,7 @@ run these with `sudo -i` first.
    ```
 
 2. **Tell the backup which key to encrypt to.** Add the public key from step 1 to the compose
-   `.env` in the checkout (the same file that holds `POSTGRES_PASSWORD`):
+   `../.env` in the checkout (the same file that holds `POSTGRES_PASSWORD`):
 
    ```bash
    cd /home/deploy/RosterChief
@@ -1757,12 +1740,11 @@ run these with `sudo -i` first.
 
 4. **Allow that key on the backup server — for uploading files only.** In the step-2 session
    on the backup server, put the printed line into `~rosterchief-backup/.ssh/authorized_keys`,
-   prefixed so the key can't open a shell (`restrict`), can only talk SFTP
-   (`command="…sftp-server"`), and can't remove, rename or change files (`-P`, the list of SFTP
+   prefixed so the key can't open a shell (`restrict`), can only talk SFTP (`command="…sftp-server"`), and can't remove, rename or change files (`-P`, the list of SFTP
    requests `sftp-server` refuses):
 
    | Denied | So the key can't… |
-   |---|---|
+      |---|---|
    | `remove`, `rmdir` | delete files or folders |
    | `rename`, `posix-rename` | rename a backup away, or rename over one |
    | `setstat`, `fsetstat`, `lsetstat` | truncate a file, change its permissions or its timestamps (which would make the archive job take a half-written file, or pruning delete a fresh one) |
@@ -1800,8 +1782,7 @@ run these with `sudo -i` first.
    anyone else can write to it). No other key belongs in this file.
 
 5. **Trust the backup server's host key, and check the key's limits** (back on the production
-   server, as root). Compare the fingerprint it shows with the one the backup server reports
-   (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there) before answering `yes`:
+   server, as root). Compare the fingerprint it shows with the one the backup server reports (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there) before answering `yes`:
 
    ```bash
    sftp -i /root/.ssh/rosterchief_backup rosterchief-backup@<backup-host>
@@ -1816,17 +1797,16 @@ run these with `sudo -i` first.
    `ec2-user`/your normal login, and the host key has to land in *root's* `known_hosts`, which is
    what the nightly backup uses. If it fails:
 
-   - `Identity file … not accessible: Permission denied` → you're not root.
-   - `Permission denied (publickey…)` → the key line in `authorized_keys` doesn't match
-     `/root/.ssh/rosterchief_backup.pub`, or the ownership/permissions from step 2 are off
-     (`authorized_keys` and `.ssh` must not be writable by anyone but their owner).
-   - Connects, then immediately `Connection closed` → the `sftp-server` path in
-     `authorized_keys` doesn't exist on the backup server (see step 4).
-   - `rmdir` **succeeds** → the `-P …` part is missing from the key line: fix it (and recreate
-     `incoming` as in step 2).
-   - The backup server's log says exactly why: `sudo journalctl -u sshd -n 20` (Amazon Linux)
-     or `sudo tail /var/log/auth.log` (Debian/Ubuntu). With `-l VERBOSE` added after `sftp-server` in
-     the key line, every refused request is logged there too (`Refusing denylisted … request`).
+    - `Identity file … not accessible: Permission denied` → you're not root.
+    - `Permission denied (publickey…)` → the key line in `authorized_keys` doesn't match
+      `/root/.ssh/rosterchief_backup.pub`, or the ownership/permissions from step 2 are off (`authorized_keys` and `.ssh` must not be writable by anyone but their owner).
+    - Connects, then immediately `Connection closed` → the `sftp-server` path in
+      `authorized_keys` doesn't exist on the backup server (see step 4).
+    - `rmdir` **succeeds** → the `-P …` part is missing from the key line: fix it (and recreate
+      `incoming` as in step 2).
+    - The backup server's log says exactly why: `sudo journalctl -u sshd -n 20` (Amazon Linux)
+      or `sudo tail /var/log/auth.log` (Debian/Ubuntu). With `-l VERBOSE` added after `sftp-server` in
+      the key line, every refused request is logged there too (`Refusing denylisted … request`).
 
 6. **Create the rclone remote** called `offsite`:
 
@@ -1857,8 +1837,7 @@ rclone deletefile offsite:rosterchief/incoming/<one of them>   # must fail: "per
 
 The script prints `backup ok: …` and `copied N file(s) to offsite:rosterchief/incoming`. If it
 stops with an error, fix what it says and run it again: every file is written under a `.part`
-name and only renamed once complete, so a half-written file never looks like a backup
-(leftover `.part` files are removed by a later run after a day). One exception: if `age` itself
+name and only renamed once complete, so a half-written file never looks like a backup (leftover `.part` files are removed by a later run after a day). One exception: if `age` itself
 fails, the unencrypted archive it was encrypting stays in `/var/backups/rosterchief` — delete
 it. Only `*.age` files are ever copied offsite.
 
@@ -1923,7 +1902,7 @@ Knobs, all optional:
 - production line: `KEEP_DAYS=14` (on the server; files older than that are deleted locally).
   `BACKUP_REMOTE` itself is only read from the environment, so it stays on the cron line;
   `BACKUP_AGE_RECIPIENT`, `POSTGRES_USER` and `POSTGRES_DB` come from the environment or else
-  from `.env` in the current directory — hence the `cd`. `REMOTE_KEEP_DAYS` is gone: the
+  from `../.env` in the current directory — hence the `cd`. `REMOTE_KEEP_DAYS` is gone: the
   production server can't delete offsite files, and the script prints a note if it's still set.
 - backup-server line: `ARCHIVE_KEEP_DAYS=60` (`0` keeps everything forever),
   `MIN_AGE_MINUTES=10` (how long an upload must sit untouched before it's taken).
@@ -1934,11 +1913,11 @@ fails quietly is worse than none. With `BACKUP_REMOTE` set and no `BACKUP_AGE_RE
 exits non-zero (so: a mail) for a rejected or conflicting upload — look at it; on a quiet night
 nothing but the production backup should ever land in `incoming`.
 
-Remove the old weekly `deploy/restore-check.sh` cron line if you have one: the server can no
+Remove the old weekly `../deploy/restore-check.sh` cron line if you have one: the server can no
 longer decrypt the backups (by design), so the restore test moves to your own computer (next
 step).
 
-Every deploy also takes a backup first (`deploy/deploy-prod.sh` → `deploy-local.sh`, as the
+Every deploy also takes a backup first (`../deploy/deploy-prod.sh` → `deploy-local.sh`, as the
 deploy user); it's encrypted the same way and lands in the same directory, but isn't copied
 offsite by the deploy itself — the next nightly run copies it along with its own files.
 
@@ -2040,32 +2019,32 @@ are always in the backup.
 
 ### What lives where
 
-| Item | Where |
-|---|---|
-| age **public** key (`BACKUP_AGE_RECIPIENT`) | production server, `.env` in the checkout |
-| age **private** key | your password manager + one offline copy. Never on a server except during a restore |
-| `MFA_ENCRYPTION_KEY` | production `.env.production` + next to the age private key |
-| Upload SSH key (`/root/.ssh/rosterchief_backup`) | production server only; on the backup server it may only create and write files (`sftp-server -P …`), never remove, rename or change them |
-| Backups, 14 days | production server, `/var/backups/rosterchief` (owner-only: the deploy user's directory, root's nightly files); `.offsite-sent` there lists what has been uploaded |
-| Uploads in transit, minutes | backup server, `~rosterchief-backup/rosterchief/incoming` |
-| Backups, 60 days | backup server, `/var/lib/rosterchief-backups/archive` — root only; reached with your own admin login and `sudo`, never with the upload key |
-| Uploads that weren't age files | backup server, `/var/lib/rosterchief-backups/rejected` (root only, pruned like the archive) |
-| Archive job | backup server, `/usr/local/sbin/rosterchief-archive-incoming` (from `deploy/backup-server/archive-incoming.sh`), root's crontab, log in `/var/log/rosterchief-archive.log` |
+| Item                                             | Where                                                                                                                                                                         |
+|--------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| age **public** key (`BACKUP_AGE_RECIPIENT`)      | production server, `../.env` in the checkout                                                                                                                                  |
+| age **private** key                              | your password manager + one offline copy. Never on a server except during a restore                                                                                           |
+| `MFA_ENCRYPTION_KEY`                             | production `.env.production` + next to the age private key                                                                                                                    |
+| Upload SSH key (`/root/.ssh/rosterchief_backup`) | production server only; on the backup server it may only create and write files (`sftp-server -P …`), never remove, rename or change them                                     |
+| Backups, 14 days                                 | production server, `/var/backups/rosterchief` (owner-only: the deploy user's directory, root's nightly files); `.offsite-sent` there lists what has been uploaded             |
+| Uploads in transit, minutes                      | backup server, `~rosterchief-backup/rosterchief/incoming`                                                                                                                     |
+| Backups, 60 days                                 | backup server, `/var/lib/rosterchief-backups/archive` — root only; reached with your own admin login and `sudo`, never with the upload key                                    |
+| Uploads that weren't age files                   | backup server, `/var/lib/rosterchief-backups/rejected` (root only, pruned like the archive)                                                                                   |
+| Archive job                                      | backup server, `/usr/local/sbin/rosterchief-archive-incoming` (from `../deploy/backup-server/archive-incoming.sh`), root's crontab, log in `/var/log/rosterchief-archive.log` |
 
 ## Going multi-server
 
 Nothing in the code changes. What changes is where the services live:
 
-| | one server | several |
-|---|---|---|
-| Postgres | `db` container | `DJANGO_DATABASE_URL` → your central Postgres |
-| Cache / flags | `redis` container | managed Redis (or your existing one) |
-| Uploads | local disk | **S3 bucket** (`AWS_STORAGE_BUCKET_NAME`) |
-| Static files | WhiteNoise, in the image | unchanged — that is why WhiteNoise is there |
-| Scheduled jobs | in-process scheduler, the only node | unchanged — every node runs the same in-process scheduler, but `features/scheduler.py`'s Redis leader lease makes exactly one of them the active one automatically (see "Scheduled jobs" above); no separate infra needed |
-| TLS | Caddy on the box | load balancer, or Caddy on each node |
+|                | one server                          | several                                                                                                                                                                                                                      |
+|----------------|-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Postgres       | `db` container                      | `DJANGO_DATABASE_URL` → your central Postgres                                                                                                                                                                                |
+| Cache / flags  | `redis` container                   | managed Redis (or your existing one)                                                                                                                                                                                         |
+| Uploads        | local disk                          | **S3 bucket** (`AWS_STORAGE_BUCKET_NAME`)                                                                                                                                                                                    |
+| Static files   | WhiteNoise, in the image            | unchanged — that is why WhiteNoise is there                                                                                                                                                                                  |
+| Scheduled jobs | in-process scheduler, the only node | unchanged — every node runs the same in-process scheduler, but `../features/scheduler.py`'s Redis leader lease makes exactly one of them the active one automatically (see "Scheduled jobs" above); no separate infra needed |
+| TLS            | Caddy on the box                    | load balancer, or Caddy on each node                                                                                                                                                                                         |
 
-Drop `db` and `redis` from `compose.yaml`, point the URLs at the central services, and run
+Drop `db` and `redis` from `../compose.yaml`, point the URLs at the central services, and run
 `web` on as many nodes as you like behind a load balancer pointed at `/healthz`.
 
 The health check tests the database *and* a cache round trip, not just that the process is
@@ -2075,7 +2054,7 @@ not healthy, and a load balancer must not keep feeding it traffic.
 ## Rollback
 
 Releases are the unit of rollback: every `main` build is tagged `:vX.Y.Z` (and
-`:main-<short-sha>`) by `.github/workflows/build-and-push.yml`, and every release has a matching
+`:main-<short-sha>`) by `../.github/workflows/build-and-push.yml`, and every release has a matching
 git tag. Rolling back is deploying the previous release, from your own machine:
 
 ```bash
@@ -2086,9 +2065,9 @@ deploy/deploy-prod.sh --version v0.7.7
 That checks out the old tag on the server (so the compose file and deploy scripts match too),
 takes a backup, pulls `:v0.7.7`, runs `migrate` (a no-op — see below) and recreates `web`.
 Prior releases are listed under the repo's GitHub Releases page, or `git tag --list 'v*'`. To go
-forward again, deploy the newer tag (or plain `deploy/deploy-prod.sh` for the tip of `main`).
+forward again, deploy the newer tag (or plain `../deploy/deploy-prod.sh` for the tip of `main`).
 
-Don't edit `IMAGE_TAG` in the server's `.env` by hand. Every deploy (`deploy-local.sh`, and so
+Don't edit `IMAGE_TAG` in the server's `../.env` by hand. Every deploy (`deploy-local.sh`, and so
 `deploy-prod.sh`, and `deploy-dev.sh`) passes the tag it deploys to the pull, the `migrate` and
 the restart, then writes it to `.env` itself (`deploy/record-image-tag.sh`). So `.env` always
 names the image `web` is running, and a by-hand `docker compose run … web` uses that same image.

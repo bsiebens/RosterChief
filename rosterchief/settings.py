@@ -30,10 +30,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 with open(BASE_DIR / "pyproject.toml", "rb") as _pyproject_file:
     ROSTERCHIEF_VERSION = tomllib.load(_pyproject_file)["project"]["version"]
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config("DJANGO_SECRET_KEY")
 
@@ -55,7 +51,6 @@ CSRF_TRUSTED_ORIGINS = config("DJANGO_CSRF_TRUSTED_ORIGINS", cast=Csv(), default
 
 
 # Application definition
-
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -63,20 +58,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # Required by allauth's security-key list template ({% load humanize %}); without it
-    # that page raises TemplateSyntaxError.
     "django.contrib.humanize",
     "phonenumber_field",
     "django_countries",
+    "django_celery_results",
+    "django_celery_beat",
     "lucide",
-    # Auth: allauth deliberately WITHOUT django.contrib.sites — it is optional in
-    # allauth 65+, and ARCHITECTURE.md §2.4 rejects the Sites framework (Club is
-    # the tenant root, not Site).
     "allauth",
     "allauth.account",
     "allauth.mfa",
-    # The native-app auth API at /api/auth/app/v1/ (API.md §3). Mounted for the "app" client
-    # only; the web keeps using the HTML /accounts/ views.
     "allauth.headless",
     "club.apps.ClubConfig",
     "authentication.apps.AuthenticationConfig",
@@ -91,26 +81,15 @@ INSTALLED_APPS = [
     "evaluations.apps.EvaluationsConfig",
     "shop.apps.ShopConfig",
     "registration.apps.RegistrationConfig",
-    # Platform billing: RosterChief charging the clubs. Not tenant data — see billing/models.py.
     "billing.apps.BillingConfig",
     "waffle",
     "features.apps.FeaturesConfig",
     "controlpanel.apps.ControlpanelConfig",
-    # The public marketing site on the base domain (rosterchief.app) -- see
-    # marketing/views.py:home and club/views.py:root.
     "marketing.apps.MarketingConfig",
-    # Club-facing UI for team managers, coaches and admins -- not controlpanel (platform
-    # staff managing every club) and not the mobile member/parent app below.
     "management.apps.ManagementConfig",
-    # The installed PWA -- Member mode first (see the design handoff
-    # README.md); Coach mode is a later phase, deliberately not built yet.
     "mobile.apps.MobileConfig",
-    # Public, read-only JSON API for a club's own external website -- see api/urls.py.
     "api.apps.ApiConfig",
-    # Authenticated native-app API at /api/app/v1/ -- see API.md and appapi/api.py.
     "appapi.apps.AppApiConfig",
-    # The project package itself, registered only for its system checks (rosterchief/checks.py):
-    # no models, templates or static files live here.
     "rosterchief.apps.RosterchiefConfig",
 ]
 
@@ -120,34 +99,20 @@ INSTALLED_APPS = [
 WAFFLE_FLAG_MODEL = "features.Flag"
 
 MIDDLEWARE = [
-    # First, so total_ms below covers every other middleware's own cost too, not just
-    # the view. A no-op passthrough unless PERFORMANCE_LOGGING_ENABLED -- see
-    # rosterchief/perf_logging.py's own docstring.
     "rosterchief.middleware.PerformanceLoggingMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    # Directly after SecurityMiddleware, per WhiteNoise's contract. It serves the collected
-    # static files from the app itself, so no shared volume or CDN is needed to add a second
-    # app server.
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    # Must sit here -- Django's contract is "after SessionMiddleware, before
-    # CommonMiddleware" -- so request.LANGUAGE_CODE is resolved before anything else
-    # runs. See LANGUAGES above for what it's allowed to resolve to.
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "authentication.middleware.RequireMFAMiddleware",
-    # After authentication: a signed-in member's saved language applies when there is no language cookie.
     "members.language.MemberLanguageMiddleware",
     "club.tenancy.ClubTenantMiddleware",
-    # After tenancy: it decides club-vs-platform from request.club, which was just resolved.
     "features.middleware.MaintenanceMiddleware",
-    # After maintenance: a club under maintenance closes its public API too, same as
-    # everything else on its subdomain.
     "api.middleware.PublicApiCorsMiddleware",
-    # No CORS on the app/auth APIs (native clients don't need it); only no-store caching.
     "appapi.middleware.AppApiHeadersMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -576,19 +541,12 @@ EMAIL_USE_TLS = config("DJANGO_EMAIL_USE_TLS", default=True, cast=bool)
 EMAIL_USE_SSL = config("DJANGO_EMAIL_USE_SSL", default=False, cast=bool)
 EMAIL_TIMEOUT = config("DJANGO_EMAIL_TIMEOUT", default=10, cast=int)
 
-#: Only read by rosterchief.mail.ResendEmailBackend -- irrelevant for the SMTP backend
-#: (which would use EMAIL_HOST_PASSWORD, e.g. Resend's own SMTP relay, instead).
 RESEND_API_KEY = config("RESEND_API_KEY", default="")
 
 DEFAULT_FROM_EMAIL = config("DJANGO_DEFAULT_FROM_EMAIL", default="RosterChief <noreply@rosterchief.app>")
 SERVER_EMAIL = config("DJANGO_SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
-#: Where a club admin is told to direct a billing question. Shown in reminder emails.
 BILLING_CONTACT_EMAIL = config("ROSTERCHIEF_BILLING_CONTACT_EMAIL", default=DEFAULT_FROM_EMAIL)
-
-#: Where the marketing site's "Book a demo" form (marketing/views.py) sends its
-#: notification. reply_to is set to the visitor's own address, so replying goes
-#: straight back to them.
 ROSTERCHIEF_CONTACT_EMAIL = config("ROSTERCHIEF_CONTACT_EMAIL", default="bernard@rosterchief.app")
 
 # Web Push (mobile app, see mobile/services/push.py) -- one VAPID keypair for the whole
@@ -605,3 +563,15 @@ VAPID_ADMIN_EMAIL = config("DJANGO_VAPID_ADMIN_EMAIL", default="admin@rosterchie
 
 PHONENUMBER_DEFAULT_REGION = "BE"
 PHONENUMBER_DB_FORMAT = "E164"
+
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_TASK_TRACK_STARTED = True
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_BROKER_URL = config("DJANGO_REDIS_URL", cast=str)
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_RESULT_EXTENDED = True

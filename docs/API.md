@@ -2,14 +2,15 @@
 
 Status: **phase 3 (member write/commerce) done on the server side** (2026-09-29): with
 phases 1-2, every member screen of the PWA now has an app API equivalent (§14). **Developer
-docs are online at `/api/docs/`** (Markdown in `docs/app-api/`, iOS first), next to the live
+docs are online at `/api/docs/`** (Markdown in `app-api`, iOS first), next to the live
 OpenAPI references, and `docs/app-api/openapi-app-v1.json` is the committed snapshot clients
 are generated from. Push setup for operators is in `DEPLOYMENT.md` "Native app push". Items
 that need real devices or cloud accounts (Android passkey prototype, SNS round trip) are
 still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
 RBAC), `DEPLOYMENT.md` (Caddy/AWS topology) and `BILLING.md`.
 
-Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and re-checked
+Where this document and the code disagree, the code wins. Statements about what allauth, ninja or the current views do were checked against the installed sources (allauth 65.18, django-ninja 1.6.2) and the `mobile/*` views on 2026-09-20, and
+re-checked
 against development at 0.7.12 on 2026-09-29; items still unverified are marked **UNVERIFIED** and collected in §16.
 
 ---
@@ -21,7 +22,7 @@ against development at 0.7.12 on 2026-09-29; items still unverified are marked *
 
 **Goals (v1)**
 
-- Member + coach parity with the current PWA: everything under `mobile/views.py` and
+- Member + coach parity with the current PWA: everything under `../mobile/views.py` and
   `mobile/coach_views.py` (home, calendar, RSVP, news, notifications, profile, payments, forms, shop, re-registration, calendar feed, bug reports; coach today/attendance/lineup/roster/events/ news/evaluations).
 - Real authentication, including the existing MFA (TOTP, recovery codes, passkeys), designed for a native client.
 - Native push (APNs + FCM) through **AWS**, next to the existing Web Push.
@@ -41,7 +42,7 @@ against development at 0.7.12 on 2026-09-29; items still unverified are marked *
 ## 2. Surface layout and coexistence with `/api/v1/`
 
 Today `/api/v1/` is an **unauthenticated, read-only, club-scoped** ninja API with `Access-Control-
-Allow-Origin: *` (`api/urls.py`, `api/middleware.py::PublicApiCorsMiddleware`, GET/OPTIONS only). It must not gain authenticated endpoints: a wildcard-CORS prefix is the wrong place for them.
+Allow-Origin: *` (`../api/urls.py`, `api/middleware.py::PublicApiCorsMiddleware`, GET/OPTIONS only). It must not gain authenticated endpoints: a wildcard-CORS prefix is the wrong place for them.
 
 | Prefix              | Host                             | What                                                       | Auth           |
 |---------------------|----------------------------------|------------------------------------------------------------|----------------|
@@ -66,7 +67,7 @@ Allow-Origin: *` (`api/urls.py`, `api/middleware.py::PublicApiCorsMiddleware`, G
 Already decided with the product owner. It reuses the existing account stack (email login, TOTP, recovery codes, WebAuthn/passkeys, rate limits, password reset) instead of a second identity system, and it is the only option that gives the app **the
 same MFA** as the web. No DRF, simplejwt or oauth-toolkit is added.
 
-Implemented in phase 0 (`rosterchief/settings.py`, `rosterchief/urls.py`):
+Implemented in phase 0 (`../rosterchief/settings.py`, `rosterchief/urls.py`):
 
 ```python
 INSTALLED_APPS += ["allauth.headless"]  # + allauth.usersessions in phase 5 (§3.7)
@@ -125,17 +126,19 @@ allauth ships two strategies:
   `meta.refresh_token`; `HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED=True` makes access tokens die with the underlying session (revocation). Sent as `Authorization: Bearer …`.
 
 **Decided (2026-09-20): the JWT strategy with stateful validation on**, refresh lifetime raised to the
-"stay signed in" horizon (target **90 days**, rotating on every refresh), access token **5–15 min** (set to 10). Reasons: short-lived bearer credentials limit the blast radius of a leaked access token; refresh rotation gives theft detection; stateful validation
+"stay signed in" horizon (target **90 days**, rotating on every refresh), access token **5–15 min** (set to 10). Reasons: short-lived bearer credentials limit the blast radius of a leaked access token; refresh rotation gives theft detection; stateful
+validation
 keeps *server-side revocation* (logout,
 "sign out other devices", admin lock-out) which is the property a club app handling minors' data needs. Algorithm HS256 via `SECRET_KEY` is acceptable for a single deployment (tokens are only ever validated by us); use RS256 +
 `HEADLESS_JWT_PRIVATE_KEY` if a second verifier ever appears. **Consequence:** rotating `SECRET_KEY` (without a separate JWT key) signs every app user out, because the session id inside each token is also encrypted with `SECRET_KEY`, and
 `SECRET_KEY_FALLBACKS` isn't consulted.
 
 **Resolved in the phase-0 spike (§16-1)** — read from allauth 65.18's source, pinned by
-`authentication/test_headless_app.py`:
+`../authentication/test_headless_app.py`:
 
 - **A refresh token only works while its server session exists.** The set of valid refresh tokens (`jti → exp`) is stored *in* the session, so an expired or deleted session kills every refresh token for it, whatever the token's own `exp` says.
-- **App logins get a 90-day session; web logins don't change.** `authentication/signals.py` handles `user_logged_in` and, only when `request.allauth.headless.client == "app"`, calls `request.session.set_expiry(APP_SESSION_LIFETIME)`. That signal fires when
+- **App logins get a 90-day session; web logins don't change.** `../authentication/signals.py` handles `user_logged_in` and, only when `request.allauth.headless.client == "app"`, calls `request.session.set_expiry(APP_SESSION_LIFETIME)`. That signal
+  fires when
   the login *completes*, i.e. after the MFA stage, and for passkey logins too.
 - **Refresh slides the session.** `/tokens/refresh` ends with `session.save()`, and a relative `set_expiry` recomputes `expire_date` from now on every save. An app in regular use stays signed in; one idle for 90 days has to log in again.
 - **Refresh rotates**, and replaying a used refresh token fails (400). Logging out (`DELETE /auth/session`) or deleting the session kills live access tokens at once (stateful validation → 401).
@@ -150,7 +153,7 @@ like replay.
 it must:
 
 1. Reject inactive users (allauth does) and half-finished sessions (no `SESSION_KEY` — an MFA stage not completed).
-2. **Set `request.user`.** allauth's ninja auth puts the user only in `request.auth`; our services (`club/services/access.py`, `has_management_access`, `teams_staffed_by(user, club)`) and
+2. **Set `request.user`.** allauth's ninja auth puts the user only in `request.auth`; our services (`../club/services/access.py`, `has_management_access`, `teams_staffed_by(user, club)`) and
    `request.user`-based code expect it.
 3. **Enforce the MFA-enrolment requirement.** `authentication.middleware.RequireMFAMiddleware`
    redirects privileged users (admins, editors, staff) who haven't enrolled MFA — but it inspects the cookie session, and app requests carry only a header, so at middleware time `request.user` is anonymous and it **never fires for the API**. Without
@@ -158,7 +161,8 @@ it must:
    is_mfa_enabled(user)` and answers **403 `mfa_enrollment_required`** on everything except
    `/api/auth/…` (where the app can enrol TOTP itself: `GET/POST /account/authenticators/totp`). The app shows an "enrol MFA to continue" screen driven by that code.
 4. Not depend on the Django session-auth hash. allauth's ninja auth does **not** verify
-   `HASH_SESSION_KEY`, so a password change does not invalidate other sessions on its own. **Decided (2026-09-20):** a `password_changed` receiver flushes the user's *other* app sessions; `ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE` stays off, so web behaviour does not change.
+   `HASH_SESSION_KEY`, so a password change does not invalidate other sessions on its own. **Decided (2026-09-20):** a `password_changed` receiver flushes the user's *other* app sessions; `ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE` stays off, so web
+   behaviour does not change.
 5. Attach nothing about the club: the token proves *who*, never *which club* (§4).
 
 ### 3.5 Login sequences
@@ -182,12 +186,12 @@ The WebAuthn challenge is held in the *server session*, so the client **must** s
 `meta.session_token` from the GET and send it on the POST. In general: whenever a response carries
 `meta.session_token`, overwrite the stored one.
 
-**Unverified email** (`ACCOUNT_EMAIL_VERIFICATION = "mandatory"`, as on the web): the login answers
-**401** with a `verify_email` flow and no tokens. The app has to show "confirm your email first";
+**Unverified email** (`ACCOUNT_EMAIL_VERIFICATION = "mandatory"`, as on the web): the login answers **401** with a `verify_email` flow and no tokens. The app has to show "confirm your email first";
 the confirmation link goes to the web. Web sign-in has the same requirement, so every account that
 can log in today already has a verified address.
 
 **Client notes found in the spike:**
+
 - Logout (`DELETE /auth/session`) answers **401** with `is_authenticated: false`. That is success, not an error.
 - A non-GET request with `Content-Type: application/json` must have an empty body or valid JSON. Anything else is a bare 400.
 
@@ -200,18 +204,23 @@ can log in today already has a verified address.
 - **iOS:** ASAuthorization sends `https://<rpId>` as the origin, so allauth's default check passes. Needs the *Associated Domains* entitlement `webcredentials:rosterchief.app` and an
   `apple-app-site-association` file served over HTTPS at
   `https://rosterchief.app/.well-known/apple-app-site-association` (Caddy static or a Django view).
-- **Android: confirmed server-side, still needs a device.** Credential Manager reports the origin for a native app as `android:apk-key-hash:<hash>`. Checked in phase 0: fido2's default check (`fido2.rpid.verify_rp_id`) returns **False** for that origin with RP ID
+- **Android: confirmed server-side, still needs a device.** Credential Manager reports the origin for a native app as `android:apk-key-hash:<hash>`. Checked in phase 0: fido2's default check (`fido2.rpid.verify_rp_id`) returns **False** for that
+  origin with RP ID
   `rosterchief.app`, and allauth only exposes an all-or-nothing `MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN`. `Fido2Server` does accept a `verify_origin` callable, but allauth builds it in the module-level `get_server()` in
-  `allauth/mfa/webauthn/internal/auth.py`, which that module's own functions look up by name. The fix is to replace that function at app start-up with one that accepts `verify_rp_id(...)` **or** an origin in our allow-list of APK signing-key hashes. It's a
-  patch on an allauth internal, so it needs a test that fails when allauth changes it. Also needs Digital Asset Links at `/.well-known/assetlinks.json` (`delegate_permission/common.get_login_creds`). What's left needs a device: that a passkey created on the web asserts from
+  `allauth/mfa/webauthn/internal/auth.py`, which that module's own functions look up by name. The fix is to replace that function at app start-up with one that accepts `verify_rp_id(...)` **or** an origin in our allow-list of APK signing-key hashes.
+  It's a
+  patch on an allauth internal, so it needs a test that fails when allauth changes it. Also needs Digital Asset Links at `/.well-known/assetlinks.json` (`delegate_permission/common.get_login_creds`). What's left needs a device: that a passkey created
+  on the web asserts from
   the Android app with this origin.
-- **Decided (2026-09-20):** v1 ships **password + TOTP/recovery** on both platforms; **iOS passkeys** in a follow-up; **Android passkeys** only after a prototype proves the origin check. Existing web passkeys keep working — same RP ID, same credentials, as long
+- **Decided (2026-09-20):** v1 ships **password + TOTP/recovery** on both platforms; **iOS passkeys** in a follow-up; **Android passkeys** only after a prototype proves the origin check. Existing web passkeys keep working — same RP ID, same
+  credentials, as long
   as the RP ID does not change.
 
 ### 3.7 Sessions / devices (phase 5)
 
 `DELETE /auth/session` covers "log out this device". "Signed-in devices" + "sign out others" needs
-`allauth.usersessions` (`GET/DELETE /auth/sessions`), which is **not installed** (new app, migration, `UserSessionsMiddleware`). **Decided (2026-09-20): deferred to phase 5**; launch has "log out this device" only (revisit if the security review asks for it). Pair it with a per-install `device_name` sent on login so
+`allauth.usersessions` (`GET/DELETE /auth/sessions`), which is **not installed** (new app, migration, `UserSessionsMiddleware`). **Decided (2026-09-20): deferred to phase 5**; launch has "log out this device" only (revisit if the security review asks
+for it). Pair it with a per-install `device_name` sent on login so
 the list is readable.
 
 ### 3.8 Hardening checklist
@@ -273,7 +282,7 @@ and CSRF are irrelevant (no cookies; allauth app views are `csrf_exempt`, and ni
 ```
 
 The client caches this, lets the user pick a club (auto-select if exactly one), and stores the
-`api_base_url` per club. **Authorization is never in the token**: every club request re-derives what the user may see from `(user, request.club)` via `club/services/access.py`. A valid token on a club the user does not belong to → **403
+`api_base_url` per club. **Authorization is never in the token**: every club request re-derives what the user may see from `(user, request.club)` via `../club/services/access.py`. A valid token on a club the user does not belong to → **403
 `not_a_member`** (not 404: it is a known club).
 
 **Deep links / push payloads** carry `club_slug` so a tap can switch club context before routing.
@@ -289,7 +298,7 @@ Order of checks, matching the current web behaviour (**flag → role → scope**
 3. **Club resolved** → 404. **User belongs to the club** → 403 `not_a_member`.
 4. **Feature flag / `Club.shop_open`** (waffle: `shop`, `formbuilder`, `officials`, `evaluations`)
    → 404 `feature_disabled` for a disabled module; 409 `shop_closed` when the shop exists but is closed (today the web redirects home with a flash).
-5. **Role** (`club/services/access.py`) → 403 `forbidden`.
+5. **Role** (`../club/services/access.py`) → 403 `forbidden`.
 6. **Object scope**: the person or team named in the request must be reachable by the caller → **404** (do not disclose existence of another family's member, order, form response, or a team the coach doesn't staff).
 7. Cross-club ids: leaf rows are scoped through a parent (`club` FK on `ClubScopedModel`); every lookup goes through the club-scoped manager so a valid UUID from another club is a 404, never a leak. Add a generic test per endpoint (§13).
 
@@ -361,7 +370,8 @@ sizes hurt mobile networks.
 **Private media** (documents, invoices, private-storage files) are **never** exposed as public S3 URLs. Return an authenticated streaming endpoint (`GET …/invoice.pdf`, `Content-Type:
 application/pdf`, `Content-Disposition`) or, later, short-lived presigned URLs minted per request after the same authorization.
 
-**Member photos are private media now** (security audit, 0.7.9). `Member.player_photo` (official) and `Member.profile_photo` (self-service, club-wide, never public) live in private storage, and `Member.photo_url` points at `members:photo`, which checks
+**Member photos are private media now** (security audit, 0.7.9). `Member.player_photo` (official) and `Member.profile_photo` (self-service, club-wide, never public) live in private storage, and `Member.photo_url` points at `members:photo`, which
+checks
 `members.services.photos.can_view_member_photo`: the member, their parents/guardians, and staff who may see that member, plus anyone when `photo_public_consent` is on. The web view authenticates by session cookie, so the app API needs its own
 token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the same rule. Don't hand out the web URL.
 
@@ -384,25 +394,25 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 
 ### 7.2 Member (club host)
 
-| Area          | Endpoints                                                                                                                                                                                                                                                           |
-|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Context       | `GET /context` — caller's `Member`, managed people (self + children), season, role flags, staffed teams, features                                                                                                                                                   |
-| Home          | `GET /home?member_id=` — hero RSVP, "going", needs-answer (RSVP + referee/official invites), open task slots, dues, news, forms (caps in the service, not the client)                                                                                               |
-| Calendar      | `GET /calendar?from&to&kind&member_id` — merged agenda of attendance, referee/official signups, blocked events; each item tagged `type: rsvp\|referee\|official\|blocked`                                                                                           |
-| Events        | `GET /events/{id}` — member view: lineup (if published), squad summary, tasks, `attachments` (files from the team's managers, only when a managed person is invited; download via `GET /events/{id}/attachments/{aid}`), per-person answers, `blocked` requirements, and for games `game_timeline` (goals/penalties, with names; feature `game_timeline`)                                                                                                                                           |
-| RSVP          | `POST /events/{id}/rsvp` `{member_id, status: present\|absent\|maybe\|dropout, note?}`                                                                                                                                                                              |
-| Officiating   | `POST /events/{id}/referee-signups/{sid}/respond` and `/official-signups/{sid}/respond` `{response: accept\|decline}`                                                                                                                                               |
-| Tasks         | `POST /events/{id}/tasks/{tid}/claim`, `DELETE …/claim`                                                                                                                                                                                                             |
-| News          | `GET /news?cursor`, `GET /news/{slug}` (`lang` follows `Accept-Language`)                                                                                                                                                                                           |
-| Game follows  | `GET /game-follows` — the club's teams with `following`; `PUT /game-follows` `{team_ids}` replaces the set (opt-in live game pushes; feature `game_timeline`, else `404 feature_disabled`) |
-| Notifications | `GET /notifications?member_id&cursor`, `GET /notifications/unread-count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `DELETE /notifications` (clear; hard delete, as today) — each carries `source: {type: news\|event\|form_send, id\|slug}` |
-| Profile       | `GET /members/{id}` (managed only), `PATCH /members/{id}`, `PUT /members/{id}/photo` (multipart, `photo_public_consent`)                                                                                                                                            |
-| Payments      | `GET /payments?member_id`, `GET /payments/batches/{id}/invoice.pdf`                                                                                                                                                                                                 |
-| Forms         | `GET /forms`, `GET /forms/{send_id}` (schema: fields, types, options, required), `POST /forms/{send_id}/submit`, `GET /forms/submissions/{id}` (raw values)                                                                                                         |
-| Shop          | `GET /shop/products` (excl. `MEMBERSHIP` type), `GET /shop/cart`, `POST /shop/cart/items`, `PATCH/DELETE /shop/cart/items/{id}`, `POST /shop/orders`, `GET /shop/orders`, `GET /shop/orders/{id}`, `GET /shop/orders/{id}/invoice.pdf`                              |
-| Registration  | `GET /registration/products`, `POST /registration/quote`, `POST /registration` (re-register managed people; phase 3)                                                                                                                                                |
-| Calendar feed | `GET /calendar-feed` (token + URL), `POST /calendar-feed/regenerate`                                                                                                                                                                                                |
-| Support       | `POST /bug-reports`, `GET /bug-reports`                                                                                                                                                                                                                             |
+| Area          | Endpoints                                                                                                                                                                                                                                                                                                                                                 |
+|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Context       | `GET /context` — caller's `Member`, managed people (self + children), season, role flags, staffed teams, features                                                                                                                                                                                                                                         |
+| Home          | `GET /home?member_id=` — hero RSVP, "going", needs-answer (RSVP + referee/official invites), open task slots, dues, news, forms (caps in the service, not the client)                                                                                                                                                                                     |
+| Calendar      | `GET /calendar?from&to&kind&member_id` — merged agenda of attendance, referee/official signups, blocked events; each item tagged `type: rsvp\|referee\|official\|blocked`                                                                                                                                                                                 |
+| Events        | `GET /events/{id}` — member view: lineup (if published), squad summary, tasks, `attachments` (files from the team's managers, only when a managed person is invited; download via `GET /events/{id}/attachments/{aid}`), per-person answers, `blocked` requirements, and for games `game_timeline` (goals/penalties, with names; feature `game_timeline`) |
+| RSVP          | `POST /events/{id}/rsvp` `{member_id, status: present\|absent\|maybe\|dropout, note?}`                                                                                                                                                                                                                                                                    |
+| Officiating   | `POST /events/{id}/referee-signups/{sid}/respond` and `/official-signups/{sid}/respond` `{response: accept\|decline}`                                                                                                                                                                                                                                     |
+| Tasks         | `POST /events/{id}/tasks/{tid}/claim`, `DELETE …/claim`                                                                                                                                                                                                                                                                                                   |
+| News          | `GET /news?cursor`, `GET /news/{slug}` (`lang` follows `Accept-Language`)                                                                                                                                                                                                                                                                                 |
+| Game follows  | `GET /game-follows` — the club's teams with `following`; `PUT /game-follows` `{team_ids}` replaces the set (opt-in live game pushes; feature `game_timeline`, else `404 feature_disabled`)                                                                                                                                                                |
+| Notifications | `GET /notifications?member_id&cursor`, `GET /notifications/unread-count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `DELETE /notifications` (clear; hard delete, as today) — each carries `source: {type: news\|event\|form_send, id\|slug}`                                                                                       |
+| Profile       | `GET /members/{id}` (managed only), `PATCH /members/{id}`, `PUT /members/{id}/photo` (multipart, `photo_public_consent`)                                                                                                                                                                                                                                  |
+| Payments      | `GET /payments?member_id`, `GET /payments/batches/{id}/invoice.pdf`                                                                                                                                                                                                                                                                                       |
+| Forms         | `GET /forms`, `GET /forms/{send_id}` (schema: fields, types, options, required), `POST /forms/{send_id}/submit`, `GET /forms/submissions/{id}` (raw values)                                                                                                                                                                                               |
+| Shop          | `GET /shop/products` (excl. `MEMBERSHIP` type), `GET /shop/cart`, `POST /shop/cart/items`, `PATCH/DELETE /shop/cart/items/{id}`, `POST /shop/orders`, `GET /shop/orders`, `GET /shop/orders/{id}`, `GET /shop/orders/{id}/invoice.pdf`                                                                                                                    |
+| Registration  | `GET /registration/products`, `POST /registration/quote`, `POST /registration` (re-register managed people; phase 3)                                                                                                                                                                                                                                      |
+| Calendar feed | `GET /calendar-feed` (token + URL), `POST /calendar-feed/regenerate`                                                                                                                                                                                                                                                                                      |
+| Support       | `POST /bug-reports`, `GET /bug-reports`                                                                                                                                                                                                                                                                                                                   |
 
 ### 7.3 Coach (club host, `/teams/{team_id}/…`)
 
@@ -417,7 +427,7 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 | News                                                       | `POST …/news` (submit for review, photos multipart; needs `can_add_news`)                                                                                                                                                                                                             |
 | Evaluations (flag `evaluations`, `can_manage_evaluations`) | `GET /evaluations/checklists`, `GET …/players/{member_id}/evaluations`, `POST …/players/{member_id}/evaluations` (requires an explicit `checklist_slug` — the web's "exactly one ⇒ auto-pick" is UI-only)                                                                             |
 
-> **As built (phase 4):** see `docs/app-api/ios.md` §9 for the real shapes. Differences from the table above: staff removal is `DELETE …/staff/{assignment_id}` (players keep `…/roster/{membership_id}`);
+> **As built (phase 4):** see `app-api/ios.md` §9 for the real shapes. Differences from the table above: staff removal is `DELETE …/staff/{assignment_id}` (players keep `…/roster/{membership_id}`);
 > `PATCH …/events/{id}` takes `scope: this|this_and_following|all`; evaluations are club-wide, not under `/teams/{team_id}`: `GET /evaluations/checklists`, `GET|POST /players/{member_id}/evaluations`
 > (the evaluation grant is not tied to a team); `GET …/news` lists the caller's own submissions; every `staffed_teams` item in `GET /context` carries `role` and the `can_*` flags.
 
@@ -436,7 +446,8 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 - **Secrets never in responses or logs:** access/refresh tokens, TOTP secrets after activation, recovery codes after first display, calendar-feed token except on the explicit endpoint, push tokens. Request logging on `/api/auth/` and `/api/app/` must
   scrub `Authorization`,
   `X-Session-Token`, `password`, `code`, `refresh_token`, `credential`.
-- **Form submission for a child is allowed** (decided and built during the security audit). A parent/guardian can answer a form on a child's behalf. `Submission` records who filled it in (`submitted_on_behalf_by`), and `formbuilder/services/submission.py`
+- **Form submission for a child is allowed** (decided and built during the security audit). A parent/guardian can answer a form on a child's behalf. `Submission` records who filled it in (`submitted_on_behalf_by`), and
+  `../formbuilder/services/submission.py`
   takes the submitting person separately from the member it's for. `POST /forms/{send_id}/submit` therefore takes the `member_id` the answers are for (a managed person), like the other writes (§5.1).
 
 ---
@@ -445,9 +456,9 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 
 Native push goes **straight to the platform providers**: Apple's APNs (HTTP/2, token auth) for iOS and
 Firebase Cloud Messaging (HTTP v1) for Android. There is no SNS or any other intermediary (the original
-SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `appapi/push.py` for the code.
+SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `../appapi/push.py` for the code.
 
-**Gateways** (`appapi/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
+**Gateways** (`../appapi/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
 set), `FcmGateway` (Android, when a Firebase service account is set), and `PlatformGateway`, which
 `get_gateway()` returns and which routes a device to the gateway of its platform. A platform without
 credentials is simply not `supports()`-ed: its devices still register, nothing is sent. `NullGateway` covers
@@ -459,14 +470,14 @@ locale, enabled, last_seen)`, keyed per `User` + install, not per Member/club: o
 belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, also on token rotation); `DELETE
 /devices/{id}` and logout remove it. The PWA's `mobile.PushSubscription` is separate (per Member, per club).
 
-**Dispatcher** (`notifications/dispatch.py`). The `notifications_created` signal is gone. `notify_members` writes the
+**Dispatcher** (`../notifications/dispatch.py`). The `notifications_created` signal is gone. `notify_members` writes the
 `Notification` rows (the in-app inbox) and calls `schedule_notifications`, which, after the surrounding transaction
 commits and off the request thread (`run_in_background`), hands the batch to every registered *channel*. Channels
 register themselves in their `AppConfig.ready` via `register_channel` (idempotent per name), so `notifications` never
 imports `appapi`/`mobile`:
 
-| Channel  | Class                                | Does                                                         |
-|----------|--------------------------------------|--------------------------------------------------------------|
+| Channel  | Class                                 | Does                                                         |
+|----------|---------------------------------------|--------------------------------------------------------------|
 | `email`  | `notifications.channels.EmailChannel` | plain notification mail to the member and guardians          |
 | `native` | `appapi.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
 | `web`    | `mobile.channels.WebPushChannel`      | Web Push to the PWA subscriptions                            |
@@ -477,10 +488,10 @@ every channel's `deliver_to_user`, returning how many devices/subscriptions each
 `NOTIFICATIONS_DISPATCH_EAGER` (on in the test suite) everything is delivered synchronously instead of after commit.
 
 **Recipients and dedupe.**
+
 - Recipients are *accounts*: the member's own login plus every parent/guardian's in that club (the `recipient_emails`
   rule). One push per account per distinct notification, so a club-wide item doesn't buzz a parent once per child.
-- Web Push is skipped for an account with an enabled native device seen in the last 60 days
-  (`users_with_native_push`): the phone already got it.
+- Web Push is skipped for an account with an enabled native device seen in the last 60 days (`users_with_native_push`): the phone already got it.
 - An account set to "email unless the app can notify me" (`User.email_notifications`) gets no plain notification mail
   while it has such a device. Mail **with attachments** (invoices) is a document, not a nudge: it is sent inline by
   `notify_members` (once, never again by the email channel) and ignores that preference.
@@ -496,29 +507,29 @@ authenticated API after tap; never put minors' details or financial data in a pu
 `notification_id`, `kind: "game_moment"`, `target: {type: "event", id}`. Who gets them is opt-in per team:
 `GET/PUT /game-follows`.
 
-**Push policy** (`notifications/policy.py`, one table for both providers). Each category maps to a TTL, whether a newer
+**Push policy** (`../notifications/policy.py`, one table for both providers). Each category maps to a TTL, whether a newer
 push replaces the older one (collapse), a priority and an Android channel. The server sets them on every send: APNs
 `apns-expiration` (now + TTL), `apns-priority`, `apns-collapse-id` (the event id, max 64 bytes); FCM `android.ttl`,
 `android.priority`, `android.collapse_key`, `android.notification.channel_id`. A `critical` notification is always
 priority 10 / high with a TTL of at least a day. A retry re-sends with the same policy and is dropped once the TTL has
 passed. The custom payload carries `category` (the category key) so the app can route and style.
 
-| Category       | TTL    | Collapse | Priority (APNs / FCM) | Android channel (importance) |
-|----------------|--------|----------|-----------------------|------------------------------|
-| `news`         | 7 days | no       | 5 / normal            | `rc_news` (default)          |
-| `event`        | 3 days | no       | 10 / high             | `rc_event` (high)            |
-| `reminder`     | 1 day  | no       | 5 / normal            | `rc_reminder` (default)      |
-| `lineup`       | 1 day  | no       | 10 / high             | `rc_lineup` (high)           |
-| `crew`         | 2 days | no       | 10 / high             | `rc_crew` (high)             |
-| `form`         | 3 days | no       | 5 / normal            | `rc_form` (default)          |
-| `shop`         | 2 days | no       | 5 / normal            | `rc_shop` (default)          |
-| `coach`        | 1 day  | no       | 10 / high             | `rc_coach` (high)            |
-| `admin`        | 3 days | no       | 5 / normal            | `rc_admin` (default)         |
-| `announcement` | 7 days | no       | 5 / normal            | `rc_announcement` (default)  |
-| `game`         | 15 min | yes, per event | 10 / high       | `rc_game` (high)             |
-| `general`      | 3 days | no       | 5 / normal            | `rc_general` (default)       |
+| Category       | TTL    | Collapse       | Priority (APNs / FCM) | Android channel (importance) |
+|----------------|--------|----------------|-----------------------|------------------------------|
+| `news`         | 7 days | no             | 5 / normal            | `rc_news` (default)          |
+| `event`        | 3 days | no             | 10 / high             | `rc_event` (high)            |
+| `reminder`     | 1 day  | no             | 5 / normal            | `rc_reminder` (default)      |
+| `lineup`       | 1 day  | no             | 10 / high             | `rc_lineup` (high)           |
+| `crew`         | 2 days | no             | 10 / high             | `rc_crew` (high)             |
+| `form`         | 3 days | no             | 5 / normal            | `rc_form` (default)          |
+| `shop`         | 2 days | no             | 5 / normal            | `rc_shop` (default)          |
+| `coach`        | 1 day  | no             | 10 / high             | `rc_coach` (high)            |
+| `admin`        | 3 days | no             | 5 / normal            | `rc_admin` (default)         |
+| `announcement` | 7 days | no             | 5 / normal            | `rc_announcement` (default)  |
+| `game`         | 15 min | yes, per event | 10 / high             | `rc_game` (high)             |
+| `general`      | 3 days | no             | 5 / normal            | `rc_general` (default)       |
 
-**Delivery log and retries** (`notifications.NotificationDelivery`, `notifications/delivery_log.py`). Every send on
+**Delivery log and retries** (`notifications.NotificationDelivery`, `../notifications/delivery_log.py`). Every send on
 every channel is logged per target (install, subscription or address): sent, failed (refused), dead (target gone) or
 retrying. A transient failure (throttling, a 5xx, a network error) keeps its payload and is retried by the
 `retry_failed_deliveries` job (every 2 min) after 1, 5 and 30 minutes, 4 attempts in total, then it is marked failed.
@@ -532,7 +543,7 @@ admin. `PUSH_FOLLOWUPS.md` lists what is still open.
 
 ## 10. Internationalisation
 
-Every user-facing string the API returns is translatable like the rest of the codebase (`gettext_lazy`, `%(name)s` placeholders — see `CLAUDE.md`). Language comes from
+Every user-facing string the API returns is translatable like the rest of the codebase (`gettext_lazy`, `%(name)s` placeholders — see `../CLAUDE.md`). Language comes from
 `Accept-Language` (the app sends the device/app locale), falling back to the club default; a `locale` on the device registration drives push text. Only `News.title_en/body_en` are true *content* translations: `GET /news/{slug}` returns the requested
 language's fields with a
 `language` field saying which was served (replaces the view's `get_language() == "en"` switch). Error `message`s are localised; `code`s are not.
@@ -542,20 +553,20 @@ language's fields with a
 ## 11. Service-layer prerequisites (do these first, in the web app, behind the existing tests)
 
 The API must **call the same rules the PWA uses**, not fork them. The audit of `mobile/*` found logic that lives inline in views; extract it *before* (or as) each endpoint is built, keeping
-`mobile/tests.py` (≈8 k lines) green as the safety net. Ordered by risk of drift:
+`../mobile/tests.py` (≈8 k lines) green as the safety net. Ordered by risk of drift:
 
-| #  | Extract                                                                                                                                                 | From                                                       | To (proposed)                                                                                                                          |
-|----|---------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
-| 1  | Managed people + scope resolution                                                                                                                       | 3 divergent copies                                         | `members/services/family.py::managed_people`, `resolve_scope`                                                                          |
-| 2  | **RSVP rules** (status set, dropout only if `SELECTED`, deadline unless dropout, note rules, `notify_dropout`) + `rsvp_is_closed` (computed inline 3×)  | `EventDetailView.post`                                     | `events/services/rsvp.py::submit_rsvp` raising `RsvpError(code)`                                                                       |
-| 3  | Home summary, calendar agenda, member event view, squad summary, task rows                                                                              | `HomeView`, `CalendarView`, `EventDetailView`              | `mobile/services/home.py`, `events/services/{agenda,member_view,attendance,tasks}.py`                                                  |
-| 4  | Signup/task response wrappers                                                                                                                           | referee/official/task views                                | `respond_to_signup`, `unclaim_task_for`                                                                                                |
-| 5  | Notifications inbox (`inbox_for`, `mark_read`, `mark_all_read`, `clear_all`, `unread_count`)                                                            | `NotificationsView`, `MX`                                  | `notifications/services.py`                                                                                                            |
-| 6  | Cart (`add_to_cart`, `update_cart_item`, `open_cart`, catalog), `place_order` pre-check, `orders_for`                                                   | shop views                                                 | `shop/services/{cart,orders}.py`                                                                                                       |
-| 7  | Coach today / attendance / remind-silent (duplicate of `send_deadline_reminders`)                                                                       | `CoachTodayView`…                                          | `events/services/coach.py`                                                                                                             |
-| 8  | Event/series create/update/detach + notify side-effects; roster add/remove/update (jersey rules in `CoachRosterEditForm.clean`); news submit-for-review | coach views/forms                                          | `events/services/coach_events.py`, `teams/services/roster.py` (use `place_member_on_team`), `news/services.py::submit_news_for_review` |
-| 9  | Lineup read/replace-set/schedule validation                                                                                                             | `CoachLineupView` (**does `Lineup.get_or_create` on GET**) | `events/services/lineup.py`                                                                                                            |
-| 10 | Profile update, payments overview, forms schema/rows, evaluations player lookup, usable vouchers, dues (`open_dues_rows` filter copied 3×)              | various                                                    | `members/services/profile.py`, `club/services/fees.py`, `formbuilder/services/…`, `shop/services/vouchers.py`                          |
+| #  | Extract                                                                                                                                                 | From                                                       | To (proposed)                                                                                                                             |
+|----|---------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| 1  | Managed people + scope resolution                                                                                                                       | 3 divergent copies                                         | `members/services/family.py::managed_people`, `resolve_scope`                                                                             |
+| 2  | **RSVP rules** (status set, dropout only if `SELECTED`, deadline unless dropout, note rules, `notify_dropout`) + `rsvp_is_closed` (computed inline 3×)  | `EventDetailView.post`                                     | `events/services/rsvp.py::submit_rsvp` raising `RsvpError(code)`                                                                          |
+| 3  | Home summary, calendar agenda, member event view, squad summary, task rows                                                                              | `HomeView`, `CalendarView`, `EventDetailView`              | `../mobile/services/home.py`, `events/services/{agenda,member_view,attendance,tasks}.py`                                                  |
+| 4  | Signup/task response wrappers                                                                                                                           | referee/official/task views                                | `respond_to_signup`, `unclaim_task_for`                                                                                                   |
+| 5  | Notifications inbox (`inbox_for`, `mark_read`, `mark_all_read`, `clear_all`, `unread_count`)                                                            | `NotificationsView`, `MX`                                  | `../notifications/services.py`                                                                                                            |
+| 6  | Cart (`add_to_cart`, `update_cart_item`, `open_cart`, catalog), `place_order` pre-check, `orders_for`                                                   | shop views                                                 | `shop/services/{cart,orders}.py`                                                                                                          |
+| 7  | Coach today / attendance / remind-silent (duplicate of `send_deadline_reminders`)                                                                       | `CoachTodayView`…                                          | `../events/services/coach.py`                                                                                                             |
+| 8  | Event/series create/update/detach + notify side-effects; roster add/remove/update (jersey rules in `CoachRosterEditForm.clean`); news submit-for-review | coach views/forms                                          | `events/services/coach_events.py`, `../teams/services/roster.py` (use `place_member_on_team`), `news/services.py::submit_news_for_review` |
+| 9  | Lineup read/replace-set/schedule validation                                                                                                             | `CoachLineupView` (**does `Lineup.get_or_create` on GET**) | `../events/services/lineup.py`                                                                                                            |
+| 10 | Profile update, payments overview, forms schema/rows, evaluations player lookup, usable vouchers, dues (`open_dues_rows` filter copied 3×)              | various                                                    | `members/services/profile.py`, `../club/services/fees.py`, `formbuilder/services/…`, `shop/services/vouchers.py`                          |
 
 **Already clean and reusable as-is** (call directly): `events.services.lineup.{toggle_selection,
 publish_lineup, schedule_lineup_publish, cancel_scheduled_publish, selected_members_by_position,
@@ -576,7 +587,8 @@ pricing.cart_totals}`, `registration.services.{submission,pricing,invoicing}.*`,
 - `request.build_absolute_uri` (calendar feed, `send_registration_confirmation_email(request=…)`) → a base-URL parameter.
 - `get_language()` → an explicit language argument.
 
-**Latent bug found by this audit — fixed on `development`** (security audit L-11): the PWA's push subscribe/unsubscribe now only touches subscriptions whose `member__user` is the caller (`mobile/views.py`). The native `DELETE /devices/{id}` is defined
+**Latent bug found by this audit — fixed on `development`** (security audit L-11): the PWA's push subscribe/unsubscribe now only touches subscriptions whose `member__user` is the caller (`../mobile/views.py`). The native `DELETE /devices/{id}` is
+defined
 ownership-scoped from day one.
 
 ---
@@ -592,7 +604,7 @@ the club / by invoice" and open any future payment page in the system browser ra
 
 ## 13. Testing strategy
 
-Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_support.make_club`,
+Follow `../api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_support.make_club`,
 `make_season`, `enrol_mfa`). Layers:
 
 1. **Contract tests per endpoint**: happy path, 401 unauthenticated, 403 wrong role, 404 flag off, 404 unmanaged member / other-club id (**a generic "cross-tenant id → 404" test driven from the route table so a new endpoint cannot ship without it**),
@@ -602,7 +614,7 @@ Follow `api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_
    `/api/app/` but able to reach enrolment; **signup endpoint refuses** (closed); password change invalidates other app sessions.
 3. **Middleware interaction**: `RequireMFAMiddleware` does not redirect API paths; maintenance → 503 JSON; no CORS headers on the new prefixes.
 4. **Push**: APNs/FCM behind a small `PushGateway` interface with a fake in tests (no network); disabled- endpoint pruning; payload contains no PII.
-5. **Regression net**: the service extractions in §11 are refactors — `mobile/tests.py` must stay green at every step, and the new service functions get direct unit tests.
+5. **Regression net**: the service extractions in §11 are refactors — `../mobile/tests.py` must stay green at every step, and the new service functions get direct unit tests.
 6. **OpenAPI diff check in CI** (§15) so an accidental breaking change fails the build.
 
 ---
@@ -624,7 +636,7 @@ answered, strategy kept.** Android origin checked server-side (§3.6), and a dev
 needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
 platform applications, a test device. None of these block phase 1.
 
-**Phase 1 status (2026-09-29).** Done, in `appapi/` (tests in `appapi/tests.py`):
+**Phase 1 status (2026-09-29).** Done, in `../appapi` (tests in `appapi/tests.py`):
 
 - `AppAuth` (§3.4): 401 `unauthenticated` / `token_expired`, inactive accounts refused, 403
   `mfa_enrollment_required` for privileged accounts without a second factor.
@@ -647,7 +659,7 @@ Still needed from outside the code before push can be tested end to end: an Appl
 account (APNs key), the SNS platform applications (production + sandbox), and a test iPhone.
 
 **Phase 2 status (2026-09-29).** Done. Service extractions first (§11 rows 2, 3 and 5), with
-the PWA switched over and `mobile/tests.py` green:
+the PWA switched over and `../mobile/tests.py` green:
 
 - `events.services.rsvp.submit_rsvp` / `RsvpError(code)` / `rsvp_is_closed` (the RSVP rules
   from `EventDetailView.post`);
@@ -658,7 +670,7 @@ the PWA switched over and `mobile/tests.py` green:
 - `notifications.services.{inbox_for, unread_count, mark_read, mark_all_read, clear_all}`.
 
 Endpoints (club host, `appapi/routers/{member,inbox,people}.py`, tests in
-`appapi/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
+`../appapi/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
 `GET /events/{id}`, `POST /events/{id}/rsvp`, referee/official `…/respond` (officials behind
 the `officials` flag → 404 `feature_disabled`), task `claim`/`unclaim`, `GET /news` (cursor)
 and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`PATCH
@@ -667,7 +679,7 @@ and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`
 `appapi.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
 an unknown id with the 404 envelope (§13).
 
-Push delivery (`appapi/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
+Push delivery (`../appapi/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
 and off the request thread, only when a gateway (APNs, FCM or a test gateway) is
 configured. Recipients are accounts: the member's own login plus their parents/guardians in that
 club (the `recipient_emails` rule, answering §16-4's mapping). One push per account per distinct
@@ -678,15 +690,15 @@ Not in phase 2, by design: photo upload (phase 3, multipart), `Me`-screen extras
 staff assignments: use `/context` and phase 3's payments), `ETag`s and `updated_since` (§15).
 
 **Phase 3 status (2026-09-29).** Done, in three slices (`appapi/routers/{payments,forms,
-people,support,shop,registration}.py`, tests in `appapi/test_phase3.py`). Service extractions
-(§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
+people,support,shop,registration}.py`, tests in `../appapi/test_phase3.py`). Service extractions (§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
 `shop.services.cart` (catalogue, cart, `orders_for`), `mobile.services.reregistration`.
 
 - Payments: `GET /payments` (registration-grouped, as the PWA) and the registration invoice PDF.
 - Forms: list, schema, `submit` (JSON, or multipart with files; idempotent; for one addressed
   managed person, §8), submitted response. Not flag-gated, like the PWA: `formbuilder` licenses
   creating forms.
-- Photos: `POST`/`DELETE /members/{id}/photo` set/clear the *profile* picture (`Member.profile_photo`) via `MemberProfileForm`, 10 MB cap; the official `player_photo` is manager-only (web). `photo_url` is the effective picture (profile, else player); `ProfileOut` also has `profile_photo_url` and `player_photo_url`; `GET .../photo[?kind=profile|player]`.
+- Photos: `POST`/`DELETE /members/{id}/photo` set/clear the *profile* picture (`Member.profile_photo`) via `MemberProfileForm`, 10 MB cap; the official `player_photo` is manager-only (web). `photo_url` is the effective picture (profile, else player);
+  `ProfileOut` also has `profile_photo_url` and `player_photo_url`; `GET .../photo[?kind=profile|player]`.
 - Shop: catalogue, cart (re-priced, code preview), idempotent checkout (pay on pickup, §12),
   orders and invoice PDF. Unlicensed → 404 `feature_disabled`; closed → 409 `shop_closed` for
   catalogue/cart/checkout, orders stay readable.
@@ -716,7 +728,7 @@ has a `RegistrationDetails` row per child registered that way, and the child no 
   on a future v2 sunset.
 - **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); push failures logged per device; counters for 401/403/429 per route.
 - **Caching.** Personalised routes: `Cache-Control: private, no-store`. Cheap conditional reads via
-  `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `api/cache.py` layer is not reused — it caches by club, not by user.)
+  `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `../api/cache.py` layer is not reused — it caches by club, not by user.)
 - **Delta sync.** Most models have `created`/`modified`; list endpoints for
   `calendar`, `news`, `notifications` accept `updated_since=<ts>` and return changed rows. **Almost nothing is soft-deleted**, so deletions need tombstones: those endpoints also return
   `deleted: [{id, at}]` for the (few) removable things clients cache (notifications cleared, events cancelled/hard-deleted, cart items). Cheap `deleted` sourcing is an open item (§16-8).

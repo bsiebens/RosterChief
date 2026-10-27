@@ -16,35 +16,35 @@ it, and the conventions every app follows. It is a living document — update it
 
 The project is decomposed into the apps below. `authentication` holds the global login identity;
 the people models (`Member`, `Family`) live in `members`; everything else that belongs to a club
-is tenant-scoped (§2.4). New app labels go into `known-first-party` in `pyproject.toml`.
+is tenant-scoped (§2.4). New app labels go into `known-first-party` in `../pyproject.toml`.
 
 > The per-app model sketches in §4 and §5 started as design notes and have since been built out
 > well beyond them. Treat them as the intent and rationale, and verify field-level detail
 > against the actual models.
 
-| App              | Responsibility                                            | Main models |
-|------------------|-----------------------------------------------------------|-------------|
-| `authentication` | Login identity, MFA, platform-level access (global)       | `User` |
-| `members`        | People and households                                     | `Member`, `Family`, `FamilyMembership` |
-| `club`           | Tenant root, seasons, season-scoped affiliation, club roles, onboarding requirements | `Club`, `Season`, `ClubMembership`, `ClubRole` |
-| `teams`          | Teams and season rosters, staff                           | `Team`, `TeamMembership`, `StaffAssignment` |
+| App              | Responsibility                                                                                | Main models                                      |
+|------------------|-----------------------------------------------------------------------------------------------|--------------------------------------------------|
+| `authentication` | Login identity, MFA, platform-level access (global)                                           | `User`                                           |
+| `members`        | People and households                                                                         | `Member`, `Family`, `FamilyMembership`           |
+| `club`           | Tenant root, seasons, season-scoped affiliation, club roles, onboarding requirements          | `Club`, `Season`, `ClubMembership`, `ClubRole`   |
+| `teams`          | Teams and season rosters, staff                                                               | `Team`, `TeamMembership`, `StaffAssignment`      |
 | `events`         | Training, games, tournaments, attendance, line-ups, referee/official sign-ups, game timelines | `Event`, `Attendance`, `Lineup`, `RefereeSignup` |
-| `news`           | Club news, authored by coaches and released by editors    | `News`, `NewsPhoto` |
-| `announcements`  | Short club-wide announcements                             | |
-| `notifications`  | In-app, e-mail and push notifications                     | `Notification` |
-| `registration`   | Public season sign-up and re-registration                | |
-| `formbuilder`    | Admin-defined dynamic forms, submissions and reporting (§5.6) | `Form`, `Field`, `Submission`, `Answer` |
-| `evaluations`    | Player evaluation checklists (§5.8)                       | `EvaluationChecklist`, `PlayerEvaluation` |
-| `shop`           | Cart, orders, payments, PDF invoices (§5.7)               | `Product`, `Order`, `Payment`, `Invoice` |
-| `billing`        | What the platform charges each club (`BILLING.md`)        | |
-| `features`       | Feature flags, maintenance mode, the in-process job scheduler | `Maintenance`, `JobRun` |
-| `controlpanel`   | Platform operator UI (`/control/`)                        | |
-| `management`     | Club admin UI (`/manage/`)                                | |
-| `mobile`         | Member and coach PWA (`/app/`)                            | |
-| `marketing`      | The public marketing site and contact form                | |
-| `appapi`         | Native-app API (`/api/app/v1/`)                           | |
-| `api`            | Public API for club websites (`/api/v1/`)                 | |
-| `bugs`           | In-app bug reports                                        | |
+| `news`           | Club news, authored by coaches and released by editors                                        | `News`, `NewsPhoto`                              |
+| `announcements`  | Short club-wide announcements                                                                 |                                                  |
+| `notifications`  | In-app, e-mail and push notifications                                                         | `Notification`                                   |
+| `registration`   | Public season sign-up and re-registration                                                     |                                                  |
+| `formbuilder`    | Admin-defined dynamic forms, submissions and reporting (§5.6)                                 | `Form`, `Field`, `Submission`, `Answer`          |
+| `evaluations`    | Player evaluation checklists (§5.8)                                                           | `EvaluationChecklist`, `PlayerEvaluation`        |
+| `shop`           | Cart, orders, payments, PDF invoices (§5.7)                                                   | `Product`, `Order`, `Payment`, `Invoice`         |
+| `billing`        | What the platform charges each club (`BILLING.md`)                                            |                                                  |
+| `features`       | Feature flags, maintenance mode, the in-process job scheduler                                 | `Maintenance`, `JobRun`                          |
+| `controlpanel`   | Platform operator UI (`/control/`)                                                            |                                                  |
+| `management`     | Club admin UI (`/manage/`)                                                                    |                                                  |
+| `mobile`         | Member and coach PWA (`/app/`)                                                                |                                                  |
+| `marketing`      | The public marketing site and contact form                                                    |                                                  |
+| `appapi`         | Native-app API (`/api/app/v1/`)                                                               |                                                  |
+| `api`            | Public API for club websites (`/api/v1/`)                                                     |                                                  |
+| `bugs`           | In-app bug reports                                                                            |                                                  |
 
 **`User` stays global** (one login identity across the whole platform); everything else
 that belongs to a club is tenant-scoped (§2.4). This is why `Member` — a *person within a
@@ -58,8 +58,7 @@ These are already established in code — every new model follows them.
 
 - **UUID primary keys.** Inherit `rosterchief.base.UUIDModel` (`id = UUIDField(default=uuid4)`).
   Never expose sequential integer PKs.
-- **`ClubScopedModel`** (`rosterchief.base`) adds the tenant `club` FK
-  (`related_name="%(class)ss"`) and, under multi-tenancy, a tenant-aware manager + auto
+- **`ClubScopedModel`** (`rosterchief.base`) adds the tenant `club` FK (`related_name="%(class)ss"`) and, under multi-tenancy, a tenant-aware manager + auto
   club-stamping `save()` (§2.4). **Every aggregate-root model inherits it**; leaf rows
   reachable only via a scoped parent (e.g. `Attendance` via `Event`) may inherit scope from
   the parent, though denormalising `club` onto them is recommended (§2.4).
@@ -77,6 +76,7 @@ These are already established in code — every new model follows them.
 - **Migrations are generated, not hand-edited** (ruff-excluded).
 
 ### Naming & relations
+
 - `related_name` is explicit and plural on the "many" side, chosen to read naturally from
   the parent (`club.members`, `family.memberships`, `member.family_memberships`).
 - Deletion policy is deliberate per FK: `CASCADE` for owned children,
@@ -101,8 +101,8 @@ and DB-level constraints. `User` is the **only** global identity model; it has n
 
 **People vs. logins under tenancy.** A `User` is one platform-wide login that may belong to
 several clubs; a `Member` is that person *within one club*. So:
-- `Member.user` becomes a **`ForeignKey`** (not `OneToOneField`) — one user → many members
-  (at most one per club): `unique_together (club, user)`.
+
+- `Member.user` becomes a **`ForeignKey`** (not `OneToOneField`) — one user → many members (at most one per club): `unique_together (club, user)`.
 - `User.get_full_name()` can no longer assume a single member; resolve the member **for the
   current club** (via the tenant context below), falling back to email.
 
@@ -133,10 +133,10 @@ so it was evaluated explicitly:
 
 *What it offers.* A `Site(domain, name)` model, `get_current_site(request)` (Host-header →
 `Site`, with a per-process `SITE_CACHE`), `CurrentSiteMiddleware` (sets `request.site`), and
-`CurrentSiteManager` (auto-filters models that hold an FK to `Site`). Ecosystem code
-(`flatpages`, `redirects`, `sitemaps`, `allauth`) is Site-aware for free.
+`CurrentSiteManager` (auto-filters models that hold an FK to `Site`). Ecosystem code (`flatpages`, `redirects`, `sitemaps`, `allauth`) is Site-aware for free.
 
 *Why it does **not** fit as our tenancy mechanism:*
+
 - **Wrong scoping key.** `CurrentSiteManager` filters on a `site` FK; our tenant key is the
   `club` FK on `ClubScopedModel`. Adopting Sites' manager would mean putting a *second* FK on
   every model, or ignoring the manager — either way it buys us nothing over `.for_club()`.
@@ -144,8 +144,7 @@ so it was evaluated explicitly:
   (`slug`, domain, name). Two tables to keep in sync, two sources of truth for "which tenant".
 - **`SITE_ID` is a single global.** The framework's happy path is *one process = one site*
   (`SITE_ID`). Multi-tenant host resolution requires leaving `SITE_ID` unset and relying on
-  `get_current_site`'s exact-domain match — workable, but the setting is a standing foot-gun
-  (any library that reads `SITE_ID` silently binds to the wrong tenant), and shells, tasks,
+  `get_current_site`'s exact-domain match — workable, but the setting is a standing foot-gun (any library that reads `SITE_ID` silently binds to the wrong tenant), and shells, tasks,
   and tests have no Host header, so they still need our contextvar (`require_current_club()`).
 - **Host-only.** Sites cannot express the path-prefix option (`/c/<slug>/`); resolution is
   purely `domain`-based, foreclosing that alternative.
@@ -186,6 +185,7 @@ club. A bare `unique=True` on a tenant model is almost always a bug — use
 `UniqueConstraint(fields=["club", …])`.
 
 **Cross-cutting consequences (checklist for every feature):**
+
 - Admin: register a `club` list-filter and scope `get_queryset` for non-superusers.
 - Roles are **per-club** — see §3 (global Django Groups don't fit; use `ClubRole`).
 - Sequential numbers (invoices) allocate per club inside a transaction — never `count()+1`.
@@ -197,8 +197,7 @@ club. A bare `unique=True` on a tenant model is almost always a bug — use
 ## 3. Roles & access control (RBAC)
 
 Authorization is **service-layer, and per-club** (§2.4). Because roles differ per tenant —
-a user can be a treasurer at club A and merely a member at club B — global Django `Group`s
-(which are platform-wide) **do not fit**. Roles are stored as tenant-scoped `ClubRole` rows
+a user can be a treasurer at club A and merely a member at club B — global Django `Group`s (which are platform-wide) **do not fit**. Roles are stored as tenant-scoped `ClubRole` rows
 and *all* permission decisions go through a single service module; no `django-guardian`,
 no per-club Group hacks. Django's own permission framework is retained **only** for the
 platform-operator layer (`is_staff` / `is_superuser` in Django admin).
@@ -208,13 +207,13 @@ platform-operator layer (`is_staff` / `is_superuser` in Django admin).
 1. **Platform operators** — `User.is_superuser` / `is_staff`. Global, cross-club; run the
    Django admin, manage the tenant list. Not a club role.
 2. **Club roles** — a member's standing *within one club*, stored per tenant. Two kinds:
-   - **Club-wide roles** → `ClubRole` rows (below).
-   - **Object-scoped roles** → derived from the domain graph, no extra rows:
-     - Coach / manager **of a specific team** → `StaffAssignment(team, member, role)`.
-     - Parent / guardian **of a specific member** → `FamilyMembership` + the family graph.
-     - Purchaser vs. beneficiary → `Order`/`OrderLine` + `ClubMembership`.
+    - **Club-wide roles** → `ClubRole` rows (below).
+    - **Object-scoped roles** → derived from the domain graph, no extra rows:
+        - Coach / manager **of a specific team** → `StaffAssignment(team, member, role)`.
+        - Parent / guardian **of a specific member** → `FamilyMembership` + the family graph.
+        - Purchaser vs. beneficiary → `Order`/`OrderLine` + `ClubMembership`.
 
-### 3.2 `ClubRole` — club-wide role assignments  *(app: `club`)*
+### 3.2 `ClubRole` — club-wide role assignments *(app: `club`)*
 
 ```
 ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.4)
@@ -224,7 +223,7 @@ ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.
 ```
 
 > ⚠️ **This table is aspirational, not current.** The actually-implemented
-> `ClubRole.Roles` (`club/models.py`) is `ADMIN | MEMBER | EDITOR | MEMBER_ADMIN` — no
+> `ClubRole.Roles` (`../club/models.py`) is `ADMIN | MEMBER | EDITOR | MEMBER_ADMIN` — no
 > `TREASURER`/`BOARD` yet, and `MEMBER_ADMIN` (full read/write on people, short of
 > Finance/Club identity/role-granting — see `club.services.access.can_manage_members`)
 > isn't reflected below either. Treat this table as the target shape; verify the real
@@ -236,26 +235,25 @@ ClubRole(ClubScopedModel)              # ClubScopedModel -> carries `club` (§2.
 > referee/official assignment views (`can_manage_referees` = ADMIN, MEMBER_ADMIN or the grant);
 > referee levels and member eligibility stay `can_manage_members`.
 
-| Role         | Grants (representative)                                                       |
-|--------------|--------------------------------------------------------------------------------|
-| *Public*     | Anonymous — no row; read-only public site of that club.                       |
-| `MEMBER`     | View own + family data, own rosters/attendance, own orders/invoices, submit member-only forms. |
-| `EDITOR`     | Manage that club's `news`, `pages`, `formbuilder` content.                     |
-| `TREASURER`  | Manage that club's `shop`: products, orders, payments, issue/void invoices.    |
-| `BOARD`      | Full management of that club: members, roles, all of the above.                |
+| Role        | Grants (representative)                                                                        |
+|-------------|------------------------------------------------------------------------------------------------|
+| *Public*    | Anonymous — no row; read-only public site of that club.                                        |
+| `MEMBER`    | View own + family data, own rosters/attendance, own orders/invoices, submit member-only forms. |
+| `EDITOR`    | Manage that club's `news`, `pages`, `formbuilder` content.                                     |
+| `TREASURER` | Manage that club's `shop`: products, orders, payments, issue/void invoices.                    |
+| `BOARD`     | Full management of that club: members, roles, all of the above.                                |
 
 `news` is the one place a `ClubRole` and a derived role (`COACH_MANAGER`, see below)
 share a single workflow rather than each owning a separate permission: drafting is
 open to EDITOR/ADMIN *or* any coach_manager, but only EDITOR/ADMIN may publish —
 see §5.4.
 
-`COACH` / `TEAM_MANAGER` are deliberately **not** `ClubRole`s — being a coach is always
-*of a team*, so it lives on `StaffAssignment` (§5.3). "Is this user a coach at this club?"
+`COACH` / `TEAM_MANAGER` are deliberately **not** `ClubRole`s — being a coach is always *of a team*, so it lives on `StaffAssignment` (§5.3). "Is this user a coach at this club?"
 = "do they have any `StaffAssignment` on a team in this club?".
 
 ### 3.3 The permission service
 
-One module — `club/services/access.py` (or `authentication/services/access.py`) — answers
+One module — `../club/services/access.py` (or `authentication/services/access.py`) — answers
 every authorization question, always taking the club/object as an argument:
 
 ```
@@ -307,8 +305,7 @@ live in `members.services.photos.can_view_member_photo(user, member, club, field
 `members:photo` (effective), `members:player_photo`, `members:profile_photo`.
 
 **`Member`** — a *person within one club*. `user` becomes a **`ForeignKey`** (was
-`OneToOneField`), still nullable (`on_delete=SET_NULL`), so one login maps to one member
-*per club* (`unique_together (club, user)`) and members can exist without logins (children,
+`OneToOneField`), still nullable (`on_delete=SET_NULL`), so one login maps to one member *per club* (`unique_together (club, user)`) and members can exist without logins (children,
 imports). Holds name, DOB, contact `email`/`phone`/`emergency_phone`. `contact_email`
 prefers the member's own email, else the login email. `guardians` returns parent/guardian
 members reachable through shared families (all within the same club).
@@ -322,7 +319,7 @@ member)`; `Family.guardians` / `Family.children` are role-derived querysets. Pow
 built, `Member` has **no `club` FK**: one person record is shared by every club the person
 belongs to (`user` stays a nullable `OneToOneField`), while `Family`, `ClubMembership`,
 roles, rosters etc. are the club-owned rows about them. Because a club-level action on a
-shared record would reach other clubs, these rules live in `members/services/deletion.py`
+shared record would reach other clubs, these rules live in `../members/services/deletion.py`
 and `members/services/invites.py` and every management path goes through them:
 
 - **Ties outside a club** — `member_has_ties_outside_club(member, club)` is true when the
@@ -380,7 +377,7 @@ Branding: `primary_color`/`secondary_color`, plus optional `primary_text_color`/
 `secondary_text_color` for the text drawn on them. Templates and the app API always read
 `Club.primary_content_color`/`secondary_content_color`: the club's own text colour when that
 colour is set, otherwise the automatic WCAG black-or-white pick. Emails with a fallback
-background use the `club|primary_text_color:"#…"` filters (`club/templatetags/club_email.py`).
+background use the `club|primary_text_color:"#…"` filters (`../club/templatetags/club_email.py`).
 
 **`ClubMembership`** — links a `Member` to the `Club` with a `license` string. **Being made
 season-scoped** (§5.1): it gains a `season` FK and sign-up / fee-status fields, so each row
@@ -396,13 +393,12 @@ here inherits `ClubScopedModel` — these rows reference a `Club`, they are not 
 tenant-scoped manager would be exactly the wrong default.
 
 **`Plan`** — a duration and three clocks, named for what they measure *from*, which is the easy
-thing to get wrong: `duration_months` (period length, from its start), `renewal_lead_days` (how far
-*before* a period starts its invoice is raised), `grace_days` (how long *after* a period starts it
+thing to get wrong: `duration_months` (period length, from its start), `renewal_lead_days` (how far *before* a period starts its invoice is raised), `grace_days` (how long *after* a period starts it
 may stay unpaid). Two `CheckConstraint`s keep them coherent. `is_trial` marks a plan offered as a
 trial; a trial's length is simply its own `duration_months`. `deleted_at` is a soft-delete marker:
 `Due.plan` is `PROTECT`, so a plan that has ever billed anyone can't really be removed — "delete"
 hides it (`Plan.objects.visible()` excludes it) and unsubscribes every club currently on it instead;
-see `billing/services/plans.py` and `BILLING.md` §11.
+see `../billing/services/plans.py` and `BILLING.md` §11.
 
 **`PlanPrice`** — a dated price (`active_from`). A rate change is a new row, never an edit, so
 every period already opened keeps what it was billed at.
@@ -421,7 +417,7 @@ what buys that.
 gapless per-year invoice number. The PDF itself is rendered on demand from the `Due` snapshot;
 only the number is stored.
 
-All lifecycle changes go through `billing/services/` — `dues.py` (open, renew, pay, waive,
+All lifecycle changes go through `../billing/services` — `dues.py` (open, renew, pay, waive,
 archive), `notices.py` (the one club-facing warning), `reminders.py` (its email). Never through
 the models directly: a `Due` whose `amount_paid` disagrees with its payments is a wrong invoice.
 
@@ -437,10 +433,9 @@ Field lists below are **sketches** to implement against, not final migrations.
 All sketches below are tenant-scoped: aggregate roots inherit **`ClubScopedModel`** (the
 `club` FK is shown implicitly and every listed `unique_together` is *within a club*, §2.4).
 
-### 5.1 `Season` — the central organizing concept  *(app: `club`)*
+### 5.1 `Season` — the central organizing concept *(app: `club`)*
 
-Everything time-bound hangs off a season. Rosters, events, and attendance are
-**season-scoped via FK** — never global state. Seasons are **per club** — each club runs
+Everything time-bound hangs off a season. Rosters, events, and attendance are **season-scoped via FK** — never global state. Seasons are **per club** — each club runs
 its own.
 
 ```
@@ -478,7 +473,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   and every member KPI (club + platform), and not eligible for a roster *or* a staff spot. A
   parent who also plays or coaches is a `member` who happens to be a parent; the two facts
   are independent, which is why this is its own field rather than being inferred from
-  `members.FamilyMembership.role`. Before this existed, `members/services/family.py` enrolled
+  `members.FamilyMembership.role`. Before this existed, `../members/services/family.py` enrolled
   a parent exactly like the child, so every parent counted as a member — a data migration
   reclassifies them, deliberately skipping anyone who plays, is on a team's staff, or holds
   an elevated ClubRole.
@@ -489,8 +484,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   so there is no flag to drift out of step with reality, and the family drops off the worklist
   by itself the moment a parent joins it. `family_role=child` with a blank `family_group` is
   what asks for it; any other lone role is still a mistake in the file.
-- **Verification is a human decision, deliberately.** A parent submits a public form
-  (`/claim/`) with the child's name and date of birth as **free text — no search, no
+- **Verification is a human decision, deliberately.** A parent submits a public form (`/claim/`) with the child's name and date of birth as **free text — no search, no
   autocomplete, no confirmation of whether the child was found**, because the page is
   reachable without logging in and anything that resolved the child would turn it into a way
   to enumerate the club's children. An admin matches it from a queue against a shortlist that
@@ -498,8 +492,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   child who already has one. The alternatives were rejected: a claim code needs a delivery
   channel the club may not have, and matching on name plus birthday hands out someone else's
   child to whoever guesses a birthday.
-- **The claim form is also the registration.** Open self-registration is closed
-  (`club.views.signup_closed` shadows `account_signup` rather than removing the route, so the
+- **The claim form is also the registration.** Open self-registration is closed (`club.views.signup_closed` shadows `account_signup` rather than removing the route, so the
   URL name allauth's own templates reverse still resolves). Accounts are created by an admin,
   by the family-registration form, or on claim approval — never by a stranger, which also
   keeps the review queue from being a spam target. The account is created **on approval**, not
@@ -522,8 +515,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   login page's own reset would send them to, rather than a second, parallel one that could
   drift out of step with it. Sending is never allowed to fail the approval — the family link
   and the guardian row are real either way, and a briefly unreachable mail server must not
-  cost the parent their place in the queue; the admin sees a distinct warning message
-  (`management/views.py::ParentClaimApproveView`) telling them the email didn't go and to have
+  cost the parent their place in the queue; the admin sees a distinct warning message (`management/views.py::ParentClaimApproveView`) telling them the email didn't go and to have
   the parent use "Forgot your password?" instead.
 - **A signed-in parent claiming a second child links, never duplicates.**
   `ParentClaim.submitted_by_user` (nullable FK to `authentication.User`) records who was
@@ -533,8 +525,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   fields from the form entirely (shown as read-only "submitting as…" text, not just pre-filled
   inputs — a disabled input doesn't even submit, and a pre-filled-but-editable one still lets a
   typo through) and populates them server-side from the `Member` instead of trusting POST data.
-  On approval, `members/services/claims.py::approve_claim` resolves the parent via that FK
-  (never re-derived from email) and, if they already belong to a `Family`, moves the newly
+  On approval, `members/services/claims.py::approve_claim` resolves the parent via that FK (never re-derived from email) and, if they already belong to a `Family`, moves the newly
   claimed child's `FamilyMembership` onto *that* family rather than leaving them split across
   two households — the child's now-empty solo family is cleaned up the same way
   `members/services/family.py::detach_from_family` already does elsewhere. No existing family →
@@ -573,7 +564,7 @@ ClubMembership(ClubScopedModel)      # -> carries `club`
   convention the Groups list already established.
 - **List views are paginated** (`MemberListView`, `EventListView`, `TeamListView`,
   `GroupListView`, `NewsListView`, `FamilyListView`; `paginate_by = 25`) through one shared
-  `management/templates/management/_pagination.html` partial, using Django's `{% querystring %}`
+  `../management/templates/management/_pagination.html` partial, using Django's `{% querystring %}`
   tag so a page link preserves whatever `?q=`/`?kind=`/etc. filter is active rather than
   resetting it.
 - **The sidebar surfaces two counts that would otherwise require opening the page to see**:
@@ -642,7 +633,7 @@ number — modeled by `TeamMembership`, exactly matching the domain note.
   is left alone: neither the model nor the single-add form constrains it, and inventing the
   rule in one entry path only would be worse than not having it.
   A playing coach is simply two rows. Rows are cloned client-side from the formset's
-  `empty_form` (`static/js/bulk-add-rows.js`); removing one deletes the node and deliberately
+  `empty_form` (`../static/js/bulk-add-rows.js`); removing one deletes the node and deliberately
   leaves `TOTAL_FORMS` alone, since Django reads a form whose fields are absent from the POST
   as an unchanged extra and skips it — safe, unlike re-indexing live inputs. The earlier
   design rendered *every* eligible member as a table row, which a club with a hundred-plus
@@ -658,15 +649,13 @@ number — modeled by `TeamMembership`, exactly matching the domain note.
   a `ModelChoiceField` otherwise re-runs its queryset per form, i.e. once per row.
 
 **As built, `Team` also carries `referee_management`** (`TextChoices`: `club` | `federation`,
-default `club`) — whether the *club* arranges referees for this team's home games, or the
-*federation* does. A federation-managed team is left out of the referee tools **entirely**:
+default `club`) — whether the *club* arranges referees for this team's home games, or the *federation* does. A federation-managed team is left out of the referee tools **entirely**:
 no eligibility, no assignment, no entry on the referee management dashboard (§5.3) — see
 `events/services/referees.py::needs_referee_management(event)`, the single gate every
 referee-facing screen reads through.
 
 **`RefereeLevel`** *(built)* — a club-defined referee qualification tier ("Regional",
-"National", ...), admin-managed like `Position` (own name, own ordering, no fixed list).
-**Owns which teams it qualifies for** — eligibility is a property of the *level*, not of the
+"National", ...), admin-managed like `Position` (own name, own ordering, no fixed list). **Owns which teams it qualifies for** — eligibility is a property of the *level*, not of the
 individual referee: a club configures a handful of levels once, each unlocking a tier of
 teams, rather than hand-picking teams per referee.
 
@@ -683,8 +672,7 @@ how long it's valid for. Which teams that translates to is *derived* (`eligible_
 never picked per member. Managed from the member's own page (`management`), read (not
 edited) from the team's own page too. Deliberately **not** routed through `members.Group` —
 eligibility is a property of a person, not of a group they might belong to; see the note on
-`Group` above for why an earlier draft that did this was reworked. It also deliberately does
-**not** put `teams` directly on the profile — a later draft of this feature did that too,
+`Group` above for why an earlier draft that did this was reworked. It also deliberately does **not** put `teams` directly on the profile — a later draft of this feature did that too,
 before the levels-own-the-teams shape replaced it, matching how real officiating
 qualifications actually work (a certification tier unlocks a tier of competitions).
 
@@ -731,7 +719,7 @@ Attendance(UUIDModel)              # through model Event <-> Member
 
 `Event.season` is redundant with `team.season` when a team is set, but events can be
 club-wide (`team=None`), so `season` stays a first-class FK. Keep it consistent in a
-service/clean().
+service/clean ().
 
 **As built, `Attendance` also carries `showed_up`** (nullable bool, default `None`) —
 deliberately separate from `status`: `status` is the RSVP, `showed_up` is whether they
@@ -753,15 +741,15 @@ season concept, unlike Team, so this isn't season-scoped the way a team roster i
 apply on top of that too). `club_wide` can't be combined with `teams`/`groups` — enforced in
 `EventForm`/`EventSeriesForm.clean()` (`clean_club_wide_excludes_teams_and_groups`), not the
 DB (an M2M can't be checked from a `CheckConstraint`, and can't be validated in `Event.clean()`
-either — M2M state isn't available until the row has a PK). `events/signals.py` re-syncs a
+either — M2M state isn't available until the row has a PK). `../events/signals.py` re-syncs a
 group's future events on `GroupMembership` change, and a club_wide event's future rows on
 `ClubMembership` change, the same way a `TeamMembership` change already re-syncs team events.
+
 - **Authorization**: `club.services.access.groups_manageable_by(user, club)` mirrors
   `teams_managed_by` — every group for an ADMIN, else only the ones the user is themselves a
   `GroupMembership` of (Group has no manager/owner concept the way Team does via
   `StaffAssignment`, so membership is the only claim there is). A non-admin must select at
-  least one team they manage **or** group they belong to when creating/editing an event
-  (`EventAudienceFormMixin.clean_audience_requires_a_claim_for_non_admins`) — `club_wide`
+  least one team they manage **or** group they belong to when creating/editing an event (`EventAudienceFormMixin.clean_audience_requires_a_claim_for_non_admins`) — `club_wide`
   itself stays admin-only (the field is removed from the form entirely for anyone else, not
   just rejected on submit). `club.mixins.EventManagerRequiredMixin` (gates edit/delete/detach/
   etc. on an *existing* event/series) checks the same two claims via `get_teams()`/
@@ -772,8 +760,7 @@ group's future events on `GroupMembership` change, and a club_wide event's futur
 **As built, a GAME-kind `Event` defaults its own `end`** — `Event.save()` sets
 `end = start + events.models.ASSUMED_EVENT_DURATION` (2 hours) whenever a game is saved
 with no explicit `end`, and never overwrites one that's already set. Other event kinds are
-untouched — `end` stays blank for them unless explicitly given one. The public games API
-(`events/api.py`, `GET /games/upcoming/`) reads through this: it returns every non-cancelled
+untouched — `end` stays blank for them unless explicitly given one. The public games API (`../events/api.py`, `GET /games/upcoming/`) reads through this: it returns every non-cancelled
 game/tournament that **hasn't finished yet** (`end` — explicit, defaulted, or, for the rare
 un-saved-since / non-GAME row still lacking one, `start` within the assumed window — is at or
 after now), not just ones that haven't started, so a game already in progress keeps showing up
@@ -781,23 +768,23 @@ until its window closes; `GameOut.end` is always populated the same way, and `st
 "started but before its (assumed) end, not flagged `is_live`" as `"live"` too, so a game
 `/games/upcoming/` still lists never turns around and calls itself `"finished"`.
 `GET /games/past/` is its exact mirror for results: the most recent `count` (default 10, max
+
 50) GAME-kind (no tournaments), non-cancelled, not-`is_live` games with **both** scores filled
-in whose (explicit, defaulted or assumed) end is at or before now, newest first — every row it
-returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
-Current season only (explicit `season`, else derived from the start date, same as
-`/teams/{id}/games/`) — never an older season's results; empty when there's no current season.
-Every game row (`GameOut`, shared by `/games/upcoming/`, `/games/past/`, `/games/live/` and
-`/teams/{id}/games/`) carries **`teams`** — every one of the club's own teams assigned to the
-event (`Event.teams` is M2M), ordered by name, prefetched in one query. `home_team`/`away_team`
-still name only *one* of them (the requested team on `/teams/{id}/games/`, else the first by
-name) opposite the opponent; they're kept unchanged for external sites already reading them,
-but a multi-team game should be read through `teams`.
+    in whose (explicit, defaulted or assumed) end is at or before now, newest first — every row it
+    returns is `"finished"`, and a finished game with no score entered yet simply isn't listed.
+    Current season only (explicit `season`, else derived from the start date, same as
+    `/teams/{id}/games/`) — never an older season's results; empty when there's no current season.
+    Every game row (`GameOut`, shared by `/games/upcoming/`, `/games/past/`, `/games/live/` and
+    `/teams/{id}/games/`) carries **`teams`** — every one of the club's own teams assigned to the
+    event (`Event.teams` is M2M), ordered by name, prefetched in one query. `home_team`/`away_team`
+    still name only *one* of them (the requested team on `/teams/{id}/games/`, else the first by
+    name) opposite the opponent; they're kept unchanged for external sites already reading them,
+    but a multi-team game should be read through `teams`.
 
 **`EventAttachment`** *(built)* — files a team manager/admin attaches to an event (schedule, map,
 consent form). `file` is in **private storage** (`event-attachments/<event id>/<random>-<name>`), so it is
 only ever streamed through an authenticated view (`events.services.attachments.attachment_response`,
-always `as_attachment`), never a `/media` link. Upload/delete use the same authority as editing the event
-(`EventManagerRequiredMixin` on the management site; `can_manage_active_team` in Coach mode). Who may *open*
+always `as_attachment`), never a `/media` link. Upload/delete use the same authority as editing the event (`EventManagerRequiredMixin` on the management site; `can_manage_active_team` in Coach mode). Who may *open*
 one is `can_view_attachments`: admins, managers/staff of the event's teams, group managers, and whoever
 answers for an invited person (own member or parent of an invited child) — `member_event_view` only returns
 `attachments` in that case, so the member app/desktop event page lists them. Limits: 10 MB per file,
@@ -806,8 +793,7 @@ answers for an invited person (own member or parent of an invited child) — `me
 **As built, `Event` also carries `max_referees`** (`PositiveSmallIntegerField`, default
 `2`) and **`EventReferee`** *(built)* — referee sign-up/assignment for a **home game**
 only (`Event.is_home_game`), staff-assigned for now (self-service subscribe is a planned
-extension, §7). A referee row is either a club member **or** an externally-logged name
-(e.g. a federation-appointed referee the club still needs to pay), never both/neither, and
+extension, §7). A referee row is either a club member **or** an externally-logged name (e.g. a federation-appointed referee the club still needs to pay), never both/neither, and
 carries its own payment snapshot:
 
 ```
@@ -829,7 +815,7 @@ EventReferee(UUIDModel)            # club implied by event
   set and its validity hasn't passed) and that level qualifies for one of the event's
   `teams`. `events/services/referees.py::eligible_referees(event)` computes this, and is
   empty for anything `needs_referee_management(event)` says no to — not a home game, or a
-  home game whose team(s) are all federation-managed (§5.2). External referees bypass
+  home game whose team (s) are all federation-managed (§5.2). External referees bypass
   eligibility entirely (`add_external_referee`) — they're logged by name only, not vetted
   against a level.
 - **Assignment is admin-only for now**, stricter than most event actions (a team
@@ -873,7 +859,7 @@ EventReferee(UUIDModel)            # club implied by event
   signup to `ACCEPTED`; declining after being confirmed deletes the assignment and tells the
   game's managers. `assigned_by` is therefore always the confirming/assigning staff member.
 - **The referee payment form is a downloadable PDF** (`event_referee_form_pdf`,
-  `EventRefereeFormPdfView`, admin-only, WeasyPrint via `management/pdf.py`'s lazy-import
+  `EventRefereeFormPdfView`, admin-only, WeasyPrint via `../management/pdf.py`'s lazy-import
   pattern), modeled directly on the club's existing paper form: game details, referee names,
   a fee+km breakdown per referee, and blank signature lines (referee always; team manager
   left blank — not reliably known at print time). The header uses `Club.official_name`
@@ -882,14 +868,12 @@ EventReferee(UUIDModel)            # club implied by event
   original paper form, which itself uses a longer legal form up top and a shorter one in the
   body text.
 
-**Fixture import sources & the weekly re-check.** The RBIHF/DFEL/IJNL one-off imports
-(`events/services/rbihf_import.py`, `dfel_import.py`, `ijnl_import.py`) remember the pasted fixture-list URL on
+**Fixture import sources & the weekly re-check.** The RBIHF/DFEL/IJNL one-off imports (`../events/services/rbihf_import.py`, `dfel_import.py`, `ijnl_import.py`) remember the pasted fixture-list URL on
 `Team.import_sources` — a JSON list (not form-editable), one entry per (source, season,
 competition label); a confirmed import of the same triple replaces its entry (label compared
 case-insensitively), anything else appends. `events/services/import_sources.py` owns the shape
 and the helpers (`record_source`, `sources_for`, `check_entry`, `update_entry`). The scheduled
-job `check_fixture_sources` (weekly, Monday 06:15) re-checks every active club's
-*current-season* entries whose source flag is still on for the club, writes
+job `check_fixture_sources` (weekly, Monday 06:15) re-checks every active club's *current-season* entries whose source flag is still on for the club, writes
 `last_checked_at`/`last_check` back onto each entry, and — only when something changed — sends
 the club's ADMIN-role members one notification (in-app + email) summarising per team / source /
 competition: games moved to another date/hour, new games, removed future games, or a fetch
@@ -897,7 +881,7 @@ error. Opponent/label drift is deliberately not alerted. It never imports anythi
 changes via the re-check page's import button.
 
 **League standings (RBIHF).** RBIHF only publishes rankings as hot-link-protected PNGs, so
-`events/services/rbihf_standings.py` recomputes them from the league page (`/league/<slug>`,
+`../events/services/rbihf_standings.py` recomputes them from the league page (`/league/<slug>`,
 found via the stored team page's league link): every *ranked* competition tab (`#type-<id>`,
 i.e. one with a ranking block) the team appears in, its played-game scores, and the points rule
 printed under the ranking. Order: points, goal difference, goals for, name. In a league that
@@ -915,7 +899,7 @@ polled game's timeline (goals with scorer/assists/strength, penalties, goalie ch
 time-outs, period markers) is stored as one normalized JSON document on
 `events.GameTimeline` (one-to-one with `Event`, so the blob never rides along on ordinary `Event`
 queries). It's fetched by each competition class's `fetch_timeline`, right after the score
-update in `fetch_game_info`, and parsed by `events/services/timeline_parsers.py`.
+update in `fetch_game_info`, and parsed by `../events/services/timeline_parsers.py`.
 `settle_game_timelines` (nightly) picks up post-game corrections, and `fetch_game_timelines` is
 the manual backfill.
 
@@ -924,17 +908,15 @@ member app's `GET /events/{id}` carries it (`game_timeline`), always with player
 period end, start, final) once each in `events.GameMoment`, via the `game_timeline_changed`
 signal. They're shown on the management event page and pushed (coalesced per poll, push only)
 to accounts that follow one of the game's teams (`events.GameFollow`, opt-in from the member
-app or PWA): `events/services/game_push.py`. Design and decisions: `GAME_TIMELINE.md`.
+app or PWA): `../events/services/game_push.py`. Design and decisions: `GAME_TIMELINE.md`.
 
 **IJNL (IJshockey Nederland, ijshockey.nl)** is gated behind its own `IJNL` waffle flag (seeded
-with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling
-(`/competities/team/<id>/data?seizoen=2026/27`) covers *every* division the team plays that season
-(league, playoffs, cup), so one import brings them all in; games are keyed by their `gameGuid`
+with its `Competition` row by `events/migrations/0039`). The team page's JSON sibling (`/competities/team/<id>/data?seizoen=2026/27`) covers *every* division the team plays that season (league, playoffs, cup), so one import brings them all in; games
+are keyed by their `gameGuid`
 UUID and `external_source_id` is `"<team id>/<season>"`. A pasted URL without `seizoen` is pinned
 to the fetched season before it's remembered. Dates are Dutch wall-clock time; a game with a date
 but no hour lands at 12:00 (as on the site), and a listed game with *no date yet* (postponed) is
-kept rather than deleted (`plan_from_fixtures(keep_game_ids=...)`). The live score refresh
-(`events.competition.hockey.IJNL`) polls the per-game `/competities/wedstrijd/<uuid>/data?part=live`
+kept rather than deleted (`plan_from_fixtures(keep_game_ids=...)`). The live score refresh (`events.competition.hockey.IJNL`) polls the per-game `/competities/wedstrijd/<uuid>/data?part=live`
 endpoint and reads the scoreboard markup.
 
 ### 5.4 `news`, `pages`, `home` (public site / editorial)
@@ -991,8 +973,7 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
   club person, not a raw login; `SET_NULL` so deleting a member doesn't erase their posts.
 - `slug`s back clean public URLs and feed `search`; they are **unique per club** (§2.4), so
   two clubs can both have `/news/season-kickoff`. Resolve within the request's club.
-- `visibility` (internal/external/both) is enforced by the public read-only API
-  (`news/api.py`, mounted under `api/`) — only `external`/`both` items, published and
+- `visibility` (internal/external/both) is enforced by the public read-only API (`../news/api.py`, mounted under `api/`) — only `external`/`both` items, published and
   past their release date, are ever returned. No member-facing internal reading page
   exists yet; that's later work.
 - **`title`/`body` are Dutch (the club's own language, and the only one required);
@@ -1004,8 +985,7 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
   languages in one call (`title_nl`/`body_nl`/`excerpt_nl` alongside
   `title_en`/`body_en`/`excerpt_en`, the latter three via the `effective_*` properties
   so they're never blank) — no `?lang=` param, the consumer picks what it needs. The
-  control panel's news form lays the two languages out in side-by-side columns
-  (`management/templates/management/news_form.html`); the detail page only shows an
+  control panel's news form lays the two languages out in side-by-side columns (`../management/templates/management/news_form.html`); the detail page only shows an
   "English" section when a translation was actually added, not the fallback-filled
   text under a second heading.
 - `NewsPhoto.image` / hero images use `ImageField` → **media storage must be configured**
@@ -1016,7 +996,7 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
 Likely **no models** — a search view over `Article`, `Page`, `Team`, `Event`. If moving to
 Postgres full-text or an external index, add config here, not domain tables.
 
-### 5.6 `formbuilder` — dynamic forms  *(new app)*
+### 5.6 `formbuilder` — dynamic forms *(new app)*
 
 Admins/editors define forms with a **variable number of fields** at runtime; submissions
 are stored so they can be **reported on** later. This uses the classic EAV (entity-
@@ -1064,11 +1044,11 @@ Answer(UUIDModel)                     # CANONICAL store — one per answered fie
 ```
 
 Design notes:
+
 - **`Answer` is canonical; there is no denormalized JSON snapshot.** A submission's values
-  are always read/aggregated from its `Answer` rows. The submit service
-  (`formbuilder/services/submit.py`) validates the dynamic form and writes the `Submission`
-  + its `Answer`s in one transaction. (If a flat per-submission view ever becomes a
-  hotspot, add a *derived, rebuildable* cache later — but the model stays the source.)
+  are always read/aggregated from its `Answer` rows. The submit service (`formbuilder/services/submit.py`) validates the dynamic form and writes the `Submission`
+    + its `Answer`s in one transaction. (If a flat per-submission view ever becomes a
+      hotspot, add a *derived, rebuildable* cache later — but the model stays the source.)
 - **`Field.key` is immutable once submissions exist** — reporting joins on it. Deleting a
   field with answers is blocked (`PROTECT`); **retire via `is_active=False`** instead.
 - **Reporting** = a service/view producing per-field aggregates (counts per choice,
@@ -1078,7 +1058,7 @@ Design notes:
 - Rendering a `Form` to a Django form (and validating a submission) is a service concern —
   build the form class dynamically from `Field` rows; don't hand-write form classes.
 
-### 5.7 `shop` — cart, orders, payments & PDF invoices  *(new app)*
+### 5.7 `shop` — cart, orders, payments & PDF invoices *(new app)*
 
 A cart-like shop where a member (or parent) "buys" products — chiefly a **season
 membership** — with payment-status tracking and generated invoices. Fulfilment of a
@@ -1176,13 +1156,13 @@ Invoice(ClubScopedModel)              # -> carries `club`
 ```
 
 Flow & design notes:
+
 - **Cart → checkout → order.** Checkout converts the open `Cart` into an immutable `Order`
-  + `OrderLine`s, snapshotting prices (products may reprice later). The cart is marked
-  `checked_out`. All in one transactional service (`shop/services/checkout.py`).
+    + `OrderLine`s, snapshotting prices (products may reprice later). The cart is marked
+      `checked_out`. All in one transactional service (`../shop/services/checkout.py`).
 - **Payment status is derived, not typed by hand.** A service sums `confirmed` `Payment`s
   and sets `Order.status` (`pending` → `partially_paid` → `paid`). Online payments arrive
-  via a gateway webhook that creates/confirms a `Payment`; manual methods
-  (bank transfer/cash) are confirmed by a `TREASURER` (§3.2).
+  via a gateway webhook that creates/confirms a `Payment`; manual methods (bank transfer/cash) are confirmed by a `TREASURER` (§3.2).
 - **Fulfilment writes back to membership.** When an order (or a membership line) reaches
   `paid`, a service creates/activates the `ClubMembership(member=beneficiary, season=…)`,
   flips its `fee_status → paid` / `status → active`, stamps `OrderLine.fulfilled_at`, and
@@ -1204,13 +1184,13 @@ Some merchandise is bought in bulk instead of made to order. `Product.inventory_
 (merchandise only) marks it; its stock lives in `InventoryMovement` (`product`, `variant`
 null for a product without variants, signed `quantity`, `reason` = received / adjustment /
 order / order_returned, optional `order`, `note`, `created_by`). **On-hand = Σ quantity** —
-no stored counter to drift. Everything goes through `shop/services/inventory.py`.
+no stored counter to drift. Everything goes through `../shop/services/inventory.py`.
+
 - **Ordering.** `place_order` row-locks the managed products, refuses a cart wanting more
   than is on hand (same item on several lines counts together), books each managed line out
   of stock and creates it `production_status=RECEIVED` — it never enters the production
   flow; the order's rollup is resynced as usual.
-- **Out of stock** = nothing on hand for that product/variant: it can't be added to the cart
-  (web app + app API, which reports `in_stock`), and a cart line that sold out is
+- **Out of stock** = nothing on hand for that product/variant: it can't be added to the cart (web app + app API, which reports `in_stock`), and a cart line that sold out is
   `unavailable` at checkout. New stock makes it orderable again.
 - **Keeping stock honest.** Cancelling an order returns what it holds (idempotent); editing a
   managed order line's size/quantity moves the stock, refused if the new size lacks stock;
@@ -1220,14 +1200,14 @@ no stored counter to drift. Everything goes through `shop/services/inventory.py`
 
 #### 5.7.1 Discounts
 
-Two independent discount mechanisms, applied at different layers and computed by a single
-**pricing service** (`shop/services/pricing.py`) so the rules live in one place and never
+Two independent discount mechanisms, applied at different layers and computed by a single **pricing service** (`../shop/services/pricing.py`) so the rules live in one place and never
 in views/templates. A shared `DiscountType` enum (`PERCENT` / `AMOUNT`) is reused by both.
 
 **A. Early-bird / prompt-payment discount — per `Product`, automatic.**
 A club toggles `early_bird_enabled` on a product, sets an `early_bird_deadline`, and a
 `PERCENT` or `AMOUNT` value (§5.7 `Product`). Semantics: *buy in time and the unit price
 drops.*
+
 - **Anchor = checkout date (recommended).** The discount is evaluated **once, at checkout**,
   comparing the order's `created_at` date against the deadline, and the result is frozen into
   `OrderLine.unit_price` (+ a human `discount_label`, with `list_price` preserved for
@@ -1247,6 +1227,7 @@ as `OrderDiscountType` rows (e.g. *Sibling discount −15%*, *Volunteer −€25
 managed under the club's shop settings. On a `pending` order a `TREASURER`/`BOARD` (§3.2)
 simply **toggles the applicable presets on** — each toggle creates an `AppliedDiscount` row.
 No arithmetic is entered at order time; the treasurer picks from a list.
+
 - **Snapshot, like prices.** `AppliedDiscount` copies the preset's `label` / `disc_type` /
   `value` at apply time. Editing or retiring (`is_active=False`) an `OrderDiscountType` later
   never rewrites past orders — historical totals stay correct. `PROTECT` on the FK means a
@@ -1280,7 +1261,7 @@ per-member entitlements would extend this — add an eligibility rule / code fie
 auto-apply service on top of the same model when that need is real, rather than a parallel
 mechanism.
 
-### 5.8 `evaluations` — player evaluations  *(built)*
+### 5.8 `evaluations` — player evaluations *(built)*
 
 Coaching-staff-only assessment of a player against one of the club's **checklists** — a
 customizable rubric (skills, ratings, notes), independently versioned over time, feeding a
@@ -1332,8 +1313,7 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
 - **Rubric changes don't corrupt history.** `evaluations.services.start_new_rubric_version`
   copies the current `Form`'s `Field`s onto a brand-new `Form` and re-points a checklist's
   `form` at it — **every edit auto-versions** (no separate draft/publish step): existing
-  `PlayerEvaluation`s keep referencing their original `Submission`'s `Form`/`Field`s
-  (immutable once created — nothing ever mutates a past version's `Field` rows), so an old
+  `PlayerEvaluation`s keep referencing their original `Submission`'s `Form`/`Field`s (immutable once created — nothing ever mutates a past version's `Field` rows), so an old
   evaluation still renders with the questions it was actually scored against. `Field.key` is
   copied verbatim across versions, which is what lets statistics match a question across a
   checklist's whole version history rather than just its current one.
@@ -1353,14 +1333,13 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
   choice-type ones, a response count + recent-answers feed for free text. Default season
   scope with an all-time toggle.
 - **Results matrix** (`evaluations.services.results_matrix`) — one row per player ever
-  evaluated against a checklist, one column per current question, each cell that player's
-  *latest* answer: a way to spot who's missing a score at a glance.
+  evaluated against a checklist, one column per current question, each cell that player's *latest* answer: a way to spot who's missing a score at a glance.
 - **Walkthrough** (`evaluations.services.checklist_players`/`player_evaluation_history`) — a
   player-review browser, not a data-entry queue. Originally a fill-in-the-form cutoff-date
   queue; redesigned once it became clear the actual need is reviewing history to decide
   whether to move a player up (or not), the way a coaching staff would around a table: one
   player at a time (alphabetical, prev/next — the nav links show the player's name, not just
-  "Previous"/"Next"), their current team(s) and this season's attendance, and every past
+  "Previous"/"Next"), their current team (s) and this season's attendance, and every past
   answer on this checklist per question — a Chart.js trendline for a numeric one, so a change
   over time is visible at a glance, not just the latest number. `checklist_players` takes an
   optional `since` date to narrow the browser to "who's had a new evaluation since my last
@@ -1394,17 +1373,15 @@ and what the statistics/results-matrix/walkthrough views group and filter by.
   validates to (`forms.DecimalField`) — never hit before since no view had submitted a real
   form end-to-end yet. Now uses `DjangoJSONEncoder`.
 - **Entry point**: an "Evaluate" action reachable from both the management app (desktop) and
-  the mobile coach surface, rendering the active rubric's `Form` for one player
-  (`formbuilder.services.form_factory.build_form`) and, on submit, calling `evaluations.
+  the mobile coach surface, rendering the active rubric's `Form` for one player (`formbuilder.services.form_factory.build_form`) and, on submit, calling `evaluations.
   services.submit_evaluation`.
 - **Player profile** (a tab on the member detail page, gated the same as everything else
   here): evaluation history (each `PlayerEvaluation`'s answers + evaluator + date). Games-
   played/attendance-rate tiles and a trend chart are future work, not required for v1.
 
-**Access.** An additive **`EvaluationManager`** grant (`club` app, alongside `ShopManager` —
-*not* a `ClubRole` value, deliberately: evaluating is its own trust boundary, and forcing it
+**Access.** An additive **`EvaluationManager`** grant (`club` app, alongside `ShopManager` — *not* a `ClubRole` value, deliberately: evaluating is its own trust boundary, and forcing it
 into the single-`ClubRole`-per-member slot would cost someone their existing ADMIN/EDITOR/
-`MEMBER_ADMIN` role just to hold it). `club/services/access.py` gets `is_evaluation_manager`
+`MEMBER_ADMIN` role just to hold it). `../club/services/access.py` gets `is_evaluation_manager`
 / `can_manage_evaluations(user, club) = is_club_admin(user, club) or is_evaluation_manager(...)`.
 Gated at the view/mixin level: `club.mixins.EvaluationManagerRequiredMixin` (ADMIN or an
 `EvaluationManager` grant, feature-flagged) for viewing/filling evaluations; plain
@@ -1415,7 +1392,7 @@ branch, an `EvaluationManagerRevokeView`) — one grant flow, not a separate mec
 additive role. Nothing evaluation-related is ever built into the member/parent-facing mobile
 context — the member app's views simply never query it, flag or no flag.
 
-**Feature flag**: `"evaluations"`, seeded by `evaluations/migrations/0002_create_evaluations_flag.py`
+**Feature flag**: `"evaluations"`, seeded by `../evaluations/migrations/0002_create_evaluations_flag.py`
 (mirrors `events`' own `0031_create_officials_flag` pattern) — `get_or_create`d with no
 `everyone`/clubs set, so it starts off disabled everywhere until a club admin turns it on
 from the control panel's Features page.
@@ -1471,9 +1448,8 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
    `members` app** (§1, §4). Migration reshuffles app labels + tables.
 2. ✅ **Season-scoped `ClubMembership`** — yes (§5.1). Data migration backfills existing
    rows with the current season and re-scopes `unique_together`.
-3. ✅ **Full multi-tenancy** — adopt **row-based multi-tenancy**, `Club` as tenant root
-   (§2.4). Requires: `ClubScopedModel` on every aggregate root, `Member.user` →
-   `ForeignKey` (+`unique(club, user)`), tenant middleware + `club/tenancy.py`
+3. ✅ **Full multi-tenancy** — adopt **row-based multi-tenancy**, `Club` as tenant root (§2.4). Requires: `ClubScopedModel` on every aggregate root, `Member.user` →
+   `ForeignKey` (+`unique(club, user)`), tenant middleware + `../club/tenancy.py`
    context, tenant-aware manager, per-club uniqueness, per-club roles (§3). **Supersedes
    `CLAUDE.md`.**
 4. ✅ **Jersey uniqueness** — unique **within a team** via a partial `UniqueConstraint`
@@ -1486,8 +1462,7 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
 8. ✅ **Tenant resolution ≠ `django.contrib.sites`** — Sites evaluated and rejected as the
    mechanism; `Club` stays the single tenant root, resolution in `ClubTenantMiddleware`
    (§2.4). Sites optional only as a later bridge for Site-aware third parties.
-9. ✅ **Shop discounts** — two mechanisms (§5.7.1): a per-`Product` early-bird discount
-   (toggle + deadline + PERCENT/AMOUNT, frozen at checkout) and **order-level discounts
+9. ✅ **Shop discounts** — two mechanisms (§5.7.1): a per-`Product` early-bird discount (toggle + deadline + PERCENT/AMOUNT, frozen at checkout) and **order-level discounts
    selected from a club catalogue of `OrderDiscountType` presets** — a treasurer toggles
    presets on a `pending` order (each = a snapshotting `AppliedDiscount` row) before
    `finalize()`, rather than typing values. Presets stack against the same subtotal base;
@@ -1500,8 +1475,7 @@ Legend: `───<` one-to-many, `>───<` many-to-many via a through model
     None)` — capacity-checked in the one place admin assignment already enforces it, so it
     lands as a real `EventReferee` row with no separate sync step (`assigned_by=None`
     marks it self-service, exactly the extension point this doc's earlier note predicted).
-    Surfaced on the mobile Calendar and event detail page, scoped to every managed person
-    (not just the account's own `self.me`) — a referee-eligible child is exactly as real
+    Surfaced on the mobile Calendar and event detail page, scoped to every managed person (not just the account's own `self.me`) — a referee-eligible child is exactly as real
     as a referee-eligible parent.
 
 Infrastructure/config for the above (media storage, dependencies + exact setup) is
@@ -1515,14 +1489,12 @@ specified in **§8**.
   mechanism** (§2.4) — `Club` stays the single tenant root; Sites is optional only as a
   bridge for Site-aware third parties.
 - **Auto-scoping vs. explicit scoping** — should the tenant manager filter *automatically*
-  from context, or stay explicit (`.for_club()` / `.current()`)? Doc currently recommends
-  **explicit** (§2.4).
+  from context, or stay explicit (`.for_club()` / `.current()`)? Doc currently recommends **explicit** (§2.4).
 - **Cross-club users** — can one person be a `BOARD` member of several clubs, switching
   context in one session? The model allows it; confirm the UX (club switcher) is in scope.
 - **Payment gateway** — which provider (Mollie / Stripe / none-yet)? Only needed when online
   payments go live (§8).
-- **Early-bird anchor** — is the discount earned by *ordering* before the deadline
-  (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
+- **Early-bird anchor** — is the discount earned by *ordering* before the deadline (checkout-date anchor, recommended, frozen total) or by *paying* before it (payment-date
   anchor, mutable total)? Doc implements checkout-date; confirm no club needs the literal
   "paid before date" semantics (§5.7.1).
 - **Player evaluations** (§5.8) — built, confirmed: no `team` FK (club-wide per member),
@@ -1545,15 +1517,14 @@ Two classes of files with **different exposure**:
 
 - **Public media** — `Article.cover_image`, home hero images. Served from the normal media
   URL is fine.
-- **Private, tenant-scoped files** — `Invoice.pdf` and `formbuilder` file uploads. These
-  **must not** be publicly reachable. Serve them only through a permission-checked Django
+- **Private, tenant-scoped files** — `Invoice.pdf` and `formbuilder` file uploads. These **must not** be publicly reachable. Serve them only through a permission-checked Django
   view (`X-Accel-Redirect`/`X-Sendfile` in prod), never a guessable public URL, and scope
   access to the file's club (§2.4).
 
 Setup:
+
 - **Dev:** `MEDIA_ROOT`/`MEDIA_URL` on local disk; private files under a non-served path.
-- **Prod:** object storage (S3-compatible) via **`django-storages`** (add to deps) with
-  **separate public and private buckets/backends** (Django 5.1+ `STORAGES` setting). Keep
+- **Prod:** object storage (S3-compatible) via **`django-storages`** (add to deps) with **separate public and private buckets/backends** (Django 5.1+ `STORAGES` setting). Keep
   the private backend non-public and generate signed/short-lived URLs or stream via the view.
 - Organise keys by club (e.g. `club/<club_id>/invoices/…`) so tenant data is easy to
   isolate, audit, and delete.
@@ -1563,10 +1534,10 @@ Setup:
 - Add the dependency: `uv add weasyprint`.
 - **Native libraries required** (WeasyPrint wraps Pango/Cairo) — install at the OS/image
   level, not via pip:
-  - macOS (dev): `brew install pango gdk-pixbuf libffi` (Cairo/GLib come along).
-  - Debian/Ubuntu (CI + prod image): `apt-get install libpango-1.0-0 libpangocairo-1.0-0
+    - macOS (dev): `brew install pango gdk-pixbuf libffi` (Cairo/GLib come along).
+    - Debian/Ubuntu (CI + prod image): `apt-get install libpango-1.0-0 libpangocairo-1.0-0
     libcairo2 libgdk-pixbuf-2.0-0 libffi-dev` (exact names per distro/WeasyPrint version).
-  - Document these in the Dockerfile/CI so PDF rendering isn't a "works on my machine" trap.
+    - Document these in the Dockerfile/CI so PDF rendering isn't a "works on my machine" trap.
 - Render a Django template → HTML string → `weasyprint.HTML(string=…).write_pdf()`; store
   onto `Invoice.pdf` (private storage, §8.1). Generation is a service, ideally async/queued
   if volume grows.
@@ -1599,6 +1570,7 @@ per-feature wiring. Console backend by default (§ "Email" in `settings.py`), so
 that forgets to configure mail prints to the log instead of raising against `localhost:25`.
 
 Two ways to use **Resend** (resend.com), no third-party SDK either way:
+
 - **SMTP relay, zero code**: point the stock `django.core.mail.backends.smtp.EmailBackend` at
   `smtp.resend.com` with `resend` as the username and the API key as the password.
 - **HTTP API**: `rosterchief.mail.ResendEmailBackend` (`DJANGO_EMAIL_BACKEND=rosterchief.mail.ResendEmailBackend`,
@@ -1609,18 +1581,16 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
   Resend's own docs: `POST /emails` accepts `html` alongside `text` (and will derive `text` from
   `html` if only the former is given), so this backend needed no changes to carry the HTML
   templates below.
-- **HTML email templates** *(built)*. `templates/email/_base.html` is the one shared shell
-  (inline styles only, ~600px single-column table — email clients strip `<style>` blocks and
+- **HTML email templates** *(built)*. `../templates/email/_base.html` is the one shared shell (inline styles only, ~600px single-column table — email clients strip `<style>` blocks and
   ignore linked stylesheets, so daisyUI/Tailwind's compiled CSS is irrelevant here) with a
   `{% include "email/_button.html" %}` for a styled CTA link. Every HTML email extends it and
   supplies a plain-text sibling — `members/services/claims.py::send_claim_approved_email` builds
   an `EmailMultiAlternatives` from `claim_approved.txt` + `claim_approved.html`
-  (`.attach_alternative(html, "text/html")`), the same never-fail-the-caller contract as before
-  (`except OSError: return False`). `club/templatetags/club_email.py::absolute_media_url` turns
+  (`.attach_alternative(html, "text/html")`), the same never-fail-the-caller contract as before (`except OSError: return False`). `club/templatetags/club_email.py::absolute_media_url` turns
   `Club.logo` (a relative `FileSystemStorage` URL) into something an inbox can actually fetch,
   by resolving it against the `request` carried in the template context.
 - **allauth's password-reset email is overridden**, not left at its default plain text —
-  `templates/account/email/password_reset_key_message.html` sits next to allauth's own
+  `../templates/account/email/password_reset_key_message.html` sits next to allauth's own
   `.txt` at the path its `render_mail` already looks for (no Python-side override needed;
   allauth auto-attaches a same-named `.html` as the HTML alternative). Branches on whether a
   `club` is in context (a reset requested from a club subdomain gets that club's branding) and
@@ -1629,7 +1599,7 @@ Two ways to use **Resend** (resend.com), no third-party SDK either way:
 
 ---
 
-*Conventions cross-reference:* `rosterchief/base.py` (`UUIDModel`, `ClubScopedModel`),
+*Conventions cross-reference:* `../rosterchief/base.py` (`UUIDModel`, `ClubScopedModel`),
 `club/tenancy.py` (tenant context and middleware, §2.4),
 `authentication/managers.py` (`UserManager`), `authentication/services/` (service-layer
 pattern).
@@ -1637,7 +1607,13 @@ pattern).
 ### 8.6 Notifications & push
 
 - **`Notification`** (`notifications`): the in-app inbox row, one per member, written by `notifications.services.notify_members`. Email, native push and web push are *deliveries* of it, not separate records.
-- **`PushDevice`** (`appapi`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per `Member`, club-scoped.
-- **Dispatcher** (`notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `appapi`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
-- Native delivery goes through `appapi.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details: `API.md` §9.
-- **`NotificationDelivery`** (`notifications`, `notifications/delivery_log.py`): the delivery log, one row per send per channel target (status sent/retrying/failed/dead, attempts, last error, next attempt, and the channel's `payload` while retrying). A transient failure is retried by the `retry_failed_deliveries` job (every 2 min; backoff 1/5/30 min, 4 attempts) through `Channel.retry`; retention 14 days for sent, 60 for failed/dead. Logging never raises. Open items: `PUSH_FOLLOWUPS.md`.
+- **`PushDevice`** (`appapi`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per
+  `Member`, club-scoped.
+- **Dispatcher** (`../notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own
+  apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `appapi`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests
+  deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
+- Native delivery goes through `appapi.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details:
+  `API.md` §9.
+- **`NotificationDelivery`** (`notifications`, `../notifications/delivery_log.py`): the delivery log, one row per send per channel target (status sent/retrying/failed/dead, attempts, last error, next attempt, and the channel's `payload` while
+  retrying). A transient failure is retried by the `retry_failed_deliveries` job (every 2 min; backoff 1/5/30 min, 4 attempts) through `Channel.retry`; retention 14 days for sent, 60 for failed/dead. Logging never raises. Open items:
+  `PUSH_FOLLOWUPS.md`.

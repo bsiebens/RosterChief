@@ -5,7 +5,7 @@ time-outs, period results — next to the score we already keep, and using it fo
 and (later) push notifications.
 
 Today `poll_live_game_results` asks each game's competition for `is_live` + score and nothing
-else (`events/competition/hockey.py`). Every source we poll can give us much more than that, most
+else (`../events/competition/hockey.py`). Every source we poll can give us much more than that, most
 of it from the same request or one extra. This document records what each source offers, proposes
 one normalized shape to store it in, and splits the work into phases.
 
@@ -19,19 +19,19 @@ this design. The §9 decisions are recorded there.
 Researched on 2026-10-04 against real, played games (RBIHF D1 #137/#131/#203, CEHL 2526/7101,
 DFEL `c441c652-…`, IJNL `920c9dc5-…`).
 
-| | RBIHF | CEHL | DFEL (hockeydata) | IJNL |
-|---|---|---|---|---|
-| **Endpoint** | `POST /modules/league/ajax/timeline.php` | `GET /ajax/timeline.php?nr=&season=` | `GET api.hockeydata.net/data/ebel/GetGameReport?gameId=&apiKey=` | `GET /competities/wedstrijd/<uuid>/data?part=live` |
-| **Format** | JSON wrapping an HTML `<table>` | JSON wrapping HTML `<div>`s | Real JSON | JSON wrapping HTML sections |
-| **Requests per poll** | 2: game page (embedded roster) + timeline POST. Roster cacheable per game. | 1 (`score.php` already called) | 1, replacing today's team page + whole-division schedule | **0 extra**: the response we already fetch contains `sections.timeline` |
-| **Goals** | scorer, ≤2 assists, strength (`EQ`/`PP1`/`SH1`/`DP`…), score after | scorer, assists, score after | scorer, 2 assists, strength, empty-net, penalty shot, GWG/tying, players on ice | scorer, assists, GWG, score after |
-| **Penalties** | player, code (`TRIP`…), type (`minor`/…), description | player, code, type, description | offender, served by, code, reason, length, start/end time | player, description, minutes |
-| **Goalie changes** | in/out | — | in/out | in/out |
-| **Time-outs / periods** | yes / start + end markers | yes / start + end markers | period results; game situations (PP/SH spans) | period scores in scoreboard |
-| **Extras** | penalty-code dictionary, full rosters | — | per-player and per-team stats (shots, faceoffs, PP/PK) | lineups section |
-| **Stable event id** | **none**: must synthesize | **none**: must synthesize | **yes**: `guid` per goal/penalty | **yes**: `data-event-key` |
-| **Home/away marker** | team code → home/visit via the embedded roster | `team-a` / `team-b` class | `homeGoals` / `awayGoals` lists | `mp-home` / `mp-away` class |
-| **Change marker** | — | `score.php` → `last` (unix ts) | `lastChangeOfGameSetup` on schedule rows | `updatedAt` |
+|                         | RBIHF                                                                      | CEHL                                 | DFEL (hockeydata)                                                               | IJNL                                                                    |
+|-------------------------|----------------------------------------------------------------------------|--------------------------------------|---------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| **Endpoint**            | `POST /modules/league/ajax/timeline.php`                                   | `GET /ajax/timeline.php?nr=&season=` | `GET api.hockeydata.net/data/ebel/GetGameReport?gameId=&apiKey=`                | `GET /competities/wedstrijd/<uuid>/data?part=live`                      |
+| **Format**              | JSON wrapping an HTML `<table>`                                            | JSON wrapping HTML `<div>`s          | Real JSON                                                                       | JSON wrapping HTML sections                                             |
+| **Requests per poll**   | 2: game page (embedded roster) + timeline POST. Roster cacheable per game. | 1 (`score.php` already called)       | 1, replacing today's team page + whole-division schedule                        | **0 extra**: the response we already fetch contains `sections.timeline` |
+| **Goals**               | scorer, ≤2 assists, strength (`EQ`/`PP1`/`SH1`/`DP`…), score after         | scorer, assists, score after         | scorer, 2 assists, strength, empty-net, penalty shot, GWG/tying, players on ice | scorer, assists, GWG, score after                                       |
+| **Penalties**           | player, code (`TRIP`…), type (`minor`/…), description                      | player, code, type, description      | offender, served by, code, reason, length, start/end time                       | player, description, minutes                                            |
+| **Goalie changes**      | in/out                                                                     | —                                    | in/out                                                                          | in/out                                                                  |
+| **Time-outs / periods** | yes / start + end markers                                                  | yes / start + end markers            | period results; game situations (PP/SH spans)                                   | period scores in scoreboard                                             |
+| **Extras**              | penalty-code dictionary, full rosters                                      | —                                    | per-player and per-team stats (shots, faceoffs, PP/PK)                          | lineups section                                                         |
+| **Stable event id**     | **none**: must synthesize                                                  | **none**: must synthesize            | **yes**: `guid` per goal/penalty                                                | **yes**: `data-event-key`                                               |
+| **Home/away marker**    | team code → home/visit via the embedded roster                             | `team-a` / `team-b` class            | `homeGoals` / `awayGoals` lists                                                 | `mp-home` / `mp-away` class                                             |
+| **Change marker**       | —                                                                          | `score.php` → `last` (unix ts)       | `lastChangeOfGameSetup` on schedule rows                                        | `updatedAt`                                                             |
 
 Source quirks worth knowing before building parsers:
 
@@ -117,8 +117,7 @@ the source:
 Rules:
 
 - **`side` stays home/away exactly as the source says it.** "Ours" vs. "theirs" is derived when
-  the data is presented, with the same `event.is_home_game` convention the score already uses
-  (`events/competition/hockey.py`, `events/api.py`). If someone later fixes a game's location, the
+  the data is presented, with the same `event.is_home_game` convention the score already uses (`../events/competition/hockey.py`, `events/api.py`). If someone later fixes a game's location, the
   stored timeline doesn't need rewriting.
 - **Player names are stored as the source gives them.** The format is `{name, number}` everywhere.
   We don't link people to `Member` in v1: names aren't reliable keys across sources (CEHL casing,
@@ -143,8 +142,7 @@ Notifications and API clients both need to recognise "the same goal" across poll
 
 ### 2.4 Goal strength checks and corrections
 
-Sources get a goal's `strength` wrong now and then (IJNL reads a missing badge as `EQ`). When a timeline's stats are synced
-(`events.services.game_stats`), `events.services.strength_check` replays the penalties per side (IIHF: minor / bench minor /
+Sources get a goal's `strength` wrong now and then (IJNL reads a missing badge as `EQ`). When a timeline's stats are synced (`events.services.game_stats`), `events.services.strength_check` replays the penalties per side (IIHF: minor / bench minor /
 double minor / major / match cost a skater, misconducts don't; two at a time; a goal against a team that is a skater down ends its
 earliest minor, never a major) and flags goals whose strength class (PP / SH / EQ) disagrees: `GameStat.meta["strength_suspect"]`.
 Overtime, shoot-outs, penalty shots, empty-net goals and goals on the very second a penalty starts or ends are not judged.
@@ -159,7 +157,7 @@ timeline only links their names), and the scoreboard's Powerplay / Strafminuten 
 
 ### 3.1 One snapshot per poll
 
-Extend `events/competition/base.py` from "update the score" to "describe the game":
+Extend `../events/competition/base.py` from "update the score" to "describe the game":
 
 ```python
 @dataclass
@@ -173,11 +171,12 @@ class GameSnapshot:
 
 class CompetitionBaseClass:
     def fetch_snapshot(self, event) -> GameSnapshot: ...
+    
     def update_game_information(self, event) -> None:  # now a template method, not per source
         apply_snapshot(event, self.fetch_snapshot(event))
 ```
 
-`apply_snapshot` (new, `events/services/game_timeline.py`) does what each class does by hand
+`apply_snapshot` (new, `../events/services/game_timeline.py`) does what each class does by hand
 today: map home/away to `score_for`/`score_against` and set `is_live`. It also upserts the
 `GameTimeline`, but writes only when `data_hash` changed, then runs the diff (§4). Four copies
 of that score-mapping code collapse into one. `fetch_game_info`, `poll_live_game_results` and the
@@ -202,8 +201,7 @@ fixtures.
 ### 3.2 Cadence and cost
 
 Polling stays where it is: every minute, from 20 min before to 1 h after the game. Within that
-window the extra cost is +1 request per game per minute for RBIHF and nothing for CEHL, DFEL
-(net cheaper) and IJNL. On a busy Saturday with, say, 15 polled games, that's under 1,000 extra
+window the extra cost is +1 request per game per minute for RBIHF and nothing for CEHL, DFEL (net cheaper) and IJNL. On a busy Saturday with, say, 15 polled games, that's under 1,000 extra
 requests/day, all RBIHF. If that ever matters, fetch RBIHF's timeline only when `time.php`'s score
 or state changed, or every 3rd minute. Today's per-game failure isolation (`CompetitionFetchError`
 is logged and skipped) stays.
@@ -211,8 +209,7 @@ is logged and skipped) stays.
 ### 3.3 After the final whistle
 
 Federations correct timelines after the game: assists added, scorers fixed, a goal disallowed.
-`poll_live_game_results` stops polling a game once it's seen finishing
-(`live_score_polling_done_at`), which would freeze the first, often incomplete, version. So:
+`poll_live_game_results` stops polling a game once it's seen finishing (`live_score_polling_done_at`), which would freeze the first, often incomplete, version. So:
 
 - When a game turns final, keep the timeline at `status = final` but leave `finalized_at` empty.
 - A nightly sweep (folded into `refresh_standings` at 01:00, or a sibling job) re-fetches every
@@ -238,17 +235,18 @@ game_timeline_changed = Signal()  # sender=Event; kwargs: added, removed, change
 A small, pure `derive_moments(event, diff) -> list[Moment]` turns that into the things a human
 would call news, from the club's point of view (ours/theirs via `is_home_game`):
 
-| Moment `kind` | Trigger |
-|---|---|
-| `game_started` | status scheduled → live |
-| `goal_for` / `goal_against` | added goal event; includes scorer, assists, strength, score after |
-| `goal_cancelled` | a goal event removed while the score went *down*. A removal without a score change is treated as an id correction, not news. |
-| `penalty_for` / `penalty_against` | added penalty event |
-| `period_started` | added `period_start` |
-| `period_ended` | added `period_end`, with the period score |
-| `game_final` | status → final, with the result and `decided_in` |
+| Moment `kind`                     | Trigger                                                                                                                      |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `game_started`                    | status scheduled → live                                                                                                      |
+| `goal_for` / `goal_against`       | added goal event; includes scorer, assists, strength, score after                                                            |
+| `goal_cancelled`                  | a goal event removed while the score went *down*. A removal without a score change is treated as an id correction, not news. |
+| `penalty_for` / `penalty_against` | added penalty event                                                                                                          |
+| `period_started`                  | added `period_start`                                                                                                         |
+| `period_ended`                    | added `period_end`, with the period score                                                                                    |
+| `game_final`                      | status → final, with the result and `decided_in`                                                                             |
 
-The stored payload keeps the assists for both, but the *sentence* (management event page, live pushes) names them for **our** goals only ("Goal for us by Sam (#9) (assist: Ann (#7)), 2-1."); an opponent's goal is just "Goal against by …", and an unassisted goal reads as plain "Goal for us by …".
+The stored payload keeps the assists for both, but the *sentence* (management event page, live pushes) names them for **our** goals only ("Goal for us by Sam (#9) (assist: Ann (#7)), 2-1."); an opponent's goal is just "Goal against by …", and an
+unassisted goal reads as plain "Goal for us by …".
 
 Guards that keep this from becoming spam:
 
@@ -299,12 +297,12 @@ How it plugs into what exists:
 
 ## 7. Phases
 
-| Phase | Scope | Rough size |
-|---|---|---|
-| **1. Store** | `GameTimeline` model + migration; `GameSnapshot`/`apply_snapshot`; four parsers with real-payload fixtures; DFEL switched to `GetGameReport`; nightly finalization sweep; management read-only card. Behind a `game_timeline` feature flag. | largest: four parsers |
-| **2. Expose** | `GET /games/{id}/` with timeline; `periods`/`decided_in`/`timeline_updated_at` on lists; ARCHITECTURE.md + API docs. | small |
-| **3. Moments** | `game_timeline_changed` signal, `derive_moments`, `GameMoment` table, logging only. | small |
-| **4. Push** | Subscriber + rules + opt-in + rate limiting, once §9 is decided. | depends on decisions |
+| Phase          | Scope                                                                                                                                                                                                                                       | Rough size            |
+|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
+| **1. Store**   | `GameTimeline` model + migration; `GameSnapshot`/`apply_snapshot`; four parsers with real-payload fixtures; DFEL switched to `GetGameReport`; nightly finalization sweep; management read-only card. Behind a `game_timeline` feature flag. | largest: four parsers |
+| **2. Expose**  | `GET /games/{id}/` with timeline; `periods`/`decided_in`/`timeline_updated_at` on lists; ARCHITECTURE.md + API docs.                                                                                                                        | small                 |
+| **3. Moments** | `game_timeline_changed` signal, `derive_moments`, `GameMoment` table, logging only.                                                                                                                                                         | small                 |
+| **4. Push**    | Subscriber + rules + opt-in + rate limiting, once §9 is decided.                                                                                                                                                                            | depends on decisions  |
 
 Phases 1–3 are independent of the push decisions and can ship first.
 
@@ -313,10 +311,10 @@ Phases 1–3 are independent of the push decisions and can ship first.
 - **Model:** `events.GameTimeline` (`events/migrations/0041`) as in §2.1, plus `raw` (last payload
   only). The `game_timeline` waffle flag is seeded by `0042`. Timelines are fetched only for clubs
   that have both this flag and the competition's own flag.
-- **Parsers:** `events/services/timeline_parsers.py`, pure functions, one per source, tested
+- **Parsers:** `../events/services/timeline_parsers.py`, pure functions, one per source, tested
   against real payloads in `events/test_fixtures/game_timeline/`. Players are pseudonymised there
   and birthdates removed; real names never go into the repo.
-- **Storage service:** `events/services/game_timeline.py` (`store`, `fetch_and_store`,
+- **Storage service:** `../events/services/game_timeline.py` (`store`, `fetch_and_store`,
   `refresh_timeline`, `settle`, `display_periods`).
 - **Hook:** `events.services.competitions.fetch_game_info` calls `refresh_timeline` after a
   successful score update, on the same competition instance. So the live poll and the "Fetch new
@@ -324,16 +322,17 @@ Phases 1–3 are independent of the push decisions and can ship first.
   downloaded (no extra request). A timeline failure is recorded in `last_error` and never fails
   the score update.
 - **Commands:**
-  - `settle_game_timelines` is a scheduled job, daily at 01:30. It handles games that started
-    3h–7d ago and aren't finalized yet; a final timeline that comes back unchanged gets
-    `finalized_at`.
-  - `fetch_game_timelines` is the manual backfill (`--club`, `--since`, `--refetch`,
-    `--dry-run`). By default it covers each club's current season. Games older than the settle
-    window are finalized right away.
+    - `settle_game_timelines` is a scheduled job, daily at 01:30. It handles games that started
+      3h–7d ago and aren't finalized yet; a final timeline that comes back unchanged gets
+      `finalized_at`.
+    - `fetch_game_timelines` is the manual backfill (`--club`, `--since`, `--refetch`,
+      `--dry-run`). By default it covers each club's current season. Games older than the settle
+      window are finalized right away.
 - **Management:** the event detail page shows a read-only "Game timeline" card under the game
   card, from the club's side.
 
 Deviations from §3.1, both to keep the score path untouched:
+
 - **No `GameSnapshot` refactor.** Each competition class keeps its proven
   `update_game_information` for score and live status, and gains a separate
   `fetch_timeline(event) -> TimelineFetch | None` (default `None`). The single shared score-mapping
@@ -349,36 +348,35 @@ Deviations from §3.1, both to keep the score path untouched:
 ## 7b. Phase 2 as built
 
 - **Player names (§9.1, decided):** the timeline is only served to logged-in members (member
-  app), always with names. The public API serves no timeline, so the earlier per-team switch
-  (`Team.show_player_names_publicly`) was removed.
-- **Shared shape:** `events/timeline_schemas.py` (`TimelineOut` and its parts) is built by
+  app), always with names. The public API serves no timeline, so the earlier per-team switch (`Team.show_player_names_publicly`) was removed.
+- **Shared shape:** `../events/timeline_schemas.py` (`TimelineOut` and its parts) is built by
   `events.services.game_timeline.timeline_for_api`, so the app API serves this
   structure. `ours` is resolved per event and on `our_side`. When a source doesn't say how the
   game was decided, `decided_in` is derived from the period labels once the game is final.
 - **Public API (`/api/v1/`):** no timeline fields (`periods`, `decided_in`, `timeline_updated_at`
   and `timeline` were dropped); `GET /games/{id}/` returns the plain game.
 - **Member app API (`appapi`):**
-  - `GET /events/{id}` gains `game_timeline`, filled only for games, with the club's
-    `game_timeline` feature, and with names.
-  - The club's `features` now includes `game_timeline`.
-  - `docs/app-api/openapi-app-v1.json` is regenerated.
+    - `GET /events/{id}` gains `game_timeline`, filled only for games, with the club's
+      `game_timeline` feature, and with names.
+    - The club's `features` now includes `game_timeline`.
+    - `app-api/openapi-app-v1.json` is regenerated.
 
 ## 7c. Phase 3 as built
 
 - **Signal:** `events.services.game_timeline.store` sends `game_timeline_changed` (from
-  `events/services/game_moments.py`) after saving a timeline whose document actually changed.
+  `../events/services/game_moments.py`) after saving a timeline whose document actually changed.
   It carries the previous document and `first_fetch`, which is true when the row had never held
   real data.
 - **Derivation:** the pure `derive_moments(previous, current, our_side=, first_fetch=)` produces
   the kinds in §4 with the guards as designed:
-  - a first fetch yields nothing;
-  - a game that was already final yields nothing (post-game corrections);
-  - a vanished goal is `goal_cancelled` only when the total score dropped, so a re-keyed goal is
-    treated as a correction;
-  - `notifiable` is false for anything more than `RECENT_SECONDS` (5 min of game clock) behind the
-    newest event, i.e. a catch-up after an outage.
+    - a first fetch yields nothing;
+    - a game that was already final yields nothing (post-game corrections);
+    - a vanished goal is `goal_cancelled` only when the total score dropped, so a re-keyed goal is
+      treated as a correction;
+    - `notifiable` is false for anything more than `RECENT_SECONDS` (5 min of game clock) behind the
+      newest event, i.e. a catch-up after an outage.
 - **Storage:** `events.GameMoment` (`events/migrations/0043`), recorded by `record_moments`
-  (connected in `events/signals.py`). `unique(event, key)` makes a repeat a no-op. `key` is the
+  (connected in `../events/signals.py`). `unique(event, key)` makes a repeat a no-op. `key` is the
   kind plus the timeline event id; `period_started`, `period_ended` and the game-level kinds use the period or the
   kind itself. `delivered_at` is reserved for phase 4.
 - **Visibility (decided):** a "Detected moments" list under the management event page's
@@ -388,6 +386,7 @@ Deviations from §3.1, both to keep the score path untouched:
 ## 7d. Phase 4 as built
 
 Decisions (§9.2–9.6):
+
 - **Who:** opt-in, anyone with an account in the club, per team they follow.
 - **What:** every notifiable moment kind.
 - **Channel:** push only, with no inbox row.
@@ -400,15 +399,15 @@ Decisions (§9.2–9.6):
   user and team. Set it from the member app (`GET/PUT /game-follows`) or the PWA's
   Me → "Live game updates" screen (`mobile:live_game_updates`). Both exist only while the club
   has the `game_timeline` flag.
-- **Delivery:** `events/services/game_push.py`. After `record_moments` stores a batch, it calls
+- **Delivery:** `../events/services/game_push.py`. After `record_moments` stores a batch, it calls
   `schedule_delivery`, which runs `deliver_moments` after commit in a background thread (the
   same pattern as `appapi.delivery`). `deliver_moments`:
-  - marks the batch's notifiable moments delivered, whether or not anyone follows the team, so
-    nothing is retried later;
-  - finds the followers of any of the game's teams (active accounts only);
-  - sends each one push, to native devices (`appapi.push` gateway, `kind: "game_moment"`,
-    target = the event) and to web push subscriptions (`mobile.services.push.send_push_to_user`).
-  - The body is one `describe_moment` line per moment, in game-clock order.
+    - marks the batch's notifiable moments delivered, whether or not anyone follows the team, so
+      nothing is retried later;
+    - finds the followers of any of the game's teams (active accounts only);
+    - sends each one push, to native devices (`appapi.push` gateway, `kind: "game_moment"`,
+      target = the event) and to web push subscriptions (`mobile.services.push.send_push_to_user`).
+    - The body is one `describe_moment` line per moment, in game-clock order.
 - **Language:** push text is rendered in the server's default language (the background thread
   has no request locale). Per-recipient localisation would need the device or account locale and
   is not done yet.
@@ -430,11 +429,11 @@ Decisions (§9.2–9.6):
 1. **Privacy of player names (decide before phase 2).** Federation sites publish them, but youth
    leagues (U14–U18) are minors, and we'd be redistributing names through the club's own API and
    pushes. Options:
-   - show names as-is everywhere;
-   - hide names for youth teams (`Team` would need an age-category signal);
-   - per-club setting;
-   - numbers only in the public API, names only for authenticated members in `appapi`
-     (resolved: the public API serves no timeline at all).
+    - show names as-is everywhere;
+    - hide names for youth teams (`Team` would need an age-category signal);
+    - per-club setting;
+    - numbers only in the public API, names only for authenticated members in `appapi`
+      (resolved: the public API serves no timeline at all).
 2. **Who gets pushes?** Team players and guardians by default with opt-out, opt-in only, or
    "followers" (anyone, including non-members via the PWA)? Which moments by default? The likely
    candidates are goals and the final result; penalties are probably opt-in.

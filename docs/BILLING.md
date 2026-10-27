@@ -15,7 +15,7 @@ there.
 
 ## 1. What ships today, and what's actually wrong with it
 
-The existing implementation (`billing/`) is structurally sound. Three things in particular are
+The existing implementation (`../billing`) is structurally sound. Three things in particular are
 worth keeping and are not up for renegotiation in this redesign:
 
 - **Snapshot-on-`Due`.** `Due.tier` and `Due.amount` are frozen when the period opens and never
@@ -30,19 +30,18 @@ worth keeping and are not up for renegotiation in this redesign:
   revenue leak.
 
 What's wrong is narrower than "the approach": **three hardcoded assumptions**, all in
-`billing/models.py`.
+`../billing/models.py`.
 
-| # | Today | Problem |
-|---|---|---|
-| 1 | `Due.save()` → `add_one_year(period_start)` | Every plan is annual. Duration is only overridable by passing an explicit `period_end`, which is the hack trials use. |
-| 2 | `GRACE_DAYS = 45`, module constant | One grace period for every plan, editable only by deploying code. |
-| 3 | `grace_until = period_end + GRACE_DAYS` | **The clock runs from the wrong end.** A club uses the entire unpaid year *and then* gets 45 days — roughly **410 days of unpaid use** before `archive_overdue_clubs` will touch it. |
+| # | Today                                       | Problem                                                                                                                                                                              |
+|---|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | `Due.save()` → `add_one_year(period_start)` | Every plan is annual. Duration is only overridable by passing an explicit `period_end`, which is the hack trials use.                                                                |
+| 2 | `GRACE_DAYS = 45`, module constant          | One grace period for every plan, editable only by deploying code.                                                                                                                    |
+| 3 | `grace_until = period_end + GRACE_DAYS`     | **The clock runs from the wrong end.** A club uses the entire unpaid year *and then* gets 45 days — roughly **410 days of unpaid use** before `archive_overdue_clubs` will touch it. |
 
 Item 3 is the real defect. The requested behaviour — "unpaid → warned → archived after N days" —
 isn't a tweak to the current rule, it's the opposite of it.
 
-A fourth gap is in the UI rather than the model: the club-facing banner
-(`management/views.py:89-93`) fires on *the period ending*, not on *money being owed*. A club
+A fourth gap is in the UI rather than the model: the club-facing banner (`management/views.py:89-93`) fires on *the period ending*, not on *money being owed*. A club
 that owes money is told nothing.
 
 ---
@@ -80,8 +79,7 @@ countdown: *"Your club will be archived in N days."*
 **Overdue.** Past `grace_until`. `archive_overdue_clubs` will now pick this club up — subject to
 `Subscription.auto_archive`, which stays as the manual override for a club you're negotiating with.
 
-**Archived.** `Club.archive()` sets `archived_at`. The subdomain stops resolving
-(`ClubTenantMiddleware.get_club()` filters on `Club.objects.active()`), so the club is frozen
+**Archived.** `Club.archive()` sets `archived_at`. The subdomain stops resolving (`ClubTenantMiddleware.get_club()` filters on `Club.objects.active()`), so the club is frozen
 exactly as requested: no access, nothing destroyed. Reactivation is a deliberate platform-admin
 action.
 
@@ -92,11 +90,11 @@ action.
 Every plan carries three numbers. Getting them confused is the easiest way to misread this design,
 so they are named for what they measure from:
 
-| Field | Measured from | Answers |
-|---|---|---|
-| `duration_months` | `period_start` | How long is a period? |
+| Field               | Measured from             | Answers                          |
+|---------------------|---------------------------|----------------------------------|
+| `duration_months`   | `period_start`            | How long is a period?            |
 | `renewal_lead_days` | `period_start`, backwards | How early is the invoice raised? |
-| `grace_days` | `period_start`, forwards | How long may it stay unpaid? |
+| `grace_days`        | `period_start`, forwards  | How long may it stay unpaid?     |
 
 **`grace_days` runs from the period start, not from the invoice and not from the period end.**
 That is the decision this redesign turns on. It means the warning window is
@@ -167,7 +165,7 @@ field names (`Subscription.tier` → `plan`, `Subscription.post_trial_tier` → 
 ```python
 class Plan(UUIDModel):
     name, slug, description, is_active  # unchanged
-
+    
     duration_months = PositiveSmallIntegerField(default=12, validators=[MinValueValidator(1)])
     renewal_lead_days = PositiveSmallIntegerField(default=30)
     grace_days = PositiveSmallIntegerField(default=30)
@@ -221,8 +219,7 @@ which is the gentlest of the three warning levels in §6.
 
 Already correct, and worth stating precisely because the interaction with lead time is not obvious.
 
-`open_period` snapshots `plan.price_on(period_start)` — the price in force on the day the period
-**starts**, not the day the invoice is raised. Add a `PlanPrice` with `active_from = 1 Jan 2027` and
+`open_period` snapshots `plan.price_on(period_start)` — the price in force on the day the period **starts**, not the day the invoice is raised. Add a `PlanPrice` with `active_from = 1 Jan 2027` and
 every period starting on or after that date bills at the new amount. That is exactly "adjust the
 price, effective as of the club's next billing cycle".
 
@@ -244,7 +241,7 @@ Two mitigations, both recommended:
 
 ## 6. The club-facing warning
 
-A new service — `billing/services/notices.py` — returns one small object for a club, or `None`:
+A new service — `../billing/services/notices.py` — returns one small object for a club, or `None`:
 
 ```python
 @dataclass(frozen=True)
@@ -256,13 +253,13 @@ class BillingNotice:
     days_until_archive: int
 ```
 
-| Condition | Level | Message |
-|---|---|---|
-| Owing, `today < period_start` | `info` | Invoice outstanding, due by *grace_until*. |
+| Condition                      | Level     | Message                                          |
+|--------------------------------|-----------|--------------------------------------------------|
+| Owing, `today < period_start`  | `info`    | Invoice outstanding, due by *grace_until*.       |
 | Owing, in grace, > 7 days left | `warning` | Fees are due. Club will be archived in *N* days. |
-| Owing, in grace, ≤ 7 days left | `error` | Final notice. Archived in *N* days. |
-| Owing, overdue | `error` | Archiving is pending. |
-| Nothing owing | — | No banner. |
+| Owing, in grace, ≤ 7 days left | `error`   | Final notice. Archived in *N* days.              |
+| Owing, overdue                 | `error`   | Archiving is pending.                            |
+| Nothing owing                  | —         | No banner.                                       |
 
 Rendered in `management/home.html`, in the existing alert block, and gated on `is_club_admin` the
 same way the current billing banner is — ordinary members have no business seeing platform billing.
@@ -270,24 +267,24 @@ The existing "your period ends soon / renews automatically" notice is kept, at l
 answers a different question and only shows when nothing is owed.
 
 All strings go through `{% trans %}` / `{% blocktrans %}` with `%(name)s`-style placeholders per
-`CLAUDE.md` — the countdown is a `{% blocktrans count %}` so the plural form survives translation.
+`../CLAUDE.md` — the countdown is a `{% blocktrans count %}` so the plural form survives translation.
 
 ---
 
 ## 7. Services and commands
 
-`billing/services/dues.py`:
+`../billing/services/dues.py`:
 
-| Function | Change |
-|---|---|
-| `subscribe(club, plan, …)` | Rename only. |
+| Function                                                           | Change                                                                                                                                      |
+|--------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| `subscribe(club, plan, …)`                                         | Rename only.                                                                                                                                |
 | `start_trial(club, trial_plan, *, post_trial_plan, start=None, …)` | **Drop `trial_months`** — the trial's length is now `trial_plan.duration_months`, and `period_end` no longer needs to be passed explicitly. |
-| `open_period(…)` | Duration and grace come from the plan. Trial-conversion check unchanged. |
-| `next_period_start` | Unchanged. |
-| `dues_in_grace(today)` | `owing_dues().filter(period_start__lte=today, grace_until__gte=today)`. |
-| `dues_overdue(today)` | Unchanged. |
-| `archivable_clubs(today)` | Unchanged. |
-| `subscriptions_due_for_renewal(today, lead_days=None)` | Per-plan lead. See below. |
+| `open_period(…)`                                                   | Duration and grace come from the plan. Trial-conversion check unchanged.                                                                    |
+| `next_period_start`                                                | Unchanged.                                                                                                                                  |
+| `dues_in_grace(today)`                                             | `owing_dues().filter(period_start__lte=today, grace_until__gte=today)`.                                                                     |
+| `dues_overdue(today)`                                              | Unchanged.                                                                                                                                  |
+| `archivable_clubs(today)`                                          | Unchanged.                                                                                                                                  |
+| `subscriptions_due_for_renewal(today, lead_days=None)`             | Per-plan lead. See below.                                                                                                                   |
 
 `subscriptions_due_for_renewal` currently compares every subscription against one horizon in SQL.
 With a per-plan lead the comparison is per-row. The function **already** materialises its result as
@@ -314,8 +311,7 @@ be re-followed after this ships.
 
 Four steps, in order. **Step 3 is the one that can take down live clubs.**
 
-**1 — Rename.** `RenameModel` + `RenameField` operations. `makemigrations` will prompt for each
-("Did you rename …?"); answer yes. **Inspect the generated migration by hand before running it** —
+**1 — Rename.** `RenameModel` + `RenameField` operations. `makemigrations` will prompt for each ("Did you rename …?"); answer yes. **Inspect the generated migration by hand before running it** —
 if Django emits `DeleteModel` + `CreateModel` instead of `RenameModel`, it will drop every price,
 subscription and due in the table. This is the single highest-risk step in the change.
 
@@ -337,7 +333,7 @@ next renewal. If a specific club should move sooner, that is a deliberate one-of
 period and reopen it), not a bulk data migration.
 
 **4 — Retire the constants.** `GRACE_DAYS` and `RENEWAL_LEAD_DAYS` become the `default=` values on
-the new `Plan` fields and are deleted from `billing/models.py`.
+the new `Plan` fields and are deleted from `../billing/models.py`.
 
 ---
 
@@ -345,19 +341,19 @@ the new `Plan` fields and are deleted from `billing/models.py`.
 
 Everything below references `Tier`, the constants, or the grace semantics, and will need touching:
 
-| Area | Files |
-|---|---|
-| Models & services | `billing/models.py`, `billing/services/dues.py`, **new** `billing/services/notices.py` |
-| Commands | `billing/management/commands/renew_subscriptions.py` |
-| Admin | `billing/admin.py` |
-| Control panel | `controlpanel/views.py` (20 refs), `forms.py` (10), `urls.py` (3), `services/statistics.py` |
-| Control-panel templates | `billing.html`, `_club_billing_card.html`, `_club_health_table.html`, `dashboard.html` |
-| Club-facing | `management/views.py`, `management/templates/management/home.html` |
-| Invoice | `billing/templates/billing/invoice.html` |
-| Tests | `billing/tests.py` (16), `controlpanel/tests.py` (17), `management/tests.py` (3), `formbuilder/tests.py` (1) |
-| Docs | `ARCHITECTURE.md` (new billing section), `DEPLOYMENT.md` (archive job note) |
+| Area                    | Files                                                                                                           |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------|
+| Models & services       | `../billing/models.py`, `billing/services/dues.py`, **new** `billing/services/notices.py`                       |
+| Commands                | `../billing/management/commands/renew_subscriptions.py`                                                         |
+| Admin                   | `../billing/admin.py`                                                                                           |
+| Control panel           | `../controlpanel/views.py` (20 refs), `forms.py` (10), `urls.py` (3), `services/statistics.py`                  |
+| Control-panel templates | `billing.html`, `_club_billing_card.html`, `_club_health_table.html`, `dashboard.html`                          |
+| Club-facing             | `../management/views.py`, `management/templates/management/home.html`                                           |
+| Invoice                 | `../billing/templates/billing/invoice.html`                                                                     |
+| Tests                   | `../billing/tests.py` (16), `controlpanel/tests.py` (17), `management/tests.py` (3), `formbuilder/tests.py` (1) |
+| Docs                    | `ARCHITECTURE.md` (new billing section), `DEPLOYMENT.md` (archive job note)                                     |
 
-`controlpanel/services/statistics.py` deserves particular attention: `tier_name`,
+`../controlpanel/services/statistics.py` deserves particular attention: `tier_name`,
 `dues_grace_until` and `dues_period_end` all feed the club-health table, and `dues_in_grace()` /
 `dues_overdue()` feed the dashboard counters. Their *numbers* will move once the clock changes,
 which is expected — but the annotations themselves need renaming, not just re-pointing.
@@ -405,7 +401,7 @@ which is expected — but the annotations themselves need renaming, not just re-
 default tries localhost:25 and raises `ConnectionRefused` on a box with no MTA — but it means a
 deployment that forgets `DJANGO_EMAIL_HOST` will watch `send_billing_reminders --commit` report
 success while no club hears anything. Set the mail variables in `.env.production` (see
-`.env.production.example`) before trusting the job.
+`../.env.production.example`) before trusting the job.
 
 ## 11. Addendum: deleting a plan
 
@@ -413,7 +409,7 @@ Added after the initial implementation. `Due.plan` is `PROTECT` — a plan that 
 anyone can never truly be removed, on purpose: `amount`, `period_end` and `grace_until` are frozen
 on a `Due` precisely so a later change can't rewrite what was actually charged, and losing the plan
 link off an old `Due` would do exactly that to every historical invoice. "Delete" therefore means
-one of two things, chosen automatically (`billing/services/plans.py`):
+one of two things, chosen automatically (`../billing/services/plans.py`):
 
 - **No `Due` ever referenced the plan** (created, never actually used to bill anyone) — the row is
   removed outright.
@@ -431,11 +427,10 @@ fully understood (every billing view already handles `getattr(club, "subscriptio
 One easy-to-miss second group: a club on a **different** plan, mid-trial, configured to convert to
 the plan being deleted (`Subscription.post_trial_plan`). Left alone, that club's trial would try to
 convert onto a plan that no longer exists (or has been hidden) the moment `open_period()`'s
-trial-conversion check next runs. Handled at delete time instead: that club's trial is ended
-(`trial_ends_at` and `post_trial_plan` both cleared, per the `CheckConstraint` that requires them
+trial-conversion check next runs. Handled at delete time instead: that club's trial is ended (`trial_ends_at` and `post_trial_plan` both cleared, per the `CheckConstraint` that requires them
 set together or not at all), leaving it on the trial plan with no scheduled conversion until a
 platform admin picks a new one.
 
-The confirmation screen (`controlpanel/templates/controlpanel/plan_delete.html`) is a real page,
+The confirmation screen (`../controlpanel/templates/controlpanel/plan_delete.html`) is a real page,
 not a modal like every other billing action — the whole point is naming exactly which clubs are
 affected, in both groups, and that list can be long.
