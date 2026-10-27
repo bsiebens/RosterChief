@@ -37,6 +37,8 @@ def audience_members(club, audience=Announcement.Audience.EVERYONE):
         members = members.filter(roles__club=club, roles__role__in=[ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN])
     elif audience == Announcement.Audience.STAFF:
         members = members.filter(staff_assignments__team__club=club, staff_assignments__season__start_date__lte=today, staff_assignments__season__end_date__gte=today)
+    elif audience == Announcement.Audience.MEMBERS:
+        members = members.filter(roles__club=club, roles__role=ClubRole.Roles.MEMBER)
     elif audience == Announcement.Audience.PARENTS:
         members = members.filter(family_memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN])
     elif audience == Announcement.Audience.PLAYERS:
@@ -141,21 +143,22 @@ def cancel(announcement: Announcement) -> Announcement:
     return announcement
 
 
-def consume_for(user, club) -> Announcement | None:
-    """The one live, not-yet-shown announcement for this user/club, marking it
-    shown in the same call -- returns None the moment there's nothing new, or
-    once some other concurrent request (e.g. a second open tab) already won the
-    race to mark it seen first. See AnnouncementSeen's own docstring for why
-    ``created`` is what decides that, not a preceding existence check."""
-    announcement = None
-    for candidate in Announcement.objects.filter(live_announcements_query(club)).order_by("-sent_at")[:20]:
+def consume_for(user, club) -> list[Announcement]:
+    """Every live announcement this user/club hasn't been shown yet, newest first,
+    marking each one shown in the same call -- an empty list the moment there's
+    nothing new. Already-seen ones are excluded in the query itself, so the common
+    case (nothing pending) costs a single query. An announcement that some other
+    concurrent request (e.g. a second open tab) already won the race to mark seen
+    is left out too. See AnnouncementSeen's own docstring for why ``created`` is
+    what decides that, not a preceding existence check."""
+    unseen = Announcement.objects.filter(live_announcements_query(club)).exclude(seen_by__user=user).order_by("-sent_at")
+    shown = []
+    for candidate in unseen:
         # An announcement for an audience (coaches, parents, ...) only pops up for people in it,
         # the same people publish() sent it to.
-        if candidate.audience == Announcement.Audience.EVERYONE or audience_members(club, candidate.audience).filter(user=user).exists():
-            announcement = candidate
-            break
-    if announcement is None:
-        return None
-
-    _seen, created = AnnouncementSeen.objects.get_or_create(announcement=announcement, user=user)
-    return announcement if created else None
+        if candidate.audience != Announcement.Audience.EVERYONE and not audience_members(club, candidate.audience).filter(user=user).exists():
+            continue
+        _seen, created = AnnouncementSeen.objects.get_or_create(announcement=candidate, user=user)
+        if created:
+            shown.append(candidate)
+    return shown

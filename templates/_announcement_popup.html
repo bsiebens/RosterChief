@@ -2,7 +2,7 @@
 {% comment %}
     Shared by management/base.html, mobile/base.html and mobile/coach/base.html --
     a platform superuser's broadcast (announcements.models.Announcement), shown at
-    most once per account. Deliberately a plain fetch on page load, not a context
+    most once per account (several pending ones are shown in turn). Deliberately a plain fetch on page load, not a context
     processor: marking it "seen" only happens once this script actually runs client-
     side (see announcements.views.PendingAnnouncementView's own docstring for why --
     a context processor would fire on every server render, including an htmx partial
@@ -69,10 +69,18 @@
         fetch("{% url 'announcement_pending' %}", { headers: { "X-Requested-With": "XMLHttpRequest" } })
             .then((response) => (response.ok ? response.json() : null))
             .then((data) => {
-                if (!data || !data.title) return;
-                document.getElementById("announcement-popup-title").textContent = data.title;
-                document.getElementById("announcement-popup-message").textContent = data.message;
-                document.getElementById("announcement-popup").showModal();
+                // Several can be pending at once: show them one after another, each on Close.
+                const queue = (data && data.announcements) || [];
+                const dialog = document.getElementById("announcement-popup");
+                const showNext = () => {
+                    const next = queue.shift();
+                    if (!next) return;
+                    document.getElementById("announcement-popup-title").textContent = next.title;
+                    document.getElementById("announcement-popup-message").textContent = next.message;
+                    dialog.showModal();
+                };
+                dialog.addEventListener("close", showNext);
+                showNext();
             })
             .catch(() => {});
     })();

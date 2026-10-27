@@ -45,14 +45,13 @@ class Announcement(UUIDModel):
         EVERYONE = "everyone", _("Everyone")
         ADMINS = "admins", _("Club administrators")
         STAFF = "staff", _("Coaches and staff")
+        MEMBERS = "members", _("Parents, guardians and players")
         PARENTS = "parents", _("Parents and guardians")
         PLAYERS = "players", _("Players")
 
     title = models.CharField(_("title"), max_length=255)
     message = models.TextField(_("message"))
 
-    #: Left blank to target every club on the platform. Set to target one club's
-    #: own people only -- see announcements.services.audience_members.
     club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="announcements", null=True, blank=True, verbose_name=_("club"), help_text=_("Leave blank to reach every club."))
 
     audience = models.CharField(
@@ -64,11 +63,6 @@ class Announcement(UUIDModel):
     )
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
-
-    #: Left blank to push immediately (announcements.services.create_and_confirm
-    #: publishes it in the same request). Set to a future time to have
-    #: announcements.management.commands.publish_scheduled_announcements pick it
-    #: up once that time arrives.
     scheduled_for = models.DateTimeField(_("scheduled for"), null=True, blank=True, help_text=_("Leave blank to push immediately."))
 
     status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.PENDING)

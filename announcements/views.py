@@ -16,10 +16,7 @@ class PendingAnnouncementView(View):
 
     def get(self, request):
         if not request.user.is_authenticated:
-            return JsonResponse({})
+            return JsonResponse({"announcements": []})
 
-        announcement = consume_for(request.user, getattr(request, "club", None))
-        if announcement is None:
-            return JsonResponse({})
-
-        return JsonResponse({"title": announcement.title, "message": announcement.message})
+        announcements = consume_for(request.user, getattr(request, "club", None))
+        return JsonResponse({"announcements": [{"title": a.title, "message": a.message} for a in announcements]})

@@ -221,31 +221,47 @@ class ConsumeForTests(AnnouncementServiceTestBase):
         first = consume_for(self.user, self.club)
         second = consume_for(self.user, self.club)
 
-        self.assertEqual(first, announcement)
-        self.assertIsNone(second)
+        self.assertEqual(first, [announcement])
+        self.assertEqual(second, [])
         self.assertEqual(AnnouncementSeen.objects.filter(announcement=announcement, user=self.user).count(), 1)
+
+    def test_every_unseen_announcement_is_returned_newest_first_and_an_older_one_is_not_lost(self):
+        now = timezone.now()
+        older = Announcement.objects.create(title="Older", message="Body", status=Announcement.Status.SENT, sent_at=now - datetime.timedelta(hours=2))
+        newer = Announcement.objects.create(title="Newer", message="Body", status=Announcement.Status.SENT, sent_at=now - datetime.timedelta(hours=1))
+        AnnouncementSeen.objects.create(announcement=newer, user=self.user)
+
+        self.assertEqual(consume_for(self.user, self.club), [older])
+
+    def test_several_unseen_announcements_come_back_together(self):
+        now = timezone.now()
+        older = Announcement.objects.create(title="Older", message="Body", status=Announcement.Status.SENT, sent_at=now - datetime.timedelta(hours=2))
+        newer = Announcement.objects.create(title="Newer", message="Body", status=Announcement.Status.SENT, sent_at=now - datetime.timedelta(hours=1))
+
+        self.assertEqual(consume_for(self.user, self.club), [newer, older])
+        self.assertEqual(consume_for(self.user, self.club), [])
 
     def test_a_club_targeted_announcement_is_invisible_to_another_club(self):
         Announcement.objects.create(title="Heads up", message="Body", club=self.other_club, status=Announcement.Status.SENT, sent_at=timezone.now())
 
-        self.assertIsNone(consume_for(self.user, self.club))
+        self.assertEqual(consume_for(self.user, self.club), [])
 
     def test_a_platform_wide_announcement_reaches_every_club(self):
         announcement = Announcement.objects.create(title="Heads up", message="Body", club=None, status=Announcement.Status.SENT, sent_at=timezone.now())
 
-        self.assertEqual(consume_for(self.user, self.club), announcement)
+        self.assertEqual(consume_for(self.user, self.club), [announcement])
 
     def test_a_pending_announcement_is_not_shown_yet(self):
         Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.PENDING)
 
-        self.assertIsNone(consume_for(self.user, self.club))
+        self.assertEqual(consume_for(self.user, self.club), [])
 
     def test_different_users_each_see_it_once(self):
         other_user = User.objects.create_user(email="other@example.com", password="pw-secret-123")
         announcement = Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
 
-        self.assertEqual(consume_for(self.user, self.club), announcement)
-        self.assertEqual(consume_for(other_user, self.club), announcement)
+        self.assertEqual(consume_for(self.user, self.club), [announcement])
+        self.assertEqual(consume_for(other_user, self.club), [announcement])
 
 
 @override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
@@ -261,7 +277,7 @@ class PendingAnnouncementViewTests(AnnouncementServiceTestBase):
     def test_anonymous_gets_nothing(self):
         response = self._get()
 
-        self.assertEqual(response.json(), {})
+        self.assertEqual(response.json(), {"announcements": []})
 
     def test_a_live_announcement_is_returned_as_json_and_only_once(self):
         Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
@@ -270,15 +286,15 @@ class PendingAnnouncementViewTests(AnnouncementServiceTestBase):
         first = self._get()
         second = self._get()
 
-        self.assertEqual(first.json(), {"title": "Heads up", "message": "Body"})
-        self.assertEqual(second.json(), {})
+        self.assertEqual(first.json(), {"announcements": [{"title": "Heads up", "message": "Body"}]})
+        self.assertEqual(second.json(), {"announcements": []})
 
-    def test_nothing_live_returns_an_empty_object(self):
+    def test_nothing_live_returns_an_empty_list(self):
         self.client.force_login(self.user)
 
         response = self._get()
 
-        self.assertEqual(response.json(), {})
+        self.assertEqual(response.json(), {"announcements": []})
 
 
 class PublishScheduledAnnouncementsCommandTests(AnnouncementServiceTestBase):
@@ -418,7 +434,7 @@ class ConsumeForAudienceTests(TestCase):
         TeamMembership.objects.create(team=team, member=member, season=season)
         Announcement.objects.create(club=club, title="Coaches", message="Only coaches", status=Announcement.Status.SENT, sent_at=timezone.now(), audience=Announcement.Audience.STAFF)
 
-        self.assertIsNone(consume_for(user, club))
+        self.assertEqual(consume_for(user, club), [])
 
         everyone = Announcement.objects.create(club=club, title="All", message="Everyone", status=Announcement.Status.SENT, sent_at=timezone.now() - timedelta(minutes=1))
-        self.assertEqual(consume_for(user, club), everyone)
+        self.assertEqual(consume_for(user, club), [everyone])
