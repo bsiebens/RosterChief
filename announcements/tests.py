@@ -1,11 +1,13 @@
 import datetime
 from unittest import mock
 
+from django.contrib.auth.models import AnonymousUser
 from django.core import mail
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
-from django.urls import reverse
 from django.utils import timezone
+from ninja.testing import TestClient
 
 from appapi.models import PushDevice
 from appapi.push import PushGateway
@@ -16,8 +18,11 @@ from mobile.models import PushSubscription
 from notifications.models import Notification, NotificationCategory
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
+from .api import router
+from .forms import AnnouncementComposeForm
 from .models import Announcement, AnnouncementSeen
 from .services import audience_member_count, audience_members, cancel, consume_for, create_and_confirm, publish, send_test
+from .tasks import publish_scheduled_announcements
 
 
 def make_subscription(club, member, endpoint):
@@ -264,39 +269,6 @@ class ConsumeForTests(AnnouncementServiceTestBase):
         self.assertEqual(consume_for(other_user, self.club), [announcement])
 
 
-@override_settings(ROSTERCHIEF_BASE_DOMAIN="rosterchief.app", ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"])
-class PendingAnnouncementViewTests(AnnouncementServiceTestBase):
-    @classmethod
-    def setUpTestData(cls):
-        super().setUpTestData()
-        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
-
-    def _get(self):
-        return self.client.get(reverse("announcement_pending"), HTTP_HOST="ajax-united.rosterchief.app")
-
-    def test_anonymous_gets_nothing(self):
-        response = self._get()
-
-        self.assertEqual(response.json(), {"announcements": []})
-
-    def test_a_live_announcement_is_returned_as_json_and_only_once(self):
-        Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
-        self.client.force_login(self.user)
-
-        first = self._get()
-        second = self._get()
-
-        self.assertEqual(first.json(), {"announcements": [{"title": "Heads up", "message": "Body"}]})
-        self.assertEqual(second.json(), {"announcements": []})
-
-    def test_nothing_live_returns_an_empty_list(self):
-        self.client.force_login(self.user)
-
-        response = self._get()
-
-        self.assertEqual(response.json(), {"announcements": []})
-
-
 class PublishScheduledAnnouncementsCommandTests(AnnouncementServiceTestBase):
     def test_a_due_scheduled_announcement_is_published(self):
         due = Announcement.objects.create(title="Due", message="Body", scheduled_for=timezone.now() - datetime.timedelta(minutes=1))
@@ -438,3 +410,129 @@ class ConsumeForAudienceTests(TestCase):
 
         everyone = Announcement.objects.create(club=club, title="All", message="Everyone", status=Announcement.Status.SENT, sent_at=timezone.now() - timedelta(minutes=1))
         self.assertEqual(consume_for(user, club), [everyone])
+
+
+class AnnouncementModelTests(AnnouncementServiceTestBase):
+    def test_str_is_the_title(self):
+        self.assertEqual(str(Announcement(title="Heads up")), "Heads up")
+
+    def test_is_due(self):
+        now = timezone.now()
+        hour = datetime.timedelta(hours=1)
+        self.assertTrue(Announcement(status=Announcement.Status.PENDING, scheduled_for=None).is_due)
+        self.assertTrue(Announcement(status=Announcement.Status.PENDING, scheduled_for=now - hour).is_due)
+        self.assertFalse(Announcement(status=Announcement.Status.PENDING, scheduled_for=now + hour).is_due)
+        self.assertFalse(Announcement(status=Announcement.Status.SENT, scheduled_for=None).is_due)
+        self.assertFalse(Announcement(status=Announcement.Status.CANCELLED, scheduled_for=None).is_due)
+
+    def test_a_user_can_only_have_one_seen_row_per_announcement(self):
+        user = User.objects.create_user(email="u@example.com", password="pw-secret-123")
+        announcement = Announcement.objects.create(title="x", message="y")
+        AnnouncementSeen.objects.create(announcement=announcement, user=user)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AnnouncementSeen.objects.create(announcement=announcement, user=user)
+
+
+class AnnouncementComposeFormTests(AnnouncementServiceTestBase):
+    def test_minimal_data_is_valid_and_defaults_to_everyone_on_all_clubs(self):
+        form = AnnouncementComposeForm(data={"title": "Hi", "message": "There"})
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["audience"], Announcement.Audience.EVERYONE)
+        self.assertIsNone(form.cleaned_data["club"])
+        self.assertIsNone(form.cleaned_data["scheduled_for"])
+
+    def test_title_and_message_are_required(self):
+        form = AnnouncementComposeForm(data={})
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(set(form.errors), {"title", "message"})
+
+    def test_a_club_and_audience_can_be_chosen(self):
+        form = AnnouncementComposeForm(data={"title": "Hi", "message": "There", "club": self.club.pk, "audience": Announcement.Audience.STAFF})
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["club"], self.club)
+        self.assertEqual(form.cleaned_data["audience"], Announcement.Audience.STAFF)
+
+    def test_an_unknown_audience_is_rejected(self):
+        form = AnnouncementComposeForm(data={"title": "Hi", "message": "There", "audience": "nobody"})
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("audience", form.errors)
+
+
+class MembersAudienceTests(AnnouncementServiceTestBase):
+    def test_members_audience_is_holders_of_the_member_role_only(self):
+        member = make_account_member(self.club, "member@example.com", role=ClubRole.Roles.MEMBER)
+        make_account_member(self.club, "admin@example.com", role=ClubRole.Roles.ADMIN, first_name="Admin")
+
+        self.assertEqual(set(audience_members(self.club, Announcement.Audience.MEMBERS)), {member})
+
+
+class PublishScheduledAnnouncementsTaskTests(AnnouncementServiceTestBase):
+    def test_publishes_only_due_pending_announcements_and_reports_the_count(self):
+        make_account_member(self.club, "jane@example.com")
+        now = timezone.now()
+        due = Announcement.objects.create(title="Due", message="Body", club=self.club, scheduled_for=now - datetime.timedelta(minutes=1))
+        later = Announcement.objects.create(title="Later", message="Body", club=self.club, scheduled_for=now + datetime.timedelta(days=1))
+        cancelled = Announcement.objects.create(title="Cancelled", message="Body", club=self.club, scheduled_for=now - datetime.timedelta(minutes=1), status=Announcement.Status.CANCELLED)
+
+        result = publish_scheduled_announcements()
+
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(result["result"], "Published 1 announcement(s)")
+        for announcement, status in [(due, Announcement.Status.SENT), (later, Announcement.Status.PENDING), (cancelled, Announcement.Status.CANCELLED)]:
+            announcement.refresh_from_db()
+            self.assertEqual(announcement.status, status)
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_nothing_due_publishes_nothing(self):
+        self.assertEqual(publish_scheduled_announcements()["result"], "Published 0 announcement(s)")
+
+
+class PendingAnnouncementsApiTests(AnnouncementServiceTestBase):
+    """The router isn't mounted yet, so it is exercised through ninja's TestClient."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.user = User.objects.create_user(email="parent@example.com", password="pw-secret-123")
+
+    def get(self, user, club=None):
+        return TestClient(router).get("/announcements/pending/", user=user, club=club)
+
+    def test_anonymous_gets_nothing(self):
+        Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
+
+        response = self.get(AnonymousUser(), self.club)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"announcements": []})
+        self.assertFalse(AnnouncementSeen.objects.exists())
+
+    def test_a_live_announcement_is_returned_once(self):
+        Announcement.objects.create(title="Heads up", message="Body", status=Announcement.Status.SENT, sent_at=timezone.now())
+
+        first = self.get(self.user, self.club)
+        second = self.get(self.user, self.club)
+
+        self.assertEqual(first.json(), {"announcements": [{"title": "Heads up", "message": "Body"}]})
+        self.assertEqual(second.json(), {"announcements": []})
+
+    def test_nothing_live_returns_an_empty_list(self):
+        Announcement.objects.create(title="Pending", message="Body")
+
+        self.assertEqual(self.get(self.user, self.club).json(), {"announcements": []})
+
+    def test_a_club_targeted_announcement_is_invisible_to_another_club(self):
+        Announcement.objects.create(title="Heads up", message="Body", club=self.other_club, status=Announcement.Status.SENT, sent_at=timezone.now())
+
+        self.assertEqual(self.get(self.user, self.club).json(), {"announcements": []})
+
+    def test_without_a_club_only_platform_wide_announcements_are_returned(self):
+        Announcement.objects.create(title="Club only", message="Body", club=self.club, status=Announcement.Status.SENT, sent_at=timezone.now())
+        Announcement.objects.create(title="Everywhere", message="Body", club=None, status=Announcement.Status.SENT, sent_at=timezone.now())
+
+        self.assertEqual(self.get(self.user).json(), {"announcements": [{"title": "Everywhere", "message": "Body"}]})
