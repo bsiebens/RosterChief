@@ -46,21 +46,12 @@ class Announcement(UUIDModel):
         ADMINS = "admins", _("Club administrators")
         STAFF = "staff", _("Coaches and staff")
         MEMBERS = "members", _("Parents, guardians and players")
-        PARENTS = "parents", _("Parents and guardians")
-        PLAYERS = "players", _("Players")
 
     title = models.CharField(_("title"), max_length=255)
     message = models.TextField(_("message"))
 
     club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="announcements", null=True, blank=True, verbose_name=_("club"), help_text=_("Leave blank to reach every club."))
-
-    audience = models.CharField(
-        _("audience"),
-        max_length=20,
-        choices=Audience.choices,
-        default=Audience.EVERYONE,
-        help_text=_("Who, within the chosen club(s), receives it. Only people with an account are reached."),
-    )
+    audience = models.CharField(_("audience"), max_length=20, choices=Audience.choices, default=Audience.EVERYONE, help_text=_("Who, within the chosen club(s), receives it. Only people with an account are reached."))
 
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
     scheduled_for = models.DateTimeField(_("scheduled for"), null=True, blank=True, help_text=_("Leave blank to push immediately."))
