@@ -219,7 +219,7 @@ class EmailPreferenceTests(TestCase):
         self.user.save(update_fields=["email_notifications"])
 
     def phone(self, **kwargs):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         return PushDevice.objects.create(user=self.user, installation_id="phone", platform="ios", push_token="t", **kwargs)
 
@@ -414,7 +414,7 @@ class DispatcherTests(TestCase):
         from django.apps import apps
 
         dispatch._channels[:] = []
-        for label in ("notifications", "appapi", "mobile"):
+        for label in ("notifications", "api", "mobile"):
             apps.get_app_config(label).ready()
 
         self.assertEqual(sorted(channel.name for channel in dispatch.channels()), ["email", "native", "web"])

@@ -1,7 +1,6 @@
 import os
 
 from celery import Celery
-from celery.signals import task_prerun
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rosterchief.settings")
 

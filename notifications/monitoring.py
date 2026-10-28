@@ -186,8 +186,8 @@ def recent_problems(since, club=None) -> list:
 
 
 def configuration() -> dict:
-    from appapi.models import PushDevice
-    from appapi.push import apns_configured, fcm_configured
+    from api.app.push import apns_configured, fcm_configured
+    from api.models import PushDevice
     from features.models import EmailSuppression
     from mobile.models import PushSubscription
 

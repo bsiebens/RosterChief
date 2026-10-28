@@ -34,7 +34,7 @@ ALWAYS_OPEN = ("/healthz", "/media/")
 
 RETRY_AFTER_SECONDS = 3600
 
-#: The native app's APIs (appapi, allauth.headless); see ``render``.
+#: The native app's APIs (api.app, allauth.headless); see ``render``.
 APP_API_PREFIXES = ("/api/app/", "/api/auth/")
 
 

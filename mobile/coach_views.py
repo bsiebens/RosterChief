@@ -24,9 +24,9 @@ from django.utils.translation import ngettext
 from django.views.generic import TemplateView, View
 from waffle import flag_is_active
 
-from appapi import coach_events as api_coach_events
-from appapi.errors import ApiError
-from appapi.idempotency import idempotent
+from api.app import coach_events as api_coach_events
+from api.app.errors import ApiError
+from api.app.idempotency import idempotent
 from club.models import ClubMembership, Season
 from club.services.access import can_add_news, can_manage_evaluations, current_season, get_current_season
 from controlpanel.messages import notify
@@ -232,7 +232,7 @@ def is_inline_request(request):
 
 def run_once(request, work):
     """Run ``work()`` -> ``(status, payload)`` at most once per ``Idempotency-Key``
-    header (appapi.idempotency, the same store the native apps use). The PWA's
+    header (api.app.idempotency, the same store the native apps use). The PWA's
     offline queue (static/js/mobile-offline-queue.js) generates a key per action and
     keeps it across retries, so a replay after a lost response returns the stored
     payload instead of applying (or notifying) twice.

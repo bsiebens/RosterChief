@@ -44,7 +44,7 @@ minutes, then recover"), and a fake *receiver* (a tiny page that acknowledges ca
   notification).
 - `monitoring.retry_queue` treats "the retry job has never run" as stuck, so a fresh install can open
   a `retry_queue` alert until the job has run once.
-- The held-push payload duplicates the retry payload keys in `../appapi/delivery.py`; keep them in sync.
+- The held-push payload duplicates the retry payload keys in `../api/app/delivery.py`; keep them in sync.
 - An announcement's pop-up and inbox rows are now audience-filtered, but the *count* on the confirm
   screen does not subtract people who muted the Announcement category.
 

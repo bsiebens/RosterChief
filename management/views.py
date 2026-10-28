@@ -7670,7 +7670,7 @@ class ClubSettingsView(ClubAdminRequiredMixin, UpdateView):
             rendered = render_preview(preview, club=club, request=self.request)
             email_previews.append({"key": preview.key, "label": preview.label, "description": preview.description, "subject": rendered["subject"], "text": rendered["text"]})
         pdf_previews = [{"key": preview.key, "label": preview.label, "description": preview.description} for preview in PDF_PREVIEWS]
-        # The club's public read-only API (api/urls.py) -- this page is served on the
+        # The club's public read-only API (api/public/urls.py) -- this page is served on the
         # club's own host, which is exactly the host that API answers on.
         public_api_url = self.request.build_absolute_uri("/api/v1/")
         return super().get_context_data(email_previews=email_previews, pdf_previews=pdf_previews, public_api_url=public_api_url, public_api_docs_url=f"{public_api_url}docs", **kwargs)

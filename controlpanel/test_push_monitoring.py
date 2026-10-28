@@ -7,7 +7,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
-from appapi.models import PushDevice
+from api.models import PushDevice
 from club.models import Club
 from features.models import JobRun, JobToggle
 from notifications import monitoring
@@ -139,13 +139,13 @@ class PushMonitoringViewTests(ControlPanelTestBase):
     def test_configuration_mismatch(self):
         user = User.objects.create_user(email="p@example.com", password="pw-secret-123")
         PushDevice.objects.create(user=user, installation_id="i1", platform="ios", push_token="tok")
-        with mock.patch("appapi.push.apns_configured", return_value=False), mock.patch("appapi.push.fcm_configured", return_value=True):
+        with mock.patch("api.app.push.apns_configured", return_value=False), mock.patch("api.app.push.fcm_configured", return_value=True):
             config = self.client.get(self.url).context["config"]
         ios = next(d for d in config["devices"] if d["platform"] == "ios")
         self.assertTrue(ios["mismatch"])
         self.assertEqual(ios["enabled"], 1)
         self.assertTrue(config["any_mismatch"])
-        with mock.patch("appapi.push.apns_configured", return_value=True), mock.patch("appapi.push.fcm_configured", return_value=True), override_settings(VAPID_PRIVATE_KEY="k"):
+        with mock.patch("api.app.push.apns_configured", return_value=True), mock.patch("api.app.push.fcm_configured", return_value=True), override_settings(VAPID_PRIVATE_KEY="k"):
             self.assertFalse(self.client.get(self.url).context["config"]["any_mismatch"])
 
     def test_query_count_is_bounded(self):

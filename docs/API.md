@@ -42,7 +42,7 @@ against development at 0.7.12 on 2026-09-29; items still unverified are marked *
 ## 2. Surface layout and coexistence with `/api/v1/`
 
 Today `/api/v1/` is an **unauthenticated, read-only, club-scoped** ninja API with `Access-Control-
-Allow-Origin: *` (`../api/urls.py`, `api/middleware.py::PublicApiCorsMiddleware`, GET/OPTIONS only). It must not gain authenticated endpoints: a wildcard-CORS prefix is the wrong place for them.
+Allow-Origin: *` (`../api/public/urls.py`, `api/public/middleware.py::PublicApiCorsMiddleware`, GET/OPTIONS only). It must not gain authenticated endpoints: a wildcard-CORS prefix is the wrong place for them.
 
 | Prefix              | Host                             | What                                                       | Auth           |
 |---------------------|----------------------------------|------------------------------------------------------------|----------------|
@@ -83,7 +83,7 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 
 ```python
 (path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),)  # -> /api/auth/app/v1/...
-(path("api/app/v1/", app_api.urls),)  # phase 1 (appapi)
+(path("api/app/v1/", app_api.urls),)  # phase 1 (api.app)
 ```
 
 `base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
@@ -246,7 +246,7 @@ Decided: **club subdomain host + base-domain account endpoints.**
   `GET /api/app/v1/clubs`, device/push registration, `meta`.
 - **Resource plane** (club host `https://<slug>.rosterchief.app/api/app/v1/…`): everything else.
   `ClubTenantMiddleware` already resolves `request.club` from the `Host`, so the API reuses
-  `api.errors.require_club` (404 when no club). Archived/unknown slugs 404 exactly as the web does.
+  `api.public.errors.require_club` (404 when no club). Archived/unknown slugs 404 exactly as the web does.
 
 The token is **host-independent** (session/JWT lookup uses no host, cookie or club), so one login serves every club the user belongs to; the client just changes the base URL. `SESSION_COOKIE_DOMAIN`
 and CSRF are irrelevant (no cookies; allauth app views are `csrf_exempt`, and ninja's `csrf` is off).
@@ -456,16 +456,16 @@ Management screens, tournament brackets/scheduling (§14), shop/forms/registrati
 
 Native push goes **straight to the platform providers**: Apple's APNs (HTTP/2, token auth) for iOS and
 Firebase Cloud Messaging (HTTP v1) for Android. There is no SNS or any other intermediary (the original
-SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `../appapi/push.py` for the code.
+SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials and `../api/app/push.py` for the code.
 
-**Gateways** (`../appapi/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
+**Gateways** (`../api/app/push.py`). Everything talks to a `PushGateway`: `ApnsGateway` (iOS, when the APNs key is
 set), `FcmGateway` (Android, when a Firebase service account is set), and `PlatformGateway`, which
 `get_gateway()` returns and which routes a device to the gateway of its platform. A platform without
 credentials is simply not `supports()`-ed: its devices still register, nothing is sent. `NullGateway` covers
-"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `appapi/push.py`)
+"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `api/app/push.py`)
 says whether any platform can deliver.
 
-**Model.** `appapi.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
+**Model.** `api.app.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
 locale, enabled, last_seen)`, keyed per `User` + install, not per Member/club: one install serves every club the user
 belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, also on token rotation); `DELETE
 /devices/{id}` and logout remove it. The PWA's `mobile.PushSubscription` is separate (per Member, per club).
@@ -474,12 +474,12 @@ belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, al
 `Notification` rows (the in-app inbox) and calls `schedule_notifications`, which, after the surrounding transaction
 commits and off the request thread (`run_in_background`), hands the batch to every registered *channel*. Channels
 register themselves in their `AppConfig.ready` via `register_channel` (idempotent per name), so `notifications` never
-imports `appapi`/`mobile`:
+imports `api`/`mobile`:
 
 | Channel  | Class                                 | Does                                                         |
 |----------|---------------------------------------|--------------------------------------------------------------|
 | `email`  | `notifications.channels.EmailChannel` | plain notification mail to the member and guardians          |
-| `native` | `appapi.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
+| `native` | `api.app.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
 | `web`    | `mobile.channels.WebPushChannel`      | Web Push to the PWA subscriptions                            |
 
 A channel that raises is logged and never stops the others. `dispatch_to_user(club, user, texts, data, url,
@@ -604,7 +604,7 @@ the club / by invoice" and open any future payment page in the system browser ra
 
 ## 13. Testing strategy
 
-Follow `../api/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_support.make_club`,
+Follow `../api/public/tests.py` (Django `TestCase` + ninja test client, `rosterchief.test_support.make_club`,
 `make_season`, `enrol_mfa`). Layers:
 
 1. **Contract tests per endpoint**: happy path, 401 unauthenticated, 403 wrong role, 404 flag off, 404 unmanaged member / other-club id (**a generic "cross-tenant id → 404" test driven from the route table so a new endpoint cannot ship without it**),
@@ -636,7 +636,7 @@ answered, strategy kept.** Android origin checked server-side (§3.6), and a dev
 needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
 platform applications, a test device. None of these block phase 1.
 
-**Phase 1 status (2026-09-29).** Done, in `../appapi` (tests in `appapi/tests.py`):
+**Phase 1 status (2026-09-29).** Done, in `../api/app` (tests in `api/app/tests.py`):
 
 - `AppAuth` (§3.4): 401 `unauthenticated` / `token_expired`, inactive accounts refused, 403
   `mfa_enrollment_required` for privileged accounts without a second factor.
@@ -669,17 +669,17 @@ the PWA switched over and `../mobile/tests.py` green:
   `get_language() == "en"` switch with an explicit language);
 - `notifications.services.{inbox_for, unread_count, mark_read, mark_all_read, clear_all}`.
 
-Endpoints (club host, `appapi/routers/{member,inbox,people}.py`, tests in
-`../appapi/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
+Endpoints (club host, `api/app/routers/{member,inbox,people}.py`, tests in
+`../api/app/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
 `GET /events/{id}`, `POST /events/{id}/rsvp`, referee/official `…/respond` (officials behind
 the `officials` flag → 404 `feature_disabled`), task `claim`/`unclaim`, `GET /news` (cursor)
 and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`PATCH
 /members/{id}` (through `MemberProfileForm`) and the token-authenticated `GET
 /members/{id}/photo` (§6's private-photo rule, `can_view_member_photo`). Person scope is
-`appapi.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
+`api.app.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
 an unknown id with the 404 envelope (§13).
 
-Push delivery (`../appapi/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
+Push delivery (`../api/app/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
 and off the request thread, only when a gateway (APNs, FCM or a test gateway) is
 configured. Recipients are accounts: the member's own login plus their parents/guardians in that
 club (the `recipient_emails` rule, answering §16-4's mapping). One push per account per distinct
@@ -689,8 +689,8 @@ device. **Open:** the Web Push / native dedupe for someone using both (§9); bot
 Not in phase 2, by design: photo upload (phase 3, multipart), `Me`-screen extras (vouchers,
 staff assignments: use `/context` and phase 3's payments), `ETag`s and `updated_since` (§15).
 
-**Phase 3 status (2026-09-29).** Done, in three slices (`appapi/routers/{payments,forms,
-people,support,shop,registration}.py`, tests in `../appapi/test_phase3.py`). Service extractions (§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
+**Phase 3 status (2026-09-29).** Done, in three slices (`api/app/routers/{payments,forms,
+people,support,shop,registration}.py`, tests in `../api/app/test_phase3.py`). Service extractions (§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
 `shop.services.cart` (catalogue, cart, `orders_for`), `mobile.services.reregistration`.
 
 - Payments: `GET /payments` (registration-grouped, as the PWA) and the registration invoice PDF.
@@ -728,7 +728,7 @@ has a `RegistrationDetails` row per child registered that way, and the child no 
   on a future v2 sunset.
 - **Observability.** Request id header echoed; structured logs with user id + club slug (never tokens/bodies); push failures logged per device; counters for 401/403/429 per route.
 - **Caching.** Personalised routes: `Cache-Control: private, no-store`. Cheap conditional reads via
-  `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `../api/cache.py` layer is not reused — it caches by club, not by user.)
+  `ETag`/`If-None-Match` on `context`, `home`, `news` list. (The public `../api/public/cache.py` layer is not reused — it caches by club, not by user.)
 - **Delta sync.** Most models have `created`/`modified`; list endpoints for
   `calendar`, `news`, `notifications` accept `updated_since=<ts>` and return changed rows. **Almost nothing is soft-deleted**, so deletions need tombstones: those endpoints also return
   `deleted: [{id, at}]` for the (few) removable things clients cache (notifications cleared, events cancelled/hard-deleted, cart items). Cheap `deleted` sourcing is an open item (§16-8).

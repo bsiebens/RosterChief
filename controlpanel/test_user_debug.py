@@ -76,12 +76,12 @@ class UserDebugViewTests(ControlPanelTestBase):
         self.assertContains(response, "Not attached to any club")
 
     def _device(self, user):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         return PushDevice.objects.create(user=user, installation_id="install-1", platform="ios", push_token="tok")
 
     def test_remove_device_deletes_it_and_returns_to_the_account(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         device = self._device(self.person)
         response = self.client.get(self.url, {"email": "person@example.com"})
@@ -91,7 +91,7 @@ class UserDebugViewTests(ControlPanelTestBase):
         self.assertFalse(PushDevice.objects.filter(pk=device.pk).exists())
 
     def test_remove_device_requires_a_platform_superuser(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         device = self._device(self.person)
         staff = User.objects.create_user(email="staff@example.com", password="pw-secret-123", is_staff=True)

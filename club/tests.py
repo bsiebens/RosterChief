@@ -1601,7 +1601,7 @@ class ClubBrandingModelTests(TestCase):
         self.assertEqual(secondary_text_color(club, "#ec4899"), Club._content_color_for("#ec4899"))
 
     def test_the_app_api_colours_carry_the_chosen_text_colour(self):
-        from appapi.services import club_colors
+        from api.app.services import club_colors
 
         colors = club_colors(Club(primary_color="#1e40af", primary_text_color="#fde047"))
 

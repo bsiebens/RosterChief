@@ -129,7 +129,7 @@ class UserDebugDeviceRemoveView(PlatformSuperuserRequiredMixin, View):
     with native push). The app registers itself again the next time the user opens it."""
 
     def post(self, request, pk):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         device = get_object_or_404(PushDevice.objects.select_related("user"), pk=pk)
         email = device.user.email
@@ -201,7 +201,7 @@ class PushSandboxView(PlatformSuperuserRequiredMixin, TemplateView):
         status = sandbox.status()
         enabled = status["enabled"]
         captured = list(messages_qs.select_related("club")[: self.LIMIT])
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         devices = {device.installation_id: device for device in PushDevice.objects.filter(installation_id__in={m.target for m in captured if m.channel == "native"})}
         for message in captured:

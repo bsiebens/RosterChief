@@ -9,8 +9,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from ninja.testing import TestClient
 
-from appapi.models import PushDevice
-from appapi.push import PushGateway
+from api.app.push import PushGateway
+from api.models import PushDevice
 from authentication.models import User
 from club.models import Club, ClubRole, Season
 from members.models import Family, FamilyMembership, Member

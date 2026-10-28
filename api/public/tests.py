@@ -1,0 +1,1134 @@
+import datetime
+import io
+from unittest import mock
+
+from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from PIL import Image
+from waffle import get_waffle_flag_model
+
+from api.public.cache import cached_for_club
+from club.models import Club, ClubMembership, Season, Sponsor
+from events.api import LIVE_GAME_CACHE_SECONDS
+from events.models import Event, Location, Opponent
+from events.services import import_sources
+from members.models import Member
+from news.models import News, NewsPhoto
+from teams.models import Position, StaffAssignment, Team, TeamMembership, TeamPhoto
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "rival-fc.rosterchief.app", "testserver"],
+)
+class ApiTestBase(TestCase):
+    # The tenant, its current season and its one team back every API test and are read
+    # only. The handful of tests that do change them (deleting the season, giving the
+    # club a logo) get their own copy from setUpTestData and are rolled back with the
+    # per-test transaction.
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        today = timezone.localdate()
+        cls.season = Season.objects.create(club=cls.club, start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def setUp(self):
+        # Several endpoints cache their query per club (active_sponsors, and the
+        # news/teams/events endpoints -- see api/public/cache.py) -- process-wide, so a
+        # club fixture reused across test methods in the same class would
+        # otherwise leak one test's cached response into the next's assertions.
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def api_get(self, path, **params):
+        return self.client.get(f"/api/v1{path}", params, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def api_get_base_domain(self, path, **params):
+        return self.client.get(f"/api/v1{path}", params, HTTP_HOST="rosterchief.app")
+
+
+class NewsApiTests(ApiTestBase):
+    def make_news(self, **overrides):
+        defaults = {"club": self.club, "title": "News", "body": "body", "status": News.Status.PUBLISHED, "published_at": timezone.now() - datetime.timedelta(hours=1), "visibility": News.Visibility.EXTERNAL}
+        defaults.update(overrides)
+        return News.objects.create(**defaults)
+
+    def test_a_draft_is_excluded(self):
+        self.make_news(status=News.Status.DRAFT, published_at=None)
+
+        self.assertEqual(self.api_get("/news/").json()["count"], 0)
+
+    def test_a_scheduled_but_not_yet_released_item_is_excluded(self):
+        self.make_news(published_at=timezone.now() + datetime.timedelta(days=1))
+
+        self.assertEqual(self.api_get("/news/").json()["count"], 0)
+
+    def test_an_internal_only_item_is_excluded(self):
+        self.make_news(visibility=News.Visibility.INTERNAL)
+
+        self.assertEqual(self.api_get("/news/").json()["count"], 0)
+
+    def test_an_external_item_is_included(self):
+        item = self.make_news(visibility=News.Visibility.EXTERNAL)
+
+        data = self.api_get("/news/").json()
+
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["results"][0]["id"], str(item.pk))
+
+    def test_a_both_visibility_item_is_included(self):
+        self.make_news(visibility=News.Visibility.BOTH)
+
+        self.assertEqual(self.api_get("/news/").json()["count"], 1)
+
+    def test_newest_first(self):
+        older = self.make_news(title="Older", published_at=timezone.now() - datetime.timedelta(days=2))
+        newer = self.make_news(title="Newer", published_at=timezone.now() - datetime.timedelta(hours=1))
+
+        results = self.api_get("/news/").json()["results"]
+
+        self.assertEqual([r["id"] for r in results], [str(newer.pk), str(older.pk)])
+
+    def test_photos_get_absolute_urls(self):
+        item = self.make_news()
+        NewsPhoto.objects.create(news_item=item, image="clubs/ajax-united/news/x/pic.jpg", is_main=True)
+
+        photo = self.api_get("/news/").json()["results"][0]["photos"][0]
+
+        self.assertTrue(photo["url"].startswith("http://ajax-united.rosterchief.app/media/"))
+        self.assertTrue(photo["is_main"])
+
+    def test_photos_carry_their_focal_point(self):
+        item = self.make_news()
+        NewsPhoto.objects.create(news_item=item, image="clubs/ajax-united/news/x/pic.jpg", is_main=True, focal_x=30, focal_y=70)
+
+        photo = self.api_get("/news/").json()["results"][0]["photos"][0]
+
+        self.assertEqual(photo["focal_x"], 30)
+        self.assertEqual(photo["focal_y"], 70)
+        self.assertEqual(photo["object_position"], "30% 70%")
+
+    def test_a_photos_focal_point_defaults_to_dead_centre(self):
+        item = self.make_news()
+        NewsPhoto.objects.create(news_item=item, image="clubs/ajax-united/news/x/pic.jpg", is_main=True)
+
+        photo = self.api_get("/news/").json()["results"][0]["photos"][0]
+
+        self.assertEqual(photo["object_position"], "50% 50%")
+
+    def test_pagination_limit_and_offset(self):
+        for i in range(3):
+            self.make_news(title=f"Item {i}", published_at=timezone.now() - datetime.timedelta(hours=1, minutes=i))
+
+        data = self.api_get("/news/", limit=1, offset=1).json()
+
+        self.assertEqual(data["count"], 3)
+        self.assertEqual(len(data["results"]), 1)
+
+    def test_limit_is_capped(self):
+        self.assertEqual(self.api_get("/news/", limit=1000).json()["limit"], 100)
+
+    def test_no_news_is_an_empty_list_not_an_error(self):
+        response = self.api_get("/news/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_translations_map_mirrors_the_legacy_fields(self):
+        self.make_news(title="Seizoensstart", title_en="Season kickoff", body="We beginnen het seizoen.", body_en="We're starting the season.")
+
+        result = self.api_get("/news/").json()["results"][0]
+
+        self.assertEqual(set(result["translations"]), {"en", "nl"})
+        for code in ("en", "nl"):
+            self.assertEqual(result["translations"][code]["title"], result[f"title_{code}"])
+            self.assertEqual(result["translations"][code]["excerpt"], result[f"excerpt_{code}"])
+            self.assertEqual(result["translations"][code]["body"], result[f"body_{code}"])
+        self.assertEqual(result["translations"]["en"]["title"], "Season kickoff")
+        self.assertEqual(result["translations"]["nl"]["title"], "Seizoensstart")
+
+    def test_translations_fall_back_to_the_club_language_without_english(self):
+        self.make_news(title="Alleen Nederlands", body="Tekst.")
+
+        translations = self.api_get("/news/").json()["results"][0]["translations"]
+
+        self.assertEqual(translations["en"]["title"], "Alleen Nederlands")
+
+    def test_excerpt_is_a_truncated_prefix_of_the_body(self):
+        self.make_news(body=" ".join(f"word{i}" for i in range(80)))
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
+
+        self.assertTrue(excerpt.startswith("word0 word1"))
+        self.assertTrue(excerpt.endswith("…"))
+        self.assertLess(len(excerpt.split()), 80)
+
+    def test_excerpt_is_unchanged_when_the_body_is_already_short(self):
+        item = self.make_news(body="Short body.")
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
+
+        self.assertEqual(excerpt, item.body)
+
+    def test_slug_is_auto_populated_from_the_title(self):
+        item = self.make_news(title="Big Win This Weekend")
+
+        self.assertEqual(item.slug, "big-win-this-weekend")
+
+    def test_get_single_news_item_by_slug(self):
+        item = self.make_news(title="Big Win This Weekend")
+
+        response = self.api_get(f"/news/{item.slug}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], str(item.pk))
+
+    def test_get_single_news_item_404s_for_an_unknown_slug(self):
+        response = self.api_get("/news/no-such-item/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_single_news_item_respects_visibility(self):
+        item = self.make_news(visibility=News.Visibility.INTERNAL)
+
+        response = self.api_get(f"/news/{item.slug}/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_body_markdown_is_rendered_to_html(self):
+        self.make_news(body="## Big win\n\nWe beat **Rivals FC** 4-2. [Full report](https://example.com).")
+
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
+
+        self.assertIn("<h2>Big win</h2>", body)
+        self.assertIn("<strong>Rivals FC</strong>", body)
+        self.assertIn('href="https://example.com"', body)
+        self.assertIn(">Full report</a>", body)
+
+    def test_body_markdown_a_single_newline_becomes_a_line_break(self):
+        self.make_news(body="Line one\nLine two")
+
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
+
+        self.assertIn("Line one<br", body)
+
+    def test_body_html_strips_a_script_tag(self):
+        self.make_news(body="Hello<script>alert('xss')</script>world")
+
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
+
+        self.assertNotIn("<script", body)
+        self.assertNotIn("alert(", body)
+
+    def test_body_html_strips_an_event_handler_attribute(self):
+        self.make_news(body='<img src="x" onerror="alert(1)">')
+
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
+
+        self.assertNotIn("onerror", body)
+
+    def test_body_html_strips_a_javascript_url(self):
+        self.make_news(body="[click me](javascript:alert(1))")
+
+        body = self.api_get("/news/").json()["results"][0]["body_nl"]
+
+        self.assertNotIn("javascript:", body)
+
+    def test_excerpt_strips_markdown_syntax(self):
+        self.make_news(body="**Bold** and a [link](https://example.com) and # not a heading here")
+
+        excerpt = self.api_get("/news/").json()["results"][0]["excerpt_nl"]
+
+        self.assertNotIn("**", excerpt)
+        self.assertNotIn("[link]", excerpt)
+        self.assertNotIn("<", excerpt)
+
+    def test_english_falls_back_to_the_original_when_not_translated(self):
+        self.make_news(title="Seizoensstart", body="We beginnen het seizoen.")
+
+        result = self.api_get("/news/").json()["results"][0]
+
+        self.assertEqual(result["title_en"], "Seizoensstart")
+        self.assertIn("We beginnen het seizoen.", result["body_en"])
+        self.assertEqual(result["excerpt_en"], result["excerpt_nl"])
+
+    def test_english_is_used_when_translated(self):
+        self.make_news(title="Seizoensstart", title_en="Season kickoff", body="We beginnen het seizoen.", body_en="We're starting the season.")
+
+        result = self.api_get("/news/").json()["results"][0]
+
+        self.assertEqual(result["title_nl"], "Seizoensstart")
+        self.assertEqual(result["title_en"], "Season kickoff")
+        self.assertIn("We beginnen het seizoen.", result["body_nl"])
+        self.assertIn("We're starting the season.", result["body_en"])
+        self.assertNotEqual(result["excerpt_en"], result["excerpt_nl"])
+
+
+class TeamsApiTests(ApiTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.forward = Position.objects.create(club=cls.club, name="Forward", short_name="FW", ordering=1)
+        cls.defense = Position.objects.create(club=cls.club, name="Defense", short_name="DF", ordering=2)
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+    def test_list_teams(self):
+        data = self.api_get("/teams/").json()
+
+        self.assertEqual(data, [{"id": str(self.team.pk), "name": "First Team", "short_name": "1st", "photo_url": None, "tournament_only": False}])
+
+    def test_tournament_only_teams_are_reported_and_can_be_filtered(self):
+        cup = Team.objects.create(club=self.club, name="Cup Team", short_name="Cup", tournament_only=True)
+
+        everything = {team["id"]: team for team in self.api_get("/teams/").json()}
+        self.assertTrue(everything[str(cup.pk)]["tournament_only"])
+        self.assertFalse(everything[str(self.team.pk)]["tournament_only"])
+
+        explicit = self.api_get("/teams/?include_tournament_only=true").json()
+        self.assertEqual({team["id"] for team in explicit}, {str(self.team.pk), str(cup.pk)})
+
+        filtered = self.api_get("/teams/?include_tournament_only=false").json()
+        self.assertEqual([team["id"] for team in filtered], [str(self.team.pk)])
+
+    def test_teams_are_returned_in_their_order_then_alphabetically(self):
+        Team.objects.create(club=self.club, name="Zed", short_name="Z")
+        Team.objects.create(club=self.club, name="Alpha", short_name="A")
+        Team.objects.create(club=self.club, name="Second", short_name="S2", ordering=2)
+        Team.objects.create(club=self.club, name="Also second", short_name="S2b", ordering=2)
+        Team.objects.create(club=self.club, name="Top", short_name="T", ordering=1)
+
+        names = [team["name"] for team in self.api_get("/teams/").json()]
+
+        self.assertEqual(names, ["Top", "Also second", "Second", "Alpha", "First Team", "Zed"])
+
+    def test_roster_groups_players_by_position(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        bob = Member.objects.create(first_name="Bob", last_name="Birch")
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar")
+        # Two forwards (ordering 1) at different jersey numbers, one defense (ordering 2).
+        TeamMembership.objects.create(team=self.team, member=bob, season=self.season, position=self.forward, jersey_number=9)
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        TeamMembership.objects.create(team=self.team, member=carol, season=self.season, position=self.defense, jersey_number=1)
+
+        groups = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        # Groups in Position.ordering order (Forward before Defense); within a
+        # group, sorted by jersey number.
+        self.assertEqual([g["position"] for g in groups], ["Forward", "Defense"])
+        self.assertEqual([p["first_name"] for p in groups[0]["players"]], ["Alice", "Bob"])
+        self.assertEqual([p["first_name"] for p in groups[1]["players"]], ["Carol"])
+
+    def test_a_player_entry_no_longer_repeats_its_position(self):
+        # The position is now the group key, not a per-player field.
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+
+        player = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"][0]
+
+        self.assertNotIn("position", player)
+
+    def test_roster_returns_only_the_player_picture_and_only_with_consent(self):
+        def upload(name):
+            return SimpleUploadedFile(name, b"fake-image-bytes", content_type="image/jpeg")
+
+        alice = Member.objects.create(first_name="Alice", last_name="Ash", player_photo=upload("player.jpg"), profile_photo=upload("profile.jpg"), photo_public_consent=True)
+        bob = Member.objects.create(first_name="Bob", last_name="Birch", profile_photo=upload("profile.jpg"), photo_public_consent=True)
+        carol = Member.objects.create(first_name="Carol", last_name="Cedar", player_photo=upload("player.jpg"))
+        for jersey, member in enumerate((alice, bob, carol), start=1):
+            TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward, jersey_number=jersey)
+
+        players = {p["first_name"]: p for p in self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"][0]["players"]}
+
+        self.assertIn(f"/members/{alice.pk}/player-photo/", players["Alice"]["photo_url"])
+        self.assertNotIn("profile-photo", players["Alice"]["photo_url"])
+        self.assertIsNone(players["Bob"]["photo_url"])
+        self.assertIsNone(players["Carol"]["photo_url"])
+
+    def test_roster_includes_staff(self):
+        dana = Member.objects.create(first_name="Dana", last_name="Dean")
+        StaffAssignment.objects.create(team=self.team, member=dana, season=self.season, position=self.coach_position)
+
+        staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
+
+        self.assertEqual(staff, [{"id": str(dana.pk), "first_name": "Dana", "last_name": "Dean", "position": "Head Coach", "photo_url": None}])
+
+    def test_roster_is_current_season_only(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2000, 1, 1), end_date=datetime.date(2000, 12, 31))
+        eve = Member.objects.create(first_name="Eve", last_name="Elm")
+        TeamMembership.objects.create(team=self.team, member=eve, season=other_season, position=self.forward, jersey_number=1)
+
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        self.assertEqual(players, [])
+
+    def test_roster_is_empty_with_no_current_season(self):
+        self.season.delete()
+        team_without_season = self.team
+
+        data = self.api_get(f"/teams/{team_without_season.pk}/roster/").json()
+
+        self.assertEqual(data["season"], None)
+        self.assertEqual(data["players"], [])
+        self.assertEqual(data["staff"], [])
+
+    def test_list_teams_includes_the_current_seasons_photo(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        photo_url = self.api_get("/teams/").json()[0]["photo_url"]
+
+        self.assertTrue(photo_url.startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_roster_includes_the_current_seasons_photo(self):
+        TeamPhoto.objects.create(team=self.team, season=self.season, image="clubs/ajax-united/teams/x/26-27/pic.jpg")
+
+        photo_url = self.api_get(f"/teams/{self.team.pk}/roster/").json()["team"]["photo_url"]
+
+        self.assertTrue(photo_url.startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_a_photo_from_a_different_season_does_not_leak(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2000, 1, 1), end_date=datetime.date(2000, 12, 31))
+        TeamPhoto.objects.create(team=self.team, season=other_season, image="clubs/ajax-united/teams/x/00-00/pic.jpg")
+
+        self.assertIsNone(self.api_get("/teams/").json()[0]["photo_url"])
+        self.assertIsNone(self.api_get(f"/teams/{self.team.pk}/roster/").json()["team"]["photo_url"])
+
+    def test_a_team_from_another_club_404s(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_team = Team.objects.create(club=other_club, name="Rival Team", short_name="RIV")
+
+        response = self.api_get(f"/teams/{other_team.pk}/roster/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_player_entry_does_not_include_a_licence_number(self):
+        # Federation licence numbers are internal membership data, not public roster data.
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, license="BE-12345", status=ClubMembership.StatusChoices.ACTIVE)
+
+        response = self.api_get(f"/teams/{self.team.pk}/roster/")
+
+        self.assertNotIn("license", response.json()["players"][0]["players"][0])
+        self.assertNotContains(response, "BE-12345")
+
+    def test_a_player_with_an_active_club_membership_is_listed(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+        ClubMembership.objects.create(club=self.club, member=alice, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_without_a_club_membership_is_still_listed(self):
+        alice = Member.objects.create(first_name="Alice", last_name="Ash")
+        TeamMembership.objects.create(team=self.team, member=alice, season=self.season, position=self.forward, jersey_number=2)
+
+        players = self.api_get(f"/teams/{self.team.pk}/roster/").json()["players"]
+
+        self.assertEqual([p["first_name"] for p in players[0]["players"]], ["Alice"])
+
+    def test_a_player_whose_club_membership_is_pending_or_cancelled_is_left_off(self):
+        # A roster spot can be assigned while the sign-up is still awaiting
+        # approval; the public roster only lists confirmed players.
+        for status in (ClubMembership.StatusChoices.PENDING, ClubMembership.StatusChoices.CANCELLED):
+            with self.subTest(status=status):
+                member = Member.objects.create(first_name=f"Player-{status}", last_name="Ash")
+                TeamMembership.objects.create(team=self.team, member=member, season=self.season, position=self.forward)
+                ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=status)
+                cache.clear()
+
+                response = self.api_get(f"/teams/{self.team.pk}/roster/")
+
+                self.assertNotContains(response, f"Player-{status}")
+
+    def test_staff_whose_club_membership_is_pending_is_left_off(self):
+        dana = Member.objects.create(first_name="Dana", last_name="Dean")
+        StaffAssignment.objects.create(team=self.team, member=dana, season=self.season, position=self.coach_position)
+        ClubMembership.objects.create(club=self.club, member=dana, season=self.season, status=ClubMembership.StatusChoices.PENDING)
+
+        staff = self.api_get(f"/teams/{self.team.pk}/roster/").json()["staff"]
+
+        self.assertEqual(staff, [])
+
+
+class StandingsApiTests(ApiTestBase):
+    """/teams/standings/ and /teams/{id}/standings/ -- read straight from what
+    events.services.rbihf_standings stored on the team's RBIHF import sources,
+    behind the club's RBIHF feature flag."""
+
+    ROW = {"team_id": "4448", "team_name": "Antwerp", "position": 1, "played": 1, "wins": 1, "ot_wins": 0, "ot_losses": 0, "draws": 0, "losses": 0, "goals_for": 6, "goals_against": 3, "goal_difference": 3, "points": 2}
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.other_team = Team.objects.create(club=cls.club, name="U18", short_name="U18")
+        entry = import_sources.record_source(cls.team, source=import_sources.SOURCE_RBIHF, url="https://www.rbihf.be/league/team/4448", season=cls.season, competition_label="Division 1")
+        rival = {**cls.ROW, "team_id": "4450", "team_name": "Sharks", "position": 2, "wins": 0, "losses": 1, "goals_for": 3, "goals_against": 6, "goal_difference": -3, "points": 0}
+        competition = {"name": "Regular Competition", "points_rule": "Won: 2 | Draw: 1 | Lost: 0", "has_overtime": False, "rows": [cls.ROW, rival]}
+        standings = {"league": "Division 1", "rbihf_team_id": "4448", "updated_at": "2026-10-03T01:00:00+00:00", "error": "", "competitions": [competition]}
+        import_sources.update_entry(cls.team, entry, standings=standings)
+
+    def enable_rbihf(self):
+        flag, _created = get_waffle_flag_model().objects.get_or_create(name="RBIHF")
+        flag.clubs.add(self.club)
+        cache.clear()
+
+    def test_nothing_without_the_rbihf_feature(self):
+        self.assertEqual(self.api_get("/teams/standings/").json(), [])
+        self.assertEqual(self.api_get(f"/teams/{self.team.pk}/standings/").json()["competitions"], [])
+
+    def test_lists_only_teams_with_standings(self):
+        self.enable_rbihf()
+
+        data = self.api_get("/teams/standings/").json()
+
+        self.assertEqual([item["team"]["name"] for item in data], ["First Team"])
+        [competition] = data[0]["competitions"]
+        self.assertEqual((competition["league"], competition["competition"], competition["competition_label"], competition["has_overtime"]), ("Division 1", "Regular Competition", "Division 1", False))
+        self.assertEqual(competition["updated_at"], "2026-10-03T01:00:00Z")
+        self.assertEqual([(row["position"], row["team_name"], row["is_own_team"], row["points"]) for row in competition["rows"]], [(1, "Antwerp", True, 2), (2, "Sharks", False, 0)])
+        self.assertNotIn("team_id", competition["rows"][0])
+
+    def test_one_teams_standings(self):
+        self.enable_rbihf()
+
+        data = self.api_get(f"/teams/{self.team.pk}/standings/").json()
+
+        self.assertEqual((data["team"]["name"], data["season"], len(data["competitions"])), ("First Team", self.season.name, 1))
+        self.assertEqual(self.api_get(f"/teams/{self.other_team.pk}/standings/").json()["competitions"], [])
+
+    def test_another_clubs_team_is_a_404(self):
+        self.enable_rbihf()
+        rival_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        rival_team = Team.objects.create(club=rival_club, name="Rivals", short_name="RV")
+
+        self.assertEqual(self.api_get(f"/teams/{rival_team.pk}/standings/").status_code, 404)
+
+
+class GamesApiTests(ApiTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home_location = Location.objects.create(club=cls.club, name="Home Arena", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Rivals FC")
+
+    def make_game(self, **overrides):
+        defaults = {"club": self.club, "title": "Game", "kind": Event.EventKind.GAME, "start": timezone.now() + datetime.timedelta(days=1), "opponent": self.opponent}
+        defaults.update(overrides)
+        event = Event.objects.create(**defaults)
+        event.teams.add(self.team)
+        return event
+
+    def test_upcoming_games_are_listed_with_location_and_teams(self):
+        self.make_game(location=self.home_location)
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
+        self.assertEqual(games[0]["location"]["name"], "Home Arena")
+        self.assertEqual(games[0]["status"], "upcoming")
+
+    def test_upcoming_games_report_whether_theyre_friendly(self):
+        self.make_game(is_friendly=True)
+        self.make_game(title="League game")
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assertEqual(sorted(game["is_friendly"] for game in games), [False, True])
+
+    def test_upcoming_excludes_cancelled_games(self):
+        self.make_game(cancelled=True)
+
+        self.assertEqual(self.api_get("/games/upcoming/").json(), [])
+
+    def test_upcoming_excludes_past_games(self):
+        self.make_game(start=timezone.now() - datetime.timedelta(days=1))
+
+        self.assertEqual(self.api_get("/games/upcoming/").json(), [])
+
+    def test_upcoming_includes_a_game_already_in_progress(self):
+        # Started 30 minutes ago, no explicit end -- the assumed 2h window
+        # means it isn't finished yet, so it must still show up.
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=30))
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "live")
+
+    def test_upcoming_excludes_a_game_past_its_explicit_end(self):
+        game = self.make_game(start=timezone.now() - datetime.timedelta(hours=3))
+        game.end = timezone.now() - datetime.timedelta(hours=1)
+        game.save()
+
+        self.assertEqual(self.api_get("/games/upcoming/").json(), [])
+
+    def test_the_response_includes_an_end_time(self):
+        game = self.make_game()
+
+        end = self.api_get("/games/upcoming/").json()[0]["end"]
+
+        # JSON round-trips to millisecond precision -- compare with a small
+        # tolerance rather than an exact microsecond match.
+        self.assertLess(abs((datetime.datetime.fromisoformat(end) - game.end).total_seconds()), 1)
+
+    def test_upcoming_includes_tournaments(self):
+        self.make_game(kind=Event.EventKind.TOURNAMENT)
+
+        self.assertEqual(len(self.api_get("/games/upcoming/").json()), 1)
+
+    def test_upcoming_excludes_other_kinds(self):
+        self.make_game(kind=Event.EventKind.TRAINING)
+        self.make_game(kind=Event.EventKind.SOCIAL)
+
+        self.assertEqual(self.api_get("/games/upcoming/").json(), [])
+
+    def test_live_endpoint_stays_game_only(self):
+        # is_live/scores are game-specific -- a tournament wouldn't have
+        # anything meaningful to show here even if flagged live.
+        self.make_game(kind=Event.EventKind.TOURNAMENT, start=timezone.now() - datetime.timedelta(minutes=10), is_live=True)
+
+        self.assertEqual(self.api_get("/games/live/").json(), [])
+
+    def test_count_is_respected(self):
+        for i in range(3):
+            self.make_game(start=timezone.now() + datetime.timedelta(days=i + 1))
+
+        self.assertEqual(len(self.api_get("/games/upcoming/", count=2).json()), 2)
+
+    def test_count_is_capped(self):
+        for i in range(3):
+            self.make_game(start=timezone.now() + datetime.timedelta(days=i + 1))
+
+        # Cap is 50, well above the 3 created -- just confirm an oversized
+        # request doesn't error and doesn't somehow exceed what exists.
+        response = self.api_get("/games/upcoming/", count=1000)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)
+
+    def test_live_games_are_listed_with_scores(self):
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=10), is_live=True, score_for=2, score_against=1, location=self.home_location)
+
+        games = self.api_get("/games/live/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "live")
+        self.assertEqual(games[0]["home_score"], 2)
+        self.assertEqual(games[0]["away_score"], 1)
+
+    def test_live_excludes_cancelled_games(self):
+        self.make_game(is_live=True, cancelled=True)
+
+        self.assertEqual(self.api_get("/games/live/").json(), [])
+
+    def test_non_live_games_are_excluded_from_live_endpoint(self):
+        self.make_game()
+
+        self.assertEqual(self.api_get("/games/live/").json(), [])
+
+    def test_score_relabelling_for_an_away_game(self):
+        # No location (or a non-home one) -- is_home_game is False, so our
+        # team's score_for/score_against map to the away side.
+        self.make_game(start=timezone.now() - datetime.timedelta(days=1), score_for=4, score_against=3)
+
+        games = self.api_get(f"/teams/{self.team.pk}/games/").json()
+
+        self.assertEqual(games[0]["home_team"]["name"], "Rivals FC")
+        self.assertEqual(games[0]["away_team"]["name"], "First Team")
+        self.assertEqual(games[0]["home_score"], 3)
+        self.assertEqual(games[0]["away_score"], 4)
+        self.assertEqual(games[0]["status"], "finished")
+
+    def test_score_relabelling_for_a_home_game(self):
+        self.make_game(start=timezone.now() - datetime.timedelta(days=1), score_for=4, score_against=3, location=self.home_location)
+
+        games = self.api_get(f"/teams/{self.team.pk}/games/").json()
+
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
+        self.assertEqual(games[0]["home_score"], 4)
+        self.assertEqual(games[0]["away_score"], 3)
+
+    def test_team_games_includes_past_and_upcoming_for_the_current_season(self):
+        self.make_game(title="Past", start=timezone.now() - datetime.timedelta(days=1), score_for=1, score_against=0)
+        self.make_game(title="Future", start=timezone.now() + datetime.timedelta(days=1))
+
+        games = self.api_get(f"/teams/{self.team.pk}/games/").json()
+
+        self.assertEqual(len(games), 2)
+
+    def test_team_games_excludes_a_different_season(self):
+        other_season = Season.objects.create(club=self.club, start_date=datetime.date(2000, 1, 1), end_date=datetime.date(2000, 12, 31))
+        self.make_game(start=datetime.datetime(2000, 6, 1, tzinfo=datetime.UTC), season=other_season)
+
+        self.assertEqual(self.api_get(f"/teams/{self.team.pk}/games/").json(), [])
+
+    def test_team_games_excludes_cancelled(self):
+        self.make_game(cancelled=True)
+
+        self.assertEqual(self.api_get(f"/teams/{self.team.pk}/games/").json(), [])
+
+    def test_team_games_is_empty_with_no_current_season(self):
+        self.make_game()
+        self.season.delete()
+
+        self.assertEqual(self.api_get(f"/teams/{self.team.pk}/games/").json(), [])
+
+    def test_a_team_from_another_club_404s_on_games(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_team = Team.objects.create(club=other_club, name="Rival Team", short_name="RIV")
+
+        response = self.api_get(f"/teams/{other_team.pk}/games/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_home_team_links_to_the_actual_team_and_the_clubs_logo(self):
+        # Our own teams have no logo of their own -- they're shown under the club's badge.
+        self.club.logo = "clubs/ajax-united/logo.png"
+        self.club.save()
+        self.make_game(location=self.home_location)
+
+        home_team = self.api_get("/games/upcoming/").json()[0]["home_team"]
+
+        self.assertEqual(home_team["id"], str(self.team.pk))
+        self.assertEqual(home_team["name"], "First Team")
+        self.assertTrue(home_team["logo_url"].startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_away_team_links_to_the_opponent_and_its_own_logo(self):
+        self.opponent.logo = "opponents/rivals.png"
+        self.opponent.save()
+        self.make_game(location=self.home_location)
+
+        away_team = self.api_get("/games/upcoming/").json()[0]["away_team"]
+
+        self.assertEqual(away_team["id"], str(self.opponent.pk))
+        self.assertEqual(away_team["name"], "Rivals FC")
+        self.assertTrue(away_team["logo_url"].startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_team_logo_url_is_null_without_a_club_logo(self):
+        self.make_game(location=self.home_location)
+
+        home_team = self.api_get("/games/upcoming/").json()[0]["home_team"]
+
+        self.assertIsNone(home_team["logo_url"])
+
+    def make_game_for_two_teams(self, **overrides):
+        second_team = Team.objects.create(club=self.club, name="Second Team", short_name="2nd")
+        game = self.make_game(**overrides)
+        game.teams.add(second_team)
+        return game, second_team
+
+    def assert_lists_both_teams_once(self, games, game, second_team):
+        # One row per game, not one per assigned team -- and that row names every team.
+        self.assertEqual([row["id"] for row in games], [str(game.pk)])
+        self.assertEqual([team["id"] for team in games[0]["teams"]], [str(self.team.pk), str(second_team.pk)])
+        self.assertEqual([team["name"] for team in games[0]["teams"]], ["First Team", "Second Team"])
+
+    def test_upcoming_lists_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(location=self.home_location)
+
+        games = self.api_get("/games/upcoming/").json()
+
+        self.assert_lists_both_teams_once(games, game, second_team)
+        # Kept for backwards compatibility: still a single team, the first by name.
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["away_team"]["name"], "Rivals FC")
+
+    def test_past_games_list_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(start=timezone.now() - datetime.timedelta(days=1), score_for=2, score_against=1)
+
+        self.assert_lists_both_teams_once(self.api_get("/games/past/").json(), game, second_team)
+
+    def test_live_games_list_every_team_of_a_multi_team_game(self):
+        game, second_team = self.make_game_for_two_teams(start=timezone.now() - datetime.timedelta(minutes=10), is_live=True)
+
+        self.assert_lists_both_teams_once(self.api_get("/games/live/").json(), game, second_team)
+
+    def test_team_games_list_every_team_but_keep_the_requested_one_as_home_or_away(self):
+        game, second_team = self.make_game_for_two_teams(location=self.home_location)
+
+        games = self.api_get(f"/teams/{second_team.pk}/games/").json()
+
+        self.assert_lists_both_teams_once(games, game, second_team)
+        self.assertEqual(games[0]["home_team"]["name"], "Second Team")
+
+    def test_a_single_team_game_lists_just_that_team(self):
+        self.make_game()
+
+        teams = self.api_get("/games/upcoming/").json()[0]["teams"]
+
+        self.assertEqual([team["name"] for team in teams], ["First Team"])
+
+    def test_upcoming_games_do_not_query_teams_per_game(self):
+        self.make_game_for_two_teams()
+        for i in range(2):
+            self.make_game(start=timezone.now() + datetime.timedelta(days=i + 2))
+        self.api_get("/games/upcoming/")  # warm up tenant/session lookups
+        cache.clear()
+
+        # Constant no matter how many games or teams: one query for the games
+        # (opponent/location joined in), one prefetch for all their teams, plus
+        # the per-request tenant lookups -- not one teams query per game.
+        with self.assertNumQueries(4):
+            self.assertEqual(len(self.api_get("/games/upcoming/").json()), 3)
+
+    def make_past_game(self, days_ago=1, **overrides):
+        # A game that meets every "fully completed" condition -- kind GAME, scored,
+        # not live, not cancelled, well past its (auto-defaulted 2h) end.
+        defaults = {"start": timezone.now() - datetime.timedelta(days=days_ago), "score_for": 1, "score_against": 0}
+        defaults.update(overrides)
+        return self.make_game(**defaults)
+
+    def test_past_games_are_listed_as_finished_with_scores(self):
+        self.make_past_game(score_for=4, score_against=3, location=self.home_location)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0]["status"], "finished")
+        self.assertEqual(games[0]["home_team"]["name"], "First Team")
+        self.assertEqual(games[0]["home_score"], 4)
+        self.assertEqual(games[0]["away_score"], 3)
+
+    def test_past_games_relabel_scores_for_an_away_game(self):
+        self.make_past_game(score_for=4, score_against=3)
+
+        game = self.api_get("/games/past/").json()[0]
+
+        self.assertEqual(game["home_team"]["name"], "Rivals FC")
+        self.assertEqual(game["home_score"], 3)
+        self.assertEqual(game["away_score"], 4)
+
+    def test_past_games_are_newest_first(self):
+        self.make_past_game(title="Oldest", days_ago=3)
+        newest = self.make_past_game(title="Newest", days_ago=1)
+        middle = self.make_past_game(title="Middle", days_ago=2)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games[:2]], [str(newest.pk), str(middle.pk)])
+
+    def test_past_games_default_count_is_ten(self):
+        for i in range(12):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/").json()), 10)
+
+    def test_past_games_count_is_respected(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=2).json()), 2)
+
+    def test_past_games_count_is_clamped(self):
+        for i in range(3):
+            self.make_past_game(days_ago=i + 1)
+
+        self.assertEqual(len(self.api_get("/games/past/", count=0).json()), 1)
+
+        # Cap is 50, well above the 3 created -- just confirm an oversized
+        # request doesn't error and doesn't somehow exceed what exists.
+        response = self.api_get("/games/past/", count=500)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)
+
+    def test_past_games_exclude_a_game_missing_either_score(self):
+        self.make_past_game(score_for=None, score_against=2)
+        self.make_past_game(score_for=2, score_against=None)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_cancelled_games(self):
+        self.make_past_game(cancelled=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_still_flagged_live(self):
+        self.make_past_game(is_live=True)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_game_not_yet_finished(self):
+        # Started 30 minutes ago and already has a score, but the assumed 2h
+        # window means it isn't over yet.
+        self.make_game(start=timezone.now() - datetime.timedelta(minutes=30), score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_upcoming_games(self):
+        self.make_game(score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_tournaments_and_other_kinds(self):
+        self.make_past_game(kind=Event.EventKind.TOURNAMENT)
+        self.make_past_game(kind=Event.EventKind.TRAINING)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_a_previous_seasons_games(self):
+        # self.season started 30 days ago -- a game from before that is last
+        # season's, whether its season is left blank or set explicitly.
+        previous_season = Season.objects.create(club=self.club, start_date=self.season.start_date - datetime.timedelta(days=365), end_date=self.season.start_date - datetime.timedelta(days=1))
+        self.make_past_game(days_ago=60)
+        self.make_past_game(days_ago=90, season=previous_season)
+        current = self.make_past_game(days_ago=5)
+
+        games = self.api_get("/games/past/").json()
+
+        self.assertEqual([game["id"] for game in games], [str(current.pk)])
+
+    def test_past_games_is_empty_without_a_current_season(self):
+        self.make_past_game()
+        self.season.delete()
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+    def test_past_games_exclude_another_clubs_games(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        other_opponent = Opponent.objects.create(club=other_club, name="Someone")
+        Event.objects.create(club=other_club, title="Their game", kind=Event.EventKind.GAME, start=timezone.now() - datetime.timedelta(days=1), opponent=other_opponent, score_for=1, score_against=0)
+
+        self.assertEqual(self.api_get("/games/past/").json(), [])
+
+
+class GameDetailApiTests(ApiTestBase):
+    """GET /games/{id}/ -- one game, the same fields as the lists (the game
+    timeline is only served by the private app API)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.home = Location.objects.create(club=cls.club, name="Home Rink", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.opponent = Opponent.objects.create(club=cls.club, name="Rivals FC")
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("start", timezone.now() - datetime.timedelta(hours=3))
+        game = Event.objects.create(club=self.club, title="Game", kind=Event.EventKind.GAME, location=self.home, opponent=self.opponent, score_for=1, score_against=0, **kwargs)
+        game.teams.set([self.team])
+        return game
+
+    def test_a_game_carries_no_timeline_fields(self):
+        game = self.make_game()
+
+        data = self.api_get(f"/games/{game.pk}/").json()
+
+        self.assertEqual((data["home_score"], data["away_score"], data["status"]), (1, 0, "finished"))
+        for field in ("timeline", "periods", "decided_in", "timeline_updated_at"):
+            self.assertNotIn(field, data)
+
+    def test_another_clubs_game_or_a_non_game_is_404(self):
+        rival = Club.objects.create(name="Rival FC", slug="rival-fc")
+        theirs = Event.objects.create(club=rival, title="Theirs", kind=Event.EventKind.GAME, start=timezone.now())
+        training = Event.objects.create(club=self.club, title="Practice", kind=Event.EventKind.TRAINING, start=timezone.now())
+
+        self.assertEqual(self.api_get(f"/games/{theirs.pk}/").status_code, 404)
+        self.assertEqual(self.api_get(f"/games/{training.pk}/").status_code, 404)
+
+    def test_a_live_game_gets_the_short_cache_window(self):
+        game = self.make_game(is_live=True)
+
+        with mock.patch("events.api.cached_for_club", wraps=cached_for_club) as mock_cache:
+            self.api_get(f"/games/{game.pk}/")
+
+        self.assertEqual(mock_cache.call_args.kwargs["seconds"], LIVE_GAME_CACHE_SECONDS)
+
+
+class TenancyAndCorsTests(ApiTestBase):
+    def test_the_base_domain_404s(self):
+        response = self.api_get_base_domain("/news/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_get_response_carries_the_cors_header(self):
+        response = self.api_get("/news/")
+
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
+    def test_an_options_preflight_gets_a_204_with_cors_headers(self):
+        response = self.client.options("/api/v1/news/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+        self.assertIn("GET", response["Access-Control-Allow-Methods"])
+
+    def test_cors_headers_are_not_added_outside_the_api(self):
+        response = self.client.get("/", HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertNotIn("Access-Control-Allow-Origin", response)
+
+    def test_docs_page_resolves(self):
+        self.assertEqual(self.api_get("/docs").status_code, 200)
+
+    def test_openapi_schema_resolves(self):
+        self.assertEqual(self.api_get("/openapi.json").status_code, 200)
+
+
+class SponsorApiTests(ApiTestBase):
+    def make_sponsor(self, **overrides):
+        today = timezone.localdate()
+        defaults = {"club": self.club, "name": "Acme Corp", "start_date": today - datetime.timedelta(days=10), "end_date": today + datetime.timedelta(days=10)}
+        defaults.update(overrides)
+        return Sponsor.objects.create(**defaults)
+
+    def test_a_sponsor_covering_today_is_included(self):
+        self.make_sponsor()
+
+        data = self.api_get("/sponsors/").json()
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "Acme Corp")
+
+    def test_a_sponsor_starting_in_the_future_is_excluded(self):
+        today = timezone.localdate()
+        self.make_sponsor(start_date=today + datetime.timedelta(days=1), end_date=None)
+
+        self.assertEqual(self.api_get("/sponsors/").json(), [])
+
+    def test_a_sponsor_that_already_ended_is_excluded(self):
+        today = timezone.localdate()
+        self.make_sponsor(start_date=today - datetime.timedelta(days=20), end_date=today - datetime.timedelta(days=1))
+
+        self.assertEqual(self.api_get("/sponsors/").json(), [])
+
+    def test_a_sponsor_with_no_end_date_and_a_past_start_is_included(self):
+        today = timezone.localdate()
+        self.make_sponsor(start_date=today - datetime.timedelta(days=100), end_date=None)
+
+        self.assertEqual(len(self.api_get("/sponsors/").json()), 1)
+
+    def test_a_sponsor_starting_today_is_included(self):
+        today = timezone.localdate()
+        self.make_sponsor(start_date=today, end_date=None)
+
+        self.assertEqual(len(self.api_get("/sponsors/").json()), 1)
+
+    def test_a_sponsor_ending_today_is_included(self):
+        today = timezone.localdate()
+        self.make_sponsor(start_date=today - datetime.timedelta(days=10), end_date=today)
+
+        self.assertEqual(len(self.api_get("/sponsors/").json()), 1)
+
+    def test_another_clubs_sponsor_never_leaks_in(self):
+        other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
+        self.make_sponsor(club=other_club)
+
+        self.assertEqual(self.api_get("/sponsors/").json(), [])
+
+    def test_logo_url_is_absolute_when_set(self):
+        self.make_sponsor(logo="clubs/ajax-united/sponsors/x/logo.png")
+
+        logo_url = self.api_get("/sponsors/").json()[0]["logo_url"]
+
+        self.assertTrue(logo_url.startswith("http://ajax-united.rosterchief.app/media/"))
+
+    def test_logo_url_is_null_when_not_set(self):
+        self.make_sponsor()
+
+        self.assertIsNone(self.api_get("/sponsors/").json()[0]["logo_url"])
+
+    def test_logo_dimensions_are_computed_for_a_raster_image(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (300, 150)).save(buffer, format="PNG")
+        logo = SimpleUploadedFile("logo.png", buffer.getvalue(), content_type="image/png")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 300)
+        self.assertEqual(sponsor["logo_height"], 150)
+
+    def test_logo_dimensions_are_computed_for_an_svg_with_width_and_height(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"></svg>'
+        logo = SimpleUploadedFile("logo.svg", svg, content_type="image/svg+xml")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 120)
+        self.assertEqual(sponsor["logo_height"], 80)
+
+    def test_logo_dimensions_fall_back_to_an_svg_viewbox(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"></svg>'
+        logo = SimpleUploadedFile("logo.svg", svg, content_type="image/svg+xml")
+
+        self.make_sponsor(logo=logo)
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertEqual(sponsor["logo_width"], 64)
+        self.assertEqual(sponsor["logo_height"], 32)
+
+    def test_logo_dimensions_are_null_without_a_logo(self):
+        self.make_sponsor()
+
+        sponsor = self.api_get("/sponsors/").json()[0]
+        self.assertIsNone(sponsor["logo_width"])
+        self.assertIsNone(sponsor["logo_height"])
+
+    def test_randomize_returns_the_same_set_of_sponsors(self):
+        for i in range(5):
+            self.make_sponsor(name=f"Sponsor {i}")
+
+        stable = {s["id"] for s in self.api_get("/sponsors/").json()}
+        randomized = {s["id"] for s in self.api_get("/sponsors/", randomize="true").json()}
+
+        self.assertEqual(stable, randomized)
+        self.assertEqual(len(stable), 5)
+
+    def test_default_order_is_stable_and_alphabetical(self):
+        self.make_sponsor(name="Zulu Corp")
+        self.make_sponsor(name="Acme Corp")
+
+        names = [s["name"] for s in self.api_get("/sponsors/").json()]
+
+        self.assertEqual(names, ["Acme Corp", "Zulu Corp"])
+
+
+@override_settings(
+    ROSTERCHIEF_BASE_DOMAIN="rosterchief.app",
+    ALLOWED_HOSTS=["rosterchief.app", "ajax-united.rosterchief.app", "testserver"],
+)
+class PublicCacheHeaderTests(TestCase):
+    """GET /api/v1/teams/ can be cached by the caller for a minute; nothing else on the API can."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+        Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def get(self, path):
+        return self.client.get(path, HTTP_HOST="ajax-united.rosterchief.app")
+
+    def test_the_team_list_may_be_cached_for_a_minute(self):
+        response = self.get("/api/v1/teams/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "public, max-age=60")
+
+    def test_the_team_list_response_shape_is_stable(self):
+        (team,) = self.get("/api/v1/teams/").json()
+
+        self.assertEqual(sorted(team), ["id", "name", "photo_url", "short_name", "tournament_only"])
+
+    def test_live_data_is_not_given_a_public_cache_lifetime(self):
+        for path in ("/api/v1/games/live/", "/api/v1/news/", "/api/v1/sponsors/"):
+            with self.subTest(path=path):
+                self.assertNotIn("max-age=60", self.get(path).get("Cache-Control", ""))
+
+    def test_an_error_is_never_marked_cacheable(self):
+        response = self.client.get("/api/v1/teams/", HTTP_HOST="rosterchief.app")  # no club on the bare domain
+
+        self.assertNotEqual(response.status_code, 200)
+        self.assertNotIn("public", response.get("Cache-Control", ""))

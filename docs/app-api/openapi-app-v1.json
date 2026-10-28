@@ -8575,7 +8575,7 @@
     "/api/app/v1/bug-reports": {
       "get": {
         "description": "Reports this account filed in this club, newest first, with the team's replies.",
-        "operationId": "appapi_routers_support_bug_reports",
+        "operationId": "api_app_routers_support_bug_reports",
         "parameters": [],
         "responses": {
           "200": {
@@ -8631,7 +8631,7 @@
       },
       "post": {
         "description": "Filed as the account's own person (never on behalf of a child).",
-        "operationId": "appapi_routers_support_report_bug",
+        "operationId": "api_app_routers_support_report_bug",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -8709,7 +8709,7 @@
     "/api/app/v1/calendar": {
       "get": {
         "description": "Invitations, referee/official sign-ups (open, accepted or declined) and events a person is\nkept off by an open club requirement (`blocked`), soonest first. A declined referee/official\nsign-up (`status` `declined`) stays until the game starts, in case they change their mind. Cancelled events\nare left out, and so are referee/official sign-ups for games that are already over (only\nyour own and your family's games as a player show when looking back). Fetch the next window by passing the previous `to` as `from`.",
-        "operationId": "appapi_routers_member_calendar",
+        "operationId": "api_app_routers_member_calendar",
         "parameters": [
           {
             "description": "Start of the window (default: now).",
@@ -8851,7 +8851,7 @@
     },
     "/api/app/v1/calendar-feed": {
       "get": {
-        "operationId": "appapi_routers_support_calendar_feed_state",
+        "operationId": "api_app_routers_support_calendar_feed_state",
         "parameters": [],
         "responses": {
           "200": {
@@ -8907,7 +8907,7 @@
       },
       "post": {
         "description": "Returns the subscription URL, the only time it's ever shown (only a hash is\nstored). Calling it again replaces the link: the old URL stops working at once,\nwhich is also how a leaked link is revoked. One link covers every club.",
-        "operationId": "appapi_routers_support_calendar_feed_issue",
+        "operationId": "api_app_routers_support_calendar_feed_issue",
         "parameters": [],
         "responses": {
           "200": {
@@ -8965,7 +8965,7 @@
     "/api/app/v1/clubs": {
       "get": {
         "description": "Every active club the account has a real tie to, with the base URL to use for that\nclub's endpoints. Cache it; offer a club picker when there is more than one.",
-        "operationId": "appapi_routers_account_clubs",
+        "operationId": "api_app_routers_account_clubs",
         "parameters": [],
         "responses": {
           "200": {
@@ -9023,7 +9023,7 @@
     "/api/app/v1/context": {
       "get": {
         "description": "Call when a club is opened (and after pull-to-refresh): the season, the people the\naccount acts for (`member_id` values for other endpoints), coached teams, permissions\nand features. `403 not_a_member` means the account has no tie to this club.",
-        "operationId": "appapi_routers_club_context",
+        "operationId": "api_app_routers_club_context",
         "parameters": [],
         "responses": {
           "200": {
@@ -9081,7 +9081,7 @@
     "/api/app/v1/devices": {
       "post": {
         "description": "Call after sign-in and whenever the push token changes (iOS may rotate it). Keyed by\n`installation_id`: repeating the call updates the same registration. If another account\nregistered this install before, it moves to the signed-in account.",
-        "operationId": "appapi_routers_account_register_device",
+        "operationId": "api_app_routers_account_register_device",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -9159,7 +9159,7 @@
     "/api/app/v1/devices/{installation_id}": {
       "delete": {
         "description": "Call on sign-out, before discarding the tokens. Only the account's own installs.",
-        "operationId": "appapi_routers_account_unregister_device",
+        "operationId": "api_app_routers_account_unregister_device",
         "parameters": [
           {
             "in": "path",
@@ -9220,7 +9220,7 @@
     "/api/app/v1/evaluations/checklists": {
       "get": {
         "description": "Every active checklist that has questions, with the fields to render. Needs the club's\n`evaluations` module and the evaluation grant (`permissions.can_manage_evaluations`).",
-        "operationId": "appapi_routers_coach_evaluations_checklists",
+        "operationId": "api_app_routers_coach_evaluations_checklists",
         "parameters": [],
         "responses": {
           "200": {
@@ -9278,7 +9278,7 @@
     "/api/app/v1/events/{event_id}": {
       "get": {
         "description": "The event as the account's family sees it: their answers, a published line-up,\nsign-ups (a declined one stays until the game starts, as in the calendar), tasks and the\nsquad's response counts.",
-        "operationId": "appapi_routers_member_event_detail",
+        "operationId": "api_app_routers_member_event_detail",
         "parameters": [
           {
             "in": "path",
@@ -9347,7 +9347,7 @@
     "/api/app/v1/events/{event_id}/attachments/{attachment_id}": {
       "get": {
         "description": "For the event's managers and staff, and whoever answers for an invited person; anyone else gets `404`.",
-        "operationId": "appapi_routers_member_event_attachment",
+        "operationId": "api_app_routers_member_event_attachment",
         "parameters": [
           {
             "in": "path",
@@ -9422,7 +9422,7 @@
     "/api/app/v1/events/{event_id}/follow": {
       "delete": {
         "description": "Stop following this game directly. Safe to repeat. If a team playing in it is followed, the\ngame is still followed through that team (`via_team` in the answer): unfollow the team with\n`PUT /game-follows` for that.",
-        "operationId": "appapi_routers_member_unfollow_game",
+        "operationId": "api_app_routers_member_unfollow_game",
         "parameters": [
           {
             "in": "path",
@@ -9499,7 +9499,7 @@
       },
       "put": {
         "description": "Follow this game for live updates: the same pushes a followed team gives (goals, penalties,\nthe result), and a card on Home while it is on. Safe to repeat. `422 not_a_game` for anything\nbut a game, `404 feature_disabled` without game timelines.",
-        "operationId": "appapi_routers_member_follow_game",
+        "operationId": "api_app_routers_member_follow_game",
         "parameters": [
           {
             "in": "path",
@@ -9578,7 +9578,7 @@
     "/api/app/v1/events/{event_id}/live-activity": {
       "post": {
         "description": "Call when a Live Activity for this game starts, and again whenever its push token changes.\nOne activity per install and game: repeating the call replaces the token. `404 not_found` when\n`installation_id` isn't one of the account's registered installs, `422 not_a_game` for anything\nbut a game, `404 feature_disabled` without game timelines.",
-        "operationId": "appapi_routers_member_register_live_activity",
+        "operationId": "api_app_routers_member_register_live_activity",
         "parameters": [
           {
             "in": "path",
@@ -9667,7 +9667,7 @@
     "/api/app/v1/events/{event_id}/live-activity/{installation_id}": {
       "delete": {
         "description": "Call when the activity ends or the user dismisses it. Safe to repeat.",
-        "operationId": "appapi_routers_member_end_live_activity",
+        "operationId": "api_app_routers_member_end_live_activity",
         "parameters": [
           {
             "in": "path",
@@ -9748,7 +9748,7 @@
     "/api/app/v1/events/{event_id}/official-signups/{signup_id}/respond": {
       "post": {
         "description": "As for referees; needs the club's `officials` feature (`404 feature_disabled`).",
-        "operationId": "appapi_routers_member_respond_official",
+        "operationId": "api_app_routers_member_respond_official",
         "parameters": [
           {
             "in": "path",
@@ -9847,7 +9847,7 @@
     "/api/app/v1/events/{event_id}/referee-signups/{signup_id}/respond": {
       "post": {
         "description": "For a managed person's referee invite. `409 signup_unavailable` when it can't be\naccepted. Accepting only records interest (`status` `accepted`); the club confirms who goes\n(`status` `confirmed`). Declining after being confirmed withdraws the assignment.",
-        "operationId": "appapi_routers_member_respond_referee",
+        "operationId": "api_app_routers_member_respond_referee",
         "parameters": [
           {
             "in": "path",
@@ -9946,7 +9946,7 @@
     "/api/app/v1/events/{event_id}/rsvp": {
       "post": {
         "description": "Answer for one managed person. Safe to repeat: it sets the answer, and returns\nthe stored state. Refusals: `409 event_started`, `409 rsvp_closed` (deadline\npassed), `409 not_in_lineup` (`dropout` without being selected), `422\nnote_required` (`absent`/`dropout` without a reason). `404` when the person isn't\ninvited.",
-        "operationId": "appapi_routers_member_rsvp",
+        "operationId": "api_app_routers_member_rsvp",
         "parameters": [
           {
             "in": "path",
@@ -10045,7 +10045,7 @@
     "/api/app/v1/events/{event_id}/tasks/{task_id}/claim": {
       "delete": {
         "description": "Safe to repeat: without a claim it just returns the task.",
-        "operationId": "appapi_routers_member_unclaim",
+        "operationId": "api_app_routers_member_unclaim",
         "parameters": [
           {
             "in": "path",
@@ -10122,7 +10122,7 @@
       },
       "post": {
         "description": "Claimed as the account's own person. `409 task_unavailable` when it's full or\nalready claimed by this account.",
-        "operationId": "appapi_routers_member_claim",
+        "operationId": "api_app_routers_member_claim",
         "parameters": [
           {
             "in": "path",
@@ -10211,7 +10211,7 @@
     "/api/app/v1/forms": {
       "get": {
         "description": "Every form any managed person is (or was) asked to fill in, one row per person,\nnewest first; `submitted_at` is null while still to do.",
-        "operationId": "appapi_routers_forms_forms",
+        "operationId": "api_app_routers_forms_forms",
         "parameters": [],
         "responses": {
           "200": {
@@ -10269,7 +10269,7 @@
     "/api/app/v1/forms/submissions/{submission_id}": {
       "get": {
         "description": "Read-only, for a managed person's own response. Every field of the form is listed;\n`value` is null where it was left blank.",
-        "operationId": "appapi_routers_forms_submission_detail",
+        "operationId": "api_app_routers_forms_submission_detail",
         "parameters": [
           {
             "in": "path",
@@ -10338,7 +10338,7 @@
     "/api/app/v1/forms/{send_id}": {
       "get": {
         "description": "The fields to render. Always readable while addressed to the family, even when\nclosed (`is_open` false): submitting then answers `409 form_unavailable`.",
-        "operationId": "appapi_routers_forms_form_detail",
+        "operationId": "api_app_routers_forms_form_detail",
         "parameters": [
           {
             "in": "path",
@@ -10407,7 +10407,7 @@
     "/api/app/v1/forms/{send_id}/submit": {
       "post": {
         "description": "Submit for one of the form's `addressed` people. Send an `Idempotency-Key`: a\nrepeated request returns the first response instead of a second submission.\n`422` carries `fields` per field `key`; `409 form_unavailable` means closed, not yet\nopen, or the maximum number of responses was reached.",
-        "operationId": "appapi_routers_forms_submit",
+        "operationId": "api_app_routers_forms_submit",
         "parameters": [
           {
             "in": "path",
@@ -10537,7 +10537,7 @@
     "/api/app/v1/game-follows": {
       "get": {
         "description": "The club's teams, and which of them this account gets live game pushes\nfor (goals, penalties, the result -- opt-in). `404 feature_disabled` when\nthe club doesn't have game timelines.",
-        "operationId": "appapi_routers_member_game_follows",
+        "operationId": "api_app_routers_member_game_follows",
         "parameters": [],
         "responses": {
           "200": {
@@ -10593,7 +10593,7 @@
       },
       "put": {
         "description": "Replaces the set of followed teams (an empty list stops all live game\npushes for this club). Safe to repeat.",
-        "operationId": "appapi_routers_member_update_game_follows",
+        "operationId": "api_app_routers_member_update_game_follows",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -10661,7 +10661,7 @@
     "/api/app/v1/home": {
       "get": {
         "description": "Everything the Home screen shows, capped the way the web app caps it: `member_cards`\n(per person, their next unanswered invitation and their next event they are going to),\nother open asks, free task slots, open dues, the latest news and forms still to fill\nin. `rsvp_needed` and `next_going` are the older single-card form of `member_cards`.",
-        "operationId": "appapi_routers_member_home",
+        "operationId": "api_app_routers_member_home",
         "parameters": [
           {
             "description": "A managed person's id (see `/context`), or `all` (the default) for everyone the account acts for.",
@@ -10737,7 +10737,7 @@
     },
     "/api/app/v1/me": {
       "get": {
-        "operationId": "appapi_routers_account_me",
+        "operationId": "api_app_routers_account_me",
         "parameters": [],
         "responses": {
           "200": {
@@ -10795,7 +10795,7 @@
     "/api/app/v1/me/notification-preferences": {
       "delete": {
         "description": "Drops the stored switches of one scope (`club_slug` empty: the all-clubs defaults, which go back\nto on; a slug: that club's overrides, which go back to the defaults). With `category` only that\ncategory's, otherwise all of them. Nothing stored is fine. Answers like GET.",
-        "operationId": "appapi_routers_account_reset_notification_preferences",
+        "operationId": "api_app_routers_account_reset_notification_preferences",
         "parameters": [
           {
             "in": "query",
@@ -10911,7 +10911,7 @@
       },
       "get": {
         "description": "Per category two switches: `push` (this account's phones and browsers) and `email`. The in-app\ninbox is never switchable. `defaults` are the all-clubs switches; each club in `clubs` can override\nthem (`overrides`), and `effective` is what applies there. No stored switch means on.",
-        "operationId": "appapi_routers_account_get_notification_preferences",
+        "operationId": "api_app_routers_account_get_notification_preferences",
         "parameters": [],
         "responses": {
           "200": {
@@ -10967,7 +10967,7 @@
       },
       "patch": {
         "description": "`club_slug: null` changes the all-clubs defaults, a slug writes overrides for that club only.\nEach change names a `category` and the `push` and/or `email` switch to set (an omitted one is left\nalone). Repeating a change is harmless. Nothing is saved when any change is invalid. Answers like GET.",
-        "operationId": "appapi_routers_account_update_notification_preferences",
+        "operationId": "api_app_routers_account_update_notification_preferences",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -11045,7 +11045,7 @@
     "/api/app/v1/me/quiet-hours": {
       "delete": {
         "description": "Back to the defaults (off). Nothing stored is fine. Answers like GET.",
-        "operationId": "appapi_routers_account_delete_quiet_hours",
+        "operationId": "api_app_routers_account_delete_quiet_hours",
         "parameters": [],
         "responses": {
           "200": {
@@ -11101,7 +11101,7 @@
       },
       "get": {
         "description": "The daily window in which pushes to this account are held. Defaults when nothing is stored:\noff, 22:00 to 07:00 in the server's zone. **Critical** notifications (a cancelled or same-day changed\nevent) and **email** ignore quiet hours. Held pushes arrive when the window ends; live game updates\nare dropped instead (stale by then). `until` is when the running window ends.",
-        "operationId": "appapi_routers_account_get_quiet_hours",
+        "operationId": "api_app_routers_account_get_quiet_hours",
         "parameters": [],
         "responses": {
           "200": {
@@ -11157,7 +11157,7 @@
       },
       "put": {
         "description": "Replaces the quiet hours. `start`/`end` are `HH:MM` (end before start crosses midnight; equal\nmeans no window), `timezone` an IANA zone name. Answers like GET.",
-        "operationId": "appapi_routers_account_put_quiet_hours",
+        "operationId": "api_app_routers_account_put_quiet_hours",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -11235,7 +11235,7 @@
     "/api/app/v1/me/settings": {
       "patch": {
         "description": "Account-wide, for every club. `email_notifications`: `always` (default) or `unless_app`\n-- skip the notification email while this account has the app installed.",
-        "operationId": "appapi_routers_account_update_settings",
+        "operationId": "api_app_routers_account_update_settings",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -11303,7 +11303,7 @@
     "/api/app/v1/members/{member_id}": {
       "get": {
         "description": "Only the account's own person and their children (`404` for anyone else).",
-        "operationId": "appapi_routers_people_profile",
+        "operationId": "api_app_routers_people_profile",
         "parameters": [
           {
             "in": "path",
@@ -11370,7 +11370,7 @@
       },
       "patch": {
         "description": "Send only the fields that change. `422` lists invalid fields (e.g. a phone\nnumber that can't be parsed).",
-        "operationId": "appapi_routers_people_update_profile",
+        "operationId": "api_app_routers_people_update_profile",
         "parameters": [
           {
             "in": "path",
@@ -11458,7 +11458,7 @@
     },
     "/api/app/v1/members/{member_id}/photo": {
       "delete": {
-        "operationId": "appapi_routers_people_delete_photo",
+        "operationId": "api_app_routers_people_delete_photo",
         "parameters": [
           {
             "in": "path",
@@ -11525,7 +11525,7 @@
       },
       "get": {
         "description": "Without `kind`: the effective picture (the profile picture, else the player picture), visible to\neveryone in the club. `kind=profile` is the profile picture only (club-wide); `kind=player` the official\nplayer picture (the member, their guardians, staff who may see them, or anyone when it is public).\nAnyone else gets `404`. `v` is only a cache-busting version.",
-        "operationId": "appapi_routers_people_photo",
+        "operationId": "api_app_routers_people_photo",
         "parameters": [
           {
             "in": "path",
@@ -11624,7 +11624,7 @@
       },
       "post": {
         "description": "Replaces the managed person's *profile* picture (the form part stays called `photo`). Returns the\nprofile with the new `photo_url` / `profile_photo_url`. The profile picture is visible to the club's\nmembers, never public. The official player picture can only be changed by club managers.",
-        "operationId": "appapi_routers_people_upload_photo",
+        "operationId": "api_app_routers_people_upload_photo",
         "parameters": [
           {
             "in": "path",
@@ -11727,7 +11727,7 @@
     "/api/app/v1/meta": {
       "get": {
         "description": "No authentication. Call on launch: if the app's version is below\n`min_supported_app_version`, show an 'update required' screen.",
-        "operationId": "appapi_routers_account_meta",
+        "operationId": "api_app_routers_account_meta",
         "parameters": [],
         "responses": {
           "200": {
@@ -11760,7 +11760,7 @@
     "/api/app/v1/news": {
       "get": {
         "description": "Published news for members, newest first. Titles and excerpts follow\n`Accept-Language` (English when asked for and written, the club's language otherwise).",
-        "operationId": "appapi_routers_inbox_news_list",
+        "operationId": "api_app_routers_inbox_news_list",
         "parameters": [
           {
             "description": "`next_cursor` from the previous page. Opaque.",
@@ -11864,7 +11864,7 @@
     },
     "/api/app/v1/news/{slug}": {
       "get": {
-        "operationId": "appapi_routers_inbox_news_detail",
+        "operationId": "api_app_routers_inbox_news_detail",
         "parameters": [
           {
             "in": "path",
@@ -11932,7 +11932,7 @@
     "/api/app/v1/notifications": {
       "delete": {
         "description": "Deletes every notification of every managed person (not just marks them read).",
-        "operationId": "appapi_routers_inbox_notifications_clear",
+        "operationId": "api_app_routers_inbox_notifications_clear",
         "parameters": [],
         "responses": {
           "200": {
@@ -11988,7 +11988,7 @@
       },
       "get": {
         "description": "Newest first. A parent sees their children's notifications too; `member_id` says\nwhose each one is. `source` points at what to open.",
-        "operationId": "appapi_routers_inbox_notifications",
+        "operationId": "api_app_routers_inbox_notifications",
         "parameters": [
           {
             "description": "A managed person's id, or `all` (the default).",
@@ -12110,7 +12110,7 @@
     },
     "/api/app/v1/notifications/read-all": {
       "post": {
-        "operationId": "appapi_routers_inbox_notifications_read_all",
+        "operationId": "api_app_routers_inbox_notifications_read_all",
         "parameters": [],
         "responses": {
           "200": {
@@ -12168,7 +12168,7 @@
     "/api/app/v1/notifications/unread-count": {
       "get": {
         "description": "Across every managed person: use it for the app icon badge.",
-        "operationId": "appapi_routers_inbox_notifications_unread",
+        "operationId": "api_app_routers_inbox_notifications_unread",
         "parameters": [],
         "responses": {
           "200": {
@@ -12226,7 +12226,7 @@
     "/api/app/v1/notifications/{notification_id}/read": {
       "post": {
         "description": "Safe to repeat; returns the notification with its `read_at`.",
-        "operationId": "appapi_routers_inbox_notification_read",
+        "operationId": "api_app_routers_inbox_notification_read",
         "parameters": [
           {
             "in": "path",
@@ -12295,7 +12295,7 @@
     "/api/app/v1/payments": {
       "get": {
         "description": "Open balances of every managed person. People covered by one registration share one\nitem (one invoice, one early-payment offer).",
-        "operationId": "appapi_routers_payments_payments",
+        "operationId": "api_app_routers_payments_payments",
         "parameters": [],
         "responses": {
           "200": {
@@ -12353,7 +12353,7 @@
     "/api/app/v1/payments/registrations/{registration_id}/invoice.pdf": {
       "get": {
         "description": "Only for a registration covering a managed person, once the club has confirmed it.",
-        "operationId": "appapi_routers_payments_registration_invoice",
+        "operationId": "api_app_routers_payments_registration_invoice",
         "parameters": [
           {
             "in": "path",
@@ -12428,7 +12428,7 @@
     "/api/app/v1/players/{member_id}/evaluations": {
       "get": {
         "description": "Everybody's evaluations of this player, newest first (several coaches may each file one per\nseason). Same gate as `GET /evaluations/checklists`; the player may be anyone in the club.",
-        "operationId": "appapi_routers_coach_evaluations_list_evaluations",
+        "operationId": "api_app_routers_coach_evaluations_list_evaluations",
         "parameters": [
           {
             "in": "path",
@@ -12527,7 +12527,7 @@
       },
       "post": {
         "description": "Scores the player against one checklist; the evaluator is the signed-in account's member.\n`checklist_slug` is always required. `422` carries `fields` per question `key`; `404` for an\nunknown or inactive checklist; `409 checklist_not_configured` when it has no questions yet;\n`409 no_current_season` without a season covering today. Send an `Idempotency-Key`.",
-        "operationId": "appapi_routers_coach_evaluations_create_evaluation",
+        "operationId": "api_app_routers_coach_evaluations_create_evaluation",
         "parameters": [
           {
             "in": "path",
@@ -12655,7 +12655,7 @@
     "/api/app/v1/players/{member_id}/evaluations/{evaluation_id}": {
       "get": {
         "description": "Every question of the version it was scored against, answered or not.",
-        "operationId": "appapi_routers_coach_evaluations_get_evaluation",
+        "operationId": "api_app_routers_coach_evaluations_get_evaluation",
         "parameters": [
           {
             "in": "path",
@@ -12734,7 +12734,7 @@
     "/api/app/v1/registration": {
       "post": {
         "description": "The same entries as the quote. The club reviews it, then sends the invoice; the\naccount gets a confirmation email now. Send an `Idempotency-Key`: a double tap\nmust not register twice.",
-        "operationId": "appapi_routers_registration_register",
+        "operationId": "api_app_routers_registration_register",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -12822,7 +12822,7 @@
     "/api/app/v1/registration/options": {
       "get": {
         "description": "Seasons open for registration and, once one is chosen (automatic when there's only\none), its products, teams and free jersey numbers.",
-        "operationId": "appapi_routers_registration_options",
+        "operationId": "api_app_routers_registration_options",
         "parameters": [
           {
             "in": "query",
@@ -12897,7 +12897,7 @@
     "/api/app/v1/registration/quote": {
       "post": {
         "description": "Validates and prices the entries without saving anything. `422` names the entry\nand field, e.g. `entries.1.variant_id`.",
-        "operationId": "appapi_routers_registration_quote",
+        "operationId": "api_app_routers_registration_quote",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -12975,7 +12975,7 @@
     "/api/app/v1/shop/cart": {
       "get": {
         "description": "Re-priced to what checkout would charge now. Pass `code` to preview a discount\ncode (`discount` or `discount_error`); only checkout actually redeems it. Wrong codes\ncount towards a throttle.",
-        "operationId": "appapi_routers_shop_cart",
+        "operationId": "api_app_routers_shop_cart",
         "parameters": [
           {
             "in": "query",
@@ -13054,7 +13054,7 @@
     "/api/app/v1/shop/cart/items": {
       "post": {
         "description": "Adds to an existing line for the same product, option, person and\npersonalisation. Returns the whole cart. Send an `Idempotency-Key` so a retried tap\ndoesn't add twice.",
-        "operationId": "appapi_routers_shop_add_item",
+        "operationId": "api_app_routers_shop_add_item",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -13141,7 +13141,7 @@
     },
     "/api/app/v1/shop/cart/items/{item_id}": {
       "delete": {
-        "operationId": "appapi_routers_shop_remove_item",
+        "operationId": "api_app_routers_shop_remove_item",
         "parameters": [
           {
             "in": "path",
@@ -13217,7 +13217,7 @@
         ]
       },
       "patch": {
-        "operationId": "appapi_routers_shop_update_item",
+        "operationId": "api_app_routers_shop_update_item",
         "parameters": [
           {
             "in": "path",
@@ -13316,7 +13316,7 @@
     "/api/app/v1/shop/orders": {
       "get": {
         "description": "Newest first, also while the shop is closed.",
-        "operationId": "appapi_routers_shop_orders",
+        "operationId": "api_app_routers_shop_orders",
         "parameters": [
           {
             "in": "query",
@@ -13415,7 +13415,7 @@
       },
       "post": {
         "description": "Turns the cart into an order, paid at the club on pickup. Send an\n`Idempotency-Key`: a double tap must not order twice. `409 checkout_failed` carries\nthe reason (empty cart, unavailable lines, a code that can't be used) in `message`.",
-        "operationId": "appapi_routers_shop_checkout",
+        "operationId": "api_app_routers_shop_checkout",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -13492,7 +13492,7 @@
     },
     "/api/app/v1/shop/orders/{order_id}": {
       "get": {
-        "operationId": "appapi_routers_shop_order_detail",
+        "operationId": "api_app_routers_shop_order_detail",
         "parameters": [
           {
             "in": "path",
@@ -13560,7 +13560,7 @@
     },
     "/api/app/v1/shop/orders/{order_id}/invoice.pdf": {
       "get": {
-        "operationId": "appapi_routers_shop_order_invoice",
+        "operationId": "api_app_routers_shop_order_invoice",
         "parameters": [
           {
             "in": "path",
@@ -13634,7 +13634,7 @@
     },
     "/api/app/v1/shop/products": {
       "get": {
-        "operationId": "appapi_routers_shop_products",
+        "operationId": "api_app_routers_shop_products",
         "parameters": [],
         "responses": {
           "200": {
@@ -13701,7 +13701,7 @@
     },
     "/api/app/v1/shop/products/{slug}": {
       "get": {
-        "operationId": "appapi_routers_shop_product_detail",
+        "operationId": "api_app_routers_shop_product_detail",
         "parameters": [
           {
             "in": "path",
@@ -13779,7 +13779,7 @@
     "/api/app/v1/teams/{team_id}/events": {
       "get": {
         "description": "Events the team is invited to, soonest first, cancelled ones included (`cancelled: true`).\nAny staff of the team.",
-        "operationId": "appapi_routers_coach_events_list_events",
+        "operationId": "api_app_routers_coach_events_list_events",
         "parameters": [
           {
             "in": "path",
@@ -13934,7 +13934,7 @@
       },
       "post": {
         "description": "The team is the audience (plus `invited_member_ids`, minus `excluded_member_ids`). Players\nstart as `no_response`. With `notify` (the default) everybody invited is told. Send an\n`Idempotency-Key`. Managers only.",
-        "operationId": "appapi_routers_coach_events_create_event",
+        "operationId": "api_app_routers_coach_events_create_event",
         "parameters": [
           {
             "in": "path",
@@ -14023,7 +14023,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}": {
       "delete": {
         "description": "A series occurrence is cancelled (the series will not regenerate it); a one-off event is\ndeleted with its attendance. Managers only.",
-        "operationId": "appapi_routers_coach_events_delete_event",
+        "operationId": "api_app_routers_coach_events_delete_event",
         "parameters": [
           {
             "in": "path",
@@ -14116,7 +14116,7 @@
         ]
       },
       "get": {
-        "operationId": "appapi_routers_coach_events_get_event",
+        "operationId": "api_app_routers_coach_events_get_event",
         "parameters": [
           {
             "in": "path",
@@ -14193,7 +14193,7 @@
       },
       "patch": {
         "description": "Only the fields sent change. For an occurrence of a series, `scope` says what happens to the\nrest of the series (see the field). Managers only.",
-        "operationId": "appapi_routers_coach_events_update_event",
+        "operationId": "api_app_routers_coach_events_update_event",
         "parameters": [
           {
             "in": "path",
@@ -14292,7 +14292,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/attendance": {
       "get": {
         "description": "One row per invited person. `filter`: `responded` (the default: in or maybe),\n`silent`, `declined`, or `all`. `counts` always cover everybody. Any staff of the team.",
-        "operationId": "appapi_routers_coach_attendance",
+        "operationId": "api_app_routers_coach_attendance",
         "parameters": [
           {
             "in": "path",
@@ -14389,7 +14389,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/attendance/{attendance_id}/status": {
       "post": {
         "description": "Sets the player's In/Out answer and/or the private coach note, and returns the sheet as\n`GET …/attendance` would (same `filter`). Works after the reply deadline and after the\nevent started; the row is marked `answered_by_coach`. `no_response` resets the answer.\nA player in the published line-up can only be marked `absent` (like their own drop-out:\nthey become `absent`, the pick stays for you to swap, the event's other managers are told);\n`present` keeps them in, `maybe` / `no_response` are `422 invalid_status`. The player is\ntold only with `notify: true` and never sees `coach_note`. Errors: `403 manager_required`,\n`404 not_found`, `409 event_cancelled`, `422 invalid_status`. Accepts an `Idempotency-Key`.\nManagers only.",
-        "operationId": "appapi_routers_coach_set_attendance_status",
+        "operationId": "api_app_routers_coach_set_attendance_status",
         "parameters": [
           {
             "in": "path",
@@ -14526,7 +14526,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/check-ins": {
       "post": {
         "description": "Sets `showed_up` for the listed rows, leaving the rest alone, and returns the sheet as\n`GET …/attendance` would (same `filter`). Repeating a call changes nothing. An id that is\nnot a row of this event fails the whole call with `422 unknown_attendance`. Managers only.",
-        "operationId": "appapi_routers_coach_check_ins",
+        "operationId": "api_app_routers_coach_check_ins",
         "parameters": [
           {
             "in": "path",
@@ -14643,7 +14643,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/detach": {
       "post": {
         "description": "Later series-wide changes skip it. Managers only.",
-        "operationId": "appapi_routers_coach_events_detach_event",
+        "operationId": "api_app_routers_coach_events_detach_event",
         "parameters": [
           {
             "in": "path",
@@ -14732,7 +14732,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/lineup": {
       "get": {
         "description": "Everybody invited with their answer, who is picked, and who a publish would notify. A pure\nread: asking for a line-up nobody has started creates nothing (`status: none`). Games and\ntournaments only (`404` for other kinds). Any staff of the team.",
-        "operationId": "appapi_routers_coach_lineup_get_lineup",
+        "operationId": "api_app_routers_coach_lineup_get_lineup",
         "parameters": [
           {
             "in": "path",
@@ -14809,7 +14809,7 @@
       },
       "put": {
         "description": "Replaces the set of selected players. Saving only stores the picks: nobody is told and\nnobody's answer changes until `…/lineup/publish`, also when the line-up is already published.\nOnly available players (`present`, `maybe`, `selected`, `not_selected`) can be picked; an id that\nis not invited, or is `absent`, `excused` or `no_response`, fails the call with `422\ninvalid_selection` and saves nothing. Managers only.",
-        "operationId": "appapi_routers_coach_lineup_put_lineup",
+        "operationId": "api_app_routers_coach_lineup_put_lineup",
         "parameters": [
           {
             "in": "path",
@@ -14908,7 +14908,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/lineup/publish": {
       "post": {
         "description": "`now` writes the picks into the players' answers (`selected` / `not_selected`) and tells the\nplayers whose situation changed since the last publish: newly selected ones \"you're in\", ones\ndropped since \"you're not in it this time\", nobody else. `notified` lists exactly who. The first\npublish of an empty line-up is `409 lineup_empty`. `schedule` (needs `at`, in the future) publishes\nby itself then; `cancel` drops the schedule. Send an `Idempotency-Key`. Managers only.",
-        "operationId": "appapi_routers_coach_lineup_publish",
+        "operationId": "api_app_routers_coach_lineup_publish",
         "parameters": [
           {
             "in": "path",
@@ -15017,7 +15017,7 @@
     "/api/app/v1/teams/{team_id}/events/{event_id}/remind-silent": {
       "post": {
         "description": "Sends the in-app (and, if they have the app, push) reminder to everyone still on\n`no_response`. Accepts an `Idempotency-Key`: a retry does not remind twice. Managers only.",
-        "operationId": "appapi_routers_coach_remind",
+        "operationId": "api_app_routers_coach_remind",
         "parameters": [
           {
             "in": "path",
@@ -15096,7 +15096,7 @@
     "/api/app/v1/teams/{team_id}/locations": {
       "get": {
         "description": "For a picker: every location of the club by name, optionally narrowed by `q` (name or city).\n`{items: [...]}`, no pagination.",
-        "operationId": "appapi_routers_coach_events_list_locations",
+        "operationId": "api_app_routers_coach_events_list_locations",
         "parameters": [
           {
             "in": "path",
@@ -15179,7 +15179,7 @@
       },
       "post": {
         "description": "Managers only. Send an `Idempotency-Key`: a repeated tap otherwise makes a second one.",
-        "operationId": "appapi_routers_coach_events_create_location",
+        "operationId": "api_app_routers_coach_events_create_location",
         "parameters": [
           {
             "in": "path",
@@ -15268,7 +15268,7 @@
     "/api/app/v1/teams/{team_id}/news": {
       "get": {
         "description": "What the caller submitted for this team, newest first, with its `status` (waiting for\nreview, published, or taken back to draft). Any staff of the team.",
-        "operationId": "appapi_routers_coach_news_list_news",
+        "operationId": "api_app_routers_coach_news_list_news",
         "parameters": [
           {
             "in": "path",
@@ -15367,7 +15367,7 @@
       },
       "post": {
         "description": "`multipart/form-data` with `title`, `body` (Markdown) and any number of `photos` files. The\npost is for this team, internal (the team's families, in the apps), and arrives as\n`pending_review`: an editor publishes it, so it is not live yet and the editors are told. Needs\n`permissions.can_add_news` (`403 forbidden` otherwise; a physio or assistant cannot post). Send an\n`Idempotency-Key`: a retry then does not post twice.",
-        "operationId": "appapi_routers_coach_news_submit_news",
+        "operationId": "api_app_routers_coach_news_submit_news",
         "parameters": [
           {
             "in": "path",
@@ -15479,7 +15479,7 @@
     "/api/app/v1/teams/{team_id}/opponents": {
       "get": {
         "description": "For a picker, by name; `q` narrows by name. `{items: [...]}`, no pagination.",
-        "operationId": "appapi_routers_coach_events_list_opponents",
+        "operationId": "api_app_routers_coach_events_list_opponents",
         "parameters": [
           {
             "in": "path",
@@ -15562,7 +15562,7 @@
       },
       "post": {
         "description": "Managers only. Send an `Idempotency-Key`.",
-        "operationId": "appapi_routers_coach_events_create_opponent",
+        "operationId": "api_app_routers_coach_events_create_opponent",
         "parameters": [
           {
             "in": "path",
@@ -15651,7 +15651,7 @@
     "/api/app/v1/teams/{team_id}/roster": {
       "get": {
         "description": "This season's roster and staff with the positions each may take. Any staff of the team.",
-        "operationId": "appapi_routers_coach_roster_get_roster",
+        "operationId": "api_app_routers_coach_roster_get_roster",
         "parameters": [
           {
             "in": "path",
@@ -15720,7 +15720,7 @@
     "/api/app/v1/teams/{team_id}/roster/candidates": {
       "get": {
         "description": "Active club members (not guardians) the team can take on. Sorted by last name, first name,\nid; `filter=suggested` sorts the best `suggestion_reason` first, then the same. Any staff of\nthe team.",
-        "operationId": "appapi_routers_coach_roster_candidates",
+        "operationId": "api_app_routers_coach_roster_candidates",
         "parameters": [
           {
             "in": "path",
@@ -15878,7 +15878,7 @@
     "/api/app/v1/teams/{team_id}/roster/players": {
       "post": {
         "description": "They start without a position or number. Anyone already on the roster is left alone, so a\nretry is harmless; anyone who is not a candidate fails the whole call with `422\nnot_a_candidate` (`fields.member_ids`) and nothing is added. Adding a player invites them to\nthe team's upcoming events (they get one \"New events on your calendar\" notification). Answers\nthe roster. Managers only.",
-        "operationId": "appapi_routers_coach_roster_add_players",
+        "operationId": "api_app_routers_coach_roster_add_players",
         "parameters": [
           {
             "in": "path",
@@ -15977,7 +15977,7 @@
     "/api/app/v1/teams/{team_id}/roster/staff": {
       "post": {
         "description": "All get the same staff `position_id` (add them in several calls for different roles). Same\nrules as adding players: staff already on the team are left alone, anyone else who is not a\ncandidate fails the call (`422 not_a_candidate`). Answers the roster. Managers only.",
-        "operationId": "appapi_routers_coach_roster_add_staff",
+        "operationId": "api_app_routers_coach_roster_add_staff",
         "parameters": [
           {
             "in": "path",
@@ -16076,7 +16076,7 @@
     "/api/app/v1/teams/{team_id}/roster/{membership_id}": {
       "delete": {
         "description": "Removes this season's roster spot; the person stays a club member. Managers only.",
-        "operationId": "appapi_routers_coach_roster_remove_player",
+        "operationId": "api_app_routers_coach_roster_remove_player",
         "parameters": [
           {
             "in": "path",
@@ -16146,7 +16146,7 @@
       },
       "patch": {
         "description": "Only what is sent changes. Jersey rules are the web's: a number already taken by another\nplayer (or, for a team with a number pool, taken in the pool this season) is `422` with\n`fields.jersey_number`. A player must keep a position (`fields.position_id`). Answers the\nroster. Managers only.",
-        "operationId": "appapi_routers_coach_roster_update_player",
+        "operationId": "api_app_routers_coach_roster_update_player",
         "parameters": [
           {
             "in": "path",
@@ -16245,7 +16245,7 @@
     "/api/app/v1/teams/{team_id}/series": {
       "post": {
         "description": "Generates the occurrences for the next 90 days now (nobody is notified per occurrence; the\ndaily reminders pick them up) and extends nightly. Send an `Idempotency-Key`. Managers only.",
-        "operationId": "appapi_routers_coach_events_create_series",
+        "operationId": "api_app_routers_coach_events_create_series",
         "parameters": [
           {
             "in": "path",
@@ -16334,7 +16334,7 @@
     "/api/app/v1/teams/{team_id}/series/{series_id}": {
       "delete": {
         "description": "Removes every occurrence, past ones with their attendance too. To keep history, stop it\ninstead: `PATCH` its `until`. Managers only.",
-        "operationId": "appapi_routers_coach_events_delete_series",
+        "operationId": "api_app_routers_coach_events_delete_series",
         "parameters": [
           {
             "in": "path",
@@ -16403,7 +16403,7 @@
         ]
       },
       "get": {
-        "operationId": "appapi_routers_coach_events_get_series",
+        "operationId": "api_app_routers_coach_events_get_series",
         "parameters": [
           {
             "in": "path",
@@ -16480,7 +16480,7 @@
       },
       "patch": {
         "description": "Only the fields sent change. The template (title, kind, place, opponent, durations, invited\nand excluded people) reaches every upcoming occurrence that still follows the series. A new\n`dtstart` or pattern only decides *future* dates: existing occurrences keep theirs, and ones that\nno longer fit stay until deleted. Managers only.",
-        "operationId": "appapi_routers_coach_events_update_series",
+        "operationId": "api_app_routers_coach_events_update_series",
         "parameters": [
           {
             "in": "path",
@@ -16579,7 +16579,7 @@
     "/api/app/v1/teams/{team_id}/staff/{assignment_id}": {
       "delete": {
         "description": "Managers only. Removing **yourself** is `403 self_removal`: it would lock you out of the team\nyou are looking at; another manager or an admin does that on the web.",
-        "operationId": "appapi_routers_coach_roster_remove_staff",
+        "operationId": "api_app_routers_coach_roster_remove_staff",
         "parameters": [
           {
             "in": "path",
@@ -16651,7 +16651,7 @@
     "/api/app/v1/teams/{team_id}/today": {
       "get": {
         "description": "Squad size, the session to show (today's, else the next one) with in / out / silent\ncounts and its reply deadline, and what needs the coach: silent players for that session\nand every upcoming game or tournament without a published line-up. Any staff of the team.",
-        "operationId": "appapi_routers_coach_today",
+        "operationId": "api_app_routers_coach_today",
         "parameters": [
           {
             "in": "path",

@@ -11,9 +11,9 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from appapi.models import PushDevice
-from appapi.push import PushGateway
-from appapi.tests import AppApiTestCase
+from api.app.push import PushGateway
+from api.app.tests import AppApiTestCase
+from api.models import PushDevice
 from members.models import FamilyMembership, Member
 from mobile.models import PushSubscription
 from notifications import delivery_log, preferences, quiet_hours

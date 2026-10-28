@@ -5,7 +5,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from appapi.models import PushDevice
+from api.models import PushDevice
 from club.models import Club, ClubMembership, Season
 from members.models import Member
 from notifications import sandbox

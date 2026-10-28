@@ -164,24 +164,24 @@ class PushAlertTests(TestCase):
         self.assertTrue(PushAlert.objects.filter(key="retry_queue").exists())
 
     def test_never_configured_provider_does_not_alert(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         PushDevice.objects.create(user=self.member, installation_id="inst-1", platform="ios", push_token="abc")
-        with mock.patch("appapi.push.apns_configured", return_value=False):
+        with mock.patch("api.app.push.apns_configured", return_value=False):
             alerts.evaluate()
             counts = alerts.evaluate()
         self.assertEqual(counts["opened"], 0)
         self.assertFalse(PushAlert.objects.filter(key="config:apns").exists())
 
     def test_losing_credentials_alerts_until_they_return(self):
-        with mock.patch("appapi.push.apns_configured", return_value=True):
+        with mock.patch("api.app.push.apns_configured", return_value=True):
             alerts.evaluate()
-        with mock.patch("appapi.push.apns_configured", return_value=False):
+        with mock.patch("api.app.push.apns_configured", return_value=False):
             counts = alerts.evaluate()
             self.assertEqual(counts["opened"], 1)
             self.assertTrue(PushAlert.objects.get(key="config:apns").is_open)
             self.assertEqual(alerts.evaluate()["opened"], 0)  # still open, not re-opened
-        with mock.patch("appapi.push.apns_configured", return_value=True):
+        with mock.patch("api.app.push.apns_configured", return_value=True):
             counts = alerts.evaluate()
         self.assertEqual(counts["resolved"], 1)
         self.assertFalse(PushAlert.objects.get(key="config:apns").is_open)

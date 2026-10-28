@@ -89,7 +89,6 @@ INSTALLED_APPS = [
     "management.apps.ManagementConfig",
     "mobile.apps.MobileConfig",
     "api.apps.ApiConfig",
-    "appapi.apps.AppApiConfig",
     "rosterchief.apps.RosterchiefConfig",
 ]
 
@@ -112,8 +111,8 @@ MIDDLEWARE = [
     "members.language.MemberLanguageMiddleware",
     "club.tenancy.ClubTenantMiddleware",
     "features.middleware.MaintenanceMiddleware",
-    "api.middleware.PublicApiCorsMiddleware",
-    "appapi.middleware.AppApiHeadersMiddleware",
+    "api.public.middleware.PublicApiCorsMiddleware",
+    "api.app.middleware.AppApiHeadersMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -223,16 +222,16 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 HEADLESS_SERVE_SPECIFICATION = True
 # allauth's own page loads ReDoc protocol-relative, which is blank on plain-http dev servers;
 # ours pins the same version over https (see the template's comment).
-HEADLESS_SPECIFICATION_TEMPLATE_NAME = "appapi/auth_spec.html"
+HEADLESS_SPECIFICATION_TEMPLATE_NAME = "api/auth_spec.html"
 
 
-# Native-app API (appapi, /api/app/v1/) -- API.md.
+# Native-app API (api.app, /api/app/v1/) -- API.md.
 #
 # Oldest app versions still allowed; GET /meta reports them and the app shows an "update
 # required" screen below them. Raise when an old build would break against the API.
 APP_MIN_VERSION_IOS = config("APP_MIN_VERSION_IOS", default="1.0.0")
 APP_MIN_VERSION_ANDROID = config("APP_MIN_VERSION_ANDROID", default="1.0.0")
-# Native push straight to Apple's APNs (appapi/push.py), token-based auth with a .p8 key from
+# Native push straight to Apple's APNs (api/app/push.py), token-based auth with a .p8 key from
 # the Apple Developer account (DEPLOYMENT.md "Native app push"). Leave the key empty until it
 # exists: devices still register, nothing is sent. The key is the .p8 file's text; a literal
 # "\n" in an env file is turned back into a newline, or point KEY_FILE at the file instead.

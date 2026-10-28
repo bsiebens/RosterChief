@@ -1,4 +1,4 @@
-"""Public read-only team/roster endpoints -- see api/urls.py for how this is
+"""Public read-only team/roster endpoints -- see api/public/urls.py for how this is
 mounted. Roster building is a small helper (build_roster) rather than
 inlined in the view so it can be unit-tested without going through Ninja's
 request cycle.
@@ -13,8 +13,8 @@ from django.utils.dateparse import parse_datetime
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
-from api.cache import cached_for_club
-from api.errors import require_club
+from api.public.cache import cached_for_club
+from api.public.errors import require_club
 from club.models import ClubMembership
 from club.services.access import current_season
 from events.services import import_sources

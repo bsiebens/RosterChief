@@ -22,7 +22,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from pywebpush import WebPushException, webpush
 
-from appapi.presenters import notification_target
+from api.app.presenters import notification_target
 from members.services.family import managed_people
 from notifications import delivery_log, sandbox
 from notifications.preferences import is_enabled
@@ -244,7 +244,7 @@ def send_push_for_notifications(notifications, url: str = "/app/") -> None:
     parent is told about their child's notification even though the child has no login. An
     account gets one push per distinct notification even when it concerns several of its
     children, and an account with an active native install is skipped: it gets this through
-    the native channel (appapi.delivery)."""
+    the native channel (api.app.delivery)."""
     if not (settings.VAPID_PRIVATE_KEY or sandbox.enabled()) or not notifications:
         return
 

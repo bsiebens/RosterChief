@@ -1,6 +1,6 @@
 {% load i18n lucide %}
 {% comment %}
-    One followed game on Home (iOS FollowedGameCard): dark card, live ones with a club-coloured ring and "Live - P2 - 04:31", scheduled ones with their start, finished ones with the final score. Expects ``game`` (appapi.presenters.followed_game_out + pk/start/location from mobile.services.game_ui.home_followed_games). Taps open the event sheet.
+    One followed game on Home (iOS FollowedGameCard): dark card, live ones with a club-coloured ring and "Live - P2 - 04:31", scheduled ones with their start, finished ones with the final score. Expects ``game`` (api.app.presenters.followed_game_out + pk/start/location from mobile.services.game_ui.home_followed_games). Taps open the event sheet.
 {% endcomment %}
 <a class="relative flex flex-col overflow-hidden rounded-[14px] bg-night px-4 text-white {% if game.status == "live" %}min-h-[150px] pt-[18px] pb-5 ring-2 ring-club{% else %}min-h-[128px] pt-3.5 pb-4{% endif %}" href="{% url "mobile:event_detail" game.pk %}">
     {% comment %}Each side's crest as a large, faint watermark behind its team name/score, deliberately oversized and cropped by the card.{% endcomment %}

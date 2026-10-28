@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _lazy
 from waffle import get_waffle_flag_model
 
-from appapi.push import PushGateway
+from api.app.push import PushGateway
 from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
 from features.jobs import JOB_REGISTRY
@@ -5274,7 +5274,7 @@ class LiveActivityTests(GameTimelineTestBase):
         cls.fan = get_user_model().objects.create_user(email="fan@example.com", password="pw-secret-123")
 
     def setUp(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         super().setUp()
         self.game = self.make_game(is_live=True)
@@ -5289,11 +5289,11 @@ class LiveActivityTests(GameTimelineTestBase):
         GameTimeline.objects.update_or_create(event=self.game, defaults={"source": "X", "data": document})
 
     def deliver(self, phase="live"):
-        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.push.get_gateway", return_value=self.gateway):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.app.push.get_gateway", return_value=self.gateway):
             return live_activity.deliver(self.game.pk, phase)
 
     def test_a_live_game_starts_an_activity_on_followers_devices_in_their_language(self):
-        from appapi.models import LiveActivity
+        from api.models import LiveActivity
 
         self.assertEqual(self.deliver(), 1)
 
@@ -5305,7 +5305,7 @@ class LiveActivityTests(GameTimelineTestBase):
         self.assertEqual(LiveActivity.objects.get().token, "")
 
     def test_the_next_change_does_not_start_a_second_activity_and_updates_the_registered_one(self):
-        from appapi.models import LiveActivity
+        from api.models import LiveActivity
 
         self.deliver()
         self.gateway.live_activity.reset_mock()
@@ -5319,7 +5319,7 @@ class LiveActivityTests(GameTimelineTestBase):
         self.assertEqual((call.kwargs["token"], call.kwargs["event"], call.kwargs["content_state"]["home_score"]), ("activity-token", "update", 2))
 
     def test_a_final_game_ends_and_forgets_the_activities(self):
-        from appapi.models import LiveActivity
+        from api.models import LiveActivity
 
         LiveActivity.objects.create(club=self.club, device=self.device, event=self.game, token="activity-token")
         self.set_timeline(status="final")
@@ -5491,7 +5491,7 @@ class GamePushTests(GameTimelineTestBase):
         native_again.assert_not_called()
 
     def test_each_device_gets_the_push_in_its_own_language(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])
@@ -5501,7 +5501,7 @@ class GamePushTests(GameTimelineTestBase):
         gateway = mock.Mock()
         gateway.publish.return_value = True
 
-        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("appapi.delivery.get_gateway", return_value=gateway), mock.patch("mobile.channels.send_push_to_user", return_value=0):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.app.delivery.get_gateway", return_value=gateway), mock.patch("mobile.channels.send_push_to_user", return_value=0):
             game_push.deliver_moments(game.pk, [goal.pk])
 
         bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}
@@ -5512,7 +5512,7 @@ class GamePushTests(GameTimelineTestBase):
         self.assertEqual(bodies["fr-FR"], "GOAL First Team · Sam (#9)")
 
     def test_an_android_device_is_reached_through_a_gateway_that_supports_it(self):
-        from appapi.models import PushDevice
+        from api.models import PushDevice
 
         game = self.make_game(is_live=True)
         game_push.set_followed_teams(self.fan, self.club, [self.team.pk])

@@ -1136,8 +1136,8 @@ Open the app on a phone, sign in and allow notifications. Then, on the server:
 
 ```bash
 docker compose exec web python manage.py shell -c "
-from appapi.models import PushDevice
-from appapi.push import get_gateway
+from api.models import PushDevice
+from api.app.push import get_gateway
 gateway = get_gateway()
 for device in PushDevice.objects.filter(user__email='you@example.com', enabled=True):
     print(device.installation_id, device.environment, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))
@@ -1214,8 +1214,8 @@ Open the app on a phone, sign in and allow notifications. Then, on the server:
 
 ```bash
 docker compose exec web python manage.py shell -c "
-from appapi.models import PushDevice
-from appapi.push import get_gateway
+from api.models import PushDevice
+from api.app.push import get_gateway
 gateway = get_gateway()
 for device in PushDevice.objects.filter(user__email='you@example.com', platform='android', enabled=True):
     print(device.installation_id, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))

@@ -9,7 +9,7 @@ recognised). Built from plain querysets across apps, grouped per club, for
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 
-from appapi.models import PushDevice
+from api.models import PushDevice
 from club.models import ClubMembership, ClubRole, ShopManager
 from members.models import FamilyMembership
 from notifications.models import NotificationCategory, NotificationDelivery, NotificationPreference, QuietHours

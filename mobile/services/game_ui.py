@@ -1,13 +1,13 @@
 """Presentation of followed games and the game timeline for the member PWA -- the same data the
 app API serves (events.services.game_push for who follows what, events.services.game_timeline.
-timeline_for_api for the timeline, appapi.presenters.followed_game_out for the Home card), shaped
+timeline_for_api for the timeline, api.app.presenters.followed_game_out for the Home card), shaped
 for the templates the way the iOS FollowedGameCard / GameTimelineCard read. Nothing here decides
 visibility: callers resolve the club's ``game_timeline`` flag and scope the event to the club."""
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext as _
 
-from appapi.presenters import followed_game_out
+from api.app.presenters import followed_game_out
 from events.models import Event, GameFollow, GameTimeline
 from events.services.game_push import follow_state, followed_games
 from events.services.game_timeline import timeline_for_api

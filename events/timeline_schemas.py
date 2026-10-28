@@ -1,5 +1,5 @@
 """Response schemas for a game's timeline, served by the member app API
-(appapi/routers/member.py) -- built by
+(api/app/routers/member.py) -- built by
 events.services.game_timeline.timeline_for_api from the stored document
 (GAME_TIMELINE.md §2.2).
 """

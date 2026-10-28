@@ -1,4 +1,4 @@
-"""Public read-only sponsors endpoint -- see api/urls.py for how this is
+"""Public read-only sponsors endpoint -- see api/public/urls.py for how this is
 mounted.
 """
 
@@ -7,7 +7,7 @@ from datetime import date
 
 from ninja import Router, Schema
 
-from api.errors import require_club
+from api.public.errors import require_club
 
 from .services.sponsors import active_sponsors
 

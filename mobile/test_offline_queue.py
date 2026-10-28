@@ -6,7 +6,7 @@ from unittest import mock
 from django.test import override_settings
 from django.urls import reverse
 
-from appapi.models import IdempotencyRecord
+from api.models import IdempotencyRecord
 from events.models import Attendance, LineupSelection
 from notifications.models import Notification
 

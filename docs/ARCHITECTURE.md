@@ -42,8 +42,7 @@ is tenant-scoped (§2.4). New app labels go into `known-first-party` in `../pypr
 | `management`     | Club admin UI (`/manage/`)                                                                    |                                                  |
 | `mobile`         | Member and coach PWA (`/app/`)                                                                |                                                  |
 | `marketing`      | The public marketing site and contact form                                                    |                                                  |
-| `appapi`         | Native-app API (`/api/app/v1/`)                                                               |                                                  |
-| `api`            | Public API for club websites (`/api/v1/`)                                                     |                                                  |
+| `api`            | Native-app API (`api.app`, `/api/app/v1/`) and public API for club websites (`api.public`, `/api/v1/`) |                                    |
 | `bugs`           | In-app bug reports                                                                            |                                                  |
 
 **`User` stays global** (one login identity across the whole platform); everything else
@@ -1607,12 +1606,12 @@ pattern).
 ### 8.6 Notifications & push
 
 - **`Notification`** (`notifications`): the in-app inbox row, one per member, written by `notifications.services.notify_members`. Email, native push and web push are *deliveries* of it, not separate records.
-- **`PushDevice`** (`appapi`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per
+- **`PushDevice`** (`api`): a native install (iOS/Android), per `User` + `installation_id`, not per club; holds the APNs/FCM token, locale, `enabled`, `last_seen`. **`PushSubscription`** (`mobile`): a Web Push subscription of the PWA, per
   `Member`, club-scoped.
 - **Dispatcher** (`../notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own
-  apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `appapi`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests
+  apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `api`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests
   deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
-- Native delivery goes through `appapi.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details:
+- Native delivery goes through `api.app.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details:
   `API.md` §9.
 - **`NotificationDelivery`** (`notifications`, `../notifications/delivery_log.py`): the delivery log, one row per send per channel target (status sent/retrying/failed/dead, attempts, last error, next attempt, and the channel's `payload` while
   retrying). A transient failure is retried by the `retry_failed_deliveries` job (every 2 min; backoff 1/5/30 min, 4 attempts) through `Channel.retry`; retention 14 days for sent, 60 for failed/dead. Logging never raises. Open items:

@@ -1,4 +1,4 @@
-"""Public read-only game endpoints -- see api/urls.py for how this is
+"""Public read-only game endpoints -- see api/public/urls.py for how this is
 mounted. Also owns GET /teams/{team_id}/games/: it's an Event query through
 and through, so the query logic and GameOut schema live here rather than
 being duplicated in teams/api.py.
@@ -12,8 +12,8 @@ from django.utils import timezone
 from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
-from api.cache import CACHE_SECONDS, cached_for_club
-from api.errors import require_club
+from api.public.cache import CACHE_SECONDS, cached_for_club
+from api.public.errors import require_club
 from club.services.access import current_season
 from teams.models import Team
 
@@ -186,7 +186,7 @@ def list_past_games(request, count: int = DEFAULT_PAST_COUNT):
 
 @router.get("/games/live/", response=list[GameOut], summary="Live games")
 def list_live_games(request):
-    # Deliberately not cached (see api/cache.py's own module docstring for every
+    # Deliberately not cached (see api/public/cache.py's own module docstring for every
     # other endpoint here) -- this is the one route whose entire purpose is a
     # score that's changing right now; even the short CACHE_SECONDS window would
     # directly work against what an external site is polling this for.

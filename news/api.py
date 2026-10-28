@@ -1,8 +1,8 @@
-"""Public read-only news endpoint -- see api/urls.py for how this is mounted.
+"""Public read-only news endpoint -- see api/public/urls.py for how this is mounted.
 
 Pagination is hand-rolled (limit/offset params) rather than Ninja's built-in
 @paginate: a photo's URL has to be made absolute against `request`
-(api/urls.py's docstring explains why), and Ninja's response-schema resolvers
+(api/public/urls.py's docstring explains why), and Ninja's response-schema resolvers
 don't have request access, so building the page manually here is simpler than
 fighting that.
 """
@@ -14,8 +14,8 @@ from django.utils import timezone
 from ninja import Router, Schema
 from ninja.errors import HttpError
 
-from api.cache import cached_for_club
-from api.errors import require_club
+from api.public.cache import cached_for_club
+from api.public.errors import require_club
 
 from .models import News
 from .services import render_body_excerpt, render_body_html

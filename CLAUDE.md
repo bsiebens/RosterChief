@@ -48,7 +48,7 @@ env var.
 
 **`docs/ARCHITECTURE.md` is the source of truth for the model design; this is a summary.** Apps: `authentication` (global login), `members` (people and families), `club` (tenant root, seasons, roles, onboarding), `teams`, `events`, `news`,
 `announcements`, `notifications`, `registration`, `formbuilder`, `evaluations`, `shop`, `billing` (the platform billing its clubs), `bugs`, `features` (flags, maintenance mode, scheduler), and the surfaces `controlpanel`, `management`, `mobile`,
-`marketing`, plus the APIs `appapi` (native apps) and `api` (public). Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
+`marketing`, plus `api` (the native-app API in `api.app` and the public club-website API in `api.public`). Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
 
 Domain notes (drive modeling decisions):
 
