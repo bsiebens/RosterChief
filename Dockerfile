@@ -9,7 +9,7 @@
 # --- 1. the stylesheet -------------------------------------------------------
 # Tailwind is a build-time concern: the CSS it emits is committed, but building it here means
 # the image never depends on someone having remembered to run `npm run build`.
-FROM node:26.11.1-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS css
+FROM node:26.12.0-slim@sha256:e556a144463cc8dc53afe8de6d2fa0db5c132fd39ffa232c17641bd40df2bf11 AS css
 
 WORKDIR /build
 COPY package.json package-lock.json ./
@@ -39,7 +39,7 @@ RUN npm run build
 # fork), so uv shells out to git to fetch it. python:*-slim has no git, and installing it in
 # the runtime image would leave a build-time tool — plus its dependency tree — in production
 # for the sake of one package that is already vendored into the venv by then.
-FROM python:3.14.8-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS venv
+FROM python:3.15.0-slim@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS venv
 
 RUN apt-get update && apt-get install --no-install-recommends -y git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # --- 3. the runtime ----------------------------------------------------------
-FROM python:3.14.8-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS app
+FROM python:3.15.0-slim@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS app
 
 # WeasyPrint binds to these at import: no pango, no invoices. This is also why building the
 # PDF path in a container is easier than on a Mac — apt has what Homebrew would have to.
