@@ -36,7 +36,7 @@ NATIVE_DEVICE_ACTIVE_DAYS = 60
 def users_with_native_push(user_ids) -> set:
     """Of ``user_ids``, the accounts that currently receive native (iOS/Android) push: an
     enabled device that has been seen recently."""
-    from api.models import PushDevice  # deferred: api.app imports this module
+    from api.models import PushDevice  # deferred: api.protected imports this module
 
     user_ids = {user_id for user_id in user_ids if user_id}
     if not user_ids:

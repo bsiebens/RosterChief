@@ -99,6 +99,7 @@ WAFFLE_FLAG_MODEL = "features.Flag"
 
 MIDDLEWARE = [
     "rosterchief.middleware.PerformanceLoggingMiddleware",
+    "api.core.middleware.LegacyAppPrefixMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -111,8 +112,7 @@ MIDDLEWARE = [
     "members.language.MemberLanguageMiddleware",
     "club.tenancy.ClubTenantMiddleware",
     "features.middleware.MaintenanceMiddleware",
-    "api.public.middleware.PublicApiCorsMiddleware",
-    "api.app.middleware.AppApiHeadersMiddleware",
+    "api.core.middleware.ApiMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -225,7 +225,12 @@ HEADLESS_SERVE_SPECIFICATION = True
 HEADLESS_SPECIFICATION_TEMPLATE_NAME = "api/auth_spec.html"
 
 
-# Native-app API (api.app, /api/app/v1/) -- API.md.
+# Browser origins (frontend apps) allowed to call the protected API at /api/v1/ with a bearer
+# token, comma-separated, e.g. "https://app.example.com,http://localhost:5173". Empty = no
+# cross-origin browser access (native apps don't need it). Public routes are open to every origin.
+API_CORS_ALLOWED_ORIGINS = config("API_CORS_ALLOWED_ORIGINS", default="", cast=Csv())
+
+# The API (api.protected, /api/v1/) -- API.md.
 #
 # Oldest app versions still allowed; GET /meta reports them and the app shows an "update
 # required" screen below them. Raise when an old build would break against the API.
@@ -574,3 +579,9 @@ CELERY_RESULT_BACKEND = "django-db"
 CELERY_BROKER_URL = config("DJANGO_REDIS_URL", cast=str)
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_RESULT_EXTENDED = True
+# Tests run tasks inline (api.core.jobs enqueues on commit; use captureOnCommitCallbacks(execute=True)).
+CELERY_TASK_ALWAYS_EAGER = TESTING
+
+# API multipart uploads (api.core.uploads): default size cap and accepted content types.
+API_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+API_UPLOAD_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")

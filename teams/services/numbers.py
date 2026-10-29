@@ -19,6 +19,8 @@ isn't assumed.
 import datetime
 import itertools
 
+from django.utils.translation import gettext_lazy as _
+
 from club.models import Season
 from members.models import Member
 from registration.models import RegistrationDetails
@@ -115,3 +117,83 @@ def member_current_number(member: Member, pool, season: Season) -> int | None:
 
     numbers = TeamMembership.objects.filter(member=member, team__pool=pool, season_id__in=seasons).exclude(jersey_number=None).order_by("jersey_number").values_list("jersey_number", flat=True)
     return numbers.first()
+
+
+# --- the Numbers overview (management /numbers and the management API) ------------------------
+
+
+def number_holder(member, team) -> dict:
+    """One holder of a number -- structured for the PDF export's own name/team/birth year columns."""
+    return {"member": member, "team": team.short_name or team.name, "birth_year": member.date_of_birth.year if member.date_of_birth else None}
+
+
+def number_tile(number, state, *, people=(), note="", reservation=None) -> dict:
+    people = list(people)
+    holders = [f"{person['member']} ({person['team']})" for person in people]
+    return {"number": number, "state": state, "people": people, "holders": holders, "note": note, "reservation": reservation}
+
+
+def build_number_tiles(pool, season) -> list[dict]:
+    """One pool's full number range for ``season`` -- five states: ``reserved``, ``taken``,
+    ``conflict`` (an admin's override left an unresolved clash), ``pending`` (requested at
+    registration, not yet placed), ``previous`` (held last season) and ``available``."""
+    previous = Season.objects.filter(club=pool.club, start_date__lt=season.start_date).order_by("-start_date").first()
+
+    reservations = {reservation.number: reservation for reservation in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
+    # Kept as memberships (not pre-formatted people, unlike the previous-season/pending dicts below) until
+    # after the conflict check -- has_unresolved_conflict needs the actual Member rows to weigh the age-gap
+    # exception, not display text.
+    placed_this_season = {}
+    for membership in TeamMembership.objects.filter(team__pool=pool, season=season).exclude(jersey_number=None).select_related("member", "team"):
+        placed_this_season.setdefault(membership.jersey_number, []).append(membership)
+    placed_previous_season = {}
+    if previous is not None:
+        for membership in TeamMembership.objects.filter(team__pool=pool, season=previous).exclude(jersey_number=None).select_related("member", "team"):
+            placed_previous_season.setdefault(membership.jersey_number, []).append(number_holder(membership.member, membership.team))
+    pending_this_season = {}
+    for details in RegistrationDetails.objects.filter(requested_team__pool=pool, membership__season=season).exclude(requested_jersey_number=None).select_related("membership__member", "requested_team"):
+        pending_this_season.setdefault(details.requested_jersey_number, []).append(number_holder(details.membership.member, details.requested_team))
+
+    tiles = []
+    for number in range(pool.min_number, pool.max_number + 1):
+        reservation = reservations.get(number)
+        if reservation is not None:
+            tiles.append(number_tile(number, "reserved", note=reservation.note, reservation=reservation))
+        elif number in placed_this_season:
+            memberships = placed_this_season[number]
+            # A genuine conflict (issue #6) only ever comes from an admin's override_conflict on
+            # TeamMembershipForm -- is_number_available already blocks everything else, age-gap-exempt
+            # shares included.
+            state = "conflict" if has_unresolved_conflict([membership.member for membership in memberships], min_age_gap_years=pool.min_age_gap_years) else "taken"
+            tiles.append(number_tile(number, state, people=[number_holder(membership.member, membership.team) for membership in memberships]))
+        elif number in pending_this_season:
+            tiles.append(number_tile(number, "pending", people=pending_this_season[number]))
+        elif number in placed_previous_season:
+            tiles.append(number_tile(number, "previous", people=placed_previous_season[number]))
+        else:
+            tiles.append(number_tile(number, "available"))
+    return tiles
+
+
+class NumberReservationError(Exception):
+    """A reservation that can't be made; ``code`` is a stable machine string, ``str()`` the localised message."""
+
+    def __init__(self, code: str, message):
+        super().__init__(str(message))
+        self.code = code
+
+
+def reserve_number(club, pool, number: int, *, note: str, user) -> NumberReservation:
+    """Block ``number`` in ``pool`` by hand (e.g. a retired shirt)."""
+    if not (pool.min_number <= number <= pool.max_number):
+        raise NumberReservationError("invalid_number", _("That number is not valid for this pool."))
+    if NumberReservation.objects.filter(pool=pool, number=number).exists():
+        raise NumberReservationError("already_reserved", _("#%(number)s is already reserved.") % {"number": number})
+    return NumberReservation.objects.create(club=club, pool=pool, number=number, note=note, reserved_by=user)
+
+
+def can_release_reservation(user, club, reservation) -> bool:
+    """Whoever reserved the number themselves, or a member admin releasing someone else's."""
+    from club.services.access import can_manage_members
+
+    return reservation.reserved_by_id == user.id or can_manage_members(user, club)

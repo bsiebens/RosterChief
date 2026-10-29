@@ -1,4 +1,4 @@
-from api.app import cleanup
+from api.protected import cleanup
 from features.commands import ScheduledJobCommand
 from notifications import delivery_log, sandbox
 

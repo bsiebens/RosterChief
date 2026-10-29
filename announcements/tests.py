@@ -9,8 +9,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from ninja.testing import TestClient
 
-from api.app.push import PushGateway
 from api.models import PushDevice
+from api.protected.push import PushGateway
 from authentication.models import User
 from club.models import Club, ClubRole, Season
 from members.models import Family, FamilyMembership, Member
@@ -328,15 +328,9 @@ class AudienceFilterTests(AnnouncementServiceTestBase):
     def test_staff_needs_a_current_season_assignment(self):
         self.assertEqual(self.members(self.club, Announcement.Audience.STAFF), {self.coach})
 
-    def test_parents_are_parent_or_guardian_family_members(self):
-        self.assertEqual(self.members(self.club, Announcement.Audience.PARENTS), {self.parent, self.guardian})
-
-    def test_players_need_a_current_season_roster_spot(self):
-        self.assertEqual(self.members(self.club, Announcement.Audience.PLAYERS), {self.player})
-
     def test_filter_and_club_combination(self):
         self.assertEqual(self.members(self.other_club, Announcement.Audience.ADMINS), {self.other_admin})
-        self.assertEqual(self.members(self.other_club, Announcement.Audience.PLAYERS), set())
+        self.assertEqual(self.members(self.other_club, Announcement.Audience.MEMBERS), set())
         self.assertEqual(audience_member_count(None, Announcement.Audience.ADMINS), 3)
         self.assertEqual(audience_member_count(self.club, Announcement.Audience.ADMINS), 2)
 
@@ -482,14 +476,14 @@ class PublishScheduledAnnouncementsTaskTests(AnnouncementServiceTestBase):
         result = publish_scheduled_announcements()
 
         self.assertEqual(result["status"], "SUCCESS")
-        self.assertEqual(result["result"], "Published 1 announcement(s)")
+        self.assertEqual(result["result"], "Published 1 announcement(s).")
         for announcement, status in [(due, Announcement.Status.SENT), (later, Announcement.Status.PENDING), (cancelled, Announcement.Status.CANCELLED)]:
             announcement.refresh_from_db()
             self.assertEqual(announcement.status, status)
         self.assertEqual(Notification.objects.count(), 1)
 
     def test_nothing_due_publishes_nothing(self):
-        self.assertEqual(publish_scheduled_announcements()["result"], "Published 0 announcement(s)")
+        self.assertEqual(publish_scheduled_announcements()["result"], "Published 0 announcement(s).")
 
 
 class PendingAnnouncementsApiTests(AnnouncementServiceTestBase):

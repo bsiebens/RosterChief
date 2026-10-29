@@ -33,3 +33,12 @@ def claim_task(task, member):
 
 def unclaim_task(claim):
     claim.delete()
+
+
+def create_task(form, event, member):
+    """Save a validated ``EventTaskForm`` as a new task of ``event``, created by ``member`` (may be None)."""
+    task = form.save(commit=False)
+    task.event = event
+    task.created_by = member
+    task.save()
+    return task

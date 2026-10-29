@@ -10,10 +10,10 @@ APIs and the two planes.
 * **Client code from the specs:** both APIs publish OpenAPI 3 documents. Generate a Swift client
   from each with [Swift OpenAPI Generator](https://github.com/apple/swift-openapi-generator):
   * sign-in: `https://<base domain>/api/auth/openapi.json`
-  * app API: `https://<base domain>/api/app/v1/openapi.json`
+  * app API: `https://<base domain>/api/v1/openapi.json`
 
   A snapshot of the app API document is in the repository at
-  [`docs/app-api/openapi-app-v1.json`](https://github.com/bsiebens/RosterChief/blob/development/docs/app-api/openapi-app-v1.json). CI fails when the API changes without updating it, so the
+  [`docs/app-api/openapi-v1.json`](https://github.com/bsiebens/RosterChief/blob/development/docs/app-api/openapi-v1.json). CI fails when the API changes without updating it, so the
   file in `git log` doubles as the API changelog.
 * **Headers on every request:** `Accept: application/json`, `Accept-Language: <app language>`,
   `User-Agent: RosterChief-iOS/<version>`.
@@ -22,7 +22,7 @@ APIs and the two planes.
 
 ## 2. Launch check
 
-`GET https://<base domain>/api/app/v1/meta` (no token). If the app's version is below
+`GET https://<base domain>/api/v1/meta` (no token). If the app's version is below
 `min_supported_app_version.ios`, show a blocking "update required" screen with an App Store link.
 
 ## 3. Signing in
@@ -123,7 +123,7 @@ On an app-API **401 `token_expired`**: refresh, then retry the request **once**.
 
 ### Signing out
 
-1. `DELETE https://<base domain>/api/app/v1/devices/<installation_id>` (stop pushes to this phone).
+1. `DELETE https://<base domain>/api/v1/devices/<installation_id>` (stop pushes to this phone).
 2. `DELETE https://<base domain>/api/auth/app/v1/auth/session` with the access token. It answers
    **401 with `is_authenticated: false`**, which here means *done*.
 3. Delete the tokens from the Keychain.
@@ -132,12 +132,12 @@ Signing out ends that server session, so its access and refresh tokens stop work
 
 ## 5. Clubs
 
-After sign-in, `GET https://<base domain>/api/app/v1/clubs`:
+After sign-in, `GET https://<base domain>/api/v1/clubs`:
 
 ```json
 {"items": [{
   "id": "…", "slug": "hc-example", "name": "HC Example", "sport_type": "ice_hockey",
-  "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
+  "api_base_url": "https://hc-example.rosterchief.app/api/v1",
   "public_api_base_url": "https://hc-example.rosterchief.app/api/v1",
   "logo_url": "https://…", "event_background_url": "https://…",
   "primary_color": "#1e40af", "primary_content_color": "#ffffff",
@@ -216,7 +216,7 @@ Until that's done, `POST /devices` answers `push_enabled: false` and no pushes a
 3. Register it:
 
    ```http
-   POST https://<base domain>/api/app/v1/devices
+   POST https://<base domain>/api/v1/devices
    Authorization: Bearer …
 
    {"installation_id": "<UUID generated once, kept in the Keychain>",

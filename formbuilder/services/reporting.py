@@ -1,8 +1,13 @@
 """Build a tabular overview of all answers for one FormSend."""
 
+import csv
 from dataclasses import dataclass, field
 
+from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+
 from formbuilder.models import Field
+from rosterchief.spreadsheet import safe_row
 
 CHOICE_TYPES = {Field.FieldType.CHOICE, Field.FieldType.MULTICHOICE, Field.FieldType.CHECKBOX}
 
@@ -65,3 +70,25 @@ def display_value(value):
     if isinstance(value, list):
         return ", ".join(str(item) for item in value)
     return str(value)
+
+
+def write_report_csv(report, target) -> None:
+    """Write ``report`` as CSV to ``target`` (an HttpResponse or any file-like object).
+
+    ``safe_row``: labels and answers are free text typed by users (anonymous respondents
+    included) -- never let a spreadsheet run one as a formula. "Submitted by" is only filled
+    in when someone else (a parent) answered for the member."""
+    writer = csv.writer(target)
+    writer.writerow(safe_row([_("Submitted"), _("Member"), _("Submitted by"), *[column.label for column in report.columns]]))
+    for row in report.rows:
+        on_behalf_by = row.submission.submitted_on_behalf_by
+        writer.writerow(
+            safe_row(
+                [
+                    timezone.localtime(row.submission.submitted_at).strftime("%Y-%m-%d %H:%M"),
+                    str(row.submission.member) if row.submission.member else "",
+                    str(on_behalf_by) if on_behalf_by else "",
+                    *[display_value(row.values.get(column.id)) for column in report.columns],
+                ]
+            )
+        )

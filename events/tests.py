@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _lazy
 from waffle import get_waffle_flag_model
 
-from api.app.push import PushGateway
+from api.protected.push import PushGateway
 from club.models import Club, ClubMembership, ClubRole, OnboardingRequirement, Season
 from club.services.onboarding import mark_bypassed, mark_complete
 from features.jobs import JOB_REGISTRY
@@ -4005,7 +4005,7 @@ class CheckFixtureSourcesCommandTests(ImportSourcesTestBase):
         meta = JOB_REGISTRY["events.tasks.check_fixture_sources"]
 
         self.assertEqual(meta["command"], "check_fixture_sources")
-        self.assertEqual(meta["trigger"], {"trigger": "cron", "day_of_week": "mon", "hour": 6, "minute": 15})
+        self.assertEqual(meta["default_schedule"], {"crontab": {"day_of_week": "1", "hour": "6", "minute": "15"}})
 
     def test_notifies_only_the_clubs_admins_once_with_a_summary(self):
         self.import_rows([self.fixture_row(), self.fixture_row("5003", days=14)], label="Division 1")
@@ -5289,7 +5289,7 @@ class LiveActivityTests(GameTimelineTestBase):
         GameTimeline.objects.update_or_create(event=self.game, defaults={"source": "X", "data": document})
 
     def deliver(self, phase="live"):
-        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.app.push.get_gateway", return_value=self.gateway):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.protected.push.get_gateway", return_value=self.gateway):
             return live_activity.deliver(self.game.pk, phase)
 
     def test_a_live_game_starts_an_activity_on_followers_devices_in_their_language(self):
@@ -5501,7 +5501,7 @@ class GamePushTests(GameTimelineTestBase):
         gateway = mock.Mock()
         gateway.publish.return_value = True
 
-        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.app.delivery.get_gateway", return_value=gateway), mock.patch("mobile.channels.send_push_to_user", return_value=0):
+        with override_settings(APP_PUSH_GATEWAY="test"), mock.patch("api.protected.delivery.get_gateway", return_value=gateway), mock.patch("mobile.channels.send_push_to_user", return_value=0):
             game_push.deliver_moments(game.pk, [goal.pk])
 
         bodies = {call.args[0].locale: call.kwargs["body"] for call in gateway.publish.call_args_list}

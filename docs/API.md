@@ -3,7 +3,7 @@
 Status: **phase 3 (member write/commerce) done on the server side** (2026-09-29): with
 phases 1-2, every member screen of the PWA now has an app API equivalent (§14). **Developer
 docs are online at `/api/docs/`** (Markdown in `app-api`, iOS first), next to the live
-OpenAPI references, and `docs/app-api/openapi-app-v1.json` is the committed snapshot clients
+OpenAPI references, and `docs/app-api/openapi-v1.json` is the committed snapshot clients
 are generated from. Push setup for operators is in `DEPLOYMENT.md` "Native app push". Items
 that need real devices or cloud accounts (Android passkey prototype, SNS round trip) are
 still open (§14, §16). Branch `API`, drafted 2026-09-20. Companion to `ARCHITECTURE.md` (models, tenancy,
@@ -39,23 +39,35 @@ against development at 0.7.12 on 2026-09-29; items still unverified are marked *
 
 ---
 
-## 2. Surface layout and coexistence with `/api/v1/`
+## 2. Surface layout (one API, public and protected routes)
 
-Today `/api/v1/` is an **unauthenticated, read-only, club-scoped** ninja API with `Access-Control-
-Allow-Origin: *` (`../api/public/urls.py`, `api/public/middleware.py::PublicApiCorsMiddleware`, GET/OPTIONS only). It must not gain authenticated endpoints: a wildcard-CORS prefix is the wrong place for them.
+> **Revised 2026-10-28.** The public API and the app API used to be two `NinjaAPI`s (`/api/v1/` and `/api/app/v1/`). They are now **one `NinjaAPI` at `/api/v1/`** (`../api/v1.py`) so the web frontends (parents/coaches, management) and the native apps share one
+> contract and one OpenAPI document. Auth is declared per router in `api/v1.py` (`PUBLIC` vs `PROTECTED`), not per endpoint, so a route cannot become public by accident.
 
-| Prefix              | Host                             | What                                                       | Auth           |
-|---------------------|----------------------------------|------------------------------------------------------------|----------------|
-| `/api/v1/`          | club subdomain                   | existing public API (unchanged)                            | none           |
-| `/api/auth/app/v1/` | **base domain**                  | allauth.headless, app client (login, MFA, tokens, account) | public / token |
-| `/api/app/v1/`      | base domain *and* club subdomain | the authenticated app API (this doc)                       | token          |
+| Prefix              | Host                             | What                                                                 | Auth           |
+|---------------------|----------------------------------|----------------------------------------------------------------------|----------------|
+| `/api/v1/` public   | club subdomain                   | `/news`, `/teams`, `/games`, `/standings`, `/sponsors` (club website) | none           |
+| `/api/v1/` protected| base domain *and* club subdomain | everything else: account, member, coach (and management, §17)       | bearer token   |
+| `/api/auth/app/v1/` | **base domain**                  | allauth.headless, app client (login, MFA, tokens, account)           | public / token |
+| `/api/app/v1/`      | (as `/api/v1/`)                  | **deprecated alias** of `/api/v1/`, answered with `Deprecation: true` | as `/api/v1/`  |
 
-- `/api/app/v1/` is a **second `NinjaAPI`** (`urls_namespace="app_api"`, own `title`/`version`, own OpenAPI). Sharing an instance with the public API would leak auth defaults and schema.
-- **No CORS** on `/api/app/` or `/api/auth/`. Native clients don't need it, and its absence keeps browsers from calling these from arbitrary origins. `PublicApiCorsMiddleware` already only matches `/api/v1/`; keep it that way and add a test that
-  asserts no `Access-Control-*` header on the new prefixes.
+Package layout (`../api/`):
+
+| Package          | Holds                                                                                                                   |
+|------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `api/v1.py`      | The `NinjaAPI`, the `PUBLIC` / `PROTECTED` router lists, OpenAPI description                                           |
+| `api/core/`      | Shared building blocks: `auth` (bearer auth, `require_club_member`), `scope` (`club_scope`), `errors` (`ApiError`, envelope, `require_club`), `pagination`, `idempotency`, `cache`, `surface` (public/protected path split), `middleware`, `docs` |
+| `api/public/`    | Unauthenticated read-only routers (`routers/{news,teams,events,sponsors}.py`) and their tests                           |
+| `api/protected/` | Member/coach routers (`routers/`), schemas, presenters, services, push delivery, tests                                 |
+| `api/panel/`     | Management-panel routers (new; §17)                                                                                     |
+
+- **CORS** (`api/core/middleware.py`): public routes answer any origin (`*`, GET/OPTIONS, no credentials). Protected routes answer only origins in `API_CORS_ALLOWED_ORIGINS` (comma-separated env var; empty by default, so native-only deployments expose nothing to
+  browsers), never with credentials: the web frontend sends `Authorization: Bearer`, so there is no cookie/CSRF surface. `/api/auth/` has no CORS.
+- **Caching:** protected responses are `Cache-Control: private, no-store`; public ones keep the short per-club server cache (`api/core/cache.py`) and the team list's `max-age=60`.
+- **Errors:** one envelope for the whole API (§6), public routes included (they previously answered `{"detail": ...}`).
 - Versioning is **URL-major** (`v1`). Within a major version changes are additive only (new optional request fields, new response fields, new endpoints, new enum values — clients must ignore unknown fields and tolerate unknown enum values). Breaking
   change ⇒ `v2` mounted beside
-  `v1`. Deprecation is announced via a `Sunset`/`Deprecation` header and `GET /api/app/v1/meta`
+  `v1`. Deprecation is announced via a `Sunset`/`Deprecation` header and `GET /api/v1/meta`
   (`min_supported_app_version`, see §15).
 
 ---
@@ -83,7 +95,7 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = APP_SESSION_LIFETIME
 
 ```python
 (path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),)  # -> /api/auth/app/v1/...
-(path("api/app/v1/", app_api.urls),)  # phase 1 (api.app)
+(path("api/v1/", api.urls),)  # api/v1.py: public + protected routes; /api/app/v1/ is rewritten to it by LegacyAppPrefixMiddleware
 ```
 
 `base_domain_only_urls` (the admin's helper) makes every auth route 404 on a club subdomain.
@@ -242,16 +254,16 @@ the list is readable.
 
 Decided: **club subdomain host + base-domain account endpoints.**
 
-- **Account plane** (base domain, `request.club is None`): auth (§3), `GET /api/app/v1/me`,
-  `GET /api/app/v1/clubs`, device/push registration, `meta`.
-- **Resource plane** (club host `https://<slug>.rosterchief.app/api/app/v1/…`): everything else.
+- **Account plane** (base domain, `request.club is None`): auth (§3), `GET /api/v1/me`,
+  `GET /api/v1/clubs`, device/push registration, `meta`.
+- **Resource plane** (club host `https://<slug>.rosterchief.app/api/v1/…`): everything else.
   `ClubTenantMiddleware` already resolves `request.club` from the `Host`, so the API reuses
-  `api.public.errors.require_club` (404 when no club). Archived/unknown slugs 404 exactly as the web does.
+  `api.core.errors.require_club` (404 when no club). Archived/unknown slugs 404 exactly as the web does.
 
 The token is **host-independent** (session/JWT lookup uses no host, cookie or club), so one login serves every club the user belongs to; the client just changes the base URL. `SESSION_COOKIE_DOMAIN`
 and CSRF are irrelevant (no cookies; allauth app views are `csrf_exempt`, and ninja's `csrf` is off).
 
-**Club discovery.** `GET /api/app/v1/clubs` (base domain) returns the clubs the user can act in:
+**Club discovery.** `GET /api/v1/clubs` (base domain) returns the clubs the user can act in:
 
 ```json
 {
@@ -260,7 +272,7 @@ and CSRF are irrelevant (no cookies; allauth app views are `csrf_exempt`, and ni
       "id": "…uuid",
       "slug": "hc-example",
       "name": "HC Example",
-      "api_base_url": "https://hc-example.rosterchief.app/api/app/v1",
+      "api_base_url": "https://hc-example.rosterchief.app/api/v1",
       "logo_url": "…",
       "primary_color": "#…",
       "relationship": [
@@ -380,7 +392,7 @@ token-authenticated photo endpoint (e.g. `GET /members/{id}/photo`) calling the 
 ## 7. Resource catalogue (v1)
 
 `M` = member/guardian, `C` = coach (`/teams/{team_id}/…`, staffed-team required; `C+` = manager).
-`P` = base-domain account plane. Person scope (`member_id`) and team scope as in §5. All club-host paths are under `/api/app/v1`.
+`P` = base-domain account plane. Person scope (`member_id`) and team scope as in §5. All club-host paths are under `/api/v1`.
 
 ### 7.1 Account plane (`P`)
 
@@ -462,10 +474,10 @@ SNS plan was dropped). See DEPLOYMENT.md "Native app push" for the credentials a
 set), `FcmGateway` (Android, when a Firebase service account is set), and `PlatformGateway`, which
 `get_gateway()` returns and which routes a device to the gateway of its platform. A platform without
 credentials is simply not `supports()`-ed: its devices still register, nothing is sent. `NullGateway` covers
-"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `api/app/push.py`)
+"nothing configured"; tests swap in a fake with `APP_PUSH_GATEWAY`. `push_configured()` (also in `api/protected/push.py`)
 says whether any platform can deliver.
 
-**Model.** `api.app.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
+**Model.** `api.protected.PushDevice(user, installation_id UNIQUE, platform: ios|android, push_token, environment, app_version,
 locale, enabled, last_seen)`, keyed per `User` + install, not per Member/club: one install serves every club the user
 belongs to (the account plane, §4). `POST /devices` upserts (safe to repeat, also on token rotation); `DELETE
 /devices/{id}` and logout remove it. The PWA's `mobile.PushSubscription` is separate (per Member, per club).
@@ -479,7 +491,7 @@ imports `api`/`mobile`:
 | Channel  | Class                                 | Does                                                         |
 |----------|---------------------------------------|--------------------------------------------------------------|
 | `email`  | `notifications.channels.EmailChannel` | plain notification mail to the member and guardians          |
-| `native` | `api.app.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
+| `native` | `api.protected.delivery.NativePushChannel`   | APNs + FCM to every enabled device of the recipient accounts |
 | `web`    | `mobile.channels.WebPushChannel`      | Web Push to the PWA subscriptions                            |
 
 A channel that raises is logged and never stops the others. `dispatch_to_user(club, user, texts, data, url,
@@ -636,7 +648,7 @@ answered, strategy kept.** Android origin checked server-side (§3.6), and a dev
 needed. Not started, needing accounts or hardware: Apple Developer and Firebase projects, SNS
 platform applications, a test device. None of these block phase 1.
 
-**Phase 1 status (2026-09-29).** Done, in `../api/app` (tests in `api/app/tests.py`):
+**Phase 1 status (2026-09-29).** Done, in `../api/app` (tests in `api/protected/tests.py`):
 
 - `AppAuth` (§3.4): 401 `unauthenticated` / `token_expired`, inactive accounts refused, 403
   `mfa_enrollment_required` for privileged accounts without a second factor.
@@ -651,7 +663,7 @@ platform applications, a test device. None of these block phase 1.
 - `PushDevice` + `POST`/`DELETE /devices`. `SnsGateway` (APNs production/sandbox, FCM ready)
   is chosen when an `APP_PUSH_SNS_*_ARN` is set, otherwise registration is stored with
   `push_enabled: false`. Delivery starts in phase 2.
-- Docs: `/api/docs/` (overview, iOS guide, errors, status), `/api/app/v1/docs` (Swagger) and
+- Docs: `/api/docs/` (overview, iOS guide, errors, status), `/api/v1/docs` (Swagger) and
   `/api/auth/openapi.html` (allauth's spec). `manage.py export_app_openapi` refreshes the
   snapshot; a test fails when it's stale.
 
@@ -669,14 +681,14 @@ the PWA switched over and `../mobile/tests.py` green:
   `get_language() == "en"` switch with an explicit language);
 - `notifications.services.{inbox_for, unread_count, mark_read, mark_all_read, clear_all}`.
 
-Endpoints (club host, `api/app/routers/{member,inbox,people}.py`, tests in
+Endpoints (club host, `api/protected/routers/{member,inbox,people}.py`, tests in
 `../api/app/test_member.py`): `GET /home`, `GET /calendar` (from/to window, max 92 days, `kind`),
 `GET /events/{id}`, `POST /events/{id}/rsvp`, referee/official `…/respond` (officials behind
 the `officials` flag → 404 `feature_disabled`), task `claim`/`unclaim`, `GET /news` (cursor)
 and `/news/{slug}` (`Accept-Language`), the five notification endpoints, `GET`/`PATCH
 /members/{id}` (through `MemberProfileForm`) and the token-authenticated `GET
 /members/{id}/photo` (§6's private-photo rule, `can_view_member_photo`). Person scope is
-`api.app.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
+`api.core.scope.ClubScope` (§5.1). A route-table test checks that every id-taking route answers
 an unknown id with the 404 envelope (§13).
 
 Push delivery (`../api/app/delivery.py`): the `native` channel of `notifications.dispatch` (§9), after commit
@@ -689,7 +701,7 @@ device. **Open:** the Web Push / native dedupe for someone using both (§9); bot
 Not in phase 2, by design: photo upload (phase 3, multipart), `Me`-screen extras (vouchers,
 staff assignments: use `/context` and phase 3's payments), `ETag`s and `updated_since` (§15).
 
-**Phase 3 status (2026-09-29).** Done, in three slices (`api/app/routers/{payments,forms,
+**Phase 3 status (2026-09-29).** Done, in three slices (`api/protected/routers/{payments,forms,
 people,support,shop,registration}.py`, tests in `../api/app/test_phase3.py`). Service extractions (§11 rows 6 and 10), with the PWA switched over: `mobile.services.payments.payments_overview`,
 `shop.services.cart` (catalogue, cart, `orders_for`), `mobile.services.reregistration`.
 
@@ -713,14 +725,14 @@ as "Include this person", and `submit_registration` read `is_contact` as "this i
 child's registration was booked on the parent. Existing data may need checking (the parent
 has a `RegistrationDetails` row per child registered that way, and the child no membership).
 
-**Tournaments** (separate `tournaments` branch) are not blocked by this design: they slot in as a new router group under `/api/app/v1` with the same scope/flag/role stack (`tournaments` flag → role → object scope), member-facing reads first
+**Tournaments** (separate `tournaments` branch) are not blocked by this design: they slot in as a new router group under `/api/v1` with the same scope/flag/role stack (`tournaments` flag → role → object scope), member-facing reads first
 (schedule, standings, brackets, "my team's next match"), read-only public bracket data already fits the existing `/api/v1/` shape.
 
 ---
 
 ## 15. Cross-cutting
 
-- **OpenAPI.** ninja generates `/api/app/v1/openapi.json`; allauth serves `/api/auth/openapi.json`
+- **OpenAPI.** ninja generates `/api/v1/openapi.json`; allauth serves `/api/auth/openapi.json`
   (rewrites its `/_allauth` prefix to our mount and pins to the `app` client). Publish both to the native repos for codegen; commit a snapshot and diff it in CI. Disable the docs UI in production or protect it (`openapi.html` pulls ReDoc from a CDN —
   set
   `HEADLESS_SPECIFICATION_TEMPLATE_NAME=None`).
@@ -753,3 +765,99 @@ has a `RegistrationDetails` row per child registered that way, and the child no 
 11. ~~Session/`usersessions` at launch or phase 5?~~ Decided: phase 5 (§3.7).
 12. Native identity linking: the account plane returns *all* clubs for a user — confirm there is no scenario where two people share one login (family login) that would need a profile switcher beyond the managed-people model.
 13. App-store review posture for the shop/registration flow (§12) — confirm with each store before the first submission.
+
+
+---
+
+## 17. Management API (foundation, 2026-10-28)
+
+Goal: the management panel (`/manage`, server-rendered today) becomes a frontend over this API. Groundwork in place; endpoints are added per screen, not all at once.
+
+Conventions for every new router (put it in `api/panel/routers/<area>.py`, add it to `PROTECTED` in `api/v1.py`):
+
+- **Auth:** the same bearer token. Club plane only: start every endpoint with `scope = club_scope(request)` (`api.core.scope`), then authorise with the club's access service (`club.services.access`), never with a role string compared by hand; `403 forbidden` for a
+  known club without the role.
+- **Services, not views:** call the same service functions the `management` views call; extract them first when a view holds the logic inline (the PWA/app API extraction pattern in §11).
+- **Lists:** `paginate()` / `paginate_keyset()` from `api.core.pagination`; filters as query params.
+- **Writes:** `idempotent(request, ...)` (`api.core.idempotency`) on POSTs that create things; `ApiError(status, code, message, fields)` for failures; Ninja schemas for all input/output.
+- **Tests:** subclass `api.protected.tests.AppApiTestCase`; add the new router to the 404-for-unknown-ids sweep (it iterates `PROTECTED`).
+- **Snapshot:** run `manage.py export_app_openapi`; the snapshot `docs/app-api/openapi-v1.json` is verified by a test.
+
+### 17.1 Built so far (all under `/api/v1/manage/`, club host, bearer token)
+
+Authorisation: `panel_club` / `require` in `api/panel/guards.py` wrap the `club.services.access` predicates the web views use. Reads need management authority; writes need the same predicate as the web screen.
+
+| Area | Prefix | Covers |
+|---|---|---|
+| Members | `/manage/members` | list/filter/keyset paging, detail, create, patch, delete, membership history, grant login, family attach/detach, families (register, add child/parent, change role) |
+| Member import | `/manage/members/import` | xlsx template download; upload with `dry_run` preview, real import as a job |
+| Onboarding & sign-up | `/manage/onboarding-requirements`, `/manage/members/{id}/requirements`, `/manage/signup` | requirement CRUD; per-member complete (with document) / bypass / incomplete / document download; sign-up queue approve, place-in-team, cancel, link, approve-all-clean; referee and official eligibility; player photo upload/delete |
+| Fees & invoices | `/manage/members/memberships`, `/manage/invoices` | fee list, KPI summary, PDF export, bulk mark-paid, mark-fully-paid, record payment, dues invoice JSON/PDF, send invoices and reminders (jobs); merged invoice list (orders, dues, registrations) |
+| Teams & seasons | `/manage/teams`, `/manage/seasons` | seasons list/current/create/edit/delete; teams CRUD; roster (position, jersey) and staff assignments per season |
+| Team config | `/manage/groups`, `/manage/positions`, `/manage/number-pools`, `/manage/numbers` | CRUD and membership management for each |
+| Team extras | `/manage/teams/reorder`, `.../roster/bulk-add`, `.../photos`, `.../analytics`, `.../fixture-sources` | manual ordering, bulk roster add, photo upload/delete, analytics JSON, fixture import sources and sync (job) |
+| Events | `/manage/events` | list/filter, create, patch (`scope`: this / this_and_following / all), delete, detach, game result, attendance, series CRUD/stop/generate |
+| Event timeline & officials | `/manage/events/{id}/...` | read-only game timeline and moments (the web has no editing), referee/official assignment, check-ins and remind-silent |
+| Event extras | `/manage/events/{id}/...` | tasks, attachments, fees, PDF forms, competition fetch, fixture import preview/apply (job) |
+| Locations & opponents | `/manage/locations`, `/manage/opponents` | CRUD (updates are `POST` on the item, see 17.3.1) |
+| News | `/manage/news` | list + status counts, create draft, edit, delete, submit-for-review, publish, unpublish; photos (upload, set-main, focal point, delete) |
+| Club configuration | `/manage/settings`, `/manage/roles`, `/manage/sponsors`, `/manage/referee-levels`, `/manage/official-levels`, `/manage/volunteers` | club settings (logo/background as sub-resources), role grants, sponsors, level CRUD, volunteers, referee/official lists |
+| Registrations | `/manage/registrations` | review queue, detail (lines + variant/number-pool options), confirm (line edits, discount, due days, number/email/place in one idempotent call), cancel, mark-paid, invoice PDF download (club admin) |
+| Forms (definition) | `/manage/forms` | forms list/create/edit/delete (409 `form_in_use`), questions add/edit/delete (409 `field_in_use`)/reorder; `is_active` is publish/archive (`can_manage_forms`, `forms` feature) |
+| Forms (responses) | `/manage/forms/{id}/submissions`, `.../sends/{send_id}/{report,pending,export}` | responses list (keyset, filters) and detail, file-answer download, per-send report with tallies, not-yet-responded list, CSV export |
+| Capabilities & jobs | `/manage/me`, `/manage/jobs/{id}` | what the caller may open; status of a started job |
+
+Deviations from the web: `PATCH /manage/members/{id}` answers 409 `person_locked` for person fields on a shared record and 403 for `status`/`fee_*`; duplicate names on positions, number pools, groups, levels and onboarding requirements are a 422 on `name` (the web forms omit `club`, so the same input is a 500 `IntegrityError` there; team names are fixed in `TeamForm`); deleting a level that is in use is 409 `level_in_use`.
+
+### 17.2 Scope rule: what is never exposed
+
+The control panel (`controlpanel`) stays server-rendered by Django and has **no API surface**: platform announcements (cross-club sends), the Jobs/scheduler tab, feature flags and maintenance mode, platform billing of clubs (`billing`), club provisioning and platform-admin tooling. The standalone frontend replaces `/manage` only. If a feature exists in both (e.g. a club-level setting), the API exposes the club-scoped `management` service, never the control-panel one. New routers must not import from `controlpanel`.
+
+### 17.3 Roadmap
+
+Each phase is a set of independent slices (one router, schemas and test module per slice, as in §17.1), so they can be built in parallel. Everything is `/manage/<area>`, authorised by the same `club.services.access` predicate as the web view it replaces. Counts are the number of `management` routes behind each area today.
+
+**Phases A and B: built** (see 17.1). Left over from them:
+- Analytics PDF download (the template context is built inside the view).
+- `RefereeManagementDashboardView` (event-staffing dashboard with date-range and need filters).
+- Event game timeline and moments *editing*: the web has none (timelines come from the competition), so none is planned.
+- Season delete is blocked by carried-over guardian memberships on a freshly created later season (409).
+
+**Phase C: built** (see 17.1). Left over: a machine-readable `payment_status` for registrations (`registration_invoice_status` in `club/services/invoice_rows.py` only returns a label and CSS class); form sends (creating and scheduling a send to an audience) and the evaluation checklist links, which belong with the sends and evaluations slices; xlsx export of responses (the web has CSV only).
+
+**Phase D: evaluations and shop**
+- Evaluations (9): templates, rounds, results.
+- Shop (46): products (including `ProductType.MEMBERSHIP`), orders, fulfilment, payments, order invoice PDF, reporting/export.
+
+**Phase E: dashboard and inbox**
+- Home summary (KPIs, onboarding status), club bug list (`bugs`), management notifications (mark-all-read, clear-all).
+
+**Cross-cutting before a standalone frontend ships**
+1. **Built:** file uploads are multipart with `validate_upload` (17.3.1); downloads (PDF/xlsx/CSV exports) return a file response authenticated by the bearer token, no signed-in cookie.
+2. **Ongoing:** logic still held in `management/views.py` moves into services that both view and router call (done for members, fees, signup, onboarding, eligibility, import, news, events access; see 17.4), so the Django-rendered screens and the API cannot drift while both exist.
+3. **Built:** `GET /manage/me` (`api/panel/routers/me.py`) capability document: caller identity, club, current season, `roles`, licensed `club_features`, and `areas` (`{key, label, feature, available, can_view, can_manage}` per management area, from the same `access` predicates as the web views; an area whose feature is off is `available: false` with both flags false). New management routers add their area to `AREAS` there. No control-panel areas.
+4. **Built:** bulk and long-running actions (invoice sends, imports, fixture syncs) enqueue Celery tasks and return a job id polled at `GET /manage/jobs/{id}`.
+5. Per-slice cut-over: once a screen has parity, the Django view stays until the frontend ships, then is retired area by area. No area is retired until its API tests cover the view's permission matrix.
+
+### 17.3.1 Shared conventions (built)
+
+- **Form errors / test data:** `api.core.forms.form_error(form, aliases=None)` (422 with `fields`, `__all__` -> `non_field_errors`, optional rename map such as `{"family": "family_id"}`) and `post_data(values, multiple=, single=, checkboxes=, extra=)` (JSON -> what a browser would POST). Event routers use `api.protected.coach_events.post_data(values, team_pks)`. `ErrorOut` lives in `api.core.schemas`.
+- **Uploads:** multipart on the resource endpoint (`photo: File[UploadedFile]` plus `Form[...]` fields), checked by `api.core.uploads.validate_upload(file, field=, max_bytes=, content_types=, extensions=)`: `413 file_too_large`, `415 unsupported_media_type`, `422` on the field for a missing or empty part. Defaults: `API_UPLOAD_MAX_BYTES`, `API_UPLOAD_CONTENT_TYPES`.
+- **Jobs:** define the work with `@job_task(name=...)` (`fn(ctx: JobContext, *json_args)`, `ctx.progress(done, total)`, return a JSON result, raise `ApiError` to fail) and answer `202, start_job(request, task, *args)` (`JobOut {id, status, progress, result, error}`). Clients poll `GET /manage/jobs/{id}` (`pending`, `running`, `succeeded`, `failed`); jobs are visible only to the starting user in their club (404 otherwise). State is the `api.Job` row; the task is enqueued on commit; tests run tasks eagerly (`captureOnCommitCallbacks(execute=True)`). Details: `api/core/jobs.py`.
+
+- **Where jobs live:** put every `@job_task` in the owning app's `tasks.py` (`club/tasks.py`, `members/tasks.py`, `teams/tasks.py`, `events/tasks.py`), never in a router. Celery's `autodiscover_tasks()` imports only `<app>/tasks.py`, so a task defined in a router would be unknown to a standalone worker. Job arguments are JSON (a 2000-row import is fine; much larger inputs would need file-based job input).
+- **Multipart is POST only:** Django does not parse multipart on `PUT`/`PATCH`, so updates that carry a file are `POST` on the item (opponents, sponsors) and settings images are `POST`/`DELETE` sub-resources.
+- **Route order:** a static sibling of an untyped path parameter (`/teams/reorder` next to `/teams/{team_id}`) is swallowed by the parameter route and answers 405. Give path parameters explicit converters (`{uuid:team_id}`), and where an existing untyped route remains, register the new router before it in `PROTECTED` (see the comment in `api/v1.py`).
+- **One path, one router:** two routers registering the same path with different methods (e.g. `POST /manage/seasons` next to `GET`) answer 405 for the second. Register the operation on the router that owns the path (the season write is imported from `seasons_admin.py` into the teams router).
+- **Downloads:** endpoints returning a file declare `response={200: None}`; there is no shared OpenAPI helper for them yet. If the PDF library is missing the endpoint answers 503 `pdf_unavailable`.
+- **Idempotency:** wrap the object lookup as well as the write in `idempotent(...)`. If the lookup runs first, replaying a key after the action changed the object (e.g. a confirmed registration) answers 404 instead of the stored response.
+- **Tests:** `login_with_totp` works once per user per test (a second call hits the `mfa_authenticator` unique constraint), so cache the token and switch roles on the same user.
+
+### 17.4 Known cleanups
+
+- `api/panel/routers/events.py` keeps `_row`, `_can_manage`, `_get_event`, `_get_manageable_event`, `_fresh_event_payload` and `_events` private, and the event timeline, officials and extras routers import or duplicate them; move them into a shared `api/panel/events_access.py`.
+- Web `PositionForm`, `NumberPoolForm`, `GroupForm`, level forms and `OnboardingRequirementForm` omit `club`, so a duplicate name is a 500 `IntegrityError` on the web (the API answers 422); fix them as `TeamForm` was.
+- `validate_upload` has no content-type escape for spreadsheets (the import passes `content_types=()` and checks the extension); add `SPREADSHEET_TYPES` handling.
+- The sign-up queue and the merged invoice list are not keyset-paginated (computed in Python); the invoice list returns an offset cursor and a `total`.
+- The web gates forms on the waffle flag `formbuilder` while the API feature key is `forms` (`FEATURE_FLAGS` maps them); bad `submitted_from`/`submitted_to` query dates on the responses list answer Ninja's default 422, not the `validation_error` envelope.
+- `management/views.py` KPI and presentation code that the API does not use stays in the views by design.

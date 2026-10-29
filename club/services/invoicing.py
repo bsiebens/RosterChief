@@ -217,3 +217,33 @@ def invoice_pdf(invoice: DuesInvoice) -> bytes:
     pdf_bytes = render_pdf(html)
     write_cached_invoice_pdf(cache_path, pdf_bytes)
     return pdf_bytes
+
+
+def send_dues_invoices(club, membership_ids, *, due_in_days: int, request=None) -> tuple[int, int, int]:
+    """Invoice every membership of ``club`` among ``membership_ids`` (ids of other clubs are
+    ignored): one invoice each, mailed to the member's own email or a parent/guardian's, all
+    sharing ``due_in_days``. Returns ``(sent, failed, unreachable)`` -- ``failed`` were recorded
+    but the mail didn't leave, ``unreachable`` have nobody to send to and get no invoice."""
+    memberships = ClubMembership.objects.filter(pk__in=membership_ids, club=club).select_related("member")
+    sent = failed = unreachable = 0
+    for membership in memberships:
+        email, sent_to_guardian = recipient_for(membership.member, club)
+        if not email:
+            unreachable += 1
+            continue
+        invoice = create_or_resend_invoice(membership, due_in_days=due_in_days, recipient_email=email, sent_to_guardian=sent_to_guardian)
+        if send_invoice_email(invoice, request=request):
+            sent += 1
+        else:
+            failed += 1
+    return sent, failed, unreachable
+
+
+def send_all_reminders(club, *, request=None) -> tuple[int, int]:
+    """Remind everyone past due, club-wide: dues invoices and confirmed registration invoices alike.
+    Returns the combined ``(sent, failed)``."""
+    from registration.services.notifications import send_registration_reminders
+
+    dues_sent, dues_failed = send_reminders(club, request=request)
+    registration_sent, registration_failed = send_registration_reminders(club, request=request)
+    return dues_sent + registration_sent, dues_failed + registration_failed

@@ -11,7 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from club.models import Club, ClubRole
-from members.models import FamilyMembership, Member
+from members.models import Member
 from notifications.dispatch import dispatch_to_user
 from notifications.models import Notification, NotificationCategory
 from notifications.services import _build_message, _render_email, notify_members
@@ -39,10 +39,6 @@ def audience_members(club, audience=Announcement.Audience.EVERYONE):
         members = members.filter(staff_assignments__team__club=club, staff_assignments__season__start_date__lte=today, staff_assignments__season__end_date__gte=today)
     elif audience == Announcement.Audience.MEMBERS:
         members = members.filter(roles__club=club, roles__role=ClubRole.Roles.MEMBER)
-    elif audience == Announcement.Audience.PARENTS:
-        members = members.filter(family_memberships__role__in=[FamilyMembership.FamilyRole.PARENT, FamilyMembership.FamilyRole.GUARDIAN])
-    elif audience == Announcement.Audience.PLAYERS:
-        members = members.filter(team_memberships__team__club=club, team_memberships__season__start_date__lte=today, team_memberships__season__end_date__gte=today)
     return members.distinct()
 
 

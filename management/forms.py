@@ -29,6 +29,7 @@ from shop.services.payments import amount_due
 from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 from teams.services.numbers import is_number_available
+from teams.services.positions import name_taken
 
 from .recurrence_ui import FREQUENCY_CHOICES, WEEKDAY_CHOICES, build_rrule, parse_rrule
 
@@ -56,6 +57,25 @@ class MemberForm(forms.ModelForm):
                 field.disabled = True
 
 
+class UniqueNamePerClubMixin:
+    """Per-club name uniqueness for a club-scoped ModelForm that leaves ``club`` out of its fields (so the model's
+    (club, name) constraint is never validated and a duplicate would be an IntegrityError). The club comes from the
+    ``club`` kwarg, else from the instance. Subclasses set ``name_taken_message``."""
+
+    name_taken_message = _("This name is already in use.")
+
+    def __init__(self, *args, club=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.club = club
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        club = self.club if self.club is not None else (self.instance.club if self.instance.club_id else None)
+        if club is not None and name_taken(self._meta.model, club, name, exclude=self.instance):
+            raise forms.ValidationError(self.name_taken_message)
+        return name
+
+
 class TeamForm(forms.ModelForm):
     class Meta:
         model = Team
@@ -63,6 +83,7 @@ class TeamForm(forms.ModelForm):
 
     def __init__(self, *args, club=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.club = club
         self.fields["pool"].queryset = NumberPool.objects.filter(club=club)
         self.fields["pool"].empty_label = _("— none —")
         feeds_into_queryset = Team.objects.filter(club=club)
@@ -70,6 +91,18 @@ class TeamForm(forms.ModelForm):
             feeds_into_queryset = feeds_into_queryset.exclude(pk=self.instance.pk)
         self.fields["feeds_into"].queryset = feeds_into_queryset
         self.fields["feeds_into"].empty_label = _("— none —")
+
+    def clean_name(self):
+        """Team names are unique per club; ``club`` isn't a form field, so the model's (club, name) check never runs."""
+        name = self.cleaned_data["name"]
+        if self.club is not None and Team.objects.filter(club=self.club, name=name).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError(_("A team with this name already exists."))
+        return name
+
+    def save(self, commit=True):
+        if self.club is not None and self.instance.club_id is None:
+            self.instance.club = self.club
+        return super().save(commit=commit)
 
 
 class NumberReservationForm(forms.ModelForm):
@@ -92,23 +125,27 @@ class TeamPhotoForm(forms.ModelForm):
         fields = ["image"]
 
 
-class GroupForm(forms.ModelForm):
+class GroupForm(UniqueNamePerClubMixin, forms.ModelForm):
     """A generic named collection of members -- nothing team- or
     referee-specific here; see MemberRefereeEligibilityForm for that."""
+
+    name_taken_message = _("A group with this name already exists.")
 
     class Meta:
         model = Group
         fields = ["name"]
 
 
-class RefereeLevelForm(forms.ModelForm):
+class RefereeLevelForm(UniqueNamePerClubMixin, forms.ModelForm):
+    name_taken_message = _("A level with this name already exists.")
+
     class Meta:
         model = RefereeLevel
         fields = ["name", "teams", "inherits_from"]
         widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, club=club, **kwargs)
         self.fields["teams"].queryset = Team.objects.filter(club=club)
         # Excludes self from the dropdown -- self.instance always has a pk (UUIDModel
         # gets its default at construction, not at save()), so this also works for a
@@ -170,14 +207,16 @@ class EventRefereeFeeForm(forms.ModelForm):
         }
 
 
-class OfficialLevelForm(forms.ModelForm):
+class OfficialLevelForm(UniqueNamePerClubMixin, forms.ModelForm):
+    name_taken_message = _("A level with this name already exists.")
+
     class Meta:
         model = OfficialLevel
         fields = ["name", "teams", "inherits_from"]
         widgets = {"teams": forms.SelectMultiple(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a team to search...")})}
 
     def __init__(self, *args, club=None, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, club=club, **kwargs)
         self.fields["teams"].queryset = Team.objects.filter(club=club)
         self.fields["inherits_from"].queryset = OfficialLevel.objects.filter(club=club).exclude(pk=self.instance.pk)
         self.fields["inherits_from"].empty_label = _("— none —")
@@ -555,7 +594,9 @@ class BaseGroupBulkAddFormSet(forms.BaseFormSet):
 GroupBulkAddFormSet = forms.formset_factory(GroupBulkAddRowForm, formset=BaseGroupBulkAddFormSet, extra=3)
 
 
-class PositionForm(forms.ModelForm):
+class PositionForm(UniqueNamePerClubMixin, forms.ModelForm):
+    name_taken_message = _("A position with this name already exists.")
+
     class Meta:
         model = Position
         fields = ["name", "short_name", "ordering", "staff_position", "management_position"]
@@ -569,7 +610,9 @@ class PositionForm(forms.ModelForm):
         return cleaned
 
 
-class NumberPoolForm(forms.ModelForm):
+class NumberPoolForm(UniqueNamePerClubMixin, forms.ModelForm):
+    name_taken_message = _("A number pool with this name already exists.")
+
     class Meta:
         model = NumberPool
         fields = ["name", "min_number", "max_number", "min_age_gap_years"]
@@ -1439,7 +1482,9 @@ class ClubSettingsForm(forms.ModelForm):
         }
 
 
-class OnboardingRequirementForm(forms.ModelForm):
+class OnboardingRequirementForm(UniqueNamePerClubMixin, forms.ModelForm):
+    name_taken_message = _("An onboarding requirement with this name already exists.")
+
     #: Not a model field lookup -- blocked_event_kinds is a plain JSONField (see
     #: OnboardingRequirement's own docstring for why: importing Event.EventKind at
     #: the model layer would create a club<->events import cycle). This is the one

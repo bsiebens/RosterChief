@@ -151,7 +151,7 @@
                     {% for run in job_log %}
                         {% if run.status == "failure" %}
                             <div class="border-l-2 border-club pl-2.5">
-                                <div>{{ run.name }} failed</div>
+                                <div>{{ run.label }} failed</div>
                                 <div class="text-on-dark-dim">{{ run.started_at|date:"H:i" }} · {{ run.error|truncatechars:60|default:"see the Jobs tab" }}</div>
                             </div>
                         {% endif %}
@@ -212,7 +212,7 @@
                             {% else %}
                                 <span class="text-info-text">···</span>
                             {% endif %}
-                            <span class="text-slate">{{ run.name }}{% if run.detail %} · {{ run.detail|truncatechars:40 }}{% endif %}</span>
+                            <span class="text-slate">{{ run.label }}{% if run.detail %} · {{ run.detail|truncatechars:40 }}{% endif %}</span>
                         </div>
                     {% empty %}
                         <div class="text-muted">No job runs recorded yet.</div>

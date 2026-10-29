@@ -1,4 +1,5 @@
 import datetime
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -18,7 +19,7 @@ from rosterchief.test_support import make_season
 from teams.models import Position, Team, TeamMembership
 
 from .models import News, NewsPhoto
-from .services import notify_editors_of_pending_review, render_body_html, send_publish_notification
+from .services import notify_editors_of_pending_review, publish_news, render_body_html, send_publish_notification, submit_news_for_review
 
 User = get_user_model()
 
@@ -506,3 +507,44 @@ class NotifyEditorsOfPendingReviewTests(TestCase):
         notify_editors_of_pending_review(news_item)
 
         self.assertIn("Cara Coach", Notification.objects.first().body)
+
+
+class PublishServiceTests(TestCase):
+    """news.services.publish_news / submit_news_for_review -- shared by the /manage views and the panel API."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.club = Club.objects.create(name="Ajax United", slug="ajax-united")
+
+    def make_item(self):
+        return News.objects.create(club=self.club, title="Item", body="Body.")
+
+    @mock.patch("news.services.dispatch_send_publish_notification")
+    def test_publish_now_dispatches_notification(self, dispatch):
+        item = publish_news(self.make_item())
+        self.assertEqual(item.status, News.Status.PUBLISHED)
+        self.assertIsNone(item.notified_at)
+        dispatch.assert_called_once_with(str(item.pk))
+
+    @mock.patch("news.services.dispatch_send_publish_notification")
+    def test_publish_without_notifying_marks_notified(self, dispatch):
+        item = publish_news(self.make_item(), notify_members=False)
+        item.refresh_from_db()
+        self.assertIsNotNone(item.notified_at)
+        dispatch.assert_not_called()
+
+    @mock.patch("news.services.dispatch_send_publish_notification")
+    def test_scheduled_publish_leaves_notification_to_sweep(self, dispatch):
+        item = publish_news(self.make_item(), published_at=timezone.now() + datetime.timedelta(days=1))
+        item.refresh_from_db()
+        self.assertTrue(item.is_scheduled)
+        self.assertIsNone(item.notified_at)
+        dispatch.assert_not_called()
+
+    @mock.patch("news.services.dispatch_notify_editors_of_pending_review")
+    def test_submit_for_review_sets_pending_and_notifies(self, dispatch):
+        item = self.make_item()
+        submit_news_for_review(item)
+        item.refresh_from_db()
+        self.assertEqual(item.status, News.Status.PENDING_REVIEW)
+        dispatch.assert_called_once_with(item.pk)

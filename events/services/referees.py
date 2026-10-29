@@ -98,12 +98,7 @@ def eligible_referees(event, *, include_expired=False, roster=None):
     expired_ids = [member_id for member_id, expired in qualifying if expired]
     assigned_ids = event.referees.values_list("member_id", flat=True)
 
-    return (
-        Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying])
-        .exclude(pk__in=assigned_ids)
-        .annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField()))
-        .distinct()
-    )
+    return Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying]).exclude(pk__in=assigned_ids).annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField())).distinct()
 
 
 def retract_ineligible_invites(profile):

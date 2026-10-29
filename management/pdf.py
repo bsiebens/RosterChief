@@ -120,3 +120,25 @@ def number_list_pdf(context: dict) -> bytes:
 def team_analytics_pdf(context: dict) -> bytes:
     html = render_to_string("management/team_analytics_pdf.html", context)
     return render_pdf(html)
+
+
+def event_referee_form_document(club, event) -> bytes:
+    """The referee payment form of one game as PDF bytes (raises PDFExportError without WeasyPrint)."""
+    from decimal import Decimal
+
+    from club.services.invoicing import resolve_document_address
+
+    referees = list(event.referees.all())
+    context = {"club": club, "event": event, "referees": referees, "document_address": resolve_document_address(club), "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))} | referee_form_colors(club)
+    return event_referee_form_pdf(context)
+
+
+def event_official_form_document(club, event) -> bytes:
+    """The officials counterpart of ``event_referee_form_document``."""
+    from decimal import Decimal
+
+    from club.services.invoicing import resolve_document_address
+
+    officials = list(event.officials.all())
+    context = {"club": club, "event": event, "officials": officials, "document_address": resolve_document_address(club), "grand_total": sum((official.total_payable for official in officials), Decimal("0"))} | referee_form_colors(club)
+    return event_official_form_pdf(context)

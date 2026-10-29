@@ -1,0 +1,40 @@
+[Unit]
+Description=RosterChief web (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rosterchief
+Group=rosterchief
+WorkingDirectory=/opt/rosterchief/current
+# Secrets and URLs (shared by every node); node.env holds what differs per node (bind address, concurrency).
+EnvironmentFile=/etc/rosterchief/rosterchief.env
+EnvironmentFile=/etc/rosterchief/node.env
+# HOME/XDG_CACHE_HOME: gunicorn's control socket and fontconfig's cache for WeasyPrint need a writable spot.
+Environment=PYTHONUNBUFFERED=1 HOME=/var/lib/rosterchief XDG_CACHE_HOME=/var/lib/rosterchief/.cache
+# 2 workers x 4 threads: this workload is not CPU-bound and every worker is a full Django process.
+# --preload imports the app once and forks (copy-on-write); --max-requests recycles a worker so the one that
+# rendered a WeasyPrint invoice does not carry that memory forever.
+ExecStart=/opt/rosterchief/current/.venv/bin/gunicorn rosterchief.wsgi:application \
+    --config gunicorn.conf.py \
+    --bind ${ROSTERCHIEF_BIND} \
+    --workers ${GUNICORN_WORKERS} --threads ${GUNICORN_THREADS} \
+    --preload --max-requests 500 --max-requests-jitter 50 \
+    --timeout 60 --access-logfile - --error-logfile -
+# No ExecReload: with --preload a HUP would not load new code. Deploys restart the unit.
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillMode=mixed
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rosterchief/shared
+StateDirectory=rosterchief
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

@@ -235,6 +235,17 @@ def home_warning(planned: PlannedGame, location: Location | None) -> str | None:
     return None
 
 
+def review_rows(plan: JSONImportPlan, chosen: dict | None = None) -> list[dict]:
+    """One review row per planned game: the location currently picked (``chosen``: external_game_id ->
+    pk string, else the suggestion) and the home/away warning for it, if any."""
+    locations_by_id = {str(location.pk): location for location in plan.location_choices}
+    rows = []
+    for planned in plan.games:
+        selected = locations_by_id.get(chosen.get(planned.external_game_id, "")) if chosen is not None else planned.suggested_location
+        rows.append({"planned": planned, "is_update": planned.event is not None, "selected": selected, "warning": home_warning(planned, selected)})
+    return rows
+
+
 def apply_plan(plan: JSONImportPlan, locations_by_game_id: dict) -> dict:
     """Creates/updates every game in ``plan``, taking each one's location from ``locations_by_game_id``
     (external_game_id -> pk string, or blank for none). A pk that isn't one of the club's locations is

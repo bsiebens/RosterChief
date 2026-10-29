@@ -75,3 +75,27 @@ def can_view_member_photo(user, member: Member, club=None, field: str | None = N
     if can_manage_members(user, club):
         return _attached_to_club(member, club)
     return members_visible_to(user, club, include_guardians=True).filter(pk=member.pk).exists()
+
+
+def set_player_photo(member: Member, upload) -> Member:
+    """Replace the official player picture with ``upload``. The bytes must really be an image (Pillow opens
+    them, as the management form's ImageField does); anything else raises ``django.core.exceptions.ValidationError``.
+    The previous file is removed from storage."""
+    from django import forms
+
+    forms.ImageField().clean(upload)
+    old = member.player_photo.name if member.player_photo else ""
+    member.player_photo = upload
+    member.save(update_fields=["player_photo"])
+    if old and old != member.player_photo.name:
+        member.player_photo.storage.delete(old)
+    return member
+
+
+def clear_player_photo(member: Member) -> Member:
+    """Remove the official player picture (and its file). Nothing happens without one."""
+    if member.player_photo:
+        member.player_photo.delete(save=False)
+        member.player_photo = ""
+        member.save(update_fields=["player_photo"])
+    return member

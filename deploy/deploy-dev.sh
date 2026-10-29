@@ -17,7 +17,7 @@
 # DEPLOYMENT.md) — this script doesn't carry credentials for that itself.
 #
 # SSH_KEY_FILE (optional) authenticates with that specific private key instead of whatever
-# ssh-agent/default identity would otherwise be tried — see deploy/deploy-prod.sh's own
+# ssh-agent/default identity would otherwise be tried — see deploy/deploy-dev.sh's own
 # comment on why IdentitiesOnly=yes goes with it, and deploy/.env.deploy.example for where to
 # keep these set rather than typing them every deploy.
 set -Eeuo pipefail

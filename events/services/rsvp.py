@@ -1,6 +1,6 @@
 """Answering an event invitation (RSVP) -- the one set of rules behind the member app's
 RSVP buttons (mobile.views.EventDetailView.post) and the native app API
-(api.app.routers.events), so the two can't drift apart.
+(api.protected.routers.events), so the two can't drift apart.
 
 Invitations are the Attendance rows events.services.attendance.sync_event_attendances
 creates: an RSVP only ever updates one, never invites itself.

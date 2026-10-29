@@ -18,6 +18,7 @@ deliberate staff decision that should win regardless.
 
 from collections import defaultdict
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -203,6 +204,27 @@ def record_check_in(attendance, *, showed_up):
     be recorded the moment something does."""
     attendance.showed_up = showed_up
     attendance.save(update_fields=["showed_up"])
+
+
+class UnknownAttendanceRows(Exception):
+    """Some check-in ids are not rows of the event (``ids``)."""
+
+    def __init__(self, ids):
+        super().__init__(ids)
+        self.ids = ids
+
+
+def record_check_ins(event, wanted: dict) -> None:
+    """Sets ``showed_up`` for ``{attendance id: showed_up}`` on ``event``'s rows, leaving the rest
+    alone. All or nothing: an id that is not a row of this event raises UnknownAttendanceRows and
+    changes nothing. Repeating a call changes nothing. Shared by the coach and management APIs."""
+    with transaction.atomic():
+        rows = {row.pk: row for row in Attendance.objects.select_for_update().filter(event=event, pk__in=wanted)}
+        unknown = [str(pk) for pk in wanted if pk not in rows]
+        if unknown:
+            raise UnknownAttendanceRows(unknown)
+        for pk, showed_up in wanted.items():
+            record_check_in(rows[pk], showed_up=showed_up)
 
 
 COACH_ANSWERS = ("present", "absent", "maybe", "no_response")

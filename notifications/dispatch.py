@@ -4,7 +4,7 @@ each feature wiring itself to the channels it happens to know.
 
 ``notifications`` stays channel-agnostic: channels live in their own apps and register
 themselves in ``AppConfig.ready`` (``register_channel``), so notifications never imports
-api/app/mobile. The in-app inbox is the ``Notification`` row itself, written by
+api/protected/mobile. The in-app inbox is the ``Notification`` row itself, written by
 ``notify_members`` before anything is dispatched.
 
 Two entry points:

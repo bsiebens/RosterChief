@@ -2,7 +2,7 @@
 
 Club staff author `body` as Markdown (see NewsForm's help text) -- rendered
 to HTML by render_body_html below everywhere it's actually shown: the
-public API (news/api.py), mobile's own article page, and the control
+public API (api/public/routers/news.py), mobile's own article page, and the control
 panel's own preview (management/templates/management/_news_preview.html),
 so staff see the same result a reader would rather than raw Markdown
 source with its `**`/`#`/`[text](url)` syntax still showing.
@@ -244,3 +244,81 @@ def dispatch_notify_editors_of_pending_review(news_id):
     rather than handing it a Python object built on the request's own (about to be closed)
     connection."""
     run_in_background(_notify_editors_of_pending_review_by_id, news_id)
+
+
+def submit_news_for_review(news_item):
+    """A non-editor author's hand-off: the item becomes pending review and the editors are told
+    (in the background). Shared by the /manage view and the panel API."""
+    news_item.submit_for_review()
+    dispatch_notify_editors_of_pending_review(news_item.pk)
+
+
+def publish_news(news_item, *, published_at=None, notify_members=True):
+    """Publish ``news_item`` now (``published_at`` omitted) or schedule it for a future moment.
+
+    ``notify_members=False`` is an opt-out, not a delay: notify_published_news's periodic sweep
+    skips anything with ``notified_at`` set, so marking it now keeps it from ever being picked
+    up. Published now with notifying on dispatches immediately rather than waiting for the
+    sweep; scheduled ahead leaves ``notified_at`` null for the sweep to pick up once
+    ``published_at`` has passed."""
+    news_item.publish(at=published_at)
+    if not notify_members:
+        news_item.notified_at = timezone.now()
+        news_item.save(update_fields=["notified_at"])
+    elif not news_item.is_scheduled:
+        dispatch_send_publish_notification(str(news_item.pk))
+    return news_item
+
+
+# --- photos ------------------------------------------------------------------------------------
+# Shared by the /manage news screens and the management API (api/panel/routers/news_photos.py).
+
+
+def add_news_photos(news_item, images) -> list:
+    """One NewsPhoto per uploaded file; if the item had no main photo yet, the first one becomes it."""
+    from django.db import transaction
+
+    from .models import NewsPhoto
+
+    with transaction.atomic():
+        has_main = news_item.photos.filter(is_main=True).exists()
+        created = []
+        for image in images:
+            created.append(NewsPhoto.objects.create(news_item=news_item, image=image, is_main=not has_main))
+            has_main = True
+    return created
+
+
+def set_main_news_photo(photo):
+    """Make ``photo`` the item's one main photo."""
+    from django.db import transaction
+
+    from .models import NewsPhoto
+
+    with transaction.atomic():
+        NewsPhoto.objects.filter(news_item=photo.news_item).update(is_main=False)
+        photo.is_main = True
+        photo.save(update_fields=["is_main"])
+    return photo
+
+
+def set_news_photo_focal_point(photo, focal_x: int, focal_y: int):
+    """Store where the crop centres, clamped to 0..100 percent."""
+    photo.focal_x = max(0, min(100, int(focal_x)))
+    photo.focal_y = max(0, min(100, int(focal_y)))
+    photo.save(update_fields=["focal_x", "focal_y"])
+    return photo
+
+
+def delete_news_photo(photo) -> None:
+    """Delete ``photo``; if it was the main one, the item's first remaining photo takes over."""
+    from django.db import transaction
+
+    news_item, was_main = photo.news_item, photo.is_main
+    with transaction.atomic():
+        photo.delete()
+        if was_main:
+            replacement = news_item.photos.first()
+            if replacement is not None:
+                replacement.is_main = True
+                replacement.save(update_fields=["is_main"])

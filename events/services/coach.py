@@ -1,5 +1,5 @@
 """Rules the coach screens share between the member web app (mobile.coach_views) and the
-app API (api.app.routers.coach): which RSVP states count as in/out, which event is "the next
+app API (api.protected.routers.coach): which RSVP states count as in/out, which event is "the next
 session", and the on-demand nudge to silent players."""
 
 import datetime

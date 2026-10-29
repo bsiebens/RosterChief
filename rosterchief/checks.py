@@ -49,4 +49,3 @@ def secret_key_check(app_configs, **kwargs):
             id="rosterchief.E001",
         )
     ]
-

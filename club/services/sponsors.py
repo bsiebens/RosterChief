@@ -1,5 +1,5 @@
 """Which sponsors are currently "live" -- shared by the public API
-(club/api.py, the club's own external website) and the mobile member app's
+(api/public/routers/sponsors.py, the club's own external website) and the mobile member app's
 Home screen (mobile/views.py), so both read the same definition of "active"
 rather than each re-deriving it.
 """

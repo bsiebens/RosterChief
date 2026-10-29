@@ -1,5 +1,3 @@
-import os
-import time
 from io import StringIO
 from unittest import mock
 
@@ -14,7 +12,6 @@ from waffle import flag_is_active, get_waffle_flag_model
 
 from club.models import Club
 
-from . import scheduler as scheduler_module
 from .jobs import JOB_REGISTRY
 from .models import EmailSuppression, JobRun, JobToggle, Maintenance
 
@@ -412,166 +409,75 @@ class JobToggleTests(TestCase):
         self.assertTrue(JobToggle.is_enabled("events.tasks.send_deadline_reminders"))
 
 
-class BuildSchedulerTests(TestCase):
-    """features.scheduler._build_scheduler wires every JOB_REGISTRY entry into an
-    APScheduler job -- this checks the wiring itself (one job per registry entry, the
-    right trigger kwargs, overlap/misfire guards), not APScheduler's own trigger math."""
+class CeleryTaskTests(TestCase):
+    """The platform jobs run as Celery tasks (beat triggers them, a worker runs them). These check the
+    wiring, not Celery's own scheduling: every task is registered, and install_tasks schedules
+    exactly the tasks that exist."""
 
-    def setUp(self):
-        # Never started -- add_job() only populates the in-memory jobstore, no thread/pool
-        # spun up, so there's nothing here that needs a shutdown() to clean up after itself.
-        self.scheduler = scheduler_module._build_scheduler()
+    def registered(self):
+        from rosterchief.celery import app
 
-    def test_one_job_per_registry_entry(self):
-        job_ids = {job.id for job in self.scheduler.get_jobs()}
+        app.loader.import_default_modules()
+        # Tasks made with api.core.jobs.job_task are started by API requests, not scheduled, so they aren't scheduler jobs (api/core/test_jobs.py defines some).
+        job_tasks = {name for name, task in app.tasks.items() if hasattr(task, "job_function")}
+        return {name for name in app.tasks if not name.startswith("celery.") and name != "rosterchief.celery.debug_task" and name not in job_tasks}
 
-        self.assertEqual(job_ids, set(JOB_REGISTRY))
+    def test_every_registry_job_has_exactly_one_registered_task(self):
+        self.assertEqual({meta["task"] for meta in JOB_REGISTRY.values()}, self.registered())
 
-    def test_every_job_guards_against_overlap_and_pauses_only_a_missed_run(self):
-        for job in self.scheduler.get_jobs():
-            self.assertEqual(job.max_instances, 1, job.id)
-            self.assertTrue(job.coalesce, job.id)
-            self.assertEqual(job.misfire_grace_time, scheduler_module.MISFIRE_GRACE_SECONDS, job.id)
+    def test_every_task_runs_its_registry_command_with_its_args(self):
+        from rosterchief.celery import app
 
-    def test_a_cron_entrys_trigger_carries_its_own_hour_and_minute(self):
-        job = self.scheduler.get_job("events.tasks.extend_event_series")
+        self.registered()
+        for key, meta in JOB_REGISTRY.items():
+            with mock.patch("features.celery_support.call_command", return_value="") as call_command_mock:
+                app.tasks[meta["task"]]()
 
-        # APScheduler's CronTrigger stringifies as "cron[hour='3', minute='0', ...]" --
-        # asserting on that representation rather than reaching into private trigger
-        # internals for the same fields JOB_REGISTRY's own "trigger" dict already states.
-        self.assertIn("hour='3'", str(job.trigger))
-        self.assertIn("minute='0'", str(job.trigger))
+            call_command_mock.assert_called_once_with(meta["command"], *meta["args"], **{})
+            self.assertEqual(key.split(".")[-1], meta["command"].replace("notify_published_news", "notify_news_published"), key)
 
-    def test_an_interval_entrys_trigger_carries_its_own_period(self):
-        job = self.scheduler.get_job("events.tasks.poll_live_game_results")
+    def test_install_tasks_is_idempotent(self):
+        from django_celery_beat.models import PeriodicTask
 
-        self.assertIn("0:01:00", str(job.trigger))
+        call_command("install_tasks", stdout=StringIO())
+        call_command("install_tasks", stdout=StringIO())
+
+        self.assertEqual(PeriodicTask.objects.filter(task__in=[meta["task"] for meta in JOB_REGISTRY.values()]).count(), len(JOB_REGISTRY))
+
+    def test_install_tasks_never_overwrites_an_edited_schedule(self):
+        from django_celery_beat.models import IntervalSchedule, PeriodicTask
+
+        call_command("install_tasks", stdout=StringIO())
+        task = PeriodicTask.objects.get(task="events.extend-event-series")
+        task.crontab = None
+        task.interval = IntervalSchedule.objects.get_or_create(every=7, period=IntervalSchedule.MINUTES)[0]
+        task.save()
+
+        call_command("install_tasks", stdout=StringIO())
+
+        task.refresh_from_db()
+        self.assertEqual(task.interval.every, 7)
 
 
 class RunJobTests(TestCase):
-    """features.scheduler._run_job is what every tick actually calls -- same call_command
-    path controlpanel.views.JobRunNowView and the old crontab entries used, plus the
-    connection cleanup a thread outside the request/response cycle needs for itself.
+    """features.celery_support.run_job is what every Celery task calls: the same call_command path
+    as the control panel's Run now, so a failure must propagate for Celery to record FAILURE."""
 
-    _run_job's own `finally: connections.close_all()` is only safe called from its own
-    dedicated thread (the production case, and JobRunNowView's/the live-score loop's own
-    precedent) -- called here, inline on the test's own thread, it would tear down the
-    connection this TestCase's wrapping atomic() block depends on, the exact bug
-    controlpanel.tests._SyncThread hit against Postgres. Patched to a no-op for every test
-    in this class for that reason, not just the one that asserts on it directly.
-    """
+    def test_runs_the_command_with_its_args_and_reports_success(self):
+        from .celery_support import run_job
 
-    def setUp(self):
-        self.connections_close_all = mock.patch("features.scheduler.connections.close_all").start()
-        self.addCleanup(mock.patch.stopall)
-
-    def test_calls_call_command_with_the_registrys_own_args(self):
-        with mock.patch("features.scheduler.call_command") as call_command_mock:
-            scheduler_module._run_job("billing.tasks.send_billing_reminders", "send_billing_reminders", ["--commit"])
+        with mock.patch("features.celery_support.call_command", return_value="done") as call_command_mock:
+            result = run_job("send_billing_reminders", "--commit")
 
         call_command_mock.assert_called_once_with("send_billing_reminders", "--commit")
+        self.assertEqual(result, {"status": "SUCCESS", "result": "done"})
 
-    def test_a_failing_job_is_caught_and_logged_not_raised(self):
-        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
-            # Must not raise -- an uncaught exception here would take the whole scheduler
-            # thread's job down with it, not just this one tick.
-            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
+    def test_a_command_error_propagates(self):
+        from .celery_support import run_job
 
-    def test_closes_connections_even_when_the_job_raises(self):
-        with mock.patch("features.scheduler.call_command", side_effect=RuntimeError("boom")):
-            scheduler_module._run_job("events.tasks.extend_event_series", "extend_event_series", [])
-
-        self.connections_close_all.assert_called_once()
-
-
-class LeaderElectionTests(TestCase):
-    """features.scheduler._try_acquire_or_renew is the cooperative lease every process
-    (only ever one today, but see that module's own docstring) uses to decide whether it's
-    the one actually running the schedule."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def test_acquires_an_unheld_lease(self):
-        self.assertTrue(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
-
-    def test_renews_a_lease_it_already_holds(self):
-        scheduler_module._try_acquire_or_renew()
-
-        self.assertTrue(scheduler_module._try_acquire_or_renew())
-
-    def test_refuses_a_lease_held_by_another_token(self):
-        cache.set(scheduler_module.LEADER_CACHE_KEY, "someone-else", scheduler_module.LEASE_SECONDS)
-
-        self.assertFalse(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), "someone-else")
-
-
-class SchedulerLifecycleTests(TestCase):
-    """start()/stop() -- the two entry points gunicorn.conf.py's post_worker_init/worker_exit
-    hooks call. Runs the real leader thread rather than mocking it: what's worth proving here is
-    that the observable state (the lease, the running scheduler) ends up right, not that
-    specific internal calls were made."""
-
-    def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
-        self.addCleanup(scheduler_module.stop)
-
-    def _wait_until(self, predicate, timeout=2.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if predicate():
-                return True
-            time.sleep(0.02)
-        return False
-
-    def test_start_acquires_leadership_and_runs_a_scheduler(self):
-        scheduler_module.start()
-
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), scheduler_module._TOKEN)
-        self.assertTrue(scheduler_module._scheduler.running)
-
-    def test_stop_releases_the_lease_and_shuts_the_scheduler_down(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-
-        scheduler_module.stop()
-
-        self.assertIsNone(scheduler_module._scheduler)
-        self.assertIsNone(cache.get(scheduler_module.LEADER_CACHE_KEY))
-
-    def test_each_start_takes_a_fresh_lease_token(self):
-        # With --preload the module is imported once in the master and inherited by every worker:
-        # without a per-process token they would all hold the same one and each think it leads.
-        import_time_token = scheduler_module._TOKEN
-
-        scheduler_module.start()
-
-        self.assertNotEqual(scheduler_module._TOKEN, import_time_token)
-        self.assertIn(f":{os.getpid()}:", scheduler_module._TOKEN)
-
-    def test_two_workers_never_both_lead(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        leader_token = scheduler_module._TOKEN
-
-        # A second worker has its own token and cannot take the lease the first one holds.
-        scheduler_module._TOKEN = scheduler_module._new_token()
-        self.assertFalse(scheduler_module._try_acquire_or_renew())
-        self.assertEqual(cache.get(scheduler_module.LEADER_CACHE_KEY), leader_token)
-
-    def test_start_is_a_noop_if_already_started(self):
-        scheduler_module.start()
-        self.assertTrue(self._wait_until(lambda: scheduler_module._scheduler is not None))
-        first_thread = scheduler_module._leader_thread
-
-        scheduler_module.start()
-
-        self.assertIs(scheduler_module._leader_thread, first_thread)
+        with mock.patch("features.celery_support.call_command", side_effect=CommandError("maintenance")):
+            with self.assertRaises(CommandError):
+                run_job("extend_event_series")
 
 
 class FlagPerUserGrantScopingTests(TestCase):
@@ -619,7 +525,7 @@ class FlagPerUserGrantScopingTests(TestCase):
 
 
 class GunicornConfigTests(TestCase):
-    """gunicorn.conf.py: the scheduler runs in the WORKERS. A master-side hook that starts a thread
+    """gunicorn.conf.py: no master-side hook may start a thread. A master-side hook that starts a thread
     makes every worker fork a gamble -- a lock the thread holds at that instant (the DNS resolver's,
     a Redis pool's) is copied locked into the child, which then hangs forever on first use. That cost
     a production worker (every thread stuck in getaddrinfo, ~half of all requests hanging)."""
@@ -639,18 +545,6 @@ class GunicornConfigTests(TestCase):
         # when_ready fires in the master BEFORE the workers are forked; the others run in the master too.
         for master_hook in ("when_ready", "on_starting", "on_reload", "on_exit", "pre_fork"):
             self.assertFalse(hasattr(config, master_hook), f"gunicorn.conf.py defines {master_hook}: it runs in the process that forks the workers")
-
-    def test_the_scheduler_is_started_in_the_worker_and_stopped_when_it_exits(self):
-        config = self.load_config()
-        worker = mock.Mock()
-
-        with mock.patch("features.scheduler.start") as start, mock.patch("features.scheduler.stop") as stop:
-            config.post_worker_init(worker)
-            start.assert_called_once_with()
-            stop.assert_not_called()
-
-            config.worker_exit(server=None, worker=worker)
-            stop.assert_called_once_with()
 
 
 class GunicornPostForkTests(TestCase):

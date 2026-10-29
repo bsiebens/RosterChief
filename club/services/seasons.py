@@ -10,9 +10,11 @@ up to a horizon, get_or_create per row, safe to call repeatedly.
 import datetime
 
 from dateutil.relativedelta import relativedelta
+from django.db import transaction
 from django.db.models import ProtectedError
 from django.db.models.deletion import Collector
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from club.models import Season
 
@@ -129,3 +131,50 @@ def resync_seasons(club, until, *, commit=False):
                 season.delete()
 
     return removed, kept
+
+
+# --- hand-made seasons (management API) ----------------------------------------------------
+
+
+class SeasonError(Exception):
+    """A season change that can't be made. ``code`` is a stable machine string, ``field`` the
+    input it concerns (None for the season as a whole), ``str()`` the localised message."""
+
+    def __init__(self, code: str, message, field: str | None = None):
+        super().__init__(str(message))
+        self.code = code
+        self.field = field
+
+
+def _validate_dates(club, start, end, *, exclude=None):
+    if end <= start:
+        raise SeasonError("invalid_dates", _("The end date must be after the start date."), "end_date")
+    others = Season.objects.filter(club=club, start_date__lte=end, end_date__gte=start)
+    if exclude is not None:
+        others = others.exclude(pk=exclude.pk)
+    clash = others.first()
+    if clash is not None:
+        raise SeasonError("season_overlap", _("These dates overlap the season %(season)s.") % {"season": clash.name}, "start_date")
+
+
+def create_season(club, start, end) -> Season:
+    """A season outside the generated cycle. Seasons of a club never overlap (a date belongs to one season)."""
+    _validate_dates(club, start, end)
+    with transaction.atomic():
+        season = Season.objects.create(club=club, start_date=start, end_date=end)
+        _carry_guardians_into(club, season)
+    return season
+
+
+def update_season(season, start, end) -> Season:
+    _validate_dates(season.club, start, end, exclude=season)
+    season.start_date, season.end_date = start, end
+    season.save(update_fields=["start_date", "end_date", "modified"])
+    return season
+
+
+def delete_season(season) -> None:
+    """Delete ``season`` unless memberships, rosters, events ... still reference it."""
+    if _is_referenced(season):
+        raise SeasonError("season_in_use", _("This season is still used by memberships, rosters or events, and can't be deleted."))
+    season.delete()

@@ -18,9 +18,8 @@ from django.urls import include, path, re_path
 from django.views.generic import RedirectView
 
 from announcements.views import PendingAnnouncementView
-from api.app.api import app_api
-from api.app.docs import docs_page
-from api.public.urls import api
+from api.core.docs import docs_page
+from api.v1 import api
 from club.views import root, signup_closed
 from members.language import set_language
 
@@ -50,15 +49,14 @@ urlpatterns = [
     path("control/", include("controlpanel.urls")),
     path("manage/", include("management.urls")),
     path("app/", include("mobile.urls")),
+    # The API (api/v1.py): public club routes and the bearer-token routes in one NinjaAPI. The old
+    # /api/app/v1/ prefix is rewritten to this by api.core.middleware.LegacyAppPrefixMiddleware.
     path("api/v1/", api.urls),
     # Native-app authentication (allauth.headless, "app" client only): /api/auth/app/v1/...
     # Base domain only -- the account plane of API.md §4; a club subdomain 404s.
     path("api/auth/", base_domain_only_urls(include("allauth.headless.urls"))),
-    # The native-app API itself (api.app): account endpoints on the base domain, club endpoints
-    # on each club's host -- each endpoint enforces its own plane (api/app/auth.py).
-    path("api/app/v1/", app_api.urls),
     # Developer docs for the app APIs (docs/app-api/*.md). Served on the base domain; a club
-    # host redirects there (api.app.docs.docs_page).
+    # host redirects there (api.core.docs.docs_page).
     path("api/docs/", docs_page, name="app_api_docs"),
     path("api/docs/<slug:page>/", docs_page, name="app_api_docs_page"),
     # Shared by management/base.html and mobile/base.html's own poll-on-load script --

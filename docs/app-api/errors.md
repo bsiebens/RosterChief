@@ -1,6 +1,6 @@
 # Errors
 
-## App API (`/api/app/v1/`)
+## App API (`/api/v1/`)
 
 Every error has the same body:
 

@@ -31,6 +31,10 @@ uv run python manage.py test <app>.tests.<Case>.<method>  # one test
 uv run python manage.py test --fast                # quick tier: skips tests that add no coverage of their own (feature-branch CI runs this; main and releases run everything)
 uv run python deploy/refresh_fast_suite.py       # regenerate rosterchief/fast_suite_skip.txt (~5 min; verified)
 
+# Production is bare metal (no Docker; see docs/bare-metal.md): deploy/prep-server.sh (once per server),
+# deploy/deploy.sh (release tarball to one or more servers), deploy/convert.sh (Docker install -> bare metal).
+# Scheduled jobs are Celery beat + worker; the schedule is PeriodicTask rows (edited on the control panel's Jobs tab).
+
 uv run ruff check .                  # lint
 uv run ruff check --fix .            # lint + autofix
 uv run ruff format .                 # format
@@ -48,7 +52,7 @@ env var.
 
 **`docs/ARCHITECTURE.md` is the source of truth for the model design; this is a summary.** Apps: `authentication` (global login), `members` (people and families), `club` (tenant root, seasons, roles, onboarding), `teams`, `events`, `news`,
 `announcements`, `notifications`, `registration`, `formbuilder`, `evaluations`, `shop`, `billing` (the platform billing its clubs), `bugs`, `features` (flags, maintenance mode, scheduler), and the surfaces `controlpanel`, `management`, `mobile`,
-`marketing`, plus `api` (the native-app API in `api.app` and the public club-website API in `api.public`). Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
+`marketing`, plus `api` (one NinjaAPI at `/api/v1/` in `api/v1.py`: public club-website routes in `api.public`, bearer-token member/coach routes in `api.protected`, management-panel routes in `api.panel`, shared auth/scope/errors/pagination in `api.core`; `/api/app/v1/` is a deprecated alias). The control panel stays Django-rendered and is never exposed through the API (no announcements, jobs, flags or platform billing endpoints); only `management` moves to `api.panel` — see `docs/API.md` §17. Add new app labels to the isort `known-first-party` list in `pyproject.toml`.
 
 Domain notes (drive modeling decisions):
 

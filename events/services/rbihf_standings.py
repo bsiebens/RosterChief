@@ -14,7 +14,7 @@ so those few games are checked against the game's own per-period overview.
 A team's league is found from the RBIHF team page already remembered by the
 fixture import (Team.import_sources, see events.services.import_sources), and
 the result is stored back on that same entry under ``standings`` -- so the
-public API (teams/api.py) only ever reads the database. Refreshed when a game of
+public API (api/public/routers/teams.py) only ever reads the database. Refreshed when a game of
 the team finishes (events.management.commands.poll_live_game_results) and once a
 night (refresh_standings).
 """

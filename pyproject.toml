@@ -5,7 +5,6 @@ requires-python = ">=3.14"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
-    "apscheduler>=3.11.3",
     "beautifulsoup4>=4.15.0",
     "defusedxml>=0.7.1",
     "dj-database-url>=3.1.2",

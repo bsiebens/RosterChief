@@ -1,6 +1,8 @@
 import datetime
+import json
 import pathlib
 from decimal import Decimal
+from io import StringIO
 from unittest import mock
 
 from allauth.account.models import EmailAddress
@@ -12,10 +14,13 @@ from django.contrib.messages.storage.base import Message
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core import mail
 from django.core.cache import cache
+from django.core.management import call_command
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django_celery_beat.models import PeriodicTask
+from django_celery_results.models import TaskResult
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from announcements.models import Announcement
@@ -26,7 +31,7 @@ from bugs.models import BugReport
 from bugs.services import add_note
 from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager, Sport
 from events.models import Attendance, Competition, Event, Location
-from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
+from features.models import EmailSuppression, JobToggle, Maintenance
 from members.models import Member
 from notifications.models import Notification
 from rosterchief.test_support import enrol_mfa
@@ -500,38 +505,61 @@ class ClubHomeLocationTests(ControlPanelTestBase):
         self.assertFalse(Location.objects.filter(club=self.club, is_home=True).exists())
 
 
-class JobToggleViewTests(ControlPanelTestBase):
-    """Pausing/resuming one scheduled platform job -- see controlpanel.views.
-    JobToggleView and features.models.JobToggle."""
+class JobTestBase(ControlPanelTestBase):
+    """Shared setup for the Jobs tab tests: the default Celery beat schedule installed, and TaskResult rows
+    (what the worker writes) to look at."""
 
-    JOB_NAME = "events.tasks.extend_event_series"
+    FAILING = "events.tasks.extend_event_series"
+    FAILING_TASK = "events.extend-event-series"
+    PAUSED = "events.tasks.send_deadline_reminders"
 
     def setUp(self):
         super().setUp()
         # JobToggle's cache isn't rolled back with the test transaction.
         cache.clear()
         self.addCleanup(cache.clear)
+        call_command("install_tasks", stdout=StringIO())
 
-    def toggle(self, name=JOB_NAME):
+    def record_run(self, task_name, status, minutes_ago=5, **fields):
+        started = timezone.now() - datetime.timedelta(minutes=minutes_ago)
+        result = TaskResult.objects.create(task_id=f"{task_name}-{minutes_ago}-{status}", task_name=task_name, status=status, **fields)
+        # date_created is auto_now_add and date_done auto_now: place the run in the past explicitly.
+        TaskResult.objects.filter(pk=result.pk).update(date_created=started, date_done=started + datetime.timedelta(seconds=2))
+        return result
+
+    def failure(self, message="horizon exploded"):
+        return {"result": json.dumps({"exc_type": "ValueError", "exc_message": [message]}), "traceback": f"Traceback...\nValueError: {message}"}
+
+
+class JobToggleViewTests(JobTestBase):
+    """Pausing/resuming one scheduled platform job -- see controlpanel.views.JobToggleView."""
+
+    def toggle(self, name=JobTestBase.FAILING):
         return self.client.post(reverse("controlpanel:job_toggle", args=[name]))
+
+    def periodic(self):
+        return PeriodicTask.objects.get(task=self.FAILING_TASK)
 
     def test_a_job_starts_enabled(self):
         response = self.client.get(reverse("controlpanel:jobs"))
 
         self.assertContains(response, "Pause")
+        self.assertTrue(self.periodic().enabled)
 
-    def test_pausing_a_job(self):
+    def test_pausing_a_job_switches_its_periodic_task_off_and_the_command_too(self):
         response = self.toggle()
 
         self.assertRedirects(response, reverse("controlpanel:jobs"))
-        self.assertFalse(JobToggle.is_enabled(self.JOB_NAME))
+        self.assertFalse(self.periodic().enabled)
+        self.assertFalse(JobToggle.is_enabled(self.FAILING))
 
     def test_resuming_a_paused_job(self):
         self.toggle()
 
         self.toggle()
 
-        self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
+        self.assertTrue(self.periodic().enabled)
+        self.assertTrue(JobToggle.is_enabled(self.FAILING))
 
     def test_the_jobs_page_reflects_the_paused_state(self):
         self.toggle()
@@ -540,6 +568,14 @@ class JobToggleViewTests(ControlPanelTestBase):
 
         self.assertContains(response, "paused")
         self.assertContains(response, "Resume")
+
+    def test_an_unscheduled_job_cannot_be_toggled(self):
+        PeriodicTask.objects.filter(task=self.FAILING_TASK).delete()
+
+        response = self.toggle()
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        self.assertTrue(JobToggle.is_enabled(self.FAILING))
 
     def test_an_unknown_job_name_is_a_404(self):
         response = self.toggle(name="not.a.real.job")
@@ -552,31 +588,24 @@ class JobToggleViewTests(ControlPanelTestBase):
         response = self.toggle()
 
         self.assertEqual(response.status_code, 403)
-        self.assertTrue(JobToggle.is_enabled(self.JOB_NAME))
+        self.assertTrue(self.periodic().enabled)
 
 
-class JobsPageTests(ControlPanelTestBase):
+class JobsPageTests(JobTestBase):
     """The Jobs tab's table and the command bar's failure indicator -- see controlpanel.
     services.jobs and controlpanel.context_processors.job_health."""
 
-    FAILING = "events.tasks.extend_event_series"
-    PAUSED = "events.tasks.send_deadline_reminders"
-
-    def record_run(self, name, status, minutes_ago=5, **fields):
-        started = timezone.now() - datetime.timedelta(minutes=minutes_ago)
-        return JobRun.objects.create(task_id=f"{name}-{minutes_ago}-{status}", name=name, status=status, started_at=started, finished_at=started + datetime.timedelta(seconds=2), **fields)
-
     def test_the_command_bar_counts_failed_runs_in_the_window_plural(self):
-        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=5)
-        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=10)
-        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=60 * 25)  # outside the window
+        self.record_run(self.FAILING_TASK, "FAILURE", minutes_ago=5)
+        self.record_run(self.FAILING_TASK, "FAILURE", minutes_ago=10)
+        self.record_run(self.FAILING_TASK, "FAILURE", minutes_ago=60 * 25)  # outside the window
 
         response = self.client.get(reverse("controlpanel:club_list"))
 
         self.assertContains(response, "2 job failures in the last 24h")
 
     def test_the_command_bar_counts_failed_runs_in_the_window_singular(self):
-        self.record_run(self.FAILING, JobRun.Status.FAILURE)
+        self.record_run(self.FAILING_TASK, "FAILURE")
 
         response = self.client.get(reverse("controlpanel:dashboard"))
 
@@ -590,9 +619,9 @@ class JobsPageTests(ControlPanelTestBase):
         self.assertNotContains(response, "job failure")
 
     def test_summary_counts_and_failing_job_first_with_its_error_visible(self):
-        self.record_run(self.FAILING, JobRun.Status.SUCCESS, minutes_ago=30)
-        self.record_run(self.FAILING, JobRun.Status.FAILURE, minutes_ago=5, error="Boom: horizon exploded")
-        JobToggle.set_enabled(self.PAUSED, False)
+        self.record_run(self.FAILING_TASK, "SUCCESS", minutes_ago=30, result=json.dumps({"status": "SUCCESS", "result": "Nothing to do"}))
+        self.record_run(self.FAILING_TASK, "FAILURE", minutes_ago=5, **self.failure("Boom: horizon exploded"))
+        self.client.post(reverse("controlpanel:job_toggle", args=[self.PAUSED]))
 
         response = self.client.get(reverse("controlpanel:jobs"))
 
@@ -604,8 +633,21 @@ class JobsPageTests(ControlPanelTestBase):
         self.assertContains(response, "1 paused")
         self.assertEqual(response.context["jobs"][0]["name"], self.FAILING)
         self.assertEqual([run.status for run in response.context["jobs"][0]["runs_oldest_first"]], ["success", "failure"])
-        self.assertContains(response, "Boom: horizon exploded")
+        self.assertContains(response, "ValueError: Boom: horizon exploded")
         self.assertContains(response, '<details class="group" open>', count=1)
+
+    def test_a_successful_run_shows_what_the_job_returned(self):
+        self.record_run(self.FAILING_TASK, "SUCCESS", result=json.dumps({"status": "SUCCESS", "result": "Extended 3 series"}))
+
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "Extended 3 series")
+
+    def test_the_schedule_comes_from_the_database(self):
+        response = self.client.get(reverse("controlpanel:jobs"))
+
+        self.assertContains(response, "Daily at 03:00")
+        self.assertContains(response, "Every minute")
 
     def test_every_job_keeps_its_run_now_and_pause_forms(self):
         response = self.client.get(reverse("controlpanel:jobs"))
@@ -613,97 +655,164 @@ class JobsPageTests(ControlPanelTestBase):
         for job in response.context["jobs"]:
             self.assertContains(response, reverse("controlpanel:job_run_now", args=[job["name"]]))
             self.assertContains(response, reverse("controlpanel:job_toggle", args=[job["name"]]))
+            self.assertContains(response, reverse("controlpanel:job_schedule", args=[job["name"]]))
 
     def test_a_running_job_disables_run_now(self):
-        JobRun.objects.create(task_id="running", name=self.FAILING, status=JobRun.Status.STARTED, started_at=timezone.now())
+        self.record_run(self.FAILING_TASK, "STARTED", minutes_ago=1)
 
         response = self.client.get(reverse("controlpanel:jobs"))
 
         self.assertContains(response, "Running…")
         self.assertNotContains(response, reverse("controlpanel:job_run_now", args=[self.FAILING]))
 
+    def test_a_run_whose_worker_died_is_a_failure_not_running_forever(self):
+        self.record_run(self.FAILING_TASK, "STARTED", minutes_ago=60 * 5)
 
-class _SyncThread:
-    """Stands in for threading.Thread in tests -- .start() runs the target immediately,
-    in-process, instead of on a real background thread, so a job dispatched by
-    JobRunNowView is guaranteed to have finished (JobRun row and all) by the time an
-    assertion runs, rather than racing a thread that may not be done yet.
+        response = self.client.get(reverse("controlpanel:jobs"))
 
-    Running it on a genuinely separate thread instead (own connection, like production)
-    was tried and reverted: SQLite's in-memory test database isn't shared across
-    connections, so a real second thread's JobRun insert becomes invisible to the test's
-    own connection -- JobRun.DoesNotExist even though `_run` completed and committed.
+        job = next(job for job in response.context["jobs"] if job["name"] == self.FAILING)
+        self.assertTrue(job["is_failing"])
+        self.assertIn("worker stopped", job["latest"].error)
+        self.assertContains(response, reverse("controlpanel:job_run_now", args=[self.FAILING]))
 
-    Inline still has one real side effect to guard against: JobRunNowView's `_run` closes
-    its thread's connections in a `finally` (correct in production, where `_run` genuinely
-    owns a separate connection on a separate thread) -- run inline, that `finally` would
-    instead tear down the SAME connection the test's own wrapping atomic() block depends
-    on, which Postgres reports right back as "the connection is closed" on the test's next
-    query. SQLite tolerates that well enough to hide the bug, which is why this only ever
-    showed up running the suite against Postgres. Patching close_all() to a no-op for the
-    duration neutralises exactly that side effect without changing what `_run` itself does.
-    """
+    def test_a_job_without_a_periodic_task_is_flagged_unscheduled(self):
+        PeriodicTask.objects.filter(task=self.FAILING_TASK).delete()
 
-    def __init__(self, target=None, **kwargs):
-        self._target = target
+        response = self.client.get(reverse("controlpanel:jobs"))
 
-    def start(self):
-        with mock.patch("django.db.connections.close_all"):
-            self._target()
+        self.assertEqual(response.context["summary"]["unscheduled"], 1)
+        self.assertContains(response, "unscheduled")
+
+    def test_other_tasks_results_are_ignored(self):
+        self.record_run("some.other-task", "FAILURE")
+
+        response = self.client.get(reverse("controlpanel:dashboard"))
+
+        self.assertNotContains(response, "job failure")
 
 
-class JobRunNowViewTests(ControlPanelTestBase):
-    """Manually triggering one scheduled job off-schedule -- see controlpanel.views.
-    JobRunNowView."""
+class JobRunNowViewTests(JobTestBase):
+    """Queueing one scheduled job off-schedule -- see controlpanel.views.JobRunNowView."""
 
-    JOB_NAME = "events.tasks.extend_event_series"
+    def run_now(self, name=JobTestBase.FAILING):
+        return self.client.post(reverse("controlpanel:job_run_now", args=[name]))
 
-    def setUp(self):
-        super().setUp()
-        cache.clear()
-        self.addCleanup(cache.clear)
-
-    def run_now(self, name=JOB_NAME):
-        with mock.patch("controlpanel.views.threading.Thread", _SyncThread):
-            return self.client.post(reverse("controlpanel:job_run_now", args=[name]))
-
-    def test_running_a_job_now_writes_a_job_run(self):
-        response = self.run_now()
+    def test_running_a_job_now_sends_its_celery_task(self):
+        with mock.patch("controlpanel.views.celery_app.send_task") as send_task:
+            response = self.run_now()
 
         self.assertRedirects(response, reverse("controlpanel:jobs"))
-        run = JobRun.objects.get(name=self.JOB_NAME)
-        self.assertEqual(run.status, JobRun.Status.SUCCESS)
+        send_task.assert_called_once_with(self.FAILING_TASK)
 
-    def test_a_paused_job_still_refuses(self):
-        JobToggle.set_enabled(self.JOB_NAME, False)
+    def test_a_broker_failure_is_reported_not_raised(self):
+        with mock.patch("controlpanel.views.celery_app.send_task", side_effect=ConnectionError("redis is down")):
+            response = self.client.post(reverse("controlpanel:job_run_now", args=[self.FAILING]), follow=True)
 
-        self.run_now()
+        self.assertContains(response, "Could not queue the job")
 
-        run = JobRun.objects.get(name=self.JOB_NAME)
-        self.assertEqual(run.status, JobRun.Status.FAILURE)
-        self.assertIn("disabled", run.error)
-
-    def test_runs_with_the_registrys_own_args(self):
-        # send_billing_reminders defaults to a dry run -- features.jobs.JOB_REGISTRY's
-        # own ["--commit"] is what a manual run needs too, same as a scheduled tick,
-        # or "Run now" would look like it worked while actually doing nothing.
-        with mock.patch("controlpanel.views.call_command") as call_command:
+    def test_the_billing_task_the_button_queues_carries_commit_via_its_command(self):
+        # The task itself adds --commit (billing/tasks.py); the view only names the task.
+        with mock.patch("controlpanel.views.celery_app.send_task") as send_task:
             self.run_now(name="billing.tasks.send_billing_reminders")
 
-        call_command.assert_called_once_with("send_billing_reminders", "--commit", detailed_logging=True)
+        send_task.assert_called_once_with("billing.send-billing-reminders")
 
     def test_an_unknown_job_name_is_a_404(self):
-        response = self.run_now(name="not.a.real.job")
-
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.run_now(name="not.a.real.job").status_code, 404)
 
     def test_a_non_staff_user_cannot_run_a_job(self):
         self.client.force_login(User.objects.create_user(email="plain-run@example.com", password="pw-secret-123"))
 
-        response = self.run_now()
+        with mock.patch("controlpanel.views.celery_app.send_task") as send_task:
+            response = self.run_now()
 
         self.assertEqual(response.status_code, 403)
-        self.assertFalse(JobRun.objects.filter(name=self.JOB_NAME).exists())
+        send_task.assert_not_called()
+
+
+class JobScheduleViewTests(JobTestBase):
+    """Editing a job's schedule from the control panel -- see controlpanel.views.JobScheduleView."""
+
+    def url(self, name=JobTestBase.FAILING):
+        return reverse("controlpanel:job_schedule", args=[name])
+
+    def periodic(self):
+        return PeriodicTask.objects.select_related("interval", "crontab").get(task=self.FAILING_TASK)
+
+    def test_the_form_starts_on_the_current_schedule(self):
+        response = self.client.get(self.url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["form"].initial["kind"], "crontab")
+        self.assertEqual(response.context["form"].initial["hour"], "3")
+        self.assertContains(response, "Daily at 03:00")
+
+    def test_switching_to_an_interval(self):
+        response = self.client.post(self.url(), {"kind": "interval", "every": "30", "period": "minutes"})
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        task = self.periodic()
+        self.assertEqual((task.interval.every, task.interval.period), (30, "minutes"))
+        self.assertIsNone(task.crontab)
+
+    def test_switching_to_fixed_times(self):
+        response = self.client.post(self.url(self.PAUSED), {"kind": "crontab", "minute": "30", "hour": "8", "day_of_month": "*", "month_of_year": "*", "day_of_week": "1,3"})
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        task = PeriodicTask.objects.select_related("crontab").get(task="events.send-deadline-reminders")
+        self.assertEqual((task.crontab.minute, task.crontab.hour, task.crontab.day_of_week), ("30", "8", "1,3"))
+        self.assertIsNone(task.interval)
+
+    def test_the_new_schedule_shows_on_the_jobs_page(self):
+        self.client.post(self.url(), {"kind": "interval", "every": "2", "period": "hours"})
+
+        self.assertContains(self.client.get(reverse("controlpanel:jobs")), "Every 2 hours")
+
+    def test_an_invalid_cron_field_is_rejected_and_nothing_changes(self):
+        response = self.client.post(self.url(), {"kind": "crontab", "minute": "99", "hour": "3", "day_of_month": "*", "month_of_year": "*", "day_of_week": "*"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("minute", response.context["form"].errors)
+        self.assertEqual(self.periodic().crontab.hour, "3")
+
+    def test_an_interval_needs_a_positive_every(self):
+        response = self.client.post(self.url(), {"kind": "interval", "every": "0", "period": "minutes"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("every", response.context["form"].errors)
+
+    def test_resetting_restores_the_default_schedule(self):
+        self.client.post(self.url(), {"kind": "interval", "every": "30", "period": "minutes"})
+
+        response = self.client.post(reverse("controlpanel:job_schedule_reset", args=[self.FAILING]))
+
+        self.assertRedirects(response, reverse("controlpanel:jobs"))
+        task = self.periodic()
+        self.assertIsNone(task.interval)
+        self.assertEqual((task.crontab.hour, task.crontab.minute), ("3", "0"))
+
+    def test_editing_a_schedule_does_not_change_whether_the_job_is_paused(self):
+        self.client.post(reverse("controlpanel:job_toggle", args=[self.FAILING]))
+
+        self.client.post(self.url(), {"kind": "interval", "every": "10", "period": "minutes"})
+
+        self.assertFalse(self.periodic().enabled)
+
+    def test_an_unscheduled_job_has_nothing_to_edit(self):
+        PeriodicTask.objects.filter(task=self.FAILING_TASK).delete()
+
+        self.assertEqual(self.client.get(self.url()).status_code, 404)
+
+    def test_an_unknown_job_name_is_a_404(self):
+        self.assertEqual(self.client.get(self.url("not.a.real.job")).status_code, 404)
+
+    def test_a_non_staff_user_cannot_edit_a_schedule(self):
+        self.client.force_login(User.objects.create_user(email="plain-sched@example.com", password="pw-secret-123"))
+
+        response = self.client.post(self.url(), {"kind": "interval", "every": "1", "period": "minutes"})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(self.periodic().interval)
 
 
 class StatisticsTests(TestCase):

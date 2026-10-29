@@ -42,7 +42,7 @@ is tenant-scoped (§2.4). New app labels go into `known-first-party` in `../pypr
 | `management`     | Club admin UI (`/manage/`)                                                                    |                                                  |
 | `mobile`         | Member and coach PWA (`/app/`)                                                                |                                                  |
 | `marketing`      | The public marketing site and contact form                                                    |                                                  |
-| `api`            | Native-app API (`api.app`, `/api/app/v1/`) and public API for club websites (`api.public`, `/api/v1/`) |                                    |
+| `api`            | The HTTP API, one NinjaAPI at `/api/v1/` (`api/v1.py`): public club routes (`api.public`), bearer-token member/coach routes (`api.protected`), management panel routes (`api.panel`), shared pieces (`api.core`) |                                    |
 | `bugs`           | In-app bug reports                                                                            |                                                  |
 
 **`User` stays global** (one login identity across the whole platform); everything else
@@ -759,7 +759,7 @@ group's future events on `GroupMembership` change, and a club_wide event's futur
 **As built, a GAME-kind `Event` defaults its own `end`** — `Event.save()` sets
 `end = start + events.models.ASSUMED_EVENT_DURATION` (2 hours) whenever a game is saved
 with no explicit `end`, and never overwrites one that's already set. Other event kinds are
-untouched — `end` stays blank for them unless explicitly given one. The public games API (`../events/api.py`, `GET /games/upcoming/`) reads through this: it returns every non-cancelled
+untouched — `end` stays blank for them unless explicitly given one. The public games API (`../api/public/routers/events.py`, `GET /games/upcoming/`) reads through this: it returns every non-cancelled
 game/tournament that **hasn't finished yet** (`end` — explicit, defaulted, or, for the rare
 un-saved-since / non-GAME row still lacking one, `start` within the assumed window — is at or
 after now), not just ones that haven't started, so a game already in progress keeps showing up
@@ -972,7 +972,7 @@ home.HomeConfig(ClubScopedModel)   # one row PER CLUB: featured articles/teams, 
   club person, not a raw login; `SET_NULL` so deleting a member doesn't erase their posts.
 - `slug`s back clean public URLs and feed `search`; they are **unique per club** (§2.4), so
   two clubs can both have `/news/season-kickoff`. Resolve within the request's club.
-- `visibility` (internal/external/both) is enforced by the public read-only API (`../news/api.py`, mounted under `api/`) — only `external`/`both` items, published and
+- `visibility` (internal/external/both) is enforced by the public read-only API (`../api/public/routers/news.py`, mounted under `api/`) — only `external`/`both` items, published and
   past their release date, are ever returned. No member-facing internal reading page
   exists yet; that's later work.
 - **`title`/`body` are Dutch (the club's own language, and the only one required);
@@ -1611,7 +1611,7 @@ pattern).
 - **Dispatcher** (`../notifications/dispatch.py`): `notify_members` calls `schedule_notifications`, which after commit and off the request thread passes the batch to every registered *channel* (`email`, `native`, `web`). Channels live in their own
   apps and call `register_channel` in `AppConfig.ready`, so `notifications` never imports `api`/`mobile`. A failing channel never stops the others; `dispatch_to_user` is the entry point for messages without an inbox row (live game updates). Tests
   deliver eagerly (`NOTIFICATIONS_DISPATCH_EAGER`).
-- Native delivery goes through `api.app.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details:
+- Native delivery goes through `api.protected.push.PlatformGateway` (APNs for iOS, FCM HTTP v1 for Android). Recipients are accounts (own login + guardians); web push and plain email are skipped for accounts with a recently-seen native device. Details:
   `API.md` §9.
 - **`NotificationDelivery`** (`notifications`, `../notifications/delivery_log.py`): the delivery log, one row per send per channel target (status sent/retrying/failed/dead, attempts, last error, next attempt, and the channel's `payload` while
   retrying). A transient failure is retried by the `retry_failed_deliveries` job (every 2 min; backoff 1/5/30 min, 4 attempts) through `Channel.retry`; retention 14 days for sent, 60 for failed/dead. Logging never raises. Open items:

@@ -69,7 +69,7 @@ class IdempotencyRecord(UUIDModel):
     """A stored response for a retried write (API.md §6, "Idempotency").
 
     A client sends ``Idempotency-Key`` on writes a flaky network may repeat; the first
-    response is kept for ``api.app.idempotency.TTL`` and replayed for the same key, so a
+    response is kept for ``api.core.idempotency.TTL`` and replayed for the same key, so a
     double-tap never creates two orders. Keys are per user.
     """
 
@@ -84,3 +84,35 @@ class IdempotencyRecord(UUIDModel):
         verbose_name = _("idempotency record")
         verbose_name_plural = _("idempotency records")
         constraints = [models.UniqueConstraint(fields=["user", "key"], name="appapi_unique_idempotency_key_per_user")]
+
+
+class Job(ClubScopedModel):
+    """A long or bulk action running as a Celery task (API.md §17.3, ``api.core.jobs``).
+
+    The endpoint that starts it answers ``202`` with the job id; the client polls
+    ``GET /manage/jobs/{id}``. A job belongs to one club and the user who started it, and is
+    invisible to anyone else. The row (not the Celery result backend) is the source of truth,
+    so progress and a localisable error survive whatever the backend does."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("pending")
+        RUNNING = "running", _("running")
+        SUCCEEDED = "succeeded", _("succeeded")
+        FAILED = "failed", _("failed")
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+", verbose_name=_("user"))
+    name = models.CharField(_("task"), max_length=128)
+    status = models.CharField(_("status"), max_length=16, choices=Status.choices, default=Status.PENDING)
+    progress = models.PositiveSmallIntegerField(_("progress"), null=True, blank=True)
+    result = models.JSONField(_("result"), null=True, blank=True)
+    error_code = models.CharField(_("error code"), max_length=64, blank=True)
+    error_message = models.TextField(_("error message"), blank=True)
+    finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("job")
+        verbose_name_plural = _("jobs")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"{self.name} ({self.status})"

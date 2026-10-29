@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide %}
+{% load i18n lucide %}
 
 {% block panel_title %}Jobs{% endblock panel_title %}
 
@@ -11,15 +11,19 @@
     <span class="{% if summary.failing %}text-club-dark{% endif %}">{{ summary.failing }} failing</span>
     <span class="text-edge">|</span>
     <span class="{% if summary.paused %}text-warn-text{% endif %}">{{ summary.paused }} paused</span>
+    {% if summary.unscheduled %}
+        <span class="text-edge">|</span>
+        <span class="text-warn-text">{{ summary.unscheduled }} unscheduled</span>
+    {% endif %}
 {% endblock breadcrumb %}
 
 {% block panel %}
     <div class="rounded border border-info-border bg-info-bg px-4 py-3 text-sm text-info-text">
         {% lucide "info" size=16 class="inline -mt-0.5 mr-1" %}
-        These run on an in-process scheduler inside the <span class="font-mono">web</span> container (schedule: <span class="font-mono">JOB_REGISTRY</span> in <span class="font-mono">features/jobs.py</span>; see "Scheduled jobs" in <span class="font-mono">DEPLOYMENT.md</span>). Only one process ticks at a time, and a run still going makes its next tick skip rather than queue. "Run now" runs a job once in the background — the page doesn't wait, refresh for the result — and a paused job refuses it until resumed. A run that never shows up at its scheduled time (not paused, no maintenance, no earlier run still going) points at the web container's scheduler — check its logs — not at this page.
+        {% blocktrans %}Jobs run on Celery: beat queues each one on its schedule and a worker runs it. The schedule and the pause switch are stored in the database, so you can change them here and beat picks the change up within seconds. Results come from the Celery result backend. "Run now" hands a job to a worker once — refresh for the result — and a paused job refuses it until resumed. A job that does not run at its scheduled time (not paused, no maintenance) points at the beat or worker service on the server, not at this page.{% endblocktrans %}
     </div>
 
-    {% comment %}
+{% comment %}
         One <details> per job laid out as a grid row: the <summary> is the collapsed row,
         clicking it expands the description, last output/error and run history. The action
         forms can't live inside <summary> (forms aren't phrasing content, and a button in
@@ -45,7 +49,9 @@
                         <summary class="grid h-12 cursor-pointer list-none grid-cols-[1.5rem_6rem_minmax(14rem,1fr)_10rem_10rem_8.5rem_13rem] items-center gap-3 px-4 hover:bg-row-focus [&::-webkit-details-marker]:hidden {% if job.is_failing %}bg-row-warn{% endif %}">
                             <span class="text-dim">{% lucide "chevron-right" size=14 class="transition-transform group-open:rotate-90" %}</span>
                             <span>
-                                {% if job.state == "paused" %}
+                                {% if job.state == "unscheduled" %}
+                                    <span class="badge badge-sm badge-warning">unscheduled</span>
+                                {% elif job.state == "paused" %}
                                     <span class="badge badge-sm badge-warning">paused</span>
                                 {% elif job.state == "ok" %}
                                     <span class="badge badge-sm badge-success">ok</span>
@@ -80,7 +86,7 @@
                         <div class="grid gap-4 border-t border-rule bg-subhead px-4 py-3 text-sm lg:grid-cols-[1fr_18rem]">
                             <div class="flex min-w-0 flex-col gap-2">
                                 <p class="text-slate">{{ job.description }}</p>
-                                <div class="font-mono text-[11px] text-muted">{{ job.name }}</div>
+                                <div class="font-mono text-[11px] text-muted">{{ job.task }}</div>
                                 {% if job.latest %}
                                     <div class="font-mono text-[11px] text-muted">
                                         last run {{ job.latest.started_at|date:"j M Y, H:i" }}
@@ -118,6 +124,9 @@
                     </details>
 
                     <div class="absolute top-0 right-0 flex h-12 items-center gap-2 pr-4">
+                        {% if job.scheduled %}
+                            <a class="btn btn-outline btn-sm gap-1.5" href="{% url 'controlpanel:job_schedule' job.name %}" title="Edit schedule">{% lucide "calendar-clock" size=13 %}</a>
+                        {% endif %}
                         {% if job.is_running %}
                             <span class="btn btn-outline btn-sm gap-1.5 opacity-50">Running…</span>
                         {% else %}
@@ -131,7 +140,7 @@
                             {% if job.enabled %}
                                 <button type="submit" class="btn btn-outline btn-sm btn-error gap-1.5">{% lucide "pause" size=13 %} Pause</button>
                             {% else %}
-                                <button type="submit" class="btn btn-outline btn-sm btn-success gap-1.5">{% lucide "play" size=13 %} Resume</button>
+                                <button type="submit" class="btn btn-outline btn-sm btn-success gap-1.5" {% if not job.scheduled %}disabled{% endif %}>{% lucide "play" size=13 %} Resume</button>
                             {% endif %}
                         </form>
                     </div>

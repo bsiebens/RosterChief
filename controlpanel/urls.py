@@ -65,8 +65,10 @@ urlpatterns = [
     path("push/sandbox/", views.PushSandboxView.as_view(), name="push_sandbox"),
     path("push/sandbox/clear/", views.PushSandboxClearView.as_view(), name="push_sandbox_clear"),
     path("push/sandbox/sample/", views.PushSandboxSampleView.as_view(), name="push_sandbox_sample"),
-    # Jobs (the in-process scheduler's platform jobs -- see controlpanel/services/jobs.py)
+    # Jobs (the Celery-scheduled platform jobs -- see controlpanel/services/jobs.py)
     path("jobs/", views.JobsView.as_view(), name="jobs"),
     path("jobs/<str:name>/toggle/", views.JobToggleView.as_view(), name="job_toggle"),
     path("jobs/<str:name>/run/", views.JobRunNowView.as_view(), name="job_run_now"),
+    path("jobs/<str:name>/schedule/", views.JobScheduleView.as_view(), name="job_schedule"),
+    path("jobs/<str:name>/schedule/reset/", views.JobScheduleResetView.as_view(), name="job_schedule_reset"),
 ]

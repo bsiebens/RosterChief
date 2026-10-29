@@ -1,0 +1,27 @@
+[Unit]
+Description=RosterChief Celery beat (scheduler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rosterchief
+Group=rosterchief
+WorkingDirectory=/opt/rosterchief/current
+EnvironmentFile=/etc/rosterchief/rosterchief.env
+EnvironmentFile=/etc/rosterchief/node.env
+Environment=PYTHONUNBUFFERED=1 HOME=/var/lib/rosterchief XDG_CACHE_HOME=/var/lib/rosterchief/.cache
+# The schedule lives in the database (django_celery_beat's DatabaseScheduler, see settings), so there is
+# no schedule file. EXACTLY ONE beat may run fleet-wide: it is enabled on the master only.
+ExecStart=/opt/rosterchief/current/.venv/bin/celery -A rosterchief beat --loglevel=INFO
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=rosterchief
+
+[Install]
+WantedBy=multi-user.target

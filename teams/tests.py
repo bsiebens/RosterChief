@@ -8,11 +8,11 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from api.public.routers.teams import build_roster
 from club.models import Club, ClubMembership, Season
 from members.models import Member
 from registration.models import RegistrationBatch, RegistrationDetails
 
-from .api import build_roster
 from .models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from .services.numbers import available_numbers, has_unresolved_conflict, is_number_available, member_current_number, numbers_taken
 from .services.roster import place_member_on_team
@@ -523,7 +523,7 @@ class OfficialProfileModelTests(TeamsTestCase):
 
 
 class RosterApiTests(TeamsTestCase):
-    """build_roster (teams/api.py) -- called directly, not through Ninja's routing,
+    """build_roster (api/public/routers/teams.py) -- called directly, not through Ninja's routing,
     same reasoning the module's own docstring gives for splitting it out. A roster
     spot placed from the Sign-up page (management.forms.SignupTeamPlacementForm)
     has no position yet -- this must group and sort those without crashing on

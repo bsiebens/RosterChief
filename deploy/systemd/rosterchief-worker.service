@@ -1,0 +1,33 @@
+[Unit]
+Description=RosterChief Celery worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rosterchief
+Group=rosterchief
+WorkingDirectory=/opt/rosterchief/current
+EnvironmentFile=/etc/rosterchief/rosterchief.env
+EnvironmentFile=/etc/rosterchief/node.env
+Environment=PYTHONUNBUFFERED=1 HOME=/var/lib/rosterchief XDG_CACHE_HOME=/var/lib/rosterchief/.cache
+# Prefork forks a full Django per child (each pays most of the import cost again), so concurrency is small
+# and children are recycled; raise CELERY_CONCURRENCY in node.env on a bigger box.
+ExecStart=/opt/rosterchief/current/.venv/bin/celery -A rosterchief worker \
+    --loglevel=INFO --hostname=worker@%H \
+    --concurrency=${CELERY_CONCURRENCY} --max-tasks-per-child=200
+Restart=on-failure
+RestartSec=5
+# Let a running job (e.g. the notification outbox) finish before a deploy restarts the worker.
+TimeoutStopSec=120
+KillMode=mixed
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rosterchief/shared
+StateDirectory=rosterchief
+
+[Install]
+WantedBy=multi-user.target

@@ -26,7 +26,7 @@ Three surfaces serve different people:
 | `/manage/`  | A club's admins, coaches and treasurers.                                                              |
 | `/app/`     | Members and parents: the installable PWA.                                                             |
 
-The native-app API lives under `/api/app/v1/` and is documented in `docs/app-api/`. The public API for club websites is under `/api/v1/`.
+One API lives under `/api/v1/` (public club routes plus bearer-token routes for the apps and management panel), documented in `docs/API.md` and `docs/app-api/`. `/api/app/v1/` still works as a deprecated alias.
 
 ## Multi-tenancy in one paragraph
 
@@ -70,7 +70,7 @@ Settings read the environment through python-decouple, with a local `.env` for d
 ```bash
 uv run python manage.py test                       # all tests
 uv run python manage.py test api                   # one app
-uv run python manage.py test api.app.test_member.CalendarTests.test_game_status
+uv run python manage.py test api.protected.test_member.CalendarTests.test_game_status
 uv run python manage.py test --fast                 # quick tier, about a third of the time (CI runs it on feature branches; releases run everything)
 
 uv run ruff check .                                # lint
@@ -96,7 +96,7 @@ Every user-facing string must be translatable. See the Conventions section of [`
 | Club life        | `events`, `announcements`, `news`, `notifications`, `evaluations`, `formbuilder`        |
 | Money            | `shop`, `billing`                                                                       |
 | Surfaces         | `management`, `mobile`, `marketing`                                                     |
-| APIs             | `api` (`api.app` native apps, `api.public` club websites)                               |
+| APIs             | `api` (`api.protected` native apps, `api.public` club websites)                               |
 
 ## Documentation
 
@@ -113,14 +113,14 @@ and `docs/DEPLOYMENT.md` has the full description.
 
 ## Deploying
 
-Production runs from container images that GitHub Actions builds, behind Caddy with a wildcard certificate (which needs DNS-01, so a DNS API token). From your own machine:
+Production runs on bare metal (Rocky/Alma, systemd, Caddy, PostgreSQL, Redis) from a release tarball that GitHub Actions attaches to each release. From your own machine:
 
 ```bash
-deploy/deploy-prod.sh                       # the latest main
-deploy/deploy-prod.sh --version v0.8.1      # an exact release, or a rollback
+deploy/deploy.sh --master prod1.example.com                          # the latest release
+deploy/deploy.sh --master prod1 --web-node prod2 --version v1.2.0    # several servers, an exact release (or a rollback)
 ```
 
-The deploy puts the platform in maintenance mode, backs up the database, migrates, restarts, checks health, and then asks whether to reopen. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) covers the first deploy and what makes this setup unusual.
+A new server is prepared once with `deploy/prep-server.sh`; an existing Docker install is moved over with `deploy/convert.sh`. See [`docs/bare-metal.md`](docs/bare-metal.md). The deploy puts the platform in maintenance mode, backs up the database, migrates, restarts, checks health, and then asks whether to reopen. [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) covers the rest (its Docker sections describe the dev instance and the previous setup).
 
 ## Licence
 

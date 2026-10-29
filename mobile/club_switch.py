@@ -1,14 +1,14 @@
 """Switch club: the clubs an account may jump between, for Me's row and the picker.
 
 Sessions are shared across club subdomains (settings.SESSION_COOKIE_DOMAIN), so switching
-is a plain navigation to the other club's app. The list reuses api.app's ``clubs_for`` -- the
+is a plain navigation to the other club's app. The list reuses api.protected's ``clubs_for`` -- the
 exact membership definition the native ClubPicker uses -- so a club the account has no tie
 to is never listed, and every URL is built from the Club's own slug (never from input).
 """
 
 from django.urls import reverse
 
-from api.app.services import club_host, clubs_for, logo_url
+from api.protected.services import club_host, clubs_for, logo_url
 
 
 def switchable_clubs(request) -> list:

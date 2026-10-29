@@ -10,7 +10,7 @@ the project the server was set up for.
 2. Get the FCM registration token (`FirebaseMessaging.getInstance().token`) and register it:
 
    ```http
-   POST https://<base domain>/api/app/v1/devices
+   POST https://<base domain>/api/v1/devices
    Authorization: Bearer ...
 
    {"installation_id": "<UUID generated once>",

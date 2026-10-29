@@ -32,7 +32,7 @@
 <header>
   <strong>{% trans "RosterChief app API" %}</strong>
   {% for item in nav %}<a href="{{ item.href }}"{% if item.current %} aria-current="page"{% endif %}>{{ item.title }}</a>{% endfor %}
-  <a href="/api/app/v1/docs">{% trans "App API reference" %}</a>
+  <a href="/api/v1/docs">{% trans "API reference" %}</a>
   <a href="/api/auth/openapi.html">{% trans "Sign-in API reference" %}</a>
 </header>
 <main>{{ body }}</main>

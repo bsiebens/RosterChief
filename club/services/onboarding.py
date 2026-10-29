@@ -26,6 +26,32 @@ from members.models import Member
 _RESOLVED = Q(is_complete=True) | Q(is_bypassed=True)
 
 
+def current_membership_for(club, member_id):
+    """``member_id``'s current-season ClubMembership in ``club`` (None without a current season or membership) --
+    the one a checklist item makes sense against, since a fresh checklist starts each season."""
+    from club.services.access import current_season
+
+    season = current_season(club)
+    if season is None:
+        return None
+    return ClubMembership.objects.filter(club=club, member_id=member_id, season=season).first()
+
+
+def requirement_document(user, club, member_id, requirement_id):
+    """The MemberRequirementStatus holding an uploaded document for this member's current checklist, for staff who may
+    see that member (the members_visible_to rule of the member page) or manage members; None when the caller may not,
+    there is no current membership, no such status or no document."""
+    from club.services.access import can_manage_members, members_visible_to
+
+    if not can_manage_members(user, club) and not members_visible_to(user, club, include_guardians=True).filter(pk=member_id).exists():
+        return None
+    membership = current_membership_for(club, member_id)
+    if membership is None:
+        return None
+    status = MemberRequirementStatus.objects.filter(membership=membership, requirement_id=requirement_id).first()
+    return status if status is not None and status.document else None
+
+
 def checklist_for(membership):
     """Every active requirement for this membership's club, each paired with its
     status row if one exists (or None -- not started). One query for the

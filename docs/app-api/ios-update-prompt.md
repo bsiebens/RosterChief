@@ -2,11 +2,11 @@
 
 Paste everything inside the fence into Claude Code, run from the **iOS app repository**. The server
 side (repo `RosterChief`) is finished; the prompt is self-contained, and points at the server's own
-contract (`openapi-app-v1.json`, `ios.md`) as the source of truth when something is unclear.
+contract (`openapi-v1.json`, `ios.md`) as the source of truth when something is unclear.
 
 ````text
 You are updating the RosterChief iOS app (SwiftUI) to match changes made to the RosterChief server's
-app API (`/api/app/v1/`). The server work is finished and tested; your job is the client. Work in
+app API (`/api/v1/`). The server work is finished and tested; your job is the client. Work in
 small, reviewable steps, one commit per numbered section, and keep the app building and its tests
 green after each. Start by reading the codebase: find how the app talks to the API (networking layer,
 models, auth/token refresh, club switching, the Notifications inbox, profile screens, the
@@ -14,8 +14,8 @@ push-registration code and the notification handling in the AppDelegate / UNUser
 delegate) and match its conventions (naming, error handling, localisation, DI, test style). Do not
 rewrite things that already work.
 
-SOURCE OF TRUTH: the server's OpenAPI document (`docs/app-api/openapi-app-v1.json` in the server repo,
-also served at `https://<base domain>/api/app/v1/openapi.json`) and its guide (`docs/app-api/ios.md`).
+SOURCE OF TRUTH: the server's OpenAPI document (`docs/app-api/openapi-v1.json` in the server repo,
+also served at `https://<base domain>/api/v1/openapi.json`) and its guide (`docs/app-api/ios.md`).
 If anything below conflicts with them, they win: tell me about the conflict instead of guessing.
 Before coding, diff the OpenAPI document against the app's existing models and list for me which
 fields/endpoints are new or changed, then do the work below.

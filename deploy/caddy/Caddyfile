@@ -53,7 +53,7 @@
 		}
 		@svg path *.svg *.SVG
 		header @svg Content-Disposition attachment
-		root * /srv/media
+		root * {$ROSTERCHIEF_MEDIA_ROOT:/srv/media}
 		file_server
 	}
 
@@ -64,7 +64,21 @@
 	# {remote_host}, which would be the Cloudflare edge). It is what
 	# ALLAUTH_TRUSTED_CLIENT_IP_HEADER / rosterchief.client_ip read, so login rate limits key
 	# on the real client.
-	reverse_proxy web:8000 {
+	#
+	# ROSTERCHIEF_UPSTREAMS is a space-separated list of host:port (several on a multi-node bare-metal
+	# deploy: deploy/prep-server.sh writes it to /etc/caddy/caddy.env); the compose default is the
+	# `web` service. The active health check keeps a node that cannot reach Postgres/Redis out of
+	# rotation. Its probe bypasses header_up, so it sends the Host and X-Forwarded-Proto Django
+	# insists on (ALLOWED_HOSTS, SECURE_SSL_REDIRECT) itself.
+	reverse_proxy {$ROSTERCHIEF_UPSTREAMS:web:8000} {
+		lb_policy least_conn
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 5s
+		health_headers {
+			Host {$ROSTERCHIEF_BASE_DOMAIN}
+			X-Forwarded-Proto https
+		}
 		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {client_ip}
 	}

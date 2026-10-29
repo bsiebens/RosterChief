@@ -117,7 +117,7 @@ the source:
 Rules:
 
 - **`side` stays home/away exactly as the source says it.** "Ours" vs. "theirs" is derived when
-  the data is presented, with the same `event.is_home_game` convention the score already uses (`../events/competition/hockey.py`, `events/api.py`). If someone later fixes a game's location, the
+  the data is presented, with the same `event.is_home_game` convention the score already uses (`../events/competition/hockey.py`, `api/public/routers/events.py`). If someone later fixes a game's location, the
   stored timeline doesn't need rewriting.
 - **Player names are stored as the source gives them.** The format is `{name, number}` everywhere.
   We don't link people to `Member` in v1: names aren't reliable keys across sources (CEHL casing,
@@ -268,7 +268,7 @@ without being stored.
 **Public API (`/api/v1/`, club website):** serves no timeline data. Games there carry only
 score and status; the timeline is for the native apps.
 
-**Member app API (`api.app`):** the same game-detail shape when the app gets a game screen. Push
+**Member app API (`api.protected`):** the same game-detail shape when the app gets a game screen. Push
 payloads stay pointers (`{target: game id}`), per `API.md` §9. The app fetches the timeline itself.
 
 **Management UI:** a read-only timeline card on the event detail page, next to the existing
@@ -288,7 +288,7 @@ How it plugs into what exists:
 
 - `notifications.services.notify_members(..., send_email=False)` creates `Notification` rows and
   fires `notifications_created`. That already fans out to Web Push (`mobile.services.push`) and
-  native push (`api.app.delivery`, which also de-duplicates per account and reaches guardians).
+  native push (`api.protected.delivery`, which also de-duplicates per account and reaches guardians).
   So reaching a team's players and parents needs no new delivery code.
 - But one inbox row per goal per member is noisy, and the inbox isn't a live ticker. The likely
   better fit is a push-only path. That means a sibling of `notify_members` that skips the
@@ -355,11 +355,11 @@ Deviations from §3.1, both to keep the score path untouched:
   game was decided, `decided_in` is derived from the period labels once the game is final.
 - **Public API (`/api/v1/`):** no timeline fields (`periods`, `decided_in`, `timeline_updated_at`
   and `timeline` were dropped); `GET /games/{id}/` returns the plain game.
-- **Member app API (`api.app`):**
+- **Member app API (`api.protected`):**
     - `GET /events/{id}` gains `game_timeline`, filled only for games, with the club's
       `game_timeline` feature, and with names.
     - The club's `features` now includes `game_timeline`.
-    - `app-api/openapi-app-v1.json` is regenerated.
+    - `app-api/openapi-v1.json` is regenerated.
 
 ## 7c. Phase 3 as built
 
@@ -401,11 +401,11 @@ Decisions (§9.2–9.6):
   has the `game_timeline` flag.
 - **Delivery:** `../events/services/game_push.py`. After `record_moments` stores a batch, it calls
   `schedule_delivery`, which runs `deliver_moments` after commit in a background thread (the
-  same pattern as `api.app.delivery`). `deliver_moments`:
+  same pattern as `api.protected.delivery`). `deliver_moments`:
     - marks the batch's notifiable moments delivered, whether or not anyone follows the team, so
       nothing is retried later;
     - finds the followers of any of the game's teams (active accounts only);
-    - sends each one push, to native devices (`api.app.push` gateway, `kind: "game_moment"`,
+    - sends each one push, to native devices (`api.protected.push` gateway, `kind: "game_moment"`,
       target = the event) and to web push subscriptions (`mobile.services.push.send_push_to_user`).
     - The body is one `describe_moment` line per moment, in game-clock order.
 - **Language:** push text is rendered in the server's default language (the background thread
@@ -432,7 +432,7 @@ Decisions (§9.2–9.6):
     - show names as-is everywhere;
     - hide names for youth teams (`Team` would need an age-category signal);
     - per-club setting;
-    - numbers only in the public API, names only for authenticated members in `api.app`
+    - numbers only in the public API, names only for authenticated members in `api.protected`
       (resolved: the public API serves no timeline at all).
 2. **Who gets pushes?** Team players and guardians by default with opt-out, opt-in only, or
    "followers" (anyone, including non-members via the PWA)? Which moments by default? The likely

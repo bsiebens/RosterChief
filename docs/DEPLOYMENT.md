@@ -839,18 +839,19 @@ encrypted form.
 
 ## Scheduled jobs
 
-All eighteen platform jobs run from **one in-process scheduler inside `web` itself** —
-`../features/scheduler.py`, an APScheduler `BackgroundScheduler`. It is started in the gunicorn **workers** (`gunicorn.conf.py`'s `post_worker_init` hook, stopped by `worker_exit`); a Redis
-lease makes exactly one worker the one that runs the schedule, so a recycled worker hands it
-over within seconds. It must never live in the gunicorn *master*: the master forks every worker,
-and a lock held by any other thread at that instant is copied locked into the child — the
-reason one worker once swallowed half the node's requests (see "A wedged web worker" below).
-Without Redis (a dev box) every worker would lead. There is no host cron, no `worker`/`beat`, and no separate poller
-container: the schedule is `features/jobs.py`'s `JOB_REGISTRY`, in code, in git, deployed with
-every image — nothing left to configure by hand on a new box. Each job is a
-`features.commands.ScheduledJobCommand` subclass — see `features/jobs.py` for what each one is
-and `features/commands.py` for the shared Maintenance/JobToggle-aware, JobRun-recording base
-class every one of them runs through.
+All eighteen platform jobs run on **Celery**: `beat` queues each one when it is due and a `worker` runs it
+(`rosterchief/celery.py`; one `tasks.py` per app; broker is Redis, `DJANGO_REDIS_URL`). On a bare-metal server
+these are the `rosterchief-beat` (master only — exactly one beat fleet-wide) and `rosterchief-worker` systemd
+units (see `bare-metal.md`). Each task is a thin wrapper (`features/celery_support.py`'s `run_job`) around the
+job's `features.commands.ScheduledJobCommand` management command, so the Maintenance lock, the per-job pause and
+the `JobRun` bookkeeping all still apply.
+
+**The schedule lives in the database**, not in code: `django_celery_beat`'s `PeriodicTask` rows. `features/jobs.py`'s
+`JOB_REGISTRY` holds each job's label, command, Celery task name and *default* schedule; `manage.py install_tasks`
+(run by every deploy) creates a row for any job that has none and **never overwrites an existing one**. Edit a
+schedule, pause or resume a job, or reset it to its default from the control panel's **Jobs** tab; beat picks the
+change up within seconds, no restart. Results (status, timing, what it returned or raised) are Celery's
+`TaskResult` rows (`django-db` result backend), which the Jobs tab and the dashboard read.
 
 | Job (management command)          | Cadence              | What it does                                                                                                                                                                                                                                                    |
 |-----------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -873,75 +874,25 @@ class every one of them runs through.
 | `process_outbox`                  | every minute         | delivers the notification / live-game-push outbox entries a restart or crash left behind (backoff 1/5/30 min, 5 attempts, at-least-once), returns entries stuck in processing > 5 min, purges done (3 days) and failed (30) entries                             |
 | `check_push_health`               | every 5 min          | emails the platform admins when push is unhealthy (provider down/degraded, retry queue or outbox stuck, provider not configured) — once per outage, reminder every 6 h, recovery notice; see "Push health alerts"                                               |
 
-Cadences above are the human-readable label each job's `JOB_REGISTRY` entry carries (also
-shown on the control panel's **Jobs** tab); the actual trigger the scheduler runs from is that
-same entry's `trigger` field (an APScheduler cron/interval spec) — keep the two in sync by hand
-if either ever changes, the same discipline the old crontab table needed, just in one file
-instead of two.
+Cadences above are the *defaults*; the Jobs tab shows what is actually scheduled.
 
-**`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders`
-and `archive_overdue_clubs` default to a dry-run/report-only preview (per their own `--help`);
-without `--commit` the scheduler would tick them forever and nothing would actually happen. The
-other ten act by default. `renew_subscriptions` also has a `--dry-run` to preview instead, for
-manual use.
+**`--commit` is not optional for the two billing jobs it's shown on** — `send_billing_reminders` and
+`archive_overdue_clubs` default to a dry run; their tasks pass `--commit`. `renew_subscriptions` also has a
+`--dry-run` for manual use.
 
-**Overlap and misfire protection is APScheduler's job config, not `flock`.** Every job is added
-with `max_instances=1` (a still-running tick makes the next one skip, not queue — the same thing
-`flock -n` gave the old crontab, per-job rather than one shared lock so a stuck
-`notify_published_news` doesn't also block `publish_scheduled_lineups`) and
-`coalesce=True, misfire_grace_time=300` (a tick or two missed — a deploy, a brief outage — runs
-once to catch up instead of once per missed tick; older misfires are dropped rather than piling
-up, the same "don't catch up the whole backlog" behaviour cron itself had).
+**Overlap.** Beat does not skip a tick while the previous one still runs; a slow job can overlap itself. The jobs
+are idempotent per run ("Nothing to renew", "Nothing overdue past grace"), and the worker's `CELERY_TASK_TIME_LIMIT`
+(30 min) bounds a stuck one.
 
-**Exactly one process runs the schedule, enforced by a Redis lease, not by convention.**
-`features.scheduler._try_acquire_or_renew` takes out a short-lived leader lease in the shared
-cache before starting its local `BackgroundScheduler`, and renews it every 10 seconds for as
-long as it holds it. Today, with one `web` container, this is nearly invisible — the gunicorn
-master is the only process that ever tries. It's there for the day this scales to more than one
-`web` node (see "Going multi-server" below): every node runs the same scheduler code, but only the one
-holding the lease actually ticks, the same "one scheduler" rule this document's multi-server
-section already asked for by convention, now enforced automatically. A lost lease (a crashed
-leader, Redis briefly unreachable) means at most ~30 seconds before another node picks it back
-up — see that module's own docstring for the accepted small race window and why it isn't worth
-a harder distributed lock at this job volume.
+**Redis is the broker *and* the cache**, so it must not evict the queue or lose it on restart: `prep-server.sh`
+configures `maxmemory-policy volatile-lru` (only keys with a TTL — the cache — are evictable; Celery's queue keys
+have none), `appendonly yes` and `maxmemory 256mb`. Do not reuse the old Docker settings (32 MB, `allkeys-lru`,
+no persistence).
 
-Run status (started, finished, success/failure, what it returned or raised) is recorded in
-`features.models.JobRun` and shown on the control panel's **Jobs** tab — check there first if a
-job seems to have gone quiet. The Jobs tab also has a **Run now** button per job, for testing one
-off-schedule — it runs on a background thread (no request/gunicorn worker tied up waiting on it)
-and goes through the exact same command, args, and JobRun bookkeeping a scheduled tick does,
-`--commit` included where the registry has it.
-
-Every job run also logs `job.start`/`job.finished`/`job.failed` lines (with elapsed time, and for
-`job.start`, the OS pid) through Django's own `logging`, flushed immediately rather than sitting
-in a stdio buffer — `docker compose logs web` is where to look first if a run
-seems stuck: the last line reached tells you whether it got past creating its own `JobRun` row (a
-DB-connectivity problem from the very first write) or hung somewhere inside the command's own
-work. `scheduler.leader_acquired`/`scheduler.leader_lost` lines show which node currently owns
-the schedule, if there's more than one.
-
-Each command still has its own `--help` for manual/dry-run use from a shell (`generate_seasons
---resync`, for one, is still CLI-only: it can delete rows, so it isn't something a schedule
-should ever run unattended, Run now button included).
-
-### Why not host cron, and why not Celery
-
-Both were tried. **Celery** (`worker`/`beat`) measured **~740 MB** for `worker` alone on a real
-1 GB box (prefork forking defeats Python's
-reference-counting-based copy-on-write once Django has ~46 apps loaded, so each forked child
-pays close to the *full* import cost again). **Host cron** fixed the memory problem (a
-`docker compose run` one-off pays the Django-import cost for a few seconds instead of 24/7,
-and the once-a-minute `poll_live_game_results` ran as a single persistent process instead of
-1,440 container starts a day) but traded it for an operational one: the schedule lived in
-`/etc/cron.d/rosterchief` on the host, outside git, provisioned by hand on every new box, with
-nothing to stop it drifting from `../features/jobs.py`'s own idea of the schedule.
-
-The in-process scheduler keeps Celery's actual lesson (no persistent worker *pool*, no
-forking, no broker) while fixing what made cron itself annoying: the schedule is a Python
-dict, reviewed in the same PR as the code it schedules, and shipped with the image instead of
-configured separately per host. Expect it to cost a background thread's worth of memory inside
-the process gunicorn's master already runs, not a new process — cheaper than even the old
-`live_score_poller` container's ~50–100 MB, let alone Celery's `worker`.
+Run status is also recorded in `features.models.JobRun` (written by the command itself). Check the Jobs tab first
+if a job seems to have gone quiet; then `journalctl -u rosterchief-beat -u rosterchief-worker`. A job missing at its
+scheduled time (not paused, no maintenance) points at `rosterchief-beat` or `rosterchief-worker` not running.
+The Jobs tab's **Run now** queues the task for a worker, exactly like a scheduled tick.
 
 ## Bulk-importing member photos
 
@@ -1051,7 +1002,7 @@ just reports `push_enabled: false` and nothing is sent to it.
 | Credential      | a `.p8` APNs key (+ Key ID, Team ID)                                    | a service-account JSON key                                                                |
 | Server env vars | `APP_PUSH_APNS_KEY_ID`, `_TEAM_ID`, `_BUNDLE_ID`, `_KEY` or `_KEY_FILE` | `APP_PUSH_FCM_CREDENTIALS` or `_CREDENTIALS_FILE` (`_PROJECT_ID`, `_CHANNEL_ID` optional) |
 | In the app      | Push Notifications capability; sends its APNs device token              | `google-services.json` of the same Firebase project; sends its FCM registration token     |
-| Register with   | `POST /api/app/v1/devices` with `platform: "ios"`                       | `POST /api/app/v1/devices` with `platform: "android"`                                     |
+| Register with   | `POST /api/v1/devices` with `platform: "ios"`                       | `POST /api/v1/devices` with `platform: "android"`                                     |
 
 Do it once per server: production and the test server may share the same keys, bundle ID /
 Firebase project, but each keeps its own `../.env`. A phone registers with exactly one server (the
@@ -1137,7 +1088,7 @@ Open the app on a phone, sign in and allow notifications. Then, on the server:
 ```bash
 docker compose exec web python manage.py shell -c "
 from api.models import PushDevice
-from api.app.push import get_gateway
+from api.protected.push import get_gateway
 gateway = get_gateway()
 for device in PushDevice.objects.filter(user__email='you@example.com', enabled=True):
     print(device.installation_id, device.environment, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))
@@ -1199,7 +1150,7 @@ debug and release builds use the same endpoint, and the device's `environment` i
 - Create the notification channel named by `APP_PUSH_FCM_CHANNEL_ID` (default `notifications`)
   at startup, and request the `POST_NOTIFICATIONS` runtime permission (Android 13+). Without the
   channel Android 8+ drops the notification.
-- Send its FCM registration token with `POST /api/app/v1/devices` (`platform: "android"`) on every
+- Send its FCM registration token with `POST /api/v1/devices` (`platform: "android"`) on every
   launch and whenever FCM rotates it (`onNewToken`).
 - Payload: the visible title/body is a normal FCM notification message (shown by the system
   even when the app is closed, in the language the device registered with). The `data` map holds
@@ -1215,7 +1166,7 @@ Open the app on a phone, sign in and allow notifications. Then, on the server:
 ```bash
 docker compose exec web python manage.py shell -c "
 from api.models import PushDevice
-from api.app.push import get_gateway
+from api.protected.push import get_gateway
 gateway = get_gateway()
 for device in PushDevice.objects.filter(user__email='you@example.com', platform='android', enabled=True):
     print(device.installation_id, gateway.supports(device), gateway.publish(device, title='Test', body='Push works', data={}))

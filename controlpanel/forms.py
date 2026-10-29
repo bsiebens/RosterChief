@@ -8,6 +8,7 @@ from billing.models import DuePayment, Plan, PlanPrice, Subscription
 from club.models import Club, Sport
 from club.validators import LOGO_ACCEPT
 from events.models import Competition, Location
+from features.scheduling import CRON_FIELDS, validate_cron_field
 
 from .services.admins import find_member_by_email
 
@@ -212,3 +213,57 @@ class MaintenanceForm(forms.Form):
         label=_("Message"),
         help_text=_("Shown to every club while the platform is closed. Left blank, they get a generic notice."),
     )
+
+
+class JobScheduleForm(forms.Form):
+    """Edit when one scheduled job runs -- either every N minutes/hours/days, or at fixed times (cron fields).
+    Saved onto the job's django_celery_beat PeriodicTask by controlpanel.views.JobScheduleView."""
+
+    KIND_INTERVAL = "interval"
+    KIND_CRONTAB = "crontab"
+
+    kind = forms.ChoiceField(label=_("Run"), choices=[(KIND_INTERVAL, _("Every so often")), (KIND_CRONTAB, _("At fixed times"))], widget=forms.RadioSelect, initial=KIND_INTERVAL)
+    every = forms.IntegerField(label=_("Every"), min_value=1, max_value=1000, required=False, initial=5)
+    period = forms.ChoiceField(label=_("Unit"), choices=[("minutes", _("minutes")), ("hours", _("hours")), ("days", _("days"))], required=False, initial="minutes")
+    minute = forms.CharField(label=_("Minute"), required=False, initial="0", help_text=_("0-59, or * for every minute, */15 for every 15 minutes."))
+    hour = forms.CharField(label=_("Hour"), required=False, initial="*", help_text=_("0-23, or *."))
+    day_of_month = forms.CharField(label=_("Day of month"), required=False, initial="*", help_text=_("1-31, or *."))
+    month_of_year = forms.CharField(label=_("Month"), required=False, initial="*", help_text=_("1-12, or *."))
+    day_of_week = forms.CharField(label=_("Day of week"), required=False, initial="*", help_text=_("0-6 where 0 is Sunday, or *. Lists (1,3) and ranges (1-5) work."))
+
+    @classmethod
+    def initial_for(cls, periodic_task):
+        if periodic_task.interval_id:
+            return {"kind": cls.KIND_INTERVAL, "every": periodic_task.interval.every, "period": periodic_task.interval.period}
+        if periodic_task.crontab_id:
+            cron = periodic_task.crontab
+            return {"kind": cls.KIND_CRONTAB, **{field: getattr(cron, field) for field in CRON_FIELDS}}
+        return {}
+
+    def clean(self):
+        cleaned = super().clean()
+        kind = cleaned.get("kind")
+        if kind == self.KIND_INTERVAL:
+            if not cleaned.get("every"):
+                self.add_error("every", _("Enter how often the job runs."))
+            if cleaned.get("period") not in ("minutes", "hours", "days"):
+                self.add_error("period", _("Pick a unit."))
+        elif kind == self.KIND_CRONTAB:
+            for field in CRON_FIELDS:
+                value = (cleaned.get(field) or "").strip()
+                if not value:
+                    self.add_error(field, _("Required. Use * for every."))
+                    continue
+                try:
+                    validate_cron_field(field, value)
+                except ValueError:
+                    self.add_error(field, _("Not a valid value."))
+                cleaned[field] = value
+        return cleaned
+
+    def spec(self):
+        """The ``default_schedule``-shaped spec features.scheduling.set_schedule takes."""
+        data = self.cleaned_data
+        if data["kind"] == self.KIND_INTERVAL:
+            return {"interval": {"every": data["every"], "period": data["period"]}}
+        return {"crontab": {field: data[field] for field in CRON_FIELDS}}

@@ -7,7 +7,7 @@ API. The web app (PWA) keeps working next to it.
 |---|---|
 | **iOS developer guide** (start here) | [iOS guide](ios/) |
 | Sign-in API reference (allauth headless) | [/api/auth/openapi.html](/api/auth/openapi.html) · [openapi.json](/api/auth/openapi.json) |
-| App API reference | [/api/app/v1/docs](/api/app/v1/docs) · [openapi.json](/api/app/v1/openapi.json) |
+| API reference (public + app routes) | [/api/v1/docs](/api/v1/docs) · [openapi.json](/api/v1/openapi.json) |
 | Error codes | [Errors](errors/) |
 | What's built, what's next | [Status](status/) |
 
@@ -17,15 +17,15 @@ API. The web app (PWA) keeps working next to it.
    token refresh, logout, password reset. It's [django-allauth's headless
    API](https://docs.allauth.org/en/latest/headless/) for the `app` client. Its responses use
    allauth's own `{status, data, meta}` shape.
-2. **App API** — `/api/app/v1/…`, authenticated with the `access_token` the sign-in API
+2. **API** — `/api/v1/…` (the former `/api/app/v1/` still works, flagged `Deprecation: true`; move to `/api/v1/`), authenticated with the `access_token` the sign-in API
    returns (`Authorization: Bearer <token>`). Its errors use `{"error": {"code", "message",
    "fields"}}`.
 
 The app API has **two planes**:
 
-* **Account plane**, on the base domain (`https://rosterchief.app/api/app/v1`): `/meta`, `/me`,
+* **Account plane**, on the base domain (`https://rosterchief.app/api/v1`): `/meta`, `/me`,
   `/clubs`, `/devices`, `/me/settings`, `/me/notification-preferences` (also per person), `/me/quiet-hours`.
-* **Club plane**, on each club's own host (`https://<club>.rosterchief.app/api/app/v1`):
+* **Club plane**, on each club's own host (`https://<club>.rosterchief.app/api/v1`):
   `/context` and the member screens (home, calendar, events, news, notifications, profiles);
   coach screens follow. Take each club's base URL
   from `api_base_url` in `GET /clubs`; never build it yourself.

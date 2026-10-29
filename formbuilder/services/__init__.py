@@ -1,7 +1,7 @@
 from .audience import addressed_people, addressed_to, effective_members, form_status_rows_for, is_send_open, members_not_yet_submitted, resolve_season
 from .form_factory import build_form, build_form_class
 from .options import allowed_values, field_choices
-from .reporting import FormReport, ReportRow, form_report
+from .reporting import FormReport, ReportRow, form_report, write_report_csv
 from .submission import FormSubmissionError, submit_form
 
 __all__ = [
@@ -21,4 +21,5 @@ __all__ = [
     "members_not_yet_submitted",
     "resolve_season",
     "submit_form",
+    "write_report_csv",
 ]

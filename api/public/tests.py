@@ -9,9 +9,9 @@ from django.utils import timezone
 from PIL import Image
 from waffle import get_waffle_flag_model
 
-from api.public.cache import cached_for_club
+from api.core.cache import cached_for_club
+from api.public.routers.events import LIVE_GAME_CACHE_SECONDS
 from club.models import Club, ClubMembership, Season, Sponsor
-from events.api import LIVE_GAME_CACHE_SECONDS
 from events.models import Event, Location, Opponent
 from events.services import import_sources
 from members.models import Member
@@ -936,7 +936,7 @@ class GameDetailApiTests(ApiTestBase):
     def test_a_live_game_gets_the_short_cache_window(self):
         game = self.make_game(is_live=True)
 
-        with mock.patch("events.api.cached_for_club", wraps=cached_for_club) as mock_cache:
+        with mock.patch("api.public.routers.events.cached_for_club", wraps=cached_for_club) as mock_cache:
             self.api_get(f"/games/{game.pk}/")
 
         self.assertEqual(mock_cache.call_args.kwargs["seconds"], LIVE_GAME_CACHE_SECONDS)

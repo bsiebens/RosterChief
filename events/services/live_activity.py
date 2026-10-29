@@ -83,9 +83,9 @@ def on_timeline_changed(sender, *, event, previous, current, first_fetch, **kwar
 def deliver(event_id, phase: str) -> int:
     """``phase`` "live": start where wanted, update the rest. "end": end every activity.
     Returns how many pushes were handed to the gateway."""
-    from api.app.delivery import push_configured  # deferred: api.app imports events
-    from api.app.push import get_gateway
     from api.models import LiveActivity, PushDevice
+    from api.protected.delivery import push_configured  # deferred: api.protected imports events
+    from api.protected.push import get_gateway
 
     if not push_configured():
         return 0

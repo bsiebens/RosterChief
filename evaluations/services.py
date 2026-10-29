@@ -403,3 +403,56 @@ def session_outcome_rows(session: EvaluationSession):
     PlayerEvaluation answers, no EvaluationNote log -- see EvaluationOutcome's
     own docstring for why those stay separate."""
     return list(session.outcomes.select_related("player").order_by("player__last_name", "player__first_name"))
+
+
+# --- checklist management (shared by the management views and the management API) ---------------
+
+
+def set_checklist_active(checklist: EvaluationChecklist, active: bool) -> EvaluationChecklist:
+    """Archive (``active=False``) or reactivate a checklist -- never a delete, evaluations already
+    filed against it must keep working (PROTECT on PlayerEvaluation.checklist)."""
+    checklist.is_active = active
+    checklist.save(update_fields=["is_active", "modified"])
+    return checklist
+
+
+def rubric_criteria(checklist: EvaluationChecklist) -> list[Field]:
+    """The current rubric's live criteria, in order (empty until a rubric was built)."""
+    current = current_rubric_form(checklist)
+    return [] if current is None else list(current.fields.filter(is_active=True).order_by("order"))
+
+
+def save_rubric(checklist: EvaluationChecklist, rows: list[dict]) -> Form:
+    """Persist ``rows`` (already validated: ``label``, ``field_type``, ``required``, ``help_text``,
+    ``section``, ``options`` list, in the wanted order) as a brand-new rubric version.
+
+    Never edits the current Form's Fields in place: ``start_new_rubric_version`` copies the rubric to a
+    fresh Form, whose Fields are then replaced by exactly ``rows`` -- safe only because nothing has
+    answered that Form yet (see ``start_new_rubric_version``)."""
+    with transaction.atomic():
+        new_form = start_new_rubric_version(checklist)
+        new_form.fields.all().delete()
+        for index, row in enumerate(rows, start=1):
+            Field.objects.create(
+                form=new_form,
+                label=row["label"],
+                field_type=row.get("field_type") or Field.FieldType.NUMBER,
+                required=row.get("required", True),
+                help_text=row.get("help_text", ""),
+                section=row.get("section", ""),
+                options=row.get("options") or [],
+                order=index,
+            )
+    return new_form
+
+
+def evaluation_totals(checklist: EvaluationChecklist, *, season=None) -> dict:
+    """Counts above the statistics: evaluations filed, distinct players and distinct evaluators."""
+    evaluations = PlayerEvaluation.objects.filter(checklist=checklist)
+    if season is not None:
+        evaluations = evaluations.filter(season=season)
+    return {
+        "total_evaluations": evaluations.count(),
+        "unique_players": evaluations.values("player_id").distinct().count(),
+        "unique_evaluators": evaluations.values("submission__member_id").distinct().count(),
+    }

@@ -1,12 +1,9 @@
 import json
 import logging
-import threading
 from contextlib import contextmanager
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.core.management import call_command
-from django.db import connections
 from django.db.models import Count
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -17,6 +14,7 @@ from django.utils.http import urlencode
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
+from django_celery_beat.models import PeriodicTask
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
 from announcements.forms import AnnouncementComposeForm
@@ -35,8 +33,10 @@ from club.models import Club, ClubRole, Sport
 from events.models import Competition, Location
 from features.jobs import JOB_REGISTRY
 from features.models import EmailSuppression, JobToggle, Maintenance
+from features.scheduling import describe_schedule, schedule_for, set_schedule
+from rosterchief.celery import app as celery_app
 
-from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SportForm, SubscriptionForm, TrialForm
+from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, JobScheduleForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SportForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services import user_debug
@@ -88,12 +88,12 @@ class DashboardView(PlatformStaffRequiredMixin, TemplateView):
 
 
 class JobsView(PlatformStaffRequiredMixin, TemplateView):
-    """Status and recent history of the scheduled platform jobs -- see features/jobs.py for
-    the registry and features/models.JobRun for what a run writes (features.commands.
-    ScheduledJobCommand, around each command's own execution). These run on the in-process
-    scheduler's own schedule (see features/scheduler.py and DEPLOYMENT.md's "Scheduled
-    jobs"); JobRunNowView below triggers one off-schedule, and each one can be paused/resumed
-    individually via JobToggleView, without reaching for the platform-wide Maintenance lock."""
+    """Status, schedule and recent history of the scheduled platform jobs. The jobs themselves are
+    features.jobs.JOB_REGISTRY; their schedule and on/off switch are django_celery_beat PeriodicTask rows
+    (editable via JobScheduleView), their history is django_celery_results' TaskResult -- see
+    controlpanel.services.jobs, and DEPLOYMENT.md's "Scheduled jobs". JobRunNowView queues one off-schedule,
+    and each one can be paused/resumed via JobToggleView without reaching for the platform-wide
+    Maintenance lock."""
 
     template_name = "controlpanel/jobs.html"
 
@@ -315,67 +315,100 @@ class PushSandboxSampleView(PlatformSuperuserRequiredMixin, View):
         return redirect("controlpanel:push_sandbox")
 
 
+def periodic_task_for(name):
+    """The (registry entry, PeriodicTask or None) for a registry key; 404 for an unknown key."""
+    if name not in JOB_REGISTRY:
+        raise Http404
+    meta = JOB_REGISTRY[name]
+    return meta, PeriodicTask.objects.select_related("interval", "crontab").filter(task=meta["task"]).first()
+
+
 class JobToggleView(PlatformStaffRequiredMixin, View):
-    """Pause or resume one scheduled job -- see features.models.JobToggle. `name` is the
-    job's registry key (a features.jobs.JOB_REGISTRY key, still dotted-Celery-path-shaped
-    for historical continuity even though nothing here runs on Celery anymore -- see that
-    module's own docstring), not a database id: a toggle row only exists once a job has
-    actually been flipped off at least once."""
+    """Pause or resume one scheduled job. Pausing switches its PeriodicTask off (beat stops queueing it) and
+    also flips features.models.JobToggle, which makes the command itself refuse -- so a manual "Run now" or a
+    shell run of a paused job stands down too, instead of routing around the pause. `name` is the job's
+    registry key (see features.jobs)."""
 
     def post(self, request, name):
-        if name not in JOB_REGISTRY:
-            raise Http404
+        meta, task = periodic_task_for(name)
+        if task is None:
+            notify(request, f"w|{_('Not scheduled')}|" + _("“%(label)s” has no schedule yet. Run manage.py install_tasks, or set one with Schedule.") % {"label": meta["label"]})
+            return redirect("controlpanel:jobs")
 
-        enabled = not JobToggle.is_enabled(name)
-        JobToggle.set_enabled(name, enabled)
+        task.enabled = not task.enabled
+        task.save()
+        JobToggle.set_enabled(name, task.enabled)
 
-        label = JOB_REGISTRY[name]["label"]
-        if enabled:
-            notify(request, f"s|Job resumed|“{label}” will run on its schedule again.")
+        if task.enabled:
+            notify(request, f"s|{_('Job resumed')}|" + _("“%(label)s” will run on its schedule again.") % {"label": meta["label"]})
         else:
-            notify(request, f"w|Job paused|“{label}” will stand down until resumed.")
+            notify(request, f"w|{_('Job paused')}|" + _("“%(label)s” will stand down until resumed.") % {"label": meta["label"]})
 
         return redirect("controlpanel:jobs")
 
 
 class JobRunNowView(PlatformStaffRequiredMixin, View):
-    """Manually trigger one scheduled job outside its normal schedule. Dispatched on a
-    daemon background thread, same pattern as events.services.notifications.
-    dispatch_notify_new_event -- there is no Celery broker left to hand this off to, and a
-    job that hangs (the reason this button exists: see the JobRun history that motivated it)
-    would otherwise tie up this very request/gunicorn worker for as long as it hangs, not
-    just however long it's supposed to take.
-
-    Runs through call_command, i.e. the exact same features.commands.ScheduledJobCommand.
-    execute() path features.scheduler's own ticks do -- same Maintenance/JobToggle checks (a
-    paused job still refuses here, on purpose: force it by resuming first, not by routing
-    around the pause), same JobRun row, same args as a scheduled tick (features.jobs.
-    JOB_REGISTRY's own ``args`` -- the two billing jobs that need --commit to actually act
-    get it here too, so a manual run isn't a silent no-op dry run someone mistakes for having
-    worked) -- plus detailed_logging=True, always: every SQL query this run makes gets logged
-    with timing (see ScheduledJobCommand.execute()'s own comment). The scheduler never passes
-    this on its own ticks -- every query, on every scheduled run, would drown the log -- but
-    a manual run is exactly the "someone's actively watching, about to go dig through docker
-    compose logs" case it's
-    for."""
+    """Queue one scheduled job outside its normal schedule. It goes to the Celery worker exactly like a
+    scheduled tick would -- same task, same result row on the Jobs tab, same Maintenance/pause checks in the
+    command (a paused job still refuses here, on purpose: resume it first, rather than routing around the
+    pause), same arguments (the two billing jobs that need --commit to act get it too). The request returns
+    at once; the result shows up on the Jobs tab when the worker has run it."""
 
     def post(self, request, name):
         if name not in JOB_REGISTRY:
             raise Http404
 
         meta = JOB_REGISTRY[name]
+        try:
+            celery_app.send_task(meta["task"])
+        except Exception:
+            logging.getLogger(__name__).exception("Could not queue %s", name)
+            notify(request, f"e|{_('Could not queue the job')}|" + _("The task queue (Redis) did not accept “%(label)s”. Check that Redis and the Celery worker are running.") % {"label": meta["label"]})
+            return redirect("controlpanel:jobs")
 
-        def _run():
-            try:
-                call_command(meta["command"], *meta["args"], detailed_logging=True)
-            except Exception:
-                logging.getLogger(__name__).exception("Manual run of %s failed", name)
-            finally:
-                connections.close_all()
+        notify(request, f"s|{_('Job queued')}|" + _("“%(label)s” was handed to a worker — refresh in a moment to see the result.") % {"label": meta["label"]})
+        return redirect("controlpanel:jobs")
 
-        threading.Thread(target=_run, daemon=True).start()
 
-        notify(request, f"s|Job started|“{meta['label']}” is running now — refresh in a moment to see the result.")
+class JobScheduleView(PlatformStaffRequiredMixin, FormView):
+    """Edit when one job runs. Saved onto the job's PeriodicTask; beat's database scheduler picks the change
+    up by itself within seconds, with no restart."""
+
+    form_class = JobScheduleForm
+    template_name = "controlpanel/job_schedule.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            self.meta, self.task = periodic_task_for(kwargs["name"])
+            if self.task is None:
+                raise Http404
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        return JobScheduleForm.initial_for(self.task)
+
+    def form_valid(self, form):
+        set_schedule(self.task, form.spec())
+        notify(self.request, f"s|{_('Schedule saved')}|" + _("“%(label)s” now runs: %(schedule)s.") % {"label": self.meta["label"], "schedule": describe_schedule(self.task)})
+        return redirect("controlpanel:jobs")
+
+    def get_context_data(self, **kwargs):
+        default = PeriodicTask(**{"interval": None, "crontab": None})
+        field, schedule = schedule_for(self.meta["default_schedule"])
+        setattr(default, field, schedule)
+        return super().get_context_data(nav="jobs", job_name=self.kwargs["name"], meta=self.meta, task=self.task, current=describe_schedule(self.task), default=describe_schedule(default), **kwargs)
+
+
+class JobScheduleResetView(PlatformStaffRequiredMixin, View):
+    """Put one job back on its default schedule (features.jobs.JOB_REGISTRY's ``default_schedule``)."""
+
+    def post(self, request, name):
+        meta, task = periodic_task_for(name)
+        if task is None:
+            raise Http404
+
+        set_schedule(task, meta["default_schedule"])
+        notify(request, f"s|{_('Schedule reset')}|" + _("“%(label)s” is back on its default schedule: %(schedule)s.") % {"label": meta["label"], "schedule": describe_schedule(task)})
         return redirect("controlpanel:jobs")
 
 

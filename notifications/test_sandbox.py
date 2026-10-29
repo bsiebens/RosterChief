@@ -10,9 +10,9 @@ from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 
-from api.app.delivery import deliver, deliver_to_user
-from api.app.tests import AppApiTestCase
 from api.models import PushDevice
+from api.protected.delivery import deliver, deliver_to_user
+from api.protected.tests import AppApiTestCase
 from features.models import EmailSuppression
 from mobile.models import PushSubscription
 from mobile.services.push import send_push_to_member
@@ -176,7 +176,7 @@ class SandboxTests(AppApiTestCase):
         self.assertFalse(SandboxMessage.objects.filter(pk=old.pk).exists())
 
     def test_the_sandbox_counts_as_configured(self):
-        from api.app.push import apns_configured, fcm_configured, get_gateway, push_configured
+        from api.protected.push import apns_configured, fcm_configured, get_gateway, push_configured
 
         self.assertTrue(apns_configured() and fcm_configured() and push_configured())
         self.assertTrue(get_gateway().supports(self.ios) and get_gateway().supports(self.android))
@@ -184,7 +184,7 @@ class SandboxTests(AppApiTestCase):
 
 class SandboxOffTests(AppApiTestCase):
     def test_nothing_is_captured_and_the_real_gateway_logic_applies(self):
-        from api.app.push import NullGateway, get_gateway, push_configured
+        from api.protected.push import NullGateway, get_gateway, push_configured
 
         self.assertIsInstance(get_gateway(), NullGateway)
         self.assertFalse(push_configured())

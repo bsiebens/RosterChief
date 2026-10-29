@@ -4,7 +4,7 @@
  *
  * What it does
  *  1. Every attendance/line-up mutation htmx sends carries an Idempotency-Key header
- *     (api.app.idempotency on the server; the same store the native apps use). A key is
+ *     (api.core.idempotency on the server; the same store the native apps use). A key is
  *     kept across manual retries of the same action (same URL + same fields) until one
  *     attempt reaches the server, so a response lost in a tunnel never double-applies --
  *     Publish especially (it notifies players).

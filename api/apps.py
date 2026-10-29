@@ -3,9 +3,9 @@ from django.utils.translation import gettext_lazy as _
 
 
 class ApiConfig(AppConfig):
-    """Both APIs: the public, read-only club-website API at /api/v1/ (``api.public``) and the
-    authenticated native-app API at /api/app/v1/ (``api.app``, API.md). They stay separate
-    NinjaAPIs with their own auth and schema; they share the app label, models and migrations."""
+    """The platform's HTTP API, one NinjaAPI at /api/v1/ (api/v1.py): public club routes
+    (``api.public``), bearer-token routes for the member/coach apps (``api.protected``) and the
+    management panel (``api.panel``), on shared building blocks (``api.core``). API.md."""
 
     name = "api"
     verbose_name = _("API")
@@ -13,6 +13,6 @@ class ApiConfig(AppConfig):
     def ready(self):
         from notifications.dispatch import register_channel
 
-        from .app.delivery import NativePushChannel
+        from .protected.delivery import NativePushChannel
 
         register_channel(NativePushChannel())

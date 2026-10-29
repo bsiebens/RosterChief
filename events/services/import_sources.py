@@ -27,6 +27,7 @@ one-off import previews, so a "re-check all" run and the weekly check share the
 exact diff logic of events.services.rbihf_import.plan_from_fixtures.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 
 from django.utils import timezone
@@ -206,3 +207,61 @@ def check_entry(club, team, entry: dict) -> CheckResult:
     result.new_games = [(planned.fixture.external_game_id, planned.fixture.start, planned.fixture.opponent_name) for planned in plan.to_create]
     result.removed_games = [(event.external_game_id, event.start, event.title) for event in plan.to_delete]
     return result
+
+
+# --- managing stored sources (the panel API; the web only records them on a confirmed import) ---
+
+
+def entry_id(entry: dict) -> str:
+    """A stable id for ``entry``: a hash of its (source, season, competition label) key."""
+    return hashlib.sha1("|".join(entry_key(entry)).encode()).hexdigest()[:16]
+
+
+def find_entry(team, identifier: str) -> dict | None:
+    return next((entry for entry in sources_for(team) if entry_id(entry) == identifier), None)
+
+
+def validate_url(source: str, url: str) -> None:
+    """Raises ``ImportSourceError`` unless ``url`` is a team page of ``source`` we can read ids from (no network)."""
+    source_id_for({"source": source, "url": url})
+
+
+def remove_source(team, identifier: str) -> bool:
+    """Drops the stored entry with this id. False when there is none."""
+    entry = find_entry(team, identifier)
+    if entry is None:
+        return False
+    team.import_sources = [existing for existing in (team.import_sources or []) if entry_key(existing) != entry_key(entry)]
+    team.save(update_fields=["import_sources"])
+    return True
+
+
+def sync_team_sources(club, team, season, *, apply: bool = False) -> dict:
+    """Re-reads every enabled stored source of ``team`` for ``season``. Without ``apply`` it only reports what
+    differs (and records the outcome on each entry, like the weekly check). With ``apply`` it also creates, updates
+    and deletes the team's games like the web re-check's confirm step, taking no location or opponent choices (a
+    blank location stays blank, an opponent is found or created by the federation's name). Returns counts."""
+    enabled = {source: source_enabled(club, source) for source in SOURCES}
+    totals = {"sources": 0, "failed": 0, "created": 0, "updated": 0, "deleted": 0, "rescheduled": 0, "new_games": 0, "removed_games": 0}
+    for entry in sources_for(team, season):
+        if not enabled.get(entry["source"]):
+            continue
+        totals["sources"] += 1
+        if apply:
+            try:
+                plan = build_plan_for(club, team, entry, fetch(entry))
+            except ImportSourceError:
+                totals["failed"] += 1
+                continue
+            result = rbihf_import.apply_plan(plan, {}, {})
+            for key in ("created", "updated", "deleted"):
+                totals[key] += result.get(key, 0)
+            record_source(team, source=entry["source"], url=entry["url"], season=season, competition_label=entry.get("competition_label", ""))
+        else:
+            check = check_entry(club, team, entry)
+            totals["failed"] += bool(check.error)
+            totals["rescheduled"] += len(check.rescheduled)
+            totals["new_games"] += len(check.new_games)
+            totals["removed_games"] += len(check.removed_games)
+            update_entry(team, entry, last_checked_at=timezone.now().isoformat(), last_check=check.as_dict())
+    return totals

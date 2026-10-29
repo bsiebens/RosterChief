@@ -3,6 +3,9 @@
 #
 #   deploy/restore-check.sh [/var/backups/rosterchief]
 #
+# BARE_METAL=1: PostgreSQL runs on this host (run as root); the scratch database is created through the
+# postgres OS user instead of `docker compose exec db`.
+#
 # The step that proves the backups work: run it regularly (DEPLOYMENT.md, "Backups", step 6).
 # A dump you have never restored is a hypothesis, not a backup.
 #
@@ -34,15 +37,28 @@ if [[ "$LATEST" == *.age ]] && [ -z "${BACKUP_AGE_IDENTITY:-}" ]; then
     exit 1
 fi
 
-cleanup() { $COMPOSE exec -T db dropdb -U "$USER_NAME" --if-exists "$SCRATCH" >/dev/null 2>&1 || true; }
+BARE_METAL="${BARE_METAL:-0}"
+if [ "$BARE_METAL" = 1 ]; then
+    PGBIN="$(ls -d /usr/pgsql-*/bin | sort -V | tail -1)"
+    pgx() { sudo -u postgres "$PGBIN/$1" "${@:2}"; }
+    createdb_() { pgx createdb "$1"; }
+    dropdb_() { pgx dropdb --if-exists "$1"; }
+    psql_() { pgx psql "$@"; }
+else
+    createdb_() { $COMPOSE exec -T db createdb -U "$USER_NAME" "$1"; }
+    dropdb_() { $COMPOSE exec -T db dropdb -U "$USER_NAME" --if-exists "$1"; }
+    psql_() { $COMPOSE exec -T db psql -U "$USER_NAME" "$@"; }
+fi
+
+cleanup() { dropdb_ "$SCRATCH" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-$COMPOSE exec -T db createdb -U "$USER_NAME" "$SCRATCH"
-read_dump | $COMPOSE exec -T db psql -q -U "$USER_NAME" "$SCRATCH" >/dev/null
+createdb_ "$SCRATCH"
+read_dump | psql_ -q "$SCRATCH" >/dev/null
 
 # A restore that produces an empty schema exits 0 and tells you nothing. Ask it something.
-CLUBS="$($COMPOSE exec -T db psql -tAq -U "$USER_NAME" "$SCRATCH" -c 'SELECT count(*) FROM club_club')"
-USERS="$($COMPOSE exec -T db psql -tAq -U "$USER_NAME" "$SCRATCH" -c 'SELECT count(*) FROM authentication_user')"
+CLUBS="$(psql_ -tAq "$SCRATCH" -c 'SELECT count(*) FROM club_club')"
+USERS="$(psql_ -tAq "$SCRATCH" -c 'SELECT count(*) FROM authentication_user')"
 
 [ "$USERS" -gt 0 ] || { echo "restore check FAILED: $(basename "$LATEST") restored no users"; exit 1; }
 

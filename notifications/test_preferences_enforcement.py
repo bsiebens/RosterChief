@@ -8,9 +8,9 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import override_settings
 
-from api.app.push import PushGateway
-from api.app.tests import AppApiTestCase
 from api.models import PushDevice
+from api.protected.push import PushGateway
+from api.protected.tests import AppApiTestCase
 from club.models import Club
 from members.models import Member
 from mobile.models import PushSubscription

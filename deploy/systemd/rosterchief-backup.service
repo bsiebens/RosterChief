@@ -1,0 +1,11 @@
+[Unit]
+Description=RosterChief backup (database + uploads, encrypted, copied offsite)
+ConditionPathExists=/opt/rosterchief/current/deploy/backup.sh
+
+[Service]
+Type=oneshot
+# Root: pg_dump runs as the postgres user and the uploads are read from /opt/rosterchief/shared.
+# BACKUP_AGE_RECIPIENT / BACKUP_REMOTE come from backup.env (see deploy/backup.sh and docs/DEPLOYMENT.md, "Backups").
+EnvironmentFile=-/etc/rosterchief/backup.env
+Environment=BARE_METAL=1 PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/rosterchief/current/deploy/backup.sh /var/backups/rosterchief

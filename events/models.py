@@ -175,7 +175,7 @@ class Event(ClubScopedModel):
         """Whether this game is being played at the club's own ground
         (Location.is_home) -- False for anything that isn't a game, or a game
         with no location set, or one at an away/neutral location. Drives
-        score/opponent semantics (events/api.py, events/competition/hockey.py),
+        score/opponent semantics (api/public/routers/events.py, events/competition/hockey.py),
         which only make sense for a Game -- see is_home_fixture below for the
         broader "referees/officials might be needed here" check, which also
         covers a home Tournament."""

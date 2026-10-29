@@ -604,6 +604,15 @@ class TeamManagementTests(ManagementTestBase):
         super().setUp()
         self.client.force_login(self.admin_user)
 
+    def test_creating_a_team_with_a_taken_name_shows_a_form_error(self):
+        Team.objects.create(club=self.club, name="Dupes", short_name="D")
+
+        response = self.client.post(reverse("management:team_create"), {"name": "Dupes", "short_name": "D2", "ordering": "0"}, HTTP_HOST="ajax-united.rosterchief.app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("name", response.context["form"].errors)
+        self.assertEqual(Team.objects.filter(club=self.club, name="Dupes").count(), 1)
+
     def test_team_list_is_scoped_to_the_club(self):
         other_club = Club.objects.create(name="Rival FC", slug="rival-fc")
         Team.objects.create(club=other_club, name="Rival Team", short_name="RT")
@@ -5202,7 +5211,7 @@ class NewsManagementTests(ManagementTestBase):
         # (see news/services.py) -- run it inline here instead, via side_effect, so
         # the email is guaranteed sent by the time this assertion runs rather than
         # racing a thread that may not have finished yet.
-        with mock.patch("management.views.dispatch_send_publish_notification", side_effect=_send_and_mark_notified):
+        with mock.patch("news.services.dispatch_send_publish_notification", side_effect=_send_and_mark_notified):
             self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
 
         # Not asserting an exact outbox size: the base fixture's own staff
@@ -5239,7 +5248,7 @@ class NewsManagementTests(ManagementTestBase):
         with (
             override_settings(VAPID_PRIVATE_KEY="test-private-key", VAPID_ADMIN_EMAIL="admin@example.com"),
             mock.patch("mobile.services.push.webpush") as webpush_mock,
-            mock.patch("management.views.dispatch_send_publish_notification", side_effect=_send_and_mark_notified),
+            mock.patch("news.services.dispatch_send_publish_notification", side_effect=_send_and_mark_notified),
         ):
             self.club_post("news_publish", {"published_at": timezone.now().strftime("%Y-%m-%dT%H:%M"), "notify_members": "on"}, item.pk)
 
@@ -5273,7 +5282,7 @@ class NewsManagementTests(ManagementTestBase):
         # (see news.services) -- run its underlying, synchronous by-id lookup inline
         # instead, so the assertion below isn't racing a thread that may not have
         # finished yet.
-        with mock.patch("management.views.dispatch_notify_editors_of_pending_review", side_effect=_notify_editors_of_pending_review_by_id):
+        with mock.patch("news.services.dispatch_notify_editors_of_pending_review", side_effect=_notify_editors_of_pending_review_by_id):
             self.club_post("news_submit_for_review", {}, item.pk)
 
         self.assertTrue(Notification.objects.filter(member=editor_member, title__contains="Draft item").exists())
@@ -7872,7 +7881,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         game = self.make_game()
         self.client.force_login(self.admin_user)
 
-        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+        with mock.patch("management.pdf.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
             response = self.club_get("event_referee_form_pdf", game.pk)
 
         self.assertEqual(response["Content-Type"], "application/pdf")
@@ -7887,7 +7896,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("40"), km_rate=Decimal("0.35"))
         self.client.force_login(self.admin_user)
 
-        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+        with mock.patch("management.pdf.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
             self.club_get("event_referee_form_pdf", game.pk)
 
         context = renderer.call_args[0][0]
@@ -7903,7 +7912,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         EventReferee.objects.create(event=game, member=other_referee, assigned_by=self.admin_member, fee=Decimal("20.00"))
         self.client.force_login(self.admin_user)
 
-        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+        with mock.patch("management.pdf.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
             self.club_get("event_referee_form_pdf", game.pk)
 
         self.assertEqual(renderer.call_args[0][0]["grand_total"], Decimal("48.320"))
@@ -7976,7 +7985,7 @@ class EventRefereeFormPdfTests(ManagementTestBase):
         game = self.make_game()
         self.client.force_login(self.admin_user)
 
-        with mock.patch("management.views.event_referee_form_pdf", side_effect=PDFExportError("PDF rendering needs the native pango/cairo libraries.")):
+        with mock.patch("management.pdf.event_referee_form_pdf", side_effect=PDFExportError("PDF rendering needs the native pango/cairo libraries.")):
             response = self.club_get("event_referee_form_pdf", game.pk)
         response = self.client.get(response.url, HTTP_HOST="ajax-united.rosterchief.app")
 
@@ -9593,7 +9602,7 @@ class RBIHFImportViewTests(ManagementTestBase):
 
         self.assertEqual(self.club_get("rbihf_import").status_code, 403)
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_submitting_the_form_shows_a_preview(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9607,7 +9616,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertContains(response, 'name="location_5002"')
         mock_fetch.assert_called_once_with("https://www.rbihf.be/league/team/4460")
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_creates_the_event(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9620,7 +9629,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertEqual(event.opponent.name, "Amsterdam Tigers")
         self.assertIn(self.team, event.teams.all())
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_the_competition_label_survives_from_form_to_confirm(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9633,7 +9642,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertEqual(event.competition_label, "Division 1")
         self.assertEqual(event.external_source_id, "4460")
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_respects_the_chosen_location(self, mock_fetch):
         self.activate_flag()
         location = Location.objects.create(club=self.club, name="Deurne Ice Hall", address="1 St", city="Deurne", zip_code="2100", country="BE")
@@ -9645,7 +9654,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         event = Event.objects.get(club=self.club, external_game_id="5002")
         self.assertEqual(event.location, location)
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_confirming_respects_the_chosen_opponent(self, mock_fetch):
         self.activate_flag()
         renamed = Opponent.objects.create(club=self.club, name="Amsterdam Tigers HC")
@@ -9658,7 +9667,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertEqual(event.opponent, renamed)
         self.assertFalse(Opponent.objects.filter(club=self.club, name="Amsterdam Tigers").exists())
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_a_blank_opponent_choice_falls_back_to_the_scraped_name(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9686,7 +9695,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "RBIHF team page")
 
-    @mock.patch("management.views.fetch_html", side_effect=RBIHFImportError("Could not reach the page."))
+    @mock.patch("events.services.rbihf_import.fetch_html", side_effect=RBIHFImportError("Could not reach the page."))
     def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9696,7 +9705,7 @@ class RBIHFImportViewTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Could not reach the page.")
 
-    @mock.patch("management.views.fetch_html", return_value=RBIHF_SAMPLE_HTML)
+    @mock.patch("events.services.rbihf_import.fetch_html", return_value=RBIHF_SAMPLE_HTML)
     def test_re_running_the_same_import_shows_it_as_unchanged(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9803,7 +9812,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.assertFalse(response.context["form"].is_valid())
         self.assertIn("url", response.context["form"].errors)
 
-    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    @mock.patch("events.services.dfel_import.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
     def test_submitting_the_form_shows_a_preview(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9817,7 +9826,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.assertContains(response, reverse("management:dfel_import_confirm"))
         mock_fetch.assert_called_once_with("70779", "21691")
 
-    @mock.patch("management.views.fetch_schedule", side_effect=DFELImportError("Could not reach the schedule."))
+    @mock.patch("events.services.dfel_import.fetch_schedule", side_effect=DFELImportError("Could not reach the schedule."))
     def test_a_fetch_failure_is_a_form_error_not_a_500(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -9827,7 +9836,7 @@ class DFELImportViewTests(ManagementTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Could not reach the schedule.")
 
-    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    @mock.patch("events.services.dfel_import.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
     def test_confirming_creates_the_event(self, mock_fetch):
         self.activate_flag()
         self.client.force_login(self.admin_user)
@@ -10061,7 +10070,7 @@ class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
 
         self.assertIn("season", response.context["form"].errors)
 
-    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    @mock.patch("events.services.rbihf_import.fetch_html", side_effect=rbihf_html_for)
     def test_confirming_records_the_source(self, mock_fetch):
         self.activate_flag("RBIHF")
         self.client.force_login(self.admin_user)
@@ -10075,7 +10084,7 @@ class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
         self.assertEqual(entry["season_id"], str(self.old_season.pk))
         self.assertEqual(entry["competition_label"], "Division 1")
 
-    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    @mock.patch("events.services.rbihf_import.fetch_html", side_effect=rbihf_html_for)
     def test_nothing_is_recorded_without_confirming(self, mock_fetch):
         self.activate_flag("RBIHF")
         self.client.force_login(self.admin_user)
@@ -10085,7 +10094,7 @@ class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
         self.team.refresh_from_db()
         self.assertEqual(self.team.import_sources, [])
 
-    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    @mock.patch("events.services.rbihf_import.fetch_html", side_effect=rbihf_html_for)
     def test_a_new_url_for_the_same_season_and_competition_replaces_the_old_one(self, mock_fetch):
         self.activate_flag("RBIHF")
         self.client.force_login(self.admin_user)
@@ -10096,7 +10105,7 @@ class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
         self.team.refresh_from_db()
         self.assertEqual([entry["url"] for entry in self.team.import_sources], ["https://www.rbihf.be/league/team/4461"])
 
-    @mock.patch("management.views.fetch_html", side_effect=rbihf_html_for)
+    @mock.patch("events.services.rbihf_import.fetch_html", side_effect=rbihf_html_for)
     def test_another_competition_or_season_appends(self, mock_fetch):
         self.activate_flag("RBIHF")
         self.client.force_login(self.admin_user)
@@ -10108,7 +10117,7 @@ class ImportSourceRecordingTests(FixtureImportTestMixin, ManagementTestBase):
         self.team.refresh_from_db()
         self.assertEqual(len(self.team.import_sources), 3)
 
-    @mock.patch("management.views.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
+    @mock.patch("events.services.dfel_import.fetch_schedule", side_effect=lambda team_id, division_id: dfel_sample_json())
     def test_confirming_a_dfel_import_records_the_source(self, mock_fetch):
         self.activate_flag("DFEL")
         self.client.force_login(self.admin_user)

@@ -318,3 +318,21 @@ def can_manage_forms(user: User, club: Club) -> bool:
     FormSend's own docstring), so there's nothing for a separate publish
     check to gate, and no stricter tier for response visibility either."""
     return is_club_admin(user, club) or has_club_role(user, club, ClubRole.Roles.EDITOR) or is_coach_manager(user, club)
+
+
+def scoped_to_managed_teams(queryset, user, club):
+    """Non-admin: only rows for a team they manage or a group they belong to,
+    plus rows tied to neither (a club-wide social, an AGM) -- there's nothing
+    to scope those to, so they stay visible to everyone. Same "manages"/
+    "belongs to" rules as who can create against a given team/group
+    (teams_managed_by/groups_manageable_by), not the broader "staffed on any
+    role" one. Works for any queryset whose model has `teams`/`groups` M2Ms --
+    Event and EventSeries both do -- so it backs the events list, the
+    dashboard's upcoming-events widget, and both detail views (an
+    out-of-scope one 404s if opened directly, same as any other
+    queryset-scoped detail view here, not just unlisted)."""
+    if is_club_admin(user, club):
+        return queryset
+    managed_team_ids = teams_managed_by(user, club).values_list("pk", flat=True)
+    member_group_ids = groups_manageable_by(user, club).values_list("pk", flat=True)
+    return queryset.filter(Q(teams__in=managed_team_ids) | Q(groups__in=member_group_ids) | Q(teams__isnull=True, groups__isnull=True)).distinct()

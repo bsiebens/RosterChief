@@ -23,9 +23,8 @@ class Announcement(UUIDModel):
     * admins -- holders of a ClubRole of admin, editor or member admin in the club.
     * staff -- members with a StaffAssignment on one of the club's teams in a season
       covering today (the coaches, managers and other team staff).
-    * parents -- attached members with a FamilyMembership of role parent or guardian.
-    * players -- members on the roster (TeamMembership) of one of the club's teams in a
-      season covering today.
+    * members -- holders of the club's plain ``member`` ClubRole (the parents, guardians and
+      players, as opposed to admins and staff).
 
     With ``club`` blank, a person in several clubs is notified once, in the first club
     (by Club.created, then pk) whose audience contains them.

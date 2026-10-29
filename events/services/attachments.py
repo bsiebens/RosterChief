@@ -65,3 +65,9 @@ def attachment_response(attachment) -> FileResponse:
     response["Content-Security-Policy"] = "default-src 'none'; sandbox"
     patch_vary_headers(response, ["Cookie"])
     return response
+
+
+def delete_attachment(attachment) -> None:
+    """Remove the stored file and the row."""
+    attachment.file.delete(save=False)
+    attachment.delete()

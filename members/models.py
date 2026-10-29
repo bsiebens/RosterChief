@@ -163,7 +163,7 @@ class Member(UUIDModel):
     def public_photo(self):
         """The *player* picture, but only once ``photo_public_consent`` says it
         can leave the club's own app/staff views -- the one gate every public
-        surface (teams.api's roster endpoints, a club's public website) must
+        surface (api.public.routers.teams's roster endpoints, a club's public website) must
         go through, so consent can't be forgotten at a new call site. The
         profile picture is never public."""
         return self.player_photo if self.player_photo and self.photo_public_consent else None

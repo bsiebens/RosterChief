@@ -16,7 +16,11 @@
 # DEPLOYMENT.md's "Backups"). It is required whenever BACKUP_REMOTE is set: dumps
 # of personal data never leave the box unencrypted. Like POSTGRES_USER/POSTGRES_DB, it is read
 # from the environment first and otherwise from the compose .env in the current directory, so
-# cron and deploy/deploy-prod.sh's pre-migration backup behave the same.
+# cron and deploy/deploy.sh's pre-migration backup behave the same.
+#
+# BARE_METAL=1 (what deploy/deploy.sh sets, and what the cron line on a bare-metal server should set):
+# PostgreSQL runs on this host and the uploads are in /opt/rosterchief/shared, so there is no
+# `docker compose exec`; run as root. The settings come from /etc/rosterchief/rosterchief.env.
 set -Eeuo pipefail
 
 # Dumps hold personal data (members, families, private uploads): everything this script
@@ -45,6 +49,13 @@ POSTGRES_DB="$(from_env_file POSTGRES_DB)"
 BACKUP_AGE_RECIPIENT="$(from_env_file BACKUP_AGE_RECIPIENT)"
 # Django's own setting lives in .env.production, not .env.
 AWS_STORAGE_BUCKET_NAME="$(from_env_file AWS_STORAGE_BUCKET_NAME .env.production)"
+BARE_METAL="${BARE_METAL:-0}"
+SHARED_DIR=/opt/rosterchief/shared
+if [ "$BARE_METAL" = 1 ]; then
+    [ "$(id -u)" -eq 0 ] || { echo "ERROR: BARE_METAL=1 needs root (pg_dump as the postgres user, reads the app env file)." >&2; exit 1; }
+    AWS_STORAGE_BUCKET_NAME="$(from_env_file AWS_STORAGE_BUCKET_NAME /etc/rosterchief/rosterchief.env)"
+    BACKUP_AGE_RECIPIENT="${BACKUP_AGE_RECIPIENT:-$(from_env_file BACKUP_AGE_RECIPIENT /etc/rosterchief/backup.env)}"
+fi
 
 if [ -n "${BACKUP_REMOTE:-}" ] && [ -z "$BACKUP_AGE_RECIPIENT" ]; then
     echo "ERROR: BACKUP_REMOTE is set but BACKUP_AGE_RECIPIENT is not -- refusing to copy unencrypted dumps off the box. See DEPLOYMENT.md, \"Backups\"." >&2
@@ -78,7 +89,12 @@ chmod 700 "$DEST"
 DB_TMP="$DEST/.db-$STAMP.sql.gz.part"
 DB_OUT="$DEST/db-$STAMP.sql.gz"
 
-$COMPOSE exec -T db pg_dump --clean --if-exists -U "${POSTGRES_USER:-rosterchief}" "${POSTGRES_DB:-rosterchief}" | gzip > "$DB_TMP"
+if [ "$BARE_METAL" = 1 ]; then
+    # Peer auth as the postgres OS user; the dump records the app role as owner, like the Docker one did.
+    sudo -u postgres "$(ls -d /usr/pgsql-*/bin | sort -V | tail -1)/pg_dump" --clean --if-exists "${POSTGRES_DB:-rosterchief}" | gzip > "$DB_TMP"
+else
+    $COMPOSE exec -T db pg_dump --clean --if-exists -U "${POSTGRES_USER:-rosterchief}" "${POSTGRES_DB:-rosterchief}" | gzip > "$DB_TMP"
+fi
 gzip -t "$DB_TMP"                     # the archive is readable
 [ -s "$DB_TMP" ]                      # ...and not empty
 mv "$DB_TMP" "$DB_OUT"
@@ -90,7 +106,7 @@ DB_OUT="$SEALED"
 # is the backup, and this step is skipped.
 if [ -z "${AWS_STORAGE_BUCKET_NAME:-}" ]; then
     MEDIA_OUT="$DEST/media-$STAMP.tar.gz"
-    $COMPOSE exec -T web tar -cz -C /app media | cat > "$MEDIA_OUT.part"
+    if [ "$BARE_METAL" = 1 ]; then tar -cz -C "$SHARED_DIR" media > "$MEDIA_OUT.part"; else $COMPOSE exec -T web tar -cz -C /app media | cat > "$MEDIA_OUT.part"; fi
     mv "$MEDIA_OUT.part" "$MEDIA_OUT"
     seal "$MEDIA_OUT"
 fi
@@ -98,7 +114,7 @@ fi
 # Private uploads (e.g. medical certificates, see rosterchief/storage.py) are always on local
 # disk, whatever AWS_STORAGE_BUCKET_NAME says, so they are backed up unconditionally.
 PRIVATE_OUT="$DEST/private-media-$STAMP.tar.gz"
-$COMPOSE exec -T web tar -cz -C /app private_media | cat > "$PRIVATE_OUT.part"
+if [ "$BARE_METAL" = 1 ]; then tar -cz -C "$SHARED_DIR" private_media > "$PRIVATE_OUT.part"; else $COMPOSE exec -T web tar -cz -C /app private_media | cat > "$PRIVATE_OUT.part"; fi
 mv "$PRIVATE_OUT.part" "$PRIVATE_OUT"
 seal "$PRIVATE_OUT"
 

@@ -8,7 +8,7 @@
 #
 # Runs the "Branching & release model" sequence from DEPLOYMENT.md, end to end except for the
 # merge itself -- merging the PR stays your call, and so does deploying it afterwards
-# (deploy/deploy-prod.sh --version vX.Y.Z once main's CI has tagged it).
+# (deploy/deploy.sh --master <host> --version vX.Y.Z once main's CI has tagged it).
 #
 # release: bumps pyproject.toml/uv.lock to the new version *on development* (so development
 #   never drifts behind main's version again), pushes development, then branches
@@ -232,7 +232,7 @@ BODY="$(
     echo "**Commits**"
     git log --format="- %h %s" --no-merges --cherry-pick --right-only "origin/main...$BRANCH"
     echo
-    echo "Merge with a **merge commit** (not squash). CI then tags \`$TAG\` and cuts the GitHub Release; deploy with \`deploy/deploy-prod.sh --version $TAG\`."
+    echo "Merge with a **merge commit** (not squash). CI then tags \`$TAG\` and cuts the GitHub Release; deploy with \`deploy/deploy.sh --master <host> --version $TAG\`."
 )"
 PR_URL="$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY")"
 
@@ -242,4 +242,4 @@ trap - ERR
 echo
 echo "Done. $TITLE is open and waiting for you: $PR_URL"
 echo "Once its checks are green and you're happy, merge it with a merge commit, then deploy:"
-echo "  deploy/deploy-prod.sh --version $TAG"
+echo "  deploy/deploy.sh --master <host> --version $TAG"
