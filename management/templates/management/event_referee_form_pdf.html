@@ -101,7 +101,7 @@
                 <div class="item wide">
                     <div class="info-label">{% trans "Referee names" %}</div>
                     <div class="info-value">
-                        {% for referee in referees %}{{ referee.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                        {% for referee in referees %}{{ referee.display_name }}{% if referee.referee_type %} ({{ referee.referee_type.name }}){% endif %}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
                     </div>
                 </div>
             </div>
@@ -123,7 +123,7 @@
             <tbody>
                 {% for referee in referees %}
                     <tr>
-                        <td>{{ referee.display_name }}</td>
+                        <td>{{ referee.display_name }}{% if referee.referee_type %}<br><span style="color: var(--muted); font-size: 8.5pt;">{{ referee.referee_type.name }}</span>{% endif %}</td>
                         <td class="amount">{% if referee.no_fee %}{% trans "No fee" %}{% else %}€{{ referee.fee|floatformat:2 }}{% endif %}</td>
                         <td class="amount">{% if referee.km %}{{ referee.km }} km{% else %}—{% endif %}</td>
                         <td class="amount">{% if referee.km %}€{{ referee.km_rate }}{% else %}—{% endif %}</td>

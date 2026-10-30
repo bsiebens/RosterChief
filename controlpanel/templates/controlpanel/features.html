@@ -1,5 +1,5 @@
 {% extends "controlpanel/base.html" %}
-{% load lucide ui %}
+{% load i18n lucide ui %}
 
 {% block panel_title %}Features{% endblock panel_title %}
 
@@ -264,6 +264,7 @@
                             <td class="text-muted">{{ sport.clubs_using }} club{{ sport.clubs_using|pluralize }} · {{ sport.competitions_using }} competition{{ sport.competitions_using|pluralize }}</td>
                             <td class="text-right">
                                 <div class="flex justify-end gap-1">
+                                    <a class="btn btn-outline btn-sm gap-1" href="{% url 'controlpanel:sport_settings' sport.pk %}">{% lucide "settings" size=14 %} {% trans "Settings" %}</a>
                                     <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ sport.pk|dom_id:"sport_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} Edit</button>
                                     {% if not sport.is_protected and not sport.in_use %}
                                         <button class="btn btn-outline btn-error btn-sm gap-1" type="button" onclick="document.getElementById('{{ sport.pk|dom_id:"sport_delete_modal" }}').showModal()">{% lucide "trash-2" size=14 %} Delete</button>

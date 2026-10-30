@@ -23,7 +23,7 @@
 {% endcomment %}
 <div class="flex flex-wrap items-center justify-between gap-2">
     <h2 class="card-title">
-        {% lucide "flag" size=18 %} {% trans "Referees" %}
+        <span class="inline-flex size-7 items-center justify-center rounded-sm bg-club text-white">{% lucide "flag" size=16 %}</span> {% trans "Referees" %}
         <span class="badge badge-sm {% if referees_full %}badge-neutral{% else %}badge-outline{% endif %}">
             {{ referees|length }} / {{ event.max_referees }}
         </span>
@@ -39,6 +39,7 @@
             <div class="flex min-w-0 flex-col gap-0.5">
                 <div class="flex flex-wrap items-center gap-1.5">
                     <span class="text-sm font-semibold text-ink">{{ referee.display_name }}</span>
+                    {% if referee.referee_type %}<span class="badge badge-outline badge-xs">{{ referee.referee_type.name }}</span>{% endif %}
                     {% if referee.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
                     {% if can_manage_referees %}
                         {% if referee.no_fee %}<span class="badge badge-outline badge-xs">{% trans "No fee" %}</span>{% elif not referee.fee %}<span class="badge badge-warning badge-xs">{% trans "Fee not set" %}</span>{% endif %}
@@ -50,16 +51,34 @@
             </div>
 
             {% if can_manage_referees %}
-                <div class="flex shrink-0 flex-col items-end gap-1">
-                    <div class="flex items-center gap-1.5">
+                <div class="flex w-full min-w-0 flex-col items-start gap-1">
+                    <div class="flex w-full flex-wrap items-center gap-1.5">
                         {% comment %}
                             Not a form of its own: every input here belongs to the game's shared fee
                             form (_event_fees_form.html, rendered by the page), so any row's ✓ saves
                             all rows. "No fee" hides the rest of the line (CSS only, via
                             group-has-[:checked]) -- the server drops any fee/km still in it.
                         {% endcomment %}
+                        {% if referee_types %}
+                            {% comment %}Part of the game's shared fee form (form=), so the page-wide save button stores it too; no nested forms.{% endcomment %}
+                            <select name="{{ referee.pk|dom_id:"referee" }}-referee_type" form="{{ fees_form_id }}" class="select select-xs h-6 w-auto max-w-40 text-xs" data-widget-class="w-32 shrink-0" data-input-class="select-xs h-6 text-xs" aria-label="{% trans 'Type' %}">
+                                <option value="">{% trans "No type" %}</option>
+                                {% for type in referee_types %}<option value="{{ type.pk }}" {% if type.pk == referee.referee_type_id %}selected{% endif %}>{{ type.name }}</option>{% endfor %}
+                            </select>
+                        {% endif %}
+                        {% if referee.is_external %}
+                            <details class="relative">
+                                <summary class="btn btn-square btn-outline btn-xs cursor-pointer list-none" title="{% trans 'Rename' %}" aria-label="{% trans 'Rename' %}">{% lucide "pencil" size=12 %}</summary>
+                                <form method="post" action="{% url 'management:event_referee_rename' event.pk referee.pk %}" class="absolute right-0 z-10 mt-1 flex items-center gap-1.5 rounded-lg border border-line bg-white p-2.5 shadow-lg">
+                                    {% csrf_token %}
+                                    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                                    <input type="text" name="name" value="{{ referee.external_name }}" class="input w-44" required aria-label="{% trans 'Name' %}">
+                                    <button class="btn btn-square btn-outline btn-xs" type="submit" title="{% trans 'Save name' %}" aria-label="{% trans 'Save name' %}">{% lucide "check" size=12 %}</button>
+                                </form>
+                            </details>
+                        {% endif %}
                         {% with prefix=referee.pk|dom_id:"referee" %}
-                        <div class="group flex items-center gap-1.5">
+                        <div class="group ml-auto flex flex-wrap items-center gap-1.5">
                             <label class="mr-3 flex cursor-pointer items-center gap-1 text-xs text-muted" title="{% trans 'Not paid for this game, or does not wish to be paid' %}">
                                 <input type="checkbox" name="{{ prefix }}-no_fee" form="{{ fees_form_id }}" class="checkbox" {% if referee.no_fee %}checked{% endif %}>
                                 {% trans "No fee" %}
@@ -89,7 +108,7 @@
                         </form>
                     </div>
                     {% if referee.km and not referee.no_fee %}
-                        <span class="font-mono text-xs text-muted">{% blocktrans with total=referee.total_payable|floatformat:2 %}&euro;{{ total }} due, travel included{% endblocktrans %}</span>
+                        <span class="self-end font-mono text-xs text-muted">{% blocktrans with total=referee.total_payable|floatformat:2 %}&euro;{{ total }} due, travel included{% endblocktrans %}</span>
                     {% endif %}
                 </div>
             {% elif referee.total_payable %}
@@ -153,6 +172,12 @@
                         </option>
                     {% endfor %}
                 </select>
+                        {% if referee_types %}
+                        <select name="referee_type" class="select w-auto" aria-label="{% trans 'Type' %}">
+                            <option value="">{% trans "No type" %}</option>
+                            {% for type in referee_types %}<option value="{{ type.pk }}">{{ type.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
                 {# No btn-sm: .select is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
                 <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Assign" %}</button>
             </form>
@@ -163,16 +188,25 @@
             </p>
         {% endif %}
 
-        <form method="post" action="{% url 'management:event_referee_add_external' event.pk %}" class="flex flex-wrap items-center gap-2">
+        <form method="post" action="{% url 'management:event_referee_add_external' event.pk %}" class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
             {% csrf_token %}
             {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-            <input type="text" name="name" class="input w-56" placeholder="{% trans 'External referee name' %}">
+            <input type="text" name="name" class="input min-w-0 flex-1" placeholder="{% trans 'External referee name' %}">
+            {% if referee_types %}
+                <select name="referee_type" class="select w-auto" data-widget-class="w-44 shrink-0" aria-label="{% trans 'Type' %}">
+                    <option value="">{% trans "No type" %}</option>
+                    {% for type in referee_types %}<option value="{{ type.pk }}">{{ type.name }}</option>{% endfor %}
+                </select>
+            {% endif %}
             {# No btn-sm: .input is height:2.25rem, matching plain .btn -- btn-sm would sit 6px shorter and misalign in the row. #}
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
+            <button class="btn btn-outline shrink-0 gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
         </form>
 
         <p class="text-xs text-muted">{% trans "⚠ = also expected at another event around this time -- shown as a warning, not blocked." %}</p>
     </div>
 {% elif can_manage_referees and referees_full %}
-    <p class="mt-2 text-sm text-muted">{% trans "This game already has its maximum number of referees." %}</p>
+    <div class="alert alert-info mt-3">
+        {% lucide "info" size=18 %}
+        <span>{% trans "This game already has its maximum number of referees." %}</span>
+    </div>
 {% endif %}

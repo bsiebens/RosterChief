@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
 from billing.models import DuePayment, Plan, PlanPrice, Subscription
-from club.models import Club, Sport
+from club.models import Club, RefereeType, Sport
 from club.validators import LOGO_ACCEPT
 from events.models import Competition, Location
 
@@ -114,6 +114,30 @@ class SportForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
             del self.fields["code"]
+
+
+class RefereeTypeForm(forms.ModelForm):
+    """Name only. The sport and kind come from the page (create) or the instance (rename); the name
+    must be unique within that sport and kind, which the model constraint alone would report as a 500."""
+
+    class Meta:
+        model = RefereeType
+        fields = ["name"]
+
+    def __init__(self, *args, sport=None, kind=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if sport is not None:
+            self.instance.sport = sport
+            self.instance.kind = kind
+        self.sport = self.instance.sport
+        self.kind = self.instance.kind
+
+    def clean_name(self):
+        name = self.cleaned_data["name"].strip()
+        clash = RefereeType.objects.filter(sport=self.sport, kind=self.kind, name__iexact=name).exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise forms.ValidationError(_("There is already a type called “%(name)s” in this list."), params={"name": name})
+        return name
 
 
 class PlanForm(forms.ModelForm):

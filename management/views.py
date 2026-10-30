@@ -50,7 +50,7 @@ from club.mixins import (
     ShopManagerRequiredMixin,
     TeamManagerRequiredMixin,
 )
-from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, RefereeManager, Season, ShopManager, Sponsor
+from club.models import ClubMembership, ClubRole, DuesInvoice, EvaluationManager, MemberRequirementStatus, OnboardingRequirement, RefereeManager, RefereeType, Season, ShopManager, Sponsor
 from club.services.access import (
     can_add_news,
     can_edit_news,
@@ -110,7 +110,18 @@ from events.services.game_moments import describe_moment
 from events.services.game_stats import SCOPES, analytics_supported, sync_game_stats, team_analytics
 from events.services.game_timeline import display_timeline
 from events.services.notifications import dispatch_notify_new_event
-from events.services.officials import OfficialAssignmentError, add_external_official, assign_official, eligible_officials, needs_official_management, officials_enabled_for, remove_official, set_official_fee
+from events.services.officials import (
+    OfficialAssignmentError,
+    add_external_official,
+    assign_official,
+    eligible_officials,
+    needs_official_management,
+    officials_enabled_for,
+    remove_official,
+    rename_external_official,
+    set_official_fee,
+    set_official_type,
+)
 from events.services.rbihf_import import RBIHFImportError, apply_plan, build_plan, extract_team_id, fetch_html
 from events.services.recurrence import cancel_occurrence, detach_occurrence, generate_occurrences, propagate_series
 from events.services.referees import (
@@ -120,10 +131,14 @@ from events.services.referees import (
     conflicting_events_for_members,
     eligible_referees,
     needs_referee_management,
+    order_assignments,
     referee_roster,
+    referee_types_for,
     remove_referee,
+    rename_external_referee,
     retract_ineligible_invites,
     set_referee_fee,
+    set_referee_type,
 )
 from events.services.strength_check import STRENGTH_LABELS, STRENGTHS
 from formbuilder.models import Field as FormBuilderField
@@ -3439,9 +3454,9 @@ class EventListView(ClubStaffRequiredMixin, ListView):
                     task.is_full = len(task.claim_labels) >= task.needed_quantity
 
                 event.needs_referees = needs_referee_management(event)
-                event.referee_rows = list(event.referees.all()) if event.needs_referees else []
+                event.referee_rows = order_assignments(event.referees.all()) if event.needs_referees else []
                 event.needs_officials = officials_enabled and needs_official_management(event)
-                event.official_rows = list(event.officials.all()) if event.needs_officials else []
+                event.official_rows = order_assignments(event.officials.all()) if event.needs_officials else []
 
         return events
 
@@ -3561,7 +3576,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         referees_full = False
         pending_signups = {}
         if referee_management_needed:
-            referees = list(event.referees.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
+            referees = order_assignments(event.referees.select_related("member", "assigned_by", "referee_type"))
             referees_full = len(referees) >= event.max_referees
             if can_manage_referees and not referees_full:
                 referee_candidates = list(eligible_referees(event, include_expired=True))
@@ -3585,7 +3600,7 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
         if officials_enabled:
             official_management_needed = needs_official_management(event)
             if official_management_needed:
-                officials = list(event.officials.select_related("member", "assigned_by").order_by("member__last_name", "member__first_name"))
+                officials = order_assignments(event.officials.select_related("member", "assigned_by", "referee_type"))
                 officials_full = len(officials) >= event.max_officials
                 if can_manage_referees and not officials_full:
                     official_candidates = list(eligible_officials(event))
@@ -3615,6 +3630,8 @@ class EventDetailView(ClubStaffRequiredMixin, DetailView):
             has_attendance_rows=any(group["rows"] for group in attendance_groups),
             attendance_row_count=sum(len(group["rows"]) for group in attendance_groups),
             referees=referees,
+            referee_types=referee_types_for(club) if can_manage_referees else [],
+            official_types=referee_types_for(club, RefereeType.Kind.OFFICIAL) if can_manage_referees and officials_enabled else [],
             referee_candidates=referee_candidates,
             referees_full=referees_full,
             pending_signups=pending_signups,
@@ -3648,13 +3665,28 @@ def _redirect_next_or(request, fallback_url):
     return redirect(fallback_url)
 
 
+def _posted_referee_type(request, error_class, field="referee_type"):
+    """The optional RefereeType picked in a POST: blank means "no type". An unknown id raises
+    ``error_class``; whether the type fits the club's sport and kind is the service's call."""
+    value = request.POST.get(field, "").strip()
+    if not value:
+        return None
+    try:
+        referee_type = RefereeType.objects.filter(pk=value).first()
+    except ValueError, ValidationError:
+        referee_type = None
+    if referee_type is None:
+        raise error_class(_("Unknown type."))
+    return referee_type
+
+
 class EventRefereeAssignView(RefereeAdminRequiredMixin, View):
     """Reachable via the assign control on the event detail page's Referees
     panel, or the referee management dashboard -- POST-only, no standalone
-    template. Admin-only for now (unlike most event actions, which a team
-    manager can also do) -- see EventDetailView's can_manage_referees; team
-    managers/coaches still see the panel, just not the assign/remove
-    controls."""
+    template. Needs RefereeAdminRequiredMixin (ADMIN, MEMBER_ADMIN or a referee
+    manager; unlike most event actions, a team manager can't do this) -- see
+    EventDetailView's can_manage_referees; team managers/coaches still see the
+    panel, just not the assign/remove controls."""
 
     def get_event(self):
         return get_object_or_404(Event.objects.filter(club=self.request.club), pk=self.kwargs["pk"])
@@ -3665,7 +3697,7 @@ class EventRefereeAssignView(RefereeAdminRequiredMixin, View):
         assigned_by = Member.objects.filter(user=request.user).first()
 
         try:
-            assign_referee(event, member, assigned_by=assigned_by)
+            assign_referee(event, member, assigned_by=assigned_by, referee_type=_posted_referee_type(request, RefereeAssignmentError))
         except RefereeAssignmentError as error:
             notify(request, f"e|{_('Could not assign referee')}|{error}")
         else:
@@ -3684,6 +3716,23 @@ class EventRefereeRemoveView(RefereeAdminRequiredMixin, View):
         name = referee.display_name
         remove_referee(referee)
         notify(request, f"w|{_('Referee removed')}|" + _("“%(name)s” is no longer refereeing this game.") % {"name": name})
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
+class EventRefereeRenameView(RefereeAdminRequiredMixin, View):
+    """Correct the name of an external referee (POST-only, from the assignment panel)."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk, referee_pk):
+        event = get_object_or_404(Event.objects.filter(club=request.club), pk=pk)
+        referee = get_object_or_404(EventReferee.objects.filter(event=event), pk=referee_pk)
+        try:
+            rename_external_referee(referee, request.POST.get("name", ""))
+        except RefereeAssignmentError as error:
+            notify(request, f"e|{_('Could not rename referee')}|{error}")
+        else:
+            notify(request, f"s|{_('Referee renamed')}|" + _("Saved as “%(name)s”.") % {"name": referee.display_name})
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
@@ -3706,7 +3755,7 @@ class EventRefereeAddExternalView(RefereeAdminRequiredMixin, View):
 
         assigned_by = Member.objects.filter(user=request.user).first()
         try:
-            add_external_referee(event, form.cleaned_data["name"], assigned_by=assigned_by)
+            add_external_referee(event, form.cleaned_data["name"], assigned_by=assigned_by, referee_type=_posted_referee_type(request, RefereeAssignmentError))
         except RefereeAssignmentError as error:
             notify(request, f"e|{_('Could not add referee')}|{error}")
         else:
@@ -3715,7 +3764,7 @@ class EventRefereeAddExternalView(RefereeAdminRequiredMixin, View):
         return fallback
 
 
-class EventFeesUpdateView(ClubAdminRequiredMixin, View):
+class EventFeesUpdateView(RefereeAdminRequiredMixin, View):
     """Saves the fee line (fee, travel km/rate, "No fee") of *every* referee and
     official on one game in a single POST -- the panels' fee inputs all belong to
     one per-game form (``form="<id>"``, see _event_fees_form.html), so the ✓ on
@@ -3731,27 +3780,36 @@ class EventFeesUpdateView(ClubAdminRequiredMixin, View):
 
     def post(self, request, pk):
         event = get_object_or_404(Event.objects.filter(club=request.club), pk=pk)
-        rows = [("referee", assignment, EventRefereeFeeForm, set_referee_fee) for assignment in event.referees.select_related("member")]
+        rows = [("referee", assignment, EventRefereeFeeForm, set_referee_fee, set_referee_type, RefereeAssignmentError) for assignment in event.referees.select_related("member", "referee_type", "event")]
         if flag_is_active(request, OFFICIALS_FLAG):
-            rows += [("official", assignment, EventOfficialFeeForm, set_official_fee) for assignment in event.officials.select_related("member")]
+            rows += [("official", assignment, EventOfficialFeeForm, set_official_fee, set_official_type, OfficialAssignmentError) for assignment in event.officials.select_related("member", "referee_type", "event")]
 
         saved, failed = [], []
-        for kind, assignment, form_class, save in rows:
+        for kind, assignment, form_class, save, save_type, type_error in rows:
             prefix = f"{kind}_{assignment.pk}"
-            if f"{prefix}-fee" not in request.POST:
-                continue
-            form = form_class(request.POST, instance=assignment, prefix=prefix)
-            if not form.is_valid():
-                failed.append(assignment.display_name)
-                continue
-            if form.has_changed():
-                save(assignment, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"], no_fee=form.cleaned_data["no_fee"])
-                saved.append(assignment.display_name)
+            if f"{prefix}-fee" in request.POST:
+                form = form_class(request.POST, instance=assignment, prefix=prefix)
+                if not form.is_valid():
+                    failed.append(assignment.display_name)
+                    continue
+                if form.has_changed():
+                    save(assignment, fee=form.cleaned_data["fee"], km=form.cleaned_data["km"], km_rate=form.cleaned_data["km_rate"], no_fee=form.cleaned_data["no_fee"])
+                    saved.append(assignment.display_name)
+            # The type select travels with the fee line (same form= attribute); a blank value clears it.
+            if f"{prefix}-referee_type" in request.POST:
+                try:
+                    new_type = _posted_referee_type(request, type_error, field=f"{prefix}-referee_type")
+                    if new_type != assignment.referee_type:
+                        save_type(assignment, new_type)
+                        if assignment.display_name not in saved:
+                            saved.append(assignment.display_name)
+                except type_error:
+                    failed.append(assignment.display_name)
 
         if failed:
-            notify(request, f"e|{_('Could not update fee')}|" + _("Check the amounts for: %(names)s.") % {"names": ", ".join(failed)})
+            notify(request, f"e|{_('Could not update fee')}|" + _("Check the amounts or type for: %(names)s.") % {"names": ", ".join(failed)})
         if saved:
-            notify(request, f"s|{_('Fees updated')}|" + _("Updated the fee for: %(names)s.") % {"names": ", ".join(saved)})
+            notify(request, f"s|{_('Fees updated')}|" + _("Updated: %(names)s.") % {"names": ", ".join(saved)})
         elif not failed:
             notify(request, f"i|{_('Nothing changed')}|{_('No fees were changed.')}")
         return _redirect_next_or(request, reverse("management:event_detail", args=[pk]))
@@ -3768,9 +3826,9 @@ class EventRefereeFormPdfView(RefereeAdminRequiredMixin, View):
     their fee/km breakdown, and blank signature lines."""
 
     def get(self, request, pk):
-        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member"), pk=pk)
+        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "referees__member", "referees__referee_type"), pk=pk)
         document_address = resolve_document_address(request.club)
-        referees = list(event.referees.all())
+        referees = order_assignments(event.referees.all())
         context = {"club": request.club, "event": event, "referees": referees, "document_address": document_address, "grand_total": sum((referee.total_payable for referee in referees), Decimal("0"))} | referee_form_colors(request.club)
 
         try:
@@ -3797,7 +3855,7 @@ class EventOfficialAssignView(OfficialsRefereeAdminRequiredMixin, View):
         assigned_by = Member.objects.filter(user=request.user).first()
 
         try:
-            assign_official(event, member, assigned_by=assigned_by)
+            assign_official(event, member, assigned_by=assigned_by, referee_type=_posted_referee_type(request, OfficialAssignmentError))
         except OfficialAssignmentError as error:
             notify(request, f"e|{_('Could not assign official')}|{error}")
         else:
@@ -3819,6 +3877,23 @@ class EventOfficialRemoveView(OfficialsRefereeAdminRequiredMixin, View):
         return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
 
 
+class EventOfficialRenameView(OfficialsRefereeAdminRequiredMixin, View):
+    """Correct the name of an external official (POST-only, from the assignment panel)."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk, official_pk):
+        event = get_object_or_404(Event.objects.filter(club=request.club), pk=pk)
+        official = get_object_or_404(EventOfficial.objects.filter(event=event), pk=official_pk)
+        try:
+            rename_external_official(official, request.POST.get("name", ""))
+        except OfficialAssignmentError as error:
+            notify(request, f"e|{_('Could not rename official')}|{error}")
+        else:
+            notify(request, f"s|{_('Official renamed')}|" + _("Saved as “%(name)s”.") % {"name": official.display_name})
+        return _redirect_next_or(request, reverse("management:event_detail", args=[event.pk]))
+
+
 class EventOfficialAddExternalView(OfficialsRefereeAdminRequiredMixin, View):
     """The officials counterpart to EventRefereeAddExternalView."""
 
@@ -3836,7 +3911,7 @@ class EventOfficialAddExternalView(OfficialsRefereeAdminRequiredMixin, View):
 
         assigned_by = Member.objects.filter(user=request.user).first()
         try:
-            add_external_official(event, form.cleaned_data["name"], assigned_by=assigned_by)
+            add_external_official(event, form.cleaned_data["name"], assigned_by=assigned_by, referee_type=_posted_referee_type(request, OfficialAssignmentError))
         except OfficialAssignmentError as error:
             notify(request, f"e|{_('Could not add official')}|{error}")
         else:
@@ -3851,9 +3926,9 @@ class EventOfficialFormPdfView(OfficialsRefereeAdminRequiredMixin, View):
     render_pdf/resolve_document_address/referee_form_colors helpers."""
 
     def get(self, request, pk):
-        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "officials__member"), pk=pk)
+        event = get_object_or_404(Event.objects.filter(club=request.club).prefetch_related("teams", "officials__member", "officials__referee_type"), pk=pk)
         document_address = resolve_document_address(request.club)
-        officials = list(event.officials.all())
+        officials = order_assignments(event.officials.all())
         context = {"club": request.club, "event": event, "officials": officials, "document_address": document_address, "grand_total": sum((official.total_payable for official in officials), Decimal("0"))} | referee_form_colors(request.club)
 
         try:
@@ -4187,13 +4262,18 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
         buckets = {"all": set(in_view_ids), "referees": short_referee_ids, "officials": short_official_ids, "both": short_referee_ids | short_official_ids}
         need_counts = {key: len(ids) for key, ids in buckets.items()}
 
-        queryset = Event.objects.filter(pk__in=buckets[need_choice]).order_by("start").select_related("location", "opponent").prefetch_related("teams", "referees__member", "referees__assigned_by", "officials__member", "officials__assigned_by")
+        queryset = (
+            Event.objects.filter(pk__in=buckets[need_choice])
+            .order_by("start")
+            .select_related("location", "opponent")
+            .prefetch_related("teams", "referees__member", "referees__assigned_by", "referees__referee_type", "officials__member", "officials__assigned_by", "officials__referee_type")
+        )
         games = list(queryset)
 
         referee_roster_cache = referee_roster(club)
         for game in games:
             game.needs_referees = needs_referee_management(game)
-            game.referee_rows = list(game.referees.all())
+            game.referee_rows = order_assignments(game.referees.all())
             game.referees_full = len(game.referee_rows) >= game.max_referees
             game.referee_candidates = []
             game.fees_pending = any(referee.fee_pending for referee in game.referee_rows)
@@ -4207,7 +4287,7 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
                     candidate.conflict_titles = ", ".join(conflict.title for conflict in conflicts)
 
             game.needs_officials = officials_enabled and needs_official_management(game)
-            game.official_rows = list(game.officials.all())
+            game.official_rows = order_assignments(game.officials.all())
             game.officials_full = len(game.official_rows) >= game.max_officials
             game.official_candidates = []
             game.official_fees_pending = any(official.fee_pending for official in game.official_rows)
@@ -4249,6 +4329,8 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
             kpi_total_assignments=kpi_total_assignments,
             kpi_avg_games_per_referee=kpi_avg_games_per_referee,
             officials_enabled=officials_enabled,
+            referee_types=referee_types_for(club),
+            official_types=referee_types_for(club, RefereeType.Kind.OFFICIAL) if officials_enabled else [],
             kpi_no_official=kpi_no_official,
             kpi_officials_understaffed=kpi_officials_understaffed,
             kpi_officials_fully_staffed=kpi_officials_fully_staffed,

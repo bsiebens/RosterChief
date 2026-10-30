@@ -1,0 +1,62 @@
+{% load i18n lucide ui %}
+
+{% comment %}
+    One referee/official type list of a sport. Included with `section` (kind, title, blurb, singular, items, form) and `sport`.
+{% endcomment %}
+<div class="card">
+    <div class="flex items-center gap-2.5 border-b border-line px-4 py-3">
+        {% lucide "list-ordered" size=16 class="shrink-0 text-muted" %}
+        <span class="font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase">{{ section.title }}</span>
+        <span class="flex-1"></span>
+        <button class="btn btn-primary btn-sm gap-1" type="button" onclick="document.getElementById('{{ section.kind|dom_id:"type_create_modal" }}').showModal()">{% lucide "plus" size=14 %} {% trans "New" %}</button>
+    </div>
+    <p class="px-4 pt-3 pb-3 text-sm text-muted">{{ section.blurb }} {% trans "Drag to change the order." %}</p>
+    <div class="overflow-x-auto">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="w-8"></th>
+                    <th class="w-16">{% trans "Order" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            {% url 'controlpanel:referee_type_reorder' sport.pk section.kind as reorder_url %}
+            <tbody data-reorder-url="{{ reorder_url }}">
+                {% for item in section.items %}
+                    <tr draggable="true" data-id="{{ item.pk }}" class="cursor-grab">
+                        <td class="w-8 text-muted" aria-hidden="true">{% lucide "grip-vertical" size=14 %}</td>
+                        <td class="font-mono text-xs tabular-nums text-muted">{{ item.ordering }}</td>
+                        <td>{{ item.name }}</td>
+                        <td class="text-right">
+                            <div class="flex justify-end gap-1">
+                                <button class="btn btn-outline btn-sm gap-1" type="button" onclick="document.getElementById('{{ item.pk|dom_id:"type_edit_modal" }}').showModal()">{% lucide "pencil" size=14 %} {% trans "Rename" %}</button>
+                                <button class="btn btn-outline btn-error btn-sm gap-1" type="button" onclick="document.getElementById('{{ item.pk|dom_id:"type_delete_modal" }}').showModal()">{% lucide "trash-2" size=14 %} {% trans "Delete" %}</button>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">{% trans "None yet." %}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% url 'controlpanel:referee_type_create' sport.pk section.kind as create_url %}
+    {% blocktrans with singular=section.singular asvar create_title %}New {{ singular }}{% endblocktrans %}
+    {% trans "Create" as create_label %}
+    {% include "controlpanel/_modal_form.html" with modal_id=section.kind|dom_id:"type_create_modal" title=create_title form=section.form action_url=create_url submit_label=create_label submit_icon="plus" %}
+    {% trans "Save" as save_label %}
+    {% trans "Delete" as delete_label %}
+    {% for item in section.items %}
+        {% url 'controlpanel:referee_type_update' item.pk as update_url %}
+        {% blocktrans with name=item.name asvar edit_title %}Rename “{{ name }}”{% endblocktrans %}
+        {% include "controlpanel/_modal_form.html" with modal_id=item.pk|dom_id:"type_edit_modal" title=edit_title form=item.edit_form action_url=update_url submit_label=save_label submit_icon="check" %}
+        {% url 'controlpanel:referee_type_delete' item.pk as delete_url %}
+        {% blocktrans with name=item.name asvar delete_title %}Delete “{{ name }}”{% endblocktrans %}
+        {% trans "Events already assigned this type keep their referee or official, but lose the type." as delete_body %}
+        {% include "controlpanel/_confirm_modal.html" with modal_id=item.pk|dom_id:"type_delete_modal" title=delete_title body=delete_body action_url=delete_url submit_label=delete_label %}
+    {% endfor %}
+</div>

@@ -24,7 +24,7 @@ from billing.services import BillingError
 from billing.services.dues import record_payment, start_trial, subscribe, waive
 from bugs.models import BugReport
 from bugs.services import add_note
-from club.models import Club, ClubMembership, ClubRole, EvaluationManager, Season, ShopManager, Sport
+from club.models import Club, ClubMembership, ClubRole, EvaluationManager, RefereeType, Season, ShopManager, Sport
 from events.models import Attendance, Competition, Event, Location
 from features.models import EmailSuppression, JobRun, JobToggle, Maintenance
 from members.models import Member
@@ -2769,3 +2769,94 @@ class SportManagementTests(ControlPanelTestBase):
         Club.objects.filter(pk=self.club.pk).update(sport_type="other")
         self.client.post(reverse("controlpanel:sport_delete", args=[used.pk]))
         self.assertFalse(Sport.objects.filter(code="rugby").exists())
+
+
+class SportSettingsTests(ControlPanelTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.sport = Sport.objects.get(code="ice_hockey")
+
+    def _make(self, name, kind=RefereeType.Kind.REFEREE, ordering=1, sport=None):
+        return RefereeType.objects.create(sport=sport or self.sport, kind=kind, name=name, ordering=ordering)
+
+    def _create(self, kind, name):
+        return self.client.post(reverse("controlpanel:referee_type_create", args=[self.sport.pk, kind]), {"name": name}, follow=True)
+
+    def test_features_page_links_to_the_settings(self):
+        self.assertContains(self.client.get(reverse("controlpanel:features")), reverse("controlpanel:sport_settings", args=[self.sport.pk]))
+
+    def test_page_renders_both_sections(self):
+        self._make("Referee")
+        self._make("Timekeeper", RefereeType.Kind.OFFICIAL)
+        response = self.client.get(reverse("controlpanel:sport_settings", args=[self.sport.pk]))
+        self.assertContains(response, "Referee types")
+        self.assertContains(response, "Official types")
+        self.assertContains(response, "Timekeeper")
+
+    def test_create_appends_after_the_last(self):
+        self._make("Referee", ordering=3)
+        self._create("referee", "Linesman")
+        self.assertEqual(RefereeType.objects.get(name="Linesman").ordering, 4)
+        self._create("official", "Timekeeper")
+        self.assertEqual(RefereeType.objects.get(name="Timekeeper").ordering, 1)
+
+    def test_duplicate_name_is_rejected_per_sport_and_kind(self):
+        self._make("Referee")
+        response = self._create("referee", "referee")
+        self.assertEqual(RefereeType.objects.filter(sport=self.sport).count(), 1)
+        self.assertContains(response, "There is already a type called")
+        # The same name under the other kind is fine.
+        self._create("official", "Referee")
+        self.assertEqual(RefereeType.objects.filter(sport=self.sport).count(), 2)
+
+    def test_rename(self):
+        item = self._make("Refree")
+        self.client.post(reverse("controlpanel:referee_type_update", args=[item.pk]), {"name": "Referee"})
+        item.refresh_from_db()
+        self.assertEqual(item.name, "Referee")
+
+    def test_rename_to_a_taken_name_is_rejected(self):
+        self._make("Referee")
+        other = self._make("Linesman", ordering=2)
+        self.client.post(reverse("controlpanel:referee_type_update", args=[other.pk]), {"name": "Referee"})
+        other.refresh_from_db()
+        self.assertEqual(other.name, "Linesman")
+
+    def test_delete(self):
+        item = self._make("Referee")
+        self.client.post(reverse("controlpanel:referee_type_delete", args=[item.pk]))
+        self.assertFalse(RefereeType.objects.filter(pk=item.pk).exists())
+
+    def test_reorder_renumbers(self):
+        a, b, c = self._make("A", ordering=1), self._make("B", ordering=2), self._make("C", ordering=3)
+        response = self.client.post(reverse("controlpanel:referee_type_reorder", args=[self.sport.pk, "referee"]), {"ids": [c.pk, a.pk, b.pk]}, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([t.name for t in RefereeType.objects.filter(kind="referee").order_by("ordering")], ["C", "A", "B"])
+        self.assertEqual(sorted(RefereeType.objects.values_list("ordering", flat=True)), [1, 2, 3])
+
+    def test_reorder_rejects_foreign_or_incomplete_ids(self):
+        a = self._make("A", ordering=1)
+        self._make("B", ordering=2)
+        official = self._make("T", RefereeType.Kind.OFFICIAL)
+        url = reverse("controlpanel:referee_type_reorder", args=[self.sport.pk, "referee"])
+        for ids in ([a.pk], [a.pk, official.pk], "nope"):
+            response = self.client.post(url, {"ids": ids}, content_type="application/json")
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(RefereeType.objects.get(pk=a.pk).ordering, 1)
+
+    def test_kinds_are_separate_lists(self):
+        self._create("referee", "Referee")
+        self._create("official", "Timekeeper")
+        self.assertEqual(RefereeType.objects.get(name="Referee").kind, "referee")
+        self.assertEqual(RefereeType.objects.get(name="Timekeeper").kind, "official")
+        self.assertEqual(self.client.post(reverse("controlpanel:referee_type_create", args=[self.sport.pk, "bogus"]), {"name": "X"}).status_code, 404)
+
+    def test_non_staff_is_denied(self):
+        item = self._make("Referee")
+        outsider = User.objects.create_user(email="nobody@example.com", password="pw-secret-123")
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get(reverse("controlpanel:sport_settings", args=[self.sport.pk])).status_code, 403)
+        self.assertEqual(self.client.post(reverse("controlpanel:referee_type_delete", args=[item.pk])).status_code, 403)
+        self.assertEqual(self.client.post(reverse("controlpanel:referee_type_reorder", args=[self.sport.pk, "referee"]), {"ids": [item.pk]}, content_type="application/json").status_code, 403)
+        self.assertTrue(RefereeType.objects.filter(pk=item.pk).exists())

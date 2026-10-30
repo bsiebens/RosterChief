@@ -177,7 +177,8 @@ class FormManagerRequiredMixin(FeatureRequiredMixin):
 #: tier each), officials needs the same three-tier split the pre-existing
 #: referee system already has (RefereeListView/RefereeLevelListView are any
 #: staff; RefereeLevelCreateView/UpdateView/DeleteView are MEMBER_ADMIN;
-#: EventRefereeAssignView/RemoveView/FeeUpdateView/FormPdfView are ADMIN-only)
+#: EventRefereeAssignView/RemoveView/FeesUpdateView/FormPdfView need
+#: RefereeAdminRequiredMixin: ADMIN, MEMBER_ADMIN or a referee manager)
 #: -- each layers FeatureFlagMixin onto the matching existing permission
 #: tier rather than introducing a fourth, officials-specific one.
 OFFICIALS_FLAG = "officials"

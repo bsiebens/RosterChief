@@ -9,7 +9,7 @@
 {% endcomment %}
 <div class="flex flex-wrap items-center justify-between gap-2">
     <h2 class="card-title">
-        {% lucide "shield" size=18 %} {% trans "Officials" %}
+        <span class="inline-flex size-7 items-center justify-center rounded-sm bg-ink text-white">{% lucide "shield" size=16 %}</span> {% trans "Officials" %}
         <span class="badge badge-sm {% if officials_full %}badge-neutral{% else %}badge-outline{% endif %}">
             {{ officials|length }} / {{ event.max_officials }}
         </span>
@@ -25,6 +25,7 @@
             <div class="flex min-w-0 flex-col gap-0.5">
                 <div class="flex flex-wrap items-center gap-1.5">
                     <span class="text-sm font-semibold text-ink">{{ official.display_name }}</span>
+                    {% if official.referee_type %}<span class="badge badge-outline badge-xs">{{ official.referee_type.name }}</span>{% endif %}
                     {% if official.is_external %}<span class="badge badge-neutral badge-xs">{% trans "External" %}</span>{% endif %}
                     {% if can_manage_referees %}
                         {% if official.no_fee %}<span class="badge badge-outline badge-xs">{% trans "No fee" %}</span>{% elif not official.fee %}<span class="badge badge-warning badge-xs">{% trans "Fee not set" %}</span>{% endif %}
@@ -36,16 +37,34 @@
             </div>
 
             {% if can_manage_referees %}
-                <div class="flex shrink-0 flex-col items-end gap-1">
-                    <div class="flex items-center gap-1.5">
+                <div class="flex w-full min-w-0 flex-col items-start gap-1">
+                    <div class="flex w-full flex-wrap items-center gap-1.5">
                         {% comment %}
                             Not a form of its own: every input here belongs to the game's shared fee
                             form (_event_fees_form.html, rendered by the page), so any row's ✓ saves
                             all rows. "No fee" hides the rest of the line (CSS only, via
                             group-has-[:checked]) -- the server drops any fee/km still in it.
                         {% endcomment %}
+                        {% if official_types %}
+                            {% comment %}Part of the game's shared fee form (form=), so the page-wide save button stores it too; no nested forms.{% endcomment %}
+                            <select name="{{ official.pk|dom_id:"official" }}-referee_type" form="{{ fees_form_id }}" class="select select-xs h-6 w-auto max-w-40 text-xs" data-widget-class="w-32 shrink-0" data-input-class="select-xs h-6 text-xs" aria-label="{% trans 'Type' %}">
+                                <option value="">{% trans "No type" %}</option>
+                                {% for type in official_types %}<option value="{{ type.pk }}" {% if type.pk == official.referee_type_id %}selected{% endif %}>{{ type.name }}</option>{% endfor %}
+                            </select>
+                        {% endif %}
+                        {% if official.is_external %}
+                            <details class="relative">
+                                <summary class="btn btn-square btn-outline btn-xs cursor-pointer list-none" title="{% trans 'Rename' %}" aria-label="{% trans 'Rename' %}">{% lucide "pencil" size=12 %}</summary>
+                                <form method="post" action="{% url 'management:event_official_rename' event.pk official.pk %}" class="absolute right-0 z-10 mt-1 flex items-center gap-1.5 rounded-lg border border-line bg-white p-2.5 shadow-lg">
+                                    {% csrf_token %}
+                                    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                                    <input type="text" name="name" value="{{ official.external_name }}" class="input w-44" required aria-label="{% trans 'Name' %}">
+                                    <button class="btn btn-square btn-outline btn-xs" type="submit" title="{% trans 'Save name' %}" aria-label="{% trans 'Save name' %}">{% lucide "check" size=12 %}</button>
+                                </form>
+                            </details>
+                        {% endif %}
                         {% with prefix=official.pk|dom_id:"official" %}
-                        <div class="group flex items-center gap-1.5">
+                        <div class="group ml-auto flex flex-wrap items-center gap-1.5">
                             <label class="mr-3 flex cursor-pointer items-center gap-1 text-xs text-muted" title="{% trans 'Not paid for this game, or does not wish to be paid' %}">
                                 <input type="checkbox" name="{{ prefix }}-no_fee" form="{{ fees_form_id }}" class="checkbox" {% if official.no_fee %}checked{% endif %}>
                                 {% trans "No fee" %}
@@ -75,7 +94,7 @@
                         </form>
                     </div>
                     {% if official.km and not official.no_fee %}
-                        <span class="font-mono text-xs text-muted">{% blocktrans with total=official.total_payable|floatformat:2 %}&euro;{{ total }} due, travel included{% endblocktrans %}</span>
+                        <span class="self-end font-mono text-xs text-muted">{% blocktrans with total=official.total_payable|floatformat:2 %}&euro;{{ total }} due, travel included{% endblocktrans %}</span>
                     {% endif %}
                 </div>
             {% elif official.total_payable %}
@@ -139,6 +158,12 @@
                         </option>
                     {% endfor %}
                 </select>
+                        {% if official_types %}
+                        <select name="referee_type" class="select w-auto" aria-label="{% trans 'Type' %}">
+                            <option value="">{% trans "No type" %}</option>
+                            {% for type in official_types %}<option value="{{ type.pk }}">{{ type.name }}</option>{% endfor %}
+                        </select>
+                        {% endif %}
                 <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Assign" %}</button>
             </form>
         {% else %}
@@ -148,15 +173,24 @@
             </p>
         {% endif %}
 
-        <form method="post" action="{% url 'management:event_official_add_external' event.pk %}" class="flex flex-wrap items-center gap-2">
+        <form method="post" action="{% url 'management:event_official_add_external' event.pk %}" class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
             {% csrf_token %}
             {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-            <input type="text" name="name" class="input w-56" placeholder="{% trans 'External official name' %}">
-            <button class="btn btn-outline gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
+            <input type="text" name="name" class="input min-w-0 flex-1" placeholder="{% trans 'External official name' %}">
+            {% if official_types %}
+                <select name="referee_type" class="select w-auto" data-widget-class="w-44 shrink-0" aria-label="{% trans 'Type' %}">
+                    <option value="">{% trans "No type" %}</option>
+                    {% for type in official_types %}<option value="{{ type.pk }}">{{ type.name }}</option>{% endfor %}
+                </select>
+            {% endif %}
+            <button class="btn btn-outline shrink-0 gap-2" type="submit">{% lucide "user-plus" size=14 %} {% trans "Add external" %}</button>
         </form>
 
         <p class="text-xs text-muted">{% trans "⚠ = also expected at another event around this time -- shown as a warning, not blocked." %}</p>
     </div>
 {% elif can_manage_referees and officials_full %}
-    <p class="mt-2 text-sm text-muted">{% trans "This game already has its maximum number of officials." %}</p>
+    <div class="alert alert-info mt-3">
+        {% lucide "info" size=18 %}
+        <span>{% trans "This game already has its maximum number of officials." %}</span>
+    </div>
 {% endif %}

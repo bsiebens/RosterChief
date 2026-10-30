@@ -350,6 +350,7 @@ class EventReferee(UUIDModel):
     member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="referee_assignments", verbose_name=_("member"))
     external_name = models.CharField(_("external referee name"), max_length=255, blank=True, help_text=_("For a referee who isn't a club member (e.g. federation-appointed) -- logged by name only."))
     assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
+    referee_type = models.ForeignKey("club.RefereeType", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("type"))
 
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)
@@ -444,6 +445,7 @@ class EventOfficial(UUIDModel):
     member = models.ForeignKey(Member, on_delete=models.CASCADE, null=True, blank=True, related_name="official_assignments", verbose_name=_("member"))
     external_name = models.CharField(_("external official name"), max_length=255, blank=True, help_text=_("For an official who isn't a club member (e.g. federation-appointed) -- logged by name only."))
     assigned_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, related_name="+", verbose_name=_("assigned by"))
+    referee_type = models.ForeignKey("club.RefereeType", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("type"))
 
     fee = models.DecimalField(_("fee"), max_digits=8, decimal_places=2, default=Decimal("0.00"), blank=True)
     km = models.DecimalField(_("kilometers"), max_digits=6, decimal_places=1, null=True, blank=True)

@@ -29,7 +29,7 @@ from waffle import get_waffle_flag_model
 from billing.models import Plan, PlanPrice
 from billing.services.dues import record_payment, subscribe
 from bugs.models import BugNote, BugReport
-from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, RefereeManager, Season, ShopManager, Sponsor
+from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, RefereeManager, RefereeType, Season, ShopManager, Sponsor, Sport
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
@@ -45,7 +45,7 @@ from events.services.game_timeline import store as store_game_timeline
 from events.services.notifications import notify_new_event
 from events.services.rbihf_import import RBIHFImportError
 from events.services.recurrence import detach_occurrence, generate_occurrences
-from events.services.referees import add_external_referee
+from events.services.referees import add_external_referee, order_assignments
 from formbuilder.models import Answer, FormSend, Submission
 from formbuilder.models import Field as FormBuilderField
 from formbuilder.models import Form as FormBuilderForm
@@ -8379,9 +8379,10 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         # already seeded this row at migrate time, so a plain create() collides with
         # it. waffle also caches Flag lookups outside the DB transaction each test
         # rolls back -- see FeatureGatedSectionsTests' own identical setUp for why.
+        # Waffle caches a flag's club ids outside the test transaction: clear after enabling, and again afterwards.
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
         cache.clear()
         self.addCleanup(cache.clear)
-        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
 
     def test_the_toggle_is_hidden_when_the_officials_flag_is_off(self):
         self.make_game()
@@ -16625,3 +16626,269 @@ class TeamAnalyticsTests(ManagementTestBase):
 
         self.assertEqual(outcome, "finalized")
         self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)
+
+
+class RefereeTypeAssignmentTests(ManagementTestBase):
+    """Referee / official types (club.RefereeType): optional type on assign and add-external, type changes,
+    renaming externals, the shared ordering helper, the fee-save permission fix and the PDFs."""
+
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        get_waffle_flag_model().objects.get_or_create(name="officials")[0].clubs.add(self.club)
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.team = Team.objects.create(club=cls.club, name="First Team", short_name="1st")
+        cls.home_ground = Location.objects.create(club=cls.club, name="Home Ground", address="1 St", city="Town", zip_code="1000", country="BE", is_home=True)
+        cls.sport = Sport.objects.get_or_create(code=cls.club.sport_type, defaults={"name": "Club sport"})[0]
+        cls.other_sport = Sport.objects.create(code="other-sport-x", name="Other sport")
+        cls.main_type = RefereeType.objects.create(sport=cls.sport, kind=RefereeType.Kind.REFEREE, name="Referee", ordering=1)
+        cls.line_type = RefereeType.objects.create(sport=cls.sport, kind=RefereeType.Kind.REFEREE, name="Linesman", ordering=2)
+        cls.official_type = RefereeType.objects.create(sport=cls.sport, kind=RefereeType.Kind.OFFICIAL, name="Timekeeper", ordering=1)
+        cls.foreign_type = RefereeType.objects.create(sport=cls.other_sport, kind=RefereeType.Kind.REFEREE, name="Umpire", ordering=1)
+        cls.referee_member = Member.objects.create(first_name="Ref", last_name="Eree")
+        cls.level = RefereeLevel.objects.create(club=cls.club, name="Regional")
+        cls.level.teams.add(cls.team)
+        ClubMembership.objects.create(club=cls.club, member=cls.referee_member, season=cls.season, status=ClubMembership.StatusChoices.ACTIVE)
+        RefereeProfile.objects.create(club=cls.club, member=cls.referee_member, level=cls.level, valid_until=timezone.localdate() + datetime.timedelta(days=30))
+        cls.coach_position = Position.objects.create(club=cls.club, name="Head Coach", short_name="HC", staff_position=True, management_position=True)
+
+    def make_game(self, **kwargs):
+        kwargs.setdefault("title", "Cup game")
+        kwargs.setdefault("kind", Event.EventKind.GAME)
+        kwargs.setdefault("location", self.home_ground)
+        kwargs.setdefault("start", timezone.now() + datetime.timedelta(days=1))
+        kwargs.setdefault("max_referees", 5)
+        kwargs.setdefault("max_officials", 5)
+        event = Event.objects.create(club=self.club, **kwargs)
+        event.teams.add(self.team)
+        return event
+
+    def make_user(self, role=None, email="x@example.com", referee_manager=False):
+        user = User.objects.create_user(email=email, password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Some", last_name="Body")
+        ClubMembership.objects.create(club=self.club, member=member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        if role:
+            ClubRole.objects.filter(club=self.club, member=member).update(role=role)
+        if referee_manager:
+            RefereeManager.objects.create(club=self.club, member=member)
+        enrol_mfa(user)
+        return user
+
+    def make_coach(self):
+        user = User.objects.create_user(email="coach-types@example.com", password="pw-secret-123")
+        member = Member.objects.create(user=user, first_name="Cara", last_name="Coach")
+        StaffAssignment.objects.create(team=self.team, member=member, season=self.season, position=self.coach_position)
+        return user
+
+    # --- the fee-save permission bug ---
+
+    def test_member_admin_and_referee_manager_can_save_fees_but_a_coach_cannot(self):
+        game = self.make_game()
+        row = EventReferee.objects.create(event=game, external_name="Guest", assigned_by=self.admin_member)
+        data = {f"referee_{row.pk}-fee": "30.00", f"referee_{row.pk}-km": "", f"referee_{row.pk}-km_rate": ""}
+        for label, user in (("member admin", self.make_user(ClubRole.Roles.MEMBER_ADMIN, "ma@example.com")), ("referee manager", self.make_user(None, "rm@example.com", referee_manager=True))):
+            with self.subTest(label):
+                self.client.force_login(user)
+                response = self.club_post("event_fees_update", data, game.pk)
+                self.assertRedirects(response, reverse("management:event_detail", args=[game.pk]), fetch_redirect_response=False)
+                row.refresh_from_db()
+                self.assertEqual(row.fee, Decimal("30.00"))
+                EventReferee.objects.filter(pk=row.pk).update(fee=Decimal("0.00"))
+        self.client.force_login(self.make_coach())
+        self.assertEqual(self.club_post("event_fees_update", data, game.pk).status_code, 403)
+
+    def test_the_fees_form_changes_and_clears_a_type(self):
+        game = self.make_game()
+        row = EventReferee.objects.create(event=game, external_name="Guest", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_fees_update", {f"referee_{row.pk}-referee_type": str(self.line_type.pk)}, game.pk)
+        row.refresh_from_db()
+        self.assertEqual(row.referee_type, self.line_type)
+
+        self.club_post("event_fees_update", {f"referee_{row.pk}-referee_type": ""}, game.pk)
+        row.refresh_from_db()
+        self.assertIsNone(row.referee_type)
+
+    def test_the_fees_form_rejects_a_type_of_another_sport_or_kind(self):
+        game = self.make_game()
+        row = EventReferee.objects.create(event=game, external_name="Guest", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        for bad in (self.foreign_type, self.official_type):
+            self.club_post("event_fees_update", {f"referee_{row.pk}-referee_type": str(bad.pk)}, game.pk)
+            row.refresh_from_db()
+            self.assertIsNone(row.referee_type)
+
+    # --- type on assign / add external ---
+
+    def test_assign_and_add_external_store_the_type(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_referee_assign", {"member": str(self.referee_member.pk), "referee_type": str(self.main_type.pk)}, game.pk)
+        self.club_post("event_referee_add_external", {"name": "Guest", "referee_type": str(self.line_type.pk)}, game.pk)
+
+        self.assertEqual(EventReferee.objects.get(event=game, member=self.referee_member).referee_type, self.main_type)
+        self.assertEqual(EventReferee.objects.get(event=game, external_name="Guest").referee_type, self.line_type)
+
+    def test_a_type_is_optional(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_referee_add_external", {"name": "Guest"}, game.pk)
+
+        self.assertIsNone(EventReferee.objects.get(event=game).referee_type)
+
+    def test_a_type_of_another_sport_or_the_wrong_kind_is_rejected(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        for bad in (self.foreign_type, self.official_type):
+            self.club_post("event_referee_add_external", {"name": "Guest", "referee_type": str(bad.pk)}, game.pk)
+            self.club_post("event_referee_assign", {"member": str(self.referee_member.pk), "referee_type": str(bad.pk)}, game.pk)
+        self.club_post("event_referee_add_external", {"name": "Guest", "referee_type": "999999"}, game.pk)
+        self.club_post("event_referee_add_external", {"name": "Guest", "referee_type": "abc"}, game.pk)
+
+        self.assertFalse(EventReferee.objects.filter(event=game).exists())
+
+    def test_officials_mirror_type_assignment_and_validation(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_official_add_external", {"name": "Timer", "referee_type": str(self.official_type.pk)}, game.pk)
+        self.club_post("event_official_add_external", {"name": "Bad", "referee_type": str(self.main_type.pk)}, game.pk)
+
+        self.assertEqual(EventOfficial.objects.get(event=game, external_name="Timer").referee_type, self.official_type)
+        self.assertFalse(EventOfficial.objects.filter(external_name="Bad").exists())
+
+    def test_the_panel_only_offers_types_when_the_sport_has_them(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.assertContains(self.club_get("event_detail", game.pk), 'name="referee_type"')
+        RefereeType.objects.filter(sport=self.sport).delete()
+        self.assertNotContains(self.club_get("event_detail", game.pk), 'name="referee_type"')
+
+    # --- rename ---
+
+    def test_an_external_referee_can_be_renamed_and_next_is_honoured(self):
+        game = self.make_game()
+        row = EventReferee.objects.create(event=game, external_name="Gues", assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_referee_rename", {"name": "  Guest Ref  ", "next": "/manage/referees/management/"}, game.pk, row.pk)
+
+        self.assertRedirects(response, "/manage/referees/management/", fetch_redirect_response=False)
+        row.refresh_from_db()
+        self.assertEqual(row.external_name, "Guest Ref")
+
+    def test_renaming_rejects_blank_names_and_member_rows(self):
+        game = self.make_game()
+        external = EventReferee.objects.create(event=game, external_name="Guest", assigned_by=self.admin_member)
+        member_row = EventReferee.objects.create(event=game, member=self.referee_member, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_referee_rename", {"name": "   "}, game.pk, external.pk)
+        self.club_post("event_referee_rename", {"name": "Hacked"}, game.pk, member_row.pk)
+
+        external.refresh_from_db()
+        member_row.refresh_from_db()
+        self.assertEqual(external.external_name, "Guest")
+        self.assertEqual(member_row.external_name, "")
+
+    def test_renaming_is_forbidden_to_a_coach_and_scoped_to_the_club(self):
+        game = self.make_game()
+        row = EventReferee.objects.create(event=game, external_name="Guest", assigned_by=self.admin_member)
+        other_club = Club.objects.create(name="Other FC", slug="other-fc")
+        other_event = Event.objects.create(club=other_club, title="Theirs", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=1))
+        foreign_row = EventReferee.objects.create(event=other_event, external_name="Foreign", assigned_by=None)
+
+        self.client.force_login(self.make_coach())
+        self.assertEqual(self.club_post("event_referee_rename", {"name": "X"}, game.pk, row.pk).status_code, 403)
+
+        self.client.force_login(self.admin_user)
+        self.assertEqual(self.club_post("event_referee_rename", {"name": "X"}, other_event.pk, foreign_row.pk).status_code, 404)
+        self.assertEqual(self.club_post("event_referee_rename", {"name": "X"}, game.pk, foreign_row.pk).status_code, 404)
+        foreign_row.refresh_from_db()
+        self.assertEqual(foreign_row.external_name, "Foreign")
+
+    def test_officials_rename_mirrors_referees(self):
+        game = self.make_game()
+        row = EventOfficial.objects.create(event=game, external_name="Timr", assigned_by=self.admin_member)
+        member_row = EventOfficial.objects.create(event=game, member=self.referee_member, assigned_by=self.admin_member)
+        coach = self.make_coach()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_official_rename", {"name": "Timer"}, game.pk, row.pk)
+        self.club_post("event_official_rename", {"name": ""}, game.pk, row.pk)
+        self.club_post("event_official_rename", {"name": "Nope"}, game.pk, member_row.pk)
+
+        row.refresh_from_db()
+        member_row.refresh_from_db()
+        self.assertEqual(row.external_name, "Timer")
+        self.assertEqual(member_row.external_name, "")
+        self.client.force_login(coach)
+        self.assertEqual(self.club_post("event_official_rename", {"name": "X"}, game.pk, row.pk).status_code, 403)
+
+    # --- ordering ---
+
+    def test_order_assignments_sorts_by_type_order_then_name_with_untyped_last(self):
+        game = self.make_game()
+        zed = Member.objects.create(first_name="Zed", last_name="Zzz")
+        EventReferee.objects.create(event=game, external_name="Untyped Anna", assigned_by=None)
+        EventReferee.objects.create(event=game, external_name="Bob Line", assigned_by=None, referee_type=self.line_type)
+        EventReferee.objects.create(event=game, member=zed, assigned_by=None, referee_type=self.main_type)
+        EventReferee.objects.create(event=game, external_name="alice Main", assigned_by=None, referee_type=self.main_type)
+
+        rows = order_assignments(game.referees.select_related("member", "referee_type"))
+
+        self.assertEqual([row.display_name for row in rows], ["alice Main", str(zed), "Bob Line", "Untyped Anna"])
+
+    def test_the_detail_page_the_dashboard_and_the_pdf_use_that_order(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, external_name="Untyped Anna", assigned_by=None)
+        EventReferee.objects.create(event=game, external_name="Bob Line", assigned_by=None, referee_type=self.line_type)
+        EventReferee.objects.create(event=game, external_name="Cleo Main", assigned_by=None, referee_type=self.main_type)
+        EventOfficial.objects.create(event=game, external_name="Untyped Olly", assigned_by=None)
+        EventOfficial.objects.create(event=game, external_name="Tim Timer", assigned_by=None, referee_type=self.official_type)
+        self.client.force_login(self.admin_user)
+        expected = ["Cleo Main", "Bob Line", "Untyped Anna"]
+
+        detail = self.club_get("event_detail", game.pk)
+        self.assertEqual([row.display_name for row in detail.context["referees"]], expected)
+        self.assertEqual([row.display_name for row in detail.context["officials"]], ["Tim Timer", "Untyped Olly"])
+        dashboard = self.club_get("referee_management")
+        self.assertEqual([row.display_name for row in dashboard.context["games"][0].referee_rows], expected)
+        self.assertEqual([row.display_name for row in dashboard.context["games"][0].official_rows], ["Tim Timer", "Untyped Olly"])
+        with mock.patch("management.views.event_referee_form_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("event_referee_form_pdf", game.pk)
+        self.assertEqual([row.display_name for row in renderer.call_args[0][0]["referees"]], expected)
+        with mock.patch("management.views.event_official_form_pdf", return_value=b"%PDF-fake") as renderer:
+            self.club_get("event_official_form_pdf", game.pk)
+        self.assertEqual([row.display_name for row in renderer.call_args[0][0]["officials"]], ["Tim Timer", "Untyped Olly"])
+
+    # --- PDFs ---
+
+    def test_the_pdfs_show_type_labels_and_the_renamed_name_but_omit_a_missing_type(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, external_name="Old Name", assigned_by=None, referee_type=self.line_type)
+        EventReferee.objects.create(event=game, external_name="No Type Nick", assigned_by=None)
+        EventOfficial.objects.create(event=game, external_name="Tim Timer", assigned_by=None, referee_type=self.official_type)
+        referee = game.referees.get(external_name="Old Name")
+        self.client.force_login(self.admin_user)
+        self.club_post("event_referee_rename", {"name": "New Name"}, game.pk, referee.pk)
+
+        referees = order_assignments(game.referees.select_related("member", "referee_type"))
+        html = render_to_string("management/event_referee_form_pdf.html", {"club": self.club, "event": game, "referees": referees, "document_address": self.home_ground, "grand_total": Decimal("0")})
+        self.assertIn("New Name (Linesman)", html)
+        self.assertNotIn("Old Name", html)
+        self.assertIn("No Type Nick", html)
+        self.assertNotIn("No Type Nick (", html)
+
+        officials = order_assignments(game.officials.select_related("member", "referee_type"))
+        html = render_to_string("management/event_official_form_pdf.html", {"club": self.club, "event": game, "officials": officials, "document_address": self.home_ground, "grand_total": Decimal("0")})
+        self.assertIn("Tim Timer (Timekeeper)", html)
