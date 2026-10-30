@@ -7804,6 +7804,22 @@ class EventRefereeManagementTests(ManagementTestBase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_a_member_admin_can_set_a_fee(self):
+        game = self.make_game()
+        assignment = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        member_admin_user = User.objects.create_user(email="memberadmin-fees@example.com", password="pw-secret-123")
+        member_admin_member = Member.objects.create(user=member_admin_user, first_name="Mo", last_name="Admin")
+        ClubMembership.objects.create(club=self.club, member=member_admin_member, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
+        ClubRole.objects.filter(club=self.club, member=member_admin_member).update(role=ClubRole.Roles.MEMBER_ADMIN)
+        enrol_mfa(member_admin_user)
+        self.client.force_login(member_admin_user)
+
+        response = self.club_post("event_fees_update", fee_data(assignment, fee="25.00"), game.pk)
+
+        self.assertEqual(response.status_code, 302)
+        assignment.refresh_from_db()
+        self.assertEqual(assignment.fee, Decimal("25.00"))
+
     def test_one_save_stores_every_rows_fee(self):
         game = self.make_game(max_referees=2)
         first = EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"))
@@ -8023,6 +8039,18 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         event = Event.objects.create(club=self.club, **kwargs)
         event.teams.add(team or self.team)
         return event
+
+    def test_fee_inputs_keep_a_dot_decimal_in_dutch(self):
+        # A comma ("25,00") is invalid in <input type="number">: the browser blanks the field, and saving posts nothing.
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member, fee=Decimal("25.00"), km=Decimal("12.5"), km_rate=Decimal("0.4230"))
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("management:referee_management"), HTTP_HOST="ajax-united.rosterchief.app", headers={"accept-language": "nl"})
+
+        self.assertContains(response, 'value="25.00"')
+        self.assertContains(response, 'value="12.5"')
+        self.assertContains(response, 'value="0.4230"')
 
     def test_is_admin_only(self):
         self.client.force_login(self.make_coach(self.team))
