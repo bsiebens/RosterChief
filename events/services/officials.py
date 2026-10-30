@@ -16,10 +16,11 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from waffle import get_waffle_flag_model
 
+from club.models import RefereeType
 from club.services.access import event_season
 from events.models import Event, EventOfficial, OfficialSignup
 from events.services.attendance import effective_members
-from events.services.referees import event_window
+from events.services.referees import event_window, resolve_referee_type
 from members.models import Member
 from notifications.models import NotificationCategory
 from notifications.services import notify_members
@@ -121,16 +122,17 @@ def _lock_and_check_capacity(event):
 
 
 @transaction.atomic
-def assign_official(event, member, *, assigned_by):
+def assign_official(event, member, *, assigned_by, referee_type=None):
     """Assign `member` as an official for `event`. Raises
     OfficialAssignmentError if it's not a club-managed home game, the game
     is already at Event.max_officials, or `member` is already assigned."""
+    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.OFFICIAL, OfficialAssignmentError)
     event = _lock_and_check_capacity(event)
 
     if event.officials.filter(member=member).exists():
         raise OfficialAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
 
-    official = EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by)
+    official = EventOfficial.objects.create(event=event, member=member, assigned_by=assigned_by, referee_type=referee_type)
     # Same as referees.assign_referee: an assignment settles the member's
     # invite, so they don't show as "no response yet" and the game appears
     # among their own duties in the app.
@@ -148,16 +150,36 @@ def assign_official(event, member, *, assigned_by):
 
 
 @transaction.atomic
-def add_external_official(event, name, *, assigned_by):
+def add_external_official(event, name, *, assigned_by, referee_type=None):
     """Log a non-member official (e.g. federation-appointed) by name only.
     Same capacity/home-game rules as assign_official."""
     name = name.strip()
     if not name:
         raise OfficialAssignmentError(_("A name is required for an external official."))
 
+    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.OFFICIAL, OfficialAssignmentError)
     event = _lock_and_check_capacity(event)
 
-    return EventOfficial.objects.create(event=event, external_name=name, assigned_by=assigned_by)
+    return EventOfficial.objects.create(event=event, external_name=name, assigned_by=assigned_by, referee_type=referee_type)
+
+
+def rename_external_official(official, name):
+    """The officials counterpart to referees.rename_external_referee."""
+    name = (name or "").strip()
+    if not name:
+        raise OfficialAssignmentError(_("A name is required for an external official."))
+    if not official.is_external:
+        raise OfficialAssignmentError(_("Only an external official can be renamed."))
+    official.external_name = name
+    official.save(update_fields=["external_name"])
+    return official
+
+
+def set_official_type(official, referee_type):
+    """Change (or clear, with None) the type of an existing assignment."""
+    official.referee_type = resolve_referee_type(official.event.club, referee_type, RefereeType.Kind.OFFICIAL, OfficialAssignmentError)
+    official.save(update_fields=["referee_type"])
+    return official
 
 
 @transaction.atomic

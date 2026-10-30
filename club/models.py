@@ -66,6 +66,30 @@ class Sport(models.Model):
         return Club.objects.filter(sport_type=self.code).count(), Competition.objects.filter(sport_type=self.code).count()
 
 
+class RefereeType(models.Model):
+    """A kind of referee (or match official) a sport has, e.g. "Referee" / "Linesman". Platform-wide like
+    Sport and maintained from its control-panel settings page. ``ordering`` sets the order of referees on
+    the referee form (PDF) and the assignment panel; ``kind`` keeps referee and official types apart."""
+
+    class Kind(models.TextChoices):
+        REFEREE = "referee", _("Referee")
+        OFFICIAL = "official", _("Official")
+
+    sport = models.ForeignKey(Sport, on_delete=models.CASCADE, related_name="referee_types", verbose_name=_("sport"))
+    kind = models.CharField(_("kind"), max_length=10, choices=Kind.choices, default=Kind.REFEREE)
+    name = models.CharField(_("name"), max_length=100)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower first on the referee form."))
+
+    class Meta:
+        ordering = ["sport", "kind", "ordering", "name"]
+        verbose_name = _("referee type")
+        verbose_name_plural = _("referee types")
+        constraints = [models.UniqueConstraint(fields=["sport", "kind", "name"], name="unique_referee_type_name_per_sport_kind")]
+
+    def __str__(self):
+        return self.name
+
+
 def sport_choices():
     """Live choices for ``sport_type`` fields: the Sport rows, or the built-ins before the table exists/is seeded."""
     from django.db import DatabaseError

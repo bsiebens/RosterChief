@@ -96,7 +96,7 @@
                 <div class="item wide">
                     <div class="info-label">{% trans "Official names" %}</div>
                     <div class="info-value">
-                        {% for official in officials %}{{ official.display_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                        {% for official in officials %}{{ official.display_name }}{% if official.referee_type %} ({{ official.referee_type.name }}){% endif %}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
                     </div>
                 </div>
             </div>
@@ -118,7 +118,7 @@
             <tbody>
                 {% for official in officials %}
                     <tr>
-                        <td>{{ official.display_name }}</td>
+                        <td>{{ official.display_name }}{% if official.referee_type %}<br><span style="color: var(--muted); font-size: 8.5pt;">{{ official.referee_type.name }}</span>{% endif %}</td>
                         <td class="amount">{% if official.no_fee %}{% trans "No fee" %}{% else %}€{{ official.fee|floatformat:2 }}{% endif %}</td>
                         <td class="amount">{% if official.km %}{{ official.km }} km{% else %}—{% endif %}</td>
                         <td class="amount">{% if official.km %}€{{ official.km_rate }}{% else %}—{% endif %}</td>

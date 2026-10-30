@@ -30,6 +30,7 @@ from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 
+from club.models import RefereeType
 from club.services.access import event_season
 from events.models import ASSUMED_EVENT_DURATION, Event, EventReferee, RefereeSignup
 from events.services.attendance import effective_members
@@ -98,12 +99,7 @@ def eligible_referees(event, *, include_expired=False, roster=None):
     expired_ids = [member_id for member_id, expired in qualifying if expired]
     assigned_ids = event.referees.values_list("member_id", flat=True)
 
-    return (
-        Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying])
-        .exclude(pk__in=assigned_ids)
-        .annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField()))
-        .distinct()
-    )
+    return Member.objects.filter(pk__in=[member_id for member_id, _expired in qualifying]).exclude(pk__in=assigned_ids).annotate(referee_expired=Case(When(pk__in=expired_ids, then=True), default=False, output_field=BooleanField())).distinct()
 
 
 def retract_ineligible_invites(profile):
@@ -162,17 +158,46 @@ def _lock_and_check_capacity(event):
     return event
 
 
+def referee_types_for(club, kind=RefereeType.Kind.REFEREE):
+    """The club's sport's referee types of one kind (REFEREE / OFFICIAL), in form order."""
+    return RefereeType.objects.filter(sport__code=club.sport_type, kind=kind).order_by("ordering", "name")
+
+
+def resolve_referee_type(club, referee_type, kind, error_class):
+    """Validate an optional type for an assignment: None passes, anything else must be a RefereeType
+    of the club's sport and the right kind, otherwise ``error_class`` is raised."""
+    if referee_type is None:
+        return None
+    if not referee_types_for(club, kind).filter(pk=referee_type.pk).exists():
+        raise error_class(_("This type isn't available for your club's sport."))
+    return referee_type
+
+
+def order_assignments(rows):
+    """Referee / official rows in display order, used by every screen and the PDFs: by type ordering
+    (rows without a type last), then alphabetically by display name -- members and externals interleaved.
+    Done in Python so it behaves the same on SQLite and PostgreSQL. Callers should select_related
+    ``member`` and ``referee_type`` to avoid per-row queries."""
+
+    def key(row):
+        referee_type = row.referee_type
+        return (referee_type is None, referee_type.ordering if referee_type else 0, referee_type.name.casefold() if referee_type else "", row.display_name.casefold(), str(row.pk))
+
+    return sorted(rows, key=key)
+
+
 @transaction.atomic
-def assign_referee(event, member, *, assigned_by):
+def assign_referee(event, member, *, assigned_by, referee_type=None):
     """Assign `member` to referee `event`. Raises RefereeAssignmentError if
     it's not a club-managed home game, the game is already at
     Event.max_referees, or `member` is already assigned."""
+    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
     event = _lock_and_check_capacity(event)
 
     if event.referees.filter(member=member).exists():
         raise RefereeAssignmentError(_("%(member)s is already assigned to this game.") % {"member": member})
 
-    referee = EventReferee.objects.create(event=event, member=member, assigned_by=assigned_by)
+    referee = EventReferee.objects.create(event=event, member=member, assigned_by=assigned_by, referee_type=referee_type)
     # An assignment settles the member's invite either way -- a staff pick is
     # as good as a yes. Without this a directly assigned referee kept showing
     # as "invited, no response yet", and one never invited had no signup row
@@ -191,7 +216,7 @@ def assign_referee(event, member, *, assigned_by):
 
 
 @transaction.atomic
-def add_external_referee(event, name, *, assigned_by):
+def add_external_referee(event, name, *, assigned_by, referee_type=None):
     """Log a non-member referee (e.g. federation-appointed) by name only.
     Same capacity/home-game rules as assign_referee -- an external slot still
     counts against Event.max_referees."""
@@ -199,9 +224,30 @@ def add_external_referee(event, name, *, assigned_by):
     if not name:
         raise RefereeAssignmentError(_("A name is required for an external referee."))
 
+    referee_type = resolve_referee_type(event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
     event = _lock_and_check_capacity(event)
 
-    return EventReferee.objects.create(event=event, external_name=name, assigned_by=assigned_by)
+    return EventReferee.objects.create(event=event, external_name=name, assigned_by=assigned_by, referee_type=referee_type)
+
+
+def rename_external_referee(referee, name):
+    """Correct the name of an externally logged referee. Member-linked rows are refused: their
+    name comes from the member record."""
+    name = (name or "").strip()
+    if not name:
+        raise RefereeAssignmentError(_("A name is required for an external referee."))
+    if not referee.is_external:
+        raise RefereeAssignmentError(_("Only an external referee can be renamed."))
+    referee.external_name = name
+    referee.save(update_fields=["external_name"])
+    return referee
+
+
+def set_referee_type(referee, referee_type):
+    """Change (or clear, with None) the type of an existing assignment."""
+    referee.referee_type = resolve_referee_type(referee.event.club, referee_type, RefereeType.Kind.REFEREE, RefereeAssignmentError)
+    referee.save(update_fields=["referee_type"])
+    return referee
 
 
 @transaction.atomic

@@ -49,8 +49,8 @@ def _dues_invoice_pdf_context(club, request):
 
 def _referee_form_pdf_context(club, request):
     referees = [
-        SimpleNamespace(display_name="Jamie Doe", fee=Decimal("35.00"), km=Decimal("12.0"), km_rate=Decimal("0.35"), total_payable=Decimal("39.20")),
-        SimpleNamespace(display_name="Alex Referee", fee=Decimal("35.00"), km=None, km_rate=None, total_payable=Decimal("35.00")),
+        SimpleNamespace(display_name="Jamie Doe", referee_type=SimpleNamespace(name="Referee"), fee=Decimal("35.00"), km=Decimal("12.0"), km_rate=Decimal("0.35"), total_payable=Decimal("39.20")),
+        SimpleNamespace(display_name="Alex Referee", referee_type=SimpleNamespace(name="Linesman"), fee=Decimal("35.00"), km=None, km_rate=None, total_payable=Decimal("35.00")),
     ]
     event = SimpleNamespace(
         start=timezone.now() + datetime.timedelta(days=7),

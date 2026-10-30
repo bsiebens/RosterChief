@@ -889,6 +889,20 @@
         font-size: 0.75rem;
     }
 
+    /* The native-select counterpart of .input-xs: same height as the .btn-xs
+       buttons, for the type picker in the referee/official assignment rows. */
+    .select-xs {
+        height: 1.5rem;
+        line-height: 1.375rem;
+        padding-right: 1.5rem;
+        padding-left: 0.5rem;
+        border-radius: var(--radius-box);
+        border-color: var(--color-stroke);
+        font-size: 0.75rem;
+        background-position: right 0.35rem center;
+        background-size: 0.75rem;
+    }
+
     .otp {
         position: relative;
         display: inline-flex;

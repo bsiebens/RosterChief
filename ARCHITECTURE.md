@@ -664,6 +664,19 @@ no eligibility, no assignment, no entry on the referee management dashboard (§5
 `events/services/referees.py::needs_referee_management(event)`, the single gate every
 referee-facing screen reads through.
 
+**`RefereeType`** *(built, platform-wide like `Sport`; `club` app)* — the referee and match-official
+roles a sport has: `sport` FK (CASCADE, `referee_types`), `kind` (`referee` | `official`), `name`,
+`ordering` (1..N within sport+kind; lower first on the referee form and assignment panel). Unique per
+(sport, kind, name). Maintained in the control panel on the per-sport settings page
+(Features → Sports → Settings), which supports create / rename / delete / drag-to-reorder. Events'
+referee and official assignments point at it with `SET_NULL`.
+On assignment screens the type is optional and only offered when the club's sport defines types of that
+kind (`events.services.referees.referee_types_for`; services validate sport + kind). Staff can change the
+type of an existing row (it rides along with the per-game fee form) and rename *external* referees/officials
+(`rename_external_referee/official`, POST-only views). Every list (event detail, dashboard, games list, fee
+save, PDFs) is built through the one helper `order_assignments`: type `ordering` first, untyped last, then
+display name; the PDFs print the type next to each name.
+
 **`RefereeLevel`** *(built)* — a club-defined referee qualification tier ("Regional",
 "National", ...), admin-managed like `Position` (own name, own ordering, no fixed list).
 **Owns which teams it qualifies for** — eligibility is a property of the *level*, not of the

@@ -7,7 +7,8 @@
  * each pick instead of replacing its own value.
  *
  * Opt in with `data-searchable="true"` on the widget; `data-search-placeholder`
- * sets the search input's placeholder (see management/forms.py).
+ * sets the search input's placeholder (see management/forms.py). Plain-mode selects
+ * may carry `data-widget-class` / `data-input-class` to size the replacing widget.
  *
  * Every other single <select> inside a <dialog> gets the same dropdown in
  * "plain" mode -- no typing, just click (or Enter/arrows) and pick -- because a
@@ -40,6 +41,9 @@
 
         const wrapper = document.createElement("div");
         wrapper.className = "relative";
+        // A select can size its widget: data-widget-class lands on the wrapper (width in a
+        // flex row), data-input-class on the visible input (e.g. a compact select-xs).
+        if (select.dataset.widgetClass) wrapper.className += ` ${select.dataset.widgetClass}`;
 
         const chips = document.createElement("div");
         chips.className = "flex flex-wrap gap-1 empty:hidden mt-2";
@@ -53,6 +57,7 @@
         } else {
             // Looks and behaves like the select it replaces: its chevron, no typing.
             input.className = "select w-full cursor-pointer text-left";
+            if (select.dataset.inputClass) input.className += ` ${select.dataset.inputClass}`;
             input.readOnly = true;
             input.placeholder = blank ? blank.text : "";
             // The field's <label for=...> points at the now-hidden select; name the overlay after it.

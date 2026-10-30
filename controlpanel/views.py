@@ -6,9 +6,9 @@ from contextlib import contextmanager
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import connections
-from django.db.models import Count
-from django.http import Http404, HttpResponse
+from django.db import connections, transaction
+from django.db.models import Count, Max
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -31,12 +31,12 @@ from billing.services.plans import delete_plan, plan_deletion_impact
 from bugs.forms import BugAdminForm, BugNoteForm
 from bugs.models import BugReport
 from bugs.services import add_note, update_bug
-from club.models import Club, ClubRole, Sport
+from club.models import Club, ClubRole, RefereeType, Sport
 from events.models import Competition, Location
 from features.jobs import JOB_REGISTRY
 from features.models import EmailSuppression, JobToggle, Maintenance
 
-from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, SportForm, SubscriptionForm, TrialForm
+from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, RefereeTypeForm, SportForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
 from .services import user_debug
@@ -770,6 +770,115 @@ class SportDeleteView(PlatformStaffRequiredMixin, View):
             sport.delete()
             notify(request, f"w|{_('Sport deleted')}|" + _("Sport “%(name)s” has been deleted.") % {"name": name})
         return redirect("controlpanel:features")
+
+
+class SportSettingsView(PlatformStaffRequiredMixin, TemplateView):
+    """Per-sport settings. One section per setting group; add further sections to ``get_context_data``
+    (and a partial in the template) as more sport-level settings appear."""
+
+    template_name = "controlpanel/sport_settings.html"
+
+    def get_context_data(self, **kwargs):
+        sport = get_object_or_404(Sport, pk=self.kwargs["pk"])
+        types = list(sport.referee_types.order_by("ordering", "name"))
+        sections = []
+        for kind, title, blurb, singular in (
+            (RefereeType.Kind.REFEREE, _("Referee types"), _("The referee roles used on this sport's referee form and when assigning referees to an event."), _("referee type")),
+            (RefereeType.Kind.OFFICIAL, _("Official types"), _("The match official roles (e.g. timekeeper) used on this sport's referee form and assignment panel."), _("official type")),
+        ):
+            items = [t for t in types if t.kind == kind]
+            for item in items:
+                item.edit_form = RefereeTypeForm(instance=item)
+            sections.append({"kind": kind.value, "title": title, "blurb": blurb, "singular": singular, "items": items, "form": RefereeTypeForm(sport=sport, kind=kind)})
+        return super().get_context_data(nav="features", sport=sport, referee_sections=sections, **kwargs)
+
+
+class _SportKindMixin:
+    """Resolves the sport and the referee-type kind from the URL for the create/reorder views."""
+
+    def get_sport(self):
+        return get_object_or_404(Sport, pk=self.kwargs["pk"])
+
+    def get_kind(self):
+        kind = self.kwargs["kind"]
+        if kind not in RefereeType.Kind.values:
+            raise Http404("Unknown kind")
+        return kind
+
+
+class RefereeTypeCreateView(PlatformStaffRequiredMixin, _SportKindMixin, RedirectOnInvalidMixin, CreateView):
+    """POST-only, from a section's "New" modal on the sport settings page. Appended after the last one."""
+
+    model = RefereeType
+    form_class = RefereeTypeForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:sport_settings"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.kwargs["pk"]}
+
+    def get_form_kwargs(self):
+        return super().get_form_kwargs() | {"sport": self.get_sport(), "kind": self.get_kind()}
+
+    def form_valid(self, form):
+        last = RefereeType.objects.filter(sport=form.sport, kind=form.kind).aggregate(top=Max("ordering"))["top"]
+        form.instance.ordering = (last or 0) + 1
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Type added')}|" + _("“%(name)s” added.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:sport_settings", args=[self.kwargs["pk"]])
+
+
+class RefereeTypeUpdateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, UpdateView):
+    """POST-only, from a type's "Rename" modal on the sport settings page."""
+
+    model = RefereeType
+    form_class = RefereeTypeForm
+    http_method_names = ["post"]
+    invalid_redirect_url_name = "controlpanel:sport_settings"
+
+    def get_invalid_redirect_kwargs(self):
+        return {"pk": self.object.sport_id}
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        notify(self.request, f"s|{_('Type renamed')}|" + _("“%(name)s” saved.") % {"name": self.object.name})
+        return response
+
+    def get_success_url(self):
+        return reverse("controlpanel:sport_settings", args=[self.object.sport_id])
+
+
+class RefereeTypeDeleteView(PlatformStaffRequiredMixin, View):
+    def post(self, request, pk):
+        referee_type = get_object_or_404(RefereeType, pk=pk)
+        sport_id, name = referee_type.sport_id, referee_type.name
+        referee_type.delete()
+        notify(request, f"w|{_('Type deleted')}|" + _("“%(name)s” has been deleted.") % {"name": name})
+        return redirect("controlpanel:sport_settings", pk=sport_id)
+
+
+class RefereeTypeReorderView(PlatformStaffRequiredMixin, _SportKindMixin, View):
+    """Drag-and-drop on the settings page: POST JSON ``{"ids": [...]}`` -- every type of this sport and
+    kind, in the order now shown. They are renumbered 1..N."""
+
+    def post(self, request, pk, kind):
+        sport, kind = self.get_sport(), self.get_kind()
+        try:
+            ids = [int(value) for value in json.loads(request.body).get("ids", [])]
+        except ValueError, TypeError, AttributeError:
+            return JsonResponse({"error": "invalid"}, status=400)
+        types = {t.pk: t for t in RefereeType.objects.filter(sport=sport, kind=kind)}
+        if len(set(ids)) != len(ids) or set(ids) != set(types):
+            return JsonResponse({"error": "invalid"}, status=400)
+        ordered = [types[pk] for pk in ids]
+        for number, item in enumerate(ordered, start=1):
+            item.ordering = number
+        with transaction.atomic():
+            RefereeType.objects.bulk_update(ordered, ["ordering"])
+        return JsonResponse({"ok": True})
 
 
 class CompetitionCreateView(PlatformStaffRequiredMixin, RedirectOnInvalidMixin, CreateView):

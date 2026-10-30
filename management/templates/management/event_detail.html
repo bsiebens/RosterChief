@@ -160,14 +160,6 @@
         {% include "management/_event_fees_form.html" %}
     {% endif %}
 
-    {% if referee_management_needed %}
-        <div class="card">
-            <div class="card-body">
-                {% include "management/_referee_assignment_panel.html" %}
-            </div>
-        </div>
-    {% endif %}
-
     {% if officials_enabled and event.is_home_fixture and not official_management_needed %}
         <div class="alert alert-info">
             {% lucide "info" size=20 %}
@@ -175,12 +167,24 @@
         </div>
     {% endif %}
 
-    {% if official_management_needed %}
-        <div class="card">
-            <div class="card-body">
-                {% include "management/_official_assignment_panel.html" %}
+    {% comment %}Side by side from lg up when both sections apply (stacked below that); a lone section stays full width. A coloured icon chip per section keeps the two apart.{% endcomment %}
+    {% if referee_management_needed or official_management_needed %}
+    <div class="grid items-start gap-4 {% if referee_management_needed and official_management_needed %}lg:grid-cols-2{% endif %}">
+        {% if referee_management_needed %}
+            <div class="card">
+                <div class="card-body">
+                    {% include "management/_referee_assignment_panel.html" %}
+                </div>
             </div>
-        </div>
+        {% endif %}
+        {% if official_management_needed %}
+            <div class="card">
+                <div class="card-body">
+                    {% include "management/_official_assignment_panel.html" %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
     {% endif %}
 
     <div class="card">

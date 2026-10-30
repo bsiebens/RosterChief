@@ -1,0 +1,56 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide ui %}
+
+{% block panel_title %}{% blocktrans with name=sport.name %}{{ name }} settings{% endblocktrans %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="link link-hover" href="{% url 'controlpanel:features' %}">features</a>
+    <span class="text-edge">|</span>
+    <span class="text-ink">{{ sport.name }}</span>
+{% endblock breadcrumb %}
+
+{% block actions %}
+    <a class="btn btn-outline gap-2" href="{% url 'controlpanel:features' %}">{% lucide "arrow-left" size=16 %} {% trans "Back to features" %}</a>
+{% endblock actions %}
+
+{% block panel %}
+    {% comment %}
+        Sport settings page. Each setting group is its own card (one include per group); to add another
+        group, add a context entry in SportSettingsView and another card below.
+    {% endcomment %}
+    {% for section in referee_sections %}
+        {% include "controlpanel/_sport_type_section.html" with section=section sport=sport %}
+    {% endfor %}
+{% endblock panel %}
+
+{% block extra_body %}
+    <script>
+        (function () {
+            document.querySelectorAll("[data-reorder-url]").forEach(function (body) {
+                var dragged = null;
+                body.addEventListener("dragstart", function (e) {
+                    dragged = e.target.closest("tr");
+                    if (dragged) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragged.dataset.id); dragged.classList.add("opacity-50"); }
+                });
+                body.addEventListener("dragover", function (e) {
+                    if (!dragged) return;
+                    e.preventDefault();
+                    var over = e.target.closest("tr");
+                    if (!over || over === dragged || over.parentNode !== body) return;
+                    var after = e.clientY > over.getBoundingClientRect().top + over.offsetHeight / 2;
+                    body.insertBefore(dragged, after ? over.nextSibling : over);
+                });
+                body.addEventListener("dragend", function () {
+                    if (!dragged) return;
+                    dragged.classList.remove("opacity-50");
+                    dragged = null;
+                    var ids = Array.prototype.map.call(body.querySelectorAll("tr[data-id]"), function (row) { return row.dataset.id; });
+                    var token = document.querySelector("input[name=csrfmiddlewaretoken]").value;
+                    fetch(body.dataset.reorderUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": token }, body: JSON.stringify({ ids: ids }) })
+                        .then(function (r) { if (!r.ok) throw new Error(); window.location.reload(); })
+                        .catch(function () { window.location.reload(); });
+                });
+            });
+        })();
+    </script>
+{% endblock extra_body %}
