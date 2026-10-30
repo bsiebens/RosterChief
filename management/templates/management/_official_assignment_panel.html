@@ -1,4 +1,4 @@
-{% load i18n lucide ui %}
+{% load i18n l10n lucide ui %}
 {% comment %}
     The officials counterpart to _referee_assignment_panel.html -- same
     shape, same reasoning throughout (see that file's own docstring).
@@ -71,16 +71,16 @@
                             </label>
                             <label class="flex items-center gap-1 group-has-[:checked]:hidden">
                                 <span class="font-mono text-xs text-dim">&euro;</span>
-                                <input type="number" step="0.01" min="0" name="{{ prefix }}-fee" form="{{ fees_form_id }}" value="{{ official.fee }}" class="input input-xs w-20 text-right" aria-label="{% trans 'Fee' %}">
+                                <input type="number" step="0.01" min="0" name="{{ prefix }}-fee" form="{{ fees_form_id }}" value="{{ official.fee|unlocalize }}" class="input input-xs w-20 text-right" aria-label="{% trans 'Fee' %}">
                             </label>
                             <details class="relative group-has-[:checked]:hidden">
                                 <summary class="btn btn-square btn-outline btn-xs cursor-pointer list-none" title="{% trans 'Travel reimbursement' %}">{% lucide "car" size=12 %}</summary>
                                 <div class="absolute right-0 z-10 mt-1 flex w-44 flex-col gap-2 rounded-lg border border-line bg-white p-2.5 shadow-lg">
                                     <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Km" %}
-                                        <input type="number" step="0.1" min="0" name="{{ prefix }}-km" form="{{ fees_form_id }}" value="{{ official.km|default_if_none:'' }}" class="input">
+                                        <input type="number" step="0.1" min="0" name="{{ prefix }}-km" form="{{ fees_form_id }}" value="{{ official.km|default_if_none:''|unlocalize }}" class="input">
                                     </label>
                                     <label class="flex flex-col gap-0.5 text-xs text-muted">{% trans "Rate/km" %}
-                                        <input type="number" step="any" min="0" name="{{ prefix }}-km_rate" form="{{ fees_form_id }}" value="{{ official.km_rate|default_if_none:'' }}" class="input">
+                                        <input type="number" step="any" min="0" name="{{ prefix }}-km_rate" form="{{ fees_form_id }}" value="{{ official.km_rate|default_if_none:''|unlocalize }}" class="input">
                                     </label>
                                 </div>
                             </details>
