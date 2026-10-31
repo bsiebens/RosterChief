@@ -275,14 +275,18 @@ def _dues_owed():
 
 def _monthly(queryset, field, value, months=MONTHS_OF_HISTORY):
     """A dense month-by-month series — zero-filled, because a chart that silently skips
-    empty months draws a smooth line over a month where nothing happened."""
-    start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    empty months draws a smooth line over a month where nothing happened.
+
+    Months are the club's local ones (TruncMonth buckets in the current timezone, and dates are
+    recorded locally), so the series is laid out in local time too: built from UTC "now" it was
+    a month behind for the first hour or two of every month, dropping the newest data."""
+    start = (timezone.localtime() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     rows = queryset.filter(**{f"{field}__gte": start}).annotate(month=TruncMonth(field)).values("month").annotate(value=value).order_by("month")
     found = {row["month"].strftime("%Y-%m"): row["value"] or 0 for row in rows if row["month"]}
 
     series, cursor = [], start
-    while cursor <= timezone.now():
+    while cursor <= timezone.localtime():
         key = cursor.strftime("%Y-%m")
         series.append({"month": cursor.strftime("%b %Y"), "value": float(found.get(key, 0))})
         cursor = (cursor + timedelta(days=32)).replace(day=1)
@@ -410,7 +414,7 @@ def signup_split(club=None, months=MONTHS_OF_HISTORY):
     keyed on member_id__in it stays a small, indexed lookup instead of scanning the club's
     entire membership history (every season, every member) on every call.
     """
-    start = (timezone.now() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = (timezone.localtime() - relativedelta(months=months)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     memberships = ClubMembership.objects.filter(kind=ClubMembership.Kind.MEMBER) if club is None else ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
@@ -430,7 +434,7 @@ def signup_split(club=None, months=MONTHS_OF_HISTORY):
         counts[signed_up_at.strftime("%Y-%m")][kind] += 1
 
     series, cursor = [], start
-    while cursor <= timezone.now():
+    while cursor <= timezone.localtime():
         month = counts[cursor.strftime("%Y-%m")]
         series.append({"month": cursor.strftime("%b %Y"), "new": month["new"], "returning": month["returning"]})
         cursor = (cursor + timedelta(days=32)).replace(day=1)
