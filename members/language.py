@@ -10,6 +10,8 @@ from django.utils import translation
 from django.views.decorators.http import require_POST
 from django.views.i18n import set_language as django_set_language
 
+from members.services.lookup import get_request_member
+
 
 @require_POST
 def set_language(request):
@@ -31,7 +33,7 @@ class MemberLanguageMiddleware:
 
     def __call__(self, request):
         if settings.LANGUAGE_COOKIE_NAME not in request.COOKIES and request.user.is_authenticated:
-            member = getattr(request.user, "member", None)
+            member = get_request_member(request)
             if member is not None and member.language:
                 translation.activate(member.language)
                 request.LANGUAGE_CODE = member.language

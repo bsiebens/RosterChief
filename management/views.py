@@ -991,7 +991,7 @@ class MemberImportView(MemberAdminRequiredMixin, View):
                 "results": results,
                 "valid_count": sum(1 for result in results if result["member"] is not None),
                 "skipped_count": sum(1 for result in results if result["member"] is None),
-                "season": current_season(request.club),
+                "season": get_current_season(request),
                 "family_groups": match_candidate_families(results, request.club),
             },
         )
@@ -1010,7 +1010,7 @@ class MemberImportConfirmView(MemberAdminRequiredMixin, View):
             return redirect("management:member_import")
 
         results = parse_member_import_rows(rows, request.club, can_set_status_and_fee=is_club_admin(request.user, request.club))
-        season = current_season(request.club)
+        season = get_current_season(request)
 
         created = 0
         families_by_group = {}
@@ -1078,7 +1078,7 @@ class MemberCreateView(MemberAdminRequiredMixin, CreateView):
 
         # Adding a member here means adding them to *this* club -- without a
         # ClubMembership they'd never show up in members_visible_to() again.
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         if season is not None:
             ClubMembership.objects.create(
                 club=self.request.club,
@@ -1117,7 +1117,7 @@ class MemberUpdateView(MemberAdminRequiredMixin, View):
         return get_object_or_404(members_visible_to(self.request.user, self.request.club, include_guardians=True), pk=self.kwargs["pk"])
 
     def get_membership(self, member):
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         if season is None:
             return None
         return ClubMembership.objects.filter(club=self.request.club, member=member, season=season).first() or ClubMembership(club=self.request.club, member=member, season=season, signed_up_at=timezone.localdate())
@@ -1165,7 +1165,7 @@ class MemberDetailView(ClubStaffRequiredMixin, DetailView):
         referee_profile = RefereeProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").prefetch_related("excluded_teams").first()
         officials_enabled = flag_is_active(self.request, "officials")
         official_profile = OfficialProfile.objects.filter(member=self.object, club=self.request.club).select_related("level").first() if officials_enabled else None
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         current_membership = ClubMembership.objects.filter(club=self.request.club, member=self.object, season=season).first()
 
         # A guardian isn't rostered anywhere, so there's never an attendance
@@ -2287,7 +2287,7 @@ class FamilyCreateView(MemberAdminRequiredMixin, FormView):
 
     def form_valid(self, form):
         cd = form.cleaned_data
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         self.family = register_family_or_invite(
             self.request.club,
             season,
@@ -2361,7 +2361,7 @@ class FamilyAddChildView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, FormV
 
     def form_valid(self, form):
         family = get_object_or_404(families_of_club(self.request.club), pk=self.kwargs["pk"])
-        child = add_child_to_family(self.request.club, current_season(self.request.club), family, **form.cleaned_data)
+        child = add_child_to_family(self.request.club, get_current_season(self.request), family, **form.cleaned_data)
         body = _("“%(child)s” added to %(family)s.") % {"child": child, "family": family}
         notify(self.request, f"s|{_('Child registered')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
@@ -2387,7 +2387,7 @@ class FamilyAddParentView(MemberAdminRequiredMixin, RedirectOnInvalidMixin, Form
         email = form.cleaned_data["email"]
         # Named before the add, so the message doesn't differ by whose surname joined.
         family_name = str(family)
-        add_or_invite_parent(self.request.club, current_season(self.request.club), family, invited_by=self.request.user, request=self.request, **form.cleaned_data)
+        add_or_invite_parent(self.request.club, get_current_season(self.request), family, invited_by=self.request.user, request=self.request, **form.cleaned_data)
         body = _("%(email)s has been added to %(family)s, or emailed an invite to join it if they already have an account.") % {"email": email, "family": family_name}
         notify(self.request, f"s|{_('Parent added')}|{body}")
         return redirect("management:family_detail", pk=family.pk)
@@ -4152,14 +4152,15 @@ def remaining_season_games_needing_official_management(club, season):
     return _club_games_needing_management(club, {"teams__official_management": Team.OfficialManagement.CLUB}, upcoming_only=True, season=season)
 
 
-def games_missing_referee_or_official_count(club):
+def games_missing_referee_or_official_count(club, season=None):
     """Distinct upcoming games this season still short a referee or an
     official (nobody assigned *or* only partially staffed) -- the nav badge's
     own number. Same set the dashboard's status KPI cards count from, so the
     badge always equals the distinct games behind "Without a referee" +
     "Partially staffed" and their officials counterparts, a game short both
     counted once (a naive sum of the two would count it twice)."""
-    season = current_season(club)
+    if season is None:
+        season = current_season(club)
     missing_ids = set(remaining_season_games_needing_referee_management(club, season).annotate(referee_count=Count("referees", distinct=True)).filter(referee_count__lt=F("max_referees")).values_list("pk", flat=True))
     if officials_enabled_for(club):
         missing_ids |= set(remaining_season_games_needing_official_management(club, season).annotate(official_count=Count("officials", distinct=True)).filter(official_count__lt=F("max_officials")).values_list("pk", flat=True))
@@ -4303,7 +4304,7 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
         # Every upcoming game left this season, not range/need-bound -- a stable
         # "what's still ahead" picture that also matches the nav badge
         # (games_missing_referee_or_official_count counts the same set).
-        season = current_season(club)
+        season = get_current_season(self.request)
         kpi_no_referee, kpi_understaffed, kpi_fully_staffed, kpi_fees_pending = self._status_kpis(remaining_season_games_needing_referee_management(club, season), "referees", "max_referees")
         if officials_enabled:
             kpi_no_official, kpi_officials_understaffed, kpi_officials_fully_staffed, kpi_official_fees_pending = self._status_kpis(remaining_season_games_needing_official_management(club, season), "officials", "max_officials")
@@ -7400,7 +7401,7 @@ class EvaluationStatsView(EvaluationChecklistMixin, EvaluationManagerRequiredMix
     template_name = "management/evaluation_stats.html"
 
     def get_context_data(self, **kwargs):
-        season = current_season(self.request.club)
+        season = get_current_season(self.request)
         show_all_seasons = self.request.GET.get("season") == "all"
         scoped_season = None if show_all_seasons else season
         rows = question_stats(self.checklist, season=scoped_season)
@@ -7509,7 +7510,7 @@ class EvaluationWalkthroughView(EvaluationChecklistMixin, EvaluationManagerRequi
 
         if player is not None:
             index = players.index(player)
-            season = current_season(self.request.club)
+            season = get_current_season(self.request)
             outcome = session.outcomes.filter(player=player).first() if session is not None else None
             context.update(
                 previous_player=players[index - 1] if index > 0 else None,
@@ -7666,7 +7667,7 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
         if checklist is None:
             return render(request, self.picker_template_name, {"member": member, "checklists": checklists})
 
-        if current_season(request.club) is None:
+        if get_current_season(request) is None:
             return self.render_blocked(member, "no_season")
         rubric = current_rubric_form(checklist)
         bound_form = build_form(rubric)
@@ -7680,7 +7681,7 @@ class EvaluationCreateView(EvaluationManagerRequiredMixin, View):
             return redirect("management:evaluation_create", pk=member.pk)
 
         rubric = current_rubric_form(checklist)
-        season = current_season(request.club)
+        season = get_current_season(request)
         if season is None:
             return self.render_blocked(member, "no_season")
 
@@ -7868,7 +7869,7 @@ def _current_membership_or_404(request, member_pk):
     lookup MemberDetailView itself uses for `current_membership`, since the
     Documents tab these three views serve lives on that same page and a
     checklist item only ever makes sense against a member's *current* signup."""
-    membership = ClubMembership.objects.filter(club=request.club, member_id=member_pk, season=current_season(request.club)).first()
+    membership = ClubMembership.objects.filter(club=request.club, member_id=member_pk, season=get_current_season(request)).first()
     if membership is None:
         raise Http404("No current-season membership for this member.")
     return membership
@@ -8068,7 +8069,7 @@ class SignupApproveAllCleanView(MemberAdminRequiredMixin, View):
     for a fully-paid membership."""
 
     def post(self, request):
-        season = current_season(request.club)
+        season = get_current_season(request)
         if season is None:
             notify(request, f"e|{_('No active season')}|{_('There is no season covering today to approve sign-ups for.')}")
             return redirect("management:signup_list")

@@ -427,7 +427,7 @@ def sidebar_counters(request):
 
         # 0 for the officials half whenever that flag is off for this club
         # (checked inside the function itself).
-        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club)
+        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club, get_current_season(request))
 
     if can_manage_members(request.user, club):
         from management.views import signup_queue_count

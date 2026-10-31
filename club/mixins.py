@@ -44,7 +44,10 @@ class ClubStaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
         # tell they were reached from the management app's own user menu. This sticks for
         # the rest of the session (nothing clears it back to False on a public-site visit),
         # which is the right default for the common case of one person, one role.
-        request.session["management_context"] = True
+        # Only when not already set: assigning always marks the session dirty, which cost a
+        # BEGIN/UPDATE/COMMIT write on every single management request.
+        if not request.session.get("management_context"):
+            request.session["management_context"] = True
         return super().dispatch(request, *args, **kwargs)
 
     def test_func(self):
