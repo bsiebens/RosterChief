@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/rosterchiefv2.iml" filepath="$PROJECT_DIR$/.idea/rosterchiefv2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/RosterChief.iml" filepath="$PROJECT_DIR$/.idea/RosterChief.iml" />
     </modules>
   </component>
 </project>
