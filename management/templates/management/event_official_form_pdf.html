@@ -52,8 +52,8 @@
             table.fees tr.empty td { color: var(--muted); font-style: italic; }
             table.fees tr.total td { border-bottom: none; border-top: 1.5pt solid var(--accent); font-weight: 700; padding-top: 3mm; }
 
-            .signatures { display: flex; gap: 8mm; margin-top: 4mm; }
-            .sign-box { flex: 1; }
+            .signatures { display: flex; flex-wrap: wrap; gap: 6mm 5mm; margin-top: 4mm; }
+            .sign-box { flex: 1 1 40mm; min-width: 40mm; }
             .sign-box .info-label { margin-bottom: 2mm; }
             .sign-box .box { border: 0.75pt solid var(--line); border-radius: 2mm; min-height: 24mm; }
             .collected-line { margin-top: 8mm; font-size: 9.5pt; }
@@ -137,10 +137,17 @@
         </table>
 
         <div class="signatures">
-            <div class="sign-box">
-                <div class="info-label">{% trans "Official signature" %}</div>
-                <div class="box"></div>
-            </div>
+            {% for official in officials %}
+                <div class="sign-box">
+                    <div class="info-label">{{ official.display_name }}{% if official.referee_type %} ({{ official.referee_type.name }}){% endif %}</div>
+                    <div class="box"></div>
+                </div>
+            {% empty %}
+                <div class="sign-box">
+                    <div class="info-label">{% trans "Official signature" %}</div>
+                    <div class="box"></div>
+                </div>
+            {% endfor %}
         </div>
 
         <div class="collected-line">
