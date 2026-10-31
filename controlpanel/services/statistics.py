@@ -681,3 +681,30 @@ def club_statistics(club, season=_RESOLVE):
             ],
         },
     ]
+
+
+#: One club's three dashboard blocks (attention / charts / stat groups) are ~25 aggregate
+#: queries, shown on the management home and the control panel's club page. Cached per club
+#: and day; the signals in controlpanel.signals drop the entry the moment something the numbers
+#: are built from changes, and the TTL is the backstop for what they can't see (bulk update(),
+#: attendance changes, which are too chatty to signal on).
+CLUB_STATS_CACHE_SECONDS = 120
+
+
+def club_stats_cache_key(club_id) -> str:
+    return f"controlpanel:club_stats:{club_id}:{timezone.localdate()}"
+
+
+def invalidate_club_stats(club_id) -> None:
+    cache.delete(club_stats_cache_key(club_id))
+
+
+def club_dashboard_stats(club, season=_RESOLVE):
+    """``{"attention", "charts", "groups"}`` for ``club``, from the cache when fresh."""
+    key = club_stats_cache_key(club.pk)
+    stats = cache.get(key)
+    if stats is None:
+        season = _season_for(club, season)
+        stats = {"attention": club_attention(club, season), "charts": club_charts(club, season), "groups": club_statistics(club, season)}
+        cache.set(key, stats, CLUB_STATS_CACHE_SECONDS)
+    return stats

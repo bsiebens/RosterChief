@@ -76,7 +76,7 @@ from club.services.onboarding import annotate_onboarding_status, approve_all_cle
 from club.services.signup_linking import link_to_existing_member, possible_duplicates
 from controlpanel.messages import notify
 from controlpanel.mixins import RedirectOnInvalidMixin
-from controlpanel.services.statistics import club_attention, club_charts, club_statistics, unrostered_members
+from controlpanel.services.statistics import club_dashboard_stats, unrostered_members
 from evaluations.models import EvaluationChecklist, EvaluationSession, PlayerEvaluation
 from evaluations.services import (
     EvaluationRubricNotConfigured,
@@ -299,7 +299,8 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
         upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:8]
 
         season = get_current_season(self.request)
-        attention = club_attention(club, season)
+        stats = club_dashboard_stats(club, season)
+        attention = stats["attention"]
 
         # Compared against the season right before this one (not last year on the
         # calendar) -- Season.before, same "adjacent by date" idea as next_after.
@@ -321,8 +322,8 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
 
         return super().get_context_data(
             attention=attention,
-            charts=club_charts(club, season),
-            groups=club_statistics(club, season),
+            charts=stats["charts"],
+            groups=stats["groups"],
             upcoming_events=upcoming_events,
             member_count=member_count,
             member_count_change=member_count_change,
