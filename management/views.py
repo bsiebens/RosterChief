@@ -193,6 +193,7 @@ from .forms import (
     AddParentForm,
     AddPaymentForm,
     AttachToFamilyForm,
+    BulkEventCapacityForm,
     ClubMembershipForm,
     ClubRoleAssignForm,
     ClubSettingsForm,
@@ -3814,6 +3815,44 @@ class EventFeesUpdateView(RefereeAdminRequiredMixin, View):
         elif not failed:
             notify(request, f"i|{_('Nothing changed')}|{_('No fees were changed.')}")
         return _redirect_next_or(request, reverse("management:event_detail", args=[pk]))
+
+
+class EventCapacityBulkUpdateView(RefereeAdminRequiredMixin, View):
+    """Mass-edit ``Event.max_referees`` / ``max_officials`` for every game of one team (by default
+    only the upcoming ones), from the calendar page's pop-up. A game that already has more people
+    assigned than the new number is left at its current setting for that field -- lowering the
+    ceiling must not silently strand assignments -- and the count is reported."""
+
+    http_method_names = ["post"]
+
+    def post(self, request):
+        club = request.club
+        officials_enabled = officials_enabled_for(club)
+        form = BulkEventCapacityForm(request.POST, club=club, officials_enabled=officials_enabled)
+        if not form.is_valid():
+            problem = "; ".join(error for errors in form.errors.values() for error in errors)
+            notify(request, f"e|{_('Could not update games')}|{problem}")
+            return _redirect_next_or(request, reverse("management:event_list"))
+
+        data = form.cleaned_data
+        games = Event.objects.filter(club=club, kind=Event.EventKind.GAME, teams=data["team"])
+        if data["upcoming_only"]:
+            games = games.filter(start__gte=timezone.now())
+
+        updated, skipped = 0, 0
+        for field, relation in (("max_referees", "referees"), ("max_officials", "officials")):
+            new_value = data.get(field)
+            if new_value is None:
+                continue
+            games_for_field = games.annotate(assigned=Count(relation, distinct=True))
+            too_full = games_for_field.filter(assigned__gt=new_value)
+            skipped += too_full.count()
+            updated += Event.objects.filter(pk__in=games_for_field.filter(assigned__lte=new_value).exclude(**{field: new_value}).values("pk")).update(**{field: new_value})
+
+        notify(request, f"s|{_('Games updated')}|" + _("%(count)d game setting(s) updated for %(team)s.") % {"count": updated, "team": data["team"]})
+        if skipped:
+            notify(request, f"w|{_('Some games kept their number')}|" + _("%(count)d game setting(s) were not lowered because more people are already assigned.") % {"count": skipped})
+        return _redirect_next_or(request, reverse("management:event_list"))
 
 
 class EventRefereeFormPdfView(RefereeAdminRequiredMixin, View):

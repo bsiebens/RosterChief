@@ -4,6 +4,9 @@
 {% block heading %}{% trans "Events" %}{% endblock heading %}
 
 {% block actions %}
+    {% if can_manage_referees %}
+        <button type="button" class="btn btn-outline gap-2" onclick="document.getElementById('bulk_capacity_modal').showModal()">{% lucide "users" size=16 %} {% trans "Referees & officials needed" %}</button>
+    {% endif %}
     {% if is_club_admin %}
         <a class="btn btn-outline gap-2" href="{% url 'management:event_import' %}">{% lucide "download" size=16 %} {% trans "Import" %}</a>
     {% endif %}
@@ -292,6 +295,36 @@
 {% endblock panel %}
 
 {% block extra_body %}
+    {% if can_manage_referees %}
+        <dialog id="bulk_capacity_modal" class="modal">
+            <div class="modal-box max-w-md">
+                <form method="dialog"><button class="btn btn-ghost btn-square btn-sm absolute top-2 right-2" aria-label="{% trans "Close" %}">{% lucide "x" size=16 %}</button></form>
+                <h3 class="font-display text-lg font-extrabold text-ink uppercase">{% trans "Referees & officials needed" %}</h3>
+                <p class="mt-1 mb-4 text-sm text-muted">{% trans "Set how many are needed for all games of a team at once. Leave a field empty to keep it as it is." %}</p>
+                <form method="post" action="{% url 'management:event_capacity_bulk' %}" class="flex flex-col gap-3">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <label class="flex flex-col gap-1 text-sm font-semibold text-ink">{% trans "Team" %}
+                        <select name="team" class="select w-full" required>
+                            <option value="">{% trans "Choose a team" %}</option>
+                            {% for team in teams %}<option value="{{ team.pk }}">{{ team.name }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    <label class="flex flex-col gap-1 text-sm font-semibold text-ink">{% trans "Referees needed" %}
+                        <input type="number" name="max_referees" min="0" max="20" class="input w-full">
+                    </label>
+                    {% if officials_enabled %}
+                        <label class="flex flex-col gap-1 text-sm font-semibold text-ink">{% trans "Officials needed" %}
+                            <input type="number" name="max_officials" min="0" max="20" class="input w-full">
+                        </label>
+                    {% endif %}
+                    <label class="flex items-center gap-2 text-sm text-ink"><input type="checkbox" name="upcoming_only" class="checkbox" checked> {% trans "Upcoming games only" %}</label>
+                    <div class="modal-action"><button type="submit" class="btn btn-primary">{% trans "Update games" %}</button></div>
+                </form>
+            </div>
+            <form method="dialog" class="modal-backdrop"><button>{% trans "close" %}</button></form>
+        </dialog>
+    {% endif %}
     {% if calendar_range == "week" %}
         <script>
             (() => {

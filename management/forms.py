@@ -2180,3 +2180,25 @@ class FormSendForm(FormSendAudienceFormMixin, forms.ModelForm):
         self.clean_audience_requires_a_claim_for_non_admins(cleaned)
         self.clean_club_wide_excludes_teams_and_groups(cleaned)
         return cleaned
+
+
+class BulkEventCapacityForm(forms.Form):
+    """Sets how many referees / officials a team's games need, for all of them at once.
+    A blank count leaves that setting as it is, so the two can be changed independently."""
+
+    team = forms.ModelChoiceField(queryset=Team.objects.none(), label=_("Team"))
+    max_referees = forms.IntegerField(label=_("Referees needed"), min_value=0, max_value=20, required=False)
+    max_officials = forms.IntegerField(label=_("Officials needed"), min_value=0, max_value=20, required=False)
+    upcoming_only = forms.BooleanField(label=_("Upcoming games only"), required=False, initial=True)
+
+    def __init__(self, *args, club, officials_enabled=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["team"].queryset = Team.objects.filter(club=club)
+        if not officials_enabled:
+            del self.fields["max_officials"]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("max_referees") is None and cleaned.get("max_officials") is None:
+            raise forms.ValidationError(_("Enter how many referees or officials are needed."))
+        return cleaned

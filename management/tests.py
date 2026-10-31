@@ -7503,6 +7503,38 @@ class EventRefereeManagementTests(ManagementTestBase):
         event.teams.add(self.team)
         return event
 
+    def test_bulk_capacity_updates_every_upcoming_game_of_the_team(self):
+        upcoming = self.make_game()
+        past = self.make_game(title="Old game", start=timezone.now() - datetime.timedelta(days=3))
+        self.client.force_login(self.admin_user)
+
+        response = self.club_post("event_capacity_bulk", {"team": self.team.pk, "max_referees": "3", "upcoming_only": "on"})
+
+        self.assertEqual(response.status_code, 302)
+        upcoming.refresh_from_db()
+        past.refresh_from_db()
+        self.assertEqual(upcoming.max_referees, 3)
+        self.assertNotEqual(past.max_referees, 3)
+
+    def test_bulk_capacity_does_not_lower_a_game_below_what_is_already_assigned(self):
+        game = self.make_game()
+        EventReferee.objects.create(event=game, member=self.referee, assigned_by=self.admin_member)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_capacity_bulk", {"team": self.team.pk, "max_referees": "0", "upcoming_only": "on"})
+
+        game.refresh_from_db()
+        self.assertEqual(game.max_referees, 2)
+
+    def test_bulk_capacity_needs_at_least_one_number(self):
+        game = self.make_game()
+        self.client.force_login(self.admin_user)
+
+        self.club_post("event_capacity_bulk", {"team": self.team.pk, "upcoming_only": "on"})
+
+        game.refresh_from_db()
+        self.assertEqual(game.max_referees, 2)
+
     def test_the_referees_panel_only_shows_for_a_home_game(self):
         # "Referees" alone also matches the nav link on every page -- assert on
         # text unique to the panel itself.
