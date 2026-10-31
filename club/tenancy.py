@@ -4,9 +4,18 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.core.cache import cache
 
 if TYPE_CHECKING:
     from .models import Club
+
+#: How long a resolved Club is reused across requests (see ClubTenantMiddleware.get_club).
+CLUB_CACHE_SECONDS = 30
+
+
+def club_cache_key(slug: str) -> str:
+    return f"club:by-slug:{slug}"
+
 
 __current_club: ContextVar = ContextVar("current_club", default=None)
 
@@ -68,7 +77,15 @@ class ClubTenantMiddleware:
             return None
 
         # Archived clubs stop resolving: their subdomain behaves as unknown.
-        return Club.objects.active().filter(slug=subdomain).first()
+        # Looked up on every request, so remembered briefly; Club saves/deletes clear it (see
+        # club.signals) and the TTL covers bulk .update() paths that skip those signals.
+        key = club_cache_key(subdomain)
+        club = cache.get(key)
+        if club is None:
+            club = Club.objects.active().filter(slug=subdomain).first()
+            if club is not None:
+                cache.set(key, club, CLUB_CACHE_SECONDS)
+        return club
 
     @staticmethod
     def get_subdomain(request) -> str | None:

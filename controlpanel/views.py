@@ -51,7 +51,7 @@ from .services.platform_admins import (
     revoke_platform_access,
     set_platform_access,
 )
-from .services.statistics import club_attention, club_charts, club_statistics, clubs_with_health, dashboard_snapshot, flags_for_club, invalidate_dashboard_snapshot
+from .services.statistics import club_dashboard_stats, clubs_with_health, dashboard_snapshot, flags_for_club, invalidate_dashboard_snapshot
 
 Flag = get_waffle_flag_model()
 Switch = get_waffle_switch_model()
@@ -449,6 +449,7 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
                 due.payment_form = DuePaymentForm(initial={"amount": due.balance})
 
         home_location = Location.objects.filter(club=self.object, is_home=True).first()
+        stats = club_dashboard_stats(self.object)
 
         return super().get_context_data(
             # Drives the "archived but owes nothing -- reactivate?" prompt. Computed from the
@@ -457,9 +458,9 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             home_location=home_location,
             home_location_form=HomeLocationForm(instance=home_location),
             nav="clubs",
-            groups=club_statistics(self.object),
-            attention=club_attention(self.object),
-            charts=club_charts(self.object),
+            groups=stats["groups"],
+            attention=stats["attention"],
+            charts=stats["charts"],
             subscription=subscription,
             dues=dues,
             today=timezone.localdate(),

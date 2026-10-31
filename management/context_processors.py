@@ -7,18 +7,25 @@ Same reasoning for ``news_permissions`` below, gating just the "New news item"
 action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news``).
 """
 
+from django.db.models import Case, IntegerField, Sum, When, Window
+from django.utils import timezone
 from waffle import flag_is_active
 
 from billing.services.notices import club_billing_notice
 from club.services.access import can_add_news, can_manage_members, can_manage_referees, get_club_admin, get_current_season, has_management_access, is_coach_manager
 from events.services.game_stats import analytics_supported
 from members.services.lookup import get_request_member
+from rosterchief.request_cache import cached_briefly
 
 #: Every management URL name, mapped to the nav item it should light up --
 #: management/templates/management/_nav_items.html compares against this.
 #: One dict here beats threading `nav=` through every view in views.py, and
 #: unlike that, a new page can't silently be forgotten (it just renders with
 #: no active item until added below, rather than needing every view touched).
+#: How long the nav badges and the billing banner may lag behind reality -- they are shown on
+#: every management page, and each costs 1-3 queries to compute.
+NAV_COUNTER_SECONDS = 15
+
 _NAV_SECTIONS = {
     "home": "home",
     "member_list": "member_list",
@@ -300,9 +307,12 @@ def active_nav_section(request):
 def is_admin(request):
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"is_club_admin": False, "can_manage_members": False, "can_manage_referees": False}
+        return {"is_club_admin": False, "can_manage_members": False, "can_manage_referees": False, "request_member": None}
 
     return {
+        # The signed-in Member, from the request cache -- the user menu reads this instead of
+        # `user.member`, which cost its own query on every page.
+        "request_member": get_request_member(request),
         "is_club_admin": get_club_admin(request),
         # Gates the nav items MemberAdminRequiredMixin also gates at the view layer
         # (Members/Teams/Referee setup/Onboarding requirements) -- real ADMIN (which
@@ -328,7 +338,7 @@ def billing_notice(request):
     if club is None or not request.user.is_authenticated or not get_club_admin(request):
         return {"billing_notice": None}
 
-    return {"billing_notice": club_billing_notice(club)}
+    return {"billing_notice": cached_briefly(f"nav:billing_notice:{club.pk}:{timezone.localdate()}", NAV_COUNTER_SECONDS * 2, lambda: club_billing_notice(club))}
 
 
 def management_position(request):
@@ -427,17 +437,17 @@ def sidebar_counters(request):
 
         # 0 for the officials half whenever that flag is off for this club
         # (checked inside the function itself).
-        counters["games_missing_referees_count"] = games_missing_referee_or_official_count(club)
+        counters["games_missing_referees_count"] = cached_briefly(f"nav:games_missing:{club.pk}", NAV_COUNTER_SECONDS, lambda: games_missing_referee_or_official_count(club, get_current_season(request)))
 
     if can_manage_members(request.user, club):
         from management.views import signup_queue_count
 
-        counters["signup_pending_count"] = signup_queue_count(club, get_current_season(request))
+        counters["signup_pending_count"] = cached_briefly(f"nav:signup_pending:{club.pk}", NAV_COUNTER_SECONDS, lambda: signup_queue_count(club, get_current_season(request)))
 
     if get_club_admin(request):
         from registration.services.invoicing import registrations_awaiting_confirmation
 
-        counters["registrations_awaiting_count"] = len(registrations_awaiting_confirmation(club))
+        counters["registrations_awaiting_count"] = cached_briefly(f"nav:registrations_awaiting:{club.pk}", NAV_COUNTER_SECONDS, lambda: len(registrations_awaiting_confirmation(club)))
 
     return counters
 
@@ -461,8 +471,11 @@ def notification_bell(request):
     if member is None:
         return {"unread_notification_count": None, "recent_notifications": None}
 
-    notifications = Notification.objects.filter(club=club, member=member).order_by("-created")[:8]
+    # One query for both the list and the badge: the window sum is taken over every notification
+    # of this member before the LIMIT cuts the list to 8, so each row carries the full unread count.
+    unread = Window(expression=Sum(Case(When(read_at__isnull=True, then=1), default=0, output_field=IntegerField())))
+    notifications = list(Notification.objects.filter(club=club, member=member).annotate(unread_total=unread).order_by("-created")[:8])
     return {
-        "unread_notification_count": Notification.objects.filter(club=club, member=member, read_at__isnull=True).count(),
+        "unread_notification_count": notifications[0].unread_total if notifications else 0,
         "recent_notifications": notifications,
     }

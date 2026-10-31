@@ -274,6 +274,17 @@
             }
         });
 
+        // Lets other scripts set the underlying <select>'s value(s) programmatically (e.g. "copy
+        // from another person" on the member page) and have the widget redraw to match.
+        select.addEventListener("searchable:sync", () => {
+            if (isMultiple) {
+                renderChips();
+            } else {
+                const chosen = select.selectedOptions[0];
+                input.value = chosen && chosen.value !== "" ? chosen.text : "";
+            }
+        });
+
         if (isMultiple) {
             renderChips();
         } else if (select.value) {

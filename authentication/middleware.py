@@ -14,6 +14,7 @@ enrolled is redirected to the MFA setup page until they do.
 
 from allauth.mfa.utils import is_mfa_enabled
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Exists, OuterRef
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -27,6 +28,9 @@ from teams.models import StaffAssignment
 #: ``/__reload__/`` is django-browser-reload's event stream, which only exists
 #: under DEBUG — without it, live reload dies on the enrolment page itself.
 EXEMPT_PREFIXES = ("/accounts/", "/static/", "/media/", "/__reload__/")
+
+#: How long "this user needs no (more) MFA enrolment" is remembered -- see needs_enrolment.
+MFA_OK_SECONDS = 60
 
 ELEVATED_ROLES = (ClubRole.Roles.ADMIN, ClubRole.Roles.EDITOR, ClubRole.Roles.MEMBER_ADMIN)
 
@@ -71,4 +75,13 @@ class RequireMFAMiddleware:
             return False
         if request.path.startswith(EXEMPT_PREFIXES):
             return False
-        return mfa_required_for(user) and not is_mfa_enabled(user)
+        # Only the "fine" answer is remembered, and only briefly: remembering "must enrol"
+        # would keep bouncing someone who just enrolled. A newly granted privileged role is
+        # therefore gated within MFA_OK_SECONDS rather than instantly.
+        key = f"mfa:ok:{user.pk}"
+        if cache.get(key):
+            return False
+        needs = mfa_required_for(user) and not is_mfa_enabled(user)
+        if not needs:
+            cache.set(key, True, MFA_OK_SECONDS)
+        return needs

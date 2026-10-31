@@ -5,11 +5,13 @@ import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from bugs.models import BugNote, BugReport
 from club.models import ClubMembership
+from club.tenancy import club_cache_key
 from formbuilder.models import Field as FormField
 from formbuilder.models import Form, FormSend, Submission
 from mobile.models import CalendarFeedToken
@@ -349,6 +351,7 @@ class ShopTests(ClubApiTestCase):
         self.add()
         order = self.send("post", "/shop/orders", {}).json()
         type(self.club).objects.filter(pk=self.club.pk).update(shop_open=False)
+        cache.delete(club_cache_key(self.club.slug))  # a bulk update() skips the Club post_save that normally clears the tenant cache
 
         self.assertError(self.get("/shop/products"), 409, "shop_closed")
         self.assertError(self.get("/shop/cart"), 409, "shop_closed")

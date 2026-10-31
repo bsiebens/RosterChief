@@ -18,10 +18,11 @@ Also separately: club.services.sponsors.active_sponsors caches its query per clu
 a save or delete on Sponsor busts that same club's cached list.
 """
 
+from django.core.cache import cache
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from .models import ClubMembership, ClubRole, DuesInvoice, Sponsor
+from .models import Club, ClubMembership, ClubRole, DuesInvoice, Sponsor
 from .services.invoicing import invalidate_cached_invoice_pdf
 from .services.sponsors import invalidate_active_sponsors_cache
 
@@ -68,3 +69,12 @@ def invalidate_dues_pdf_on_fee_status_change(sender, instance, **kwargs):
 @receiver(post_delete, sender=Sponsor)
 def invalidate_sponsors_cache(sender, instance, **kwargs):
     invalidate_active_sponsors_cache(instance.club_id)
+
+
+@receiver([post_save, post_delete], sender=Club)
+def forget_cached_club(sender, instance, **kwargs):
+    """The tenant middleware reuses a resolved Club for a few seconds; an edit (branding,
+    archive, slug change) must show up at once, not after the TTL."""
+    from .tenancy import club_cache_key
+
+    cache.delete(club_cache_key(instance.slug))

@@ -145,6 +145,7 @@ urlpatterns = [
     path("events/<uuid:pk>/attachments/upload/", views.EventAttachmentUploadView.as_view(), name="event_attachment_upload"),
     path("events/<uuid:pk>/attachments/<uuid:attachment_pk>/", views.EventAttachmentDownloadView.as_view(), name="event_attachment_download"),
     path("events/<uuid:pk>/attachments/<uuid:attachment_pk>/delete/", views.EventAttachmentDeleteView.as_view(), name="event_attachment_delete"),
+    path("events/capacity/", views.EventCapacityBulkUpdateView.as_view(), name="event_capacity_bulk"),
     path("events/import/", views.EventImportChooserView.as_view(), name="event_import"),
     path("events/rbihf-import/", views.RBIHFImportView.as_view(), name="rbihf_import"),
     path("events/rbihf-import/confirm/", views.RBIHFImportConfirmView.as_view(), name="rbihf_import_confirm"),

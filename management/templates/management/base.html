@@ -93,9 +93,9 @@
                     {% endcomment %}
                     <details id="user-menu" class="dismissable-details relative border-t border-sidebar-hairline pt-3.5">
                         <summary class="flex cursor-pointer list-none items-center gap-2.5 [&::-webkit-details-marker]:hidden">
-                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-chip font-display text-[13px] font-extrabold text-sidebar-fg">{% if user.member %}{{ user.member.first_name|slice:":1" }}{{ user.member.last_name|slice:":1" }}{% else %}?{% endif %}</span>
+                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-chip font-display text-[13px] font-extrabold text-sidebar-fg">{% if request_member %}{{ request_member.first_name|slice:":1" }}{{ request_member.last_name|slice:":1" }}{% else %}?{% endif %}</span>
                             <span class="min-w-0 flex-1">
-                                <span class="block truncate text-[13px] font-semibold text-sidebar-fg">{{ user.member|default:user.email }}</span>
+                                <span class="block truncate text-[13px] font-semibold text-sidebar-fg">{{ request_member|default:user.email }}</span>
                                 <span class="block text-[11px] text-sidebar-fg-faint">{% if is_club_admin %}Admin{% else %}Staff{% endif %}</span>
                             </span>
                             {% lucide "chevron-up" size=14 class="shrink-0 text-sidebar-fg-faint" %}
