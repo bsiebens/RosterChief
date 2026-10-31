@@ -511,9 +511,19 @@ def attendance_rates(club, season):
     }
 
 
-def club_attention(club):
+#: "Look the season up yourself" marker for the three club_* functions below: the management
+#: home calls all of them in one request and passes the already-resolved season (which may
+#: legitimately be None) so it's looked up once, not three times.
+_RESOLVE = object()
+
+
+def _season_for(club, season):
+    return Season.covering(club, timezone.localdate()) if season is _RESOLVE else season
+
+
+def club_attention(club, season=_RESOLVE):
     """A club's own numbers that are supposed to be zero."""
-    season = Season.covering(club, timezone.localdate())
+    season = _season_for(club, season)
     memberships = ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)
 
     # Both counts below share the same memberships queryset -- one aggregate() instead of
@@ -538,8 +548,8 @@ def club_attention(club):
     }
 
 
-def club_charts(club):
-    season = Season.covering(club, timezone.localdate())
+def club_charts(club, season=_RESOLVE):
+    season = _season_for(club, season)
     memberships = ClubMembership.objects.filter(club=club, season=season, kind=ClubMembership.Kind.MEMBER) if season else ClubMembership.objects.none()
 
     # Fee status this season, in the order a treasurer cares about -- one aggregate() for
@@ -564,7 +574,10 @@ def club_people_counts(club, season=None):
     memberships = ClubMembership.objects.filter(club=club)
     if season:
         memberships = memberships.filter(season=season)
-    by_kind = {kind: set(memberships.filter(kind=kind).values_list("member_id", flat=True)) for kind in ClubMembership.Kind.values}
+    # One query for every kind, split in Python (was one query per kind).
+    by_kind = {kind: set() for kind in ClubMembership.Kind.values}
+    for kind, member_id in memberships.values_list("kind", "member_id"):
+        by_kind[kind].add(member_id)
 
     assignments = StaffAssignment.objects.filter(team__club=club)
     if season:
@@ -575,14 +588,14 @@ def club_people_counts(club, season=None):
     return {"admins": len(admins), "staff": len(staff), "members": len(members), "guardians": len(guardians)}
 
 
-def club_statistics(club):
+def club_statistics(club, season=_RESOLVE):
     """Stat groups for one club. Add new groups here as the domain grows.
 
     Each group below that draws several numbers from the *same* base queryset resolves
     them in one aggregate() call rather than one .count()/.aggregate() per number -- this
     used to be ~13 round trips for a page that renders once per dashboard load.
     """
-    season = Season.covering(club, timezone.localdate())
+    season = _season_for(club, season)
     now = timezone.now()
 
     memberships = ClubMembership.objects.filter(club=club, kind=ClubMembership.Kind.MEMBER)

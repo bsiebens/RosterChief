@@ -298,8 +298,8 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
 
         upcoming_events = scoped_to_managed_teams(Event.objects.filter(club=club, start__gte=timezone.now()), user, club).order_by("start").prefetch_related("teams")[:8]
 
-        attention = club_attention(club)
-        season = attention["season"]
+        season = get_current_season(self.request)
+        attention = club_attention(club, season)
 
         # Compared against the season right before this one (not last year on the
         # calendar) -- Season.before, same "adjacent by date" idea as next_after.
@@ -321,8 +321,8 @@ class HomeView(ClubStaffRequiredMixin, TemplateView):
 
         return super().get_context_data(
             attention=attention,
-            charts=club_charts(club),
-            groups=club_statistics(club),
+            charts=club_charts(club, season),
+            groups=club_statistics(club, season),
             upcoming_events=upcoming_events,
             member_count=member_count,
             member_count_change=member_count_change,
