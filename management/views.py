@@ -4186,7 +4186,7 @@ class RefereeManagementDashboardView(RefereeAdminRequiredMixin, TemplateView):
 
     template_name = "management/referee_management.html"
     RANGE_CHOICES = ["week", "two_weeks", "10", "25", "50"]
-    DEFAULT_RANGE = "10"
+    DEFAULT_RANGE = "two_weeks"
     NEED_CHOICES = ["all", "both", "referees", "officials"]
     DEFAULT_NEED = "all"
 

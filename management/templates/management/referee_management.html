@@ -48,14 +48,11 @@
 {% block panel %}
     {% comment %}
         Same big-tile style as the other KPI rows in this app (see
-        management/home.html), grouped into labelled rows so the referee and
-        official numbers read as the two sets they are -- matching the two
-        columns of the game dialogs below.
+        management/home.html). Two rows of six: row 1 = games in view, active
+        referees, then the four referee tiles (flag icon); row 2 = games refereed,
+        average per referee, then the four official tiles (shield icon).
     {% endcomment %}
-    <div class="flex flex-col gap-4">
-        <div class="flex flex-col gap-2">
-            <span class="font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Overview" %}</span>
-            <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
         <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games in view" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_total }}</div>
@@ -65,6 +62,30 @@
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Active referees" %}</div>
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_active_referees }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
+        </div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Referees' %}">{% lucide "flag" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without a referee" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_referee %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_referee }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
+        </div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Referees' %}">{% lucide "flag" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Partially staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_understaffed }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Still short a referee" %}</div>
+        </div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Referees' %}">{% lucide "flag" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fully staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_fully_staffed }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
+        </div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Referees' %}">{% lucide "flag" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fees not set" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
         </div>
         <div class="card min-w-0 p-4">
             <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Games refereed" %}</div>
@@ -76,58 +97,30 @@
             <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ink tabular-nums">{{ kpi_avg_games_per_referee }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "This season" %}</div>
         </div>
-            </div>
-        </div>
-        <div class="flex flex-col gap-2">
-            <span class="font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Referees" %}</span>
-            <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-        <div class="card min-w-0 p-4">
-            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without a referee" %}</div>
-            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_referee %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_referee }}</div>
+        {% if officials_enabled %}
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Officials' %}">{% lucide "shield" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without an official" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_official %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_official }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
         </div>
-        <div class="card min-w-0 p-4">
-            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Partially staffed" %}</div>
-            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_understaffed }}</div>
-            <div class="mt-1 text-[13px] text-muted">{% trans "Still short a referee" %}</div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Officials' %}">{% lucide "shield" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials partially staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_officials_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_officials_understaffed }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Still short an official" %}</div>
         </div>
-        <div class="card min-w-0 p-4">
-            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fully staffed" %}</div>
-            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_fully_staffed }}</div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Officials' %}">{% lucide "shield" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials fully staffed" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_officials_fully_staffed }}</div>
             <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
         </div>
-        <div class="card min-w-0 p-4">
-            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Fees not set" %}</div>
-            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_fees_pending }}</div>
-            <div class="mt-1 text-[13px] text-muted">{% trans "Referee fee missing" %}</div>
-        </div>
-            </div>
-        </div>
-        {% if officials_enabled %}
-        <div class="flex flex-col gap-2">
-            <span class="font-mono text-[11px] tracking-[.08em] text-dim uppercase">{% trans "Officials" %}</span>
-            <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-        <div class="card min-w-0 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Without an official" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_no_official %}text-club{% else %}text-ink{% endif %}">{{ kpi_no_official }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "Nobody assigned yet" %}</div>
-        </div>
-        <div class="card min-w-0 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials partially staffed" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_officials_understaffed %}text-warn{% else %}text-ink{% endif %}">{{ kpi_officials_understaffed }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "Still short an official" %}</div>
-        </div>
-        <div class="card min-w-0 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Officials fully staffed" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold text-ok tabular-nums">{{ kpi_officials_fully_staffed }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "Nothing left to do" %}</div>
-        </div>
-        <div class="card min-w-0 p-4">
-                <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Official fees not set" %}</div>
-                <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_official_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_official_fees_pending }}</div>
-                <div class="mt-1 text-[13px] text-muted">{% trans "Official fee missing" %}</div>
-        </div>
-            </div>
+        <div class="card relative min-w-0 p-4">
+            <span class="absolute top-3 right-3 text-muted" title="{% trans 'Officials' %}">{% lucide "shield" size=14 %}</span>
+            <div class="font-display text-xs font-bold tracking-[.12em] text-muted uppercase">{% trans "Official fees not set" %}</div>
+            <div class="mt-1 font-display text-[34px] leading-none font-extrabold tabular-nums {% if kpi_official_fees_pending %}text-warn{% else %}text-ink{% endif %}">{{ kpi_official_fees_pending }}</div>
+            <div class="mt-1 text-[13px] text-muted">{% trans "Official fee missing" %}</div>
         </div>
         {% endif %}
     </div>

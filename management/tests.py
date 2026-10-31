@@ -8184,8 +8184,8 @@ class RefereeManagementDashboardTests(ManagementTestBase):
         response = self.club_get("referee_management")
         response_with_bad_range = self.client.get(f"{reverse('management:referee_management')}?range=bogus", HTTP_HOST="ajax-united.rosterchief.app")
 
-        self.assertEqual(response.context["range_choice"], "10")
-        self.assertEqual(response_with_bad_range.context["range_choice"], "10")
+        self.assertEqual(response.context["range_choice"], "two_weeks")
+        self.assertEqual(response_with_bad_range.context["range_choice"], "two_weeks")
 
     def test_a_valid_range_is_honoured(self):
         self.client.force_login(self.admin_user)
