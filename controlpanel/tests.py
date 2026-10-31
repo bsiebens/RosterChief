@@ -1486,6 +1486,18 @@ class PlatformChartTests(TestCase):
 
         self.assertEqual(series[-1]["new"], 1)
 
+    def test_the_series_follows_local_months_when_utc_is_still_in_the_previous_month(self):
+        # 23:30 UTC on 31 Oct is already 1 Nov in Brussels, where dates are recorded and months
+        # bucketed. Laid out from UTC "now", the series ended on October and the newest data fell off.
+        moment = datetime.datetime(2026, 10, 31, 23, 30, tzinfo=datetime.UTC)
+        with mock.patch("django.utils.timezone.now", return_value=moment):
+            ClubMembership.objects.create(club=self.club, season=self.season, member=self.member, signed_up_at=timezone.localdate())
+
+            series = platform_charts()["signups"]
+
+        self.assertEqual(series[-1]["month"], "Nov 2026")
+        self.assertEqual(series[-1]["new"], 1)
+
     def test_new_is_per_club_not_per_platform(self):
         # A veteran of one club joining a second is new *there*. Keying "first season" on the
         # member alone would file their very first signup at the new club as a renewal.
