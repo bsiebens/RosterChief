@@ -32,6 +32,7 @@ from bugs.models import BugNote, BugReport
 from club.models import Club, ClubMembership, ClubRole, DuesInvoice, EvaluationManager, FeePayment, MemberRequirementStatus, OnboardingRequirement, RefereeManager, RefereeType, Season, ShopManager, Sponsor, Sport
 from club.services.invoicing import DuesInvoicePDFError, create_or_resend_invoice
 from club.services.onboarding import mark_complete
+from club.tenancy import club_cache_key
 from evaluations.models import EvaluationChecklist, EvaluationNote, EvaluationOutcome, EvaluationSession, PlayerEvaluation
 from evaluations.services import add_evaluation_note, current_rubric_form, start_session
 from events.models import Attendance, Competition, Event, EventOfficial, EventReferee, EventSeries, EventTask, EventTaskClaim, GameMoment, GameStat, GameTimeline, Location, Opponent, RefereeSignup
@@ -16506,6 +16507,7 @@ class TeamAnalyticsTests(ManagementTestBase):
 
         self.assertContains(self.club_get("team_analytics", self.team.pk, params={"games": "away"}), f"{pdf_url}?games=away")
         Club.objects.filter(pk=self.club.pk).update(sport_type=Club.SportType.OTHER)
+        cache.delete(club_cache_key(self.club.slug))  # a bulk update() skips the Club post_save that normally clears the tenant cache
         self.assertEqual(self.club_get("team_analytics_pdf", self.team.pk).status_code, 404)
 
     def test_page_and_button_are_hidden_for_a_club_playing_another_sport(self):

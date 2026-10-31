@@ -25,3 +25,17 @@ def cached_on_request[T](request, key: str, compute: Callable[[], T]) -> T:
     if cached is _UNSET:
         cached = cache[key] = compute()
     return cached
+
+
+def cached_briefly[T](key: str, seconds: int, compute: Callable[[], T]) -> T:
+    """Cross-request counterpart of ``cached_on_request``: ``compute()`` once per ``seconds`` in
+    the shared Django cache (Redis in production). Only for values that are cheap to be a few
+    seconds stale -- nav badges, banners -- never for anything a view acts on. ``None`` is a
+    valid cached value."""
+    from django.core.cache import cache
+
+    cached = cache.get(key, _UNSET)
+    if cached is _UNSET:
+        cached = compute()
+        cache.set(key, cached, seconds)
+    return cached
