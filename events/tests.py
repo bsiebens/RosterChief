@@ -4235,6 +4235,21 @@ class RBIHFStandingsParsingTests(TestCase):
         self.assertEqual((rows["Haskey"]["wins"], rows["Haskey"]["points"]), (1, 3))
         self.assertEqual(rows["Leuven"]["points"], 3)
 
+    def test_a_score_marked_ot_or_ps_counts_and_earns_overtime_points_without_asking_the_overview(self):
+        # RBIHF writes "3-2(PS)" / "3-2(OT)" in the score cell itself (game 207 of the Belgian cup):
+        # these used to be dropped as "not a score", leaving the game out of the table entirely.
+        played = [("207", "4448", "Antwerp", "4450", "Sharks", "3-2(PS)"), ("208", "4445", "Haskey", "4443", "Bulldogs", "4-3 ( OT )")]
+        [competition] = rbihf_standings.parse_league(rbihf_league_html(played, rule=RBIHF_OT_RULE))
+        overtime_check = mock.Mock()
+
+        rows = {row["team_name"]: row for row in rbihf_standings.compute_table(competition, overtime_check=overtime_check)}
+
+        overtime_check.assert_not_called()
+        self.assertEqual(len(competition.games), 2)
+        self.assertEqual((rows["Antwerp"]["played"], rows["Antwerp"]["ot_wins"], rows["Antwerp"]["points"]), (1, 1, 2))
+        self.assertEqual((rows["Sharks"]["played"], rows["Sharks"]["ot_losses"], rows["Sharks"]["points"]), (1, 1, 1))
+        self.assertEqual((rows["Haskey"]["ot_wins"], rows["Bulldogs"]["ot_losses"]), (1, 1))
+
     def test_a_league_without_overtime_points_never_asks_for_the_overview(self):
         [competition] = rbihf_standings.parse_league(rbihf_league_html([("1", "4448", "Antwerp", "4450", "Sharks", "3-2")]))
         overtime_check = mock.Mock()

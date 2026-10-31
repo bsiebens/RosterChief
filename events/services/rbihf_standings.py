@@ -42,7 +42,9 @@ OVERVIEW_URL = BASE_URL + "/modules/league/ajax/overview.php?gameNr={game_id}&se
 LEAGUE_PATH_RE = re.compile(r"^/league/(?P<slug>[a-z0-9_-]+)/?$")
 TEAM_PATH_RE = re.compile(r"/league/team/(?P<team_id>\d+)")
 GAME_PATH_RE = re.compile(r"/game/(?P<game_id>\d+)")
-SCORE_RE = re.compile(r"^(?P<home>\d+)\s*-\s*(?P<away>\d+)$")
+#: "3-2", or "3-2(OT)" / "3-2 ( PS )" when the game was decided in overtime / a shoot-out -- RBIHF
+#: says so right in the score cell.
+SCORE_RE = re.compile(r"^(?P<home>\d+)\s*-\s*(?P<away>\d+)(?:\s*\(\s*(?P<after>OT|PS|SO|GWS)\s*\))?$", re.IGNORECASE)
 RULE_RE = re.compile(r"(?P<label>[A-Za-z][A-Za-z ]*?)\s*:\s*(?P<points>\d+)\s*points?", re.IGNORECASE)
 
 #: Several clubs' teams share one league page, and one finished game refreshes
@@ -74,6 +76,8 @@ class PlayedGame:
     away_id: str
     home_score: int
     away_score: int
+    #: True when the score cell itself says "(OT)" / "(PS)": decided after regulation, no need to ask the overview.
+    after_regulation: bool = False
 
 
 @dataclass
@@ -180,7 +184,7 @@ def parse_league(html: str) -> list[LeagueCompetition]:
                 game_link = row.find("a", href=GAME_PATH_RE)
                 game_id = GAME_PATH_RE.search(game_link["href"]).group("game_id") if game_link else cells[0].get_text(strip=True)
                 date = _parse_date(cells[date_at].get_text(strip=True)) if date_at is not None else None
-                competition.games.append(PlayedGame(game_id=game_id, date=date, home_id=home_id, away_id=away_id, home_score=int(score.group("home")), away_score=int(score.group("away"))))
+                competition.games.append(PlayedGame(game_id=game_id, date=date, home_id=home_id, away_id=away_id, home_score=int(score.group("home")), away_score=int(score.group("away")), after_regulation=bool(score.group("after"))))
 
         competitions.append(competition)
     return competitions
@@ -262,7 +266,7 @@ def compute_table(competition: LeagueCompetition, overtime_check=decided_after_r
             record(game.home_id, home, away, "draws")
             record(game.away_id, away, home, "draws")
             continue
-        overtime = rule.has_overtime and abs(home - away) == 1 and overtime_check(game)
+        overtime = rule.has_overtime and (game.after_regulation or (abs(home - away) == 1 and overtime_check(game)))
         winner, loser = (game.home_id, game.away_id) if home > away else (game.away_id, game.home_id)
         high, low = max(home, away), min(home, away)
         record(winner, high, low, "ot_wins" if overtime else "wins")
