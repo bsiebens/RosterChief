@@ -53,7 +53,7 @@ from formbuilder.models import Form as FormBuilderForm
 from formbuilder.services.notifications import notify_form_send
 from management.bulk_import import TEMPLATE_COLUMNS, family_choice_field_name
 from management.email_previews import EMAIL_PREVIEWS
-from management.forms import MemberRefereeEligibilityForm
+from management.forms import MemberOfficialEligibilityForm, MemberRefereeEligibilityForm
 from management.pdf import PDFExportError, _tint_with_white, referee_form_colors, render_pdf
 from management.pdf_previews import PDF_PREVIEWS
 from management.recurrence_ui import build_rrule, describe_rrule, parse_rrule
@@ -71,7 +71,7 @@ from shop.models import Discount, DiscountType, Invoice, Order, OrderLine, Payme
 from shop.services.inventory import receive_stock, stock_for, take_for_order_lines
 from shop.services.invoices import ShopInvoicePDFError, create_invoice_for_order
 from shop.services.notifications import _notify_order_ready_for_pickup_by_id
-from teams.models import NumberPool, NumberReservation, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
+from teams.models import NumberPool, NumberReservation, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership, TeamPhoto
 from teams.services import eligible_roster_members
 
 User = get_user_model()
@@ -2924,6 +2924,46 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
         self.assertEqual(profile.level, self.level)
         self.assertEqual(profile.valid_until, self.future_date)
         self.assertEqual(set(profile.eligible_teams), {self.team, self.other_team})
+
+    def test_copy_from_lists_other_people_with_a_level_and_carries_their_settings(self):
+        source = Member.objects.create(first_name="Source", last_name="Ref")
+        source_profile = RefereeProfile.objects.create(club=self.club, member=source, level=self.level, valid_until=self.future_date)
+        source_profile.excluded_teams.add(self.other_team)
+        RefereeProfile.objects.create(club=self.club, member=self.member, level=self.level)
+        no_level = Member.objects.create(first_name="No", last_name="Level")
+        RefereeProfile.objects.create(club=self.club, member=no_level)
+
+        form = MemberRefereeEligibilityForm(club=self.club, member=self.member)
+        field = form.fields["copy_from"]
+
+        # Not themselves, and not someone without a level.
+        self.assertEqual([value for value, _label in field.choices if value], [str(source.pk)])
+        html = str(form["copy_from"])
+        self.assertIn(f'data-level="{self.level.pk}"', html)
+        self.assertIn(f'data-excluded="{self.other_team.pk}"', html)
+        self.assertEqual(next(iter(form.fields)), "copy_from")
+
+    def test_the_copy_from_pick_itself_is_not_saved(self):
+        source = Member.objects.create(first_name="Source", last_name="Ref")
+        RefereeProfile.objects.create(club=self.club, member=source, level=self.level)
+        self.client.force_login(self.admin_user)
+
+        self.club_post("member_referee_eligibility_update", {"copy_from": str(source.pk), "level": str(self.level.pk), "valid_until": self.future_date.isoformat()}, self.member.pk)
+
+        profile = RefereeProfile.objects.get(member=self.member)
+        self.assertEqual(profile.level, self.level)
+        self.assertEqual(profile.valid_until, self.future_date)
+
+    def test_official_copy_from_carries_the_level_only(self):
+        level = OfficialLevel.objects.create(club=self.club, name="Table")
+        source = Member.objects.create(first_name="Source", last_name="Off")
+        OfficialProfile.objects.create(club=self.club, member=source, level=level)
+
+        form = MemberOfficialEligibilityForm(club=self.club, member=self.member)
+
+        html = str(form["copy_from"])
+        self.assertIn(f'data-level="{level.pk}"', html)
+        self.assertNotIn("data-excluded", html)
 
     def test_not_allowed_teams_are_a_searchable_dropdown_of_the_clubs_teams(self):
         form = MemberRefereeEligibilityForm(club=self.club, member=self.member)

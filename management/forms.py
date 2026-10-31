@@ -117,6 +117,42 @@ class RefereeLevelForm(forms.ModelForm):
         self.fields["inherits_from"].empty_label = _("— none —")
 
 
+class CopyFromSelect(forms.Select):
+    """A select whose options carry the level / excluded teams of the person they stand for as
+    data attributes, so the member page's script can prefill the rest of the form from a pick --
+    nothing is looked up or saved server-side; the pick itself is ignored on submit."""
+
+    def __init__(self, *args, option_data=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.option_data = option_data or {}
+
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex=subindex, attrs=attrs)
+        data = self.option_data.get(str(value))
+        if data is not None:
+            option["attrs"]["data-level"] = data["level"]
+            if "excluded" in data:
+                option["attrs"]["data-excluded"] = ",".join(data["excluded"])
+        return option
+
+
+def _copy_from_field(profiles, member, with_excluded):
+    """The "Copy from" field: every other person in the club who holds a level, labelled with it."""
+    profiles = [profile for profile in profiles if profile.level_id is not None and profile.member_id != getattr(member, "pk", None)]
+    data = {}
+    for profile in profiles:
+        data[str(profile.member_id)] = {"level": str(profile.level_id)}
+        if with_excluded:
+            data[str(profile.member_id)]["excluded"] = [str(team.pk) for team in profile.excluded_teams.all()]
+    return forms.ChoiceField(
+        label=_("Copy settings from"),
+        required=False,
+        choices=[("", _("— choose a person —"))] + [(str(profile.member_id), f"{profile.member} — {profile.level}") for profile in profiles],
+        widget=CopyFromSelect(option_data=data, attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+        help_text=_("Fills in the fields below from this person. Nothing is saved until you press Save."),
+    )
+
+
 class MemberRefereeEligibilityForm(forms.ModelForm):
     """This member's referee level and how long it's valid for -- edited from
     the member's own page (teams.RefereeProfile), get-or-created on save.
@@ -145,6 +181,9 @@ class MemberRefereeEligibilityForm(forms.ModelForm):
         self.fields["level"].empty_label = _("— no level (not eligible) —")
         self.fields["excluded_teams"].queryset = Team.objects.filter(club=club).order_by("name")
         self.fields["excluded_teams"].required = False
+        profiles = RefereeProfile.objects.filter(club=club).select_related("member", "level").prefetch_related("excluded_teams") if club is not None else []
+        self.fields["copy_from"] = _copy_from_field(profiles, member, with_excluded=True)
+        self.order_fields(["copy_from", "level", "valid_until", "excluded_teams"])
 
 
 class ExternalRefereeForm(forms.Form):
@@ -202,6 +241,9 @@ class MemberOfficialEligibilityForm(forms.ModelForm):
         self.fields["level"].queryset = OfficialLevel.objects.filter(club=club)
         self.fields["level"].required = False
         self.fields["level"].empty_label = _("— no level (not eligible) —")
+        profiles = OfficialProfile.objects.filter(club=club).select_related("member", "level") if club is not None else []
+        self.fields["copy_from"] = _copy_from_field(profiles, member, with_excluded=False)
+        self.order_fields(["copy_from", "level", "valid_until"])
 
 
 class ExternalOfficialForm(forms.Form):
