@@ -7,6 +7,7 @@ Same reasoning for ``news_permissions`` below, gating just the "New news item"
 action rather than the whole section (``NewsAuthorRequiredMixin``/``can_add_news``).
 """
 
+from django.db.models import Case, IntegerField, Sum, When, Window
 from django.utils import timezone
 from waffle import flag_is_active
 
@@ -306,9 +307,12 @@ def active_nav_section(request):
 def is_admin(request):
     club = getattr(request, "club", None)
     if club is None or not request.user.is_authenticated:
-        return {"is_club_admin": False, "can_manage_members": False, "can_manage_referees": False}
+        return {"is_club_admin": False, "can_manage_members": False, "can_manage_referees": False, "request_member": None}
 
     return {
+        # The signed-in Member, from the request cache -- the user menu reads this instead of
+        # `user.member`, which cost its own query on every page.
+        "request_member": get_request_member(request),
         "is_club_admin": get_club_admin(request),
         # Gates the nav items MemberAdminRequiredMixin also gates at the view layer
         # (Members/Teams/Referee setup/Onboarding requirements) -- real ADMIN (which
@@ -467,8 +471,11 @@ def notification_bell(request):
     if member is None:
         return {"unread_notification_count": None, "recent_notifications": None}
 
-    notifications = Notification.objects.filter(club=club, member=member).order_by("-created")[:8]
+    # One query for both the list and the badge: the window sum is taken over every notification
+    # of this member before the LIMIT cuts the list to 8, so each row carries the full unread count.
+    unread = Window(expression=Sum(Case(When(read_at__isnull=True, then=1), default=0, output_field=IntegerField())))
+    notifications = list(Notification.objects.filter(club=club, member=member).annotate(unread_total=unread).order_by("-created")[:8])
     return {
-        "unread_notification_count": Notification.objects.filter(club=club, member=member, read_at__isnull=True).count(),
+        "unread_notification_count": notifications[0].unread_total if notifications else 0,
         "recent_notifications": notifications,
     }
