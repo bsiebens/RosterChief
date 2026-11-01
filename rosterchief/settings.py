@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 
+from celery.schedules import crontab
 from decouple import Csv, config
 from dj_database_url import parse as db_url
 
@@ -37,6 +38,10 @@ SHARED_APPS = [
     "api",
     "club",  # Club, Domain and the User model (public schema only)
     "features",  # plans, subscriptions and per-club feature overrides (public schema only)
+    "billing",  # prices, billing periods, payments and invoices on top of features (public schema only)
+    "controlpanel",  # platform API, audit log, switches, statistics (public schema only)
+    "django_celery_beat",  # periodic task schedules (public schema only)
+    "django_celery_results",  # task run history (public schema only)
     "tenant_users.tenants",
     "tenant_users.permissions",
     # Everything below are standard django apps
@@ -69,6 +74,8 @@ INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in S
 
 MIDDLEWARE = [
     "django_tenants.middleware.main.TenantMainMiddleware",
+    "club.middleware.ArchivedClubMiddleware",
+    "controlpanel.middleware.MaintenanceMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -216,3 +223,23 @@ SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 if not DEBUG:
     CSRF_TRUSTED_ORIGINS = [f"https://*.{ROSTERCHIEF_BASE_DOMAIN}"]
+
+
+# Celery: Redis broker, results and run history in the database, schedules in code (synced into django-celery-beat).
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_RESULT_EXTENDED = True  # store task name and arguments, so failures are traceable in the history
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_TASK_ALWAYS_EAGER = config("CELERY_TASK_ALWAYS_EAGER", cast=bool, default=False)
+# Periodic tasks (name -> task and schedule); synced into django-celery-beat when beat starts, editable there afterwards.
+CELERY_BEAT_SCHEDULE = {
+    "billing-renew-subscriptions": {"task": "billing.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
+    "billing-send-reminders": {"task": "billing.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
+    "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
+}
+
+# Platform API list endpoints: ?limit=&offset=, default 25, at most 100.
+NINJA_PAGINATION_PER_PAGE = 25
+NINJA_PAGINATION_MAX_LIMIT = 100
