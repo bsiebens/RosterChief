@@ -4475,6 +4475,23 @@ class TimelineParserTests(TestCase):
     """events.services.timeline_parsers against saved real payloads -- the
     expected totals are the real results of those games."""
 
+    def test_hockeydata_period_markers_follow_where_the_game_is(self):
+        def markers(**game):
+            report = json.loads(timeline_fixture("hockeydata_report.json"))
+            report["data"]["gameData"].update(game)
+            document = timeline_parsers.parse_hockeydata(json.dumps(report))
+            return [(event["type"], event["period"], event["seconds"]) for event in document["events"] if event["type"].startswith("period")]
+
+        self.assertEqual(
+            markers(),
+            [("period_start", "1", 0), ("period_end", "1", 1200), ("period_start", "2", 1200), ("period_end", "2", 2400), ("period_start", "3", 2400), ("period_end", "3", 3600)],
+        )
+        # Live in the 2nd period: 1 has ended, 2 has started, nothing says 2 is over yet.
+        live = markers(gameStatus=1, endTime="", liveTime=1217, liveTimePeriod="2")
+        self.assertEqual(live, [("period_start", "1", 0), ("period_end", "1", 1200), ("period_start", "2", 1200)])
+        # Not started: no markers at all.
+        self.assertEqual(markers(gameStatus=0, endTime="", liveTime=0, liveTimePeriod="1"), [])
+
     def parse_all(self):
         return {
             "rbihf": timeline_parsers.finalize_document(timeline_parsers.parse_rbihf(timeline_fixture("rbihf_timeline_137.json"), rbihf_game_data())),
@@ -5170,6 +5187,18 @@ class DeriveMomentsTests(TestCase):
 
         self.assertFalse(moments["goal_for:old"].notifiable)
         self.assertTrue(moments["goal_for:new"].notifiable)
+
+    def test_pre_registered_goalie_changes_do_not_make_live_moments_look_late(self):
+        goalies = [
+            {"id": "gk-on", "type": "goalie_change", "side": "home", "period": "1", "seconds": 0},
+            {"id": "gk-off", "type": "goalie_change", "side": "home", "period": "3", "seconds": 3600},  # DFEL lists the 60:00 "off" before the game starts
+        ]
+        live = moment_doc("live", goalies)
+        current = moment_doc("live", [*goalies, goal_item("g1", "home", 420, 1, 0)], home=1)
+
+        [moment] = game_moments.derive_moments(live, current, our_side="home", first_fetch=False)
+
+        self.assertTrue(moment.notifiable)
 
 
 class RecordGameMomentsTests(GameTimelineTestBase):

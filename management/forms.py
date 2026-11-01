@@ -1,4 +1,5 @@
 import datetime
+import json
 from decimal import Decimal
 
 from django import forms
@@ -117,38 +118,24 @@ class RefereeLevelForm(forms.ModelForm):
         self.fields["inherits_from"].empty_label = _("— none —")
 
 
-class CopyFromSelect(forms.Select):
-    """A select whose options carry the level / excluded teams of the person they stand for as
-    data attributes, so the member page's script can prefill the rest of the form from a pick --
-    nothing is looked up or saved server-side; the pick itself is ignored on submit."""
-
-    def __init__(self, *args, option_data=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.option_data = option_data or {}
-
-    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
-        option = super().create_option(name, value, label, selected, index, subindex=subindex, attrs=attrs)
-        data = self.option_data.get(str(value))
-        if data is not None:
-            option["attrs"]["data-level"] = data["level"]
-            if "excluded" in data:
-                option["attrs"]["data-excluded"] = ",".join(data["excluded"])
-        return option
-
-
 def _copy_from_field(profiles, member, with_excluded):
-    """The "Copy from" field: every other person in the club who holds a level, labelled with it."""
+    """The "Copy from" field: every other person in the club who holds a level, labelled with it.
+
+    A plain select (the shared form-field template renders the <option> tags itself, so a custom
+    widget class or per-option attributes would not survive). What a pick should fill in travels
+    as one JSON object on the select -- ``data-copy-sources``, keyed by member id -- which the member
+    page's script reads. The pick itself is ignored on submit; nothing is looked up server-side."""
     profiles = [profile for profile in profiles if profile.level_id is not None and profile.member_id != getattr(member, "pk", None)]
-    data = {}
+    sources = {}
     for profile in profiles:
-        data[str(profile.member_id)] = {"level": str(profile.level_id)}
+        sources[str(profile.member_id)] = {"level": str(profile.level_id)}
         if with_excluded:
-            data[str(profile.member_id)]["excluded"] = [str(team.pk) for team in profile.excluded_teams.all()]
+            sources[str(profile.member_id)]["excluded"] = [str(team.pk) for team in profile.excluded_teams.all()]
     return forms.ChoiceField(
         label=_("Copy settings from"),
         required=False,
         choices=[("", _("— choose a person —"))] + [(str(profile.member_id), f"{profile.member} — {profile.level}") for profile in profiles],
-        widget=CopyFromSelect(option_data=data, attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search...")}),
+        widget=forms.Select(attrs={"data-searchable": "true", "data-search-placeholder": _("Type a name to search..."), "data-copy-sources": json.dumps(sources)}),
         help_text=_("Fills in the fields below from this person. Nothing is saved until you press Save."),
     )
 
