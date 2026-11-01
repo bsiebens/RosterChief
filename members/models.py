@@ -10,7 +10,7 @@ class Member(UUIDModel):
     first_name = models.CharField(max_length=75)
     last_name = models.CharField(max_length=75)
     email = models.EmailField(blank=True, help_text="Contact address. Also used as the login email when access is granted.")
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.DO_NOTHING, related_name="+")
 
     class Meta:
         ordering = ["last_name", "first_name"]
