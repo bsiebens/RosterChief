@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice {{ invoice.number }}</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  body { font-family: sans-serif; font-size: 11pt; color: #111; }
+  h1 { font-size: 20pt; margin: 0 0 4mm; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8mm; }
+  th, td { text-align: left; padding: 2mm 0; border-bottom: 1px solid #ccc; }
+  td.num, th.num { text-align: right; }
+  .meta { margin-top: 4mm; color: #444; }
+  .total td { font-weight: bold; border-bottom: 2px solid #111; }
+</style>
+</head>
+<body>
+  <h1>Invoice {{ invoice.number }}</h1>
+  <div class="meta">
+    RosterChief &middot; Club &amp; team management<br>
+    Issued {{ invoice.issued_at|date:"Y-m-d" }}
+  </div>
+  <p class="meta">
+    Billed to: <strong>{{ club_name }}</strong>{% if club.legal_address %}<br>{{ club.legal_address }}, {{ club.legal_zip_code }} {{ club.legal_city }}{% endif %}{% if club.vat_id %}<br>VAT {{ club.vat_id }}{% endif %}
+  </p>
+  <table>
+    <thead><tr><th>Description</th><th>Period</th><th class="num">Amount (EUR)</th></tr></thead>
+    <tbody>
+      <tr><td>{{ line }}</td><td>{{ due.period_start|date:"Y-m-d" }} to {{ due.period_end|date:"Y-m-d" }}</td><td class="num">{{ due.amount }}</td></tr>
+      {% for p in payments %}<tr><td>Payment received {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td></td><td class="num">-{{ p.amount }}</td></tr>{% endfor %}
+      <tr class="total"><td>Balance due</td><td></td><td class="num">{{ balance }}</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
