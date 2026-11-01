@@ -2938,10 +2938,23 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
 
         # Not themselves, and not someone without a level.
         self.assertEqual([value for value, _label in field.choices if value], [str(source.pk)])
-        html = str(form["copy_from"])
-        self.assertIn(f'data-level="{self.level.pk}"', html)
-        self.assertIn(f'data-excluded="{self.other_team.pk}"', html)
+        sources = json.loads(field.widget.attrs["data-copy-sources"])
+        self.assertEqual(sources, {str(source.pk): {"level": str(self.level.pk), "excluded": [str(self.other_team.pk)]}})
         self.assertEqual(next(iter(form.fields)), "copy_from")
+
+    def test_the_member_page_renders_copy_from_as_a_select_with_the_other_referees(self):
+        # Rendered through the shared form_field template, which picks the HTML by widget type:
+        # an unknown widget class fell through to a plain text box with no options at all.
+        source = Member.objects.create(first_name="Source", last_name="Ref")
+        RefereeProfile.objects.create(club=self.club, member=source, level=self.level)
+        self.client.force_login(self.admin_user)
+
+        response = self.club_get("member_detail", self.member.pk)
+
+        self.assertContains(response, 'name="copy_from"')
+        self.assertContains(response, f'<option value="{source.pk}"')
+        self.assertContains(response, "Source Ref — Regional")
+        self.assertContains(response, "data-copy-sources=")
 
     def test_the_copy_from_pick_itself_is_not_saved(self):
         source = Member.objects.create(first_name="Source", last_name="Ref")
@@ -2961,9 +2974,8 @@ class MemberRefereeEligibilityTests(ManagementTestBase):
 
         form = MemberOfficialEligibilityForm(club=self.club, member=self.member)
 
-        html = str(form["copy_from"])
-        self.assertIn(f'data-level="{level.pk}"', html)
-        self.assertNotIn("data-excluded", html)
+        sources = json.loads(form.fields["copy_from"].widget.attrs["data-copy-sources"])
+        self.assertEqual(sources, {str(source.pk): {"level": str(level.pk)}})
 
     def test_not_allowed_teams_are_a_searchable_dropdown_of_the_clubs_teams(self):
         form = MemberRefereeEligibilityForm(club=self.club, member=self.member)

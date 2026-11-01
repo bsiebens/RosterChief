@@ -553,17 +553,17 @@
         // "Copy settings from": a pick fills level (and, for referees, the excluded teams --
         // replacing whatever was there) into the same modal's fields. Nothing is saved until Save.
         document.querySelectorAll('select[name="copy_from"]').forEach((picker) => {
+            const sources = JSON.parse(picker.dataset.copySources || "{}");
             picker.addEventListener("change", () => {
-                const option = picker.selectedOptions[0];
-                if (!option || !option.value) return;
+                const source = sources[picker.value];
+                if (!source) return;
                 const form = picker.form;
                 const level = form.querySelector('[name="level"]');
-                level.value = option.dataset.level || "";
+                level.value = source.level;
                 level.dispatchEvent(new Event("searchable:sync"));
                 const excluded = form.querySelector('[name="excluded_teams"]');
-                if (excluded && option.dataset.excluded !== undefined) {
-                    const ids = option.dataset.excluded.split(",").filter(Boolean);
-                    Array.from(excluded.options).forEach((team) => { team.selected = ids.includes(team.value); });
+                if (excluded && source.excluded) {
+                    Array.from(excluded.options).forEach((team) => { team.selected = source.excluded.includes(team.value); });
                     excluded.dispatchEvent(new Event("searchable:sync"));
                 }
             });
