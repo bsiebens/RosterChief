@@ -4,6 +4,7 @@ from allauth.core import context
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from django.utils.text import slugify
 from django_tenants.utils import get_public_schema_name, schema_context
 
@@ -17,6 +18,32 @@ from features.models import Plan
 from features.services import subscribe
 
 from .models import Club, Domain
+
+
+class AccountError(Exception):
+    pass
+
+
+class UnverifiedEmailError(AccountError):
+    """The address belongs to an account whose email was never verified, so it must not inherit rights."""
+
+
+def resolve_account(email: str, *, first_name: str = "", last_name: str = ""):
+    """Find or create the account for ``email`` before giving it rights. Returns ``(user, created)``.
+
+    An existing account is only reused if that exact address is verified. A new account is login-less; the caller
+    sends the password setup email.
+    """
+    email = email.strip().lower()
+    with schema_context(get_public_schema_name()):
+        user = get_user_model().objects.filter(email__iexact=email).first()
+        if user is not None:
+            if not EmailAddress.objects.filter(user=user, email__iexact=email, verified=True).exists():
+                raise UnverifiedEmailError("That account's email address has not been verified.")
+            return user, False
+        if not (first_name and last_name):
+            raise AccountError("First and last name are required for a new account.")
+        return create_account(email, first_name=first_name, last_name=last_name), True
 
 
 def mark_email_verified(user) -> None:
@@ -95,6 +122,7 @@ def provision_club(club: Club) -> Club:
     if plan is not None:
         subscribe(club, plan, reason="Default plan")
     ensure_member_for_user(club, club.owner)
+    _invalidate_dashboard()
     return club
 
 
@@ -170,3 +198,75 @@ def send_password_setup_email(request, user) -> None:
         raise ValueError(form.errors.as_text())
     with context.request_context(request):
         form.save(request)
+
+
+def _invalidate_dashboard() -> None:
+    from controlpanel import stats
+
+    stats.invalidate()
+
+
+def archive_club(club: Club) -> Club:
+    """Archive a club: its domains stop resolving (see ArchivedClubMiddleware); all data is kept."""
+    if club.schema_name == get_public_schema_name():
+        raise ValueError("The platform itself cannot be archived.")
+    if club.archived_at is None:
+        club.archived_at = timezone.now()
+        club.save(update_fields=["archived_at", "modified"])
+        _invalidate_dashboard()
+    return club
+
+
+def restore_club(club: Club) -> Club:
+    if club.archived_at is not None:
+        club.archived_at = None
+        club.save(update_fields=["archived_at", "modified"])
+        _invalidate_dashboard()
+    return club
+
+
+def delete_club(club: Club) -> None:
+    """Permanently delete a club and its schema. People (users) are kept; only the club's own rows go."""
+    if club.schema_name == get_public_schema_name():
+        raise ValueError("The platform itself cannot be deleted.")
+    club.delete(force_drop=True)
+    _invalidate_dashboard()
+
+
+class ClubAdminError(Exception):
+    pass
+
+
+def club_admins(club: Club) -> list:
+    """Users holding the Owner role in ``club``."""
+    from authorization.catalog import OWNER_SLUG
+
+    with schema_context(club.schema_name):
+        group = Role.objects.get(slug=OWNER_SLUG).group
+        return [perms.profile for perms in group.user_set.select_related("profile").order_by("profile__email")]
+
+
+@transaction.atomic
+def grant_club_admin(club: Club, user) -> None:
+    """Make ``user`` an administrator of ``club``: grant access if they have none, put them on the roster, give them Owner."""
+    from authorization.catalog import OWNER_SLUG
+
+    if not club.user_set.filter(pk=user.pk).exists():
+        club.add_user(user)
+    ensure_member_for_user(club, user)
+    with schema_context(club.schema_name):
+        assign_role(user, Role.objects.get(slug=OWNER_SLUG))
+
+
+@transaction.atomic
+def revoke_club_admin(club: Club, user) -> None:
+    """Take the Owner role from ``user`` (they stay a member). The club's owner and its last Owner cannot be removed."""
+    from authorization.catalog import OWNER_SLUG
+    from authorization.services import remove_role
+
+    if user.pk == club.owner_id:
+        raise ClubAdminError("The club's owner cannot be removed as an administrator. Transfer ownership first.")
+    with schema_context(club.schema_name):
+        remove_role(user, Role.objects.get(slug=OWNER_SLUG))  # raises ProtectedRoleError for the last Owner
+        if not user.tenant_perms.groups.exists():
+            assign_role(user, Role.objects.get(slug="member"))

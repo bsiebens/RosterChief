@@ -45,6 +45,8 @@ class Club(TenantBase):
 
     sport = models.ForeignKey("club.Sport", null=True, on_delete=models.PROTECT, related_name="clubs")
 
+    archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, db_index=True, help_text=_("Set while the club is archived: its subdomain stops resolving but all data is kept."))
+
     legal_name = models.CharField(_("legal name"), max_length=255, blank=True, help_text=_("Full registered name (e.g. including a legal form like VZW/ASBL), used on official documents. Falls back to club name if blank."))
     contact_email = models.EmailField(_("contact email"), blank=True, help_text=_("The club's public address, shown to people the club writes to or asks to get in touch. Falls back to nothing being shown at all, so it's worth setting."))
     website = models.URLField(_("website"), blank=True, help_text=_("The club's own site, if it has one -- shown alongside its RosterChief pages, not used for anything else yet."))
@@ -105,6 +107,10 @@ class Club(TenantBase):
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
 
     class Meta:
         verbose_name = _("club")
@@ -174,3 +180,41 @@ class Sport(UUIDModel):
         verbose_name = _("sport")
         verbose_name_plural = _("sports")
         ordering = ["name"]
+
+
+class RefereeType(UUIDModel):
+    """A type of referee or official for one sport (shared reference data, ordered for display)."""
+
+    REFEREE, OFFICIAL = "referee", "official"
+    KIND_CHOICES = [(REFEREE, _("Referee")), (OFFICIAL, _("Official"))]
+
+    sport = models.ForeignKey(Sport, on_delete=models.CASCADE, related_name="referee_types")
+    kind = models.CharField(_("kind"), max_length=10, choices=KIND_CHOICES, default=REFEREE)
+    name = models.CharField(_("name"), max_length=100)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower comes first."))
+
+    class Meta:
+        verbose_name = _("referee type")
+        verbose_name_plural = _("referee types")
+        ordering = ["sport", "kind", "ordering", "name"]
+        constraints = [models.UniqueConstraint(fields=["sport", "kind", "name"], name="unique_referee_type_name_per_sport_kind")]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Competition(UUIDModel):
+    """A competition clubs can import fixtures from. Which clubs may use it is decided by ``feature`` (a catalog feature)."""
+
+    name = models.CharField(_("name"), max_length=250)
+    module = models.CharField(_("module"), max_length=250, help_text=_("Dotted path of the module with the class that fetches fixtures."))
+    sport = models.ForeignKey(Sport, null=True, blank=True, on_delete=models.PROTECT, related_name="competitions")
+    feature = models.ForeignKey("features.Feature", null=True, blank=True, on_delete=models.PROTECT, related_name="competitions", help_text=_("Clubs need this feature to use the competition."))
+
+    class Meta:
+        verbose_name = _("competition")
+        verbose_name_plural = _("competitions")
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
