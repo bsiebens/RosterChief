@@ -34,6 +34,7 @@ ALLOWED_HOSTS = [".localhost"] if DEBUG else config("DJANGO_ALLOWED_HOSTS", cast
 # Application definition
 SHARED_APPS = [
     "django_tenants",
+    "api",
     "club",  # Club, Domain and the User model (public schema only)
     "features",  # plans, subscriptions and per-club feature overrides (public schema only)
     "tenant_users.tenants",
@@ -49,6 +50,7 @@ SHARED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.mfa",
+    "allauth.headless",  # JSON API for login, MFA and passkeys (/_allauth/)
     "django_extensions",
 ]
 
@@ -185,6 +187,21 @@ ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_USER_MODEL_EMAIL_FIELD = "email"
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+
+# Headless API (/_allauth/): browser clients use the session cookie, app clients an X-Session-Token.
+# Optional: base URL of the separate frontend app. When set, e-mailed links (verify e-mail, password reset / invite)
+# open pages there; when empty they open allauth's built-in pages under /accounts/.
+ROSTERCHIEF_FRONTEND_URL = config("ROSTERCHIEF_FRONTEND_URL", default="").rstrip("/")
+HEADLESS_FRONTEND_URLS = (
+    {
+        "account_confirm_email": ROSTERCHIEF_FRONTEND_URL + "/account/verify-email/{key}",
+        "account_reset_password": ROSTERCHIEF_FRONTEND_URL + "/account/password/reset",
+        "account_reset_password_from_key": ROSTERCHIEF_FRONTEND_URL + "/account/password/reset/key/{key}",
+        "account_signup": ROSTERCHIEF_FRONTEND_URL + "/account/signup",
+    }
+    if ROSTERCHIEF_FRONTEND_URL
+    else {}
+)
 
 MFA_ADAPTER = "club.adapters.MFAAdapter"
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes", "webauthn"]
