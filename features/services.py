@@ -3,7 +3,7 @@
 from django.db import models, transaction
 from django.utils import timezone
 
-from .catalog import CATALOG, DEFAULT_PLAN, DEFAULT_PLANS
+from .catalog import CATALOG, DEFAULT_PLAN, DEFAULT_PLANS, LIMIT, duplicate_limit_scopes
 from .models import EntitlementLog, Feature, FeatureOverride, Plan, PlanFeature, Subscription
 
 
@@ -79,6 +79,8 @@ def _override_snapshot(ov: FeatureOverride | None) -> dict | None:
 def set_override(club, code: str, *, enabled=True, limit=None, expires_at=None, actor=None, reason="") -> FeatureOverride:
     """Grant (``enabled=True``) or revoke (``enabled=False``) a feature for one club, regardless of its plan."""
     feature = _feature(code)
+    if limit is not None and CATALOG[code].kind != LIMIT:
+        raise PlanError(f"Feature '{code}' is on/off and cannot have a limit.")
     existing = FeatureOverride.objects.filter(club=club, feature=feature).first()
     old = _override_snapshot(existing)
     ov, _ = FeatureOverride.objects.update_or_create(
@@ -112,3 +114,69 @@ def ensure_default_subscriptions() -> int:
         subscribe(club, plan, reason="Default plan")
         n += 1
     return n
+
+
+class PlanError(ValueError):
+    pass
+
+
+def _check_plan_features(items) -> dict[str, int | None]:
+    """Validate ``[(code, limit)]`` for a plan: known codes, no duplicates, limits only on limit features, one per scope."""
+    out: dict[str, int | None] = {}
+    for code, limit in items:
+        if code not in CATALOG:
+            raise PlanError(f"Unknown feature '{code}'.")
+        if code in out:
+            raise PlanError(f"Feature '{code}' is listed twice.")
+        if limit is not None and CATALOG[code].kind != LIMIT:
+            raise PlanError(f"Feature '{code}' is on/off and cannot have a limit.")
+        out[code] = limit
+    if duplicate_limit_scopes(out):
+        raise PlanError("A plan can only have one feature limiting the same thing (e.g. the number of members).")
+    return out
+
+
+def _set_plan_features(plan: Plan, features: dict[str, int | None]) -> None:
+    PlanFeature.objects.filter(plan=plan).exclude(feature__code__in=features).delete()
+    for code, limit in features.items():
+        PlanFeature.objects.update_or_create(plan=plan, feature=_feature(code), defaults={"limit": limit})
+
+
+@transaction.atomic
+def create_plan(*, code: str, name: str, description: str = "", features=(), actor=None) -> Plan:
+    if Plan.objects.filter(code=code).exists():
+        raise PlanError(f"A plan with code '{code}' already exists.")
+    checked = _check_plan_features(features)
+    plan = Plan.objects.create(code=code, name=name, description=description)
+    _set_plan_features(plan, checked)
+    log("plan_created", plan=plan, new={"name": name, "features": checked}, actor=actor)
+    return plan
+
+
+@transaction.atomic
+def update_plan(plan: Plan, *, name=None, description=None, is_active=None, features=None, actor=None) -> Plan:
+    """Change a plan. ``features`` (a list of ``(code, limit)``) replaces the plan's feature set when given."""
+    old = {"name": plan.name, "is_active": plan.is_active, "features": {pf.feature.code: pf.limit for pf in plan.plan_features.select_related("feature")}}
+    if is_active is False and plan.code == DEFAULT_PLAN:
+        raise PlanError("The default plan cannot be deactivated: clubs without a plan fall back to it.")
+    checked = _check_plan_features(features) if features is not None else None
+    for field, value in (("name", name), ("description", description), ("is_active", is_active)):
+        if value is not None:
+            setattr(plan, field, value)
+    plan.save()
+    if checked is not None:
+        _set_plan_features(plan, checked)
+    new = {"name": plan.name, "is_active": plan.is_active, "features": {pf.feature.code: pf.limit for pf in plan.plan_features.select_related("feature")}}
+    log("plan_updated", plan=plan, old=old, new=new, actor=actor)
+    return plan
+
+
+@transaction.atomic
+def delete_plan(plan: Plan, *, actor=None) -> None:
+    """Delete a plan nobody has ever used. Plans with subscriptions are deactivated instead."""
+    if plan.code == DEFAULT_PLAN:
+        raise PlanError("The default plan cannot be deleted.")
+    if Subscription.objects.filter(plan=plan).exists():
+        raise PlanError("This plan has subscriptions (current or past). Deactivate it instead.")
+    log("plan_deleted", old={"code": plan.code, "name": plan.name}, actor=actor)
+    plan.delete()

@@ -23,6 +23,7 @@ class LimitExceeded(Exception):
 class Entitlement:
     enabled: bool = False
     limit: int | None = None  # None = unlimited (only meaningful when enabled)
+    source: str = ""  # where it comes from: "plan", "default_plan" (fallback) or "override"
 
 
 class Entitlements:
@@ -54,6 +55,13 @@ class Entitlements:
         if limit is not None and current + adding > limit:
             raise LimitExceeded(code, limit)
 
+    def entitlement(self, code: str) -> Entitlement:
+        """The raw entitlement (including where it came from) for one feature."""
+        self._check(code)
+        if self.bypass:
+            return Entitlement(True, None, "bypass")
+        return self._data.get(code, Entitlement())
+
     def enabled_codes(self) -> set[str]:
         return set(CATALOG) if self.bypass else {c for c, e in self._data.items() if e.enabled}
 
@@ -81,20 +89,21 @@ def resolve_entitlements(club, *, now=None, bypass: bool = False) -> Entitlement
         .order_by("-starts_at")
         .first()
     )
-    plan = None
+    plan, source = None, "plan"
     if subscription is not None and subscription.grants_access(now) and subscription.plan.is_active:
         plan = subscription.plan
     else:
+        source = "default_plan"
         # No usable subscription (never had one, ended, trial over, plan retired): fall back to the default plan.
         plan = Plan.objects.filter(code=DEFAULT_PLAN).first()
     if plan is not None:
         for pf in PlanFeature.objects.filter(plan=plan, feature__is_active=True).select_related("feature"):
-            data[pf.feature.code] = Entitlement(True, pf.limit)
+            data[pf.feature.code] = Entitlement(True, pf.limit, source)
 
     for ov in FeatureOverride.objects.filter(club=club, feature__is_active=True).select_related("feature"):
         if not ov.is_current(now):
             continue
-        data[ov.feature.code] = Entitlement(True, ov.limit) if ov.enabled else Entitlement(False)
+        data[ov.feature.code] = Entitlement(True, ov.limit, "override") if ov.enabled else Entitlement(False, None, "override")
 
     return Entitlements(data)
 
