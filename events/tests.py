@@ -5171,6 +5171,18 @@ class DeriveMomentsTests(TestCase):
         self.assertFalse(moments["goal_for:old"].notifiable)
         self.assertTrue(moments["goal_for:new"].notifiable)
 
+    def test_pre_registered_goalie_changes_do_not_make_live_moments_look_late(self):
+        goalies = [
+            {"id": "gk-on", "type": "goalie_change", "side": "home", "period": "1", "seconds": 0},
+            {"id": "gk-off", "type": "goalie_change", "side": "home", "period": "3", "seconds": 3600},  # DFEL lists the 60:00 "off" before the game starts
+        ]
+        live = moment_doc("live", goalies)
+        current = moment_doc("live", [*goalies, goal_item("g1", "home", 420, 1, 0)], home=1)
+
+        [moment] = game_moments.derive_moments(live, current, our_side="home", first_fetch=False)
+
+        self.assertTrue(moment.notifiable)
+
 
 class RecordGameMomentsTests(GameTimelineTestBase):
     """game_timeline.store -> game_timeline_changed -> GameMoment rows."""

@@ -96,7 +96,9 @@ def derive_moments(previous: dict | None, current: dict, *, our_side: str, first
 
     previous_events = {item["id"]: item for item in previous.get("events", [])}
     current_events = {item["id"]: item for item in current.get("events", [])}
-    latest = max((item.get("seconds") or 0 for item in current_events.values()), default=0)
+    # Goalie changes don't say how far the game has got: hockeydata (DFEL) lists the starting goalies' "on" at 0:00
+    # and "off" at 60:00 before the puck drops, which would make every real moment look like a catch-up.
+    latest = max((item.get("seconds") or 0 for item in current_events.values() if item["type"] != "goalie_change"), default=0)
     score_now = _for_against(_score(current), our_side)
     moments = []
 
