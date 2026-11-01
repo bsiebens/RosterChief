@@ -430,6 +430,27 @@ def _hd_base(item: dict, side: str, *, id_key: str | None = None) -> dict:
     return base
 
 
+def _hd_period_markers(game: dict) -> list[dict]:
+    """hockeydata has no period events, only where the game is now (``liveTimePeriod``, ``liveTime``) -- so a period
+    counts as started once the game reached it and as ended once the game moved past it (or finished). The end of the
+    period being played right now (the intermission) isn't visible until the next one starts."""
+    label = _hd_period(game.get("liveTimePeriod"))
+    reached = int(label) if label and label.isdigit() else {"OT": REGULAR_PERIODS + 1}.get(label or "", 0)
+    if label and label.startswith("OT") and label[2:].isdigit():
+        reached = REGULAR_PERIODS + int(label[2:])
+    finished = bool(game.get("endTime")) or game.get("gameStatus") == 4
+    if reached < 1 or not (game.get("liveTime") or finished):
+        return []
+    length = game.get("lengthOfPeriod") or DEFAULT_PERIOD_SECONDS
+    markers = []
+    for number in range(1, reached + 1):
+        markers.append({"side": None, "type": "period_start", "period": period_label(number), "seconds": (number - 1) * length, "time": clock_text((number - 1) * length)})
+        if number < reached or finished:
+            end = number * length if number < reached else max(game.get("liveTime") or 0, (number - 1) * length)
+            markers.append({"side": None, "type": "period_end", "period": period_label(number), "seconds": end, "time": clock_text(end)})
+    return markers
+
+
 def parse_hockeydata(report_json: str) -> dict:
     try:
         payload = json.loads(report_json)
@@ -469,9 +490,9 @@ def parse_hockeydata(report_json: str) -> dict:
             action = "in" if str(change.get("action", "")).lower() in ("on", "in") else "out"
             events.append({**_hd_base(change, side), "type": "goalie_change", "goalie_change": {"player": _hd_player(change.get("player")), "action": action}})
 
-    events = with_ids(chronological(events), "hd")
-
     game = data.get("gameData") or {}
+    events = with_ids(chronological([*events, *_hd_period_markers(game)]), "hd")
+
     document = {"source": "DFEL", "events": events}
     if isinstance(game.get("homeTeamScore"), int) and isinstance(game.get("awayTeamScore"), int):
         document["score"] = {"home": game["homeTeamScore"], "away": game["awayTeamScore"]}

@@ -4475,6 +4475,23 @@ class TimelineParserTests(TestCase):
     """events.services.timeline_parsers against saved real payloads -- the
     expected totals are the real results of those games."""
 
+    def test_hockeydata_period_markers_follow_where_the_game_is(self):
+        def markers(**game):
+            report = json.loads(timeline_fixture("hockeydata_report.json"))
+            report["data"]["gameData"].update(game)
+            document = timeline_parsers.parse_hockeydata(json.dumps(report))
+            return [(event["type"], event["period"], event["seconds"]) for event in document["events"] if event["type"].startswith("period")]
+
+        self.assertEqual(
+            markers(),
+            [("period_start", "1", 0), ("period_end", "1", 1200), ("period_start", "2", 1200), ("period_end", "2", 2400), ("period_start", "3", 2400), ("period_end", "3", 3600)],
+        )
+        # Live in the 2nd period: 1 has ended, 2 has started, nothing says 2 is over yet.
+        live = markers(gameStatus=1, endTime="", liveTime=1217, liveTimePeriod="2")
+        self.assertEqual(live, [("period_start", "1", 0), ("period_end", "1", 1200), ("period_start", "2", 1200)])
+        # Not started: no markers at all.
+        self.assertEqual(markers(gameStatus=0, endTime="", liveTime=0, liveTimePeriod="1"), [])
+
     def parse_all(self):
         return {
             "rbihf": timeline_parsers.finalize_document(timeline_parsers.parse_rbihf(timeline_fixture("rbihf_timeline_137.json"), rbihf_game_data())),
