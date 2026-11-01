@@ -72,6 +72,11 @@ def set_roles(user, roles) -> None:
     user.tenant_perms.groups.set([r.group for r in roles])
 
 
+def validate_roles(user, roles) -> None:
+    """Raise ``ProtectedRoleError`` if replacing ``user``'s roles with ``roles`` is not allowed."""
+    _guard_last_owner(user, [r.group_id for r in roles], replacing=True)
+
+
 def _guard_last_owner(user, keep_or_remove_ids, replacing=False) -> None:
     owner = _owner_group()
     perms = user.tenant_perms
@@ -94,3 +99,15 @@ def seed_default_roles() -> None:
 
 def user_perm_codes(user) -> set[str]:
     return set(user.get_all_permissions())
+
+
+def roles_by_club(user, clubs=None) -> list[tuple]:
+    """``[(club, [role names])]`` for ``clubs`` (default: every club ``user`` belongs to)."""
+    from django_tenants.utils import schema_context
+
+    out = []
+    for club in clubs if clubs is not None else user.tenants.order_by("name"):
+        with schema_context(club.schema_name):
+            perms = type(user).objects.get(pk=user.pk).tenant_perms
+            out.append((club, sorted(perms.groups.values_list("name", flat=True))))
+    return out

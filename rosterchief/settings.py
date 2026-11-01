@@ -38,7 +38,7 @@ SHARED_APPS = [
     "tenant_users.tenants",
     "tenant_users.permissions",
     # Everything below are standard django apps
-    "django.contrib.admin",
+    "rosterchief.apps.RosterAdminConfig",  # django.contrib.admin with a club-aware AdminSite
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -48,6 +48,7 @@ SHARED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.mfa",
+    "django_extensions",
 ]
 
 TENANT_APPS = [
@@ -159,11 +160,7 @@ MAILERS = {
 # "ajax-united.rosterchief.app" -> the club with slug "ajax-united". Leave
 # unset to fall back to generic "slug.example.com" (3+ label) resolution.
 # Required when DEBUG is off; defaults to "localhost" only in development.
-ROSTERCHIEF_BASE_DOMAIN = (
-    config("ROSTERCHIEF_BASE_DOMAIN", default="localhost")
-    if DEBUG
-    else config("ROSTERCHIEF_BASE_DOMAIN")
-)
+ROSTERCHIEF_BASE_DOMAIN = config("ROSTERCHIEF_BASE_DOMAIN", default="localhost") if DEBUG else config("ROSTERCHIEF_BASE_DOMAIN")
 TENANT_MODEL = "club.Club"
 TENANT_DOMAIN_MODEL = "club.Domain"
 
