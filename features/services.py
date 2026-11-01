@@ -1,6 +1,6 @@
 """All writes to plans, subscriptions and overrides. Each change is recorded in ``EntitlementLog``."""
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from .catalog import CATALOG, DEFAULT_PLAN, DEFAULT_PLANS
@@ -38,15 +38,20 @@ def sync_catalog() -> None:
             log("plan_seeded", plan=plan, new={"features": features})
 
 
+def _current_subscriptions(club, now):
+    """Subscriptions in force right now: started, and not ended (including ones scheduled to end later)."""
+    return Subscription.objects.select_related("plan").filter(club=club, starts_at__lte=now).filter(models.Q(ends_at__isnull=True) | models.Q(ends_at__gt=now))
+
+
 @transaction.atomic
 def subscribe(club, plan: Plan, *, status=Subscription.ACTIVE, trial_ends_at=None, ends_at=None, actor=None, reason="") -> Subscription:
     """Move ``club`` to ``plan``: the open subscription (if any) ends now and a new one starts."""
     now = timezone.now()
-    current = Subscription.objects.select_related("plan").filter(club=club, ends_at__isnull=True).first()
-    old = _snapshot(current)
-    if current is not None:
-        current.ends_at = now
-        current.save(update_fields=["ends_at", "modified"])
+    current = list(_current_subscriptions(club, now))
+    old = _snapshot(current[0]) if current else None
+    for c in current:
+        c.ends_at = now
+        c.save(update_fields=["ends_at", "modified"])
     sub = Subscription.objects.create(club=club, plan=plan, status=status, starts_at=now, ends_at=ends_at, trial_ends_at=trial_ends_at)
     log("subscribed", club=club, plan=plan, old=old, new=_snapshot(sub), reason=reason, actor=actor)
     return sub
@@ -54,14 +59,14 @@ def subscribe(club, plan: Plan, *, status=Subscription.ACTIVE, trial_ends_at=Non
 
 @transaction.atomic
 def end_subscription(club, *, actor=None, reason="") -> None:
-    current = Subscription.objects.select_related("plan").filter(club=club, ends_at__isnull=True).first()
-    if current is None:
-        return
-    old = _snapshot(current)
-    current.ends_at = timezone.now()
-    current.status = Subscription.CANCELED
-    current.save(update_fields=["ends_at", "status", "modified"])
-    log("subscription_ended", club=club, plan=current.plan, old=old, new=_snapshot(current), reason=reason, actor=actor)
+    """End the club's current subscription now. The club then falls back to the default plan."""
+    now = timezone.now()
+    for current in _current_subscriptions(club, now):
+        old = _snapshot(current)
+        current.ends_at = now
+        current.status = Subscription.CANCELED
+        current.save(update_fields=["ends_at", "status", "modified"])
+        log("subscription_ended", club=club, plan=current.plan, old=old, new=_snapshot(current), reason=reason, actor=actor)
 
 
 def _override_snapshot(ov: FeatureOverride | None) -> dict | None:

@@ -6,7 +6,7 @@ from django.db import models
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name
 
-from .catalog import CATALOG
+from .catalog import CATALOG, DEFAULT_PLAN
 
 
 class UnknownFeature(KeyError):
@@ -65,8 +65,8 @@ class Entitlements:
 
 
 def resolve_entitlements(club, *, now=None, bypass: bool = False) -> Entitlements:
-    """Plan features of the current subscription, with unexpired overrides applied on top."""
-    from .models import FeatureOverride, PlanFeature, Subscription
+    """Plan features of the current subscription (or the default plan if none applies), with unexpired overrides on top."""
+    from .models import FeatureOverride, Plan, PlanFeature, Subscription
 
     if bypass or club is None or club.schema_name == get_public_schema_name():
         return Entitlements(bypass=True)
@@ -81,8 +81,14 @@ def resolve_entitlements(club, *, now=None, bypass: bool = False) -> Entitlement
         .order_by("-starts_at")
         .first()
     )
+    plan = None
     if subscription is not None and subscription.grants_access(now) and subscription.plan.is_active:
-        for pf in PlanFeature.objects.filter(plan=subscription.plan, feature__is_active=True).select_related("feature"):
+        plan = subscription.plan
+    else:
+        # No usable subscription (never had one, ended, trial over, plan retired): fall back to the default plan.
+        plan = Plan.objects.filter(code=DEFAULT_PLAN).first()
+    if plan is not None:
+        for pf in PlanFeature.objects.filter(plan=plan, feature__is_active=True).select_related("feature"):
             data[pf.feature.code] = Entitlement(True, pf.limit)
 
     for ov in FeatureOverride.objects.filter(club=club, feature__is_active=True).select_related("feature"):

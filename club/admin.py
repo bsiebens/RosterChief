@@ -28,7 +28,7 @@ class ClubAdmin(PlatformAdminMixin, TenantAdminMixin, admin.ModelAdmin):
         from features.models import Subscription
 
         sub = Subscription.objects.filter(club=obj, ends_at__isnull=True).select_related("plan").first()
-        head = format_html_join("", "<div>Plan: <strong>{}</strong> ({})</div>", [(sub.plan, sub.status)] if sub else [("none", "-")])
+        head = format_html_join("", "<div>Plan: <strong>{}</strong> ({})</div>", [(sub.plan, sub.status)] if sub else [("none (default plan applies)", "-")])
         return mark_safe(f"{head}{effective_features_html(obj)}")
 
     def get_fields(self, request, obj=None):
