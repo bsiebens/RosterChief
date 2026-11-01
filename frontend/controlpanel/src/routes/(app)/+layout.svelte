@@ -1,0 +1,92 @@
+<script lang="ts">
+    import {page} from '$app/state';
+    import {goto} from '$app/navigation';
+    import {CircleUser, KeyRound, LogOut, ShieldCheck} from '@lucide/svelte';
+    import {auth} from '#lib/api.ts';
+    import {NAV} from '#lib/nav.ts';
+    import JobStatus from '#lib/components/JobStatus.svelte';
+	import ReauthDialog from '#lib/components/ReauthDialog.svelte';
+
+    let {data, children} = $props();
+
+    const a = $derived(data.auth);
+    const email = $derived(a.status === 'anonymous' || a.status === 'mfa_pending' ? '' : a.user.email);
+    const isSuper = $derived(a.status === 'authenticated' && a.me.level === 'superuser');
+    const version = $derived(a.status === 'authenticated' ? a.me.version : '');
+    const tabs = $derived(NAV.filter((t) => !t.superuser || isSuper));
+    const active = (href: string) => (href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href));
+
+    let menu: HTMLDetailsElement | undefined = $state();
+
+    async function signOut() {
+        await auth('DELETE', '/auth/session');
+        await goto('/login', {refreshAll: true});
+    }
+</script>
+
+<svelte:window onclick={(e) => menu?.open && !menu.contains(e.target as Node) && (menu.open = false)}/>
+
+<!-- App shell, as the old control panel's base.html: pinned command bar + breadcrumb strip, <main> scrolls. -->
+<div class="flex h-screen flex-col overflow-hidden bg-paper font-sans text-slate">
+    <header class="flex h-[52px] shrink-0 items-center gap-5 bg-ink px-5">
+        <a class="flex shrink-0 items-center gap-2.5" href="/">
+            <img class="h-7 w-7 shrink-0" src="/images/rosterchief-white.svg" alt="" width="28" height="28"/>
+            <span class="font-display text-base font-extrabold tracking-[.1em] text-white uppercase">RosterChief</span>
+            <span class="font-mono text-[11px] text-on-dark-faint">controlpanel</span>
+        </a>
+
+        <nav class="flex h-full font-mono text-xs" aria-label="Sections">
+            {#if a.status === 'authenticated'}
+                {#each tabs as tab (tab.key)}
+                    <a
+                            class="flex h-full items-center px-3.5 {active(tab.href) ? 'border-b-2 border-ice bg-steel text-white' : 'text-on-dark-dim hover:text-white'}"
+                            href={tab.href}
+                            aria-current={active(tab.href) ? 'page' : undefined}>{tab.label}</a
+                    >
+                {/each}
+            {/if}
+        </nav>
+
+        <div class="flex-1"></div>
+
+        <JobStatus initial={data.jobsStatus} />
+
+        <details class="account-menu relative shrink-0" bind:this={menu}>
+            <summary class="flex cursor-pointer items-center rounded px-1.5 py-1 text-on-dark-dim hover:bg-steel hover:text-white" aria-label="Account">
+                <CircleUser size={18} aria-hidden="true"/>
+            </summary>
+            <div class="absolute top-full right-0 z-20 mt-2 w-64 rounded border border-edge bg-white py-1.5 shadow-lg">
+                <div class="truncate border-b border-rule px-3 pb-2 font-mono text-xs text-muted">{email}</div>
+                <a class="flex items-center gap-2.5 px-3 py-2 text-sm text-slate hover:bg-rule" href="/account/password" onclick={() => menu && (menu.open = false)}>
+                    <KeyRound size={15} aria-hidden="true"/>
+                    Change password
+                </a>
+                <a class="flex items-center gap-2.5 px-3 py-2 text-sm text-slate hover:bg-rule" href="/account/security" onclick={() => menu && (menu.open = false)}>
+                    <ShieldCheck size={15} aria-hidden="true"/>
+                    Two-factor authentication
+                </a>
+                <button class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-slate hover:bg-rule" onclick={signOut}>
+                    <LogOut size={15} aria-hidden="true"/>
+                    Sign out
+                </button>
+            </div>
+        </details>
+
+        {#if version}<span class="shrink-0 font-mono text-[11px] text-on-dark-faint" title="Platform version">v{version}</span>{/if}
+    </header>
+
+    <div class="flex h-[34px] shrink-0 items-center gap-3 border-b border-edge bg-white px-5 font-mono text-[11px] text-muted">
+        <span class="text-ink">controlpanel</span>
+        {#each page.url.pathname.split('/').filter(Boolean) as part, i (i)}
+            <span aria-hidden="true">/</span><span class="text-ink">{part}</span>
+        {/each}
+    </div>
+
+    <main class="flex-1 overflow-y-auto">
+        <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-7 py-6">
+            {@render children()}
+        </div>
+    </main>
+</div>
+
+<ReauthDialog/>
