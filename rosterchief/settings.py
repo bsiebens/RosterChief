@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [".localhost"] if DEBUG else config("DJANGO_ALLOWED_HOSTS", cast
 SHARED_APPS = [
     "django_tenants",
     "club",  # Club, Domain and the User model (public schema only)
+    "features",  # plans, subscriptions and per-club feature overrides (public schema only)
     "tenant_users.tenants",
     "tenant_users.permissions",
     # Everything below are standard django apps
@@ -73,6 +74,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "tenant_users.tenants.middleware.TenantAccessMiddleware",
+    "features.middleware.FeaturesMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "authorization.middleware.RequireMFAMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -90,6 +92,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "features.context_processors.features",
             ],
         },
     },
@@ -134,7 +137,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Europe/Brussels"
 
 USE_I18N = True
 
@@ -168,8 +171,8 @@ TENANT_DOMAIN_MODEL = "club.Domain"
 AUTH_USER_MODEL = "club.User"
 TENANT_USERS_DOMAIN = ROSTERCHIEF_BASE_DOMAIN
 AUTHENTICATION_BACKENDS = [
-    "tenant_users.permissions.backend.UserBackend",
-    "allauth.account.auth_backends.AuthenticationBackend",
+    "features.backends.FeatureAwareUserBackend",
+    "features.backends.FeatureAwareAuthenticationBackend",
 ]
 
 LOGIN_URL = "account_login"

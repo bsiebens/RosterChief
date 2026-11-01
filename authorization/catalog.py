@@ -12,6 +12,7 @@ class Perm:
     code: str  # "<app_label>.<codename>", matches user.has_perm()
     label: str
     admin: bool = False
+    feature: str | None = None  # code of the feature the club needs for this permission to apply
 
 
 CATALOG: dict[str, Perm] = {
