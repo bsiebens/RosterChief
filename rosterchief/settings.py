@@ -28,13 +28,15 @@ SECRET_KEY = config("DJANGO_SECRET_KEY", cast=str)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DJANGO_DEBUG", cast=bool, default=False)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [".localhost"] if DEBUG else config("DJANGO_ALLOWED_HOSTS", cast=Csv())
 
 
 # Application definition
 SHARED_APPS = [
     "django_tenants",
-    "club",
+    "club",  # Club, Domain and the User model (public schema only)
+    "tenant_users.tenants",
+    "tenant_users.permissions",
     # Everything below are standard django apps
     "django.contrib.admin",
     "django.contrib.auth",
@@ -42,9 +44,19 @@ SHARED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # Authentication and MFA (tables live in the public schema)
+    "allauth",
+    "allauth.account",
+    "allauth.mfa",
 ]
 
 TENANT_APPS = [
+    # Group/Permission and UserTenantPermissions exist per club schema
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "tenant_users.permissions",
+    "authorization",
+    "members",
     "sponsoring",
 ]
 
@@ -59,6 +71,9 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "tenant_users.tenants.middleware.TenantAccessMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    "authorization.middleware.RequireMFAMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -151,3 +166,36 @@ ROSTERCHIEF_BASE_DOMAIN = (
 )
 TENANT_MODEL = "club.Club"
 TENANT_DOMAIN_MODEL = "club.Domain"
+
+# Users, authentication and MFA
+AUTH_USER_MODEL = "club.User"
+TENANT_USERS_DOMAIN = ROSTERCHIEF_BASE_DOMAIN
+AUTHENTICATION_BACKENDS = [
+    "tenant_users.permissions.backend.UserBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+LOGIN_URL = "account_login"
+LOGIN_REDIRECT_URL = "/"
+
+ACCOUNT_ADAPTER = "club.adapters.AccountAdapter"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_USER_MODEL_EMAIL_FIELD = "email"
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+
+MFA_ADAPTER = "club.adapters.MFAAdapter"
+MFA_SUPPORTED_TYPES = ["totp", "recovery_codes", "webauthn"]
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_TOTP_ISSUER = "RosterChief"
+MFA_WEBAUTHN_ALLOW_INSECURE_ORIGIN = DEBUG
+
+# One login for every club subdomain (e.g. ".rosterchief.app"); None in development.
+SESSION_COOKIE_DOMAIN = None if DEBUG else f".{ROSTERCHIEF_BASE_DOMAIN}"
+CSRF_COOKIE_DOMAIN = SESSION_COOKIE_DOMAIN
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+if not DEBUG:
+    CSRF_TRUSTED_ORIGINS = [f"https://*.{ROSTERCHIEF_BASE_DOMAIN}"]
