@@ -200,19 +200,26 @@ ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 
 # Headless API (/_allauth/): browser clients use the session cookie, app clients an X-Session-Token.
-# Optional: base URL of the separate frontend app. When set, e-mailed links (verify e-mail, password reset / invite)
-# open pages there; when empty they open allauth's built-in pages under /accounts/.
-ROSTERCHIEF_FRONTEND_URL = config("ROSTERCHIEF_FRONTEND_URL", default="").rstrip("/")
-HEADLESS_FRONTEND_URLS = (
-    {
-        "account_confirm_email": ROSTERCHIEF_FRONTEND_URL + "/account/verify-email/{key}",
-        "account_reset_password": ROSTERCHIEF_FRONTEND_URL + "/account/password/reset",
-        "account_reset_password_from_key": ROSTERCHIEF_FRONTEND_URL + "/account/password/reset/key/{key}",
-        "account_signup": ROSTERCHIEF_FRONTEND_URL + "/account/signup",
-    }
-    if ROSTERCHIEF_FRONTEND_URL
-    else {}
-)
+HEADLESS_CLIENTS = ("browser", "app")
+HEADLESS_SERVE_SPECIFICATION = DEBUG  # OpenAPI spec of the auth API at /_allauth/openapi.html (development only)
+
+# Frontend apps. Allauth's e-mailed links (verify e-mail, password reset / invite) open a page in the app that
+# fits the recipient instead of allauth's built-in /accounts/ pages; club.adapters.HeadlessAdapter picks the app
+# (control panel on the base domain, member app on a club subdomain). An app left empty falls back to /accounts/.
+# A value may be absolute ("https://app.rosterchief.app") or relative ("/m"), which resolves against the request host.
+# Every app serves the same /account/... paths, listed in FRONTEND_PATHS.
+HEADLESS_ADAPTER = "club.adapters.HeadlessAdapter"
+FRONTEND_URLS = {
+    "controlpanel": config("FRONTEND_CONTROLPANEL_URL", default="").rstrip("/"),
+    "management": config("FRONTEND_MANAGEMENT_URL", default="").rstrip("/"),
+    "member": config("FRONTEND_MEMBER_URL", default="").rstrip("/"),
+}
+FRONTEND_PATHS = {
+    "account_confirm_email": "/account/verify-email/{key}",
+    "account_reset_password": "/account/password/reset",
+    "account_reset_password_from_key": "/account/password/reset/key/{key}",
+    "account_signup": "/account/signup",
+}
 
 MFA_ADAPTER = "club.adapters.MFAAdapter"
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes", "webauthn"]
