@@ -245,9 +245,9 @@ def _feature_adoption(s) -> list[dict]:
 
 def _funnel(s) -> list[dict]:
     return [
-        {"step": "Clubs", "count": len(s.clubs)},
-        {"step": "With more than the owner on the roster", "count": sum(1 for f in s.clubs if (f.members or 0) > 1)},
-        {"step": "Billed", "count": sum(1 for f in s.clubs if f.billed)},
+        {"key": "clubs", "step": "Clubs", "count": len(s.clubs)},
+        {"key": "members", "step": "With members", "count": sum(1 for f in s.clubs if (f.members or 0) > 1)},
+        {"key": "billed", "step": "Billed", "count": sum(1 for f in s.clubs if f.billed)},
     ]
 
 

@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from ninja import Query, Router, Schema
@@ -24,7 +25,7 @@ router = Router(tags=["access"])
 @router.get("/me", response=MeOut, summary="The signed-in platform user and their level")
 def me(request):
     user = request.user
-    return MeOut(id=user.pk, email=user.email, first_name=user.first_name, last_name=user.last_name, level="superuser" if is_platform_superuser(user) else "staff")
+    return MeOut(id=user.pk, email=user.email, first_name=user.first_name, last_name=user.last_name, level="superuser" if is_platform_superuser(user) else "staff", version=settings.ROSTERCHIEF_VERSION)
 
 
 @router.get("/admins", response=list[PlatformAdminOut], auth=superuser_auth, summary="Everyone with platform access")

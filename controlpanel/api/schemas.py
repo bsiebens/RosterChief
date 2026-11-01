@@ -10,6 +10,7 @@ class MeOut(Schema):
     first_name: str
     last_name: str
     level: str  # "staff" or "superuser"
+    version: str  # the platform version (pyproject.toml)
 
 
 class PlatformAdminOut(Schema):
@@ -623,3 +624,76 @@ class BillingSettingsIn(Schema):
     auto_renew: bool | None = None
     auto_archive: bool | None = None
     notes: str | None = None
+
+
+class JobOut(Schema):
+    id: str
+    name: str
+    status: str  # "success", "failure", "running", "pending", "retry", "revoked"
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_seconds: float | None
+    scheduled: bool  # started by celery beat rather than by a request
+    worker: str | None
+    detail: str  # the result on success, the last line of the traceback on failure
+
+
+class JobsStatusOut(Schema):
+    state: str  # "ok", "failing" (a failure inside the window) or "busy" (jobs running, none failed)
+    failed: int
+    running: int
+    window_hours: int
+    last_run_at: datetime | None
+
+
+class JobDetailOut(JobOut):
+    traceback: str | None
+    result: str | None
+    args: str | None
+    kwargs: str | None
+    periodic_task_name: str | None
+
+
+class CronIn(Schema):
+    minute: str
+    hour: str
+    day_of_month: str
+    month_of_year: str
+    day_of_week: str
+
+
+class CronOut(CronIn):
+    timezone: str | None = None
+
+
+class JobRunBrief(Schema):
+    status: str
+    started_at: datetime | None
+    duration_seconds: float | None
+    detail: str
+
+
+class PeriodicJobOut(Schema):
+    name: str
+    task: str
+    label: str
+    description: str
+    builtin: bool  # celery's own housekeeping
+    enabled: bool
+    state: str  # "ok", "error", "running", "paused", "never"
+    schedule: CronOut | None
+    default_schedule: CronIn | None
+    edited: bool
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    total_run_count: int
+    latest: JobRunBrief | None
+    recent: list[str]  # statuses, oldest first
+
+
+class JobEnabledIn(Schema):
+    enabled: bool
+
+
+class JobQueuedOut(Schema):
+    task_id: str

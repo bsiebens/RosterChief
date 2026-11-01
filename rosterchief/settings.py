@@ -10,14 +10,18 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import tomllib
 from pathlib import Path
 
-from celery.schedules import crontab
 from decouple import Csv, config
 from dj_database_url import parse as db_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# The platform version is defined once, in pyproject.toml, and read at startup (shown in the control panel's header).
+with open(BASE_DIR / "pyproject.toml", "rb") as _pyproject_file:
+    ROSTERCHIEF_VERSION = tomllib.load(_pyproject_file)["project"]["version"]
 
 
 # Quick-start development settings - unsuitable for production
