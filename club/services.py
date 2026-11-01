@@ -11,6 +11,11 @@ from authorization.models import Role
 from authorization.services import assign_role
 from members.models import Member
 
+from features.catalog import DEFAULT_PLAN
+from features.entitlements import resolve_entitlements
+from features.models import Plan
+from features.services import subscribe
+
 from .models import Club, Domain
 
 
@@ -86,6 +91,9 @@ def provision_club(club: Club) -> Club:
         club.schema_name = schema_name_for(club.slug)
         club.save()
         Domain.objects.create(domain=club_domain(club.slug), tenant=club, is_primary=True)
+    plan = Plan.objects.filter(code=DEFAULT_PLAN).first()
+    if plan is not None:
+        subscribe(club, plan, reason="Default plan")
     ensure_member_for_user(club, club.owner)
     return club
 
@@ -104,9 +112,19 @@ def ensure_member_for_user(club: Club, user) -> Member:
     return member
 
 
-def create_member(club: Club, first_name: str, last_name: str, email: str = "") -> Member:
-    """Add a person to the club's roster without a login."""
+@transaction.atomic
+def create_member(club: Club, first_name: str, last_name: str, email: str = "", *, features=None) -> Member:
+    """Add a person to the club's roster without a login.
+
+    Enforces the club's ``max_members`` limit and raises ``features.entitlements.LimitExceeded`` when it is reached.
+    Pass ``features`` (e.g. ``request.features``) to honour the request's entitlements, including the platform
+    owner's bypass; otherwise they are resolved for the club.
+    """
+    with schema_context(get_public_schema_name()):
+        # Serialise member creation per club so two concurrent requests cannot both slip under the limit.
+        Club.objects.select_for_update().get(pk=club.pk)
     with schema_context(club.schema_name):
+        (features or resolve_entitlements(club)).check_limit("max_members", Member.objects.count())
         return Member.objects.create(first_name=first_name, last_name=last_name, email=email)
 
 
@@ -138,9 +156,9 @@ def grant_login(club: Club, member: Member, *, role_slug: str = "member"):
 
 
 @transaction.atomic
-def create_member_for_club(club: Club, email: str, first_name: str, last_name: str, *, role_slug: str = "member"):
+def create_member_for_club(club: Club, email: str, first_name: str, last_name: str, *, role_slug: str = "member", features=None):
     """Create a member and give them a login in one step. Returns ``(member, user, user_created)``."""
-    member = create_member(club, first_name, last_name, email)
+    member = create_member(club, first_name, last_name, email, features=features)
     user, user_created = grant_login(club, member, role_slug=role_slug)
     return member, user, user_created
 

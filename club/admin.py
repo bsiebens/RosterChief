@@ -22,12 +22,21 @@ class ClubAdmin(PlatformAdminMixin, TenantAdminMixin, admin.ModelAdmin):
     search_fields = ["name", "slug"]
     ordering = ["name"]
 
+    @admin.display(description="Plan and features")
+    def plan_and_features(self, obj):
+        from features.admin import effective_features_html
+        from features.models import Subscription
+
+        sub = Subscription.objects.filter(club=obj, ends_at__isnull=True).select_related("plan").first()
+        head = format_html_join("", "<div>Plan: <strong>{}</strong> ({})</div>", [(sub.plan, sub.status)] if sub else [("none", "-")])
+        return mark_safe(f"{head}{effective_features_html(obj)}")
+
     def get_fields(self, request, obj=None):
         # Slug, schema and domain are generated on creation and fixed afterwards (the domain depends on the slug).
-        return ["name", "sport", "owner"] if obj is None else ["name", "sport", "owner", "slug", "schema_name"]
+        return ["name", "sport", "owner"] if obj is None else ["name", "sport", "owner", "slug", "schema_name", "plan_and_features"]
 
     def get_readonly_fields(self, request, obj=None):
-        return () if obj is None else ("slug", "schema_name")
+        return () if obj is None else ("slug", "schema_name", "plan_and_features")
 
     def save_model(self, request, obj, form, change):
         if change:
