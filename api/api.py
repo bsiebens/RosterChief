@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
-from ninja import NinjaAPI
 from django_tenants.utils import get_public_schema_name
+from ninja import NinjaAPI
 
 from .auth import AUTHENTICATORS
 from .errors import register_error_handlers

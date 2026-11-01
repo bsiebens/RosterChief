@@ -57,3 +57,8 @@ ignore = [
 
 [tool.uv.sources]
 django-lucide = { git = "https://github.com/bsiebens/lucide" }
+
+[tool.uv]
+override-dependencies = [
+    "django>=6.1.1",
+]

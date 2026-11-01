@@ -225,20 +225,20 @@ if not DEBUG:
     CSRF_TRUSTED_ORIGINS = [f"https://*.{ROSTERCHIEF_BASE_DOMAIN}"]
 
 
-# Celery: Redis broker, results and run history in the database, schedules in code (synced into django-celery-beat).
+# Celery: Redis broker, task results and run history in the database (django-celery-results).
 CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_RESULT_EXTENDED = True  # store task name and arguments, so failures are traceable in the history
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TIMEZONE = TIME_ZONE
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+# Python 3.14 starts worker processes with "spawn" on macOS, which breaks celery's prefork pool ("not enough values to
+# unpack" in fast_trace_task). Run tasks in the worker process itself in development; production keeps prefork.
+CELERY_WORKER_POOL = config("CELERY_WORKER_POOL", default="solo" if DEBUG else "prefork")
 CELERY_TASK_ALWAYS_EAGER = config("CELERY_TASK_ALWAYS_EAGER", cast=bool, default=False)
-# Periodic tasks (name -> task and schedule); synced into django-celery-beat when beat starts, editable there afterwards.
-CELERY_BEAT_SCHEDULE = {
-    "billing-renew-subscriptions": {"task": "billing.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
-    "billing-send-reminders": {"task": "billing.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
-    "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
-}
+
+# Periodic tasks are defined in rosterchief/celery.py (beat_schedule) and seeded into the database once; after that the
+# database (admin: "Periodic tasks") owns them. `manage.py beat_schedule` compares the two.
+CELERY_BEAT_SCHEDULER = "rosterchief.scheduler:SeedOnlyDatabaseScheduler"  # sets Django up first (see rosterchief/scheduler.py)
 
 # Platform API list endpoints: ?limit=&offset=, default 25, at most 100.
 NINJA_PAGINATION_PER_PAGE = 25
