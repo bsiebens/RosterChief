@@ -107,5 +107,7 @@ export type ClubOverview = {
 	signups: { month: string; value: string }[];
 	member_types: { type: string; label: string; count: number }[];
 	groups: StatGroup[];
-	home_location: null;
+	home_location: HomeLocation | null;
 };
+
+export type HomeLocation = { id: string; name: string; address: string; zip_code: string; city: string; country: string; country_name: string; latitude: number | null; longitude: number | null };

@@ -30,6 +30,7 @@
 	},
 	"dependencies": {
 		"chart.js": "^4.6.1",
+		"maplibre-gl": "^6.16.0",
 		"qrcode": "^1.5.4"
 	}
 }

@@ -15,13 +15,14 @@ from club import services as club_services
 from club.models import Club, Domain, Sport
 from controlpanel import audit
 from controlpanel.models import ClubProvisioning
+from controlpanel.services import home_location as home_svc
 from controlpanel.services import provisioning
 from features.models import Subscription
 
 from ..auth import superuser_auth
 from ..errors import ApiError
 from ..idempotency import idempotent
-from ..schemas import ClubAdminIn, ClubAdminOut, ClubCreateIn, ClubDeleteIn, ClubDetailOut, ClubListOut, ClubUpdateIn, CountryOut, ProvisioningOut
+from ..schemas import ClubAdminIn, ClubAdminOut, ClubCreateIn, ClubDeleteIn, ClubDetailOut, ClubListOut, ClubUpdateIn, CountryOut, HomeLocationIn, HomeLocationOut, ProvisioningOut
 
 router = Router(tags=["clubs"])
 
@@ -193,4 +194,29 @@ def remove_club_admin(request, club_id: UUID, user_id: UUID):
     except (club_services.ClubAdminError, ProtectedRoleError) as e:
         raise ApiError(409, "admin_change_refused", str(e)) from e
     audit.record(request.user, "club.admin_removed", target=user, club=club)
+    return 204, None
+
+
+@router.get("/clubs/{club_id}/home-location", response=HomeLocationOut | None, summary="The club's home location (the events location flagged as home), or null")
+def get_home_location(request, club_id: UUID):
+    return home_svc.get_home_location(_get_club(club_id))
+
+
+@router.put("/clubs/{club_id}/home-location", response=HomeLocationOut, summary="Set or update the club's home location (creates the location, or edits the current home one)")
+def put_home_location(request, club_id: UUID, payload: HomeLocationIn):
+    club = _get_club(club_id)
+    try:
+        data, created = home_svc.set_home_location(club, payload.dict())
+    except home_svc.HomeLocationError as e:
+        raise ApiError(422, "validation_error", str(e), e.fields) from e
+    audit.record(request.user, "club.home_location_set", target=club, club=club, data={"name": data["name"], "city": data["city"], "country": data["country"], "created": created})
+    return data
+
+
+@router.delete("/clubs/{club_id}/home-location", response={204: None}, summary="Stop treating the location as home (the location itself is kept)")
+def delete_home_location(request, club_id: UUID):
+    club = _get_club(club_id)
+    if not home_svc.clear_home_location(club):
+        raise ApiError(404, "not_found", "This club has no home location.")
+    audit.record(request.user, "club.home_location_cleared", target=club, club=club)
     return 204, None

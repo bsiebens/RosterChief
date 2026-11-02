@@ -1166,3 +1166,25 @@ class CountryOut(Schema):
 
 
 from .user_schemas import *  # noqa: E402,F403  (user lookup schemas)
+
+
+class HomeLocationIn(Schema):
+    name: str
+    address: str
+    zip_code: str
+    city: str
+    country: str  # ISO 3166-1 alpha-2 code, e.g. "BE"
+    latitude: float | None = None  # optional exact position; both or neither
+    longitude: float | None = None
+
+
+class HomeLocationOut(Schema):
+    id: UUID
+    name: str
+    address: str
+    zip_code: str
+    city: str
+    country: str
+    country_name: str
+    latitude: float | None = None
+    longitude: float | None = None

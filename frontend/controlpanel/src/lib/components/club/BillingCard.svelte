@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ExternalLink, Receipt } from '@lucide/svelte';
+	import { ExternalLink, NotebookPen, Receipt } from '@lucide/svelte';
 	import { platform } from '#lib/api.ts';
 	import type { CreditLedger } from '#lib/billing.ts';
 	import type { ClubBilling, ClubDetail } from '#lib/clubs.ts';
@@ -13,9 +13,24 @@
 	let busy = $state(false);
 	let error = $state('');
 	let notes = $state('');
-	$effect(() => {
+	let notesOpen = $state(false);
+	let notesError = $state('');
+
+	function openNotes() {
 		notes = billing?.notes ?? '';
-	});
+		notesError = '';
+		notesOpen = true;
+	}
+
+	async function saveNotes() {
+		busy = true;
+		notesError = '';
+		const r = await platform('PATCH', `/clubs/${club.id}/billing`, { notes });
+		busy = false;
+		if (!r.ok) return (notesError = r.message ?? 'The notes could not be saved.');
+		notesOpen = false;
+		onchange();
+	}
 
 	async function patch(body: Record<string, unknown>) {
 		busy = true;
@@ -47,13 +62,20 @@
 
 <div class="card">
 	<div class="card-body gap-3">
-		<div class="card-title"><Receipt size={16} aria-hidden="true" /> Billing</div>
+		<div class="card-title">
+			<Receipt size={16} aria-hidden="true" /> Billing
+			{#if billing?.billed}
+				<button class="btn btn-xs ml-auto {billing.notes ? 'btn-primary' : 'btn-outline'}" onclick={openNotes} title={billing.notes ? 'This club has billing notes' : 'No billing notes yet'}>
+					<NotebookPen size={12} aria-hidden="true" /> Notes
+				</button>
+			{/if}
+		</div>
 		{#if error}<Alert kind="error">{error}</Alert>{/if}
 
 		{#if !billing || !billing.billed}
 			<p class="text-sm">This club is <strong>not billed</strong>: it uses the platform for free. Billing is started from the <a class="link font-semibold" href="/billing/cycles">billing cycles</a> page.</p>
 		{:else}
-			<div class="flex flex-wrap items-start gap-x-8 gap-y-2">
+			<div class="flex flex-wrap items-start justify-between gap-x-8 gap-y-2">
 				<div>
 					<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">billed plan</div>
 					<div class="flex h-6 items-center font-display text-xl leading-none font-extrabold text-ink uppercase">{billing.plan?.name ?? '—'}</div>
@@ -84,14 +106,6 @@
 				<label class="flex cursor-pointer items-center gap-2"><input type="checkbox" class="checkbox" checked={billing.auto_archive ?? false} disabled={!canEdit || busy} onchange={(e) => patch({ auto_archive: e.currentTarget.checked })} /> Archive when overdue</label>
 			</div>
 			<p class="text-xs text-muted">Archive when overdue: when a period stays unpaid past its grace the club is first moved to the free plan, and archived {archiveDays} days later. Downgrading happens regardless.</p>
-
-			<div class="form-control">
-				<label class="label" for="billing-notes"><span class="label-text">Notes</span></label>
-				<textarea id="billing-notes" class="textarea textarea-bordered w-full" rows="2" disabled={!canEdit} bind:value={notes}></textarea>
-				{#if canEdit && notes !== billing.notes}
-					<div class="mt-2"><button class="btn btn-outline btn-xs" disabled={busy} onclick={() => patch({ notes })}>Save notes</button></div>
-				{/if}
-			</div>
 
 			{#if billing.credit_notes?.length}
 				<div>
@@ -140,6 +154,15 @@
 		{/if}
 	</div>
 </div>
+
+<Modal bind:open={notesOpen} title="Billing notes">
+	{#if notesError}<div class="mb-3"><Alert kind="error">{notesError}</Alert></div>{/if}
+	<textarea id="billing-notes" class="textarea textarea-bordered w-full" rows="6" aria-label="Billing notes" readonly={!canEdit} bind:value={notes}></textarea>
+	<div class="modal-action">
+		<button class="btn btn-outline" onclick={() => (notesOpen = false)}>{canEdit ? 'Cancel' : 'Close'}</button>
+		{#if canEdit}<button class="btn btn-primary" disabled={busy || notes === (billing?.notes ?? '')} onclick={saveNotes}>Save</button>{/if}
+	</div>
+</Modal>
 
 <Modal bind:open={ledgerOpen} title="Club credit ledger" wide>
 	{#if ledgerError}<Alert kind="error">{ledgerError}</Alert>

@@ -55,7 +55,7 @@
 					<div class="font-semibold text-ink">Delete this club</div>
 					<p class="text-muted">Permanently removes the club and its entire database schema: members, teams, events, everything. This cannot be undone.</p>
 				</div>
-				<button class="btn btn-error" onclick={() => ((deleteOpen = true), (confirm = ''), (error = ''))}><Trash2 size={14} aria-hidden="true" /> Delete…</button>
+				<button class="btn btn-error" onclick={() => ((deleteOpen = true), (confirm = ''), (error = ''))}><Trash2 size={14} aria-hidden="true" /> Delete</button>
 			</div>
 		{/if}
 	</div>

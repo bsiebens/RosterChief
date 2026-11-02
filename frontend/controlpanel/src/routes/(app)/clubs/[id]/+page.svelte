@@ -113,7 +113,7 @@
 		<DetailsCard {club} sports={data.sports} countries={data.countries} onchange={refresh} />
 		<PlanCard {club} subscriptions={data.subscriptions} plans={data.plans} billing={data.billing} {isSuperuser} {canEdit} onchange={refresh} />
 		<BillingCard {club} billing={data.billing} {canEdit} onchange={refresh} archiveDays={data.archiveAfterDays} />
-		<HomeLocationCard />
+		<HomeLocationCard {club} location={data.overview?.home_location ?? null} countries={data.countries} {canEdit} onchange={refresh} />
 	</div>
 </div>
 

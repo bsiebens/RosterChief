@@ -16,9 +16,9 @@
 	</div>
 	<dl class="px-4 {group.available ? '' : 'opacity-60'}">
 		{#each group.stats as stat (stat.label)}
-			<div class="flex items-center justify-between py-2">
-				<dt class="text-sm text-muted">{stat.label}</dt>
-				<dd class="font-mono font-semibold text-ink tabular-nums">{stat.value ?? '—'}</dd>
+			<div class="flex items-center justify-between gap-2 py-2">
+				<dt class="min-w-0 text-xs leading-tight text-muted">{stat.label}</dt>
+				<dd class="shrink-0 font-mono text-sm leading-none font-semibold text-ink tabular-nums">{stat.value ?? '—'}</dd>
 			</div>
 		{/each}
 	</dl>

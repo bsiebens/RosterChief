@@ -7,6 +7,7 @@ export type ClubRow = {
 	plan: string | null;
 	members: number | null;
 	member_limit: number | null;
+	events_upcoming: number | null;
 	dues_owed: string;
 	grace_until: string | null;
 	risk: 'high' | 'watch' | 'ok';

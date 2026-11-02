@@ -91,6 +91,15 @@ def _members() -> int:
     return Member.objects.count()
 
 
+@collector("events")
+def _events() -> dict:
+    from events.models import Event
+
+    now = timezone.now()
+    live = Event.objects.filter(cancelled=False)
+    return {"upcoming": live.filter(start__gte=now).count(), "next_7d": live.filter(start__gte=now, start__lt=now + datetime.timedelta(days=7)).count()}
+
+
 @collector("admin_ids")
 def _admin_ids() -> list[str]:
     from authorization.catalog import OWNER_SLUG
@@ -143,6 +152,11 @@ def _clubs_archived(s):
 @metric("members_total", "Members across all clubs")
 def _members_total(s):
     return sum(f.members or 0 for f in s.clubs)
+
+
+@metric("events_upcoming", "Upcoming events across all clubs")
+def _events_upcoming(s):
+    return sum((f.data.get("events") or {}).get("upcoming", 0) for f in s.clubs)
 
 
 @metric("club_admins", "Club administrators (distinct people)")
@@ -334,6 +348,7 @@ def _clubs_by_risk(s) -> list[dict]:
                 "plan": f.plan,
                 "members": f.members,
                 "member_limit": f.member_limit if f.entitlements.has("max_members") else None,
+                "events_upcoming": (f.data.get("events") or {}).get("upcoming"),
                 "dues_owed": str(owed[f.club.pk]),
                 "grace_until": grace[f.club.pk].isoformat() if f.club.pk in grace else None,
                 "risk": tier,
@@ -414,12 +429,13 @@ def club_stats(club) -> dict:
 def club_overview(club) -> dict:
     """What the club page charts and counts: signups, member types and the People/Members/Events/Shop boxes.
 
-    Events and Shop have no tables yet, so those boxes report ``available: False`` instead of inventing zeros; they fill
-    in when the apps exist. ``renewal_rate`` is ``None`` for the same reason: there are no seasons or renewals to measure.
+    Shop has no tables yet, so that box reports ``available: False`` instead of inventing zeros; it fills
+    in when the app exists. ``renewal_rate`` is ``None`` for the same reason: there are no seasons or renewals to measure.
     """
     from authorization.catalog import OWNER_SLUG
     from authorization.models import Role
-    from members.models import Member, MemberType
+    from events.models import Event, Season
+    from members.models import Member
 
     now = timezone.now()
     with schema_context(club.schema_name):
@@ -431,8 +447,18 @@ def club_overview(club) -> dict:
         by_type = {row["member_type"]: row["n"] for row in members.values("member_type").annotate(n=Count("pk"))}
         signups = _monthly(members, "created")
         admins = len(Role.objects.get(slug=OWNER_SLUG).group.user_set.values_list("pk", flat=True))
+        live = Event.objects.filter(cancelled=False)
+        season = Season.get_current(timezone.localdate())
+        in_season = live.filter(start__date__gte=season.start_date, start__date__lte=season.end_date) if season else live.none()
+        events = {
+            "upcoming": live.filter(start__gte=now).count(),
+            "next_7d": live.filter(start__gte=now, start__lt=now + datetime.timedelta(days=7)).count(),
+            "season": in_season.count(),
+            "games_played": in_season.filter(kind=Event.EventKind.GAME, start__lt=now).count(),
+            "has_season": season is not None,
+        }
 
-    labels = dict(MemberType.choices)
+    labels = dict(Member.MemberType.choices)
     types = [{"type": code, "label": labels.get(code, code), "count": n} for code, n in sorted(by_type.items(), key=lambda x: -x[1])]
     return {
         "kpis": {"members": total, "new_members_30d": new_30d, "renewal_rate": None, "renewal_note": "Needs seasons and renewals, which don't exist yet."},
@@ -447,7 +473,18 @@ def club_overview(club) -> dict:
                 "available": True,
                 "stats": [{"label": "Total", "value": total}, {"label": "Joined in the last 30 days", "value": new_30d}, {"label": "Joined this year", "value": this_year}, {"label": "Member types in use", "value": len(types)}],
             },
-            {"key": "events", "title": "Events", "icon": "calendar-days", "available": False, "stats": [{"label": "Upcoming", "value": None}, {"label": "This season", "value": None}]},
+            {
+                "key": "events",
+                "title": "Events",
+                "icon": "calendar-days",
+                "available": True,
+                "stats": [
+                    {"label": "Upcoming", "value": events["upcoming"]},
+                    {"label": "In the next 7 days", "value": events["next_7d"]},
+                    {"label": "This season", "value": events["season"] if events["has_season"] else None},
+                    {"label": "Games played this season", "value": events["games_played"] if events["has_season"] else None},
+                ],
+            },
             {
                 "key": "shop",
                 "title": "Shop",
@@ -456,5 +493,12 @@ def club_overview(club) -> dict:
                 "stats": [{"label": "Orders", "value": None}, {"label": "Revenue", "value": None}, {"label": "Outstanding", "value": None}, {"label": "Orders unpaid", "value": None}],
             },
         ],
-        "home_location": None,  # placeholder until locations exist
+        "home_location": location_data_for(club),
     }
+
+
+def location_data_for(club) -> dict | None:
+    from controlpanel.services.home_location import get_home_location
+
+    data = get_home_location(club)
+    return {**data, "id": str(data["id"])} if data else None

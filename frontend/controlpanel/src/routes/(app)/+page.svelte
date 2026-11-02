@@ -61,9 +61,10 @@
 		</div>
 		{#if refreshError}<Alert kind="error">{refreshError}</Alert>{/if}
 
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
 			<Kpi label="clubs live" value={val(d, 'totals', 'clubs_active')} sub="{val(d, 'totals', 'clubs_archived')} archived" />
 			<Kpi label="members" value={val(d, 'totals', 'members_total')} sub="{val(d, 'totals', 'club_admins')} club admins" />
+			<Kpi label="upcoming events" value={val(d, 'totals', 'events_upcoming')} sub="across all clubs" />
 			<Kpi
 				label="dues owed"
 				value={money(d.attention.dues_owed?.value)}
@@ -97,7 +98,7 @@
 					<div class="overflow-x-auto">
 						<table class="table">
 							<thead>
-								<tr><th>Club</th><th>Plan</th><th class="text-right">Members</th><th class="text-right">Dues owed</th><th>Risk</th></tr>
+								<tr><th>Club</th><th>Plan</th><th class="text-right">Members</th><th class="text-right">Events</th><th class="text-right">Dues owed</th><th>Risk</th></tr>
 							</thead>
 							<tbody>
 								{#each d.clubs as club (club.club_id)}
@@ -110,6 +111,7 @@
 										<td class="text-right font-mono tabular-nums">
 											{club.members ?? '—'}{#if club.member_limit}<span class="text-muted"> / {club.member_limit}</span>{/if}
 										</td>
+										<td class="text-right font-mono tabular-nums {club.events_upcoming ? '' : 'text-muted'}" title="Upcoming events">{club.events_upcoming ?? '—'}</td>
 										<td class="text-right font-mono tabular-nums {num(club.dues_owed) ? 'text-club-dark' : 'text-muted'}">{num(club.dues_owed) ? money(club.dues_owed) : '—'}</td>
 										<td>
 											<span class="badge {club.risk === 'high' ? 'badge-error' : club.risk === 'watch' ? 'badge-warning' : 'badge-success'}" title={club.reason}>{club.risk}</span>
@@ -117,7 +119,7 @@
 										</td>
 									</tr>
 								{:else}
-									<tr><td colspan="5" class="text-center text-muted">No clubs yet.</td></tr>
+									<tr><td colspan="6" class="text-center text-muted">No clubs yet.</td></tr>
 								{/each}
 							</tbody>
 						</table>
