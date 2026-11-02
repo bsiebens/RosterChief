@@ -5,8 +5,9 @@
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
-      <env name="PYTHONUNBUFFERED" value="1" />
       <env name="DJANGO_SETTINGS_MODULE" value="rosterchief.settings" />
+      <env name="PYTHONUNBUFFERED" value="1" />
+      <env name="DYLD_FALLBACK_LIBRARY_PATH" value="/opt/homebrew/lib" />
     </envs>
     <option name="SDK_HOME" value="" />
     <option name="SDK_NAME" value="~/Code/PycharmProjects/RosterChiefv2/.venv" />
