@@ -10,7 +10,8 @@
 	let { data } = $props();
 
 	const o = $derived(data.overview);
-	const refresh = () => invalidate('app:push');
+	// The sandbox banner at the top of every page comes from the layout, which reloads on 'app:features'.
+	const refresh = () => Promise.all([invalidate('app:push'), invalidate('app:features')]);
 </script>
 
 <svelte:head><title>Push sandbox · RosterChief</title></svelte:head>
