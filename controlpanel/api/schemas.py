@@ -1163,3 +1163,6 @@ class JobQueuedOut(Schema):
 class CountryOut(Schema):
     code: str
     name: str
+
+
+from .user_schemas import *  # noqa: E402,F403  (user lookup schemas)

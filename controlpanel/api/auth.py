@@ -25,7 +25,7 @@ class PlatformAuth(XSessionTokenAuth):
         if club is None or club.schema_name != get_public_schema_name():
             raise Http404  # the platform API does not exist on club subdomains
         user = super().__call__(request)
-        if user is None:
+        if user is None or not user.is_active:  # a blocked account is signed out even if a session lingers
             return None
         request.user = user
         if not is_platform_staff(user) or (self.superuser and not is_platform_superuser(user)):
