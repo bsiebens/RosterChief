@@ -45,6 +45,92 @@ export type Due = {
 	paid_at: string | null;
 	invoice: InvoiceBrief | null;
 	payments: Payment[];
+} & ProrationFields;
+
+export type CreditNoteBrief = { number: string; total: string };
+
+/** Set on a period that a plan change shortened and repriced; amount/vat_amount/total/period_end are then the prorated values. */
+export type ProrationFields = {
+	prorated: boolean;
+	original_amount: string | null;
+	original_vat_amount: string | null;
+	original_total: string | null;
+	original_period_end: string | null;
+	prorated_at: string | null;
+	credit_transferred: string;
+	credit_notes: CreditNoteBrief[];
+};
+
+export type CreditNote = {
+	id: string;
+	number: string;
+	issued_at: string;
+	club: ClubRef;
+	invoice_number: string;
+	due_id: string;
+	net: string;
+	vat: string;
+	total: string;
+	vat_rate: string;
+	reverse_charge: boolean;
+	reason: string;
+	applied_to: { due_id: string; invoice_number: string | null; amount: string }[];
+};
+
+export type CreditEntry = { id: string; amount: string; kind: 'overpayment' | 'cancelled_period' | 'applied'; note: string; created: string; credit_note_number: string | null; due_id: string | null };
+export type CreditLedger = { balance: string; entries: CreditEntry[] };
+
+type Money3 = { net: string; vat: string; total: string };
+
+export type PlanChangePreview = {
+	club_id: string;
+	effective_date: string;
+	from_plan: PlanRef | null;
+	to_plan: PlanRef;
+	old_period: {
+		id: string;
+		period_start: string;
+		period_end: string;
+		new_period_end: string;
+		total_days: number;
+		used_days: number;
+		unused_days: number;
+		original: Money3;
+		prorated: Money3;
+		status_before: string;
+		status: string;
+		paid: string;
+		credit_to_issue: Money3 | null;
+		overpayment_to_credit: string;
+		has_invoice: boolean;
+		invoice_number: string | null;
+		is_trial: boolean;
+	} | null;
+	cancelled_periods: { id: string; period_start: string; period_end: string; total: string; paid: string; invoice_number: string | null }[];
+	credit_notes_to_issue: ({ for_invoice: string | null } & Money3)[];
+	credit_balance_before: string;
+	credit_available_for_new_period: string;
+	new_period: {
+		period_start: string;
+		period_end: string;
+		plan: PlanRef;
+		net: string;
+		vat_rate: string;
+		vat_amount: string;
+		total: string;
+		reverse_charge: boolean;
+		grace_until: string;
+		invoice_opens: string;
+	};
+	credit_applied: string;
+	amount_payable_after_credit: string;
+	credit_balance_after: string;
+	warnings: string[];
+};
+
+export type PlanChangeResult = PlanChangePreview & {
+	created: { old_due_id: string | null; new_due_id: string; new_invoice_id: string | null; new_invoice_number: string | null; credit_note_ids: string[]; cancelled_due_ids: string[] };
+	credit_notes: CreditNote[];
 };
 
 export type Cycle = {

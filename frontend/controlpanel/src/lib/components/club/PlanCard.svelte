@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { CreditCard } from '@lucide/svelte';
 	import { platform } from '#lib/api.ts';
-	import type { ClubDetail, Plan, Subscription } from '#lib/clubs.ts';
+	import type { PlanChangeResult } from '#lib/billing.ts';
+	import type { ClubBilling, ClubDetail, Plan, Subscription } from '#lib/clubs.ts';
+	import ChangePlanDialog from './ChangePlanDialog.svelte';
 	import Alert from '../Alert.svelte';
 	import Modal from '../Modal.svelte';
 
-	let { club, subscriptions, plans, canEdit, onchange }: { club: ClubDetail; subscriptions: Subscription[]; plans: Plan[]; canEdit: boolean; onchange: () => void } = $props();
+	let { club, subscriptions, plans, billing = null, isSuperuser = false, canEdit, onchange }: { club: ClubDetail; subscriptions: Subscription[]; plans: Plan[]; billing?: ClubBilling | null; isSuperuser?: boolean; canEdit: boolean; onchange: () => void } = $props();
+
+	const billed = $derived(!!billing?.billed);
+	let billedOpen = $state(false);
+	let result = $state<PlanChangeResult | null>(null);
 
 	const current = $derived(subscriptions.find((s) => s.is_current) ?? null);
 	const history = $derived(subscriptions.filter((s) => s !== current));
@@ -23,6 +29,12 @@
 	let busy = $state(false);
 
 	function openChange() {
+		if (billed) {
+			notice = '';
+			result = null;
+			billedOpen = true;
+			return;
+		}
 		planId = current?.plan.id ?? plans.find((p) => p.is_active && !p.is_default)?.id ?? '';
 		status = 'active';
 		trialEnds = reason = error = '';
@@ -67,6 +79,12 @@
 	<div class="card-body gap-3">
 		<div class="card-title"><CreditCard size={16} aria-hidden="true" /> Plan</div>
 		{#if notice}<Alert kind="success">{notice}</Alert>{/if}
+		{#if result}
+			<Alert kind="success" title="Plan changed">
+				New cycle on {result.to_plan.name} started{#if result.created.new_invoice_number}, invoice <a class="link font-mono" href="/billing?status=all&q={encodeURIComponent(result.created.new_invoice_number)}">{result.created.new_invoice_number}</a> issued{/if}.
+				{#if result.credit_notes.length}Credit note{result.credit_notes.length > 1 ? 's' : ''}: {#each result.credit_notes as cn, i (cn.id)}{i ? ', ' : ''}<a class="link font-mono" href="/billing/credit-notes?q={encodeURIComponent(cn.number)}">{cn.number}</a>{/each}.{/if}
+			</Alert>
+		{/if}
 
 		{#if current}
 			<div class="flex flex-wrap items-center gap-2">
@@ -92,7 +110,7 @@
 				<div class="mb-1.5 font-mono text-[10px] tracking-[.06em] text-dim uppercase">History</div>
 				<ul class="flex flex-col gap-1 font-mono text-[11px]">
 					{#each showAll ? history : history.slice(0, 4) as sub (sub.id)}
-						<li class="flex gap-2"><span class="w-40 shrink-0 text-dim">{date(sub.starts_at)} → {date(sub.ends_at)}</span><span class="text-ink">{sub.plan.name}</span><span class="text-muted">{sub.status.replace('_', ' ')}</span></li>
+						<li class="flex gap-2"><span class="w-60 shrink-0 whitespace-nowrap text-dim">{date(sub.starts_at)} → {date(sub.ends_at)}</span><span class="text-ink">{sub.plan.name}</span><span class="text-muted">{sub.status.replace('_', ' ')}</span></li>
 					{/each}
 				</ul>
 				{#if history.length > 4}<button class="btn-link mt-1 text-xs" onclick={() => (showAll = !showAll)}>{showAll ? 'Show less' : `Show all ${history.length}`}</button>{/if}
@@ -100,6 +118,19 @@
 		{/if}
 	</div>
 </div>
+
+<ChangePlanDialog
+	bind:open={billedOpen}
+	{club}
+	{billing}
+	{plans}
+	currentPlanId={current?.plan.id ?? billing?.plan?.id ?? null}
+	{isSuperuser}
+	ondone={(r) => {
+		result = r;
+		onchange();
+	}}
+/>
 
 <Modal bind:open={changeOpen} title="Change plan">
 	<form class="flex flex-col gap-4" onsubmit={change}>

@@ -64,56 +64,57 @@
 	<Alert kind="warning" title="Archived">This club has been archived since {date(club.archived_at)}. Its subdomain does not resolve. Restore it under “Danger zone”.</Alert>
 {/if}
 
-{#if stats}
-	{@const k = data.overview?.kpis}
-	<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-		<Kpi label="members" value={stats.members} sub={stats.member_limit ? `limit ${stats.member_limit}${atLimit ? ' · reached' : nearLimit ? ' · almost' : ''}` : 'no limit'} tone={atLimit ? 'club' : nearLimit ? 'warn' : 'none'} />
-		<Kpi label="new members" value={k ? k.new_members_30d : '—'} sub="joined in the last 30 days" />
-		<Kpi label="renewal rate" value={k?.renewal_rate == null ? 'N/A' : `${k.renewal_rate}%`} sub={k?.renewal_rate == null ? 'no renewal data yet' : 'of last period’s members'} />
-		<Kpi label="administrators" value={stats.admins} tone={stats.admins === 0 ? 'club' : 'none'} sub={stats.admins === 0 ? 'nobody can manage the club' : undefined} />
-		<Kpi label="dues owed" value={money(stats.dues_owed)} tone={Number(stats.dues_owed) ? 'warn' : 'none'} />
-		<Kpi label="plan" value={stats.plan ?? 'default'} sub="{stats.features.length} feature{stats.features.length === 1 ? '' : 's'} enabled" />
-	</div>
-{/if}
+<!-- Data-dense two-column layout: figures, charts, features and admins in the wide column; details, plan, billing and location beside it, with plan and billing together. -->
+<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+	<div class="flex min-w-0 flex-col gap-4">
+		{#if stats}
+			{@const k = data.overview?.kpis}
+			<div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+				<Kpi label="members" value={stats.members} sub={stats.member_limit ? `limit ${stats.member_limit}${atLimit ? ' · reached' : nearLimit ? ' · almost' : ''}` : 'no limit'} tone={atLimit ? 'club' : nearLimit ? 'warn' : 'none'} />
+				<Kpi label="new members" value={k ? k.new_members_30d : '—'} sub="joined in the last 30 days" />
+				<Kpi label="renewal rate" value={k?.renewal_rate == null ? 'N/A' : `${k.renewal_rate}%`} sub={k?.renewal_rate == null ? 'no renewal data yet' : 'of last period’s members'} />
+				<Kpi label="administrators" value={stats.admins} tone={stats.admins === 0 ? 'club' : 'none'} sub={stats.admins === 0 ? 'nobody can manage the club' : undefined} />
+				<Kpi label="dues owed" value={money(stats.dues_owed)} tone={Number(stats.dues_owed) ? 'warn' : 'none'} />
+				<Kpi label="plan" value={stats.plan ?? 'default'} sub="{stats.features.length} feature{stats.features.length === 1 ? '' : 's'} enabled" />
+			</div>
+		{/if}
 
-{#if data.overview}
-	{@const o = data.overview}
-	<div class="grid gap-4 lg:grid-cols-2">
-		<div class="card p-4">
-			<div class="mb-1 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase"><UserPlus size={16} aria-hidden="true" /> Signups per month</div>
-			<p class="mb-3 font-mono text-[11px] text-muted">Members added over the last 12 months.</p>
-			<BarChart series={o.signups} label="Signups" />
-		</div>
-		<div class="card p-4">
-			<div class="mb-1 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase"><PieChartIcon size={16} aria-hidden="true" /> Member types</div>
-			<p class="mb-3 font-mono text-[11px] text-muted">How the roster splits by type.</p>
-			{#if o.member_types.length}
-				<PieChart slices={o.member_types.map((t) => ({ label: t.label, value: t.count }))} label="Member types" />
-			{:else}
-				<p class="flex h-44 items-center justify-center text-sm text-muted">No members yet.</p>
-			{/if}
-		</div>
-	</div>
+		{#if data.overview}
+			{@const o = data.overview}
+			<div class="grid gap-4 md:grid-cols-2">
+				<div class="card p-4">
+					<div class="mb-1 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase"><UserPlus size={16} aria-hidden="true" /> Signups per month</div>
+					<p class="mb-3 font-mono text-[11px] text-muted">Members added over the last 12 months.</p>
+					<BarChart series={o.signups} label="Signups" />
+				</div>
+				<div class="card p-4">
+					<div class="mb-1 flex items-center gap-2 font-display text-sm font-extrabold tracking-[.1em] text-ink uppercase"><PieChartIcon size={16} aria-hidden="true" /> Member types</div>
+					<p class="mb-3 font-mono text-[11px] text-muted">How the roster splits by type.</p>
+					{#if o.member_types.length}
+						<PieChart slices={o.member_types.map((t) => ({ label: t.label, value: t.count }))} label="Member types" />
+					{:else}
+						<p class="flex h-44 items-center justify-center text-sm text-muted">No members yet.</p>
+					{/if}
+				</div>
+			</div>
 
-	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-		{#each o.groups as group (group.key)}<StatGroupCard {group} />{/each}
-	</div>
-{:else}
-	<Alert kind="warning">The club's statistics could not be loaded.</Alert>
-{/if}
+			<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+				{#each o.groups as group (group.key)}<StatGroupCard {group} />{/each}
+			</div>
+		{:else}
+			<Alert kind="warning">The club's statistics could not be loaded.</Alert>
+		{/if}
 
-<div class="grid items-start gap-4 xl:grid-cols-2">
-	<div class="flex flex-col gap-4">
-		<DetailsCard {club} sports={data.sports} countries={data.countries} onchange={refresh} />
+		<FeaturesCard {club} entitlements={data.entitlements} overrides={data.overrides} {canEdit} onchange={refresh} />
 		<AdminsCard {club} {canEdit} onchange={refresh} />
 	</div>
-	<div class="flex flex-col gap-4">
-		<HomeLocationCard />
-		<PlanCard {club} subscriptions={data.subscriptions} plans={data.plans} {canEdit} onchange={refresh} />
+
+	<div class="flex min-w-0 flex-col gap-4">
+		<DetailsCard {club} sports={data.sports} countries={data.countries} onchange={refresh} />
+		<PlanCard {club} subscriptions={data.subscriptions} plans={data.plans} billing={data.billing} {isSuperuser} {canEdit} onchange={refresh} />
 		<BillingCard {club} billing={data.billing} {canEdit} onchange={refresh} archiveDays={data.archiveAfterDays} />
+		<HomeLocationCard />
 	</div>
 </div>
-
-<FeaturesCard {club} entitlements={data.entitlements} overrides={data.overrides} {canEdit} onchange={refresh} />
 
 <DangerCard {club} {isSuperuser} onchange={refresh} />

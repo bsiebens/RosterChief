@@ -1,3 +1,5 @@
+import type { CreditNote, InvoiceBrief, ProrationFields } from './billing.ts';
+
 export type SportRef = { id: string; name: string; slug: string };
 export type Sport = SportRef & { club_count: number };
 
@@ -57,6 +59,10 @@ export type Due = {
 	id: string;
 	plan: PlanRef;
 	amount: string;
+	vat_rate: string;
+	vat_amount: string;
+	total: string;
+	reverse_charge: boolean;
 	amount_paid: string;
 	balance: string;
 	period_start: string;
@@ -65,7 +71,8 @@ export type Due = {
 	status: string;
 	state: 'overdue' | 'in_grace' | 'issued_ahead' | 'settled';
 	is_trial: boolean;
-};
+	invoice: InvoiceBrief | null;
+} & ProrationFields;
 
 export type ClubBilling = {
 	billed: boolean;
@@ -76,6 +83,8 @@ export type ClubBilling = {
 	trial_ends_at: string | null;
 	downgraded_at: string | null;
 	owed: string;
+	credit_balance: string;
+	credit_notes: CreditNote[];
 	dues: Due[];
 };
 
