@@ -6,7 +6,7 @@
 	import Alert from '../Alert.svelte';
 	import Modal from '../Modal.svelte';
 
-	let { switches, canEdit, onchange }: { switches: Switches; canEdit: boolean; onchange: () => void } = $props();
+	let { switches, canEdit, onchange }: { switches: Switches; canEdit: boolean; onchange: () => void | Promise<unknown> } = $props();
 
 	let maintOpen = $state(false);
 	let mailOpen = $state(false);
@@ -22,13 +22,15 @@
 		busy = true;
 		error = '';
 		const r = await platform('PUT', path, body);
-		busy = false;
 		if (!r.ok) {
+			busy = false;
 			error = r.fields.message ?? r.message ?? 'The switch could not be changed.';
 			return false;
 		}
+		// Reload first: the notice, the cards and the banners at the top of the page should all change together, not one after the other.
+		await onchange();
+		busy = false;
 		notice = done;
-		onchange();
 		return true;
 	}
 
@@ -75,7 +77,7 @@
 			{/if}
 			{#if canEdit}
 				<div>
-					<button class="btn btn-sm {maint.is_active ? 'btn-success' : 'btn-error btn-outline'}" onclick={askMaintenance} disabled={busy}>{maint.is_active ? 'Turn maintenance off' : 'Turn maintenance on…'}</button>
+					<button class="btn btn-sm {maint.is_active ? 'btn-success' : 'btn-error btn-outline'}" onclick={askMaintenance} disabled={busy}>{maint.is_active ? 'Turn maintenance off' : 'Turn maintenance on'}</button>
 				</div>
 			{/if}
 		</div>
@@ -91,7 +93,7 @@
 			{#if mail.is_active}<div class="rounded border border-warn bg-row-warn p-3 font-mono text-[11px] text-muted">Paused {since(mail)}</div>{/if}
 			{#if canEdit}
 				<div>
-					<button class="btn btn-sm {mail.is_active ? 'btn-success' : 'btn-warning btn-outline'}" onclick={askMail} disabled={busy}>{mail.is_active ? 'Resume automated email' : 'Pause automated email…'}</button>
+					<button class="btn btn-sm {mail.is_active ? 'btn-success' : 'btn-warning btn-outline'}" onclick={askMail} disabled={busy}>{mail.is_active ? 'Resume automated email' : 'Pause automated email'}</button>
 				</div>
 			{/if}
 		</div>
