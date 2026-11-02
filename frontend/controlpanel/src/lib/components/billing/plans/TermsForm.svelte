@@ -46,7 +46,7 @@
 			<label class="label" for="{id}-{f.k}"><span class="label-text">{f.label}</span></label>
 			<input
 				id="{id}-{f.k}"
-				class="input input-bordered w-full font-mono {fields[f.k] ? 'input-error' : ''}"
+				class="input input-bordered w-full {fields[f.k] ? 'input-error' : ''}"
 				type="number"
 				min={f.k === 'duration_months' ? 1 : 0}
 				step="1"

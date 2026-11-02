@@ -73,7 +73,7 @@
 <Modal bind:open={deleteOpen} title="Delete club permanently?">
 	<p class="text-sm">This deletes <strong>{club.name}</strong> and everything in it. To confirm, type the slug <code class="font-mono font-bold">{club.slug}</code>.</p>
 	{#if error}<div class="mt-3"><Alert kind="error">{error}</Alert></div>{/if}
-	<input class="input input-bordered mt-3 w-full font-mono" aria-label="Type the club slug to confirm" autocomplete="off" spellcheck="false" bind:value={confirm} />
+	<input class="input input-bordered mt-3 w-full" aria-label="Type the club slug to confirm" autocomplete="off" spellcheck="false" bind:value={confirm} />
 	<div class="modal-action">
 		<button class="btn btn-outline" onclick={() => (deleteOpen = false)}>Cancel</button>
 		<button class="btn btn-error" disabled={busy || confirm.trim() !== club.slug} onclick={remove}>Delete forever</button>

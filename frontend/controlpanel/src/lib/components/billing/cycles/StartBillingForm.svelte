@@ -73,7 +73,7 @@
 
 	<div class="form-control">
 		<label class="label" for="{id}-start"><span class="label-text">Start date (optional)</span></label>
-		<input id="{id}-start" class="input input-bordered w-full font-mono" type="date" bind:value={start} aria-describedby="{id}-start-help" aria-invalid={fields.start ? 'true' : undefined} />
+		<input id="{id}-start" class="input input-bordered w-full" type="date" bind:value={start} aria-describedby="{id}-start-help" aria-invalid={fields.start ? 'true' : undefined} />
 		<span id="{id}-start-help" class="label-text-alt mt-1 block {fields.start ? 'text-club-dark' : ''}">{fields.start ?? 'Leave empty to start today. This date becomes the club’s anniversary: every later period starts on it.'}</span>
 	</div>
 
@@ -82,7 +82,7 @@
 		{#if trial}
 			<div class="form-control">
 				<label class="label" for="{id}-trial"><span class="label-text">Trial length (days)</span></label>
-				<input id="{id}-trial" class="input input-bordered w-32 font-mono {fields.trial_days ? 'input-error' : ''}" type="number" min="1" max="365" step="1" inputmode="numeric" bind:value={trialDays} aria-invalid={fields.trial_days ? 'true' : undefined} aria-describedby="{id}-trial-d" />
+				<input id="{id}-trial" class="input input-bordered w-32 {fields.trial_days ? 'input-error' : ''}" type="number" min="1" max="365" step="1" inputmode="numeric" bind:value={trialDays} aria-invalid={fields.trial_days ? 'true' : undefined} aria-describedby="{id}-trial-d" />
 				<span id="{id}-trial-d" class="mt-1 block text-xs {fields.trial_days ? 'text-club-dark' : 'label-text-alt'}">
 					{#if fields.trial_days}{fields.trial_days}
 					{:else if trialEnd}

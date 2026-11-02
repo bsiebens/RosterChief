@@ -58,9 +58,9 @@
 		{#if error}<Alert kind="error">{error}</Alert>{/if}
 		<div class="grid gap-4 sm:grid-cols-2">
 			{#if plan}
-				<Field label="Code" value={plan.code} readonly mono help="The code cannot be changed." />
+				<Field label="Code" value={plan.code} readonly help="The code cannot be changed." />
 			{:else}
-				<Field label="Code" bind:value={code} mono required error={fields.code} help="Short and permanent, e.g. “club-plus”." autocomplete="off" />
+				<Field label="Code" bind:value={code} required error={fields.code} help="Short and permanent, e.g. “club-plus”." autocomplete="off" />
 			{/if}
 			<Field label="Name" bind:value={name} required error={fields.name} autocomplete="off" />
 		</div>
@@ -91,7 +91,7 @@
 								</td>
 								<td class="w-48">
 									{#if f.kind === 'limit' && picked[f.code]}
-										<input class="input input-bordered w-full font-mono" type="number" min="0" placeholder="unlimited" aria-label="Limit for {f.name}, empty means unlimited" bind:value={limits[f.code]} />
+										<input class="input input-bordered w-full" type="number" min="0" placeholder="unlimited" aria-label="Limit for {f.name}, empty means unlimited" bind:value={limits[f.code]} />
 									{:else if f.kind === 'limit'}<span class="text-xs text-muted">has a limit</span>{/if}
 								</td>
 							</tr>

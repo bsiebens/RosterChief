@@ -16,7 +16,7 @@
 	{#if custom}
 		<input
 			id="{id}-n"
-			class="input input-bordered mt-2 w-full font-mono {error ? 'input-error' : ''}"
+			class="input input-bordered mt-2 w-full {error ? 'input-error' : ''}"
 			maxlength="32"
 			bind:value={text}
 			{disabled}

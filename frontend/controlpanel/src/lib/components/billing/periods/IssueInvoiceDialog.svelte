@@ -42,7 +42,7 @@
 			<input type="checkbox" class="checkbox" bind:checked={custom} /> Use a custom number (for an invoice issued outside the system)
 		</label>
 		{#if custom}
-			<Field label="Custom invoice number" mono required maxlength={32} bind:value={number} error={fieldError} help="1–32 characters, unique. It must not look like the automatic format set on the Invoicing tab." />
+			<Field label="Custom invoice number" required maxlength={32} bind:value={number} error={fieldError} help="1–32 characters, unique. It must not look like the automatic format set on the Invoicing tab." />
 		{/if}
 		<Alert kind="warning" title="Numbers are permanent">
 			An invoice number can never be changed once created. Custom numbers never affect the automatic sequence, which stays gapless.

@@ -45,7 +45,7 @@
 
 	<div class="form-control">
 		<label class="label" for="{id}-from"><span class="label-text">Valid from</span></label>
-		<input id="{id}-from" class="input input-bordered w-full font-mono {fields.active_from ? 'input-error' : ''}" type="date" bind:value={from} aria-invalid={fields.active_from ? 'true' : undefined} aria-describedby="{id}-from-d" />
+		<input id="{id}-from" class="input input-bordered w-full {fields.active_from ? 'input-error' : ''}" type="date" bind:value={from} aria-invalid={fields.active_from ? 'true' : undefined} aria-describedby="{id}-from-d" />
 		<span id="{id}-from-d" class="mt-1 block text-xs {fields.active_from ? 'text-club-dark' : 'label-text-alt'}">
 			{fields.active_from ?? (from > today ? 'A future date: the price is scheduled and applies to periods that start on or after it.' : past ? 'This date is in the past. It only affects periods that have not been opened yet.' : 'Applies to periods that start on or after this date.')}
 		</span>
@@ -53,7 +53,7 @@
 
 	<div class="form-control">
 		<label class="label" for="{id}-amount"><span class="label-text">Net amount per period (EUR, excl. VAT)</span></label>
-		<input id="{id}-amount" class="input input-bordered w-full font-mono {fields.amount ? 'input-error' : ''}" inputmode="decimal" placeholder="50.00" bind:value={amount} aria-invalid={fields.amount ? 'true' : undefined} aria-describedby={fields.amount ? `${id}-amount-d` : undefined} />
+		<input id="{id}-amount" class="input input-bordered w-full {fields.amount ? 'input-error' : ''}" inputmode="decimal" placeholder="50.00" bind:value={amount} aria-invalid={fields.amount ? 'true' : undefined} aria-describedby={fields.amount ? `${id}-amount-d` : undefined} />
 		{#if fields.amount}<span id="{id}-amount-d" class="mt-1 block text-xs text-club-dark">{fields.amount}</span>{/if}
 	</div>
 

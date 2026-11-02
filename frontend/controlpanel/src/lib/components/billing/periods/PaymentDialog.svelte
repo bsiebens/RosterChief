@@ -46,7 +46,7 @@
 		<p class="text-sm text-muted">
 			{due.club.name}: open balance <strong class="text-ink">{money2(due.balance)}</strong> of {money2(due.total)} (incl. VAT). A payment cannot exceed the open balance.
 		</p>
-		<Field label="Amount (EUR)" type="text" inputmode="decimal" mono required bind:value={amount} error={fields.amount} />
+		<Field label="Amount (EUR)" type="text" inputmode="decimal" required bind:value={amount} error={fields.amount} />
 		<div class="form-control w-full">
 			<label class="label" for={methodId}><span class="label-text">Method</span></label>
 			<select id={methodId} class="select select-bordered w-full" bind:value={method}>

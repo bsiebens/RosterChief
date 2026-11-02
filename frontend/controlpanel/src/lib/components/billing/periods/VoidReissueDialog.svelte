@@ -64,7 +64,7 @@
 				<input type="checkbox" class="checkbox" bind:checked={custom} /> Use a custom number
 			</label>
 			{#if custom}
-				<Field label="Custom invoice number" mono required maxlength={32} bind:value={number} error={numberError} help="Only for numbers that must follow an external system. Cannot look like the automatic format set on the Invoicing tab and cannot be changed afterwards." />
+				<Field label="Custom invoice number" required maxlength={32} bind:value={number} error={numberError} help="Only for numbers that must follow an external system. Cannot look like the automatic format set on the Invoicing tab and cannot be changed afterwards." />
 			{/if}
 		</div>
 

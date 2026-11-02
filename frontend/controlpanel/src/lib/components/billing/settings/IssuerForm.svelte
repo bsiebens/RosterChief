@@ -84,7 +84,7 @@
 			<legend class="card-title float-left w-full">Issuer</legend>
 			<div class="grid gap-3 sm:grid-cols-2">
 				<Field label="Legal name" bind:value={f.legal_name} error={fields.legal_name} autocomplete="organization" />
-				<Field label="VAT number" bind:value={f.vat_id} error={fields.vat_id} mono help="For example BE0123456789." />
+				<Field label="VAT number" bind:value={f.vat_id} error={fields.vat_id} help="For example BE0123456789." />
 				<Field label="Address" bind:value={f.address} error={fields.address} autocomplete="street-address" />
 				<div class="grid grid-cols-[8rem_1fr] gap-3">
 					<Field label="Postal code" bind:value={f.zip_code} error={fields.zip_code} autocomplete="postal-code" />
@@ -108,8 +108,8 @@
 		<div class="card-body gap-3">
 			<legend class="card-title float-left w-full">Payment</legend>
 			<div class="grid gap-3 sm:grid-cols-2">
-				<Field label="IBAN" bind:value={f.iban} error={fields.iban} mono help="Spaces are removed and letters upper-cased when saved." />
-				<Field label="BIC" bind:value={f.bic} error={fields.bic} mono />
+				<Field label="IBAN" bind:value={f.iban} error={fields.iban} help="Spaces are removed and letters upper-cased when saved." />
+				<Field label="BIC" bind:value={f.bic} error={fields.bic} />
 			</div>
 			<div class="form-control">
 				<label class="label" for="{id}-terms"><span class="label-text">Payment terms</span></label>
@@ -127,7 +127,7 @@
 			<div class="card-body gap-3">
 				<legend class="card-title float-left w-full">VAT</legend>
 				<div>
-					<Field label="VAT rate (%)" bind:value={f.vat_rate} error={fields.vat_rate} mono inputmode="decimal" help="Between 0 and 100, up to two decimals. 0 means no VAT." />
+					<Field label="VAT rate (%)" bind:value={f.vat_rate} error={fields.vat_rate} inputmode="decimal" help="Between 0 and 100, up to two decimals. 0 means no VAT." />
 				</div>
 			</div>
 		</fieldset>
@@ -136,7 +136,7 @@
 			<div class="card-body gap-3">
 				<legend class="card-title float-left w-full">Overdue clubs</legend>
 				<div>
-					<Field label="Days between downgrade and archive" type="number" bind:value={archiveDays} error={fields.archive_after_days} mono inputmode="numeric" help="An unpaid club is first moved to the free plan. It is archived this many days later (0 = immediately), only if the club has auto-archive on." />
+					<Field label="Days between downgrade and archive" type="number" bind:value={archiveDays} error={fields.archive_after_days} inputmode="numeric" help="An unpaid club is first moved to the free plan. It is archived this many days later (0 = immediately), only if the club has auto-archive on." />
 				</div>
 			</div>
 		</fieldset>

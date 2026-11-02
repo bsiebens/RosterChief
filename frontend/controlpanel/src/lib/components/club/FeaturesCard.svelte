@@ -117,7 +117,7 @@
 			{#if editing.kind === 'limit' && enabled === 'true'}
 				<div class="form-control">
 					<label class="label" for="ov-limit"><span class="label-text">Limit <span class="text-muted">(empty = unlimited)</span></span></label>
-					<input id="ov-limit" class="input input-bordered w-full font-mono" type="number" min="0" bind:value={limit} />
+					<input id="ov-limit" class="input input-bordered w-full" type="number" min="0" bind:value={limit} />
 				</div>
 			{/if}
 			<div class="form-control">

@@ -68,9 +68,9 @@
 				<div class="form-control">
 					<label class="label" for="{id}-{c.key}"><span class="label-text">Format</span></label>
 					{#if c.key === 'invoice'}
-						<input id="{id}-{c.key}" class="input input-bordered w-full font-mono {fields[c.pattern] ? 'input-error' : ''}" bind:value={invoicePattern} maxlength="40" spellcheck="false" autocomplete="off" aria-invalid={fields[c.pattern] ? 'true' : undefined} aria-describedby="{id}-{c.key}-e" />
+						<input id="{id}-{c.key}" class="input input-bordered w-full {fields[c.pattern] ? 'input-error' : ''}" bind:value={invoicePattern} maxlength="40" spellcheck="false" autocomplete="off" aria-invalid={fields[c.pattern] ? 'true' : undefined} aria-describedby="{id}-{c.key}-e" />
 					{:else}
-						<input id="{id}-{c.key}" class="input input-bordered w-full font-mono {fields[c.pattern] ? 'input-error' : ''}" bind:value={creditPattern} maxlength="40" spellcheck="false" autocomplete="off" aria-invalid={fields[c.pattern] ? 'true' : undefined} aria-describedby="{id}-{c.key}-e" />
+						<input id="{id}-{c.key}" class="input input-bordered w-full {fields[c.pattern] ? 'input-error' : ''}" bind:value={creditPattern} maxlength="40" spellcheck="false" autocomplete="off" aria-invalid={fields[c.pattern] ? 'true' : undefined} aria-describedby="{id}-{c.key}-e" />
 					{/if}
 					<span id="{id}-{c.key}-e" class="mt-1 block text-xs text-club-dark">{fields[c.pattern] ?? ''}</span>
 				</div>
@@ -106,9 +106,9 @@
 				<div class="form-control">
 					<label class="label" for="{id}-{c.key}-seq"><span class="label-text">Set next number (optional)</span></label>
 					{#if c.key === 'invoice'}
-						<input id="{id}-{c.key}-seq" class="input input-bordered w-40 font-mono {fields[c.seqField] ? 'input-error' : ''}" type="number" step="1" min={(c.cur ?? 0) + 1} inputmode="numeric" bind:value={invoiceNext} aria-describedby="{id}-{c.key}-sd" />
+						<input id="{id}-{c.key}-seq" class="input input-bordered w-40 {fields[c.seqField] ? 'input-error' : ''}" type="number" step="1" min={(c.cur ?? 0) + 1} inputmode="numeric" bind:value={invoiceNext} aria-describedby="{id}-{c.key}-sd" />
 					{:else}
-						<input id="{id}-{c.key}-seq" class="input input-bordered w-40 font-mono {fields[c.seqField] ? 'input-error' : ''}" type="number" step="1" min={(c.cur ?? 0) + 1} inputmode="numeric" bind:value={creditNext} aria-describedby="{id}-{c.key}-sd" />
+						<input id="{id}-{c.key}-seq" class="input input-bordered w-40 {fields[c.seqField] ? 'input-error' : ''}" type="number" step="1" min={(c.cur ?? 0) + 1} inputmode="numeric" bind:value={creditNext} aria-describedby="{id}-{c.key}-sd" />
 					{/if}
 					<span id="{id}-{c.key}-sd" class="mt-1 block text-xs {fields[c.seqField] ? 'text-club-dark' : 'label-text-alt'}">{fields[c.seqField] ?? 'Only moves forward, e.g. when you take over from another system. Leave empty to keep counting.'}</span>
 				</div>

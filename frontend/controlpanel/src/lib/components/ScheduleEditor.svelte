@@ -73,12 +73,12 @@
 			{#if preset === 'minutes'}
 				<div class="form-control">
 					<label class="label" for="every"><span class="label-text">Every how many minutes</span></label>
-					<input id="every" class="input input-bordered font-mono" type="number" min="1" max="59" bind:value={every} />
+					<input id="every" class="input input-bordered" type="number" min="1" max="59" bind:value={every} />
 				</div>
 			{:else if preset === 'hourly'}
 				<div class="form-control">
 					<label class="label" for="minute"><span class="label-text">At minute</span></label>
-					<input id="minute" class="input input-bordered font-mono" type="number" min="0" max="59" bind:value={minute} />
+					<input id="minute" class="input input-bordered" type="number" min="0" max="59" bind:value={minute} />
 				</div>
 			{:else if preset === 'daily' || preset === 'weekly' || preset === 'monthly'}
 				<div class="grid grid-cols-2 gap-3">
@@ -92,12 +92,12 @@
 					{:else if preset === 'monthly'}
 						<div class="form-control">
 							<label class="label" for="day"><span class="label-text">Day of the month</span></label>
-							<input id="day" class="input input-bordered font-mono" type="number" min="1" max="31" bind:value={day} />
+							<input id="day" class="input input-bordered" type="number" min="1" max="31" bind:value={day} />
 						</div>
 					{/if}
 					<div class="form-control">
 						<label class="label" for="time"><span class="label-text">At</span></label>
-						<input id="time" class="input input-bordered font-mono" type="time" required bind:value={time} />
+						<input id="time" class="input input-bordered" type="time" required bind:value={time} />
 					</div>
 				</div>
 			{:else}
@@ -105,7 +105,7 @@
 					{#each fields as [key, label, hint] (key)}
 						<div class="form-control">
 							<label class="label" for={key}><span class="label-text text-xs">{label}</span></label>
-							<input id={key} class="input input-bordered px-2 text-center font-mono" bind:value={custom[key]} placeholder="*" spellcheck="false" autocomplete="off" />
+							<input id={key} class="input input-bordered px-2 text-center" bind:value={custom[key]} placeholder="*" spellcheck="false" autocomplete="off" />
 							<span class="label-text-alt mt-1 text-center text-[10px]">{hint}</span>
 						</div>
 					{/each}

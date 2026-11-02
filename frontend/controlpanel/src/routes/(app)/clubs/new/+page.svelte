@@ -129,7 +129,7 @@
 				<div class="card-title">Legal &amp; contact <span class="font-body text-xs font-normal tracking-normal text-muted normal-case">optional, used on invoices</span></div>
 				<div class="grid gap-4 sm:grid-cols-2">
 					<Field label="Legal name" bind:value={f.legal_name} error={fields.legal_name} />
-					<Field label="VAT number" mono bind:value={f.vat_id} error={fields.vat_id} />
+					<Field label="VAT number" bind:value={f.vat_id} error={fields.vat_id} />
 					<Field label="Contact email" type="email" bind:value={f.contact_email} error={fields.contact_email} />
 					<Field label="Website" type="url" placeholder="https://" bind:value={f.website} error={fields.website} />
 				</div>
