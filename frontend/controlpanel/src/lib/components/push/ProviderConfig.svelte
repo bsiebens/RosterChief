@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { Pause, Play } from '@lucide/svelte';
 	import { platform } from '#lib/api.ts';
+	import Modal from '#lib/components/Modal.svelte';
 	import type { PushConfig } from '#lib/push.ts';
 
 	let { provider, onToggled }: { provider: PushConfig['providers'][number]; onToggled: () => void } = $props();
@@ -7,6 +9,7 @@
 	let busy = $state(false);
 	let result = $state<{ ok: boolean; detail: string } | null>(null);
 
+	let confirmOpen = $state(false);
 	let toggling = $state(false);
 	let toggleError = $state('');
 
@@ -15,6 +18,7 @@
 		toggleError = '';
 		const r = await platform('PATCH', '/push/config', { [`${provider.provider}_enabled`]: enabled });
 		toggling = false;
+		confirmOpen = false;
 		if (!r.ok) toggleError = r.message ?? 'The change could not be saved.';
 		onToggled();
 	}
@@ -32,12 +36,20 @@
 	<div class="card-body flex-1 gap-2 text-sm">
 		<div class="card-title">
 			{provider.label}
-			<span class="badge {provider.configured ? 'badge-success' : 'badge-warning'} ml-auto">{provider.configured ? 'configured' : 'not configured'}</span>
+			{#if !provider.enabled}
+				<span class="badge badge-ghost ml-auto">disabled</span>
+			{:else}
+				<span class="badge {provider.configured ? 'badge-success' : 'badge-warning'} ml-auto">{provider.configured ? 'configured' : 'not configured'}</span>
+			{/if}
 		</div>
-		<label class="flex items-center gap-3">
-			<input type="checkbox" class="toggle toggle-sm" checked={provider.enabled} disabled={toggling} onchange={(e) => toggle(e.currentTarget.checked)} />
-			<span><strong class="text-ink">{provider.enabled ? 'Enabled' : 'Disabled'}</strong> <span class="text-muted">· when disabled, nothing is sent through this provider</span></span>
-		</label>
+		<div class="flex items-center justify-between gap-3">
+			<span><strong class="text-ink">{provider.enabled ? 'Enabled' : 'Disabled'}</strong> <span class="text-muted">· {provider.enabled ? 'pushes are sent through this provider' : 'nothing is sent through this provider'}</span></span>
+			{#if provider.enabled}
+				<button class="btn btn-outline btn-error btn-sm shrink-0" disabled={toggling} onclick={() => (confirmOpen = true)}><Pause size={14} aria-hidden="true" /> Disable</button>
+			{:else}
+				<button class="btn btn-outline btn-success btn-sm shrink-0" disabled={toggling} onclick={() => toggle(true)}><Play size={14} aria-hidden="true" /> Enable</button>
+			{/if}
+		</div>
 		{#if toggleError}<p class="text-xs text-club-dark">{toggleError}</p>{/if}
 		{#if provider.missing.length}
 			<div>
@@ -56,3 +68,11 @@
 		<div class="mt-auto flex justify-end pt-2"><button class="btn btn-outline btn-sm" disabled={busy || !provider.configured} onclick={validate}>Validate credentials</button></div>
 	</div>
 </div>
+
+<Modal bind:open={confirmOpen} title="Disable {provider.label}?">
+	<p class="text-sm">Nothing is sent through {provider.label} while it is disabled. Devices on this provider stop receiving pushes, and deliveries are skipped without being logged. You can enable it again at any time.</p>
+	<div class="modal-action">
+		<button class="btn btn-outline" onclick={() => (confirmOpen = false)}>Cancel</button>
+		<button class="btn btn-outline btn-error" disabled={toggling} onclick={() => toggle(false)}><Pause size={14} aria-hidden="true" /> Disable</button>
+	</div>
+</Modal>

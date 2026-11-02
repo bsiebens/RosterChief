@@ -9,8 +9,13 @@
 	<div class="card-body gap-2 text-sm">
 		<div class="card-title flex-wrap gap-y-1">
 			{p.label}
-			{#if p.configured === true}<span class="badge badge-success badge-sm">configured</span>{:else if p.configured === false}<span class="badge badge-warning badge-sm">not configured</span>{/if}
-			{#if p.enabled === false}<span class="badge badge-ghost badge-sm">disabled</span>{/if}
+			{#if p.enabled === false}
+				<span class="badge badge-ghost badge-sm">disabled</span>
+			{:else if p.configured === true}
+				<span class="badge badge-success badge-sm">configured</span>
+			{:else if p.configured === false}
+				<span class="badge badge-warning badge-sm">not configured</span>
+			{/if}
 			<span class="badge {STATE_BADGE[p.state]} ml-auto">{p.state}</span>
 		</div>
 		<div class="flex items-end gap-2">
