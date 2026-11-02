@@ -20,7 +20,6 @@ CATALOG: dict[str, Perm] = {
     for p in [
         Perm("authorizations.manage_roles", "Manage roles", admin=True),
         Perm("members.manage_members", "Manage members", admin=True),
-        Perm("members.view_members", "View member details"),
     ]
 }
 
