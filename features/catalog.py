@@ -34,13 +34,36 @@ CATALOG: dict[str, FeatureDef] = {
     ]
 }
 
+
+def all_access_features() -> dict[str, int | None]:
+    """Every catalog feature with no limit: flags on, limit features unlimited (``None``).
+
+    A plan may hold at most one limit feature per scope (see ``duplicate_limit_scopes``), so if two features ever cap the
+    same thing the first one in the catalog wins.
+    """
+    seen_scopes: set[str] = set()
+    features: dict[str, int | None] = {}
+    for code, definition in CATALOG.items():
+        if definition.limit_scope:
+            if definition.limit_scope in seen_scopes:
+                continue
+            seen_scopes.add(definition.limit_scope)
+        features[code] = None
+    return features
+
+
 # Plans seeded when missing. After seeding they are edited in the platform admin (this is never re-applied).
 # plan code: (name, {feature code: limit}); a flag uses None, a limit of None means unlimited.
 DEFAULT_PLAN = "free"
+ALL_ACCESS_PLAN = "all_access"
 DEFAULT_PLANS: dict[str, tuple[str, dict[str, int | None]]] = {
     "free": ("Free", {"max_members": 50}),
-    "pro": ("Pro", {"sponsoring": None, "max_members": None}),
+    ALL_ACCESS_PLAN: ("All access", all_access_features()),
 }
+
+# Plans that automatically pick up every new catalog feature (without limits) the next time the catalog is synced.
+# Only missing features are added: an admin can still set a limit on one, or the plan's other rows, without it being undone.
+AUTO_FEATURE_PLANS = frozenset({ALL_ACCESS_PLAN})
 
 
 def duplicate_limit_scopes(codes) -> set[str]:

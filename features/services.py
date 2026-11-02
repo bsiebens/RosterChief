@@ -3,7 +3,7 @@
 from django.db import models, transaction
 from django.utils import timezone
 
-from .catalog import CATALOG, DEFAULT_PLAN, DEFAULT_PLANS, LIMIT, duplicate_limit_scopes
+from .catalog import AUTO_FEATURE_PLANS, CATALOG, DEFAULT_PLAN, DEFAULT_PLANS, LIMIT, all_access_features, duplicate_limit_scopes
 from .models import EntitlementLog, Feature, FeatureOverride, Plan, PlanFeature, Subscription
 
 
@@ -36,6 +36,23 @@ def sync_catalog() -> None:
             for fcode, limit in features.items():
                 PlanFeature.objects.create(plan=plan, feature=Feature.objects.get(code=fcode), limit=limit)
             log("plan_seeded", plan=plan, new={"features": features})
+
+    # Plans that include every feature: add what the catalog gained since (never changes or removes existing rows).
+    for code in AUTO_FEATURE_PLANS:
+        plan = Plan.objects.filter(code=code).first()
+        if plan is None:
+            continue
+        have = set(plan.plan_features.values_list("feature__code", flat=True))
+        used_scopes = {CATALOG[c].limit_scope for c in have if c in CATALOG and CATALOG[c].limit_scope}
+        for fcode in all_access_features():
+            scope = CATALOG[fcode].limit_scope
+            if fcode in have or (scope and scope in used_scopes):
+                continue
+            PlanFeature.objects.create(plan=plan, feature=Feature.objects.get(code=fcode), limit=None)
+            log("plan_feature_added", plan=plan, feature=Feature.objects.get(code=fcode), new={"feature": fcode, "limit": None}, reason="Added automatically: this plan includes every feature")
+            have.add(fcode)
+            if scope:
+                used_scopes.add(scope)
 
 
 def _current_subscriptions(club, now):
