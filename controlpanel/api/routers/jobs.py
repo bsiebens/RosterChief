@@ -1,6 +1,7 @@
 """Background jobs: the celery run history and a one-line health summary for the control panel's top bar."""
 
 import datetime
+import json
 
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -28,6 +29,17 @@ class JobsQuery(Schema):
     status: str | None = None  # success | failure | running | pending | retry | revoked
 
 
+def _result_text(raw: str | None) -> str:
+    """celery stores results as JSON, so a returned string arrives quoted ('"Hello, world!"'): show the value itself."""
+    if not raw:
+        return ""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return raw
+    return value if isinstance(value, str) else json.dumps(value, indent=2, ensure_ascii=False)
+
+
 def _short(text: str | None, size: int = 200) -> str:
     line = next((ln.strip() for ln in reversed((text or "").strip().splitlines()) if ln.strip()), "")
     return line if len(line) <= size else line[: size - 1] + "…"
@@ -46,7 +58,7 @@ def _out(r: TaskResult) -> JobOut:
         duration_seconds=duration,
         scheduled=bool(r.periodic_task_name),
         worker=r.worker,
-        detail=_short(r.traceback if failed else r.result),
+        detail=_short(r.traceback if failed else _result_text(r.result)),
     )
 
 
@@ -155,7 +167,7 @@ def job_detail(request, task_id: str):
     return JobDetailOut(
         **_out(r).dict(),
         traceback=r.traceback,
-        result=r.result,
+        result=_result_text(r.result) if r.status != "FAILURE" else r.result,
         args=r.task_args,
         kwargs=r.task_kwargs,
         periodic_task_name=r.periodic_task_name,
