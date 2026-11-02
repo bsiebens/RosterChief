@@ -1,7 +1,12 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from events.models import Season
+from members.models import Member
 from rosterchief.base import UUIDModel
 
 
@@ -22,3 +27,418 @@ class NumberPool(UUIDModel):
     def clean(self):
         if self.min_number is not None and self.max_number is not None and self.min_number > self.max_number:
             raise ValidationError({"max_number": _("Must be greater than or equal to the minimum number.")})
+
+
+class Team(UUIDModel):
+    name = models.CharField(_("name"), max_length=255, unique=True)
+    short_name = models.CharField(_("short name"), max_length=255)
+
+    pool = models.ForeignKey(
+        NumberPool,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="teams",
+        verbose_name=_("number pool"),
+        help_text=_("Jersey numbers are checked for clashes against every other team sharing this pool, not just this one. Left blank, this team's numbers are only checked against itself, as before."),
+    )
+
+    age_min = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True)
+    age_max = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True)
+
+    tournament_only = models.BooleanField(_("tournament only"), default=False, help_text=_("This team only plays in tournaments. The club's public website can hide tournament-only teams from its team list."))
+
+    ordering = models.PositiveSmallIntegerField(
+        _("order"), null=True, blank=True, help_text=_("Teams with an order are listed first, lowest number first; teams without one follow alphabetically. Teams with the same order are sorted alphabetically.")
+    )
+
+    feeds_into = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feeder_teams",
+        verbose_name=_("feeds into"),
+        help_text=_("The team this one's players typically graduate to next season -- used to suggest call-ups from here when adding players to that team."),
+    )
+
+    import_sources = models.JSONField(_("fixture import sources"), default=list, blank=True, editable=False)
+
+    class Meta:
+        verbose_name = _("team")
+        verbose_name_plural = _("teams")
+        ordering = [models.F("ordering").asc(nulls_last=True), "name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        if self.feeds_into_id is not None and self.feeds_into_id == self.pk:
+            raise ValidationError({"feeds_into": _("A team can't feed into itself.")})
+        if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
+            raise ValidationError({"age_max": _("Must be greater than or equal to the minimum age.")})
+
+
+def team_photo_path(instance, filename):
+    return f"teams/{instance.team_id}/{instance.season.name}/{filename}"
+
+
+class TeamPhoto(UUIDModel):
+    """One team photo per season -- a team's makeup changes every season, so
+    this can't be a plain field on Team. No club FK of its own: club is
+    already reachable via team.club, same reasoning as NewsPhoto being owned
+    by News rather than club-scoped itself."""
+
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="photos", verbose_name=_("team"))
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="team_photos", verbose_name=_("season"))
+    image = models.ImageField(_("image"), upload_to=team_photo_path)
+
+    class Meta:
+        verbose_name = _("team photo")
+        verbose_name_plural = _("team photos")
+        constraints = [
+            models.UniqueConstraint(fields=["team", "season"], name="unique_team_photo_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.team} - {self.season}"
+
+
+class Position(UUIDModel):
+    name = models.CharField(_("name"), max_length=255)
+    short_name = models.CharField(_("short name"), max_length=255)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower numbers are listed first (e.g. on a team's roster). Positions with the same number are ordered by name."))
+
+    staff_position = models.BooleanField(_("staff position"), default=False, help_text=_("Coach, manager, physio, ... -- assignable via a StaffAssignment rather than a team roster spot."))
+    management_position = models.BooleanField(_("management position"), default=False, help_text=_("A staff position with management authority over the team (e.g. head coach) -- requires staff position to also be checked."))
+
+    class Meta:
+        verbose_name = _("position")
+        verbose_name_plural = _("positions")
+        constraints = [
+            # A management position is always a staff position.
+            models.CheckConstraint(condition=Q(management_position=False) | Q(staff_position=True), name="management_position_implies_staff_position"),
+        ]
+        ordering = ["ordering", "name"]
+
+    def __str__(self):
+        return self.name
+
+
+class TeamMembership(UUIDModel):
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="roster", verbose_name=_("team"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="team_memberships", verbose_name=_("member"))
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="team_memberships", verbose_name=_("season"))
+    position = models.ForeignKey(
+        Position,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="team_memberships",
+        verbose_name=_("position"),
+        limit_choices_to={"staff_position": False},
+        help_text=_("Left blank for a member placed on the roster before their position is decided (e.g. from the Sign-up page) -- the team's own manager sets it once known."),
+    )
+
+    jersey_number = models.PositiveSmallIntegerField(_("jersey number"), blank=True, null=True)
+    is_captain = models.BooleanField(_("is captain"), default=False)
+    is_alternate_captain = models.BooleanField(_("is alternate captain"), default=False)
+
+    class Meta:
+        verbose_name = _("team membership")
+        verbose_name_plural = _("team memberships")
+        ordering = ["team", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["team", "season", "member"], name="unique_member_per_team_per_season"),
+            models.UniqueConstraint(fields=["team", "season", "jersey_number"], name="unique_jersey_number_per_team_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.team} - {self.member}"
+
+
+class RefereeLevel(UUIDModel):
+    """A club-defined referee qualification tier (e.g. "Regional", "National")
+    -- admin-managed, like Position, so a club can name its own levels rather
+    than picking from a fixed list. Owns which teams it qualifies a referee
+    for: eligibility is a property of the *level*, not of the individual
+    referee -- a club typically has a handful of levels, each unlocking a
+    tier of teams/competitions, rather than hand-picking teams per referee.
+
+    `inherits_from` chains levels together so a higher tier doesn't need every
+    lower tier's team re-added by hand: a "National" referee is automatically
+    eligible for everything "Regional" (its inherits_from) covers, and so on
+    down the chain -- see eligible_team_ids, the single definition every
+    consumer (RefereeProfile.eligible_teams, events.services.referees) reads
+    through. That chain is also what expresses which tier is "higher" now --
+    there used to be a manual `ordering` field for this too, dropped once
+    inherits_from covered the same need without a second, independently-kept
+    number to keep in sync with it."""
+
+    name = models.CharField(_("name"), max_length=255, unique=True)
+    teams = models.ManyToManyField(Team, related_name="referee_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned to referee these teams' home games."))
+    inherits_from = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inherited_by",
+        verbose_name=_("inherits from"),
+        help_text=_("A referee holding this level is also eligible for everything the linked level covers (and, transitively, whatever that one inherits from)."),
+    )
+
+    class Meta:
+        verbose_name = _("referee level")
+        verbose_name_plural = _("referee levels")
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        current = self.inherits_from
+        seen = set()
+        while current is not None:
+            if current.pk == self.pk:
+                raise ValidationError({"inherits_from": _("This would create a loop -- a level can't inherit from itself, even indirectly.")})
+            if current.pk in seen:
+                break  # An already-broken chain elsewhere; not this field's problem to fix.
+            seen.add(current.pk)
+            current = current.inherits_from
+
+    def eligible_team_ids(self):
+        """This level's own qualifying teams, plus (transitively) every level
+        it inherits from -- so a higher tier doesn't need a lower tier's teams
+        duplicated onto it by hand, and stays correct if the lower tier's own
+        teams change later. Cycle-guarded even though clean() already blocks
+        creating one, in case of data written outside that path."""
+        team_ids = set(self.teams.values_list("id", flat=True))
+        seen = {self.pk}
+        current = self.inherits_from
+        while current is not None and current.pk not in seen:
+            team_ids.update(current.teams.values_list("id", flat=True))
+            seen.add(current.pk)
+            current = current.inherits_from
+        return team_ids
+
+    @staticmethod
+    def eligible_team_ids_by_level(club) -> dict:
+        """``{level.pk: team_ids}`` for every RefereeLevel in ``club``, each
+        level's own eligible_team_ids() resolved once and shared -- built for
+        a referees list, where many referees typically hold the same one of
+        a club's "handful" of levels (see this model's own docstring); calling
+        eligible_team_ids() once per referee row would repeat the same
+        level's chain walk once per referee holding it, instead of once."""
+        return {level.pk: level.eligible_team_ids() for level in RefereeLevel.objects.filter(club=club).select_related("inherits_from")}
+
+
+class RefereeProfile(UUIDModel):
+    """Marks a member as a club referee: their level (which determines which
+    teams they're eligible for, via RefereeLevel.teams) and how long that
+    qualification is valid. A member-level fact, not a group-level one --
+    managed from the member's own page, unrelated to members.Group (which
+    stays a plain, opaque collection of people with no referee-specific
+    knowledge).
+
+    Club-scoped, and `member` a plain FK rather than OneToOne: Member is
+    global (shared across every club a person belongs to), but a referee
+    qualification is club-specific -- a person can hold independent levels
+    in different clubs, and one club's level/validity must never surface
+    when looking at that same person from another club.
+
+    No level, or an expired/unset validity, both mean "not currently
+    eligible" -- see `is_currently_valid`/`eligible_teams` below, the single
+    definitions every consumer (the event assign panel, the team page, the
+    referees list) reads through, so "eligible" never drifts out of sync.
+    """
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="referee_profiles", verbose_name=_("member"))
+    level = models.ForeignKey(RefereeLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="referees", verbose_name=_("level"))
+    valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the referee is not eligible for assignment until it's extended."))
+    excluded_teams = models.ManyToManyField(
+        Team,
+        related_name="referee_exclusions",
+        blank=True,
+        verbose_name=_("not allowed to referee"),
+        help_text=_("Teams this person must not referee even though their level qualifies them -- subtracted from what the level allows."),
+    )
+
+    class Meta:
+        verbose_name = _("referee profile")
+        verbose_name_plural = _("referee profiles")
+        ordering = ["member__last_name", "member__first_name"]
+
+    def __str__(self):
+        return f"{self.member} (referee)"
+
+    @property
+    def is_currently_valid(self) -> bool:
+        """Whether the validity date itself hasn't passed -- independent of
+        whether a level is even set. Use `is_eligible` for the full gate."""
+        return self.valid_until is not None and self.valid_until >= timezone.localdate()
+
+    @property
+    def is_eligible(self) -> bool:
+        """The full gate consumed everywhere eligibility actually matters: a
+        level is set, and its validity hasn't passed."""
+        return self.level_id is not None and self.is_currently_valid
+
+    def eligible_team_ids(self, level_team_ids=None, *, ignore_validity=False):
+        """The ids of the teams this profile may referee: what the level allows
+        (including whatever it inherits, transitively -- RefereeLevel.eligible_team_ids)
+        minus the teams explicitly marked as not allowed. Empty whenever the profile
+        isn't currently eligible. Pass ``level_team_ids`` when it is already resolved
+        (RefereeLevel.eligible_team_ids_by_level) to skip walking the level's chain.
+        ``ignore_validity`` answers "which teams would they qualify for were the validity
+        still running" -- how the assign dropdowns list lapsed referees as "(expired)"."""
+        if self.level_id is None or not (ignore_validity or self.is_currently_valid):
+            return set()
+        if level_team_ids is None:
+            level_team_ids = self.level.eligible_team_ids()
+        return set(level_team_ids) - {team.pk for team in self.excluded_teams.all()}
+
+    @property
+    def eligible_teams(self):
+        """Teams this profile currently qualifies for -- empty whenever it
+        isn't currently eligible, regardless of what level is set. The level's
+        teams (see RefereeLevel.eligible_team_ids) minus the explicitly excluded
+        ones (``excluded_teams``): the exclusion is the club saying "not this
+        team" even though the level would otherwise allow it."""
+        return Team.objects.filter(id__in=self.eligible_team_ids())
+
+
+class OfficialLevel(UUIDModel):
+    """The match-officials counterpart to RefereeLevel -- same shape, same
+    eligible_team_ids()/inherits_from chaining, same reasoning throughout
+    (see RefereeLevel's own docstring). Deliberately a separate model rather
+    than a "kind" flag on RefereeLevel: a club's official qualification
+    tiers ("Table official", "Scorekeeper") don't share a name/inheritance
+    chain with its referee tiers, and keeping them apart means turning
+    officials off (see the "officials" waffle flag) never has to filter a
+    shared table by kind everywhere it's read."""
+
+    name = models.CharField(_("name"), max_length=255, unique=True)
+    teams = models.ManyToManyField(Team, related_name="official_levels", blank=True, verbose_name=_("qualifies for"), help_text=_("Members holding this level can be assigned as an official for these teams' home games."))
+    inherits_from = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inherited_by",
+        verbose_name=_("inherits from"),
+        help_text=_("An official holding this level is also eligible for everything the linked level covers (and, transitively, whatever that one inherits from)."),
+    )
+
+    class Meta:
+        verbose_name = _("official level")
+        verbose_name_plural = _("official levels")
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        current = self.inherits_from
+        seen = set()
+        while current is not None:
+            if current.pk == self.pk:
+                raise ValidationError({"inherits_from": _("This would create a loop -- a level can't inherit from itself, even indirectly.")})
+            if current.pk in seen:
+                break
+            seen.add(current.pk)
+            current = current.inherits_from
+
+    def eligible_team_ids(self):
+        team_ids = set(self.teams.values_list("id", flat=True))
+        seen = {self.pk}
+        current = self.inherits_from
+        while current is not None and current.pk not in seen:
+            team_ids.update(current.teams.values_list("id", flat=True))
+            seen.add(current.pk)
+            current = current.inherits_from
+        return team_ids
+
+    @staticmethod
+    def eligible_team_ids_by_level(club) -> dict:
+        """The officials counterpart to RefereeLevel.eligible_team_ids_by_level
+        -- see that method's own docstring."""
+        return {level.pk: level.eligible_team_ids() for level in OfficialLevel.objects.filter(club=club).select_related("inherits_from")}
+
+
+class OfficialProfile(UUIDModel):
+    """The match-officials counterpart to RefereeProfile -- same shape, same
+    reasoning: a member-level fact (which level, how long it's valid), not a
+    group-level one, managed from the member's own page. Club-scoped, and
+    `member` a plain FK rather than OneToOne, for the same reason as
+    RefereeProfile: Member is global, an official qualification isn't."""
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="official_profiles", verbose_name=_("member"))
+    level = models.ForeignKey(OfficialLevel, on_delete=models.PROTECT, null=True, blank=True, related_name="officials", verbose_name=_("level"))
+    valid_until = models.DateField(_("valid until"), null=True, blank=True, help_text=_("Once this date has passed, the official is not eligible for assignment until it's extended."))
+
+    class Meta:
+        verbose_name = _("official profile")
+        verbose_name_plural = _("official profiles")
+        ordering = ["member__last_name", "member__first_name"]
+
+    def __str__(self):
+        return f"{self.member} (official)"
+
+    @property
+    def is_currently_valid(self) -> bool:
+        return self.valid_until is not None and self.valid_until >= timezone.localdate()
+
+    @property
+    def is_eligible(self) -> bool:
+        return self.level_id is not None and self.is_currently_valid
+
+    @property
+    def eligible_teams(self):
+        if not self.is_eligible:
+            return Team.objects.none()
+        return Team.objects.filter(id__in=self.level.eligible_team_ids())
+
+
+class StaffAssignment(UUIDModel):
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="staff_assignments", verbose_name=_("team"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="staff_assignments", verbose_name=_("member"))
+    season = models.ForeignKey(Season, on_delete=models.PROTECT, related_name="staff_assignments", verbose_name=_("season"))
+    position = models.ForeignKey(Position, on_delete=models.PROTECT, related_name="staff_assignments", verbose_name=_("position"), limit_choices_to={"staff_position": True})
+
+    class Meta:
+        verbose_name = _("staff assignment")
+        verbose_name_plural = _("staff assignments")
+        ordering = ["team", "member__last_name", "member__first_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["team", "season", "member"], name="unique_staff_member_per_team_per_season"),
+        ]
+
+    def __str__(self):
+        return f"{self.team} - {self.member}"
+
+
+class NumberReservation(UUIDModel):
+    """A manual block on a number within a pool, not tied to any member --
+    e.g. a retired shirt. Permanent until released by staff: unlike organic
+    usage (see teams/services/numbers.py's season window), a reservation
+    doesn't expire on its own after a season or two."""
+
+    pool = models.ForeignKey(NumberPool, on_delete=models.CASCADE, related_name="reservations", verbose_name=_("pool"))
+    number = models.PositiveSmallIntegerField(_("number"))
+    note = models.CharField(_("note"), max_length=255, blank=True, help_text=_('e.g. "Retired -- Jane Doe, #23".'))
+    reserved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="number_reservations", verbose_name=_("reserved by"))
+
+    class Meta:
+        verbose_name = _("number reservation")
+        verbose_name_plural = _("number reservations")
+        ordering = ["pool", "number"]
+        constraints = [
+            models.UniqueConstraint(fields=["pool", "number"], name="unique_number_per_pool_reservation"),
+        ]
+
+    def __str__(self):
+        return f"{self.pool} #{self.number}"
+
+    def clean(self):
+        if self.pool_id and self.number is not None and not (self.pool.min_number <= self.number <= self.pool.max_number):
+            raise ValidationError({"number": _("Must be within the pool's number range.")})
