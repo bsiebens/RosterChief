@@ -6,7 +6,7 @@
 	import type { PushConfigSettings } from '#lib/push.ts';
 	import { fieldError } from '#lib/users.ts';
 
-	let { settings, onsaved }: { settings: PushConfigSettings; onsaved: () => void } = $props();
+	let { settings, onsaved, saved = $bindable(false) }: { settings: PushConfigSettings; onsaved: () => void; saved?: boolean } = $props();
 
 	const NUMBERS: { key: keyof PushConfigSettings; label: string; help?: string }[] = [
 		{ key: 'outbox_max_attempts', label: 'Outbox max attempts', help: 'How often an outbox entry is retried before it is marked failed.' },
@@ -30,7 +30,6 @@
 	let f = $state(untrack(() => fromSettings(settings)));
 	let busy = $state(false);
 	let error = $state('');
-	let saved = $state(false);
 	let fields = $state<Record<string, string>>({});
 
 	async function submit(e: SubmitEvent) {
@@ -75,7 +74,6 @@
 
 <form class="flex flex-col gap-4" onsubmit={submit} novalidate aria-label="Push settings">
 	{#if error}<Alert kind="error">{error}</Alert>{/if}
-	{#if saved}<Alert kind="success">Saved.</Alert>{/if}
 
 	<div class="grid gap-4 lg:grid-cols-3">
 	<fieldset class="card" disabled={busy}>
