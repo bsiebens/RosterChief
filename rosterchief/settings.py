@@ -168,6 +168,7 @@ STATIC_URL = "static/"
 # serves MEDIA_ROOT from the web server or object storage.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
 
 
 # Email

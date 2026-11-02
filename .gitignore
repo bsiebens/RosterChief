@@ -379,3 +379,6 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/django,python,pycharm
 # Frontend apps: SvelteKit keeps its shared code in src/lib (the Python "lib/" rule above would hide it from git and Tailwind)
 !frontend/*/src/lib/
+
+# Private uploads (member photos, ...): never served directly, only through authenticated views
+private_media/

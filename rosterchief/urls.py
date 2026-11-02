@@ -31,6 +31,7 @@ urlpatterns = [
     path('_allauth/', include('allauth.headless.urls')),
     path('api/v1/', api.urls),
     path('api/platform/v1/', platform_api.urls),
+    path('', include('members.urls')),  # private member photos (streamed after a permission check)
 ]
 
 if settings.DEBUG:
