@@ -58,6 +58,19 @@ def subscribe(club, plan: Plan, *, status=Subscription.ACTIVE, trial_ends_at=Non
 
 
 @transaction.atomic
+def convert_trial(club, *, actor=None, reason="") -> Subscription | None:
+    """Turn the club's open TRIAL subscription into an ACTIVE one on the same plan (no entitlement change)."""
+    sub = Subscription.objects.select_related("plan").filter(club=club, ends_at__isnull=True, status=Subscription.TRIAL).first()
+    if sub is None:
+        return None
+    old = _snapshot(sub)
+    sub.status, sub.trial_ends_at = Subscription.ACTIVE, None
+    sub.save(update_fields=["status", "trial_ends_at", "modified"])
+    log("trial_converted", club=club, plan=sub.plan, old=old, new=_snapshot(sub), reason=reason, actor=actor)
+    return sub
+
+
+@transaction.atomic
 def end_subscription(club, *, actor=None, reason="") -> None:
     """End the club's current subscription now. The club then falls back to the default plan."""
     now = timezone.now()
@@ -83,9 +96,7 @@ def set_override(club, code: str, *, enabled=True, limit=None, expires_at=None, 
         raise PlanError(f"Feature '{code}' is on/off and cannot have a limit.")
     existing = FeatureOverride.objects.filter(club=club, feature=feature).first()
     old = _override_snapshot(existing)
-    ov, _ = FeatureOverride.objects.update_or_create(
-        club=club, feature=feature, defaults={"enabled": enabled, "limit": limit, "expires_at": expires_at, "reason": reason}
-    )
+    ov, _ = FeatureOverride.objects.update_or_create(club=club, feature=feature, defaults={"enabled": enabled, "limit": limit, "expires_at": expires_at, "reason": reason})
     log("override_set", club=club, feature=feature, old=old, new=_override_snapshot(ov), reason=reason, actor=actor)
     return ov
 

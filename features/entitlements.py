@@ -23,7 +23,7 @@ class LimitExceeded(Exception):
 class Entitlement:
     enabled: bool = False
     limit: int | None = None  # None = unlimited (only meaningful when enabled)
-    source: str = ""  # where it comes from: "plan", "default_plan" (fallback) or "override"
+    source: str = ""  # where it comes from: "plan", "default_plan" (no usable subscription), "overdue" (downgraded for unpaid billing) or "override"
 
 
 class Entitlements:
@@ -82,20 +82,22 @@ def resolve_entitlements(club, *, now=None, bypass: bool = False) -> Entitlement
     now = now or timezone.now()
     data: dict[str, Entitlement] = {}
 
-    subscription = (
-        Subscription.objects.filter(club=club, starts_at__lte=now)
-        .filter(models.Q(ends_at__isnull=True) | models.Q(ends_at__gt=now))
-        .select_related("plan")
-        .order_by("-starts_at")
-        .first()
-    )
+    # A club with an overdue billing period is downgraded to the default plan (see billing.tasks.downgrade_overdue_clubs).
+    # This replaces the subscription lookup, so it costs no extra query.
+    from billing.models import ClubBilling
+
     plan, source = None, "plan"
-    if subscription is not None and subscription.grants_access(now) and subscription.plan.is_active:
-        plan = subscription.plan
-    else:
-        source = "default_plan"
-        # No usable subscription (never had one, ended, trial over, plan retired): fall back to the default plan.
+    if ClubBilling.objects.filter(club=club, downgraded_at__isnull=False).exists():
+        source = "overdue"
         plan = Plan.objects.filter(code=DEFAULT_PLAN).first()
+    else:
+        subscription = Subscription.objects.filter(club=club, starts_at__lte=now).filter(models.Q(ends_at__isnull=True) | models.Q(ends_at__gt=now)).select_related("plan").order_by("-starts_at").first()
+        if subscription is not None and subscription.grants_access(now) and subscription.plan.is_active:
+            plan = subscription.plan
+        else:
+            source = "default_plan"
+            # No usable subscription (never had one, ended, trial over, plan retired): fall back to the default plan.
+            plan = Plan.objects.filter(code=DEFAULT_PLAN).first()
     if plan is not None:
         for pf in PlanFeature.objects.filter(plan=plan, feature__is_active=True).select_related("feature"):
             data[pf.feature.code] = Entitlement(True, pf.limit, source)

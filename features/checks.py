@@ -7,8 +7,4 @@ def permission_features_exist(app_configs, **kwargs):
 
     from .catalog import CATALOG
 
-    return [
-        Error(f"Permission '{p.code}' references unknown feature '{p.feature}'.", id="features.E001")
-        for p in PERMISSIONS.values()
-        if p.feature and p.feature not in CATALOG
-    ]
+    return [Error(f"Permission '{p.code}' references unknown feature '{p.feature}'.", id="features.E001") for p in PERMISSIONS.values() if p.feature and p.feature not in CATALOG]

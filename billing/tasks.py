@@ -55,9 +55,39 @@ def send_billing_reminders(dry_run: bool = False, force: bool = False) -> str:
     return _finish("send_billing_reminders", done, failures)
 
 
+@shared_task(name="billing.downgrade_overdue_clubs")
+def downgrade_overdue_clubs(dry_run: bool = False) -> str:
+    """Move clubs with an overdue period to the default plan's entitlements, and lift that once nothing is overdue.
+
+    Independent of ``auto_archive``: downgrading is not archiving. Idempotent (``downgraded_at`` is only set once).
+    """
+    done, failures = [], []
+    for club in dues_svc.clubs_to_downgrade():
+        try:
+            if dry_run:
+                done.append(f"would downgrade {club.slug}")
+                continue
+            if dues_svc.downgrade_club(club):
+                audit.record(None, "billing.club_downgraded", club=club, target=club)
+                done.append(f"{club.slug} downgraded")
+        except Exception as e:
+            log.exception("downgrading failed for %s", club.slug)
+            failures.append(f"{club.slug}: {e}")
+    for club in dues_svc.clubs_to_restore():
+        try:
+            if dry_run:
+                done.append(f"would restore {club.slug}")
+            elif dues_svc.restore_if_settled(club):  # audits billing.club_restored_after_payment
+                done.append(f"{club.slug} restored")
+        except Exception as e:
+            log.exception("restoring failed for %s", club.slug)
+            failures.append(f"{club.slug}: {e}")
+    return _finish("downgrade_overdue_clubs", done, failures)
+
+
 @shared_task(name="billing.archive_overdue_clubs")
 def archive_overdue_clubs(dry_run: bool = False) -> str:
-    """Archive active clubs whose period stayed unpaid past its grace (when the club's billing allows it)."""
+    """Archive active clubs that stayed unpaid for ``archive_after_days`` after being downgraded (when billing allows it)."""
     done, failures = [], []
     for club in dues_svc.archivable_clubs():
         try:

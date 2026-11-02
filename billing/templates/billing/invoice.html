@@ -4,32 +4,114 @@
 <meta charset="utf-8">
 <title>Invoice {{ invoice.number }}</title>
 <style>
-  @page { size: A4; margin: 20mm; }
-  body { font-family: sans-serif; font-size: 11pt; color: #111; }
-  h1 { font-size: 20pt; margin: 0 0 4mm; }
-  table { width: 100%; border-collapse: collapse; margin-top: 8mm; }
-  th, td { text-align: left; padding: 2mm 0; border-bottom: 1px solid #ccc; }
-  td.num, th.num { text-align: right; }
-  .meta { margin-top: 4mm; color: #444; }
-  .total td { font-weight: bold; border-bottom: 2px solid #111; }
+  @page { size: A4; margin: 18mm 18mm 20mm; }
+  body { font-family: sans-serif; font-size: 10pt; color: #111; line-height: 1.35; }
+  h1 { font-size: 22pt; margin: 0 0 1mm; letter-spacing: 0.5pt; }
+  .head { width: 100%; border-collapse: collapse; }
+  .head td { vertical-align: top; padding: 0; border: 0; }
+  .head td.right { text-align: right; }
+  .issuer-name { font-size: 12pt; font-weight: bold; }
+  .muted { color: #555; }
+  .label { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #666; margin-bottom: 1mm; }
+  .parties { width: 100%; border-collapse: collapse; margin-top: 10mm; }
+  .parties td { vertical-align: top; padding: 0; width: 50%; }
+  table.lines { width: 100%; border-collapse: collapse; margin-top: 10mm; }
+  table.lines th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #555; padding: 2mm 0; border-bottom: 1.5px solid #111; }
+  table.lines td { padding: 2.2mm 0; border-bottom: 1px solid #ddd; }
+  .num { text-align: right; }
+  table.lines tr.sum td { border-bottom: 0; padding: 1mm 0; }
+  table.lines tr.total td { font-weight: bold; border-top: 1.5px solid #111; padding-top: 2mm; }
+  table.lines tr.balance td { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; padding: 2.5mm 0; }
+  .note { margin-top: 6mm; padding: 3mm 4mm; border: 1px solid #999; background: #f5f5f5; }
+  .pay { margin-top: 9mm; padding: 4mm; border: 1px solid #ccc; page-break-inside: avoid; }
+  .pay table { border-collapse: collapse; }
+  .pay td { padding: 0.6mm 6mm 0.6mm 0; vertical-align: top; }
+  .terms { margin-top: 6mm; white-space: pre-line; }
+  .footer { margin-top: 10mm; padding-top: 3mm; border-top: 1px solid #ccc; font-size: 8.5pt; color: #555; white-space: pre-line; }
 </style>
 </head>
 <body>
-  <h1>Invoice {{ invoice.number }}</h1>
-  <div class="meta">
-    RosterChief &middot; Club &amp; team management<br>
-    Issued {{ invoice.issued_at|date:"Y-m-d" }}
-  </div>
-  <p class="meta">
-    Billed to: <strong>{{ club_name }}</strong>{% if club.legal_address %}<br>{{ club.legal_address }}, {{ club.legal_zip_code }} {{ club.legal_city }}{% endif %}{% if club.vat_id %}<br>VAT {{ club.vat_id }}{% endif %}
-  </p>
-  <table>
-    <thead><tr><th>Description</th><th>Period</th><th class="num">Amount (EUR)</th></tr></thead>
+  <table class="head">
+    <tr>
+      <td>
+        <h1>Invoice</h1>
+        <div class="muted">No. <strong style="color:#111">{{ invoice.number }}</strong></div>
+      </td>
+      <td class="right">
+        <div class="issuer-name">{{ issuer.legal_name|default:"RosterChief" }}</div>
+        {% if issuer.address %}{{ issuer.address }}<br>{% endif %}
+        {% if issuer.zip_code or issuer.city %}{{ issuer.zip_code }} {{ issuer.city }}<br>{% endif %}
+        {% if issuer.country_name %}{{ issuer.country_name }}<br>{% endif %}
+        {% if issuer.vat_id %}VAT {{ issuer.vat_id }}<br>{% endif %}
+        {% if issuer.contact_email %}{{ issuer.contact_email }}<br>{% endif %}
+        {% if issuer.website %}{{ issuer.website }}{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="parties">
+    <tr>
+      <td>
+        <div class="label">Bill to</div>
+        <strong>{{ bill_to.name }}</strong><br>
+        {% if bill_to.address %}{{ bill_to.address }}<br>{% endif %}
+        {% if bill_to.zip_code or bill_to.city %}{{ bill_to.zip_code }} {{ bill_to.city }}<br>{% endif %}
+        {% if bill_to.country_name %}{{ bill_to.country_name }}<br>{% endif %}
+        {% if bill_to.vat_id %}VAT {{ bill_to.vat_id }}{% endif %}
+      </td>
+      <td>
+        <div class="label">Details</div>
+        Invoice date: {{ invoice.issued_at|date:"Y-m-d" }}<br>
+        Due date: <strong>{{ due_date|date:"Y-m-d" }}</strong><br>
+        Reference: {{ invoice.number }}
+      </td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th>Period</th><th class="num">Net (EUR)</th><th class="num">VAT</th><th class="num">Total (EUR)</th></tr>
+    </thead>
     <tbody>
-      <tr><td>{{ line }}</td><td>{{ due.period_start|date:"Y-m-d" }} to {{ due.period_end|date:"Y-m-d" }}</td><td class="num">{{ due.amount }}</td></tr>
-      {% for p in payments %}<tr><td>Payment received {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td></td><td class="num">-{{ p.amount }}</td></tr>{% endfor %}
-      <tr class="total"><td>Balance due</td><td></td><td class="num">{{ balance }}</td></tr>
+      <tr>
+        <td>{{ snap.description }}</td>
+        <td>{{ period_start|date:"Y-m-d" }} to {{ period_end|date:"Y-m-d" }}</td>
+        <td class="num">{{ net }}</td>
+        <td class="num">{% if snap.reverse_charge %}0%{% else %}{{ vat_rate|floatformat:"-2" }}%{% endif %} ({{ vat }})</td>
+        <td class="num">{{ total }}</td>
+      </tr>
+      <tr class="sum"><td colspan="4" class="num">Total excl. VAT</td><td class="num">{{ net }}</td></tr>
+      <tr class="sum"><td colspan="4" class="num">VAT{% if not snap.reverse_charge %} {{ vat_rate|floatformat:"-2" }}%{% endif %}</td><td class="num">{{ vat }}</td></tr>
+      <tr class="sum total"><td colspan="4" class="num">Total incl. VAT</td><td class="num">{{ total }}</td></tr>
+      {% for p in payments %}
+      <tr class="sum"><td colspan="4" class="num muted">Payment received {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td class="num">-{{ p.amount }}</td></tr>
+      {% endfor %}
+      <tr class="balance"><td colspan="4" class="num">Balance due</td><td class="num">EUR {{ balance }}</td></tr>
     </tbody>
   </table>
+
+  {% if snap.reverse_charge %}
+  <div class="note">
+    <strong>VAT reverse charged.</strong> Intra-community supply of services; the customer is liable for VAT.<br>
+    Issuer VAT: {{ issuer.vat_id|default:"-" }} &middot; Customer VAT: {{ bill_to.vat_id|default:"-" }}
+  </div>
+  {% endif %}
+
+  {% if issuer.iban or issuer.bic %}
+  <div class="pay">
+    <div class="label">Payment</div>
+    <table>
+      {% if issuer.legal_name %}<tr><td class="muted">Beneficiary</td><td>{{ issuer.legal_name }}</td></tr>{% endif %}
+      {% if issuer.iban %}<tr><td class="muted">IBAN</td><td><strong>{{ issuer.iban }}</strong></td></tr>{% endif %}
+      {% if issuer.bic %}<tr><td class="muted">BIC</td><td>{{ issuer.bic }}</td></tr>{% endif %}
+      <tr><td class="muted">Amount</td><td>EUR {{ balance }}</td></tr>
+      <tr><td class="muted">Payment reference</td><td><strong>{{ invoice.number }}</strong></td></tr>
+      <tr><td class="muted">Pay before</td><td>{{ due_date|date:"Y-m-d" }}</td></tr>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if issuer.payment_terms %}<div class="terms">{{ issuer.payment_terms }}</div>{% endif %}
+  {% if issuer.invoice_footer %}<div class="footer">{{ issuer.invoice_footer }}</div>{% endif %}
 </body>
 </html>

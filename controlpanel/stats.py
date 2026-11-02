@@ -159,8 +159,8 @@ def _clubs_unbilled(s):
 def _dues_owed(s):
     from billing.services.dues import owing_dues
 
-    agg = owing_dues().aggregate(total=Sum("amount"), paid=Sum("amount_paid"))
-    return str((agg["total"] or Decimal("0")) - (agg["paid"] or Decimal("0")))
+    agg = owing_dues().aggregate(total=Sum("amount"), vat=Sum("vat_amount"), paid=Sum("amount_paid"))
+    return str((agg["total"] or Decimal("0")) + (agg["vat"] or Decimal("0")) - (agg["paid"] or Decimal("0")))
 
 
 @metric("dues_in_grace", "Periods in their grace period", group="attention")
@@ -177,11 +177,25 @@ def _dues_overdue(s):
     return dues_overdue(s.today).count()
 
 
+@metric("clubs_downgraded", "Clubs on the free plan because of unpaid periods", group="attention")
+def _clubs_downgraded(s):
+    from billing.models import ClubBilling
+
+    return ClubBilling.objects.filter(downgraded_at__isnull=False, club__archived_at__isnull=True).count()
+
+
+@metric("lapsed_clubs", "Billed clubs whose last period has ended with no new one", group="attention")
+def _lapsed_clubs(s):
+    from billing.services.dues import lapsed_billings
+
+    return lapsed_billings(s.today).count()
+
+
 @metric("invoices_to_send", "Invoices not sent yet", group="attention")
 def _invoices_to_send(s):
     from billing.models import Invoice
 
-    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0).count()
+    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).count()
 
 
 @metric("renewals_pending", "Renewals waiting to be opened", group="attention")
@@ -369,7 +383,10 @@ def club_stats(club) -> dict:
                 data[key] = fn()
             except Exception:
                 data[key] = None
+    from billing.models import ClubBilling
+
     owing = Due.objects.filter(club=club, status__in=Due.OWING)
+    billing = ClubBilling.objects.filter(club=club).first()
     plan = current_plan(club)
     members = data.get("members") or 0
     return {

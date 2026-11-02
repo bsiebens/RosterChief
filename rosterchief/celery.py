@@ -22,6 +22,7 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     "billing-renew-subscriptions": {"task": "billing.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
     "billing-send-reminders": {"task": "billing.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
+    "billing-downgrade-overdue": {"task": "billing.downgrade_overdue_clubs", "schedule": crontab(hour=5, minute=30)},
     "controlpanel-hello-world": {"task": "controlpanel.hello_world", "schedule": crontab()},  # every minute; dummy, to see the job log work
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

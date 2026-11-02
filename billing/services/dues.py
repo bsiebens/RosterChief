@@ -1,21 +1,27 @@
-"""Billing lifecycle: subscribe or trial -> period (Due) -> payments or waive -> renewal; unpaid past grace archives.
+"""Billing lifecycle: subscribe (optionally with a free trial) -> period (Due) -> payments or waive -> renewal.
+
+Unpaid past grace: the club is first DOWNGRADED to the default plan (``ClubBilling.downgraded_at``), and archived
+``BillingSettings.archive_after_days`` later if it still owes. Paying (or waiving) the last overdue period restores it.
 
 Prices and dates are frozen when a period opens. There is no proration: a plan change mid-period applies from the
-next period. Grace counts from the period start.
+next period. Grace is ``max(period_start, day the period was opened) + grace_days`` (see ``models.grace_until_for``).
+
+Trials are a property of the club, not of a plan: ``subscribe(..., trial_days=N)`` gives the plan's features at once and
+a free period of N days. The first paid period follows the day after, opened and invoiced in advance by the renewal job.
 """
 
 import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-from dateutil.relativedelta import relativedelta
 from django.db import transaction
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from club.services import archive_club, restore_club
 from features import services as feature_services
 from features.models import Plan, Subscription
 
-from ..models import ClubBilling, Due, DuePayment, PlanPrice
+from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanPrice
 from . import BillingError
 from .invoices import issue_invoice
 
@@ -40,6 +46,24 @@ def next_period_start(club) -> datetime.date:
     return last.period_end + datetime.timedelta(days=1) if last else today()
 
 
+def compute_vat(club, net: Decimal, settings: BillingSettings | None = None) -> tuple[Decimal, Decimal, bool]:
+    """``(rate, vat_amount, reverse_charge)`` for ``net``.
+
+    Zero amounts carry no VAT. Reverse charge (rate 0) applies when the club has a VAT id and its legal country is an
+    EU state other than the issuer's (the issuer's country must be set to tell). Otherwise the standard rate applies.
+    """
+    settings = settings or BillingSettings.current()
+    zero = Decimal("0")
+    if net == 0:
+        return zero, zero, False
+    issuer_country = str(settings.country or "")
+    club_country = str(getattr(club, "legal_country", "") or "")
+    if club.vat_id.strip() and issuer_country and club_country in EU_COUNTRIES and club_country != issuer_country:
+        return zero, zero, True
+    rate = Decimal(settings.vat_rate)
+    return rate, (net * rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), False
+
+
 def _terms(plan: Plan):
     try:
         return plan.terms
@@ -48,8 +72,15 @@ def _terms(plan: Plan):
 
 
 @transaction.atomic
-def open_period(club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, actor=None) -> Due:
-    """Open (and invoice) the billing period beginning ``start``. After a trial ends the club converts to its post-trial plan."""
+def open_period(club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None) -> Due:
+    """Open (and invoice) the billing period beginning ``start``.
+
+    ``is_trial`` makes it a free trial period; its ``period_end`` is then passed explicitly (otherwise the plan's
+    ``duration_months`` applies). Opening the first paid period after a trial converts the club's TRIAL subscription to
+    ACTIVE on the same plan. We convert when the period is *opened* (in advance), not when it starts: the plan is the
+    same, so entitlements do not change, and the subscription never has a trial end date that could lapse and drop the
+    club to the default plan before the paid period exists. ``ClubBilling.trial_ends_at`` is cleared at the same time.
+    """
     billing = ClubBilling.objects.filter(club=club).first()
     if billing is None:
         raise BillingError("This club is not being billed yet. Subscribe it to a plan first.")
@@ -57,39 +88,46 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
     plan = plan or current_plan(club)
     if plan is None:
         raise BillingError("This club has no plan.")
-    if billing.trial_ends_at and start > billing.trial_ends_at:
-        plan = billing.post_trial_plan
-        billing.trial_ends_at = billing.post_trial_plan = None
-        billing.save(update_fields=["trial_ends_at", "post_trial_plan", "modified"])
-        feature_services.subscribe(club, plan, actor=actor, reason="Trial ended")
-        is_trial = False
     if Due.objects.filter(club=club, period_start=start).exists():
         raise BillingError(f"A period starting {start} already exists.")
     price = price_on(plan, start)
     if price is None:
         raise BillingError(f"Plan '{plan.code}' has no price on {start}.")
-    due = Due.objects.create(club=club, plan=plan, amount=price.amount, period_start=start, is_trial=is_trial or _terms(plan).is_trial)
-    if due.amount == 0:
-        due.status, due.paid_at = Due.PAID, timezone.now()  # a free or trial period never trips archiving
+    if billing.trial_ends_at and start > billing.trial_ends_at and not is_trial:
+        feature_services.convert_trial(club, actor=actor, reason="Trial ended: first paid period opened")
+        billing.trial_ends_at = None
+        billing.save(update_fields=["trial_ends_at", "modified"])
+    amount = Decimal("0") if is_trial else price.amount
+    rate, vat_amount, reverse_charge = compute_vat(club, amount)
+    due = Due.objects.create(club=club, plan=plan, amount=amount, vat_rate=rate, vat_amount=vat_amount, reverse_charge=reverse_charge, period_start=start, period_end=period_end, is_trial=is_trial)
+    if due.total == 0:
+        due.status, due.paid_at = Due.PAID, timezone.now()  # a free or trial period never trips downgrading or archiving
         due.save(update_fields=["status", "paid_at", "modified"])
     issue_invoice(due)
     return due
 
 
 @transaction.atomic
-def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", actor=None):
+def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None):
     """Bill ``club`` on ``plan``. Returns ``(billing, due)``; ``due`` is None when only the plan changed.
 
     First time: opens the first period. Already billed: just moves the club to the new plan (the current period keeps
     its amount; the new rate applies from the next period). A trial in progress is replaced.
+
+    ``trial_days`` (only for a club that is not billed yet): the first period is a free trial of that many days on
+    ``plan``; the plan's features apply at once and the club simply continues on the same plan afterwards.
     """
     if not plan.is_active:
         raise BillingError("That plan is not active.")
-    if _terms(plan).is_trial:
-        raise BillingError("Use start_trial for a trial plan.")
+    if trial_days is not None:
+        if not 1 <= trial_days <= 365:
+            raise BillingError("A trial lasts 1 to 365 days.")
+        if ClubBilling.objects.filter(club=club).exists():
+            raise BillingError("A trial can only be started for a club that is not being billed yet.")
+        return _start_trial(club, plan, trial_days, start=start or today(), auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, actor=actor)
     billing, created = ClubBilling.objects.get_or_create(club=club)
     billing.auto_renew, billing.auto_archive, billing.notes = auto_renew, auto_archive, notes
-    billing.trial_ends_at = billing.post_trial_plan = None
+    billing.trial_ends_at = None
     billing.save()
     feature_services.subscribe(club, plan, actor=actor, reason="Billing subscription")
     if created or not Due.objects.filter(club=club).exists():
@@ -97,21 +135,13 @@ def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_rene
     return billing, None
 
 
-@transaction.atomic
-def start_trial(club, trial_plan: Plan, post_trial_plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, actor=None):
-    """Start a free trial; the trial's length comes from its plan, and the club converts to ``post_trial_plan`` after it."""
-    if ClubBilling.objects.filter(club=club).exists():
-        raise BillingError("This club is already being billed.")
-    if not _terms(trial_plan).is_trial or not trial_plan.is_active:
-        raise BillingError("The trial plan must be an active trial plan.")
-    if _terms(post_trial_plan).is_trial or not post_trial_plan.is_active:
-        raise BillingError("The plan after the trial must be an active, non-trial plan.")
-    start = start or today()
-    trial_ends_at = start + relativedelta(months=trial_plan.terms.duration_months) - datetime.timedelta(days=1)
-    billing = ClubBilling.objects.create(club=club, auto_renew=auto_renew, auto_archive=auto_archive, trial_ends_at=trial_ends_at, post_trial_plan=post_trial_plan)
-    entitlements_end = timezone.make_aware(datetime.datetime.combine(trial_ends_at + datetime.timedelta(days=1), datetime.time.min))
-    feature_services.subscribe(club, trial_plan, status=Subscription.TRIAL, trial_ends_at=entitlements_end, actor=actor, reason="Trial started")
-    due = open_period(club, start=start, plan=trial_plan, is_trial=True, actor=actor)
+def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_archive, notes, actor):
+    trial_ends_at = start + datetime.timedelta(days=trial_days - 1)
+    billing = ClubBilling.objects.create(club=club, auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, trial_ends_at=trial_ends_at)
+    # Subscription.trial_ends_at stays empty on purpose: a dated TRIAL subscription stops granting access on that date,
+    # which would drop the club to the default plan before its first paid period starts. The billing trial end rules.
+    feature_services.subscribe(club, plan, status=Subscription.TRIAL, actor=actor, reason=f"Trial started ({trial_days} days)")
+    due = open_period(club, start=start, plan=plan, is_trial=True, period_end=trial_ends_at, actor=actor)
     return billing, due
 
 
@@ -119,7 +149,7 @@ def _resettle(due: Due) -> Due:
     """Re-derive amount_paid and status from the payments (never incrementally)."""
     paid = sum((p.amount for p in due.payments.all()), Decimal("0"))
     due.amount_paid = paid
-    if paid >= due.amount:
+    if paid >= due.total:
         due.status = Due.PAID
         due.paid_at = due.paid_at or timezone.now()
     elif paid > 0:
@@ -127,6 +157,7 @@ def _resettle(due: Due) -> Due:
     else:
         due.status, due.paid_at = Due.UNPAID, None
     due.save(update_fields=["amount_paid", "status", "paid_at", "modified"])
+    restore_if_settled(due.club)
     return due
 
 
@@ -137,6 +168,8 @@ def record_payment(due: Due, *, amount: Decimal, method: str = DuePayment.BANK_T
         raise BillingError(f"A {due.status} period cannot take payments.")
     if amount <= 0:
         raise BillingError("The payment must be more than zero.")
+    if amount > due.balance:
+        raise BillingError(f"The payment ({amount}) is more than the open balance ({due.balance}).")
     payment = DuePayment.objects.create(due=due, amount=amount, method=method, reference=reference, paid_at=paid_at or timezone.now(), note=note, recorded_by=user)
     _resettle(due)
     return payment
@@ -158,6 +191,7 @@ def waive(due: Due) -> Due:
         raise BillingError("Only an unpaid period can be waived.")
     due.status = Due.WAIVED
     due.save(update_fields=["status", "modified"])
+    restore_if_settled(due.club)
     return due
 
 
@@ -184,26 +218,112 @@ def dues_overdue(day: datetime.date | None = None):
     return owing_dues().filter(grace_until__lt=day or today())
 
 
-def archivable_clubs(day: datetime.date | None = None):
-    """Active clubs with an overdue period whose billing allows auto-archiving."""
+def archivable_clubs(day: datetime.date | None = None, now: datetime.datetime | None = None):
+    """Active clubs with an overdue period, auto-archive on, downgraded for at least ``archive_after_days`` days."""
     from club.models import Club
 
+    cutoff = (now or timezone.now()) - datetime.timedelta(days=BillingSettings.current().archive_after_days)
     ids = dues_overdue(day).values("club_id")
-    return Club.objects.filter(pk__in=ids, archived_at__isnull=True, billing__auto_archive=True)
+    return Club.objects.filter(pk__in=ids, archived_at__isnull=True, billing__auto_archive=True, billing__downgraded_at__lte=cutoff)
+
+
+def clubs_to_downgrade(day: datetime.date | None = None):
+    """Active billed clubs with an overdue period that are not downgraded yet (independent of ``auto_archive``)."""
+    from club.models import Club
+
+    return Club.objects.filter(pk__in=dues_overdue(day).values("club_id"), archived_at__isnull=True, billing__isnull=False, billing__downgraded_at__isnull=True)
+
+
+def clubs_to_restore(day: datetime.date | None = None):
+    """Downgraded clubs that no longer have an overdue period."""
+    from club.models import Club
+
+    return Club.objects.filter(billing__downgraded_at__isnull=False).exclude(pk__in=dues_overdue(day).values("club_id"))
+
+
+def downgrade_club(club) -> bool:
+    return bool(ClubBilling.objects.filter(club=club, downgraded_at__isnull=True).update(downgraded_at=timezone.now()))
+
+
+def restore_if_settled(club, day: datetime.date | None = None) -> bool:
+    """Lift the downgrade when the club has no overdue period left. Returns whether anything was cleared."""
+    from controlpanel import audit
+
+    if dues_overdue(day).filter(club=club).exists():
+        return False
+    cleared = ClubBilling.objects.filter(club=club, downgraded_at__isnull=False).update(downgraded_at=None)
+    if cleared:
+        audit.record(None, "billing.club_restored_after_payment", club=club, target=club)
+    return bool(cleared)
+
+
+def lapsed_billings(day: datetime.date | None = None):
+    """Billed, active clubs whose last (non-cancelled) period ended before ``day`` with nothing after it."""
+    day = day or today()
+    last_end = Max("club__dues__period_end", filter=~Q(club__dues__status=Due.CANCELLED))
+    return ClubBilling.objects.filter(club__archived_at__isnull=True).annotate(last_end=last_end).filter(last_end__lt=day)
 
 
 def subscriptions_due_for_renewal(day: datetime.date | None = None) -> list:
-    """Billing records whose next period should be opened now (renewal lead reached). Idempotent."""
+    """Billing records whose next period should be opened now. Idempotent.
+
+    auto_renew clubs: once the plan's renewal lead time is reached. Clubs without auto_renew are only picked up once
+    LAPSED (last period ended, nothing after it), so the normal overdue -> downgrade -> archive flow applies to them.
+    """
     day = day or today()
     due = []
-    for billing in ClubBilling.objects.filter(auto_renew=True, club__archived_at__isnull=True).select_related("club"):
+    for billing in ClubBilling.objects.filter(club__archived_at__isnull=True).select_related("club"):
         plan = current_plan(billing.club)
         if plan is None:
             continue
         last = Due.objects.filter(club=billing.club).exclude(status=Due.CANCELLED).order_by("-period_end").first()
-        if last is None or last.period_end <= day + datetime.timedelta(days=_terms(plan).renewal_lead_days):
+        if billing.auto_renew:
+            if last is None or last.period_end <= day + datetime.timedelta(days=_terms(plan).renewal_lead_days):
+                due.append(billing)
+        elif last is not None and last.period_end < day:
             due.append(billing)
     return due
+
+
+def upcoming_renewals(day: datetime.date | None = None) -> list[dict]:
+    """Billed, active clubs: when the next period starts and when that invoice is due to open.
+
+    Includes every auto-renew club, and clubs without auto-renew only once they have ``lapsed``.
+    """
+    day = day or today()
+    rows = []
+    for billing in ClubBilling.objects.filter(club__archived_at__isnull=True).select_related("club"):
+        club = billing.club
+        plan = current_plan(club)
+        if plan is None:
+            continue
+        periods = Due.objects.filter(club=club).exclude(status=Due.CANCELLED)
+        last = periods.order_by("-period_end").first()
+        lapsed = last is not None and last.period_end < day
+        if not billing.auto_renew and not lapsed:
+            continue
+        current = periods.filter(period_start__lte=day).order_by("-period_start").first()
+        if current:
+            next_start = current.period_end + datetime.timedelta(days=1)
+        else:  # only future periods (or none): the first of those is the "next" one
+            first = periods.order_by("period_start").first()
+            next_start = first.period_start if first else day
+        lead = _terms(plan).renewal_lead_days
+        rows.append(
+            {
+                "club": club,
+                "plan": plan,
+                "current_period_end": current.period_end if current else None,
+                "next_period_start": next_start,
+                "invoice_opens_on": next_start - datetime.timedelta(days=lead),
+                "renewal_lead_days": lead,
+                "opened": periods.filter(period_start=next_start).exists(),
+                "trial_ends_at": billing.trial_ends_at,
+                "lapsed": lapsed,
+                "downgraded_at": billing.downgraded_at,
+            }
+        )
+    return sorted(rows, key=lambda r: (r["invoice_opens_on"], r["club"].name))
 
 
 def renew(billing: ClubBilling, *, actor=None) -> Due:

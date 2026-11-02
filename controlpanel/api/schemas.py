@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from ninja import Schema
+from pydantic import Field
 
 
 class MeOut(Schema):
@@ -297,7 +298,7 @@ class EntitlementOut(Schema):
     kind: str
     enabled: bool
     limit: int | None = None
-    source: str  # plan | default_plan | override | none
+    source: str  # plan | default_plan | overdue (downgraded for unpaid billing) | override | none
 
 
 class OverrideIn(Schema):
@@ -474,7 +475,6 @@ class TermsIO(Schema):
     duration_months: int = 12
     renewal_lead_days: int = 30
     grace_days: int = 30
-    is_trial: bool = False
 
 
 class PriceIn(Schema):
@@ -506,7 +506,7 @@ class BillingPlanOut(Schema):
         return BillingPlanOut(
             plan=PlanRef(id=plan.pk, code=plan.code, name=plan.name),
             is_active=plan.is_active,
-            terms=TermsIO(duration_months=t.duration_months, renewal_lead_days=t.renewal_lead_days, grace_days=t.grace_days, is_trial=t.is_trial),
+            terms=TermsIO(duration_months=t.duration_months, renewal_lead_days=t.renewal_lead_days, grace_days=t.grace_days),
             prices=[PriceOut(id=p.pk, active_from=p.active_from, amount=p.amount) for p in plan.prices.all()],
             current_price=price.amount if price else None,
             club_count=Subscription.objects.filter(plan=plan, ends_at__isnull=True, club__billing__isnull=False).count(),
@@ -540,11 +540,77 @@ class InvoiceOut(Schema):
     issued_at: date
     sent_at: datetime | None = None
     sent_method: str = ""
+    custom_number: bool  # True when the number was typed in at issue time instead of coming from the automatic sequence
     needs_sending: bool
+    net: Decimal
+    vat: Decimal
+    total: Decimal
+    vat_rate: Decimal
+    reverse_charge: bool
+    due_date: date
+    has_snapshot: bool  # False for invoices issued before snapshots existed (the PDF then renders from live data)
 
     @staticmethod
     def of(inv) -> InvoiceOut:
-        return InvoiceOut(number=inv.number, issued_at=inv.issued_at, sent_at=inv.sent_at, sent_method=inv.sent_method, needs_sending=inv.needs_sending)
+        snap = inv.snapshot or {}
+        due = inv.due
+        return InvoiceOut(
+            number=inv.number,
+            issued_at=inv.issued_at,
+            sent_at=inv.sent_at,
+            sent_method=inv.sent_method,
+            custom_number=inv.custom_number,
+            needs_sending=inv.needs_sending,
+            net=Decimal(snap.get("net", due.amount)),
+            vat=Decimal(snap.get("vat", due.vat_amount)),
+            total=Decimal(snap.get("total", due.total)),
+            vat_rate=Decimal(snap.get("vat_rate", due.vat_rate)),
+            reverse_charge=snap.get("reverse_charge", due.reverse_charge),
+            due_date=date.fromisoformat(snap["due_date"]) if snap.get("due_date") else due.grace_until,
+            has_snapshot=bool(snap),
+        )
+
+
+class InvoiceIssueIn(Schema):
+    number: str | None = None  # custom number; omit for the automatic INV-YYYY-00001 sequence
+
+
+class IssuerSettingsIO(Schema):
+    """The platform's invoicing identity. ``country`` is an ISO 3166-1 alpha-2 code or empty."""
+
+    legal_name: str = ""
+    address: str = ""
+    zip_code: str = ""
+    city: str = ""
+    country: str = ""
+    vat_id: str = ""
+    iban: str = ""
+    bic: str = ""
+    contact_email: str = ""
+    website: str = ""
+    invoice_footer: str = ""
+    payment_terms: str = ""
+    vat_rate: Decimal = Decimal("21.00")  # percent, 0 = no VAT
+    archive_after_days: int = 30  # unpaid clubs are downgraded first, then archived this many days later (0-365)
+
+    @staticmethod
+    def of(row) -> IssuerSettingsIO:
+        return IssuerSettingsIO(
+            legal_name=row.legal_name,
+            address=row.address,
+            zip_code=row.zip_code,
+            city=row.city,
+            country=str(row.country or ""),
+            vat_id=row.vat_id,
+            iban=row.iban,
+            bic=row.bic,
+            contact_email=row.contact_email,
+            website=row.website,
+            invoice_footer=row.invoice_footer,
+            payment_terms=row.payment_terms,
+            vat_rate=row.vat_rate,
+            archive_after_days=row.archive_after_days,
+        )
 
 
 class ClubRef(Schema):
@@ -553,13 +619,48 @@ class ClubRef(Schema):
     slug: str
 
 
+class CycleOut(Schema):
+    club: ClubRef
+    plan: PlanRef
+    current_period_end: date | None = None
+    next_period_start: date
+    invoice_opens_on: date  # next_period_start minus the plan's renewal lead
+    renewal_lead_days: int
+    opened: bool  # the next period already exists
+    invoice_due_now: bool  # invoice_opens_on has passed and the period is not opened yet
+    trial_ends_at: date | None = None
+    lapsed: bool = False  # the last period ended and nothing follows: opened regardless of auto_renew
+    downgraded_at: datetime | None = None
+
+    @staticmethod
+    def of(row, day) -> CycleOut:
+        club, plan = row["club"], row["plan"]
+        return CycleOut(
+            club=ClubRef(id=club.pk, name=club.name, slug=club.slug),
+            plan=PlanRef(id=plan.pk, code=plan.code, name=plan.name),
+            current_period_end=row["current_period_end"],
+            next_period_start=row["next_period_start"],
+            invoice_opens_on=row["invoice_opens_on"],
+            renewal_lead_days=row["renewal_lead_days"],
+            opened=row["opened"],
+            invoice_due_now=(not row["opened"]) and row["invoice_opens_on"] <= day,
+            trial_ends_at=row["trial_ends_at"],
+            lapsed=row["lapsed"],
+            downgraded_at=row["downgraded_at"],
+        )
+
+
 class DueOut(Schema):
     id: UUID
     club: ClubRef
     plan: PlanRef
-    amount: Decimal
+    amount: Decimal  # NET, excluding VAT
+    vat_rate: Decimal
+    vat_amount: Decimal
+    total: Decimal  # amount + vat_amount (gross); everything is settled against this
+    reverse_charge: bool
     amount_paid: Decimal
-    balance: Decimal
+    balance: Decimal  # total - amount_paid
     period_start: date
     period_end: date
     grace_until: date
@@ -582,6 +683,10 @@ class DueOut(Schema):
             club=ClubRef(id=due.club.pk, name=due.club.name, slug=due.club.slug),
             plan=PlanRef(id=due.plan.pk, code=due.plan.code, name=due.plan.name),
             amount=due.amount,
+            vat_rate=due.vat_rate,
+            vat_amount=due.vat_amount,
+            total=due.total,
+            reverse_charge=due.reverse_charge,
             amount_paid=due.amount_paid,
             balance=due.balance,
             period_start=due.period_start,
@@ -603,7 +708,7 @@ class ClubBillingOut(Schema):
     auto_archive: bool | None = None
     notes: str = ""
     trial_ends_at: date | None = None
-    post_trial_plan: PlanRef | None = None
+    downgraded_at: datetime | None = None  # set while the club is on the default plan because a period is overdue
     owed: Decimal
     dues: list[DueOut]
 
@@ -614,14 +719,7 @@ class SubscribeBillingIn(Schema):
     auto_renew: bool = True
     auto_archive: bool = True
     notes: str = ""
-
-
-class TrialIn(Schema):
-    trial_plan_id: UUID
-    post_trial_plan_id: UUID
-    start: date | None = None
-    auto_renew: bool = True
-    auto_archive: bool = True
+    trial_days: int | None = Field(None, ge=1, le=365)  # free trial of this many days; only for a club that is not billed yet
 
 
 class OpenPeriodIn(Schema):

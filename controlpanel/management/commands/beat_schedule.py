@@ -26,10 +26,7 @@ def _describe(task) -> str:
 
 
 class Command(BaseCommand):
-    help = (
-        "Show the periodic tasks: what the database holds (editable in the admin under 'Periodic tasks') compared with the defaults in "
-        "rosterchief/celery.py. Use --sync NAME to reset an entry's schedule to the code default."
-    )
+    help = "Show the periodic tasks: what the database holds (editable in the admin under 'Periodic tasks') compared with the defaults in rosterchief/celery.py. Use --sync NAME to reset an entry's schedule to the code default."
 
     def add_arguments(self, parser):
         parser.add_argument("--sync", nargs="*", metavar="NAME", help="Reset these code-defined entries (or all, if no name is given) to their default schedule. The on/off switch is kept.")
@@ -50,7 +47,16 @@ class Command(BaseCommand):
                 status = "EDITED in the database (differs from the code default)"
             else:
                 status = "default"
-            rows.append((name, (entry or {}).get("task") or task.task, _describe(task) if task else "-", "-" if task is None else ("on" if task.enabled else "OFF"), task.last_run_at.strftime("%Y-%m-%d %H:%M") if task and task.last_run_at else "never", status))
+            rows.append(
+                (
+                    name,
+                    (entry or {}).get("task") or task.task,
+                    _describe(task) if task else "-",
+                    "-" if task is None else ("on" if task.enabled else "OFF"),
+                    task.last_run_at.strftime("%Y-%m-%d %H:%M") if task and task.last_run_at else "never",
+                    status,
+                )
+            )
         header = ("name", "task", "schedule (m h dom moy dow)", "enabled", "last run", "status")
         widths = [max(len(str(r[i])) for r in [header, *rows]) for i in range(len(header))]
         for r in [header, *rows]:

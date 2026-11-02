@@ -1,7 +1,7 @@
 """Platform billing its clubs (public schema). Entitlements live in ``features``; this adds money on top of
 ``features.Plan`` and ``features.Subscription`` without changing how entitlements resolve.
 
-Currency is EUR; there is no VAT calculation (a club's VAT id is printed on its invoice when set).
+Currency is EUR. Plan prices are NET; VAT (from ``BillingSettings``) is computed when a period opens and frozen on the Due.
 """
 
 import datetime
@@ -10,13 +10,72 @@ from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django_countries.fields import CountryField
 
 from rosterchief.base import UUIDModel
 
 MAX_DAYS_PER_MONTH = 28  # lead and grace may not exceed the period length, measured conservatively
+
+# EU member states (ISO 3166-1 alpha-2), used to decide on intra-community reverse charge.
+EU_COUNTRIES = frozenset("AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split())
+
+
+class BillingSettings(UUIDModel):
+    """The platform's invoicing identity and VAT rate, stored as a single row (public schema)."""
+
+    CACHE_SECONDS = 10
+
+    legal_name = models.CharField(_("legal name"), max_length=255, blank=True)
+    address = models.CharField(_("address"), max_length=255, blank=True)
+    zip_code = models.CharField(_("zip code"), max_length=32, blank=True)
+    city = models.CharField(_("city"), max_length=255, blank=True)
+    country = CountryField(_("country"), blank=True)
+    vat_id = models.CharField(_("VAT ID"), max_length=32, blank=True)
+    iban = models.CharField(_("IBAN"), max_length=42, blank=True)
+    bic = models.CharField(_("BIC"), max_length=11, blank=True)
+    contact_email = models.EmailField(_("contact email"), blank=True)
+    website = models.CharField(_("website"), max_length=255, blank=True)
+    invoice_footer = models.TextField(_("invoice footer"), blank=True)
+    payment_terms = models.TextField(_("payment terms"), blank=True)
+    archive_after_days = models.PositiveSmallIntegerField(
+        _("archive this many days after downgrading"),
+        default=30,
+        validators=[MaxValueValidator(365)],
+        help_text=_("An unpaid club is first moved to the default plan; it is archived this many days later (0 = straight away)."),
+    )
+    vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=Decimal("21.00"), validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))])
+
+    class Meta:
+        verbose_name = _("billing settings")
+        verbose_name_plural = _("billing settings")
+
+    def __str__(self) -> str:
+        return f"Billing settings ({self.legal_name or 'unnamed'})"
+
+    @classmethod
+    def _cache_key(cls) -> str:
+        return "billing:settings"
+
+    @classmethod
+    def current(cls):
+        """The single row (created on first use). Cached briefly; ``save`` refreshes the cache."""
+        from django.core.cache import cache
+
+        row = cache.get(cls._cache_key())
+        if row is None:
+            row = cls.objects.first() or cls.objects.create()
+            cache.set(cls._cache_key(), row, cls.CACHE_SECONDS)
+        return row
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.set(self._cache_key(), self, self.CACHE_SECONDS)
 
 
 class PlanTerms(UUIDModel):
@@ -25,8 +84,7 @@ class PlanTerms(UUIDModel):
     plan = models.OneToOneField("features.Plan", on_delete=models.CASCADE, related_name="terms")
     duration_months = models.PositiveSmallIntegerField(_("period length (months)"), default=12, validators=[MinValueValidator(1)])
     renewal_lead_days = models.PositiveSmallIntegerField(_("invoice this many days before the period starts"), default=30)
-    grace_days = models.PositiveSmallIntegerField(_("grace days, counted from the period start"), default=30)
-    is_trial = models.BooleanField(_("trial plan"), default=False, help_text=_("Trial plans are free and convert to another plan when the trial ends."))
+    grace_days = models.PositiveSmallIntegerField(_("grace days, counted from the period start or from the day it was opened, whichever is later"), default=30)
 
     class Meta:
         verbose_name = _("plan terms")
@@ -67,21 +125,25 @@ class ClubBilling(UUIDModel):
     auto_renew = models.BooleanField(_("auto renew"), default=True)
     auto_archive = models.BooleanField(_("auto archive"), default=True, help_text=_("Archive the club when a period stays unpaid past its grace."))
     notes = models.TextField(_("notes"), blank=True)
-    trial_ends_at = models.DateField(_("trial ends"), null=True, blank=True)
-    post_trial_plan = models.ForeignKey("features.Plan", null=True, blank=True, on_delete=models.PROTECT, related_name="+")
+    trial_ends_at = models.DateField(_("trial ends"), null=True, blank=True, help_text=_("Set while the club's free trial period is running or has not been followed by a paid period yet."))
+    downgraded_at = models.DateTimeField(_("downgraded at"), null=True, blank=True, help_text=_("Set while a period is overdue: the club only gets the default plan's entitlements."))
 
     class Meta:
         verbose_name = _("club billing")
         verbose_name_plural = _("club billing")
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(trial_ends_at__isnull=True, post_trial_plan__isnull=True) | models.Q(trial_ends_at__isnull=False, post_trial_plan__isnull=False),
-                name="trial_fields_set_together",
-            )
-        ]
 
     def __str__(self) -> str:
         return f"Billing of {self.club}"
+
+
+def grace_until_for(period_start: datetime.date, grace_days: int, opened_on: datetime.date | None = None) -> datetime.date:
+    """``max(period_start, opened_on) + grace_days``.
+
+    A period opened ahead of time gets its grace counted from its start (unchanged behaviour). A period opened late (a
+    lapsed club, a backdated start) still gives the club at least ``grace_days`` after the invoice is issued.
+    """
+    opened_on = opened_on or timezone.localdate()
+    return max(period_start, opened_on) + datetime.timedelta(days=grace_days)
 
 
 class Due(UUIDModel):
@@ -93,11 +155,14 @@ class Due(UUIDModel):
 
     club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="dues")
     plan = models.ForeignKey("features.Plan", on_delete=models.PROTECT, related_name="dues")
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, help_text="Net amount, excluding VAT.")
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    vat_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    reverse_charge = models.BooleanField(default=False)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
     period_start = models.DateField()
-    period_end = models.DateField()
-    grace_until = models.DateField()
+    period_end = models.DateField()  # derived from the plan's length on create unless given (trials)
+    grace_until = models.DateField()  # derived on create, see grace_until_for
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=UNPAID)
     paid_at = models.DateTimeField(null=True, blank=True)
     is_trial = models.BooleanField(default=False)
@@ -115,8 +180,13 @@ class Due(UUIDModel):
         return f"{self.club} {self.period_start}..{self.period_end} ({self.status})"
 
     @property
+    def total(self) -> Decimal:
+        """Gross amount owed: net plus VAT. Everything about settling is measured against this."""
+        return self.amount + self.vat_amount
+
+    @property
     def balance(self) -> Decimal:
-        return self.amount - self.amount_paid
+        return self.total - self.amount_paid
 
     @property
     def is_owing(self) -> bool:
@@ -135,8 +205,10 @@ class Due(UUIDModel):
     def save(self, *args, **kwargs):
         if self._state.adding:
             terms = self.plan.terms
-            self.period_end = self.period_start + relativedelta(months=terms.duration_months) - datetime.timedelta(days=1)
-            self.grace_until = self.period_start + datetime.timedelta(days=terms.grace_days)
+            if self.period_end is None:  # a trial passes its own end; otherwise the plan's period length applies
+                self.period_end = self.period_start + relativedelta(months=terms.duration_months) - datetime.timedelta(days=1)
+            if self.grace_until is None:
+                self.grace_until = grace_until_for(self.period_start, terms.grace_days)
         super().save(*args, **kwargs)
 
 
@@ -156,21 +228,37 @@ class DuePayment(UUIDModel):
         ordering = ["paid_at"]
 
 
+class InvoiceSequence(models.Model):
+    """The gapless counter behind automatic ``INV-YYYY-00001`` numbers, one row per year.
+
+    Never derived from existing invoices, so custom numbers cannot skew it. Allocate with ``select_for_update`` inside the
+    transaction that creates the invoice, so a rolled-back invoice does not burn a number.
+    """
+
+    year = models.PositiveSmallIntegerField(unique=True)
+    last_number = models.PositiveIntegerField(default=0)
+
+    def __str__(self) -> str:
+        return f"INV-{self.year}: {self.last_number}"
+
+
 class Invoice(UUIDModel):
-    """Only the number and send tracking are stored; the document is rendered from the Due's frozen values."""
+    """Number, send tracking and a ``snapshot`` of issuer / bill-to / amounts taken at issue time; the PDF renders from it."""
 
     EMAIL, MANUAL = "email", "manual"
 
     due = models.OneToOneField(Due, on_delete=models.CASCADE, related_name="invoice")
-    number = models.CharField(max_length=32, unique=True)
+    number = models.CharField(max_length=32, unique=True, editable=False)
+    custom_number = models.BooleanField(default=False, help_text="Set by hand when issued; automatic numbers come from InvoiceSequence.")
     issued_at = models.DateField()
+    snapshot = models.JSONField(default=dict, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     sent_method = models.CharField(max_length=10, choices=[(EMAIL, "Email"), (MANUAL, "Manual")], blank=True)
     sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     @property
     def needs_sending(self) -> bool:
-        return self.sent_at is None and self.due.amount != 0
+        return self.sent_at is None and self.due.total != 0
 
     def __str__(self) -> str:
         return self.number
