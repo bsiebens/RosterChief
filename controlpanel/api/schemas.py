@@ -426,9 +426,15 @@ class MaintenanceState(SwitchState):
     message: str
 
 
+class PushSandboxState(Schema):
+    is_active: bool
+    expires_at: datetime | None = None
+
+
 class SwitchesOut(Schema):
     maintenance: MaintenanceState
     email_suppression: SwitchState
+    push_sandbox: PushSandboxState
 
 
 class MaintenanceIn(Schema):

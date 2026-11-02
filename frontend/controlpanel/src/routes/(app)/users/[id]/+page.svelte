@@ -6,6 +6,7 @@
 	import ActionDialogs, { type Action } from '#lib/components/users/ActionDialogs.svelte';
 	import ActionsCard from '#lib/components/users/ActionsCard.svelte';
 	import ActivityCard from '#lib/components/users/ActivityCard.svelte';
+	import PushCard from '#lib/components/users/PushCard.svelte';
 	import SecurityCard from '#lib/components/users/SecurityCard.svelte';
 	import SessionsCard from '#lib/components/users/SessionsCard.svelte';
 	import UserClubsCard from '#lib/components/users/UserClubsCard.svelte';
@@ -59,6 +60,8 @@
 		<SessionsCard sessions={user.sessions} />
 	</div>
 </div>
+
+<PushCard userId={acc.id} push={data.push} error={data.pushError} ondone={done} />
 
 <ActivityCard entries={user.recent_activity} userId={acc.id} />
 

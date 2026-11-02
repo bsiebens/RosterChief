@@ -45,6 +45,7 @@ SHARED_APPS = [
     "features",  # plans, subscriptions and per-club feature overrides (public schema only)
     "billing",  # prices, billing periods, payments and invoices on top of features (public schema only)
     "controlpanel",  # platform API, audit log, switches, statistics (public schema only)
+    "notifications",  # push devices, preferences, quiet hours, delivery log and outbox (public schema only)
     "django_celery_beat",  # periodic task schedules (public schema only)
     "django_celery_results",  # task run history (public schema only)
     "tenant_users.tenants",

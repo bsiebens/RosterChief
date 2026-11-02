@@ -24,5 +24,9 @@ app.conf.beat_schedule = {
     "billing-send-reminders": {"task": "billing.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
     "billing-downgrade-overdue": {"task": "billing.downgrade_overdue_clubs", "schedule": crontab(hour=5, minute=30)},
     "controlpanel-hello-world": {"task": "controlpanel.hello_world", "schedule": crontab()},  # every minute; dummy, to see the job log work
+    "notifications-process-outbox": {"task": "notifications.process_outbox", "schedule": crontab()},  # every minute
+    "notifications-retry-deliveries": {"task": "notifications.retry_failed_deliveries", "schedule": crontab()},  # every minute
+    "notifications-check-health": {"task": "notifications.check_push_health", "schedule": crontab(minute="*/5")},
+    "notifications-cleanup": {"task": "notifications.cleanup", "schedule": crontab(hour=3, minute=30)},
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

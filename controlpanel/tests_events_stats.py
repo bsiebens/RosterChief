@@ -8,8 +8,8 @@ from django_tenants.utils import schema_context
 
 from club.services import create_club
 from controlpanel import stats
-from events.models import Event, Season
 from controlpanel.tests import make_user
+from events.models import Event, Season
 
 
 def _stat(overview, label):

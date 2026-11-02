@@ -7,5 +7,6 @@ export const NAV: { key: string; label: string; href: string; superuser?: boolea
 	{ key: 'billing', label: 'billing', href: '/billing' },
 	{ key: 'admins', label: 'admins', href: '/admins', superuser: true },
 	{ key: 'users', label: 'users', href: '/users', superuser: true },
+	{ key: 'push', label: 'push', href: '/push', superuser: true },
 	{ key: 'jobs', label: 'jobs', href: '/jobs' }
 ];

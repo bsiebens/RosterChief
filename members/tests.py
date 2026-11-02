@@ -6,6 +6,7 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.db import connection
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django_tenants.utils import schema_context
@@ -36,6 +37,7 @@ class PrivatePhotoTests(TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+        connection.set_schema_to_public()  # requests through a club domain leave the connection on that club's schema
         cls._mfa.stop()
         cls._override.disable()
         shutil.rmtree(cls._tmp, ignore_errors=True)

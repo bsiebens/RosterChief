@@ -1,11 +1,11 @@
-"""Platform-wide switches: maintenance mode and the automated-email pause."""
+"""Platform-wide switches: maintenance mode, the automated-email pause, and (read-only here) whether the push sandbox is on."""
 
 from ninja import Router
 
 from controlpanel import audit
 from controlpanel.models import EmailSuppression, Maintenance
 
-from ..schemas import EmailSuppressionIn, MaintenanceIn, MaintenanceState, SwitchesOut, SwitchState
+from ..schemas import EmailSuppressionIn, MaintenanceIn, MaintenanceState, PushSandboxState, SwitchesOut, SwitchState
 
 router = Router(tags=["switches"])
 
@@ -15,8 +15,11 @@ def _state(row, cls=SwitchState, **extra):
 
 
 def _all() -> SwitchesOut:
+    from notifications import sandbox
+
     m, e = Maintenance.current(), EmailSuppression.current()
-    return SwitchesOut(maintenance=_state(m, MaintenanceState, message=m.message), email_suppression=_state(e))
+    state = sandbox.get_state()
+    return SwitchesOut(maintenance=_state(m, MaintenanceState, message=m.message), email_suppression=_state(e), push_sandbox=PushSandboxState(is_active=state["effective"], expires_at=state["expires_at"]))
 
 
 @router.get("/switches", response=SwitchesOut, summary="Maintenance mode and the email pause")
