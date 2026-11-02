@@ -1,4 +1,4 @@
-import type { CreditNote, InvoiceBrief, ProrationFields } from './billing.ts';
+import type { CreditNote, InvoiceBrief, ProrationFields, VoidedInvoice } from './billing.ts';
 
 export type SportRef = { id: string; name: string; slug: string };
 export type Sport = SportRef & { club_count: number };
@@ -72,6 +72,7 @@ export type Due = {
 	state: 'overdue' | 'in_grace' | 'issued_ahead' | 'settled';
 	is_trial: boolean;
 	invoice: InvoiceBrief | null;
+	voided_invoices?: VoidedInvoice[];
 } & ProrationFields;
 
 export type ClubBilling = {

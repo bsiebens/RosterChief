@@ -66,6 +66,7 @@
 						{#if due.invoice}
 							<span class="font-mono text-xs">{due.invoice.number}</span>
 							{#if due.invoice.custom_number}<span class="badge badge-ghost badge-xs ml-1">custom</span>{/if}
+							{#if due.voided_invoices?.length}<span class="badge badge-warning badge-xs ml-1" title="Replaces {due.invoice.replaces_number ?? due.voided_invoices[0].number}">reissued</span>{/if}
 							<span class="block text-[11px] {due.invoice.sent_at ? 'text-muted' : due.invoice.needs_sending ? 'text-club-dark' : 'text-muted'}">
 								{due.invoice.sent_at ? 'sent' : due.invoice.needs_sending ? 'not sent' : 'nothing to send'}
 							</span>

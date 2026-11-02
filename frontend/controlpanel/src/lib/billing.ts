@@ -18,7 +18,14 @@ export type InvoiceBrief = {
 	reverse_charge: boolean;
 	due_date: string;
 	has_snapshot: boolean;
+	status: 'active' | 'voided';
+	voided_at: string | null;
+	void_reason: string;
+	replaced_by_number: string | null;
+	replaces_number: string | null;
 };
+
+export type VoidedInvoice = { number: string; voided_at: string; void_reason: string; replaced_by_number: string | null; credit_note_number: string | null };
 
 export type Payment = { id: string; amount: string; method: string; reference: string; paid_at: string; note: string; recorded_by_email?: string | null };
 
@@ -44,10 +51,12 @@ export type Due = {
 	is_trial: boolean;
 	paid_at: string | null;
 	invoice: InvoiceBrief | null;
+	voided_invoices: VoidedInvoice[];
 	payments: Payment[];
 } & ProrationFields;
 
-export type CreditNoteBrief = { number: string; total: string };
+export type CreditNoteKind = 'plan_change' | 'void';
+export type CreditNoteBrief = { number: string; total: string; kind: CreditNoteKind };
 
 /** Set on a period that a plan change shortened and repriced; amount/vat_amount/total/period_end are then the prorated values. */
 export type ProrationFields = {
@@ -74,8 +83,12 @@ export type CreditNote = {
 	vat_rate: string;
 	reverse_charge: boolean;
 	reason: string;
+	kind: CreditNoteKind;
+	replacement_invoice_number: string | null;
 	applied_to: { due_id: string; invoice_number: string | null; amount: string }[];
 };
+
+export type VoidReissueResult = { voided: InvoiceBrief; invoice: InvoiceBrief; credit_note: CreditNote | null };
 
 export type CreditEntry = { id: string; amount: string; kind: 'overpayment' | 'cancelled_period' | 'applied'; note: string; created: string; credit_note_number: string | null; due_id: string | null };
 export type CreditLedger = { balance: string; entries: CreditEntry[] };
@@ -83,6 +96,7 @@ export type CreditLedger = { balance: string; entries: CreditEntry[] };
 type Money3 = { net: string; vat: string; total: string };
 
 export type PlanChangePreview = {
+	invoice_number?: InvoiceNumberEcho;
 	club_id: string;
 	effective_date: string;
 	from_plan: PlanRef | null;
@@ -164,7 +178,24 @@ export type IssuerSettings = {
 	payment_terms: string;
 	vat_rate: string;
 	archive_after_days: number;
+	invoice_number_pattern: string;
+	credit_note_number_pattern: string;
+	/** Always null in a GET; send a positive integer on PUT only to move the counter forward. */
+	invoice_next_sequence?: number | null;
+	credit_note_next_sequence?: number | null;
+	// Read-only (ignored on PUT).
+	invoice_next_number_preview?: string;
+	credit_note_next_number_preview?: string;
+	invoice_current_sequence?: number;
+	credit_note_current_sequence?: number;
+	invoice_counter_resets?: CounterResets;
+	credit_note_counter_resets?: CounterResets;
 };
+
+export type CounterResets = 'yearly' | 'monthly' | 'never';
+export type NumberPatternPreview = { valid: boolean; error: string | null; example: string | null; next: string | null; scope: string | null; scope_label: string | null; resets: CounterResets | null };
+export type NumberingPreview = { invoice: NumberPatternPreview; credit_note: NumberPatternPreview; placeholders: { token: string; meaning: string }[]; literal_characters: string; max_length: number };
+export type InvoiceNumberEcho = { mode: 'custom' | 'automatic'; number: string | null; next_automatic: string | null };
 
 export type BillingPlan = {
 	plan: PlanRef;

@@ -5,7 +5,6 @@
 	import type { ClubBilling, ClubDetail } from '#lib/clubs.ts';
 	import CreditNotePdf from '../billing/credit/CreditNotePdf.svelte';
 	import Modal from '../Modal.svelte';
-	import { money } from '#lib/dashboard.ts';
 	import { dateTime, day, money2 } from '#lib/components/billing/periods/format.ts';
 	import Alert from '../Alert.svelte';
 
@@ -54,25 +53,24 @@
 		{#if !billing || !billing.billed}
 			<p class="text-sm">This club is <strong>not billed</strong>: it uses the platform for free. Billing is started from the <a class="link font-semibold" href="/billing/cycles">billing cycles</a> page.</p>
 		{:else}
-			<div class="flex flex-wrap items-end gap-x-8 gap-y-2">
+			<div class="flex flex-wrap items-start gap-x-8 gap-y-2">
 				<div>
 					<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">billed plan</div>
-					<div class="font-display text-xl leading-none font-extrabold text-ink uppercase">{billing.plan?.name ?? '—'}</div>
+					<div class="flex h-6 items-center font-display text-xl leading-none font-extrabold text-ink uppercase">{billing.plan?.name ?? '—'}</div>
 				</div>
 				<div>
 					<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">owed</div>
-					<div class="font-display text-xl leading-none font-extrabold tabular-nums {Number(billing.owed) ? 'text-club-dark' : 'text-ink'}">{money(billing.owed)}</div>
+					<div class="flex h-6 items-center font-display text-xl leading-none font-extrabold tabular-nums {Number(billing.owed) ? 'text-club-dark' : 'text-ink'}">{money2(billing.owed)}</div>
+				</div>
+				<div>
+					<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase" title="Applied automatically to the next invoices; never refunded by the system.">club credit</div>
+					<div class="flex h-6 items-center gap-2">
+						<span class="font-display text-xl leading-none font-extrabold tabular-nums {Number(billing.credit_balance) > 0 ? 'text-ok-text' : 'text-ink'}">{money2(billing.credit_balance)}</span>
+						<button class="btn btn-outline btn-xs" onclick={openLedger}>Ledger</button>
+					</div>
 				</div>
 			</div>
 
-			<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-				<div>
-					<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">club credit</div>
-					<div class="font-display text-xl leading-none font-extrabold tabular-nums {Number(billing.credit_balance) > 0 ? 'text-ok-text' : 'text-ink'}">{money2(billing.credit_balance)}</div>
-				</div>
-				<button class="btn btn-outline btn-xs" onclick={openLedger}>Ledger</button>
-				<span class="text-xs text-muted">Applied automatically to the next invoices; never refunded by the system.</span>
-			</div>
 
 			{#if billing.trial_ends_at}
 				<p class="text-sm">Trial until <strong>{date(billing.trial_ends_at)}</strong>, then billed automatically.</p>
@@ -119,12 +117,13 @@
 								<span class="font-mono text-xs whitespace-nowrap">{date(due.period_start)} – {date(due.period_end)}{#if due.is_trial}<span class="badge badge-info badge-xs ml-1">trial</span>{/if}{#if due.prorated}<span class="badge badge-warning badge-xs ml-1" title="Shortened by a plan change">prorated</span>{/if}</span>
 								{#if closed}<span class="badge badge-sm badge-ghost">{due.status}</span>
 								{:else if due.status === 'paid'}<span class="badge badge-sm badge-success">{Number(due.total) === 0 ? 'settled · nothing to pay' : 'paid'}</span>
-								{:else}<span class="badge badge-sm {stateTone[due.state]}">{stateLabel[due.state]}</span>{/if}
+								{:else}<span class="badge badge-sm {stateTone[due.state]}">{stateLabel[due.state]}{#if due.state === 'in_grace'} · until {date(due.grace_until)}{/if}</span>{/if}
 							</div>
 							<div class="flex items-center justify-between gap-2 font-mono text-xs">
 								{#if due.invoice}
 									<span class="inline-flex items-center gap-1.5">
 										<a class="link font-semibold" href="/api/platform/v1/billing/dues/{due.id}/invoice.pdf" target="_blank" rel="noopener noreferrer" title="Open the invoice PDF">{due.invoice.number}</a>
+										{#if due.voided_invoices?.length}<span class="badge badge-warning badge-xs" title="Replaces {due.invoice.replaces_number ?? due.voided_invoices[0].number}">reissued</span>{/if}
 										<a class="inline-flex items-center text-dim hover:text-ink" href="/billing?status=all&q={encodeURIComponent(due.invoice.number)}" title="Open this period in Billing" aria-label="Open {due.invoice.number} in Billing"><ExternalLink size={12} aria-hidden="true" /></a>
 									</span>
 								{:else}<span class="text-dim">no invoice</span>{/if}

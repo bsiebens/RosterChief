@@ -10,6 +10,7 @@
 		['unpaid', 'Unpaid periods'],
 		['vat', 'VAT and reverse charge'],
 		['invoices', 'Invoices and numbers'],
+		['correcting', 'Correcting an invoice'],
 		['payments', 'Payments, waiving and reminders'],
 		['glossary', 'Glossary']
 	] as const;
@@ -131,7 +132,7 @@
 			<ul class="list-disc space-y-1 pl-5">
 				<li>The <strong>standard rate</strong> is set on the Invoicing tab (default 21%) and added on top of the plan price: 50.00 + 21% = 60.50 payable.</li>
 				<li><strong>Reverse charge</strong> (0% VAT, noted on the invoice) applies when the club has a VAT number <em>and</em> its legal country is an EU member state different from the issuer's country. It needs the issuer's country on the Invoicing tab; the readiness checklist there warns when it is missing.</li>
-				<li>Free and trial periods carry no VAT.</li>
+				<li>Free and trial periods show the same rate as any other (for example 21%), with a VAT amount of 0.00.</li>
 				<li>The rate and amounts are <strong>frozen on the period</strong> when it opens. Later changes to the rate do not touch existing periods or invoices.</li>
 				<li>Everything that is “owed” or “paid” works on the <strong>total including VAT</strong>.</li>
 			</ul>
@@ -141,11 +142,27 @@
 			<h2 class="card-title">Invoices and numbers</h2>
 			<ul class="list-disc space-y-1 pl-5">
 				<li>An invoice is created automatically when a period opens. It stores a <strong>snapshot</strong> of the issuer details, the club's details and the amounts, so editing settings or the club later never changes an invoice that has been issued. Payments received are shown live.</li>
-				<li><strong>Numbers</strong> are automatic and gapless per year: <span class="font-mono">INV-2026-00001</span>, <span class="font-mono">INV-2026-00002</span>, … A number is only taken when an invoice is successfully created, so failures never leave holes.</li>
-				<li><strong>Custom numbers</strong> exist for invoices issued <em>outside</em> the system: when issuing an invoice by hand for a period that has none, you can give your own number. Custom numbers never touch the automatic sequence, cannot look like <span class="font-mono">INV-YYYY-nnnnn</span> and cannot be changed afterwards. Numbers are never editable once an invoice exists.</li>
-				<li><strong>Credit notes</strong> correct an invoice without editing it (see Switching plans). They have <strong>their own sequence</strong>, <span class="font-mono">CN-2026-00001</span>, <span class="font-mono">CN-2026-00002</span>, …, gapless per year like invoices, and are immutable once issued. They are listed on the Credit notes tab with a PDF each.</li>
+				<li><strong>Numbers</strong> are automatic and gapless, in a <strong>format you set</strong> on the Invoicing tab (a <em>number pattern</em>). Examples: <span class="font-mono">INV-{'{YYYY}'}-{'{NNNNN}'}</span> gives <span class="font-mono">INV-2026-00001</span>; <span class="font-mono">{'{YY}{MM}'}-{'{NNN}'}</span> gives <span class="font-mono">2611-001</span>; <span class="font-mono">FAC/{'{YYYY}'}/{'{NNNN}'}</span> gives <span class="font-mono">FAC/2026/0001</span>. A number is only taken when an invoice is successfully created, so failures never leave holes.</li>
+				<li><strong>Placeholders:</strong> <span class="font-mono">{'{YYYY}'}</span> year (4 digits), <span class="font-mono">{'{YY}'}</span> year (2 digits), <span class="font-mono">{'{MM}'}</span> month, and exactly one sequence placeholder: <span class="font-mono">{'{N}'}</span> without padding or <span class="font-mono">{'{NNNNN}'}</span> padded with zeros to the number of N's. Besides placeholders you can use letters, digits, spaces and <span class="font-mono">/ - _ . #</span>.</li>
+				<li><strong>The counter restarts</strong> with the finest date placeholder in the pattern: every month with <span class="font-mono">{'{MM}'}</span>, every year with <span class="font-mono">{'{YYYY}'}</span> or <span class="font-mono">{'{YY}'}</span>, never without a date. The counter is independent of the pattern text: changing the pattern keeps counting, so numbers are never repeated or skipped. A new pattern only applies to invoices created after saving; existing invoices keep their numbers.</li>
+				<li><strong>Set next number:</strong> on the Invoicing tab you can move the counter forward, for example when you take over from another system. It can never go back.</li>
+				<li><strong>Custom numbers</strong> are only for numbers that must follow another system, and only when a person acts by hand: when starting billing, opening the next period now, changing a billed club's plan, issuing an invoice created outside the system, or voiding and reissuing. Renewals are always automatic. A custom number never touches the automatic counter, cannot look like the automatic format, must be unique (voided invoices count) and can never be edited afterwards. To fix a wrong invoice, <a class="link" href="#correcting">void and reissue</a> it.</li>
+				<li><strong>Credit notes</strong> correct an invoice without editing it (see Switching plans). They have <strong>their own number pattern and counter</strong> (default <span class="font-mono">CN-2026-00001</span>), always automatic, and are immutable once issued. They are listed on the Credit notes tab with a PDF each.</li>
 				<li><strong>Sending:</strong> “Send by email” mails the PDF to the club's administrators. “Mark as sent” records that you sent it yourself.</li>
 				<li>The PDF shows the issuer, the club, net / VAT / total, the due date, and payment details with the invoice number as the payment reference.</li>
+			</ul>
+		</div></section>
+
+		<section id="correcting" class="card scroll-mt-4"><div class="card-body gap-3">
+			<h2 class="card-title">Correcting an invoice</h2>
+			<p>An invoice is never edited. When it contains a mistake (a wrong address, a wrong VAT number), a superuser uses <strong>Void &amp; reissue</strong> in the period's details on the Periods tab, with a required reason.</p>
+			<ul class="list-disc space-y-1 pl-5">
+				<li><strong>What happens:</strong> the invoice is marked <em>VOID</em> and keeps its number forever; a <strong>credit note for the full amount</strong> is issued (an invoice of 0.00 is voided without one); and a <strong>replacement invoice</strong> for the same period is issued with the next automatic number. Numbers are never reused or edited, so the paper trail stays complete. The voided PDF stays available and names its replacement.</li>
+				<li><strong>Documents only:</strong> the credit note is a document. Payments, the period's amounts, its balance and the club's credit do not change, and the credit note creates no club credit.</li>
+				<li><strong>Send it again:</strong> the replacement counts as not sent. Email it or mark it as sent, like any other invoice.</li>
+				<li><strong>Not available</strong> when the invoice already has credit notes (for example after a plan change; that credit note already documents the adjustment) or when the period was cancelled.</li>
+				<li><strong>Custom number:</strong> only use it when the replacement must follow the numbering of an external system. It cannot look like the automatic format, must be unique and cannot be changed afterwards. Otherwise leave it on automatic.</li>
+				<li>Voiding again voids the replacement too, so check the invoice before confirming. Voided invoices are listed on the period and are found by searching their number.</li>
 			</ul>
 		</div></section>
 
@@ -179,6 +196,10 @@
 							['Club credit', 'Money the club has paid or been credited that is not yet used. Applied automatically to new invoices, carried forward, never refunded by the system.'],
 							['Prorated', 'A period that was shortened by a plan change and priced by the days actually used.'],
 							['Cancelled period', 'An advance-invoiced period dropped by a plan change. Its invoice is kept and credited in full; nothing is owed for it.'],
+							['Voided invoice', 'An invoice that was replaced because it was wrong. It keeps its number and PDF (marked VOID) and is never reused.'],
+							['Void and reissue', 'The correction action: voids the invoice, issues a full credit note (documents only) and a replacement invoice for the same period. Payments and balances do not change.'],
+							['Number pattern', 'The format of automatic invoice or credit note numbers, with placeholders such as {YYYY} and {NNNNN}. Set on the Invoicing tab.'],
+							['Counter', 'The running sequence behind automatic numbers. It restarts every year, every month or never, depending on the date placeholders in the pattern, and only moves forward.'],
 							['Snapshot', 'The frozen copy of issuer, club and amounts stored on an invoice when it is issued.']
 						] as [term, meaning] (term)}
 							<tr><td class="w-48 align-top font-semibold text-ink">{term}</td><td>{meaning}</td></tr>
