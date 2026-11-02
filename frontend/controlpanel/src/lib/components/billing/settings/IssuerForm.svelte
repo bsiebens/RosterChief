@@ -4,6 +4,7 @@
 	import type { IssuerSettings } from '#lib/billing.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
+	import NumberingCards from './NumberingCards.svelte';
 
 	type Country = { code: string; name: string };
 	let { settings, countries, canEdit, onsaved }: { settings: IssuerSettings; countries: Country[]; canEdit: boolean; onsaved: (s: IssuerSettings) => void } = $props();
@@ -12,6 +13,8 @@
 	const blank = (s: IssuerSettings) => ({ ...s });
 	let f = $state<IssuerSettings>(untrack(() => blank(settings)));
 	let archiveDays = $state(String(untrack(() => settings.archive_after_days)));
+	let invoiceNext = $state('');
+	let creditNext = $state('');
 	let busy = $state(false);
 	let error = $state('');
 	let saved = $state(false);
@@ -32,14 +35,36 @@
 			fields.archive_after_days = 'Enter a whole number of days between 0 and 365.';
 			return;
 		}
+		const seqOf = (v: string, key: string) => {
+			const t = String(v ?? '').trim();
+			if (!t) return null;
+			if (!/^\d+$/.test(t) || Number(t) < 1) {
+				fields[key] = 'Enter a positive whole number.';
+				return undefined;
+			}
+			return Number(t);
+		};
+		const invSeq = seqOf(invoiceNext, 'invoice_next_sequence');
+		const cnSeq = seqOf(creditNext, 'credit_note_next_sequence');
+		if (invSeq === undefined || cnSeq === undefined) return;
 		busy = true;
-		const r = await platform<IssuerSettings>('PUT', '/billing/settings', { ...f, vat_rate: rate, archive_after_days: Number(days) });
+		// Full replacement: the patterns must always be sent, or they would reset to the defaults.
+		const r = await platform<IssuerSettings>('PUT', '/billing/settings', {
+			...f,
+			vat_rate: rate,
+			archive_after_days: Number(days),
+			invoice_number_pattern: f.invoice_number_pattern,
+			credit_note_number_pattern: f.credit_note_number_pattern,
+			invoice_next_sequence: invSeq,
+			credit_note_next_sequence: cnSeq
+		});
 		busy = false;
 		if (!r.ok) {
 			fields = r.fields;
 			return (error = r.message ?? 'The settings could not be saved.');
 		}
 		archiveDays = String(r.data!.archive_after_days);
+		invoiceNext = creditNext = '';
 		f = blank(r.data!); // the server normalises (IBAN without spaces, upper case, 2-decimal rate)
 		onsaved(r.data!);
 		saved = true;
@@ -97,23 +122,27 @@
 		</div>
 	</fieldset>
 
-	<fieldset class="card" disabled={!canEdit || busy}>
-		<div class="card-body gap-3">
-			<legend class="card-title float-left w-full">VAT</legend>
-			<div class="max-w-xs">
-				<Field label="VAT rate (%)" bind:value={f.vat_rate} error={fields.vat_rate} mono inputmode="decimal" help="Between 0 and 100, up to two decimals. 0 means no VAT." />
+	<div class="grid items-stretch gap-4 md:grid-cols-2">
+		<fieldset class="card min-w-0" disabled={!canEdit || busy}>
+			<div class="card-body gap-3">
+				<legend class="card-title float-left w-full">VAT</legend>
+				<div>
+					<Field label="VAT rate (%)" bind:value={f.vat_rate} error={fields.vat_rate} mono inputmode="decimal" help="Between 0 and 100, up to two decimals. 0 means no VAT." />
+				</div>
 			</div>
-		</div>
-	</fieldset>
+		</fieldset>
 
-	<fieldset class="card" disabled={!canEdit || busy}>
-		<div class="card-body gap-3">
-			<legend class="card-title float-left w-full">Overdue clubs</legend>
-			<div class="max-w-xs">
-				<Field label="Days between downgrade and archive" type="number" bind:value={archiveDays} error={fields.archive_after_days} mono inputmode="numeric" help="An unpaid club is first moved to the free plan. It is archived this many days later (0 = immediately), only if the club has auto-archive on." />
+		<fieldset class="card min-w-0" disabled={!canEdit || busy}>
+			<div class="card-body gap-3">
+				<legend class="card-title float-left w-full">Overdue clubs</legend>
+				<div>
+					<Field label="Days between downgrade and archive" type="number" bind:value={archiveDays} error={fields.archive_after_days} mono inputmode="numeric" help="An unpaid club is first moved to the free plan. It is archived this many days later (0 = immediately), only if the club has auto-archive on." />
+				</div>
 			</div>
-		</div>
-	</fieldset>
+		</fieldset>
+	</div>
+
+	<NumberingCards current={f} bind:invoicePattern={f.invoice_number_pattern} bind:creditPattern={f.credit_note_number_pattern} bind:invoiceNext bind:creditNext {fields} {canEdit} />
 
 	{#if canEdit}
 		<div class="flex justify-end"><button type="submit" class="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button></div>

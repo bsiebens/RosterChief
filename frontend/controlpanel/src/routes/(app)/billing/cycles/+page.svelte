@@ -60,5 +60,5 @@
 	{/if}
 </section>
 
-<OpenPeriodDialog bind:cycle={opening} ondone={done} />
-<StartBillingDialog bind:target={starting} plans={data.plans} archiveAfterDays={data.archiveAfterDays} ondone={done} />
+<OpenPeriodDialog bind:cycle={opening} nextNumber={data.nextNumber} ondone={done} />
+<StartBillingDialog bind:target={starting} plans={data.plans} archiveAfterDays={data.archiveAfterDays} nextNumber={data.nextNumber} ondone={done} />

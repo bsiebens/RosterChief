@@ -6,6 +6,7 @@
 	import type { PlanChangePreview, PlanChangeResult } from '#lib/billing.ts';
 	import type { ClubBilling, ClubDetail, Plan } from '#lib/clubs.ts';
 	import { day, money2, todayLocal, vatPct } from '#lib/components/billing/periods/format.ts';
+	import InvoiceNumberField from '#lib/components/billing/InvoiceNumberField.svelte';
 	import Alert from '../Alert.svelte';
 	import Field from '../Field.svelte';
 	import Modal from '../Modal.svelte';
@@ -37,6 +38,8 @@
 	let loading = $state(false);
 	let previewError = $state('');
 	let previewFields = $state<Record<string, string>>({});
+	let invoiceNumber = $state<string | null>(null);
+	let numberError = $state('');
 	let submitError = $state('');
 	let busy = $state(false);
 	let key = '';
@@ -50,7 +53,8 @@
 			planId = choices[0]?.id ?? '';
 			effective = today;
 			preview = null;
-			previewError = submitError = '';
+			previewError = submitError = numberError = '';
+			invoiceNumber = null;
 			previewFields = {};
 			key = crypto.randomUUID();
 		});
@@ -60,6 +64,7 @@
 	$effect(() => {
 		const id = planId;
 		const date = effective;
+		const num = invoiceNumber;
 		if (!open || !isSuperuser || !id || !date) return;
 		clearTimeout(timer);
 		const mine = ++seq;
@@ -69,12 +74,12 @@
 			previewFields = {};
 		});
 		timer = setTimeout(async () => {
-			const r = await platform<PlanChangePreview>('POST', `/clubs/${club.id}/billing/change-plan/preview`, { plan_id: id, effective_date: date });
+			const r = await platform<PlanChangePreview>('POST', `/clubs/${club.id}/billing/change-plan/preview`, { plan_id: id, effective_date: date, invoice_number: num });
 			if (mine !== seq) return;
 			loading = false;
 			if (r.ok && r.data) preview = r.data;
 			else {
-				preview = null;
+				if (!num || !(r.fields.invoice_number || r.status === 409)) preview = null;
 				previewError = r.message ?? 'The preview could not be calculated.';
 				previewFields = r.fields;
 			}
@@ -86,17 +91,22 @@
 	$effect(() => {
 		void planId;
 		void effective;
-		untrack(() => (key = crypto.randomUUID()));
+		void invoiceNumber;
+		untrack(() => {
+			key = crypto.randomUUID();
+			numberError = '';
+		});
 	});
 
 	async function confirm() {
 		if (!preview) return;
 		busy = true;
 		submitError = '';
-		const r = await platform<PlanChangeResult>('POST', `/clubs/${club.id}/billing/change-plan`, { plan_id: planId, effective_date: effective }, fetch, { 'Idempotency-Key': key });
+		const r = await platform<PlanChangeResult>('POST', `/clubs/${club.id}/billing/change-plan`, { plan_id: planId, effective_date: effective, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		if (!r.ok || !r.data) {
 			if (r.status !== 0) key = crypto.randomUUID();
+			if (r.fields.invoice_number || (r.status === 409 && invoiceNumber)) return (numberError = r.fields.invoice_number ?? r.message ?? '');
 			submitError = r.message ?? 'The plan could not be changed.';
 			return;
 		}
@@ -127,7 +137,11 @@
 			<Field label="Switch date" type="date" max={today} min={minDate} bind:value={effective} disabled={!isSuperuser} error={previewFields.effective_date} help="Defaults to today. You can back-date within the current period; features change immediately either way." />
 		</div>
 
-		{#if previewError && !previewFields.effective_date}<Alert kind="error">{previewError}</Alert>{/if}
+		{#if previewError && !previewFields.effective_date && !previewFields.invoice_number}<Alert kind="error">{previewError}</Alert>{/if}
+
+		{#if isSuperuser}
+			<InvoiceNumberField bind:value={invoiceNumber} nextAutomatic={preview?.invoice_number?.next_automatic ?? null} error={numberError || previewFields.invoice_number || (previewError && invoiceNumber && !previewFields.effective_date ? previewError : '')} />
+		{/if}
 
 		{#if isSuperuser && preview}
 			{@const p = preview}
@@ -192,6 +206,7 @@
 						<dt class="text-muted">Total</dt><dd class="font-mono font-semibold tabular-nums">{money2(p.new_period.total)}</dd>
 						<dt class="text-muted">Grace until</dt><dd>{day(p.new_period.grace_until)}</dd>
 						<dt class="text-muted">Invoice</dt><dd>issued immediately</dd>
+						{#if p.invoice_number}<dt class="text-muted">Invoice number</dt><dd class="font-mono text-xs">{#if p.invoice_number.mode === 'custom'}custom {p.invoice_number.number}{:else}automatic{p.invoice_number.next_automatic ? ` (next: ${p.invoice_number.next_automatic})` : ''}{/if}</dd>{/if}
 					</dl>
 				</section>
 

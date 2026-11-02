@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { platform } from '#lib/api.ts';
 	import Alert from '#lib/components/Alert.svelte';
+	import InvoiceNumberField from '#lib/components/billing/InvoiceNumberField.svelte';
 	import { day, newKey, price } from './fmt.ts';
 	import type { PlanLite, Unbilled } from './types.ts';
 
-	let { club, plans, archiveAfterDays, onclose, ondone }: { club: Unbilled; plans: PlanLite[]; archiveAfterDays: number; onclose: () => void; ondone: (message: string) => void } = $props();
+	let { club, plans, archiveAfterDays, nextNumber = null, onclose, ondone }: { club: Unbilled; plans: PlanLite[]; archiveAfterDays: number; nextNumber?: string | null; onclose: () => void; ondone: (message: string) => void } = $props();
 
 	const active = $derived(plans.filter((p) => p.is_active));
 	const id = $props.id();
@@ -17,6 +18,7 @@
 	let autoRenew = $state(true);
 	let autoArchive = $state(true);
 	let notes = $state('');
+	let invoiceNumber = $state<string | null>(null);
 	let busy = $state(false);
 	let error = $state('');
 	let fields = $state<Record<string, string>>({});
@@ -44,10 +46,11 @@
 		if (!planId) return (fields = { plan_id: 'Choose a plan.' });
 		if (trial && (!whole(trialDays) || Number(trialDays) < 1 || Number(trialDays) > 365)) return (fields = { trial_days: 'Enter a whole number of days between 1 and 365.' });
 		busy = true;
-		const r = await platform('POST', `/clubs/${club.id}/billing/subscribe`, { plan_id: planId, start: start || null, trial_days: trial ? Number(trialDays) : null, auto_renew: autoRenew, auto_archive: autoArchive, notes }, fetch, { 'Idempotency-Key': key });
+		const r = await platform('POST', `/clubs/${club.id}/billing/subscribe`, { plan_id: planId, start: start || null, trial_days: trial ? Number(trialDays) : null, auto_renew: autoRenew, auto_archive: autoArchive, notes, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		if (!r.ok) {
 			fields = r.fields;
+			if (r.status === 409 && invoiceNumber && !fields.invoice_number) return (fields = { ...fields, invoice_number: r.message ?? 'That invoice number is already in use.' });
 			return (error = r.message ?? 'Billing could not be started.');
 		}
 		onclose();
@@ -99,6 +102,8 @@
 			<span class="label-text-alt mt-1 block pl-8">When a period stays unpaid past its grace the club is first moved to the free plan, and archived {archiveAfterDays} days later.</span>
 		</div>
 	</div>
+
+	<InvoiceNumberField bind:value={invoiceNumber} nextAutomatic={nextNumber} error={fields.invoice_number} extra={trial ? 'For a trial the number goes on the trial’s zero invoice.' : ''} />
 
 	<div class="form-control">
 		<label class="label" for="{id}-notes"><span class="label-text">Notes</span></label>

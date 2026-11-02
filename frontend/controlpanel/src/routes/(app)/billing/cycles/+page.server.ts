@@ -9,7 +9,7 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 		platform<Cycle[]>('GET', '/billing/cycles', undefined, fetch),
 		platform<Unbilled[]>('GET', '/billing/unbilled', undefined, fetch),
 		platform<PlanLite[]>('GET', '/billing/plans', undefined, fetch),
-		platform<{ archive_after_days: number }>('GET', '/billing/settings', undefined, fetch)
+		platform<{ archive_after_days: number; invoice_next_number_preview?: string }>('GET', '/billing/settings', undefined, fetch)
 	]);
 	return {
 		cycles: cycles.data ?? [],
@@ -17,6 +17,7 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 		unbilled: unbilled.data ?? [],
 		unbilledError: unbilled.ok ? '' : (unbilled.message ?? 'The unbilled clubs could not be loaded.'),
 		plans: plans.data ?? [],
-		archiveAfterDays: settings.data?.archive_after_days ?? 30
+		archiveAfterDays: settings.data?.archive_after_days ?? 30,
+		nextNumber: settings.data?.invoice_next_number_preview ?? null
 	};
 };

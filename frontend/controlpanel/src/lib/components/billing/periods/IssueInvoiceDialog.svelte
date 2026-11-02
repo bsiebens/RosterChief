@@ -36,13 +36,13 @@
 <Modal bind:open title="Issue invoice" {onclose}>
 	<form class="flex flex-col gap-3" onsubmit={submit}>
 		<p class="text-sm">
-			Issue the invoice for <strong>{due.club.name}</strong>, {day(due.period_start)} – {day(due.period_end)} ({money2(due.total)} incl. VAT). By default it gets the next number of the automatic sequence (INV-YYYY-00001).
+			Issue the invoice for <strong>{due.club.name}</strong>, {day(due.period_start)} – {day(due.period_end)} ({money2(due.total)} incl. VAT). By default it gets the next number of the automatic sequence (format set on the Invoicing tab).
 		</p>
 		<label class="flex cursor-pointer items-center gap-2 text-sm">
 			<input type="checkbox" class="checkbox" bind:checked={custom} /> Use a custom number (for an invoice issued outside the system)
 		</label>
 		{#if custom}
-			<Field label="Custom invoice number" mono required maxlength={32} bind:value={number} error={fieldError} help="1–32 characters, unique. It must not look like INV-YYYY-nnnnn." />
+			<Field label="Custom invoice number" mono required maxlength={32} bind:value={number} error={fieldError} help="1–32 characters, unique. It must not look like the automatic format set on the Invoicing tab." />
 		{/if}
 		<Alert kind="warning" title="Numbers are permanent">
 			An invoice number can never be changed once created. Custom numbers never affect the automatic sequence, which stays gapless.
