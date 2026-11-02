@@ -6,13 +6,12 @@ changing how entitlements are resolved.
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from rosterchief.base import UUIDModel
-
-from django.core.exceptions import ValidationError
 
 from .catalog import FLAG, LIMIT, duplicate_limit_scopes
 
@@ -40,7 +39,7 @@ class Plan(UUIDModel):
     name = models.CharField(_("name"), max_length=100)
     description = models.TextField(_("description"), blank=True)
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive plans cannot be chosen for new subscriptions."))
-    features = models.ManyToManyField(Feature, through="PlanFeature", related_name="plans")
+    features = models.ManyToManyField(Feature, verbose_name=_("features"), through="PlanFeature", related_name="plans")
 
     class Meta:
         verbose_name = _("plan")
@@ -52,8 +51,8 @@ class Plan(UUIDModel):
 
 
 class PlanFeature(UUIDModel):
-    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="plan_features")
-    feature = models.ForeignKey(Feature, on_delete=models.PROTECT, related_name="plan_features")
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), on_delete=models.CASCADE, related_name="plan_features")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), on_delete=models.PROTECT, related_name="plan_features")
     limit = models.PositiveIntegerField(_("limit"), null=True, blank=True, help_text=_("Only for limit features. Empty = unlimited."))
 
     class Meta:
@@ -78,8 +77,8 @@ class Subscription(UUIDModel):
     TRIAL, ACTIVE, PAST_DUE, CANCELED = "trial", "active", "past_due", "canceled"
     STATUS_CHOICES = [(TRIAL, _("Trial")), (ACTIVE, _("Active")), (PAST_DUE, _("Past due")), (CANCELED, _("Canceled"))]
 
-    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="subscriptions")
-    plan = models.ForeignKey(Plan, on_delete=models.PROTECT, related_name="subscriptions")
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="subscriptions")
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), on_delete=models.PROTECT, related_name="subscriptions")
     status = models.CharField(_("status"), max_length=10, choices=STATUS_CHOICES, default=ACTIVE)
     starts_at = models.DateTimeField(_("starts at"), default=timezone.now)
     ends_at = models.DateTimeField(_("ends at"), null=True, blank=True, help_text=_("Access stops at this moment. Empty = no end."))
@@ -107,8 +106,8 @@ class Subscription(UUIDModel):
 class FeatureOverride(UUIDModel):
     """Platform exception for one club: grant or revoke a feature, optionally with a different limit and an expiry."""
 
-    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="feature_overrides")
-    feature = models.ForeignKey(Feature, on_delete=models.PROTECT, related_name="overrides")
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="feature_overrides")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), on_delete=models.PROTECT, related_name="overrides")
     enabled = models.BooleanField(_("enabled"), default=True, help_text=_("Untick to revoke a feature the plan would give."))
     limit = models.PositiveIntegerField(_("limit"), null=True, blank=True, help_text=_("Only for limit features. Empty = unlimited."))
     expires_at = models.DateTimeField(_("expires at"), null=True, blank=True)
@@ -129,14 +128,14 @@ class FeatureOverride(UUIDModel):
 class EntitlementLog(UUIDModel):
     """Append-only audit trail of every change to plans, subscriptions and overrides."""
 
-    club = models.ForeignKey(settings.TENANT_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name="entitlement_log")
-    plan = models.ForeignKey(Plan, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
-    feature = models.ForeignKey(Feature, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), null=True, blank=True, on_delete=models.CASCADE, related_name="entitlement_log")
+    plan = models.ForeignKey(Plan, verbose_name=_("plan"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feature = models.ForeignKey(Feature, verbose_name=_("feature"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     action = models.CharField(_("action"), max_length=40)
     old = models.JSONField(_("old"), null=True, blank=True)
     new = models.JSONField(_("new"), null=True, blank=True)
     reason = models.CharField(_("reason"), max_length=255, blank=True)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("actor"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     class Meta:
         verbose_name = _("entitlement log entry")

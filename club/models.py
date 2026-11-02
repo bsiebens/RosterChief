@@ -25,8 +25,8 @@ class User(UserProfile):
     """Platform user (public schema). Email is the username."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    first_name = models.CharField(max_length=75)
-    last_name = models.CharField(max_length=75)
+    first_name = models.CharField(_("first name"), max_length=75)
+    last_name = models.CharField(_("last name"), max_length=75)
 
     def __str__(self) -> str:
         return self.email
@@ -41,10 +41,10 @@ class Club(TenantBase):
     """A club is a tenant. TenantBase provides owner, slug, created and modified."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=100)
+    name = models.CharField(_("name"), max_length=100)
     slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"])
 
-    sport = models.ForeignKey("club.Sport", null=True, on_delete=models.PROTECT, related_name="clubs")
+    sport = models.ForeignKey("club.Sport", verbose_name=_("sport"), null=True, on_delete=models.PROTECT, related_name="clubs")
 
     archived_at = models.DateTimeField(_("archived at"), null=True, blank=True, db_index=True, help_text=_("Set while the club is archived: its subdomain stops resolving but all data is kept."))
 
@@ -190,7 +190,7 @@ class RefereeType(UUIDModel):
     REFEREE, OFFICIAL = "referee", "official"
     KIND_CHOICES = [(REFEREE, _("Referee")), (OFFICIAL, _("Official"))]
 
-    sport = models.ForeignKey(Sport, on_delete=models.CASCADE, related_name="referee_types")
+    sport = models.ForeignKey(Sport, verbose_name=_("sport"), on_delete=models.CASCADE, related_name="referee_types")
     kind = models.CharField(_("kind"), max_length=10, choices=KIND_CHOICES, default=REFEREE)
     name = models.CharField(_("name"), max_length=100)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0, help_text=_("Lower comes first."))
@@ -210,8 +210,8 @@ class Competition(UUIDModel):
 
     name = models.CharField(_("name"), max_length=250)
     module = models.CharField(_("module"), max_length=250, help_text=_("Dotted path of the module with the class that fetches fixtures."))
-    sport = models.ForeignKey(Sport, null=True, blank=True, on_delete=models.PROTECT, related_name="competitions")
-    feature = models.ForeignKey("features.Feature", null=True, blank=True, on_delete=models.PROTECT, related_name="competitions", help_text=_("Clubs need this feature to use the competition."))
+    sport = models.ForeignKey(Sport, verbose_name=_("sport"), null=True, blank=True, on_delete=models.PROTECT, related_name="competitions")
+    feature = models.ForeignKey("features.Feature", verbose_name=_("feature"), null=True, blank=True, on_delete=models.PROTECT, related_name="competitions", help_text=_("Clubs need this feature to use the competition."))
 
     class Meta:
         verbose_name = _("competition")

@@ -83,7 +83,7 @@ class BillingSettings(UUIDModel):
 class PlanTerms(UUIDModel):
     """The commercial clock of a plan: how long a period is and when it is invoiced and chased."""
 
-    plan = models.OneToOneField("features.Plan", on_delete=models.CASCADE, related_name="terms")
+    plan = models.OneToOneField("features.Plan", verbose_name=_("plan"), on_delete=models.CASCADE, related_name="terms")
     duration_months = models.PositiveSmallIntegerField(_("period length (months)"), default=12, validators=[MinValueValidator(1)])
     renewal_lead_days = models.PositiveSmallIntegerField(_("invoice this many days before the period starts"), default=30)
     grace_days = models.PositiveSmallIntegerField(_("grace days, counted from the period start or from the day it was opened, whichever is later"), default=30)
@@ -106,7 +106,7 @@ class PlanTerms(UUIDModel):
 class PlanPrice(UUIDModel):
     """A dated price. A rate change is always a new row, never an edit; the latest ``active_from <= day`` applies."""
 
-    plan = models.ForeignKey("features.Plan", on_delete=models.CASCADE, related_name="prices")
+    plan = models.ForeignKey("features.Plan", verbose_name=_("plan"), on_delete=models.CASCADE, related_name="prices")
     active_from = models.DateField(_("active from"))
     amount = models.DecimalField(_("amount (EUR)"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
 
@@ -123,7 +123,7 @@ class PlanPrice(UUIDModel):
 class ClubBilling(UUIDModel):
     """How a club is billed. The plan itself is the club's current ``features.Subscription``."""
 
-    club = models.OneToOneField(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="billing")
+    club = models.OneToOneField(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="billing")
     auto_renew = models.BooleanField(_("auto renew"), default=True)
     auto_archive = models.BooleanField(_("auto archive"), default=True, help_text=_("Archive the club when a period stays unpaid past its grace."))
     notes = models.TextField(_("notes"), blank=True)
@@ -155,32 +155,39 @@ class Due(UUIDModel):
     STATUS_CHOICES = [(UNPAID, _("Unpaid")), (PARTIAL, _("Partially paid")), (PAID, _("Paid")), (WAIVED, _("Waived")), (CANCELLED, _("Cancelled"))]
     OWING = (UNPAID, PARTIAL)
 
-    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="dues")
-    plan = models.ForeignKey("features.Plan", on_delete=models.PROTECT, related_name="dues")
-    amount = models.DecimalField(max_digits=10, decimal_places=2, help_text="Net amount, excluding VAT.")
-    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
-    vat_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
-    reverse_charge = models.BooleanField(default=False)
-    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
-    period_start = models.DateField()
-    period_end = models.DateField()  # derived from the plan's length on create unless given (trials)
-    grace_until = models.DateField()  # derived on create, see grace_until_for
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=UNPAID)
-    paid_at = models.DateTimeField(null=True, blank=True)
-    is_trial = models.BooleanField(default=False)
-    last_reminder_level = models.CharField(max_length=20, blank=True)
-    last_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="dues")
+    plan = models.ForeignKey("features.Plan", verbose_name=_("plan"), on_delete=models.PROTECT, related_name="dues")
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, help_text=_("Net amount, excluding VAT."))
+    vat_rate = models.DecimalField(_("VAT rate"), max_digits=5, decimal_places=2, default=Decimal("0"))
+    vat_amount = models.DecimalField(_("VAT amount"), max_digits=10, decimal_places=2, default=Decimal("0"))
+    reverse_charge = models.BooleanField(_("reverse charge"), default=False)
+    amount_paid = models.DecimalField(_("amount paid"), max_digits=10, decimal_places=2, default=Decimal("0"))
+    period_start = models.DateField(
+        _("period start"),
+    )
+    period_end = models.DateField(
+        _("period end"),
+    )  # derived from the plan's length on create unless given (trials)
+    grace_until = models.DateField(
+        _("grace until"),
+    )  # derived on create, see grace_until_for
+    status = models.CharField(_("status"), max_length=10, choices=STATUS_CHOICES, default=UNPAID)
+    paid_at = models.DateTimeField(_("paid at"), null=True, blank=True)
+    is_trial = models.BooleanField(_("is trial"), default=False)
+    last_reminder_level = models.CharField(_("last reminder level"), max_length=20, blank=True)
+    last_reminder_sent_at = models.DateTimeField(_("last reminder sent at"), null=True, blank=True)
     # Plan change (see billing.services.plan_change): the period is shortened and its figures prorated. The figures it was
     # opened with are kept here for reference; ``amount``/``vat_amount``/``period_end`` hold the prorated values.
-    original_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    original_vat_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    original_period_end = models.DateField(null=True, blank=True)
-    prorated_at = models.DateTimeField(null=True, blank=True)
+    original_amount = models.DecimalField(_("original amount"), max_digits=10, decimal_places=2, null=True, blank=True)
+    original_vat_amount = models.DecimalField(_("original VAT amount"), max_digits=10, decimal_places=2, null=True, blank=True)
+    original_period_end = models.DateField(_("original period end"), null=True, blank=True)
+    prorated_at = models.DateTimeField(_("prorated at"), null=True, blank=True)
     credit_transferred = models.DecimalField(
+        _("credit transferred"),
         max_digits=10,
         decimal_places=2,
         default=Decimal("0"),
-        help_text="Part of the recorded payments that was moved to the club's credit (a plan change made the period cheaper, or cancelled it). amount_paid = sum(payments) - credit_transferred.",
+        help_text=_("Part of the recorded payments that was moved to the club's credit (a plan change made the period cheaper, or cancelled it). amount_paid = sum(payments) - credit_transferred."),
     )
 
     class Meta:
@@ -251,15 +258,19 @@ class DuePayment(UUIDModel):
     METHOD_CHOICES = [(BANK_TRANSFER, _("Bank transfer")), (CARD, _("Card")), (CASH, _("Cash")), (OTHER, _("Other")), (CREDIT, _("Club credit"))]
     MANUAL_METHODS = (BANK_TRANSFER, CARD, CASH, OTHER)  # ``credit`` is only ever created by the system, from the credit ledger
 
-    due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="payments")
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
-    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=BANK_TRANSFER)
-    reference = models.CharField(max_length=255, blank=True)
-    paid_at = models.DateTimeField()
-    note = models.TextField(blank=True)
-    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    due = models.ForeignKey(Due, verbose_name=_("due"), on_delete=models.CASCADE, related_name="payments")
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    method = models.CharField(_("method"), max_length=20, choices=METHOD_CHOICES, default=BANK_TRANSFER)
+    reference = models.CharField(_("reference"), max_length=255, blank=True)
+    paid_at = models.DateTimeField(
+        _("paid at"),
+    )
+    note = models.TextField(_("note"), blank=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("recorded by"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     class Meta:
+        verbose_name = _("due payment")
+        verbose_name_plural = _("due payments")
         ordering = ["paid_at"]
 
 
@@ -271,8 +282,12 @@ class InvoiceSequence(models.Model):
     transaction that creates the invoice, so a rolled-back invoice does not burn a number.
     """
 
-    scope = models.CharField(max_length=16, unique=True)
-    last_number = models.PositiveIntegerField(default=0)
+    scope = models.CharField(_("scope"), max_length=16, unique=True)
+    last_number = models.PositiveIntegerField(_("last number"), default=0)
+
+    class Meta:
+        verbose_name = _("invoice sequence")
+        verbose_name_plural = _("invoice sequences")
 
     def __str__(self) -> str:
         return f"invoices {self.scope}: {self.last_number}"
@@ -283,23 +298,27 @@ class Invoice(UUIDModel):
 
     EMAIL, MANUAL = "email", "manual"
 
-    due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="invoices")  # ``Due.invoice`` is the active one
-    number = models.CharField(max_length=32, unique=True, editable=False)
-    custom_number = models.BooleanField(default=False, help_text="Set by hand when issued; automatic numbers come from InvoiceSequence.")
-    issued_at = models.DateField()
-    snapshot = models.JSONField(default=dict, blank=True)
-    sent_at = models.DateTimeField(null=True, blank=True)
-    sent_method = models.CharField(max_length=10, choices=[(EMAIL, "Email"), (MANUAL, "Manual")], blank=True)
-    sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    due = models.ForeignKey(Due, verbose_name=_("due"), on_delete=models.CASCADE, related_name="invoices")  # ``Due.invoice`` is the active one
+    number = models.CharField(_("number"), max_length=32, unique=True, editable=False)
+    custom_number = models.BooleanField(_("custom number"), default=False, help_text=_("Set by hand when issued; automatic numbers come from InvoiceSequence."))
+    issued_at = models.DateField(
+        _("issued at"),
+    )
+    snapshot = models.JSONField(_("snapshot"), default=dict, blank=True)
+    sent_at = models.DateTimeField(_("sent at"), null=True, blank=True)
+    sent_method = models.CharField(_("sent method"), max_length=10, choices=[(EMAIL, "Email"), (MANUAL, "Manual")], blank=True)
+    sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("sent by"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     # Void and reissue (see billing.services.reissue): a voided invoice keeps its number forever, can no longer be sent,
     # and points to the invoice that replaced it. At most one invoice per period is active (constraint below).
-    voided_at = models.DateTimeField(null=True, blank=True)
-    voided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
-    void_reason = models.TextField(blank=True)
-    replaced_by = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="replaced_invoices")
+    voided_at = models.DateTimeField(_("voided at"), null=True, blank=True)
+    voided_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("voided by"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    void_reason = models.TextField(_("void reason"), blank=True)
+    replaced_by = models.ForeignKey("self", verbose_name=_("replaced by"), null=True, blank=True, on_delete=models.SET_NULL, related_name="replaced_invoices")
 
     class Meta:
+        verbose_name = _("invoice")
+        verbose_name_plural = _("invoices")
         constraints = [models.UniqueConstraint(fields=["due"], condition=models.Q(voided_at__isnull=True), name="uniq_active_invoice_per_due")]
 
     @property
@@ -330,8 +349,12 @@ class CreditNoteSequence(models.Model):
     the transaction that creates the credit note, so a rolled-back credit note does not burn a number.
     """
 
-    scope = models.CharField(max_length=16, unique=True)
-    last_number = models.PositiveIntegerField(default=0)
+    scope = models.CharField(_("scope"), max_length=16, unique=True)
+    last_number = models.PositiveIntegerField(_("last number"), default=0)
+
+    class Meta:
+        verbose_name = _("credit note sequence")
+        verbose_name_plural = _("credit note sequences")
 
     def __str__(self) -> str:
         return f"credit notes {self.scope}: {self.last_number}"
@@ -344,24 +367,28 @@ class CreditNote(UUIDModel):
     PLAN_CHANGE, VOID = "plan_change", "void"
     KIND_CHOICES = [(PLAN_CHANGE, _("Plan change")), (VOID, _("Invoice voided"))]
 
-    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="credit_notes")
-    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="credit_notes")
-    due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="credit_notes")
-    number = models.CharField(max_length=32, unique=True, editable=False)
-    issued_at = models.DateField()
-    net = models.DecimalField(max_digits=10, decimal_places=2)
-    vat = models.DecimalField(max_digits=10, decimal_places=2)
-    total = models.DecimalField(max_digits=10, decimal_places=2)
-    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
-    reverse_charge = models.BooleanField(default=False)
-    reason = models.CharField(max_length=255)
-    snapshot = models.JSONField(default=dict, blank=True)
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="credit_notes")
+    invoice = models.ForeignKey(Invoice, verbose_name=_("invoice"), on_delete=models.CASCADE, related_name="credit_notes")
+    due = models.ForeignKey(Due, verbose_name=_("due"), on_delete=models.CASCADE, related_name="credit_notes")
+    number = models.CharField(_("number"), max_length=32, unique=True, editable=False)
+    issued_at = models.DateField(
+        _("issued at"),
+    )
+    net = models.DecimalField(_("net"), max_digits=10, decimal_places=2)
+    vat = models.DecimalField(_("VAT"), max_digits=10, decimal_places=2)
+    total = models.DecimalField(_("total"), max_digits=10, decimal_places=2)
+    vat_rate = models.DecimalField(_("VAT rate"), max_digits=5, decimal_places=2, default=Decimal("0"))
+    reverse_charge = models.BooleanField(_("reverse charge"), default=False)
+    reason = models.CharField(_("reason"), max_length=255)
+    snapshot = models.JSONField(_("snapshot"), default=dict, blank=True)
     # ``void``: a document only, issued when an invoice is voided and reissued. It never touches the period, payments or
     # club credit (the replacement invoice covers the same period and amounts).
-    kind = models.CharField(max_length=12, choices=KIND_CHOICES, default=PLAN_CHANGE)
-    replacement_invoice = models.ForeignKey(Invoice, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    kind = models.CharField(_("kind"), max_length=12, choices=KIND_CHOICES, default=PLAN_CHANGE)
+    replacement_invoice = models.ForeignKey(Invoice, verbose_name=_("replacement invoice"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     class Meta:
+        verbose_name = _("credit note")
+        verbose_name_plural = _("credit notes")
         ordering = ["-issued_at", "-created"]
 
     def save(self, *args, **kwargs):
@@ -383,14 +410,16 @@ class ClubCreditEntry(UUIDModel):
     OVERPAYMENT, CANCELLED, APPLIED = "overpayment", "cancelled_period", "applied"
     KIND_CHOICES = [(OVERPAYMENT, _("Overpayment after proration")), (CANCELLED, _("Payment on a cancelled period")), (APPLIED, _("Applied to an invoice"))]
 
-    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="credit_entries")
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
-    credit_note = models.ForeignKey(CreditNote, null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
-    due = models.ForeignKey(Due, null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
-    note = models.CharField(max_length=255, blank=True)
+    club = models.ForeignKey(settings.TENANT_MODEL, verbose_name=_("club"), on_delete=models.CASCADE, related_name="credit_entries")
+    amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2)
+    kind = models.CharField(_("kind"), max_length=20, choices=KIND_CHOICES)
+    credit_note = models.ForeignKey(CreditNote, verbose_name=_("credit note"), null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
+    due = models.ForeignKey(Due, verbose_name=_("due"), null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
+    note = models.CharField(_("note"), max_length=255, blank=True)
 
     class Meta:
+        verbose_name = _("club credit entry")
+        verbose_name_plural = _("club credit entries")
         ordering = ["-created"]
         indexes = [models.Index(fields=["club", "created"])]
 
