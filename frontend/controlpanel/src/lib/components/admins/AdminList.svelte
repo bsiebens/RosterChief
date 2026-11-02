@@ -47,10 +47,10 @@
 						{@const me = admin.id === meId}
 						<tr class={admin.mfa_enabled ? '' : 'bg-row-warn'}>
 							<td class="font-semibold text-ink">
-								{adminName(admin)}
+								<a class="hover:underline" href="/users/{admin.id}">{adminName(admin)}</a>
 								{#if me}<span class="badge badge-ghost badge-sm ml-1">you</span>{/if}
 							</td>
-							<td class="font-mono text-xs text-muted">{admin.email}</td>
+							<td class="font-mono text-xs text-muted"><a class="hover:underline" href="/users/{admin.id}">{admin.email}</a></td>
 							<td><span class="badge badge-sm {admin.is_superuser ? 'badge-info' : 'badge-ghost'}">{admin.is_superuser ? 'superuser' : 'staff'}</span></td>
 							<td>
 								{#if admin.mfa_enabled}

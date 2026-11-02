@@ -68,7 +68,7 @@
 							{admin.first_name} {admin.last_name}
 							{#if admin.is_owner}<span class="badge badge-info badge-sm"><Crown size={10} aria-hidden="true" /> owner</span>{/if}
 						</div>
-						<div class="truncate font-mono text-[11px] text-muted">{admin.email}</div>
+						<div class="truncate font-mono text-[11px] text-muted"><a class="hover:underline" href="/users/{admin.id}">{admin.email}</a></div>
 					</div>
 					{#if canEdit && !admin.is_owner}
 						<button class="btn btn-ghost btn-square btn-sm text-club-dark hover:bg-danger-bg" aria-label="Remove {admin.email}" onclick={() => ((removing = admin), (error = ''))}><Trash2 size={14} aria-hidden="true" /></button>

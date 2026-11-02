@@ -79,7 +79,7 @@
 							<span class="block text-sm font-semibold text-ink">{actionLabel(e.action)}</span>
 							<span class="block font-mono text-[11px] text-muted">{e.action}</span>
 						</td>
-						<td class="font-mono text-xs">{#if e.target_type}{e.target_type}<span class="text-muted" title={e.target_id}> {short(e.target_id)}</span>{:else}<span class="text-dim">—</span>{/if}</td>
+						<td class="font-mono text-xs">{#if e.target_type}{e.target_type}{#if e.target_type === 'user'}<a class="text-muted hover:underline" href="/users/{e.target_id}" title={e.target_id}> {short(e.target_id)}</a>{:else}<span class="text-muted" title={e.target_id}> {short(e.target_id)}</span>{/if}{:else}<span class="text-dim">—</span>{/if}</td>
 						<td class="text-sm">{#if e.club_id}<a class="link font-semibold" href="/clubs/{e.club_id}">{clubName.get(e.club_id) ?? short(e.club_id)}</a>{:else}<span class="text-dim">—</span>{/if}</td>
 						<td class="text-right">
 							<button class="btn btn-outline btn-xs" onclick={() => (viewing = e)} aria-label="View data of {actionLabel(e.action)}" disabled={!Object.keys(e.data).length}><Code size={12} aria-hidden="true" /> JSON</button>

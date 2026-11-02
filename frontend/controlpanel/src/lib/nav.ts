@@ -3,7 +3,9 @@ export const NAV: { key: string; label: string; href: string; superuser?: boolea
 	{ key: 'dashboard', label: 'platform', href: '/' },
 	{ key: 'clubs', label: 'clubs', href: '/clubs' },
 	{ key: 'features', label: 'features', href: '/features' },
+	{ key: 'sports', label: 'sports', href: '/sports' },
 	{ key: 'billing', label: 'billing', href: '/billing' },
 	{ key: 'admins', label: 'admins', href: '/admins', superuser: true },
+	{ key: 'users', label: 'users', href: '/users', superuser: true },
 	{ key: 'jobs', label: 'jobs', href: '/jobs' }
 ];
