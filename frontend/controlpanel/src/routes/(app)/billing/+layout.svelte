@@ -10,6 +10,7 @@
 		{ href: '/billing', label: 'Periods' },
 		{ href: '/billing/cycles', label: 'Cycles' },
 		{ href: '/billing/plans', label: 'Plans & pricing' },
+		{ href: '/billing/credit-notes', label: 'Credit notes' },
 		{ href: '/billing/settings', label: 'Invoicing' },
 		{ href: '/billing/help', label: 'How it works' }
 	];

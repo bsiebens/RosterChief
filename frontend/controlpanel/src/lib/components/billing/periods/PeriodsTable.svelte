@@ -42,6 +42,8 @@
 					<td class="font-mono text-xs whitespace-nowrap">
 						{day(due.period_start)} – {day(due.period_end)}
 						{#if due.is_trial}<span class="badge badge-info badge-xs ml-1">trial</span>{/if}
+						{#if due.prorated}<span class="badge badge-warning badge-xs ml-1" title="Shortened by a plan change; the original period ended {day(due.original_period_end)}">prorated</span>{/if}
+						{#if due.prorated && due.original_total}<span class="block text-[10px] text-muted">was {money2(due.original_total)}</span>{/if}
 					</td>
 					<td class="text-right font-mono tabular-nums">{money2(due.amount)}</td>
 					<td class="text-right font-mono whitespace-nowrap tabular-nums">
@@ -50,11 +52,15 @@
 					</td>
 					<td class="text-right font-mono tabular-nums">{money2(due.total)}</td>
 					<td class="text-right font-mono tabular-nums text-muted">{money2(due.amount_paid)}</td>
-					<td class="text-right font-mono tabular-nums {Number(due.balance) ? (due.state === 'overdue' ? 'font-bold text-club-dark' : 'text-ink') : 'text-muted'}">{money2(due.balance)}</td>
+					<td class="text-right font-mono tabular-nums {due.status === 'cancelled' ? 'text-muted' : Number(due.balance) ? (due.state === 'overdue' ? 'font-bold text-club-dark' : 'text-ink') : 'text-muted'}">{due.status === 'cancelled' ? '—' : money2(due.balance)}</td>
 					<td class="font-mono text-xs whitespace-nowrap {due.state === 'overdue' ? 'text-club-dark' : 'text-muted'}">{day(due.grace_until)}</td>
 					<td class="whitespace-nowrap">
-						<span class="badge badge-sm {stateTone[due.state]}">{stateLabel[due.state]}</span>
-						<span class="ml-1 font-mono text-[11px] text-muted">{statusLabel[due.status]}</span>
+						{#if due.status === 'cancelled'}
+							<span class="badge badge-sm badge-ghost">cancelled</span>
+						{:else}
+							<span class="badge badge-sm {stateTone[due.state]}">{stateLabel[due.state]}</span>
+							<span class="ml-1 font-mono text-[11px] text-muted">{statusLabel[due.status]}</span>
+						{/if}
 					</td>
 					<td class="whitespace-nowrap">
 						{#if due.invoice}

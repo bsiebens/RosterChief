@@ -6,6 +6,7 @@
 		['timeline', 'From invoice to archive'],
 		['renewal', 'Auto-renew and lapsed clubs'],
 		['trials', 'Trials'],
+		['switching', 'Switching plans mid-cycle'],
 		['unpaid', 'Unpaid periods'],
 		['vat', 'VAT and reverse charge'],
 		['invoices', 'Invoices and numbers'],
@@ -37,7 +38,7 @@
 			<ul class="list-disc space-y-1 pl-5">
 				<li><strong>Price and VAT are fixed when a period opens.</strong> Changing a plan's price later (prices are dated, a new price is a new row) only affects periods opened after the new price starts.</li>
 				<li><strong>Prices exclude VAT.</strong> VAT is added on top, see below.</li>
-				<li><strong>No proration.</strong> Changing a club's plan changes what it can use straight away, but the price changes from the next period.</li>
+				<li><strong>Plan changes are prorated.</strong> Switching a billed club's plan mid-cycle shortens the running period, credits the unused part and starts a new cycle on the new plan, see <a class="link" href="#switching">Switching plans mid-cycle</a>. Unbilled clubs just get the new features.</li>
 				<li>Each plan has three timing settings (Plans &amp; pricing): <em>period length</em>, <em>invoice N days before the period starts</em> and <em>grace days</em>.</li>
 			</ul>
 		</div></section>
@@ -84,6 +85,37 @@
 			</ul>
 		</div></section>
 
+		<section id="switching" class="card scroll-mt-4"><div class="card-body gap-3">
+			<h2 class="card-title">Switching plans mid-cycle</h2>
+			<p>When a <strong>billed</strong> club moves to another plan (club page, Plan card, “Change plan”), the money is settled on the spot and a new cycle starts. Nothing is edited after the fact; everything is documented by invoices and credit notes.</p>
+			<ol class="list-decimal space-y-1 pl-5">
+				<li><strong>The old period is shortened</strong> so that it ends the day before the switch date, and its price is <strong>prorated by days</strong> (VAT at the period's own rate). The days used are charged, the unused days are not.</li>
+				<li>A <strong>credit note</strong> is issued for the unused part. The original invoice is <strong>never edited</strong>: the invoice and the credit note together show what is owed.</li>
+				<li>If the club <strong>already paid more</strong> than the prorated amount, the difference becomes <strong>club credit</strong>. Club credit is applied automatically to the new invoice and to later invoices, and is carried forward until used. <strong>The system never refunds</strong>.</li>
+				<li>A <strong>new full period</strong> of the new plan starts <strong>on the switch date</strong> at the new plan's price and is invoiced immediately (a normal gapless invoice number). Available credit is applied to it. This <strong>moves the club's anniversary</strong>: later renewals follow the new start date.</li>
+				<li>Periods already <strong>invoiced in advance</strong> (the next renewal) are <strong>cancelled</strong> with a full credit note; their payments become club credit. The invoice is kept, marked cancelled.</li>
+				<li><strong>Trials end</strong> when the club switches during one; the new plan starts as a paid cycle.</li>
+			</ol>
+			<div class="rounded border border-rule bg-paper p-3">
+				<div class="mb-1 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">Example: upgrade from 100 per year to 300 per year</div>
+				<p>The club pays <span class="font-mono">100.00 + 21.00 VAT = 121.00</span> for 2026-01-01 to 2026-12-31 and switches on <strong>2026-07-02</strong>. It used 182 of 365 days.</p>
+				<ul class="mt-1 list-disc space-y-0.5 pl-5">
+					<li>Prorated old period: <span class="font-mono">49.86 + 10.47 = 60.33</span>. Credit note for the rest: <span class="font-mono">60.67</span>. Since the 121.00 was paid, <span class="font-mono">60.67</span> becomes club credit.</li>
+					<li>New period 2026-07-02 to 2027-07-01: <span class="font-mono">300.00 + 63.00 VAT = 363.00</span>, invoiced at once.</li>
+					<li>Credit applied <span class="font-mono">60.67</span>, so the club has to pay <strong class="font-mono">302.33</strong>. Credit left: <span class="font-mono">0.00</span>.</li>
+					<li>If the old period had <em>not</em> been paid: same credit note, no club credit, and the club pays the full <span class="font-mono">363.00</span>.</li>
+					<li>A downgrade works the same way. From 300 (paid 363.00) to 40: credit note <span class="font-mono">182.00</span>, new invoice <span class="font-mono">48.40</span> paid entirely from credit, <span class="font-mono">133.60</span> of credit remains.</li>
+				</ul>
+			</div>
+			<ul class="list-disc space-y-1 pl-5">
+				<li><strong>Preview first.</strong> The dialog calculates every figure (prorated amounts, credit notes, credit applied, amount payable, credit left) before you confirm. Nothing is written until you click “Change plan and start a new cycle”.</li>
+				<li><strong>Switch date.</strong> Defaults to today. It can be back-dated to the day after the current period's start, never into the future. Features change immediately either way.</li>
+				<li><strong>Who.</strong> Only superusers can change a billed club's plan. Staff can see the result on the club page and in Billing.</li>
+				<li><strong>Need a refund?</strong> The system does not pay money back. Refund the club outside the system (bank transfer), and note it, for example in the club's billing notes. The club credit stays on the ledger until you agree with the club how to handle it.</li>
+				<li>A period can only be prorated once. A plan needs a price on the switch date, and the club cannot be switched to the plan it is already on.</li>
+			</ul>
+		</div></section>
+
 		<section id="unpaid" class="card scroll-mt-4"><div class="card-body gap-3">
 			<h2 class="card-title">Unpaid periods: downgrade first, archive later</h2>
 			<ul class="list-disc space-y-1 pl-5">
@@ -111,6 +143,7 @@
 				<li>An invoice is created automatically when a period opens. It stores a <strong>snapshot</strong> of the issuer details, the club's details and the amounts, so editing settings or the club later never changes an invoice that has been issued. Payments received are shown live.</li>
 				<li><strong>Numbers</strong> are automatic and gapless per year: <span class="font-mono">INV-2026-00001</span>, <span class="font-mono">INV-2026-00002</span>, … A number is only taken when an invoice is successfully created, so failures never leave holes.</li>
 				<li><strong>Custom numbers</strong> exist for invoices issued <em>outside</em> the system: when issuing an invoice by hand for a period that has none, you can give your own number. Custom numbers never touch the automatic sequence, cannot look like <span class="font-mono">INV-YYYY-nnnnn</span> and cannot be changed afterwards. Numbers are never editable once an invoice exists.</li>
+				<li><strong>Credit notes</strong> correct an invoice without editing it (see Switching plans). They have <strong>their own sequence</strong>, <span class="font-mono">CN-2026-00001</span>, <span class="font-mono">CN-2026-00002</span>, …, gapless per year like invoices, and are immutable once issued. They are listed on the Credit notes tab with a PDF each.</li>
 				<li><strong>Sending:</strong> “Send by email” mails the PDF to the club's administrators. “Mark as sent” records that you sent it yourself.</li>
 				<li>The PDF shows the issuer, the club, net / VAT / total, the due date, and payment details with the invoice number as the payment reference.</li>
 			</ul>
@@ -142,6 +175,10 @@
 							['Lapsed', 'The last period has ended and no new one was opened (for example auto-renew off).'],
 							['Net / total', 'Net is the plan price; total is net plus VAT. Balances use the total.'],
 							['Reverse charge', 'Cross-border EU business sale: 0% VAT with a note; the customer accounts for the VAT.'],
+							['Credit note', 'A document that reduces an invoice (for example the unused part after a plan change). Own sequence CN-YYYY-nnnnn; never edited.'],
+							['Club credit', 'Money the club has paid or been credited that is not yet used. Applied automatically to new invoices, carried forward, never refunded by the system.'],
+							['Prorated', 'A period that was shortened by a plan change and priced by the days actually used.'],
+							['Cancelled period', 'An advance-invoiced period dropped by a plan change. Its invoice is kept and credited in full; nothing is owed for it.'],
 							['Snapshot', 'The frozen copy of issuer, club and amounts stored on an invoice when it is issued.']
 						] as [term, meaning] (term)}
 							<tr><td class="w-48 align-top font-semibold text-ink">{term}</td><td>{meaning}</td></tr>

@@ -7,7 +7,7 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import InvoiceActions from './InvoiceActions.svelte';
 	import PaymentDialog from './PaymentDialog.svelte';
-	import { dateTime, methodLabel, money2, owing } from './format.ts';
+	import { dateTime, day, methodLabel, money2, owing } from './format.ts';
 
 	let { row, canIssue, onchange }: { row: Due; canIssue: boolean; onchange: () => void } = $props();
 
@@ -38,6 +38,8 @@
 		if (!r.ok) return r.message ?? fail;
 		done();
 	};
+	// Credit payments are system-made, and payments that were moved to club credit (or sit on a cancelled period) are locked.
+	const removable = (p: Payment) => p.method !== 'credit' && due.status !== 'cancelled' && !Number(due.credit_transferred);
 	const canWaive = $derived(due.status === 'unpaid' && !!full && full.payments.length === 0);
 </script>
 
@@ -45,6 +47,25 @@
 	{#if loadError}<div class="lg:col-span-2"><Alert kind="error">{loadError}</Alert></div>{/if}
 
 	<div class="flex flex-col gap-2">
+		{#if due.prorated || due.status === 'cancelled' || due.credit_notes?.length}
+			<div class="rounded border border-rule bg-white px-3 py-2 text-sm">
+				{#if due.prorated}
+					<p>
+						<span class="badge badge-warning badge-xs mr-1">prorated</span>Shortened by a plan change{due.prorated_at ? ` on ${dateTime(due.prorated_at)}` : ''}. Originally {day(due.period_start)} – {day(due.original_period_end)}:
+						<span class="font-mono tabular-nums">{money2(due.original_amount)} + {money2(due.original_vat_amount)} VAT = {money2(due.original_total)}</span>, now <span class="font-mono tabular-nums">{money2(due.amount)} + {money2(due.vat_amount)} VAT = {money2(due.total)}</span>.
+					</p>
+				{/if}
+				{#if due.status === 'cancelled'}
+					<p><span class="badge badge-ghost badge-xs mr-1">cancelled</span>Cancelled by a plan change before it started. The invoice is kept, a credit note offsets it, and nothing is owed.</p>
+				{/if}
+				{#if Number(due.credit_transferred)}
+					<p class="text-muted">{money2(due.credit_transferred)} of the payments was moved to the club's credit.</p>
+				{/if}
+				{#if due.credit_notes?.length}
+					<p class="text-muted">Credit notes: {#each due.credit_notes as cn, i (cn.number)}{i ? ', ' : ''}<a class="link font-mono" href="/billing/credit-notes?q={encodeURIComponent(cn.number)}">{cn.number}</a> ({money2(cn.total)}){/each}</p>
+				{/if}
+			</div>
+		{/if}
 		<div class="font-mono text-[10px] tracking-[.08em] text-muted uppercase">payments</div>
 		{#if !full && !loadError}
 			<p class="text-sm text-muted">Loading…</p>
@@ -58,7 +79,9 @@
 								{#if p.reference || p.note}<div class="truncate text-xs text-muted">{[p.reference, p.note].filter(Boolean).join(' · ')}</div>{/if}
 								{#if p.recorded_by_email}<div class="text-xs text-dim">recorded by {p.recorded_by_email}</div>{/if}
 							</div>
-							<button class="btn btn-ghost btn-xs text-club-dark hover:bg-danger-bg" onclick={() => (removing = p)} aria-label="Remove payment of {money2(p.amount)}"><Trash2 size={13} aria-hidden="true" /></button>
+							{#if removable(p)}
+								<button class="btn btn-ghost btn-xs text-club-dark hover:bg-danger-bg" onclick={() => (removing = p)} aria-label="Remove payment of {money2(p.amount)}"><Trash2 size={13} aria-hidden="true" /></button>
+							{/if}
 						</li>
 					{/each}
 				</ul>

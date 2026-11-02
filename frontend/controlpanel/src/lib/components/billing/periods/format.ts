@@ -20,7 +20,7 @@ export const METHODS = [
 	['cash', 'Cash'],
 	['other', 'Other']
 ] as const;
-export const methodLabel = (m: string) => METHODS.find(([v]) => v === m)?.[1] ?? m;
+export const methodLabel = (m: string) => (m === 'credit' ? 'Credit applied' : (METHODS.find(([v]) => v === m)?.[1] ?? m));
 
 export const stateTone: Record<DueState, string> = { overdue: 'badge-error', in_grace: 'badge-warning', issued_ahead: 'badge-info', settled: 'badge-success' };
 export const stateLabel: Record<DueState, string> = { overdue: 'overdue', in_grace: 'in grace', issued_ahead: 'upcoming', settled: 'settled' };
