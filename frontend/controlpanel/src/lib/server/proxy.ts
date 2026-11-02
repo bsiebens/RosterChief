@@ -17,6 +17,8 @@ const env = process.env;
 export const SESSION_COOKIE = 'rc_cp_session';
 export const ALLAUTH_PREFIX = '/_allauth/app/v1/';
 export const PLATFORM_PREFIX = '/api/platform/v1/';
+/** Uploaded files (club logos), served by Django. Public, read-only: the session token is never sent along. */
+export const MEDIA_PREFIX = '/media/';
 
 const FORWARDED_REQUEST_HEADERS = [
 	'content-type',
@@ -25,11 +27,13 @@ const FORWARDED_REQUEST_HEADERS = [
 	'idempotency-key',
 	'x-password-reset-key',
 	'x-email-verification-key',
-	'user-agent'
+	'user-agent',
+	'if-none-match',
+	'if-modified-since'
 ];
 
 export function isProxied(pathname: string) {
-	return pathname.startsWith(ALLAUTH_PREFIX) || pathname.startsWith(PLATFORM_PREFIX);
+	return pathname.startsWith(ALLAUTH_PREFIX) || pathname.startsWith(PLATFORM_PREFIX) || pathname.startsWith(MEDIA_PREFIX);
 }
 
 const COOKIE_OPTIONS = { path: '/', httpOnly: true, sameSite: 'lax', secure: !dev, maxAge: 60 * 60 * 24 * 14 } as const;
@@ -48,8 +52,10 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 		const value = request.headers.get(name);
 		if (value) headers.set(name, value);
 	}
+	const isMedia = url.pathname.startsWith(MEDIA_PREFIX);
+	if (isMedia && !['GET', 'HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405 });
 	const token = cookies.get(SESSION_COOKIE);
-	if (token) headers.set('x-session-token', token);
+	if (token && !isMedia) headers.set('x-session-token', token);
 	if (env.BACKEND_HOST) headers.set('host', env.BACKEND_HOST);
 	try {
 		headers.set('x-forwarded-for', event.getClientAddress());
@@ -95,7 +101,7 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	}
 
 	const out = new Headers();
-	for (const name of ['content-type', 'www-authenticate', 'retry-after']) {
+	for (const name of ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'www-authenticate', 'retry-after']) {
 		const value = upstream.headers.get(name);
 		if (value) out.set(name, value);
 	}

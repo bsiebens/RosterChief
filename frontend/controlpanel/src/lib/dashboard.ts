@@ -40,6 +40,8 @@ export const ALERTS: Record<string, { tone: 'club' | 'warn'; hint: string; money
 	admins_pending_mfa: { tone: 'warn', hint: 'Locked out until they enrol.' },
 	clubs_unbilled: { tone: 'warn', hint: 'Using the platform for free.' },
 	clubs_near_member_limit: { tone: 'warn', hint: 'Candidates for an upgrade.' },
+	clubs_downgraded: { tone: 'warn', hint: 'Paying their open periods restores them.' },
+	lapsed_clubs: { tone: 'warn', hint: 'Their next period opens on the next renewal run.' },
 	dues_in_grace: { tone: 'warn', hint: 'Still inside the grace period.' }
 };
 
@@ -90,3 +92,6 @@ export type PeriodicJob = {
 	latest: { status: string; started_at: string | null; duration_seconds: number | null; detail: string } | null;
 	recent: string[];
 };
+
+export type SwitchState = { is_active: boolean; started_at: string | null; started_by_email: string | null };
+export type Switches = { maintenance: SwitchState & { message: string }; email_suppression: SwitchState };

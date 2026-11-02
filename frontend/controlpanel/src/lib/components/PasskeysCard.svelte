@@ -81,7 +81,7 @@
 		<p class="text-sm text-muted">Hardware keys, Touch ID, Windows Hello or a phone. Passkeys can also sign you in without a password.</p>
 
 		{#if keys.length}
-			<ul class="divide-y">
+			<ul class="divide-y divide-rule">
 				{#each keys as key (key.id)}
 					<li class="flex items-center gap-3 py-2.5">
 						<div class="min-w-0 flex-1">
@@ -89,7 +89,7 @@
 							<div class="font-mono text-[11px] text-muted">Added {fmt(key.created_at)}{key.last_used_at ? ` · last used ${fmt(key.last_used_at)}` : ' · never used'}</div>
 						</div>
 						<button class="btn btn-ghost btn-square btn-sm" aria-label="Rename {key.name}" onclick={() => ((renaming = key), (name = key.name), (error = ''))}><Pencil size={14} aria-hidden="true" /></button>
-						<button class="btn btn-ghost btn-square btn-sm" aria-label="Remove {key.name}" onclick={() => ((removing = key), (error = ''))}><Trash2 size={14} aria-hidden="true" /></button>
+						<button class="btn btn-ghost btn-square btn-sm text-club-dark hover:bg-danger-bg" aria-label="Remove {key.name}" onclick={() => ((removing = key), (error = ''))}><Trash2 size={14} aria-hidden="true" /></button>
 					</li>
 				{/each}
 			</ul>

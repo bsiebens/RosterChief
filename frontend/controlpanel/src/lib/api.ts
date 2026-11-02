@@ -94,22 +94,30 @@ export const webauthnMessage = (e: unknown) =>
 
 // --- platform API --------------------------------------------------------------------------------
 
-export type PlatformResult<T> = { ok: boolean; status: number; data?: T; message?: string };
+export type PlatformResult<T> = { ok: boolean; status: number; data?: T; message?: string; fields: Record<string, string> };
 
 /** A call to the platform API ({"error": {code, message, fields}} on failure) through this app's proxy. */
-export async function platform<T = any>(method: string, path: string, body?: unknown, f: Fetch = fetch): Promise<PlatformResult<T>> {
+export async function platform<T = any>(method: string, path: string, body?: unknown, f: Fetch = fetch, headers: Record<string, string> = {}): Promise<PlatformResult<T>> {
 	try {
 		const res = await f(`/api/platform/v1${path}`, {
 			method,
-			headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+			headers: { accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...headers },
 			body: body !== undefined ? JSON.stringify(body) : undefined
 		});
+		if (res.status === 204) return { ok: true, status: 204, fields: {} };
 		const json = await res.json().catch(() => null);
-		if (res.ok) return { ok: true, status: res.status, data: json };
-		const fields = json?.error?.fields;
-		const first = fields ? (Object.values(fields).flat()[0] as string | undefined) : undefined;
-		return { ok: false, status: res.status, message: first ?? json?.error?.message ?? 'Something went wrong. Please try again.' };
+		if (res.ok) return { ok: true, status: res.status, data: json, fields: {} };
+		const fields: Record<string, string> = {};
+		for (const [key, messages] of Object.entries((json?.error?.fields ?? {}) as Record<string, string[]>)) fields[key] = messages[0];
+		const first = Object.values(fields)[0];
+		return { ok: false, status: res.status, message: json?.error?.message || first || 'Something went wrong. Please try again.', fields };
 	} catch {
-		return { ok: false, status: 0, message: 'Could not reach the server. Check your connection and try again.' };
+		return { ok: false, status: 0, message: 'Could not reach the server. Check your connection and try again.', fields: {} };
 	}
+}
+
+/** All rows of a paginated platform endpoint (the largest page the API allows). */
+export async function platformList<T>(path: string, f: Fetch = fetch): Promise<PlatformResult<T[]>> {
+	const r = await platform<{ items: T[]; count: number }>('GET', `${path}${path.includes('?') ? '&' : '?'}limit=100`, undefined, f);
+	return { ok: r.ok, status: r.status, message: r.message, fields: r.fields, data: r.data?.items };
 }

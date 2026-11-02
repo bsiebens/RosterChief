@@ -14,7 +14,7 @@ export type ApiResult<T = any> = {
 export type User = { id: number | string; email: string; display?: string };
 
 export type Me = {
-	id: number;
+	id: string;
 	email: string;
 	first_name: string;
 	last_name: string;

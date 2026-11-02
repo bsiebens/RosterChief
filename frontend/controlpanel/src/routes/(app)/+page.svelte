@@ -103,7 +103,7 @@
 								{#each d.clubs as club (club.club_id)}
 									<tr>
 										<td>
-											<div class="font-semibold text-ink">{club.name}</div>
+											<a class="font-semibold text-ink hover:underline" href="/clubs/{club.club_id}">{club.name}</a>
 											<div class="font-mono text-[11px] text-muted">{club.slug}</div>
 										</td>
 										<td class="font-mono text-xs">{club.plan ?? '—'}</td>

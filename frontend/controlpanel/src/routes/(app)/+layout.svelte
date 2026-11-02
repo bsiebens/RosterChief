@@ -1,7 +1,7 @@
 <script lang="ts">
     import {page} from '$app/state';
     import {goto} from '$app/navigation';
-    import {CircleUser, KeyRound, LogOut, ShieldCheck} from '@lucide/svelte';
+    import {CircleUser, KeyRound, LogOut, MailX, ShieldCheck, Wrench} from '@lucide/svelte';
     import {auth} from '#lib/api.ts';
     import {NAV} from '#lib/nav.ts';
     import JobStatus from '#lib/components/JobStatus.svelte';
@@ -84,6 +84,29 @@
 
     <main class="flex-1 overflow-y-auto">
         <div class="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-7 py-6">
+            {#if data.switches?.maintenance.is_active}
+                <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert" data-testid="maintenance-banner">
+                    <Wrench size={18} class="shrink-0" aria-hidden="true" />
+                    <div class="min-w-0 flex-1">
+                        <span class="font-display font-extrabold tracking-[.04em] uppercase">Platform closed for maintenance.</span>
+                        Every club subdomain serves a maintenance page, and the scheduled jobs stand down.
+                        {#if data.switches.maintenance.message}<span class="mt-1 block text-xs">“{data.switches.maintenance.message}”</span>{/if}
+                    </div>
+                    <a class="btn btn-error shrink-0" href="/features">Reopen platform</a>
+                </div>
+            {/if}
+
+            {#if data.switches?.email_suppression.is_active}
+                <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert" data-testid="email-banner">
+                    <MailX size={18} class="shrink-0" aria-hidden="true" />
+                    <div class="min-w-0 flex-1">
+                        <span class="font-display font-extrabold tracking-[.04em] uppercase">Automated email paused.</span>
+                        Notifications, reminders and invoices are not sending. Password reset and other account email still work.
+                    </div>
+                    <a class="btn btn-error shrink-0" href="/features">Resume email</a>
+                </div>
+            {/if}
+
             {@render children()}
         </div>
     </main>
