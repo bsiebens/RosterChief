@@ -44,35 +44,42 @@ def clean_number(raw: str) -> str:
     return number
 
 
+def issuer_snapshot(settings: BillingSettings | None = None) -> dict:
+    settings = settings or BillingSettings.current()
+    return {
+        "legal_name": settings.legal_name,
+        "address": settings.address,
+        "zip_code": settings.zip_code,
+        "city": settings.city,
+        "country": str(settings.country or ""),
+        "country_name": settings.country.name if settings.country else "",
+        "vat_id": settings.vat_id,
+        "iban": settings.iban,
+        "bic": settings.bic,
+        "contact_email": settings.contact_email,
+        "website": settings.website,
+        "invoice_footer": settings.invoice_footer,
+        "payment_terms": settings.payment_terms,
+    }
+
+
+def bill_to_snapshot(club) -> dict:
+    return {
+        "name": club.legal_name or club.name,
+        "address": club.legal_address,
+        "zip_code": club.legal_zip_code,
+        "city": club.legal_city,
+        "country": str(club.legal_country or ""),
+        "country_name": club.legal_country.name if club.legal_country else "",
+        "vat_id": club.vat_id,
+    }
+
+
 def build_snapshot(due: Due) -> dict:
     """Everything printed on the invoice, frozen: issuer, bill-to, line and amounts."""
-    settings = BillingSettings.current()
-    club = due.club
     return {
-        "issuer": {
-            "legal_name": settings.legal_name,
-            "address": settings.address,
-            "zip_code": settings.zip_code,
-            "city": settings.city,
-            "country": str(settings.country or ""),
-            "country_name": settings.country.name if settings.country else "",
-            "vat_id": settings.vat_id,
-            "iban": settings.iban,
-            "bic": settings.bic,
-            "contact_email": settings.contact_email,
-            "website": settings.website,
-            "invoice_footer": settings.invoice_footer,
-            "payment_terms": settings.payment_terms,
-        },
-        "bill_to": {
-            "name": club.legal_name or club.name,
-            "address": club.legal_address,
-            "zip_code": club.legal_zip_code,
-            "city": club.legal_city,
-            "country": str(club.legal_country or ""),
-            "country_name": club.legal_country.name if club.legal_country else "",
-            "vat_id": club.vat_id,
-        },
+        "issuer": issuer_snapshot(),
+        "bill_to": bill_to_snapshot(due.club),
         "description": f"{due.plan.name} - platform subscription",
         "period_start": due.period_start.isoformat(),
         "period_end": due.period_end.isoformat(),

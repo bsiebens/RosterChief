@@ -84,7 +84,7 @@
       <tr class="sum"><td colspan="4" class="num">VAT{% if not snap.reverse_charge %} {{ vat_rate|floatformat:"-2" }}%{% endif %}</td><td class="num">{{ vat }}</td></tr>
       <tr class="sum total"><td colspan="4" class="num">Total incl. VAT</td><td class="num">{{ total }}</td></tr>
       {% for p in payments %}
-      <tr class="sum"><td colspan="4" class="num muted">Payment received {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td class="num">-{{ p.amount }}</td></tr>
+      <tr class="sum"><td colspan="4" class="num muted">{% if p.method == "credit" %}Credit applied{% else %}Payment received{% endif %} {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td class="num">-{{ p.amount }}</td></tr>
       {% endfor %}
       <tr class="balance"><td colspan="4" class="num">Balance due</td><td class="num">EUR {{ balance }}</td></tr>
     </tbody>

@@ -13,9 +13,12 @@ from django_countries import countries
 from ninja import Query, Router, Schema
 from ninja.pagination import paginate
 
-from billing.models import BillingSettings, ClubBilling, Due, DuePayment, Invoice, PlanPrice
+from billing.models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, Due, DuePayment, Invoice, PlanPrice
+from billing.services import credit as credit_svc
+from billing.services import credit_notes as credit_notes_svc
 from billing.services import dues as dues_svc
 from billing.services import invoices as invoices_svc
+from billing.services import plan_change as plan_change_svc
 from club.models import Club
 from controlpanel import audit
 from features.models import Plan
@@ -27,6 +30,9 @@ from ..schemas import (
     BillingPlanOut,
     BillingSettingsIn,
     ClubBillingOut,
+    CreditEntryOut,
+    CreditLedgerOut,
+    CreditNoteOut,
     CycleOut,
     DueOut,
     InvoiceIssueIn,
@@ -34,6 +40,10 @@ from ..schemas import (
     IssuerSettingsIO,
     OpenPeriodIn,
     PaymentIn,
+    PlanChangeCreatedOut,
+    PlanChangeIn,
+    PlanChangeOut,
+    PlanChangePreviewOut,
     PlanRef,
     PriceIn,
     PriceOut,
@@ -43,13 +53,15 @@ from ..schemas import (
 
 router = Router(tags=["billing"])
 
+BILLED_USE_PLAN_CHANGE = "This club is billed: use the billing plan change so the current period is prorated and a new cycle starts."
+
 
 def _club(club_id: UUID) -> Club:
     return get_object_or_404(Club.objects.exclude(schema_name="public"), pk=club_id)
 
 
 def _dues():
-    return Due.objects.select_related("club", "plan", "invoice")
+    return Due.objects.select_related("club", "plan", "invoice").prefetch_related("credit_notes")
 
 
 def _due(due_id: UUID) -> Due:
@@ -110,6 +122,8 @@ def _club_billing(club: Club) -> ClubBillingOut:
         downgraded_at=billing.downgraded_at if billing else None,
         owed=owed,
         dues=[DueOut.of(d) for d in dues],
+        credit_balance=credit_svc.credit_balance(club),
+        credit_notes=[CreditNoteOut.of(n, with_applied=True) for n in CreditNote.objects.filter(club=club).select_related("club", "invoice")[:5]],
     )
 
 
@@ -135,6 +149,8 @@ def patch_club_billing(request, club_id: UUID, payload: BillingSettingsIn):
 def subscribe(request, club_id: UUID, payload: SubscribeBillingIn):
     club = _club(club_id)
     plan = _plan(payload.plan_id)
+    if ClubBilling.objects.filter(club=club).exists():
+        raise ApiError(409, "billing_error", BILLED_USE_PLAN_CHANGE)
     _, due = dues_svc.subscribe(club, plan, start=payload.start, auto_renew=payload.auto_renew, auto_archive=payload.auto_archive, notes=payload.notes, trial_days=payload.trial_days, actor=request.user)
     audit.record(request.user, "billing.subscribed", club=club, data={"plan": plan.code, "opened_period": due is not None, "trial_days": payload.trial_days})
     return 201, _club_billing(club)
@@ -215,7 +231,7 @@ def summary(request):
 def _unsent_invoices():
     from billing.models import Invoice
 
-    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0)
+    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).exclude(due__status=Due.CANCELLED)
 
 
 @router.get("/billing/dues/{due_id}", response=DueOut, summary="One period with its payments and invoice")
@@ -227,8 +243,8 @@ def get_due(request, due_id: UUID):
 @idempotent
 def record_payment(request, due_id: UUID, payload: PaymentIn):
     due = _due(due_id)
-    if payload.method not in dict(DuePayment.METHOD_CHOICES):
-        raise ApiError(422, "validation_error", "Unknown method.", {"method": [f"Use one of: {', '.join(dict(DuePayment.METHOD_CHOICES))}."]})
+    if payload.method not in DuePayment.MANUAL_METHODS:
+        raise ApiError(422, "validation_error", "Unknown method.", {"method": [f"Use one of: {', '.join(DuePayment.MANUAL_METHODS)}. Club credit is applied automatically."]})
     payment = dues_svc.record_payment(due, amount=payload.amount, method=payload.method, reference=payload.reference, paid_at=payload.paid_at, note=payload.note, user=request.user)
     audit.record(request.user, "billing.payment_recorded", club=due.club, target=due, data={"payment": str(payment.pk), "amount": str(payload.amount)})
     return 201, DueOut.of(_due(due_id), with_payments=True)
@@ -300,6 +316,116 @@ def mark_invoice_sent(request, due_id: UUID):
     invoice = invoices_svc.mark_invoice_sent_manually(_invoice(due_id), actor=request.user)
     audit.record(request.user, "billing.invoice_marked_sent", club=invoice.due.club, target=invoice.due, data={"number": invoice.number})
     return InvoiceOut.of(invoice)
+
+
+# --- plan change (prorate the running period, start a new cycle) -----------------------------------------------------
+
+
+def _change_inputs(club_id: UUID, payload: PlanChangeIn):
+    club = _club(club_id)
+    plan = _plan(payload.plan_id)
+    return club, plan
+
+
+def _date_error(exc: plan_change_svc.PlanChangeDateError) -> ApiError:
+    return ApiError(422, "validation_error", str(exc), {"effective_date": [str(exc)]})
+
+
+@router.post("/clubs/{club_id}/billing/change-plan/preview", response=PlanChangePreviewOut, auth=superuser_auth, summary="Preview a plan change: proration, credit notes, credit and the new period. Writes nothing")
+def change_plan_preview(request, club_id: UUID, payload: PlanChangeIn):
+    club, plan = _change_inputs(club_id, payload)
+    try:
+        change = plan_change_svc.build_plan_change(club, plan, payload.effective_date)
+    except plan_change_svc.PlanChangeDateError as exc:
+        raise _date_error(exc) from None
+    return PlanChangePreviewOut.of(change)
+
+
+@router.post("/clubs/{club_id}/billing/change-plan", response={201: PlanChangeOut}, auth=superuser_auth, summary="Switch a billed club's plan now: prorate the running period, issue credit notes, start a new cycle on the new plan")
+@idempotent
+def change_plan(request, club_id: UUID, payload: PlanChangeIn):
+    club, plan = _change_inputs(club_id, payload)
+    try:
+        result = plan_change_svc.execute_plan_change(club, plan, effective_date=payload.effective_date, actor=request.user)
+    except plan_change_svc.PlanChangeDateError as exc:
+        raise _date_error(exc) from None
+    change = result.change
+    audit.record(
+        request.user,
+        "billing.plan_changed",
+        club=club,
+        target=result.new_due,
+        data={
+            "from_plan": change.plan_from.code if change.plan_from else None,
+            "to_plan": plan.code,
+            "effective_date": str(change.effective_date),
+            "old_due": str(result.old_due.pk) if result.old_due else None,
+            "credit_notes": [n.number for n in result.credit_notes],
+            "cancelled_dues": [str(d.pk) for d in result.cancelled_dues],
+            "credit_applied": str(change.credit_applied),
+            "credit_balance_after": str(change.credit_balance_after),
+        },
+    )
+    invoice = Invoice.objects.filter(due=result.new_due).first()
+    created = PlanChangeCreatedOut(
+        old_due_id=result.old_due.pk if result.old_due else None,
+        new_due_id=result.new_due.pk,
+        new_invoice_id=invoice.pk if invoice else None,
+        new_invoice_number=invoice.number if invoice else None,
+        credit_note_ids=[n.pk for n in result.credit_notes],
+        cancelled_due_ids=[d.pk for d in result.cancelled_dues],
+    )
+    data = PlanChangePreviewOut.of(change).dict()
+    out = PlanChangeOut(**data, created=created, credit_notes=[CreditNoteOut.of(CreditNote.objects.select_related("club", "invoice").get(pk=n.pk), with_applied=True) for n in result.credit_notes], billing=_club_billing(club))
+    return 201, out
+
+
+@router.get("/clubs/{club_id}/billing/credit", response=CreditLedgerOut, summary="A club's credit balance and ledger, newest first")
+def club_credit(request, club_id: UUID):
+    club = _club(club_id)
+    entries = ClubCreditEntry.objects.filter(club=club).select_related("credit_note").order_by("-created", "-id")
+    return CreditLedgerOut(
+        balance=credit_svc.credit_balance(club),
+        entries=[CreditEntryOut(id=e.pk, amount=e.amount, kind=e.kind, note=e.note, created=e.created, credit_note_number=e.credit_note.number if e.credit_note else None, due_id=e.due_id) for e in entries],
+    )
+
+
+# --- credit notes ----------------------------------------------------------------------------------------------------
+
+
+class CreditNoteFilters(Schema):
+    club_id: UUID | None = None
+    search: str | None = None  # credit note or invoice number, club name / slug
+
+
+def _credit_note(note_id: UUID) -> CreditNote:
+    return get_object_or_404(CreditNote.objects.select_related("club", "invoice"), pk=note_id)
+
+
+@router.get("/billing/credit-notes", response=list[CreditNoteOut], summary="Credit notes, newest first; paginated with limit/offset ({items, count})")
+@paginate
+def list_credit_notes(request, filters: CreditNoteFilters = Query(...)):
+    qs = CreditNote.objects.select_related("club", "invoice")
+    if filters.club_id:
+        qs = qs.filter(club_id=filters.club_id)
+    if filters.search and filters.search.strip():
+        term = filters.search.strip()
+        qs = qs.filter(Q(number__icontains=term) | Q(invoice__number__icontains=term) | Q(club__name__icontains=term) | Q(club__legal_name__icontains=term) | Q(club__slug__icontains=term))
+    return [CreditNoteOut.of(n, with_applied=True) for n in qs.order_by("-issued_at", "-created", "-id")]
+
+
+@router.get("/billing/credit-notes/{note_id}", response=CreditNoteOut, summary="One credit note")
+def get_credit_note(request, note_id: UUID):
+    return CreditNoteOut.of(_credit_note(note_id), with_applied=True)
+
+
+@router.get("/billing/credit-notes/{note_id}/pdf", response={200: None}, summary="Download the credit note as a PDF (409 billing_error when PDF rendering is unavailable)")
+def credit_note_pdf(request, note_id: UUID):
+    note = _credit_note(note_id)
+    pdf = credit_notes_svc.credit_note_pdf(note)
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{note.number}.pdf"'
+    return response
 
 
 # --- upcoming renewals -----------------------------------------------------------------------------------------------

@@ -3,16 +3,20 @@
 Unpaid past grace: the club is first DOWNGRADED to the default plan (``ClubBilling.downgraded_at``), and archived
 ``BillingSettings.archive_after_days`` later if it still owes. Paying (or waiving) the last overdue period restores it.
 
-Prices and dates are frozen when a period opens. There is no proration: a plan change mid-period applies from the
-next period. Grace is ``max(period_start, day the period was opened) + grace_days`` (see ``models.grace_until_for``).
+Prices and dates are frozen when a period opens. Changing the plan of a billed club mid-period is a *plan change*
+(``services/plan_change.py``): the running period is prorated, a credit note is issued and a new cycle starts on the new
+plan; credit that results from it is carried forward on the club's credit ledger and applied to the next invoices
+(``apply_credit`` below, called whenever a period opens). Grace is ``max(period_start, day the period was opened) + grace_days`` (see ``models.grace_until_for``).
 
 Trials are a property of the club, not of a plan: ``subscribe(..., trial_days=N)`` gives the plan's features at once and
 a free period of N days. The first paid period follows the day after, opened and invoiced in advance by the renewal job.
 """
 
 import datetime
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from dateutil.relativedelta import relativedelta
 from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
@@ -21,7 +25,7 @@ from club.services import archive_club, restore_club
 from features import services as feature_services
 from features.models import Plan, Subscription
 
-from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanPrice
+from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanPrice, grace_until_for
 from . import BillingError
 from .invoices import issue_invoice
 
@@ -71,8 +75,39 @@ def _terms(plan: Plan):
         raise BillingError(f"Plan '{plan.code}' has no billing terms.") from None
 
 
+@dataclass(frozen=True)
+class PeriodQuote:
+    """What a period for ``plan`` starting ``start`` would be: dates, frozen price and VAT. Shared by ``open_period`` and
+    the plan-change preview, so the numbers shown before a change are the numbers used by it."""
+
+    plan: Plan
+    start: datetime.date
+    end: datetime.date
+    net: Decimal
+    vat_rate: Decimal
+    vat_amount: Decimal
+    reverse_charge: bool
+    grace_until: datetime.date
+
+    @property
+    def total(self) -> Decimal:
+        return self.net + self.vat_amount
+
+
+def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = False, period_end: datetime.date | None = None) -> PeriodQuote:
+    price = price_on(plan, start)
+    if price is None:
+        raise BillingError(f"Plan '{plan.code}' has no price on {start}.")
+    terms = _terms(plan)
+    if period_end is None:  # a trial passes its own end; otherwise the plan's period length applies
+        period_end = start + relativedelta(months=terms.duration_months) - datetime.timedelta(days=1)
+    net = Decimal("0") if is_trial else price.amount
+    rate, vat_amount, reverse_charge = compute_vat(club, net)
+    return PeriodQuote(plan, start, period_end, net, rate, vat_amount, reverse_charge, grace_until_for(start, terms.grace_days))
+
+
 @transaction.atomic
-def open_period(club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None) -> Due:
+def open_period(club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None) -> Due:
     """Open (and invoice) the billing period beginning ``start``.
 
     ``is_trial`` makes it a free trial period; its ``period_end`` is then passed explicitly (otherwise the plan's
@@ -80,6 +115,9 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
     ACTIVE on the same plan. We convert when the period is *opened* (in advance), not when it starts: the plan is the
     same, so entitlements do not change, and the subscription never has a trial end date that could lapse and drop the
     club to the default plan before the paid period exists. ``ClubBilling.trial_ends_at`` is cleared at the same time.
+
+    Once invoiced, any credit the club holds is applied to the period (``credit_reference`` / ``credit_note`` only label
+    that application).
     """
     billing = ClubBilling.objects.filter(club=club).first()
     if billing is None:
@@ -90,20 +128,32 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
         raise BillingError("This club has no plan.")
     if Due.objects.filter(club=club, period_start=start).exists():
         raise BillingError(f"A period starting {start} already exists.")
-    price = price_on(plan, start)
-    if price is None:
-        raise BillingError(f"Plan '{plan.code}' has no price on {start}.")
+    quote = quote_period(club, plan, start, is_trial=is_trial, period_end=period_end)
     if billing.trial_ends_at and start > billing.trial_ends_at and not is_trial:
         feature_services.convert_trial(club, actor=actor, reason="Trial ended: first paid period opened")
         billing.trial_ends_at = None
         billing.save(update_fields=["trial_ends_at", "modified"])
-    amount = Decimal("0") if is_trial else price.amount
-    rate, vat_amount, reverse_charge = compute_vat(club, amount)
-    due = Due.objects.create(club=club, plan=plan, amount=amount, vat_rate=rate, vat_amount=vat_amount, reverse_charge=reverse_charge, period_start=start, period_end=period_end, is_trial=is_trial)
+    due = Due.objects.create(
+        club=club,
+        plan=plan,
+        amount=quote.net,
+        vat_rate=quote.vat_rate,
+        vat_amount=quote.vat_amount,
+        reverse_charge=quote.reverse_charge,
+        period_start=start,
+        period_end=quote.end,
+        grace_until=quote.grace_until,
+        is_trial=is_trial,
+    )
     if due.total == 0:
         due.status, due.paid_at = Due.PAID, timezone.now()  # a free or trial period never trips downgrading or archiving
         due.save(update_fields=["status", "paid_at", "modified"])
     issue_invoice(due)
+    if due.total > 0:
+        from .credit import apply_credit
+
+        if apply_credit(due, reference=credit_reference, credit_note=credit_note) > 0:
+            due.refresh_from_db()
     return due
 
 
@@ -111,8 +161,8 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
 def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None):
     """Bill ``club`` on ``plan``. Returns ``(billing, due)``; ``due`` is None when only the plan changed.
 
-    First time: opens the first period. Already billed: just moves the club to the new plan (the current period keeps
-    its amount; the new rate applies from the next period). A trial in progress is replaced.
+    First time: opens the first period. Already billed: just moves the club to the new plan without touching the periods; the platform API
+    refuses this for billed clubs and points to ``plan_change.execute_plan_change`` (proration, credit notes, new cycle).
 
     ``trial_days`` (only for a club that is not billed yet): the first period is a free trial of that many days on
     ``plan``; the plan's features apply at once and the club simply continues on the same plan afterwards.
@@ -146,8 +196,11 @@ def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_a
 
 
 def _resettle(due: Due) -> Due:
-    """Re-derive amount_paid and status from the payments (never incrementally)."""
-    paid = sum((p.amount for p in due.payments.all()), Decimal("0"))
+    """Re-derive amount_paid and status from the payments (never incrementally).
+
+    ``amount_paid`` is what the period keeps: the payments minus the part moved to the club's credit by a plan change
+    (``credit_transferred``). The payments themselves are never changed, so the history stays complete."""
+    paid = sum((p.amount for p in due.payments.all()), Decimal("0")) - due.credit_transferred
     due.amount_paid = paid
     if paid >= due.total:
         due.status = Due.PAID
@@ -166,6 +219,8 @@ def record_payment(due: Due, *, amount: Decimal, method: str = DuePayment.BANK_T
     due = Due.objects.select_for_update().get(pk=due.pk)
     if due.status in (Due.WAIVED, Due.CANCELLED):
         raise BillingError(f"A {due.status} period cannot take payments.")
+    if method == DuePayment.CREDIT:
+        raise BillingError("Club credit is applied automatically; it cannot be recorded by hand.")
     if amount <= 0:
         raise BillingError("The payment must be more than zero.")
     if amount > due.balance:
@@ -178,6 +233,12 @@ def record_payment(due: Due, *, amount: Decimal, method: str = DuePayment.BANK_T
 @transaction.atomic
 def remove_payment(payment: DuePayment) -> Due:
     due = Due.objects.select_for_update().get(pk=payment.due_id)
+    if due.status == Due.CANCELLED:
+        raise BillingError("A cancelled period cannot be changed.")
+    if payment.method == DuePayment.CREDIT:
+        raise BillingError("Credit applied from the club's credit cannot be removed.")
+    if due.credit_transferred > 0:
+        raise BillingError("Part of this period's payments was moved to the club's credit by a plan change, so its payments can no longer be removed.")
     payment.delete()
     return _resettle(due)
 

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Credit note {{ note.number }}</title>
+<style>
+  @page { size: A4; margin: 18mm 18mm 20mm; }
+  body { font-family: sans-serif; font-size: 10pt; color: #111; line-height: 1.35; }
+  h1 { font-size: 22pt; margin: 0 0 1mm; letter-spacing: 0.5pt; }
+  .head { width: 100%; border-collapse: collapse; }
+  .head td { vertical-align: top; padding: 0; border: 0; }
+  .head td.right { text-align: right; }
+  .issuer-name { font-size: 12pt; font-weight: bold; }
+  .muted { color: #555; }
+  .label { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #666; margin-bottom: 1mm; }
+  .parties { width: 100%; border-collapse: collapse; margin-top: 10mm; }
+  .parties td { vertical-align: top; padding: 0; width: 50%; }
+  table.lines { width: 100%; border-collapse: collapse; margin-top: 10mm; }
+  table.lines th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #555; padding: 2mm 0; border-bottom: 1.5px solid #111; }
+  table.lines td { padding: 2.2mm 0; border-bottom: 1px solid #ddd; }
+  .num { text-align: right; }
+  table.lines tr.sum td { border-bottom: 0; padding: 1mm 0; }
+  table.lines tr.total td { font-weight: bold; border-top: 1.5px solid #111; padding-top: 2mm; }
+  table.lines tr.balance td { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; padding: 2.5mm 0; }
+  .note { margin-top: 6mm; padding: 3mm 4mm; border: 1px solid #999; background: #f5f5f5; }
+  .pay { margin-top: 9mm; padding: 4mm; border: 1px solid #ccc; page-break-inside: avoid; }
+  .pay table { border-collapse: collapse; }
+  .pay td { padding: 0.6mm 6mm 0.6mm 0; vertical-align: top; }
+  .terms { margin-top: 6mm; white-space: pre-line; }
+  .footer { margin-top: 10mm; padding-top: 3mm; border-top: 1px solid #ccc; font-size: 8.5pt; color: #555; white-space: pre-line; }
+</style>
+</head>
+<body>
+  <table class="head">
+    <tr>
+      <td>
+        <h1>Credit note</h1>
+        <div class="muted">No. <strong style="color:#111">{{ note.number }}</strong></div>
+      </td>
+      <td class="right">
+        <div class="issuer-name">{{ issuer.legal_name|default:"RosterChief" }}</div>
+        {% if issuer.address %}{{ issuer.address }}<br>{% endif %}
+        {% if issuer.zip_code or issuer.city %}{{ issuer.zip_code }} {{ issuer.city }}<br>{% endif %}
+        {% if issuer.country_name %}{{ issuer.country_name }}<br>{% endif %}
+        {% if issuer.vat_id %}VAT {{ issuer.vat_id }}<br>{% endif %}
+        {% if issuer.contact_email %}{{ issuer.contact_email }}<br>{% endif %}
+        {% if issuer.website %}{{ issuer.website }}{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="parties">
+    <tr>
+      <td>
+        <div class="label">Credited to</div>
+        <strong>{{ bill_to.name }}</strong><br>
+        {% if bill_to.address %}{{ bill_to.address }}<br>{% endif %}
+        {% if bill_to.zip_code or bill_to.city %}{{ bill_to.zip_code }} {{ bill_to.city }}<br>{% endif %}
+        {% if bill_to.country_name %}{{ bill_to.country_name }}<br>{% endif %}
+        {% if bill_to.vat_id %}VAT {{ bill_to.vat_id }}{% endif %}
+      </td>
+      <td>
+        <div class="label">Details</div>
+        Credit note date: {{ note.issued_at|date:"Y-m-d" }}<br>
+        Credits invoice: <strong>{{ invoice_number }}</strong><br>
+        Reference: {{ note.number }}
+      </td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th>Credited period</th><th class="num">Net (EUR)</th><th class="num">VAT</th><th class="num">Total (EUR)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ snap.description }}<br><span class="muted">{{ snap.reason }}</span></td>
+        <td>{{ credited_from|date:"Y-m-d" }} to {{ credited_to|date:"Y-m-d" }}</td>
+        <td class="num">-{{ net }}</td>
+        <td class="num">{% if snap.reverse_charge %}0%{% else %}{{ vat_rate|floatformat:"-2" }}%{% endif %} (-{{ vat }})</td>
+        <td class="num">-{{ total }}</td>
+      </tr>
+      <tr class="sum"><td colspan="4" class="num">Total excl. VAT</td><td class="num">-{{ net }}</td></tr>
+      <tr class="sum"><td colspan="4" class="num">VAT{% if not snap.reverse_charge %} {{ vat_rate|floatformat:"-2" }}%{% endif %}</td><td class="num">-{{ vat }}</td></tr>
+      <tr class="balance"><td colspan="4" class="num">Total credited</td><td class="num">EUR -{{ total }}</td></tr>
+    </tbody>
+  </table>
+
+  {% if snap.reverse_charge %}
+  <div class="note">
+    <strong>VAT reverse charged.</strong> Intra-community supply of services; the customer is liable for VAT.<br>
+    Issuer VAT: {{ issuer.vat_id|default:"-" }} &middot; Customer VAT: {{ bill_to.vat_id|default:"-" }}
+  </div>
+  {% endif %}
+
+  <div class="note">
+    This credit note corrects invoice {{ invoice_number }} (original total EUR {{ snap.invoice_total }}), which remains unchanged.
+    Amounts already paid are not refunded: any surplus is kept as credit on your account and deducted from your next invoice.
+  </div>
+
+  {% if issuer.payment_terms %}<div class="terms">{{ issuer.payment_terms }}</div>{% endif %}
+  {% if issuer.invoice_footer %}<div class="footer">{{ issuer.invoice_footer }}</div>{% endif %}
+</body>
+</html>

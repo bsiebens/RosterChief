@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from ninja import Query, Router, Schema
 from ninja.pagination import paginate
 
+from billing.models import ClubBilling
 from club.models import Club
 from features import services
 from features.catalog import CATALOG
@@ -110,6 +111,8 @@ def club_subscriptions(request, club_id: UUID):
 def subscribe_club(request, club_id: UUID, payload: SubscribeIn):
     club = _club(club_id)
     plan = get_object_or_404(Plan, pk=payload.plan_id)
+    if ClubBilling.objects.filter(club=club).exists():
+        raise ApiError(409, "billing_error", "This club is billed: use the billing plan change so the current period is prorated and a new cycle starts.")
     if not plan.is_active:
         raise ApiError(422, "validation_error", "That plan is not active.", {"plan_id": ["That plan is not active."]})
     if payload.status not in dict(Subscription.STATUS_CHOICES):

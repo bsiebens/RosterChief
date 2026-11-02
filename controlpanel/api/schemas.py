@@ -650,6 +650,73 @@ class CycleOut(Schema):
         )
 
 
+class CreditNoteBrief(Schema):
+    number: str
+    total: Decimal
+
+
+class CreditAppliedOut(Schema):
+    due_id: UUID
+    invoice_number: str | None = None
+    amount: Decimal
+
+
+class CreditNoteOut(Schema):
+    id: UUID
+    number: str  # CN-YYYY-00001, its own gapless sequence
+    issued_at: date
+    club: ClubRef
+    invoice_number: str  # the invoice this credit note corrects (which is never edited)
+    due_id: UUID
+    net: Decimal  # amounts are positive: the credited part
+    vat: Decimal
+    total: Decimal
+    vat_rate: Decimal
+    reverse_charge: bool
+    reason: str
+    applied_to: list[CreditAppliedOut] = []  # informational: invoices that were paid from the credit this change created
+
+    @staticmethod
+    def of(note, *, with_applied: bool = False) -> CreditNoteOut:
+        applied = []
+        if with_applied:
+            from billing.models import ClubCreditEntry
+
+            for e in ClubCreditEntry.objects.filter(credit_note=note, kind=ClubCreditEntry.APPLIED).select_related("due__invoice"):
+                inv = getattr(e.due, "invoice", None)
+                applied.append(CreditAppliedOut(due_id=e.due_id, invoice_number=inv.number if inv else None, amount=-e.amount))
+        return CreditNoteOut(
+            id=note.pk,
+            number=note.number,
+            issued_at=note.issued_at,
+            club=ClubRef(id=note.club.pk, name=note.club.name, slug=note.club.slug),
+            invoice_number=note.invoice.number,
+            due_id=note.due_id,
+            net=note.net,
+            vat=note.vat,
+            total=note.total,
+            vat_rate=note.vat_rate,
+            reverse_charge=note.reverse_charge,
+            reason=note.reason,
+            applied_to=applied,
+        )
+
+
+class CreditEntryOut(Schema):
+    id: UUID
+    amount: Decimal  # + credit gained, - credit used
+    kind: str  # overpayment | cancelled_period | applied
+    note: str
+    created: datetime
+    credit_note_number: str | None = None
+    due_id: UUID | None = None
+
+
+class CreditLedgerOut(Schema):
+    balance: Decimal
+    entries: list[CreditEntryOut]  # newest first
+
+
 class DueOut(Schema):
     id: UUID
     club: ClubRef
@@ -670,6 +737,14 @@ class DueOut(Schema):
     paid_at: datetime | None = None
     invoice: InvoiceOut | None = None
     payments: list[PaymentOut] = []
+    prorated: bool = False  # shortened and repriced by a plan change; amount/vat_amount/total/period_end are then the prorated values
+    original_amount: Decimal | None = None  # net before proration
+    original_vat_amount: Decimal | None = None
+    original_total: Decimal | None = None
+    original_period_end: date | None = None
+    prorated_at: datetime | None = None
+    credit_transferred: Decimal = Decimal("0")  # payments on this period that were moved to the club's credit (still listed in payments)
+    credit_notes: list[CreditNoteBrief] = []
 
     @staticmethod
     def of(due, *, with_payments: bool = False) -> DueOut:
@@ -698,6 +773,14 @@ class DueOut(Schema):
             paid_at=due.paid_at,
             invoice=InvoiceOut.of(invoice) if invoice else None,
             payments=[PaymentOut.of(p) for p in due.payments.select_related("recorded_by")] if with_payments else [],
+            prorated=due.is_prorated,
+            original_amount=due.original_amount,
+            original_vat_amount=due.original_vat_amount,
+            original_total=due.original_total,
+            original_period_end=due.original_period_end,
+            prorated_at=due.prorated_at,
+            credit_transferred=due.credit_transferred,
+            credit_notes=[CreditNoteBrief(number=n.number, total=n.total) for n in sorted(due.credit_notes.all(), key=lambda n: n.created)],
         )
 
 
@@ -711,6 +794,8 @@ class ClubBillingOut(Schema):
     downgraded_at: datetime | None = None  # set while the club is on the default plan because a period is overdue
     owed: Decimal
     dues: list[DueOut]
+    credit_balance: Decimal = Decimal("0")  # credit held for the club; applied automatically to its next invoices
+    credit_notes: list[CreditNoteOut] = []  # the latest few
 
 
 class SubscribeBillingIn(Schema):
@@ -720,6 +805,148 @@ class SubscribeBillingIn(Schema):
     auto_archive: bool = True
     notes: str = ""
     trial_days: int | None = Field(None, ge=1, le=365)  # free trial of this many days; only for a club that is not billed yet
+
+
+class PlanChangeIn(Schema):
+    plan_id: UUID
+    effective_date: date | None = None  # default today; between the day after the current period's start and today
+
+
+class MoneyOut(Schema):
+    net: Decimal
+    vat: Decimal
+    total: Decimal
+
+    @staticmethod
+    def of(m) -> MoneyOut:
+        return MoneyOut(net=m.net, vat=m.vat, total=m.total)
+
+
+class OldPeriodOut(Schema):
+    id: UUID
+    period_start: date
+    period_end: date  # as it was before the change
+    new_period_end: date  # the day before the switch date
+    total_days: int
+    used_days: int
+    unused_days: int
+    original: MoneyOut
+    prorated: MoneyOut  # equals original for a trial or waived period (only shortened)
+    status_before: str
+    status: str  # status after the change
+    paid: Decimal  # recorded payments on the period (net of anything moved to credit earlier)
+    credit_to_issue: MoneyOut | None = None  # the credit note (null: nothing to credit)
+    overpayment_to_credit: Decimal  # paid beyond the prorated total: moved to the club's credit
+    has_invoice: bool
+    invoice_number: str | None = None
+    is_trial: bool = False
+
+
+class CancelledPeriodOut(Schema):
+    id: UUID
+    period_start: date
+    period_end: date
+    total: Decimal
+    paid: Decimal  # becomes club credit
+    invoice_number: str | None = None
+
+
+class CreditNoteToIssueOut(Schema):
+    for_invoice: str | None = None
+    net: Decimal
+    vat: Decimal
+    total: Decimal
+
+
+class NewPeriodOut(Schema):
+    period_start: date
+    period_end: date
+    plan: PlanRef
+    net: Decimal
+    vat_rate: Decimal
+    vat_amount: Decimal
+    total: Decimal
+    reverse_charge: bool
+    grace_until: date
+    invoice_opens: str = "immediately"
+
+
+class PlanChangePreviewOut(Schema):
+    club_id: UUID
+    effective_date: date
+    from_plan: PlanRef | None = None
+    to_plan: PlanRef
+    old_period: OldPeriodOut | None = None  # null when no period covers the switch date
+    cancelled_periods: list[CancelledPeriodOut]
+    credit_notes_to_issue: list[CreditNoteToIssueOut]
+    credit_balance_before: Decimal
+    credit_available_for_new_period: Decimal  # balance before + credit created by this change
+    new_period: NewPeriodOut
+    credit_applied: Decimal
+    amount_payable_after_credit: Decimal
+    credit_balance_after: Decimal
+    warnings: list[str]
+
+    @staticmethod
+    def of(change) -> PlanChangePreviewOut:
+        def ref(p):
+            return PlanRef(id=p.pk, code=p.code, name=p.name)
+
+        o = change.old
+        old = None
+        if o is not None:
+            inv = o.invoice
+            old = OldPeriodOut(
+                id=o.due.pk,
+                period_start=o.period_start,
+                period_end=o.period_end,
+                new_period_end=o.new_period_end,
+                total_days=o.total_days,
+                used_days=o.used_days,
+                unused_days=o.unused_days,
+                original=MoneyOut.of(o.original),
+                prorated=MoneyOut.of(o.prorated),
+                status_before=o.status_before,
+                status=o.status_after,
+                paid=o.paid,
+                credit_to_issue=MoneyOut.of(o.credit_to_issue) if o.credit_to_issue else None,
+                overpayment_to_credit=o.overpayment,
+                has_invoice=inv is not None,
+                invoice_number=inv.number if inv else None,
+                is_trial=o.due.is_trial,
+            )
+        q = change.quote
+        return PlanChangePreviewOut(
+            club_id=change.club.pk,
+            effective_date=change.effective_date,
+            from_plan=ref(change.plan_from) if change.plan_from else None,
+            to_plan=ref(change.plan_to),
+            old_period=old,
+            cancelled_periods=[CancelledPeriodOut(id=c.due.pk, period_start=c.due.period_start, period_end=c.due.period_end, total=c.total, paid=c.paid, invoice_number=c.invoice.number if c.invoice else None) for c in change.cancelled],
+            credit_notes_to_issue=[CreditNoteToIssueOut(for_invoice=inv.number if inv else None, net=m.net, vat=m.vat, total=m.total) for inv, m, _due in change.credit_notes_to_issue],
+            credit_balance_before=change.credit_balance_before,
+            credit_available_for_new_period=change.credit_available,
+            new_period=NewPeriodOut(period_start=q.start, period_end=q.end, plan=ref(q.plan), net=q.net, vat_rate=q.vat_rate, vat_amount=q.vat_amount, total=q.total, reverse_charge=q.reverse_charge, grace_until=q.grace_until),
+            credit_applied=change.credit_applied,
+            amount_payable_after_credit=change.amount_payable,
+            credit_balance_after=change.credit_balance_after,
+            warnings=change.warnings,
+        )
+
+
+class PlanChangeCreatedOut(Schema):
+    old_due_id: UUID | None = None
+    new_due_id: UUID
+    new_invoice_id: UUID | None = None
+    new_invoice_number: str | None = None
+    credit_note_ids: list[UUID]
+    cancelled_due_ids: list[UUID]
+
+
+class PlanChangeOut(PlanChangePreviewOut):
+    created: PlanChangeCreatedOut
+    credit_notes: list[CreditNoteOut]
+    billing: ClubBillingOut
 
 
 class OpenPeriodIn(Schema):

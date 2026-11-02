@@ -195,7 +195,14 @@ def _lapsed_clubs(s):
 def _invoices_to_send(s):
     from billing.models import Invoice
 
-    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).count()
+    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).exclude(due__status="cancelled").count()
+
+
+@metric("club_credit_total", "Credit held for clubs (EUR)", group="attention")
+def _club_credit_total(s):
+    from billing.models import ClubCreditEntry
+
+    return str(ClubCreditEntry.objects.aggregate(total=Sum("amount"))["total"] or Decimal("0"))
 
 
 @metric("renewals_pending", "Renewals waiting to be opened", group="attention")
@@ -288,7 +295,7 @@ def _charts() -> dict:
     clubs = Club.objects.exclude(schema_name=get_public_schema_name())
     return {
         "new_clubs": _monthly(clubs, "created"),
-        "payments_received_eur": _monthly(DuePayment.objects.all(), "paid_at", Sum("amount")),
+        "payments_received_eur": _monthly(DuePayment.objects.exclude(method=DuePayment.CREDIT), "paid_at", Sum("amount")),  # credit is not money received
     }
 
 

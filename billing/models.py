@@ -168,6 +168,18 @@ class Due(UUIDModel):
     is_trial = models.BooleanField(default=False)
     last_reminder_level = models.CharField(max_length=20, blank=True)
     last_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    # Plan change (see billing.services.plan_change): the period is shortened and its figures prorated. The figures it was
+    # opened with are kept here for reference; ``amount``/``vat_amount``/``period_end`` hold the prorated values.
+    original_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    original_vat_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    original_period_end = models.DateField(null=True, blank=True)
+    prorated_at = models.DateTimeField(null=True, blank=True)
+    credit_transferred = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0"),
+        help_text="Part of the recorded payments that was moved to the club's credit (a plan change made the period cheaper, or cancelled it). amount_paid = sum(payments) - credit_transferred.",
+    )
 
     class Meta:
         verbose_name = _("due")
@@ -187,6 +199,16 @@ class Due(UUIDModel):
     @property
     def balance(self) -> Decimal:
         return self.total - self.amount_paid
+
+    @property
+    def is_prorated(self) -> bool:
+        return self.original_period_end is not None
+
+    @property
+    def original_total(self) -> Decimal | None:
+        if self.original_amount is None:
+            return None
+        return self.original_amount + (self.original_vat_amount or Decimal("0"))
 
     @property
     def is_owing(self) -> bool:
@@ -213,8 +235,9 @@ class Due(UUIDModel):
 
 
 class DuePayment(UUIDModel):
-    BANK_TRANSFER, CARD, CASH, OTHER = "bank_transfer", "card", "cash", "other"
-    METHOD_CHOICES = [(BANK_TRANSFER, _("Bank transfer")), (CARD, _("Card")), (CASH, _("Cash")), (OTHER, _("Other"))]
+    BANK_TRANSFER, CARD, CASH, OTHER, CREDIT = "bank_transfer", "card", "cash", "other", "credit"
+    METHOD_CHOICES = [(BANK_TRANSFER, _("Bank transfer")), (CARD, _("Card")), (CASH, _("Cash")), (OTHER, _("Other")), (CREDIT, _("Club credit"))]
+    MANUAL_METHODS = (BANK_TRANSFER, CARD, CASH, OTHER)  # ``credit`` is only ever created by the system, from the credit ledger
 
     due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="payments")
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
@@ -262,3 +285,71 @@ class Invoice(UUIDModel):
 
     def __str__(self) -> str:
         return self.number
+
+
+class CreditNoteSequence(models.Model):
+    """The gapless counter behind ``CN-YYYY-00001`` credit note numbers, one row per year. Separate from invoices.
+
+    Same rules as ``InvoiceSequence``: never derived from existing numbers, allocated with ``select_for_update`` inside
+    the transaction that creates the credit note, so a rolled-back credit note does not burn a number.
+    """
+
+    year = models.PositiveSmallIntegerField(unique=True)
+    last_number = models.PositiveIntegerField(default=0)
+
+    def __str__(self) -> str:
+        return f"CN-{self.year}: {self.last_number}"
+
+
+class CreditNote(UUIDModel):
+    """An immutable credit document against an invoice (the invoice itself is never edited). Amounts are positive and
+    are the credited part; ``snapshot`` freezes issuer / bill-to / texts like an invoice snapshot."""
+
+    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="credit_notes")
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="credit_notes")
+    due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="credit_notes")
+    number = models.CharField(max_length=32, unique=True, editable=False)
+    issued_at = models.DateField()
+    net = models.DecimalField(max_digits=10, decimal_places=2)
+    vat = models.DecimalField(max_digits=10, decimal_places=2)
+    total = models.DecimalField(max_digits=10, decimal_places=2)
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    reverse_charge = models.BooleanField(default=False)
+    reason = models.CharField(max_length=255)
+    snapshot = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-issued_at", "-created"]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("Credit notes are immutable.")
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.number
+
+
+class ClubCreditEntry(UUIDModel):
+    """Append-only ledger of a club's credit. ``credit_balance`` is the sum of ``amount``; no money is ever paid out.
+
+    Positive: money the club paid that no longer has a period to pay for (a prorated period is cheaper than what was
+    paid, or a period paid in advance was cancelled). Negative: credit used to pay an invoice (a ``credit`` DuePayment).
+    """
+
+    OVERPAYMENT, CANCELLED, APPLIED = "overpayment", "cancelled_period", "applied"
+    KIND_CHOICES = [(OVERPAYMENT, _("Overpayment after proration")), (CANCELLED, _("Payment on a cancelled period")), (APPLIED, _("Applied to an invoice"))]
+
+    club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="credit_entries")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    credit_note = models.ForeignKey(CreditNote, null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
+    due = models.ForeignKey(Due, null=True, blank=True, on_delete=models.SET_NULL, related_name="credit_entries")
+    note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created"]
+        indexes = [models.Index(fields=["club", "created"])]
+
+    def __str__(self) -> str:
+        return f"{self.club} {self.amount:+} ({self.kind})"
