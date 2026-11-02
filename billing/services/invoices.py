@@ -12,23 +12,31 @@ from django.utils import timezone
 from rosterchief.mail import send_message
 
 from ..models import BillingSettings, Due, Invoice, InvoiceSequence
-from . import BillingError
+from . import BillingError, numbering
 
 NUMBER_MAX_LENGTH = 32
-AUTO_FORMAT = re.compile(r"^INV-\d{4}-\d+$")
+LEGACY_AUTO_FORMAT = re.compile(r"^INV-\d{4}-\d+$")  # the original fixed format; always reserved, whatever the current pattern
 
 
-def next_automatic_number(year: int) -> str:
-    """Allocate the next ``INV-YYYY-00001`` number. Must run inside the transaction that creates the invoice."""
-    InvoiceSequence.objects.get_or_create(year=year)
-    seq = InvoiceSequence.objects.select_for_update().get(year=year)
-    seq.last_number += 1
-    seq.save(update_fields=["last_number"])
-    return f"INV-{year}-{seq.last_number:05d}"
+def next_automatic_number(on_date: datetime.date | None = None) -> str:
+    """Allocate the next automatic invoice number from the configured pattern. Must run inside the transaction that
+    creates the invoice (see ``numbering.allocate``)."""
+    on_date = on_date or timezone.localdate()
+    pattern = BillingSettings.current().invoice_number_pattern
+    return numbering.allocate(InvoiceSequence, pattern, on_date, lambda n: Invoice.objects.filter(number=n).exists())
+
+
+def peek_next_automatic_number(pattern: str | None = None, on_date: datetime.date | None = None) -> str:
+    """The number the next automatic invoice would get right now. Writes nothing."""
+    pattern = pattern or BillingSettings.current().invoice_number_pattern
+    return numbering.peek(InvoiceSequence, pattern, on_date or timezone.localdate(), lambda n: Invoice.objects.filter(number=n).exists())[0]
 
 
 def clean_number(raw: str) -> str:
-    """Validate a custom invoice number: trimmed, not blank, at most 32 characters, not the automatic format, unique.
+    """Validate a custom invoice number: trimmed, not blank, at most 32 characters, not in the automatic format, unique.
+
+    Reserved (automatic-looking) are numbers matching the CURRENT invoice number pattern and the legacy ``INV-YYYY-n``
+    format. Unique across ALL invoices, voided ones included.
 
     ``ValueError`` = invalid format (422); ``BillingError`` = already taken (409).
     """
@@ -37,8 +45,9 @@ def clean_number(raw: str) -> str:
         raise ValueError("The invoice number cannot be blank.")
     if len(number) > NUMBER_MAX_LENGTH:
         raise ValueError(f"The invoice number can be at most {NUMBER_MAX_LENGTH} characters.")
-    if AUTO_FORMAT.match(number):
-        raise ValueError("Numbers like INV-YYYY-00001 are reserved for the automatic sequence; use another format.")
+    pattern = BillingSettings.current().invoice_number_pattern
+    if numbering.matches_pattern(pattern, number) or LEGACY_AUTO_FORMAT.match(number):
+        raise ValueError(f"This format is reserved for the automatic sequence (pattern {pattern}); use another format.")
     if Invoice.objects.filter(number=number).exists():
         raise BillingError(f"Invoice number {number} is already in use.")
     return number
@@ -75,6 +84,12 @@ def bill_to_snapshot(club) -> dict:
     }
 
 
+def split_description(description: str) -> tuple[str, str]:
+    """``"Pro - platform subscription"`` -> ``("Pro", "platform subscription")``: the plan name is shown bold, the rest as a sub-line."""
+    name, _, detail = description.partition(" - ")
+    return name.strip(), detail.strip()
+
+
 def build_snapshot(due: Due) -> dict:
     """Everything printed on the invoice, frozen: issuer, bill-to, line and amounts."""
     return {
@@ -95,7 +110,7 @@ def build_snapshot(due: Due) -> dict:
 def issue_invoice(due: Due, *, number: str | None = None) -> Invoice:
     """Create the invoice for a period (idempotent). Automatic numbers come from the gapless counter; ``number`` sets a
     custom one (only possible here, numbers never change afterwards) without touching the counter."""
-    existing = Invoice.objects.filter(due=due).first()
+    existing = Invoice.objects.filter(due=due, voided_at__isnull=True).first()
     if existing:
         return existing
     custom = clean_number(number) if number is not None else None
@@ -103,9 +118,9 @@ def issue_invoice(due: Due, *, number: str | None = None) -> Invoice:
     snapshot = build_snapshot(due)
     try:
         with transaction.atomic():
-            invoice = Invoice.objects.create(due=due, number=custom or next_automatic_number(today.year), custom_number=custom is not None, issued_at=today, snapshot=snapshot)
+            invoice = Invoice.objects.create(due=due, number=custom or next_automatic_number(today), custom_number=custom is not None, issued_at=today, snapshot=snapshot)
     except IntegrityError:
-        existing = Invoice.objects.filter(due=due).first()
+        existing = Invoice.objects.filter(due=due, voided_at__isnull=True).first()
         if existing:
             return existing
         raise BillingError(f"Invoice number {custom} is already in use.") from None
@@ -135,9 +150,19 @@ def invoice_context(invoice: Invoice) -> dict:
     snap = invoice.snapshot or build_snapshot(due)  # invoices from before snapshots render from live data
     payments = list(due.payments.all())
     paid = sum((p.amount for p in payments), Decimal("0"))
+    replaced_by = invoice.replaced_by if invoice.replaced_by_id else None
+    replaces = invoice.replaces
+    void_note = invoice.credit_notes.filter(kind="void").first() if invoice.voided_at else None
     return {
+        "voided": invoice.voided_at is not None,
+        "voided_on": timezone.localtime(invoice.voided_at).date() if invoice.voided_at else None,
+        "replaced_by_number": replaced_by.number if replaced_by else None,
+        "void_credit_note_number": void_note.number if void_note else None,
+        "replaces_number": replaces.number if replaces else None,
         "invoice": invoice,
         "snap": snap,
+        "line_name": split_description(snap["description"])[0],
+        "line_detail": split_description(snap["description"])[1],
         "issuer": snap["issuer"],
         "bill_to": snap["bill_to"],
         "period_start": datetime.date.fromisoformat(snap["period_start"]),
@@ -173,6 +198,7 @@ def club_recipients(club) -> list[str]:
 @transaction.atomic
 def send_invoice(invoice: Invoice, *, actor=None) -> Invoice:
     """Email the PDF to the club's administrators."""
+    _refuse_if_voided(invoice)
     recipients = club_recipients(invoice.due.club)
     if not recipients:
         raise BillingError("This club has no administrator with an email address.")
@@ -189,7 +215,13 @@ def send_invoice(invoice: Invoice, *, actor=None) -> Invoice:
     return invoice
 
 
+def _refuse_if_voided(invoice: Invoice) -> None:
+    if invoice.voided_at is not None:
+        raise BillingError(f"Invoice {invoice.number} was voided; it can no longer be sent.")
+
+
 def mark_invoice_sent_manually(invoice: Invoice, *, actor=None) -> Invoice:
+    _refuse_if_voided(invoice)
     invoice.sent_at, invoice.sent_method, invoice.sent_by = timezone.now(), Invoice.MANUAL, actor
     invoice.save(update_fields=["sent_at", "sent_method", "sent_by", "modified"])
     return invoice

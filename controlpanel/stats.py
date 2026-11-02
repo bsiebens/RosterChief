@@ -195,7 +195,7 @@ def _lapsed_clubs(s):
 def _invoices_to_send(s):
     from billing.models import Invoice
 
-    return Invoice.objects.filter(sent_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).exclude(due__status="cancelled").count()
+    return Invoice.objects.filter(sent_at__isnull=True, voided_at__isnull=True).exclude(due__amount=0, due__vat_amount=0).exclude(due__status="cancelled").count()
 
 
 @metric("club_credit_total", "Credit held for clubs (EUR)", group="attention")

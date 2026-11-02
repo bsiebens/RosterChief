@@ -72,11 +72,17 @@ class VatTests(BillingTestBase):
         self.assertFalse(self.open(make_club("Swiss", vat_id="CHE1", country="CH"), start=START).reverse_charge)
         self.assertFalse(self.open(make_club("Unknown", vat_id="X1")).reverse_charge)
 
-    def test_zero_amount_has_no_vat_and_is_paid(self):
+    def test_zero_amount_shows_the_standard_rate_with_no_vat_and_is_paid(self):
         free = Plan.objects.create(code="free-test", name="Free")
         PlanPrice.objects.create(plan=free, active_from=datetime.date(2000, 1, 1), amount=0)
         due = self.open(make_club("Freebie", country="BE"), plan=free)
-        self.assertEqual((due.vat_amount, due.status), (Decimal("0"), Due.PAID))
+        self.assertEqual((due.vat_rate, due.vat_amount, due.total, due.status, due.reverse_charge), (Decimal("21.00"), Decimal("0"), Decimal("0"), Due.PAID, False))
+
+    def test_zero_amount_for_a_reverse_charge_club_is_still_reverse_charge(self):
+        free = Plan.objects.create(code="free-rc", name="Free")
+        PlanPrice.objects.create(plan=free, active_from=datetime.date(2000, 1, 1), amount=0)
+        due = self.open(make_club("Freebie NL", country="NL", vat_id="NL123456789B01"), plan=free)
+        self.assertEqual((due.vat_rate, due.vat_amount, due.reverse_charge, due.status), (Decimal("0"), Decimal("0"), True, Due.PAID))
 
     def test_vat_is_rounded_to_cents(self):
         s = BillingSettings.current()
@@ -473,9 +479,9 @@ def counts():
         "invoice": Invoice.objects.count(),
         "billing": ClubBilling.objects.count(),
         "subscription": Subscription.objects.count(),
-        "invoice_seq": list(InvoiceSequence.objects.values_list("year", "last_number")),
+        "invoice_seq": list(InvoiceSequence.objects.values_list("scope", "last_number")),
         "credit_note": CreditNote.objects.count(),
-        "credit_seq": list(CreditNoteSequence.objects.values_list("year", "last_number")),
+        "credit_seq": list(CreditNoteSequence.objects.values_list("scope", "last_number")),
         "ledger": ClubCreditEntry.objects.count(),
         "payment": DuePayment.objects.count(),
     }
@@ -802,8 +808,8 @@ class CreditNoteTests(PlanChangeBase):
         n1 = self.change(a, self.big).credit_notes[0]
         n2 = self.change(b, self.big).credit_notes[0]
         self.assertEqual((n1.number, n2.number), ("CN-2026-00001", "CN-2026-00002"))
-        self.assertEqual(CreditNoteSequence.objects.get(year=2026).last_number, 2)
-        self.assertEqual(InvoiceSequence.objects.get(year=2026).last_number, 4)  # 2 original + 2 new, unaffected by credit notes
+        self.assertEqual(CreditNoteSequence.objects.get(scope="2026").last_number, 2)
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 4)  # 2 original + 2 new, unaffected by credit notes
         with at(D(2027, 2, 3)):
             c, _ = self.billed("C1", start=D(2027, 1, 1))
         n3 = self.change(c, self.big, day=D(2027, 2, 3)).credit_notes[0]
@@ -933,7 +939,7 @@ class ValidationTests(PlanChangeBase):
         self.assertEqual(Due.objects.filter(club=club, status=Due.CANCELLED).count(), 1)
 
 
-class ApiTests(PlanChangeBase):
+class ApiBase(PlanChangeBase):
     def setUp(self):
         super().setUp()
         patcher = mock.patch.object(PlatformAuth, "__call__", self._auth)
@@ -953,6 +959,8 @@ class ApiTests(PlanChangeBase):
         with at(day):
             return self.client.get(path)
 
+
+class ApiTests(ApiBase):
     def test_preview_writes_nothing_and_equals_the_execution(self):
         club, due = self.billed(paid=M("121.00"))
         base = f"/clubs/{club.pk}/billing/change-plan"
@@ -1050,7 +1058,7 @@ class ApiTests(PlanChangeBase):
         self.assertEqual(self.get(f"/billing/credit-notes?club_id={club.pk}").json()["items"][0]["invoice_number"], "INV-2026-00001")
         note = self.get(f"/billing/credit-notes?club_id={club.pk}").json()["items"][0]
         one = self.get(f"/billing/credit-notes/{note['id']}").json()
-        self.assertEqual(set(one), {"id", "number", "issued_at", "club", "invoice_number", "due_id", "net", "vat", "total", "vat_rate", "reverse_charge", "reason", "applied_to"})
+        self.assertEqual(set(one), {"id", "number", "issued_at", "club", "invoice_number", "due_id", "net", "vat", "total", "vat_rate", "reverse_charge", "reason", "applied_to", "kind", "replacement_invoice_number"})
         self.assertEqual(one["due_id"], str(due.pk))
         pdf = self.get(f"/billing/credit-notes/{note['id']}/pdf")
         try:
@@ -1067,7 +1075,7 @@ class ApiTests(PlanChangeBase):
         self.assertEqual(b["credit_notes"][0]["number"], "CN-2026-00001")
         old = next(d for d in b["dues"] if d["id"] == str(due.pk))
         self.assertEqual((old["prorated"], old["original_total"], old["original_period_end"], old["total"], old["status"]), (True, "121.00", "2026-12-31", "60.33", "paid"))
-        self.assertEqual(old["credit_notes"], [{"number": "CN-2026-00001", "total": "60.67"}])
+        self.assertEqual(old["credit_notes"], [{"number": "CN-2026-00001", "total": "60.67", "kind": "plan_change"}])
         self.assertEqual(old["credit_transferred"], "60.67")
         self.assertEqual({p["method"] for d in b["dues"] for p in self.get(f"/billing/dues/{d['id']}").json()["payments"]}, {"bank_transfer", "credit"})
 
@@ -1075,3 +1083,612 @@ class ApiTests(PlanChangeBase):
         _club, due = self.billed()
         r = self.post(f"/billing/dues/{due.pk}/payments", {"amount": "10.00", "method": "credit"})
         self.assertEqual(r.status_code, 422)
+
+
+# --- void and reissue --------------------------------------------------------------------------------------------------
+
+from controlpanel.models import PlatformAuditLog  # noqa: E402
+
+from .services import reissue as reissue_svc  # noqa: E402
+
+
+class VoidReissueTests(ApiBase):
+    def void(self, due, reason="Wrong bill-to address", number=None, headers=None, day=SWITCH):
+        body = {"reason": reason}
+        if number is not None:
+            body["number"] = number
+        return self.post(f"/billing/dues/{due.pk}/invoice/void-and-reissue", body, day=day, headers=headers)
+
+    def position(self, club):
+        return {
+            "dues": [(d.pk, d.amount, d.vat_amount, d.total, d.amount_paid, d.status, d.credit_transferred, d.grace_until, d.paid_at, d.period_end, d.original_amount) for d in Due.objects.filter(club=club).order_by("period_start")],
+            "payments": sorted((p.pk, p.amount, p.method) for p in DuePayment.objects.filter(due__club=club)),
+            "ledger": sorted((e.pk, e.amount, e.kind) for e in ClubCreditEntry.objects.filter(club=club)),
+            "balance": credit_svc.credit_balance(club),
+            "owed": sum((d.balance for d in Due.objects.filter(club=club) if d.is_owing), M("0")),
+        }
+
+    def test_void_with_vat_issues_a_full_credit_note_and_changes_no_money(self):
+        club, due = self.billed(vat_id="BE1", paid=M("50.00"))
+        before_pos = self.position(club)
+        r = self.void(due)
+        self.assertEqual(r.status_code, 201, r.content)
+        data = r.json()
+        self.assertEqual(self.position(club), before_pos)
+        self.assert_conserved(club)
+        old, new, note = data["voided"], data["invoice"], data["credit_note"]
+        self.assertEqual((old["number"], old["status"], old["void_reason"], old["replaced_by_number"], old["needs_sending"]), ("INV-2026-00001", "voided", "Wrong bill-to address", "INV-2026-00002", False))
+        self.assertIsNotNone(old["voided_at"])
+        self.assertEqual((new["number"], new["status"], new["replaces_number"], new["needs_sending"], new["custom_number"], new["total"], new["issued_at"]), ("INV-2026-00002", "active", "INV-2026-00001", True, False, "121.00", "2026-07-02"))
+        self.assertEqual(new["due_date"], due.grace_until.isoformat())
+        self.assertEqual((note["number"], note["kind"], note["net"], note["vat"], note["total"], note["vat_rate"], note["reverse_charge"]), ("CN-2026-00001", "void", "100.00", "21.00", "121.00", "21.00", False))
+        self.assertEqual((note["invoice_number"], note["replacement_invoice_number"], note["applied_to"], note["due_id"]), ("INV-2026-00001", "INV-2026-00002", [], str(due.pk)))
+        self.assertEqual(note["reason"], "Invoice voided and reissued: Wrong bill-to address")
+        self.assertFalse(ClubCreditEntry.objects.exists())
+        self.assertEqual(credit_svc.credit_balance(club), M("0"))
+        got = Due.objects.get(pk=due.pk)
+        self.assertEqual(got.invoice.number, "INV-2026-00002")
+        self.assertEqual(got.invoices.count(), 2)
+
+    def test_reverse_charge_credit_note_uses_the_invoices_own_flag(self):
+        _club, due = self.billed("Dutch", country="NL", vat_id="NL123456789B01")
+        note = self.void(due).json()["credit_note"]
+        self.assertEqual((note["net"], note["vat"], note["total"], note["vat_rate"], note["reverse_charge"]), ("100.00", "0.00", "100.00", "0.00", True))
+
+    def test_credit_note_follows_the_voided_invoice_not_a_changed_vat_rate(self):
+        _club, due = self.billed()
+        s = BillingSettings.current()
+        s.vat_rate = M("6.00")
+        s.save()
+        cache.clear()
+        data = self.void(due).json()
+        self.assertEqual((data["credit_note"]["total"], data["credit_note"]["vat_rate"]), ("121.00", "21.00"))
+        self.assertEqual(data["invoice"]["total"], "121.00")  # the replacement carries the Due's frozen amounts
+
+    def test_zero_invoice_voids_without_a_credit_note(self):
+        free = Plan.objects.create(code="free-v", name="Free V")
+        PlanPrice.objects.create(plan=free, active_from=D(2000, 1, 1), amount=0)
+        _club, due = self.billed(plan=free)
+        before = counts()
+        r = self.void(due)
+        self.assertEqual(r.status_code, 201, r.content)
+        data = r.json()
+        self.assertIsNone(data["credit_note"])
+        self.assertEqual((data["voided"]["status"], data["invoice"]["number"], data["invoice"]["needs_sending"], data["invoice"]["total"]), ("voided", "INV-2026-00002", False, "0.00"))
+        self.assertEqual(CreditNote.objects.count(), 0)
+        self.assertEqual(counts()["credit_seq"], before["credit_seq"])
+
+    def test_voided_invoice_is_kept_unsendable_and_numbering_stays_gapless(self):
+        _club, due = self.billed()
+        self.void(due)
+        old = Invoice.objects.get(number="INV-2026-00001")
+        self.assertTrue(old.is_voided)
+        with self.assertRaises(BillingError):
+            invoices_svc.send_invoice(old)
+        with self.assertRaises(BillingError):
+            invoices_svc.mark_invoice_sent_manually(old)
+        old.refresh_from_db()
+        self.assertIsNone(old.sent_at)
+        # the API routes act on the current invoice, which is the replacement
+        r = self.post(f"/billing/dues/{due.pk}/invoice/mark-sent")
+        self.assertEqual(r.json()["number"], "INV-2026-00002")
+        other, _ = self.billed("Next")
+        self.assertEqual(Due.objects.get(club=other).invoice.number, "INV-2026-00003")
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 3)
+
+    def test_failed_attempt_burns_no_number_and_changes_nothing(self):
+        club, due = self.billed()
+        before, pos = counts(), self.position(club)
+        with mock.patch.object(CreditNote.objects, "create", side_effect=RuntimeError("boom")), self.assertRaises(RuntimeError):
+            reissue_svc.void_and_reissue(due.invoice, reason="x", actor=self.staff)
+        self.assertEqual(counts(), before)
+        self.assertEqual(self.position(club), pos)
+        self.assertFalse(Invoice.objects.get(number="INV-2026-00001").is_voided)
+        data = self.void(due).json()
+        self.assertEqual((data["invoice"]["number"], data["credit_note"]["number"]), ("INV-2026-00002", "CN-2026-00001"))
+
+    def test_custom_replacement_number(self):
+        _club, due = self.billed()
+        before = counts()
+        for bad, status, code in (
+            ("   ", 422, "validation_error"),
+            ("X" * 33, 422, "validation_error"),
+            ("INV-2026-00099", 422, "validation_error"),
+            ("INV-2026-00001", 422, "validation_error"),
+        ):  # the voided invoice's own number is in the reserved format
+            r = self.void(due, number=bad)
+            self.assertEqual((r.status_code, r.json()["error"]["code"]), (status, code), bad)
+            self.assertEqual(counts(), before, bad)
+        r = self.void(due, number="  EXT-77 ")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["invoice"]["number"], r.json()["invoice"]["custom_number"]), ("EXT-77", True))
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 1)  # the counter is untouched
+        # the voided number can never be reused, and neither can the custom one
+        _club2, due2 = self.billed("Two")
+        self.assertEqual(self.void(due2, number="EXT-77").status_code, 409)
+
+    def test_reason_is_required(self):
+        _club, due = self.billed()
+        before = counts()
+        for body in ({}, {"reason": ""}, {"reason": "   "}, {"reason": "x" * 301}):
+            r = self.post(f"/billing/dues/{due.pk}/invoice/void-and-reissue", body)
+            self.assertEqual((r.status_code, r.json()["error"]["code"]), (422, "validation_error"), body)
+        self.assertEqual(counts(), before)
+
+    def test_refusals_change_nothing(self):
+        club, due = self.billed(paid=M("121.00"))
+        self.change(club, self.big)  # plan change: the old invoice now has a credit note
+        before = counts()
+        r = self.void(due)
+        self.assertEqual((r.status_code, r.json()["error"]["code"], r.json()["error"]["message"]), (409, "billing_error", "This invoice has credit notes; it cannot be voided."))
+        self.assertEqual(counts(), before)
+
+        _c2, d2 = self.billed("Cancelled")
+        Due.objects.filter(pk=d2.pk).update(status=Due.CANCELLED)
+        before = counts()
+        r = self.void(d2)
+        self.assertEqual((r.status_code, r.json()["error"]["message"]), (409, "This period was cancelled; its invoice cannot be voided."))
+        self.assertEqual(counts(), before)
+
+        c3, d3 = self.billed("Twice")
+        first = d3.invoice
+        self.assertEqual(self.void(d3).status_code, 201)
+        before = counts()
+        with self.assertRaisesMessage(BillingError, "was already voided (replaced by INV-"):
+            reissue_svc.void_and_reissue(first, reason="again", actor=self.staff)
+        self.assertEqual(counts(), before)
+
+        nothing = Due.objects.create(club=c3, plan=self.plan, amount=M("10.00"), period_start=D(2030, 1, 1))
+        r = self.void(nothing)
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (409, "billing_error"))
+
+    def test_a_reissued_period_can_still_have_its_plan_changed(self):
+        club, due = self.billed(paid=M("121.00"))
+        self.void(due)
+        result = self.change(club, self.big)
+        self.assertEqual(result.credit_notes[0].invoice.number, "INV-2026-00002")
+        self.assert_conserved(club)
+
+    def test_due_out_history_search_and_current_invoice_endpoints(self):
+        club, due = self.billed()
+        self.void(due, reason="First")
+        self.void(due, reason="Second", number="EXT-2")
+        out = self.get(f"/billing/dues/{due.pk}").json()
+        self.assertEqual(out["invoice"]["number"], "EXT-2")
+        self.assertEqual(out["invoice"]["replaces_number"], "INV-2026-00002")
+        hist = out["voided_invoices"]
+        self.assertEqual([h["number"] for h in hist], ["INV-2026-00002", "INV-2026-00001"])  # newest first
+        self.assertEqual((hist[0]["replaced_by_number"], hist[0]["void_reason"], hist[0]["credit_note_number"]), ("EXT-2", "Second", "CN-2026-00002"))
+        self.assertEqual((hist[1]["replaced_by_number"], hist[1]["credit_note_number"]), ("INV-2026-00002", "CN-2026-00001"))
+        self.assertEqual(self.get(f"/billing/dues/{due.pk}/invoice").json()["number"], "EXT-2")
+        for term in ("INV-2026-00001", "EXT-2"):
+            found = self.get(f"/billing/dues?status=all&search={term}").json()
+            self.assertEqual([d["id"] for d in found["items"]], [str(due.pk)], term)
+        self.assertEqual(self.get("/billing/dues?status=all&search=INV-2026-00002").json()["count"], 1)
+        listed = self.get("/billing/credit-notes?search=EXT-2").json()
+        self.assertEqual([n["number"] for n in listed["items"]], ["CN-2026-00002"])
+        self.assertEqual({n["kind"] for n in self.get("/billing/credit-notes").json()["items"]}, {"void"})
+        b = self.get(f"/clubs/{club.pk}/billing").json()
+        self.assertEqual(len(b["dues"][0]["voided_invoices"]), 2)
+
+    def test_metrics_exclude_voided_invoices(self):
+        from controlpanel.stats import _invoices_to_send
+
+        _club, due = self.billed()
+        self.assertEqual(_invoices_to_send(None), 1)
+        self.void(due)
+        self.assertEqual(_invoices_to_send(None), 1)  # only the replacement
+        self.assertEqual(self.get("/billing/summary").json()["invoices_to_send"], 1)
+        self.post(f"/billing/dues/{due.pk}/invoice/mark-sent")
+        self.assertEqual(_invoices_to_send(None), 0)
+        self.assertEqual(self.get("/billing/summary").json()["invoices_to_send"], 0)
+
+    def test_idempotent_replay(self):
+        _club, due = self.billed()
+        h = {"Idempotency-Key": "void-1"}
+        first, second = self.void(due, headers=h), self.void(due, headers=h)
+        self.assertEqual((first.status_code, second.status_code), (201, 201))
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(Invoice.objects.filter(due=due).count(), 2)
+        self.assertEqual(CreditNote.objects.count(), 1)
+
+    def test_audit_entry(self):
+        club, due = self.billed()
+        self.void(due, reason="Typo in name", number="EXT-9")
+        entry = PlatformAuditLog.objects.get(action="billing.invoice_voided")
+        self.assertEqual(entry.data, {"old_number": "INV-2026-00001", "new_number": "EXT-9", "credit_note": "CN-2026-00001", "reason": "Typo in name", "custom_number": True})
+        self.assertEqual((entry.target_type, entry.target_id, entry.club_id), ("due", str(due.pk), club.pk))
+
+    def test_pdfs_for_voided_and_replacement_invoices(self):
+        _club, due = self.billed()
+        self.void(due, reason="Wrong address")
+        old, new = Invoice.objects.get(number="INV-2026-00001"), Invoice.objects.get(number="INV-2026-00002")
+        html = invoices_svc.invoice_html(old)
+        self.assertIn("VOID", html)
+        self.assertIn("Voided 2026-", html)
+        self.assertIn("replaced by INV-2026-00002; credit note CN-2026-00001", html)
+        self.assertNotIn("Balance due", html)
+        html = invoices_svc.invoice_html(new)
+        self.assertNotIn("VOID", html)
+        self.assertIn("Replaces invoice INV-2026-00001", html)
+        note_html = credit_notes_svc.credit_note_html(CreditNote.objects.get())
+        self.assertIn("replaced by invoice INV-2026-00002", note_html)
+        self.assertIn("balance is unchanged", note_html)
+        try:
+            import weasyprint  # noqa: F401
+        except ImportError, OSError:
+            for path in (f"/billing/dues/{due.pk}/invoice.pdf", f"/billing/dues/{due.pk}/invoice.pdf?number=INV-2026-00001"):
+                r = self.get(path)
+                self.assertEqual((r.status_code, r.json()["error"]["code"]), (409, "billing_error"))
+        else:
+            cur = self.get(f"/billing/dues/{due.pk}/invoice.pdf")
+            self.assertEqual((cur.status_code, cur.content[:4]), (200, b"%PDF"))
+            self.assertIn("INV-2026-00002.pdf", cur["Content-Disposition"])
+            gone = self.get(f"/billing/dues/{due.pk}/invoice.pdf?number=INV-2026-00001")
+            self.assertEqual((gone.status_code, gone.content[:4]), (200, b"%PDF"))
+            self.assertIn("INV-2026-00001.pdf", gone["Content-Disposition"])
+        self.assertEqual(self.get(f"/billing/dues/{due.pk}/invoice.pdf?number=NOPE").status_code, 404)
+
+
+# --- configurable number patterns ----------------------------------------------------------------------------------
+
+from .services import numbering  # noqa: E402
+
+
+def set_patterns(invoice=None, credit_note=None):
+    row = BillingSettings.current()
+    if invoice is not None:
+        row.invoice_number_pattern = invoice
+    if credit_note is not None:
+        row.credit_note_number_pattern = credit_note
+    row.save()
+
+
+from controlpanel.api.schemas import IssuerSettingsIO  # noqa: E402
+
+
+class PatternTests(TestCase):
+    def test_valid_patterns(self):
+        for ok in ("INV-{YYYY}-{NNNNN}", "{YY}{MM}-{NNN}", "FAC/{YYYY}/{NNNN}", "{N}", "Nr {N}", "A_B.C#{NN}", "{YYYY}{MM}{NNNNNN}"):
+            self.assertEqual(numbering.validate_pattern(ok), ok)
+
+    def test_invalid_patterns_have_clear_messages(self):
+        cases = {
+            "": "Enter a pattern",
+            "   ": "Enter a pattern",
+            "INV-{YYYY}": "needs a sequence",
+            "INV-{N}-{NNN}": "only one sequence",
+            "INV-{FOO}-{N}": "Unknown placeholder {FOO}",
+            "INV-{yyyy}-{N}": "Unknown placeholder {yyyy}",
+            "INV-{}-{N}": "Unknown placeholder {}",
+            "INV-{N": "Braces",
+            "INV}-{N}": "Braces",
+            "INV-é-{N}": "not allowed",
+            "INV:{N}": "not allowed",
+            "INV*{N}": "not allowed",
+            "X" * 36 + "{NNNN}": "at most 40",
+            "X" * 25 + "{YYYY}-{NNNNN}": "too long",
+        }
+        for pattern, fragment in cases.items():
+            with self.assertRaises(ValueError, msg=pattern) as cm:
+                numbering.validate_pattern(pattern)
+            self.assertIn(fragment, str(cm.exception), pattern)
+
+    def test_render(self):
+        d = D(2026, 3, 9)
+        self.assertEqual(numbering.render("INV-{YYYY}-{NNNNN}", 1, d), "INV-2026-00001")
+        self.assertEqual(numbering.render("{YY}{MM}-{N}", 7, d), "2603-7")
+        self.assertEqual(numbering.render("FAC/{YYYY}/{NNNN}", 7, d), "FAC/2026/0007")
+        self.assertEqual(numbering.render("{NN}", 123, d), "123")  # never cut
+        self.assertEqual(numbering.render("{N}", 5, D(2026, 12, 31)), "5")
+
+    def test_scope_and_resets(self):
+        d = D(2026, 11, 5)
+        self.assertEqual((numbering.scope_key("X{MM}{YY}-{N}", d), numbering.resets("X{MM}{YY}-{N}")), ("2026-11", "monthly"))
+        self.assertEqual((numbering.scope_key("INV-{YYYY}-{N}", d), numbering.resets("INV-{YYYY}-{N}")), ("2026", "yearly"))
+        self.assertEqual((numbering.scope_key("{YY}/{N}", d), numbering.resets("{YY}/{N}")), ("2026", "yearly"))
+        self.assertEqual((numbering.scope_key("N-{NNN}", d), numbering.resets("N-{NNN}")), ("all", "never"))
+
+    def test_matches_pattern(self):
+        self.assertTrue(numbering.matches_pattern("INV-{YYYY}-{NNNNN}", "INV-2026-00001"))
+        self.assertTrue(numbering.matches_pattern("INV-{YYYY}-{NNNNN}", "INV-1999-1234567"))
+        self.assertFalse(numbering.matches_pattern("INV-{YYYY}-{NNNNN}", "INV-2026-001"))  # narrower than the padding
+        self.assertFalse(numbering.matches_pattern("INV-{YYYY}-{NNNNN}", "XINV-2026-00001"))
+        self.assertTrue(numbering.matches_pattern("FAC/{YYYY}/{N}", "FAC/2026/7"))
+        self.assertTrue(numbering.matches_pattern("{YY}{MM}-{NN}", "2611-07"))
+        self.assertFalse(numbering.matches_pattern("{YY}{MM}-{NN}", "2611-7"))
+        self.assertTrue(numbering.matches_pattern("A.B{N}", "A.B12"))
+        self.assertFalse(numbering.matches_pattern("A.B{N}", "AxB12"))  # the dot is literal
+
+
+class NumberingTests(BillingTestBase):
+    def invoice_on(self, day, name):
+        club = make_club(name, country="BE")
+        with at(day):
+            return self.open(club, start=day).invoice
+
+    def test_defaults_reproduce_the_original_format(self):
+        row = BillingSettings.current()
+        self.assertEqual((row.invoice_number_pattern, row.credit_note_number_pattern), ("INV-{YYYY}-{NNNNN}", "CN-{YYYY}-{NNNNN}"))
+        self.assertEqual(self.invoice_on(D(2026, 5, 1), "A").number, "INV-2026-00001")
+        self.assertEqual(self.invoice_on(D(2026, 5, 2), "B").number, "INV-2026-00002")
+        self.assertEqual(self.invoice_on(D(2027, 1, 2), "C").number, "INV-2027-00001")  # yearly reset
+
+    def test_yearly_monthly_and_never_scopes(self):
+        set_patterns(invoice="{YY}{MM}/{NNN}")
+        self.assertEqual([self.invoice_on(d, n).number for d, n in ((D(2026, 1, 5), "a"), (D(2026, 1, 20), "b"), (D(2026, 2, 1), "c"), (D(2026, 2, 2), "d"), (D(2027, 1, 1), "e"))], ["2601/001", "2601/002", "2602/001", "2602/002", "2701/001"])
+        self.assertEqual(sorted(InvoiceSequence.objects.values_list("scope", "last_number")), [("2026-01", 2), ("2026-02", 2), ("2027-01", 1)])
+        set_patterns(invoice="Z{N}")
+        self.assertEqual([self.invoice_on(D(2030, 1, 1) + datetime.timedelta(days=i), f"n{i}").number for i in range(2)], ["Z1", "Z2"])
+        self.assertTrue(InvoiceSequence.objects.filter(scope="all").exists())
+
+    def test_pattern_change_mid_year_keeps_the_counter(self):
+        a = self.invoice_on(D(2026, 3, 1), "A").number
+        set_patterns(invoice="FAC/{YYYY}/{NNNN}")
+        b = self.invoice_on(D(2026, 3, 2), "B").number
+        c = self.invoice_on(D(2026, 3, 3), "C").number
+        self.assertEqual((a, b, c), ("INV-2026-00001", "FAC/2026/0002", "FAC/2026/0003"))
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 3)
+        self.assertEqual(len({a, b, c}), 3)
+
+    def test_collision_with_an_existing_number_skips_forward(self):
+        club = make_club("Old", country="BE")
+        due = Due.objects.create(club=club, plan=self.plan, amount=M("100.00"), period_start=START)
+        Invoice.objects.create(due=due, number="REF-0002", custom_number=True, issued_at=START)
+        set_patterns(invoice="REF-{NNNN}")
+        self.assertEqual(self.invoice_on(D(2026, 4, 1), "A").number, "REF-0001")
+        self.assertEqual(self.invoice_on(D(2026, 4, 2), "B").number, "REF-0003")  # REF-0002 is taken: skipped, never duplicated
+        self.assertEqual(InvoiceSequence.objects.get(scope="all").last_number, 3)
+
+    def test_rollback_burns_nothing_under_a_pattern(self):
+        set_patterns(invoice="X{YY}-{NNN}")
+        club = make_club("Rolled", country="BE")
+        due = Due.objects.create(club=club, plan=self.plan, amount=M("100.00"), period_start=START)
+        with at(D(2026, 6, 1)), mock.patch.object(Invoice.objects, "create", side_effect=RuntimeError("boom")), self.assertRaises(RuntimeError):
+            invoices_svc.issue_invoice(due)
+        with at(D(2026, 6, 1)):
+            self.assertEqual(invoices_svc.issue_invoice(due).number, "X26-001")
+
+    def test_credit_notes_use_their_own_pattern_and_counter(self):
+        set_patterns(credit_note="CR{YY}{MM}-{NN}")
+        club = make_club("Cn", country="BE")
+        with at(D(2026, 1, 1)):
+            invoice = self.open(club).invoice
+        from django.db import transaction
+
+        with at(D(2026, 7, 2)), transaction.atomic():
+            n1 = credit_notes_svc.issue_credit_note(invoice, net=M("10.00"), vat=M("2.10"), reason="r", credited_from=START, credited_to=START).number
+            n2 = credit_notes_svc.issue_credit_note(invoice, net=M("10.00"), vat=M("2.10"), reason="r", credited_from=START, credited_to=START).number
+        self.assertEqual((n1, n2), ("CR2607-01", "CR2607-02"))
+        self.assertEqual(list(CreditNoteSequence.objects.values_list("scope", "last_number")), [("2026-07", 2)])
+        self.assertEqual(invoice.number, "INV-2026-00001")  # a separate counter
+
+    def test_allocation_needs_a_transaction(self):
+        # TestCase wraps in a transaction, so simulate the check through the guard directly
+        with mock.patch("billing.services.numbering.transaction.get_connection") as conn:
+            conn.return_value.in_atomic_block = False
+            with self.assertRaises(RuntimeError):
+                numbering.allocate(InvoiceSequence, "INV-{YYYY}-{NNNNN}", START, lambda n: False)
+
+    def test_reserved_numbers(self):
+        club = make_club("Res", country="BE")
+        due = Due.objects.create(club=club, plan=self.plan, amount=M("100.00"), period_start=START)
+        set_patterns(invoice="FAC/{YYYY}/{NNNN}")
+        for bad in ("FAC/2026/0007", "FAC/1999/12345", "INV-2026-00005", "INV-1999-1"):  # current pattern and the legacy format
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                invoices_svc.clean_number(bad)
+            self.assertIn("FAC/{YYYY}/{NNNN}", str(cm.exception))
+        self.assertEqual(invoices_svc.clean_number(" FAC-2026-7 "), "FAC-2026-7")  # different separators: fine
+        self.assertEqual(invoices_svc.issue_invoice(due, number="EXT-1").number, "EXT-1")
+
+    def test_old_numbers_are_untouched_by_a_pattern_change(self):
+        a = self.invoice_on(D(2026, 3, 1), "A")
+        set_patterns(invoice="ZZ{N}")
+        a.refresh_from_db()
+        self.assertEqual(a.number, "INV-2026-00001")
+
+
+class NumberingApiTests(ApiBase):
+    def put_settings(self, **changes):
+        body = IssuerSettingsIO.of(BillingSettings.current()).dict()
+        for k in IssuerSettingsIO.model_fields:
+            if k in ("invoice_next_sequence", "credit_note_next_sequence"):
+                body[k] = None
+        body.update(changes)
+        with at(SWITCH):
+            return self.client.put("/billing/settings", json=body)
+
+    def test_get_settings_exposes_patterns_and_next_numbers(self):
+        data = self.get("/billing/settings").json()
+        self.assertEqual((data["invoice_number_pattern"], data["credit_note_number_pattern"]), ("INV-{YYYY}-{NNNNN}", "CN-{YYYY}-{NNNNN}"))
+        self.assertEqual((data["invoice_next_number_preview"], data["credit_note_next_number_preview"]), ("INV-2026-00001", "CN-2026-00001"))
+        self.assertEqual((data["invoice_current_sequence"], data["invoice_counter_resets"], data["invoice_next_sequence"]), (0, "yearly", None))
+        self.billed()
+        data = self.get("/billing/settings").json()
+        self.assertEqual((data["invoice_next_number_preview"], data["invoice_current_sequence"]), ("INV-2026-00002", 1))
+
+    def test_put_round_trip_and_audit(self):
+        r = self.put_settings(invoice_number_pattern=" FAC/{YYYY}/{NNNN} ", credit_note_number_pattern="CR-{YY}{MM}-{N}")
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()
+        self.assertEqual((data["invoice_number_pattern"], data["credit_note_number_pattern"]), ("FAC/{YYYY}/{NNNN}", "CR-{YY}{MM}-{N}"))
+        self.assertEqual((data["invoice_next_number_preview"], data["credit_note_next_number_preview"], data["credit_note_counter_resets"]), ("FAC/2026/0001", "CR-2607-1", "monthly"))
+        row = BillingSettings.objects.get()
+        self.assertEqual(row.invoice_number_pattern, "FAC/{YYYY}/{NNNN}")
+        event = PlatformAuditLog.objects.filter(action="billing.issuer_settings_updated").latest("created")
+        self.assertEqual(event.data["changed"]["invoice_number_pattern"], ["INV-{YYYY}-{NNNNN}", "FAC/{YYYY}/{NNNN}"])
+        self.assertNotIn("invoice_next_number_preview", event.data["changed"])
+
+    def test_older_clients_without_the_new_fields_keep_the_patterns(self):
+        set_patterns(invoice="FAC/{YYYY}/{NNNN}")
+        body = IssuerSettingsIO.of(BillingSettings.current()).dict()
+        for k in ("invoice_number_pattern", "credit_note_number_pattern", "invoice_next_sequence", "credit_note_next_sequence"):
+            body.pop(k)
+        with at(SWITCH):
+            r = self.client.put("/billing/settings", json=body)
+        self.assertEqual(r.status_code, 200, r.content)
+        # full replacement: omitted patterns fall back to the defaults (documented), the counters are untouched
+        self.assertEqual(r.json()["invoice_number_pattern"], "INV-{YYYY}-{NNNNN}")
+
+    def test_invalid_patterns_are_field_errors(self):
+        r = self.put_settings(invoice_number_pattern="INV-{FOO}-{N}", credit_note_number_pattern="CN-{YYYY}")
+        self.assertEqual(r.status_code, 422)
+        fields = r.json()["error"]["fields"]
+        self.assertIn("Unknown placeholder {FOO}", fields["invoice_number_pattern"][0])
+        self.assertIn("needs a sequence", fields["credit_note_number_pattern"][0])
+        self.assertEqual(BillingSettings.objects.get().invoice_number_pattern, "INV-{YYYY}-{NNNNN}")
+
+    def test_next_number_jump_forward_and_never_back(self):
+        self.billed()  # counter at 1
+        r = self.put_settings(invoice_number_pattern="FAC/{YYYY}/{NNNN}", invoice_next_sequence=7, credit_note_next_sequence=40)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()["invoice_next_number_preview"], r.json()["credit_note_next_number_preview"]), ("FAC/2026/0007", "CN-2026-00040"))
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 6)
+        _club, due = self.billed("Next")
+        self.assertEqual(due.invoice.number, "FAC/2026/0007")
+        self.assertEqual(self.get("/billing/settings").json()["invoice_next_number_preview"], "FAC/2026/0008")
+        for value in (3, 8, 1):  # at 7 now: 8 is the very next number (allowed), everything at or below 7 is refused
+            r = self.put_settings(invoice_next_sequence=value)
+            if value == 8:
+                self.assertEqual(r.status_code, 200, r.content)
+            else:
+                self.assertEqual(r.status_code, 422, value)
+                self.assertEqual(r.json()["error"]["fields"]["invoice_next_sequence"], ["Cannot go back: the sequence is already at 7."])
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 7)
+        r = self.put_settings(invoice_next_sequence=0)
+        self.assertEqual(r.status_code, 422)
+
+    def test_jump_is_validated_against_the_new_patterns_scope(self):
+        r = self.put_settings(invoice_number_pattern="{YY}{MM}-{NN}", invoice_next_sequence=5)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["invoice_next_number_preview"], "2607-05")
+        self.assertEqual(list(InvoiceSequence.objects.values_list("scope", "last_number")), [("2026-07", 4)])
+
+    def test_a_bad_field_changes_nothing_not_even_the_jump(self):
+        r = self.put_settings(invoice_next_sequence=9, vat_rate="150.00")
+        self.assertEqual(r.status_code, 422)
+        self.assertFalse(InvoiceSequence.objects.exists())
+
+    def test_numbering_preview_endpoint(self):
+        self.billed()
+        r = self.post("/billing/numbering/preview", {"invoice_number_pattern": "FAC/{YYYY}/{NNNN}", "credit_note_number_pattern": "CR-{YY}{MM}-{N}"})
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()
+        self.assertEqual(data["invoice"], {"valid": True, "error": None, "example": "FAC/2026/0001", "next": "FAC/2026/0002", "scope": "2026", "scope_label": "2026", "resets": "yearly"})
+        self.assertEqual(data["credit_note"], {"valid": True, "error": None, "example": "CR-2607-1", "next": "CR-2607-1", "scope": "2026-07", "scope_label": "July 2026", "resets": "monthly"})
+        self.assertEqual({p["token"] for p in data["placeholders"]}, {"{YYYY}", "{YY}", "{MM}", "{N}", "{NNNNN}"})
+        self.assertEqual(data["max_length"], 40)
+        never = self.post("/billing/numbering/preview", {"invoice_number_pattern": "Z{N}", "date": "2027-02-03"}).json()["invoice"]
+        self.assertEqual((never["example"], never["next"], never["scope"], never["scope_label"], never["resets"]), ("Z1", "Z1", "all", "All time", "never"))
+        monthly = self.post("/billing/numbering/preview", {"invoice_number_pattern": "{YY}{MM}-{NN}", "date": "2027-02-03"}).json()["invoice"]
+        self.assertEqual((monthly["example"], monthly["scope"]), ("2702-01", "2027-02"))
+        bad = self.post("/billing/numbering/preview", {"invoice_number_pattern": "INV-{FOO}"}).json()
+        self.assertEqual(bad["invoice"]["valid"], False)
+        self.assertIn("Unknown placeholder {FOO}", bad["invoice"]["error"])
+        self.assertIsNone(bad["invoice"]["example"])
+        self.assertTrue(bad["credit_note"]["valid"])  # the saved credit note pattern
+        before = counts()
+        self.post("/billing/numbering/preview", {})
+        self.assertEqual(counts(), before)
+        self.assertEqual(BillingSettings.objects.get().invoice_number_pattern, "INV-{YYYY}-{NNNNN}")
+
+
+class CustomInvoiceNumberTests(ApiBase):
+    def subscribe(self, club, **extra):
+        return self.post(f"/clubs/{club.pk}/billing/subscribe", {"plan_id": str(self.plan.pk), **extra}, day=START)
+
+    def fresh_club(self, name):
+        return make_club(name, country="BE", billed=False)
+
+    def test_subscribe_with_a_custom_number(self):
+        club = self.fresh_club("Sub")
+        r = self.subscribe(club, invoice_number="  OLD-77 ")
+        self.assertEqual(r.status_code, 201, r.content)
+        inv = Invoice.objects.get(due__club=club)
+        self.assertEqual((inv.number, inv.custom_number), ("OLD-77", True))
+        self.assertFalse(InvoiceSequence.objects.exists())  # the automatic counter was not consumed
+        self.assertEqual(PlatformAuditLog.objects.get(action="billing.subscribed").data["invoice_number"], "OLD-77")
+
+    def test_trial_zero_invoice_takes_the_custom_number(self):
+        club = self.fresh_club("Trial")
+        r = self.subscribe(club, trial_days=14, invoice_number="TRIAL-1")
+        self.assertEqual(r.status_code, 201, r.content)
+        inv = Invoice.objects.get(due__club=club)
+        self.assertEqual((inv.number, inv.due.is_trial, inv.due.total), ("TRIAL-1", True, M("0")))
+
+    def test_bad_custom_number_changes_nothing(self):
+        club = self.fresh_club("Bad")
+        before = counts()
+        for bad in ("   ", "X" * 33, "INV-2026-00077", "INV-1999-1"):
+            r = self.subscribe(club, invoice_number=bad)
+            self.assertEqual(r.status_code, 422, bad)
+            self.assertIn("invoice_number", r.json()["error"]["fields"], bad)
+            self.assertEqual(counts(), before, bad)
+        r = self.subscribe(club, invoice_number="TAKEN-1")
+        self.assertEqual(r.status_code, 201)
+        club2 = self.fresh_club("Bad2")
+        r = self.subscribe(club2, invoice_number="TAKEN-1")
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (409, "billing_error"))
+        self.assertFalse(ClubBilling.objects.filter(club=club2).exists())
+        self.assertFalse(Subscription.objects.filter(club=club2).exists())
+
+    def test_voided_numbers_count_as_in_use(self):
+        _club, due = self.billed("Voided")
+        self.post(f"/billing/dues/{due.pk}/invoice/void-and-reissue", {"reason": "x", "number": "GONE-1"})
+        club2 = self.fresh_club("Reuse")
+        gone = Invoice.objects.get(number="INV-2026-00001")
+        Invoice.objects.filter(pk=gone.pk).update(number="OLDVOID-1")
+        r = self.subscribe(club2, invoice_number="OLDVOID-1")
+        self.assertEqual(r.status_code, 409)
+
+    def test_open_next_period_with_a_custom_number_and_renewal_stays_automatic(self):
+        club, _due = self.billed("Per")
+        r = self.post(f"/clubs/{club.pk}/billing/periods", {"invoice_number": "NEXT-1"}, day=SWITCH)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Invoice.objects.get(number="NEXT-1").custom_number, True)
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 1)
+        before = counts()
+        bad = self.post(f"/clubs/{club.pk}/billing/periods", {"invoice_number": "INV-2026-00002"}, day=SWITCH)
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(bad.json()["error"]["fields"]["invoice_number"][0][:20], "This format is reser")
+        self.assertEqual(counts(), before)
+        # the unattended renewal job never takes a custom number
+        renewed = dues_svc.renew(ClubBilling.objects.get(club=club))
+        self.assertEqual((renewed.invoice.number, renewed.invoice.custom_number), ("INV-2026-00002", False))
+
+    def test_change_plan_custom_number_and_preview_echo(self):
+        club, _due = self.billed("Chg", paid=M("121.00"))
+        base = f"/clubs/{club.pk}/billing/change-plan"
+        pre = self.post(base + "/preview", {"plan_id": str(self.big.pk)}).json()
+        self.assertEqual(pre["invoice_number"], {"mode": "automatic", "number": None, "next_automatic": "INV-2026-00002"})
+        pre = self.post(base + "/preview", {"plan_id": str(self.big.pk), "invoice_number": " PC-9 "}).json()
+        self.assertEqual(pre["invoice_number"], {"mode": "custom", "number": "PC-9", "next_automatic": "INV-2026-00002"})
+        before = counts()
+        for path in (base + "/preview", base):  # validation problems show in the preview and block the change
+            r = self.post(path, {"plan_id": str(self.big.pk), "invoice_number": "INV-2026-00123"})
+            self.assertEqual((r.status_code, list(r.json()["error"]["fields"])), (422, ["invoice_number"]), path)
+            r = self.post(path, {"plan_id": str(self.big.pk), "invoice_number": "INV-1999-1"})
+            self.assertEqual(r.status_code, 422, path)
+        self.assertEqual(counts(), before)
+        done = self.post(base, {"plan_id": str(self.big.pk), "invoice_number": "PC-9"})
+        self.assertEqual(done.status_code, 201, done.content)
+        self.assertEqual(done.json()["invoice_number"]["mode"], "custom")
+        self.assertEqual(done.json()["created"]["new_invoice_number"], "PC-9")
+        self.assertEqual(done.json()["credit_notes"][0]["number"], "CN-2026-00001")  # credit notes stay automatic
+        self.assertEqual(InvoiceSequence.objects.get(scope="2026").last_number, 1)
+
+    def test_change_plan_number_in_use_is_a_conflict_and_changes_nothing(self):
+        club, _due = self.billed("Chg2", paid=M("121.00"))
+        self.billed("Other")
+        Invoice.objects.filter(number="INV-2026-00002").update(number="USED-1", custom_number=True)
+        before = counts()
+        r = self.post(f"/clubs/{club.pk}/billing/change-plan", {"plan_id": str(self.big.pk), "invoice_number": "USED-1"})
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (409, "billing_error"))
+        self.assertEqual(counts(), before)
+
+    def test_numbers_follow_the_pattern_everywhere(self):
+        set_patterns(invoice="FAC/{YYYY}/{NNNN}", credit_note="NC-{N}")
+        club, due = self.billed("Pat", paid=M("121.00"))
+        self.assertEqual(due.invoice.number, "FAC/2026/0001")
+        done = self.post(f"/clubs/{club.pk}/billing/change-plan", {"plan_id": str(self.big.pk)}).json()
+        self.assertEqual((done["created"]["new_invoice_number"], done["credit_notes"][0]["number"]), ("FAC/2026/0002", "NC-1"))

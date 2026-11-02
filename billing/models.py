@@ -48,6 +48,8 @@ class BillingSettings(UUIDModel):
         help_text=_("An unpaid club is first moved to the default plan; it is archived this many days later (0 = straight away)."),
     )
     vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=Decimal("21.00"), validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))])
+    invoice_number_pattern = models.CharField(_("invoice number pattern"), max_length=40, default="INV-{YYYY}-{NNNNN}", help_text=_("Placeholders {YYYY} {YY} {MM} and one sequence such as {NNNNN}; see billing.services.numbering."))
+    credit_note_number_pattern = models.CharField(_("credit note number pattern"), max_length=40, default="CN-{YYYY}-{NNNNN}")
 
     class Meta:
         verbose_name = _("billing settings")
@@ -201,6 +203,16 @@ class Due(UUIDModel):
         return self.total - self.amount_paid
 
     @property
+    def invoice(self):
+        """The CURRENT (non-voided) invoice of this period, or ``None``. A period can have several invoices over time (a
+        voided one is kept for the books and replaced), but at most one is active. Uses ``prefetch_related("invoices")``
+        when that was done, otherwise one query per access."""
+        for inv in self.invoices.all():
+            if inv.voided_at is None:
+                return inv
+        return None
+
+    @property
     def is_prorated(self) -> bool:
         return self.original_period_end is not None
 
@@ -252,17 +264,18 @@ class DuePayment(UUIDModel):
 
 
 class InvoiceSequence(models.Model):
-    """The gapless counter behind automatic ``INV-YYYY-00001`` numbers, one row per year.
+    """The gapless counter behind automatic invoice numbers, one row per scope (``"2026"``, ``"2026-11"`` or ``"all"``,
+    see ``billing.services.numbering``). Independent of the number pattern's text.
 
     Never derived from existing invoices, so custom numbers cannot skew it. Allocate with ``select_for_update`` inside the
     transaction that creates the invoice, so a rolled-back invoice does not burn a number.
     """
 
-    year = models.PositiveSmallIntegerField(unique=True)
+    scope = models.CharField(max_length=16, unique=True)
     last_number = models.PositiveIntegerField(default=0)
 
     def __str__(self) -> str:
-        return f"INV-{self.year}: {self.last_number}"
+        return f"invoices {self.scope}: {self.last_number}"
 
 
 class Invoice(UUIDModel):
@@ -270,7 +283,7 @@ class Invoice(UUIDModel):
 
     EMAIL, MANUAL = "email", "manual"
 
-    due = models.OneToOneField(Due, on_delete=models.CASCADE, related_name="invoice")
+    due = models.ForeignKey(Due, on_delete=models.CASCADE, related_name="invoices")  # ``Due.invoice`` is the active one
     number = models.CharField(max_length=32, unique=True, editable=False)
     custom_number = models.BooleanField(default=False, help_text="Set by hand when issued; automatic numbers come from InvoiceSequence.")
     issued_at = models.DateField()
@@ -279,31 +292,57 @@ class Invoice(UUIDModel):
     sent_method = models.CharField(max_length=10, choices=[(EMAIL, "Email"), (MANUAL, "Manual")], blank=True)
     sent_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
+    # Void and reissue (see billing.services.reissue): a voided invoice keeps its number forever, can no longer be sent,
+    # and points to the invoice that replaced it. At most one invoice per period is active (constraint below).
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    void_reason = models.TextField(blank=True)
+    replaced_by = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="replaced_invoices")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["due"], condition=models.Q(voided_at__isnull=True), name="uniq_active_invoice_per_due")]
+
+    @property
+    def is_voided(self) -> bool:
+        return self.voided_at is not None
+
+    @property
+    def status(self) -> str:
+        return "voided" if self.is_voided else "active"
+
     @property
     def needs_sending(self) -> bool:
-        return self.sent_at is None and self.due.total != 0
+        return self.voided_at is None and self.sent_at is None and self.due.total != 0
+
+    @property
+    def replaces(self):
+        """The voided invoice this one replaced, if any."""
+        return self.replaced_invoices.first()
 
     def __str__(self) -> str:
         return self.number
 
 
 class CreditNoteSequence(models.Model):
-    """The gapless counter behind ``CN-YYYY-00001`` credit note numbers, one row per year. Separate from invoices.
+    """The gapless counter behind automatic credit note numbers, one row per scope. Separate from invoices.
 
     Same rules as ``InvoiceSequence``: never derived from existing numbers, allocated with ``select_for_update`` inside
     the transaction that creates the credit note, so a rolled-back credit note does not burn a number.
     """
 
-    year = models.PositiveSmallIntegerField(unique=True)
+    scope = models.CharField(max_length=16, unique=True)
     last_number = models.PositiveIntegerField(default=0)
 
     def __str__(self) -> str:
-        return f"CN-{self.year}: {self.last_number}"
+        return f"credit notes {self.scope}: {self.last_number}"
 
 
 class CreditNote(UUIDModel):
     """An immutable credit document against an invoice (the invoice itself is never edited). Amounts are positive and
     are the credited part; ``snapshot`` freezes issuer / bill-to / texts like an invoice snapshot."""
+
+    PLAN_CHANGE, VOID = "plan_change", "void"
+    KIND_CHOICES = [(PLAN_CHANGE, _("Plan change")), (VOID, _("Invoice voided"))]
 
     club = models.ForeignKey(settings.TENANT_MODEL, on_delete=models.CASCADE, related_name="credit_notes")
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="credit_notes")
@@ -317,6 +356,10 @@ class CreditNote(UUIDModel):
     reverse_charge = models.BooleanField(default=False)
     reason = models.CharField(max_length=255)
     snapshot = models.JSONField(default=dict, blank=True)
+    # ``void``: a document only, issued when an invoice is voided and reissued. It never touches the period, payments or
+    # club credit (the replacement invoice covers the same period and amounts).
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, default=PLAN_CHANGE)
+    replacement_invoice = models.ForeignKey(Invoice, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
 
     class Meta:
         ordering = ["-issued_at", "-created"]

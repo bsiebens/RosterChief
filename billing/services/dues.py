@@ -27,7 +27,7 @@ from features.models import Plan, Subscription
 
 from ..models import EU_COUNTRIES, BillingSettings, ClubBilling, Due, DuePayment, PlanPrice, grace_until_for
 from . import BillingError
-from .invoices import issue_invoice
+from .invoices import clean_number, issue_invoice
 
 
 def today() -> datetime.date:
@@ -53,13 +53,12 @@ def next_period_start(club) -> datetime.date:
 def compute_vat(club, net: Decimal, settings: BillingSettings | None = None) -> tuple[Decimal, Decimal, bool]:
     """``(rate, vat_amount, reverse_charge)`` for ``net``.
 
-    Zero amounts carry no VAT. Reverse charge (rate 0) applies when the club has a VAT id and its legal country is an
-    EU state other than the issuer's (the issuer's country must be set to tell). Otherwise the standard rate applies.
+    Reverse charge (rate 0) applies when the club has a VAT id and its legal country is an EU state other than the
+    issuer's (the issuer's country must be set to tell). Otherwise the standard rate applies. A zero amount follows the
+    same rules, so a free or trial period shows the rate it would carry (e.g. 21%) with a VAT amount of 0.00.
     """
     settings = settings or BillingSettings.current()
     zero = Decimal("0")
-    if net == 0:
-        return zero, zero, False
     issuer_country = str(settings.country or "")
     club_country = str(getattr(club, "legal_country", "") or "")
     if club.vat_id.strip() and issuer_country and club_country in EU_COUNTRIES and club_country != issuer_country:
@@ -107,7 +106,9 @@ def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = Fal
 
 
 @transaction.atomic
-def open_period(club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None) -> Due:
+def open_period(
+    club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None, invoice_number: str | None = None
+) -> Due:
     """Open (and invoice) the billing period beginning ``start``.
 
     ``is_trial`` makes it a free trial period; its ``period_end`` is then passed explicitly (otherwise the plan's
@@ -118,7 +119,12 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
 
     Once invoiced, any credit the club holds is applied to the period (``credit_reference`` / ``credit_note`` only label
     that application).
+
+    ``invoice_number`` gives the period's invoice a custom number instead of the next automatic one (only the manual
+    actions pass it; the unattended renewal never does). It is validated first, so a bad number changes nothing:
+    ``ValueError`` = invalid format (422), ``BillingError`` = already in use.
     """
+    custom = clean_number(invoice_number) if invoice_number is not None else None
     billing = ClubBilling.objects.filter(club=club).first()
     if billing is None:
         raise BillingError("This club is not being billed yet. Subscribe it to a plan first.")
@@ -148,7 +154,7 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
     if due.total == 0:
         due.status, due.paid_at = Due.PAID, timezone.now()  # a free or trial period never trips downgrading or archiving
         due.save(update_fields=["status", "paid_at", "modified"])
-    issue_invoice(due)
+    issue_invoice(due, number=custom)
     if due.total > 0:
         from .credit import apply_credit
 
@@ -158,7 +164,7 @@ def open_period(club, *, start: datetime.date | None = None, plan: Plan | None =
 
 
 @transaction.atomic
-def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None):
+def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_renew: bool = True, auto_archive: bool = True, notes: str = "", trial_days: int | None = None, actor=None, invoice_number: str | None = None):
     """Bill ``club`` on ``plan``. Returns ``(billing, due)``; ``due`` is None when only the plan changed.
 
     First time: opens the first period. Already billed: just moves the club to the new plan without touching the periods; the platform API
@@ -166,7 +172,12 @@ def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_rene
 
     ``trial_days`` (only for a club that is not billed yet): the first period is a free trial of that many days on
     ``plan``; the plan's features apply at once and the club simply continues on the same plan afterwards.
+
+    ``invoice_number``: custom number for the first period's invoice (the trial's zero invoice included); validated up
+    front. Ignored when no period opens.
     """
+    if invoice_number is not None:
+        clean_number(invoice_number)
     if not plan.is_active:
         raise BillingError("That plan is not active.")
     if trial_days is not None:
@@ -174,24 +185,24 @@ def subscribe(club, plan: Plan, *, start: datetime.date | None = None, auto_rene
             raise BillingError("A trial lasts 1 to 365 days.")
         if ClubBilling.objects.filter(club=club).exists():
             raise BillingError("A trial can only be started for a club that is not being billed yet.")
-        return _start_trial(club, plan, trial_days, start=start or today(), auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, actor=actor)
+        return _start_trial(club, plan, trial_days, start=start or today(), auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, actor=actor, invoice_number=invoice_number)
     billing, created = ClubBilling.objects.get_or_create(club=club)
     billing.auto_renew, billing.auto_archive, billing.notes = auto_renew, auto_archive, notes
     billing.trial_ends_at = None
     billing.save()
     feature_services.subscribe(club, plan, actor=actor, reason="Billing subscription")
     if created or not Due.objects.filter(club=club).exists():
-        return billing, open_period(club, start=start or today(), plan=plan, actor=actor)
+        return billing, open_period(club, start=start or today(), plan=plan, actor=actor, invoice_number=invoice_number)
     return billing, None
 
 
-def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_archive, notes, actor):
+def _start_trial(club, plan: Plan, trial_days: int, *, start, auto_renew, auto_archive, notes, actor, invoice_number=None):
     trial_ends_at = start + datetime.timedelta(days=trial_days - 1)
     billing = ClubBilling.objects.create(club=club, auto_renew=auto_renew, auto_archive=auto_archive, notes=notes, trial_ends_at=trial_ends_at)
     # Subscription.trial_ends_at stays empty on purpose: a dated TRIAL subscription stops granting access on that date,
     # which would drop the club to the default plan before its first paid period starts. The billing trial end rules.
     feature_services.subscribe(club, plan, status=Subscription.TRIAL, actor=actor, reason=f"Trial started ({trial_days} days)")
-    due = open_period(club, start=start, plan=plan, is_trial=True, period_end=trial_ends_at, actor=actor)
+    due = open_period(club, start=start, plan=plan, is_trial=True, period_end=trial_ends_at, actor=actor, invoice_number=invoice_number)
     return billing, due
 
 
@@ -257,10 +268,12 @@ def waive(due: Due) -> Due:
 
 
 @transaction.atomic
-def reactivate(club, *, start: datetime.date | None = None, actor=None) -> Due:
+def reactivate(club, *, start: datetime.date | None = None, actor=None, invoice_number: str | None = None) -> Due:
     """Restore an archived club and open the next period (default: continuing from the last, so the lapse is still owed)."""
+    if invoice_number is not None:
+        clean_number(invoice_number)  # before the club is restored
     restore_club(club)
-    return open_period(club, start=start, actor=actor)
+    return open_period(club, start=start, actor=actor, invoice_number=invoice_number)
 
 
 # --- queries used by reminders, renewal and archiving ----------------------------------------------------------------

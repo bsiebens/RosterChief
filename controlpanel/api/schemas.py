@@ -1,3 +1,4 @@
+import datetime as _dt
 from datetime import datetime
 from uuid import UUID
 
@@ -549,12 +550,30 @@ class InvoiceOut(Schema):
     reverse_charge: bool
     due_date: date
     has_snapshot: bool  # False for invoices issued before snapshots existed (the PDF then renders from live data)
+    status: str = "active"  # active | voided (a voided invoice keeps its number, cannot be sent, still has a PDF)
+    voided_at: datetime | None = None
+    void_reason: str = ""
+    replaced_by_number: str | None = None  # on a voided invoice: the invoice that replaced it
+    replaces_number: str | None = None  # on a replacement: the voided invoice it replaces
 
     @staticmethod
-    def of(inv) -> InvoiceOut:
+    def of(inv, *, siblings=None) -> InvoiceOut:
+        """``siblings``: all invoices of the period (when already loaded), which saves a query per link."""
         snap = inv.snapshot or {}
         due = inv.due
+        if siblings is not None:
+            by_id = {i.id: i for i in siblings}
+            replaced_by = by_id.get(inv.replaced_by_id)
+            replaces = next((i for i in siblings if i.replaced_by_id == inv.id), None)
+        else:
+            replaced_by = inv.replaced_by if inv.replaced_by_id else None
+            replaces = inv.replaces
         return InvoiceOut(
+            status=inv.status,
+            voided_at=inv.voided_at,
+            void_reason=inv.void_reason,
+            replaced_by_number=replaced_by.number if replaced_by else None,
+            replaces_number=replaces.number if replaces else None,
             number=inv.number,
             issued_at=inv.issued_at,
             sent_at=inv.sent_at,
@@ -571,8 +590,48 @@ class InvoiceOut(Schema):
         )
 
 
+class NumberingPreviewIn(Schema):
+    invoice_number_pattern: str | None = None  # default: the saved pattern
+    credit_note_number_pattern: str | None = None
+    date: _dt.date | None = None  # default today; the date the example and the counter scope are computed for
+
+
+class NumberingKindOut(Schema):
+    valid: bool
+    error: str | None = None
+    example: str | None = None  # the pattern rendered with sequence 1 for the date
+    next: str | None = None  # the real next automatic number under this pattern with the current counter of its scope
+    scope: str | None = None  # counter key: "2026", "2026-11" or "all"
+    scope_label: str | None = None  # "2026", "November 2026" or "All time"
+    resets: str | None = None  # yearly | monthly | never
+
+
+class PlaceholderOut(Schema):
+    token: str
+    meaning: str
+
+
+class NumberingPreviewOut(Schema):
+    invoice: NumberingKindOut
+    credit_note: NumberingKindOut
+    placeholders: list[PlaceholderOut]
+    literal_characters: str
+    max_length: int
+
+
+class NumberEchoOut(Schema):
+    mode: str  # "custom" | "automatic"
+    number: str | None = None  # the custom number (null when automatic)
+    next_automatic: str  # what the automatic counter would give right now
+
+
 class InvoiceIssueIn(Schema):
     number: str | None = None  # custom number; omit for the automatic INV-YYYY-00001 sequence
+
+
+class InvoiceVoidIn(Schema):
+    reason: str = Field(min_length=1, max_length=300)  # required; printed on the voided invoice's record and the credit note
+    number: str | None = None  # custom number for the replacement; omit for the next automatic one
 
 
 class IssuerSettingsIO(Schema):
@@ -592,10 +651,39 @@ class IssuerSettingsIO(Schema):
     payment_terms: str = ""
     vat_rate: Decimal = Decimal("21.00")  # percent, 0 = no VAT
     archive_after_days: int = 30  # unpaid clubs are downgraded first, then archived this many days later (0-365)
+    # Automatic numbering (see billing.services.numbering). Optional on PUT: omitted = the current/default value.
+    invoice_number_pattern: str = "INV-{YYYY}-{NNNNN}"
+    credit_note_number_pattern: str = "CN-{YYYY}-{NNNNN}"
+    # PUT only: jump the counter forward so the NEXT number uses this sequence value (> the current counter; null = leave alone). GET returns null.
+    invoice_next_sequence: int | None = Field(None, ge=1)
+    credit_note_next_sequence: int | None = Field(None, ge=1)
+    # GET/PUT responses only (ignored on PUT): what the next automatic number would be right now, and where the counter stands in today's scope.
+    invoice_next_number_preview: str = ""
+    credit_note_next_number_preview: str = ""
+    invoice_current_sequence: int = 0  # last sequence value used in today's scope (0 = none yet)
+    credit_note_current_sequence: int = 0
+    invoice_counter_resets: str = "yearly"  # yearly | monthly | never
+    credit_note_counter_resets: str = "yearly"
 
     @staticmethod
     def of(row) -> IssuerSettingsIO:
+        from django.utils import timezone as django_timezone
+
+        from billing.models import CreditNoteSequence, InvoiceSequence
+        from billing.services import credit_notes as cn_svc
+        from billing.services import invoices as inv_svc
+        from billing.services import numbering
+
+        today = django_timezone.localdate()
         return IssuerSettingsIO(
+            invoice_number_pattern=row.invoice_number_pattern,
+            credit_note_number_pattern=row.credit_note_number_pattern,
+            invoice_next_number_preview=inv_svc.peek_next_automatic_number(row.invoice_number_pattern, today),
+            credit_note_next_number_preview=cn_svc.peek_next_credit_note_number(row.credit_note_number_pattern, today),
+            invoice_current_sequence=numbering.current_value(InvoiceSequence, numbering.scope_key(row.invoice_number_pattern, today)),
+            credit_note_current_sequence=numbering.current_value(CreditNoteSequence, numbering.scope_key(row.credit_note_number_pattern, today)),
+            invoice_counter_resets=numbering.resets(row.invoice_number_pattern),
+            credit_note_counter_resets=numbering.resets(row.credit_note_number_pattern),
             legal_name=row.legal_name,
             address=row.address,
             zip_code=row.zip_code,
@@ -653,6 +741,7 @@ class CycleOut(Schema):
 class CreditNoteBrief(Schema):
     number: str
     total: Decimal
+    kind: str = "plan_change"  # plan_change | void
 
 
 class CreditAppliedOut(Schema):
@@ -674,15 +763,17 @@ class CreditNoteOut(Schema):
     vat_rate: Decimal
     reverse_charge: bool
     reason: str
-    applied_to: list[CreditAppliedOut] = []  # informational: invoices that were paid from the credit this change created
+    applied_to: list[CreditAppliedOut] = []  # informational: invoices that were paid from the credit this change created (always empty for void notes)
+    kind: str = "plan_change"  # plan_change | void (a void note is a document only: no credit, no change to the period)
+    replacement_invoice_number: str | None = None  # void notes: the invoice that replaced the voided one
 
     @staticmethod
     def of(note, *, with_applied: bool = False) -> CreditNoteOut:
         applied = []
-        if with_applied:
+        if with_applied and note.kind != "void":
             from billing.models import ClubCreditEntry
 
-            for e in ClubCreditEntry.objects.filter(credit_note=note, kind=ClubCreditEntry.APPLIED).select_related("due__invoice"):
+            for e in ClubCreditEntry.objects.filter(credit_note=note, kind=ClubCreditEntry.APPLIED).select_related("due"):
                 inv = getattr(e.due, "invoice", None)
                 applied.append(CreditAppliedOut(due_id=e.due_id, invoice_number=inv.number if inv else None, amount=-e.amount))
         return CreditNoteOut(
@@ -699,7 +790,15 @@ class CreditNoteOut(Schema):
             reverse_charge=note.reverse_charge,
             reason=note.reason,
             applied_to=applied,
+            kind=note.kind,
+            replacement_invoice_number=note.replacement_invoice.number if note.replacement_invoice_id else None,
         )
+
+
+class VoidReissueOut(Schema):
+    voided: InvoiceOut  # the old invoice, now status "voided"
+    invoice: InvoiceOut  # the replacement (same period, next number, needs sending)
+    credit_note: CreditNoteOut | None = None  # null when the voided invoice had no amount
 
 
 class CreditEntryOut(Schema):
@@ -715,6 +814,14 @@ class CreditEntryOut(Schema):
 class CreditLedgerOut(Schema):
     balance: Decimal
     entries: list[CreditEntryOut]  # newest first
+
+
+class VoidedInvoiceOut(Schema):
+    number: str
+    voided_at: datetime
+    void_reason: str
+    replaced_by_number: str | None = None
+    credit_note_number: str | None = None  # null when the voided invoice had no amount
 
 
 class DueOut(Schema):
@@ -745,6 +852,7 @@ class DueOut(Schema):
     prorated_at: datetime | None = None
     credit_transferred: Decimal = Decimal("0")  # payments on this period that were moved to the club's credit (still listed in payments)
     credit_notes: list[CreditNoteBrief] = []
+    voided_invoices: list[VoidedInvoiceOut] = []  # history of voided invoices of this period, newest first
 
     @staticmethod
     def of(due, *, with_payments: bool = False) -> DueOut:
@@ -752,7 +860,21 @@ class DueOut(Schema):
 
         day = today()
         state = "overdue" if due.is_overdue(day) else "in_grace" if due.is_in_grace(day) else "issued_ahead" if due.is_issued_ahead(day) else "settled"
-        invoice = getattr(due, "invoice", None)
+        invoices = list(due.invoices.all())
+        invoice = next((i for i in invoices if i.voided_at is None), None)
+        notes = sorted(due.credit_notes.all(), key=lambda n: n.created)
+        void_notes = {n.invoice_id: n.number for n in notes if n.kind == "void"}
+        by_id = {i.id: i for i in invoices}
+        voided = [
+            VoidedInvoiceOut(
+                number=i.number,
+                voided_at=i.voided_at,
+                void_reason=i.void_reason,
+                replaced_by_number=by_id[i.replaced_by_id].number if i.replaced_by_id in by_id else None,
+                credit_note_number=void_notes.get(i.id),
+            )
+            for i in sorted((i for i in invoices if i.voided_at is not None), key=lambda i: i.voided_at, reverse=True)
+        ]
         return DueOut(
             id=due.pk,
             club=ClubRef(id=due.club.pk, name=due.club.name, slug=due.club.slug),
@@ -771,7 +893,7 @@ class DueOut(Schema):
             state=state,
             is_trial=due.is_trial,
             paid_at=due.paid_at,
-            invoice=InvoiceOut.of(invoice) if invoice else None,
+            invoice=InvoiceOut.of(invoice, siblings=invoices) if invoice else None,
             payments=[PaymentOut.of(p) for p in due.payments.select_related("recorded_by")] if with_payments else [],
             prorated=due.is_prorated,
             original_amount=due.original_amount,
@@ -780,7 +902,8 @@ class DueOut(Schema):
             original_period_end=due.original_period_end,
             prorated_at=due.prorated_at,
             credit_transferred=due.credit_transferred,
-            credit_notes=[CreditNoteBrief(number=n.number, total=n.total) for n in sorted(due.credit_notes.all(), key=lambda n: n.created)],
+            credit_notes=[CreditNoteBrief(number=n.number, total=n.total, kind=n.kind) for n in notes],
+            voided_invoices=voided,
         )
 
 
@@ -805,11 +928,13 @@ class SubscribeBillingIn(Schema):
     auto_archive: bool = True
     notes: str = ""
     trial_days: int | None = Field(None, ge=1, le=365)  # free trial of this many days; only for a club that is not billed yet
+    invoice_number: str | None = None  # custom number for the first period's invoice (the trial's zero invoice too); omit for automatic
 
 
 class PlanChangeIn(Schema):
     plan_id: UUID
     effective_date: date | None = None  # default today; between the day after the current period's start and today
+    invoice_number: str | None = None  # custom number for the NEW period's invoice; omit for automatic
 
 
 class MoneyOut(Schema):
@@ -886,6 +1011,7 @@ class PlanChangePreviewOut(Schema):
     amount_payable_after_credit: Decimal
     credit_balance_after: Decimal
     warnings: list[str]
+    invoice_number: NumberEchoOut  # how the new period's invoice will be numbered
 
     @staticmethod
     def of(change) -> PlanChangePreviewOut:
@@ -931,6 +1057,7 @@ class PlanChangePreviewOut(Schema):
             amount_payable_after_credit=change.amount_payable,
             credit_balance_after=change.credit_balance_after,
             warnings=change.warnings,
+            invoice_number=NumberEchoOut(mode="custom" if change.invoice_number else "automatic", number=change.invoice_number, next_automatic=change.next_automatic_number),
         )
 
 
@@ -951,6 +1078,7 @@ class PlanChangeOut(PlanChangePreviewOut):
 
 class OpenPeriodIn(Schema):
     start: date | None = None
+    invoice_number: str | None = None  # custom number for the new period's invoice; omit for automatic
 
 
 class BillingSettingsIn(Schema):

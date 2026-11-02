@@ -45,6 +45,7 @@ from . import BillingError
 from . import credit as credit_svc
 from .credit_notes import issue_credit_note
 from .dues import PeriodQuote, _resettle, current_plan, open_period, quote_period, today
+from .invoices import clean_number, peek_next_automatic_number
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
@@ -113,6 +114,8 @@ class PlanChange:
     credit_balance_after: Decimal
     warnings: list[str] = field(default_factory=list)
     trial_replaced: bool = False
+    invoice_number: str | None = None  # custom number for the NEW period's invoice (validated); None = automatic
+    next_automatic_number: str = ""  # what the automatic counter would give right now
 
     @property
     def credit_notes_to_issue(self) -> list[tuple[Invoice, Money, Due]]:
@@ -159,8 +162,9 @@ def _date_bounds(dues: list[Due], day: datetime.date) -> tuple[datetime.date, da
     return anchor.period_end + ONE_DAY, day, f"The club's last period ended {anchor.period_end}; the switch date must be after that and not in the future."
 
 
-def build_plan_change(club, plan: Plan, effective_date: datetime.date | None = None) -> PlanChange:
-    """Validate and compute a plan change. No writes."""
+def build_plan_change(club, plan: Plan, effective_date: datetime.date | None = None, invoice_number: str | None = None) -> PlanChange:
+    """Validate and compute a plan change. No writes. ``invoice_number`` (optional custom number for the new period's
+    invoice) is validated here too: ``ValueError`` = bad format (422), ``BillingError`` = already in use (409)."""
     day = today()
     billing = ClubBilling.objects.filter(club=club).first()
     if billing is None:
@@ -198,6 +202,7 @@ def build_plan_change(club, plan: Plan, effective_date: datetime.date | None = N
     if Due.objects.filter(club=club, period_start=new_start).exists():
         raise BillingError(f"A period starting {new_start} already exists (possibly a cancelled one).")
     quote = quote_period(club, plan, new_start)  # BillingError when the plan has no price on that day
+    custom_number = clean_number(invoice_number) if invoice_number is not None else None
 
     cancelled = [_plan_cancelled(d) for d in futures]
     trial_replaced = bool(old and old.due.is_trial)
@@ -234,6 +239,8 @@ def build_plan_change(club, plan: Plan, effective_date: datetime.date | None = N
         credit_balance_after=available - applied,
         warnings=warnings,
         trial_replaced=trial_replaced,
+        invoice_number=custom_number,
+        next_automatic_number=peek_next_automatic_number(),
     )
 
 
@@ -283,11 +290,11 @@ def _plan_cancelled(due: Due) -> CancelledPeriod:
 
 
 @transaction.atomic
-def execute_plan_change(club, plan: Plan, *, effective_date: datetime.date | None = None, actor=None) -> PlanChangeResult:
+def execute_plan_change(club, plan: Plan, *, effective_date: datetime.date | None = None, actor=None, invoice_number: str | None = None) -> PlanChangeResult:
     """Apply a plan change atomically. Raises ``BillingError`` (or ``PlanChangeDateError``) before touching anything."""
     credit_svc.lock(club)
     list(Due.objects.select_for_update().filter(club=club))  # lock the periods
-    change = build_plan_change(club, plan, effective_date)
+    change = build_plan_change(club, plan, effective_date, invoice_number)
     now = timezone.now()
     notes: list[CreditNote] = []
     old_due = None
@@ -341,7 +348,7 @@ def execute_plan_change(club, plan: Plan, *, effective_date: datetime.date | Non
     feature_services.subscribe(club, plan, actor=actor, reason="Plan change")
 
     reference = ", ".join(n.number for n in notes) if notes and change.credit_balance_before == 0 else None
-    new_due = open_period(club, start=change.quote.start, plan=plan, actor=actor, credit_reference=reference, credit_note=notes[-1] if notes else None)
+    new_due = open_period(club, start=change.quote.start, plan=plan, actor=actor, credit_reference=reference, credit_note=notes[-1] if notes else None, invoice_number=change.invoice_number)
     new_due.refresh_from_db()
     if new_due.amount_paid != change.credit_applied or new_due.total != change.quote.total:  # the preview and the change must agree
         raise RuntimeError(f"Plan change drifted from its preview: credit {new_due.amount_paid} != {change.credit_applied}")

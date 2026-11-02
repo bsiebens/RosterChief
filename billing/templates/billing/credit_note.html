@@ -19,13 +19,18 @@
   table.lines th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #555; padding: 2mm 0; border-bottom: 1.5px solid #111; }
   table.lines td { padding: 2.2mm 0; border-bottom: 1px solid #ddd; }
   .num { text-align: right; }
+  /* breathing room between the columns; the description column takes the slack */
+  table.lines th + th, table.lines td + td { padding-left: 6mm; }
+  table.lines th.num, table.lines td.num { white-space: nowrap; }
+  table.lines td.nowrap { white-space: nowrap; }
+  .sub { font-size: 8.5pt; color: #777; font-weight: normal; }
   table.lines tr.sum td { border-bottom: 0; padding: 1mm 0; }
   table.lines tr.total td { font-weight: bold; border-top: 1.5px solid #111; padding-top: 2mm; }
   table.lines tr.balance td { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; padding: 2.5mm 0; }
   .note { margin-top: 6mm; padding: 3mm 4mm; border: 1px solid #999; background: #f5f5f5; }
   .pay { margin-top: 9mm; padding: 4mm; border: 1px solid #ccc; page-break-inside: avoid; }
   .pay table { border-collapse: collapse; }
-  .pay td { padding: 0.6mm 6mm 0.6mm 0; vertical-align: top; }
+  .pay td { padding: 0.6mm 10mm 0.6mm 0; vertical-align: top; }
   .terms { margin-top: 6mm; white-space: pre-line; }
   .footer { margin-top: 10mm; padding-top: 3mm; border-top: 1px solid #ccc; font-size: 8.5pt; color: #555; white-space: pre-line; }
 </style>
@@ -74,8 +79,8 @@
     </thead>
     <tbody>
       <tr>
-        <td>{{ snap.description }}<br><span class="muted">{{ snap.reason }}</span></td>
-        <td>{{ credited_from|date:"Y-m-d" }} to {{ credited_to|date:"Y-m-d" }}</td>
+        <td><strong>{{ line_name }}</strong>{% if line_detail %}<br><span class="sub">{{ line_detail }}</span>{% endif %}{% if snap.reason %}<br><span class="sub">{{ snap.reason }}</span>{% endif %}</td>
+        <td class="nowrap">{{ credited_from|date:"Y-m-d" }} &ndash; {{ credited_to|date:"Y-m-d" }}</td>
         <td class="num">-{{ net }}</td>
         <td class="num">{% if snap.reverse_charge %}0%{% else %}{{ vat_rate|floatformat:"-2" }}%{% endif %} (-{{ vat }})</td>
         <td class="num">-{{ total }}</td>
@@ -93,10 +98,18 @@
   </div>
   {% endif %}
 
+  {% if is_void %}
+  <div class="note">
+    This credit note cancels invoice {{ invoice_number }} (total EUR {{ snap.invoice_total }}), which was voided{% if replacement_invoice_number %} and replaced by invoice {{ replacement_invoice_number }}{% endif %}.
+    It is an accounting document only: the replacement covers the same period and amount, so no payment is due or refunded and your account balance is unchanged.
+  </div>
+  {% else %}
   <div class="note">
     This credit note corrects invoice {{ invoice_number }} (original total EUR {{ snap.invoice_total }}), which remains unchanged.
     Amounts already paid are not refunded: any surplus is kept as credit on your account and deducted from your next invoice.
   </div>
+
+  {% endif %}
 
   {% if issuer.payment_terms %}<div class="terms">{{ issuer.payment_terms }}</div>{% endif %}
   {% if issuer.invoice_footer %}<div class="footer">{{ issuer.invoice_footer }}</div>{% endif %}

@@ -19,18 +19,33 @@
   table.lines th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.6pt; color: #555; padding: 2mm 0; border-bottom: 1.5px solid #111; }
   table.lines td { padding: 2.2mm 0; border-bottom: 1px solid #ddd; }
   .num { text-align: right; }
+  /* breathing room between the columns; the description column takes the slack */
+  table.lines th + th, table.lines td + td { padding-left: 6mm; }
+  table.lines th.num, table.lines td.num { white-space: nowrap; }
+  table.lines td.nowrap { white-space: nowrap; }
+  .sub { font-size: 8.5pt; color: #777; font-weight: normal; }
   table.lines tr.sum td { border-bottom: 0; padding: 1mm 0; }
   table.lines tr.total td { font-weight: bold; border-top: 1.5px solid #111; padding-top: 2mm; }
   table.lines tr.balance td { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; padding: 2.5mm 0; }
   .note { margin-top: 6mm; padding: 3mm 4mm; border: 1px solid #999; background: #f5f5f5; }
   .pay { margin-top: 9mm; padding: 4mm; border: 1px solid #ccc; page-break-inside: avoid; }
   .pay table { border-collapse: collapse; }
-  .pay td { padding: 0.6mm 6mm 0.6mm 0; vertical-align: top; }
+  .pay td { padding: 0.6mm 10mm 0.6mm 0; vertical-align: top; }
+  .void { margin-top: 6mm; padding: 3mm 4mm; border: 2px solid #b00020; color: #b00020; }
+  .void strong.stamp { font-size: 20pt; letter-spacing: 3pt; display: block; }
   .terms { margin-top: 6mm; white-space: pre-line; }
   .footer { margin-top: 10mm; padding-top: 3mm; border-top: 1px solid #ccc; font-size: 8.5pt; color: #555; white-space: pre-line; }
 </style>
 </head>
 <body>
+  {% if voided %}
+  <div class="void">
+    <strong class="stamp">VOID</strong>
+    Voided {{ voided_on|date:"Y-m-d" }}{% if replaced_by_number %} &mdash; replaced by {{ replaced_by_number }}{% endif %}{% if void_credit_note_number %}; credit note {{ void_credit_note_number }}{% endif %}.
+    {% if invoice.void_reason %}<br>Reason: {{ invoice.void_reason }}{% endif %}
+  </div>
+  {% endif %}
+
   <table class="head">
     <tr>
       <td>
@@ -64,6 +79,7 @@
         Invoice date: {{ invoice.issued_at|date:"Y-m-d" }}<br>
         Due date: <strong>{{ due_date|date:"Y-m-d" }}</strong><br>
         Reference: {{ invoice.number }}
+        {% if replaces_number %}<br>Replaces invoice {{ replaces_number }}{% endif %}
       </td>
     </tr>
   </table>
@@ -74,8 +90,8 @@
     </thead>
     <tbody>
       <tr>
-        <td>{{ snap.description }}</td>
-        <td>{{ period_start|date:"Y-m-d" }} to {{ period_end|date:"Y-m-d" }}</td>
+        <td><strong>{{ line_name }}</strong>{% if line_detail %}<br><span class="sub">{{ line_detail }}</span>{% endif %}</td>
+        <td class="nowrap">{{ period_start|date:"Y-m-d" }} &ndash; {{ period_end|date:"Y-m-d" }}</td>
         <td class="num">{{ net }}</td>
         <td class="num">{% if snap.reverse_charge %}0%{% else %}{{ vat_rate|floatformat:"-2" }}%{% endif %} ({{ vat }})</td>
         <td class="num">{{ total }}</td>
@@ -83,10 +99,12 @@
       <tr class="sum"><td colspan="4" class="num">Total excl. VAT</td><td class="num">{{ net }}</td></tr>
       <tr class="sum"><td colspan="4" class="num">VAT{% if not snap.reverse_charge %} {{ vat_rate|floatformat:"-2" }}%{% endif %}</td><td class="num">{{ vat }}</td></tr>
       <tr class="sum total"><td colspan="4" class="num">Total incl. VAT</td><td class="num">{{ total }}</td></tr>
+      {% if not voided %}
       {% for p in payments %}
       <tr class="sum"><td colspan="4" class="num muted">{% if p.method == "credit" %}Credit applied{% else %}Payment received{% endif %} {{ p.paid_at|date:"Y-m-d" }}{% if p.reference %} ({{ p.reference }}){% endif %}</td><td class="num">-{{ p.amount }}</td></tr>
       {% endfor %}
       <tr class="balance"><td colspan="4" class="num">Balance due</td><td class="num">EUR {{ balance }}</td></tr>
+      {% endif %}
     </tbody>
   </table>
 
@@ -97,7 +115,7 @@
   </div>
   {% endif %}
 
-  {% if issuer.iban or issuer.bic %}
+  {% if not voided and issuer.iban or not voided and issuer.bic %}
   <div class="pay">
     <div class="label">Payment</div>
     <table>
