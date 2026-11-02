@@ -19,3 +19,8 @@ def dashboard(request, refresh: bool = False):
 @router.get("/clubs/{club_id}/stats", summary="Numbers for one club")
 def club_stats(request, club_id: UUID):
     return stats.club_stats(get_object_or_404(Club.objects.exclude(schema_name="public"), pk=club_id))
+
+
+@router.get("/clubs/{club_id}/overview", summary="The club page: signups per month, member types and the People/Members/Events/Shop boxes")
+def club_overview(request, club_id: UUID):
+    return stats.club_overview(get_object_or_404(Club.objects.exclude(schema_name="public"), pk=club_id))

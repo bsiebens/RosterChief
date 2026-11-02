@@ -5,6 +5,7 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404
+from django_countries import countries
 from ninja import Query, Router, Schema
 from ninja.pagination import paginate
 
@@ -20,7 +21,7 @@ from features.models import Subscription
 from ..auth import superuser_auth
 from ..errors import ApiError
 from ..idempotency import idempotent
-from ..schemas import ClubAdminIn, ClubAdminOut, ClubCreateIn, ClubDeleteIn, ClubDetailOut, ClubListOut, ClubUpdateIn, ProvisioningOut
+from ..schemas import ClubAdminIn, ClubAdminOut, ClubCreateIn, ClubDeleteIn, ClubDetailOut, ClubListOut, ClubUpdateIn, CountryOut, ProvisioningOut
 
 router = Router(tags=["clubs"])
 
@@ -36,6 +37,21 @@ def _get_club(club_id: UUID) -> Club:
 
 def _domains(club):
     return list(Domain.objects.filter(tenant=club).order_by("-is_primary", "domain").values_list("domain", flat=True))
+
+
+def _country(code: str | None) -> str | None:
+    """Normalise a country code, or reject an unknown one (the model would otherwise store it unchecked on create)."""
+    if code is None or code == "":
+        return code
+    code = code.strip().upper()
+    if code not in dict(countries):
+        raise ApiError(422, "validation_error", "Unknown country.", {"legal_country": ["Use a two-letter country code such as BE."]})
+    return code
+
+
+@router.get("/countries", response=list[CountryOut], summary="Countries (ISO 3166-1 alpha-2 code and name) for address fields")
+def list_countries(request):
+    return [CountryOut(code=c.code, name=str(c.name)) for c in countries]
 
 
 class ClubFilters(Schema):
@@ -71,6 +87,7 @@ def create_club(request, payload: ClubCreateIn):
         raise ApiError(409, "unverified_email", str(e)) from e
     except club_services.AccountError as e:
         raise ApiError(422, "validation_error", str(e), {"owner_first_name": [str(e)]}) from e
+    payload.legal_country = _country(payload.legal_country)
     extra = payload.dict(exclude={"name", "sport_id", "owner_email", "owner_first_name", "owner_last_name"}, exclude_none=True)
     job = provisioning.request_club(name=payload.name, owner=owner, sport=sport, club_fields=extra, requested_by=request.user)
     if owner_created:
@@ -103,6 +120,8 @@ def get_club(request, club_id: UUID):
 def update_club(request, club_id: UUID, payload: ClubUpdateIn):
     club = _get_club(club_id)
     changes = payload.dict(exclude_unset=True)
+    if "legal_country" in changes:
+        changes["legal_country"] = _country(changes["legal_country"]) or ""
     if "sport_id" in changes:
         club.sport = get_object_or_404(Sport, pk=changes.pop("sport_id")) if payload.sport_id else None
     for field, value in changes.items():

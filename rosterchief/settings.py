@@ -39,6 +39,7 @@ ALLOWED_HOSTS = [".localhost"] if DEBUG else config("DJANGO_ALLOWED_HOSTS", cast
 # Application definition
 SHARED_APPS = [
     "django_tenants",
+    "django_countries",  # country names for addresses
     "api",
     "club",  # Club, Domain and the User model (public schema only)
     "features",  # plans, subscriptions and per-club feature overrides (public schema only)
@@ -161,6 +162,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = "static/"
+
+# Uploaded files (club logos). Served by Django itself in development (see rosterchief/urls.py); a real deployment
+# serves MEDIA_ROOT from the web server or object storage.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 
 # Email

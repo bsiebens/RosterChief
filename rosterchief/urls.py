@@ -17,6 +17,8 @@ from api.api import api
 from controlpanel.api.urls import api as platform_api
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -30,3 +32,6 @@ urlpatterns = [
     path('api/v1/', api.urls),
     path('api/platform/v1/', platform_api.urls),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

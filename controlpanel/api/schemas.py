@@ -85,6 +85,7 @@ class ClubListOut(Schema):
     plan: str | None = None  # code of the current subscription's plan; None = default plan applies
     archived_at: datetime | None = None
     created: datetime
+    logo_url: str | None = None  # site-relative (MEDIA_URL), None when the club has no logo
 
     @staticmethod
     def of(club) -> ClubListOut:
@@ -98,6 +99,7 @@ class ClubListOut(Schema):
             plan=getattr(club, "plan_code", None),
             archived_at=club.archived_at,
             created=club.created,
+            logo_url=club.logo.url if club.logo else None,
         )
 
 
@@ -120,6 +122,8 @@ class ClubDetailOut(ClubListOut):
     legal_address: str
     legal_zip_code: str
     legal_city: str
+    legal_country: str  # ISO 3166-1 alpha-2 code, "" when not set
+    legal_country_name: str
     vat_id: str
     domains: list[str]
     admins: list[ClubAdminOut]
@@ -135,6 +139,8 @@ class ClubDetailOut(ClubListOut):
             legal_address=club.legal_address,
             legal_zip_code=club.legal_zip_code,
             legal_city=club.legal_city,
+            legal_country=club.legal_country.code or "",
+            legal_country_name=club.legal_country.name if club.legal_country else "",
             vat_id=club.vat_id,
             domains=domains,
             admins=[ClubAdminOut.of(u, club) for u in admins],
@@ -153,6 +159,7 @@ class ClubCreateIn(Schema):
     legal_address: str | None = None
     legal_zip_code: str | None = None
     legal_city: str | None = None
+    legal_country: str | None = None  # ISO 3166-1 alpha-2 code, e.g. "BE"
     vat_id: str | None = None
 
 
@@ -165,6 +172,7 @@ class ClubUpdateIn(Schema):
     legal_address: str | None = None
     legal_zip_code: str | None = None
     legal_city: str | None = None
+    legal_country: str | None = None
     vat_id: str | None = None
 
 
@@ -697,3 +705,8 @@ class JobEnabledIn(Schema):
 
 class JobQueuedOut(Schema):
     task_id: str
+
+
+class CountryOut(Schema):
+    code: str
+    name: str

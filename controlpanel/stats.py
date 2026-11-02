@@ -378,5 +378,59 @@ def club_stats(club) -> dict:
         "member_limit": ent.limit("max_members") if ent.has("max_members") else None,
         "admins": len(data.get("admin_ids") or []),
         "dues_owed": str(sum((d.balance for d in owing), Decimal("0"))),
+        "downgraded_at": billing.downgraded_at if billing else None,
+        "trial_ends_at": billing.trial_ends_at if billing else None,
         "features": sorted(ent.enabled_codes()),
+    }
+
+
+# --- one club's overview page -------------------------------------------------------------------------------------------
+
+
+def club_overview(club) -> dict:
+    """What the club page charts and counts: signups, member types and the People/Members/Events/Shop boxes.
+
+    Events and Shop have no tables yet, so those boxes report ``available: False`` instead of inventing zeros; they fill
+    in when the apps exist. ``renewal_rate`` is ``None`` for the same reason: there are no seasons or renewals to measure.
+    """
+    from authorization.catalog import OWNER_SLUG
+    from authorization.models import Role
+    from members.models import Member, MemberType
+
+    now = timezone.now()
+    with schema_context(club.schema_name):
+        members = Member.objects.all()
+        total = members.count()
+        new_30d = members.filter(created__gte=now - datetime.timedelta(days=30)).count()
+        this_year = members.filter(created__year=now.year).count()
+        with_login = members.filter(user__isnull=False).count()
+        by_type = {row["member_type"]: row["n"] for row in members.values("member_type").annotate(n=Count("pk"))}
+        signups = _monthly(members, "created")
+        admins = len(Role.objects.get(slug=OWNER_SLUG).group.user_set.values_list("pk", flat=True))
+
+    labels = dict(MemberType.choices)
+    types = [{"type": code, "label": labels.get(code, code), "count": n} for code, n in sorted(by_type.items(), key=lambda x: -x[1])]
+    return {
+        "kpis": {"members": total, "new_members_30d": new_30d, "renewal_rate": None, "renewal_note": "Needs seasons and renewals, which don't exist yet."},
+        "signups": signups,
+        "member_types": types,
+        "groups": [
+            {"key": "people", "title": "People", "icon": "contact", "available": True, "stats": [{"label": "Admins", "value": admins}, {"label": "Members", "value": total}, {"label": "With a login", "value": with_login}]},
+            {
+                "key": "members",
+                "title": "Members",
+                "icon": "users",
+                "available": True,
+                "stats": [{"label": "Total", "value": total}, {"label": "Joined in the last 30 days", "value": new_30d}, {"label": "Joined this year", "value": this_year}, {"label": "Member types in use", "value": len(types)}],
+            },
+            {"key": "events", "title": "Events", "icon": "calendar-days", "available": False, "stats": [{"label": "Upcoming", "value": None}, {"label": "This season", "value": None}]},
+            {
+                "key": "shop",
+                "title": "Shop",
+                "icon": "shopping-cart",
+                "available": False,
+                "stats": [{"label": "Orders", "value": None}, {"label": "Revenue", "value": None}, {"label": "Outstanding", "value": None}, {"label": "Orders unpaid", "value": None}],
+            },
+        ],
+        "home_location": None,  # placeholder until locations exist
     }

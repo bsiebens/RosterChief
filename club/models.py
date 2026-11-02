@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django_countries.fields import CountryField
 from django_extensions.db.fields import AutoSlugField
 from django_tenants.models import DomainMixin
 from tenant_users.tenants.models import TenantBase, UserProfile
@@ -59,6 +60,7 @@ class Club(TenantBase):
     )
     legal_zip_code = models.CharField(_("legal zip code"), max_length=255, blank=True)
     legal_city = models.CharField(_("legal city"), max_length=255, blank=True)
+    legal_country = CountryField(_("legal country"), blank=True)
     vat_id = models.CharField(_("VAT ID"), max_length=32, blank=True, help_text=_("VAT/tax registration number, if the club has one. Shown on invoices sent to or by the club when set."))
 
     payment_instructions = models.TextField(
