@@ -56,17 +56,17 @@
 				{#each log as e (e.id)}
 					<tr>
 						<td class="font-mono text-[11px] whitespace-nowrap">{withZone(e.created)}</td>
-						<td class="min-w-56">
+						<td class="min-w-40">
 							<span class="badge">{label(e.action)}</span>
 							{#if e.plan_code}<span class="ml-1 font-mono text-[11px] text-muted">plan {e.plan_code}</span>{/if}
 							{#if e.feature_code}<span class="ml-1 font-mono text-[11px] text-muted">{e.feature_code}</span>{/if}
 							{#if show(e.old) || show(e.new)}
-								<div class="mt-1 text-xs text-muted">{#if show(e.old)}<span>{show(e.old)}</span> → {/if}<span class="text-ink">{show(e.new) || '—'}</span></div>
+								<div class="mt-1 text-xs text-muted">{#if show(e.old)}<span>{show(e.old)}</span><span class="mx-2.5 font-semibold text-ink" aria-label="changed to">→</span>{/if}<span class="text-ink">{show(e.new) || '—'}</span></div>
 							{/if}
 						</td>
-						<td class="text-sm">{#if e.club_id}<a class="link" href="/clubs/{e.club_id}">{clubName[e.club_id] ?? 'Club'}</a>{:else}<span class="text-muted">platform</span>{/if}</td>
-						<td class="text-xs">{e.actor_email ?? 'system'}</td>
-						<td class="max-w-64 text-xs text-muted">{e.reason || '—'}</td>
+						<td class="text-sm whitespace-nowrap">{#if e.club_id}<a class="link" href="/clubs/{e.club_id}">{clubName[e.club_id] ?? 'Club'}</a>{:else}<span class="text-muted">platform</span>{/if}</td>
+						<td class="text-xs whitespace-nowrap">{e.actor_email ?? 'system'}</td>
+						<td class="max-w-xl min-w-64 text-xs text-muted">{e.reason || '—'}</td>
 					</tr>
 				{:else}
 					<tr><td colspan="5" class="text-sm text-muted">{error ? 'The log could not be loaded.' : club ? 'No changes recorded for this club.' : 'No changes recorded yet.'}</td></tr>
