@@ -20,19 +20,45 @@ class MFARequired(Exception):
     pass
 
 
-def _enforce_mfa(request, user):
+class NoManagementAccess(Exception):
+    """Signed in, but neither a club admin, owner nor team staff: the management app is not for them."""
+
+
+def _enforce_mfa(request, user, *, door=True):
     if mfa_required(request, user):
         raise MFARequired
+    if door:
+        _enforce_management_access(request, user)
     return user
 
 
+def _enforce_management_access(request, user):
+    """Inside a club only admins, owners and team staff use this API. The platform host (club picker) is exempt."""
+    from django_tenants.utils import get_public_schema_name
+
+    from members.services.access import can_access_management
+
+    tenant = getattr(request, "tenant", None)
+    if tenant is None or tenant.schema_name == get_public_schema_name():
+        return
+    if not can_access_management(user):
+        raise NoManagementAccess
+
+
 class TokenAuth(XSessionTokenAuth):
+    """``door=False`` is for endpoints that have their own access rule and also serve people who are not admins or
+    staff (the private pictures): the MFA rule still applies, the management-app door does not."""
+
+    def __init__(self, *, door: bool = True):
+        super().__init__()
+        self.door = door
+
     def __call__(self, request):
         user = super().__call__(request)
         if user is None:
             return None
         request.user = user
-        return _enforce_mfa(request, user)
+        return _enforce_mfa(request, user, door=self.door)
 
 
 class CookieAuth(SessionAuth):

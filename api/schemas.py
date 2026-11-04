@@ -7,6 +7,30 @@ class ClubOut(Schema):
     is_platform: bool
 
 
+class BrandingOut(Schema):
+    """What the login page of a club needs: public by design, so nothing here may be private."""
+
+    slug: str
+    name: str
+    is_platform: bool
+    logo_url: str | None = None
+    #: Browser icons generated from the logo: keys ico, png_32, png_192, apple_touch (site-relative URLs). Empty without a logo.
+    icons: dict[str, str] = {}
+    primary_color: str = ""
+    secondary_color: str = ""
+    primary_content_color: str = ""
+    secondary_content_color: str = ""
+
+
+class MyClubOut(Schema):
+    slug: str
+    name: str
+    host: str
+    logo_url: str | None = None
+    primary_color: str = ""
+    primary_content_color: str = ""
+
+
 class MeOut(Schema):
     id: str
     email: str
@@ -14,4 +38,10 @@ class MeOut(Schema):
     last_name: str
     club: ClubOut
     roles: list[str]
+    permissions: list[str]
+    is_club_admin: bool
+    can_manage_members: bool = False
+    can_manage_settings: bool = False
+    can_execute_evaluations: bool = False
+    managed_team_ids: list[str] = []
     features: list[str]
