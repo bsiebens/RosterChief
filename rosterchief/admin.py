@@ -61,3 +61,26 @@ class PlatformAdminMixin:
 
     def has_delete_permission(self, request, obj=None):
         return not in_club() and super().has_delete_permission(request, obj)
+
+
+class ClubAdminMixin:
+    """Tenant (club schema) models: offered only on a club domain (their tables do not exist on the base domain), to
+    club admins (see ``authorization.permissions.is_club_admin``) and to users holding the Django model permission."""
+
+    def _allowed(self, request, super_check) -> bool:
+        return in_club() and (is_club_admin_user(request.user) or super_check)
+
+    def has_module_permission(self, request):
+        return self._allowed(request, super().has_module_permission(request))
+
+    def has_view_permission(self, request, obj=None):
+        return self._allowed(request, super().has_view_permission(request, obj))
+
+    def has_add_permission(self, request):
+        return self._allowed(request, super().has_add_permission(request))
+
+    def has_change_permission(self, request, obj=None):
+        return self._allowed(request, super().has_change_permission(request, obj))
+
+    def has_delete_permission(self, request, obj=None):
+        return self._allowed(request, super().has_delete_permission(request, obj))

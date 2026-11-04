@@ -28,5 +28,7 @@ app.conf.beat_schedule = {
     "notifications-retry-deliveries": {"task": "notifications.retry_failed_deliveries", "schedule": crontab()},  # every minute
     "notifications-check-health": {"task": "notifications.check_push_health", "schedule": crontab(minute="*/5")},
     "notifications-cleanup": {"task": "notifications.cleanup", "schedule": crontab(hour=3, minute=30)},
+    # Mondays 02:00.
+    "events-create-missing-seasons": {"task": "events.create_missing_seasons", "schedule": crontab(hour=2, minute=0, day_of_week=1)},
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

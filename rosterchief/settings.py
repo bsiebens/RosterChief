@@ -153,6 +153,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
 LANGUAGE_CODE = "en-us"
+LANGUAGES = [("en", "English"), ("nl", "Nederlands"), ("fr", "Français")]
 
 TIME_ZONE = "Europe/Brussels"
 
@@ -208,6 +209,7 @@ ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_USER_MODEL_EMAIL_FIELD = "email"
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_EMAIL_SUBJECT_PREFIX = ""  # our email subjects already name the club (club.emails.AUTH_TEXTS)
 
 # Headless API (/_allauth/): browser clients use the session cookie, app clients an X-Session-Token.
 HEADLESS_CLIENTS = ("browser", "app")

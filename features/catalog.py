@@ -27,6 +27,8 @@ CATALOG: dict[str, FeatureDef] = {
     for f in [
         FeatureDef("sponsoring", "Sponsor management", "Track sponsors and sponsorship deals."),
         FeatureDef("max_members", "Member limit", "Maximum number of members on the roster.", kind=LIMIT, limit_scope="members"),
+        FeatureDef("referee_officials", "Referees and officials", "Use of referee and officials management"),
+        FeatureDef("shop", "Shop", "Enables the club shop"),
         # One feature per competition a club can import fixtures from (see club.Competition.feature).
         FeatureDef("competition_rbihf", "RBIHF fixtures", "Import fixtures from the RBIHF competition."),
         FeatureDef("competition_dfel", "DFEL fixtures", "Import fixtures from the DFEL competition."),
