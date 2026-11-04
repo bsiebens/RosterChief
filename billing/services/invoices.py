@@ -4,12 +4,11 @@ import datetime
 import re
 from decimal import Decimal
 
-from django.core.mail import EmailMessage
 from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from rosterchief.mail import send_message
+from billing.emails import send_branded, texts
 
 from ..models import BillingSettings, Due, Invoice, InvoiceSequence
 from . import BillingError, numbering
@@ -137,12 +136,10 @@ def _notify_platform_admins(invoice: Invoice) -> None:
     if not emails:
         return
     due = invoice.due
-    message = EmailMessage(
-        subject=f"New invoice {invoice.number} for {due.club.name}",
-        body=f"Invoice {invoice.number} was issued for {due.club.name}: EUR {due.total} for {due.period_start} to {due.period_end}.",
-        to=emails,
-    )
-    send_message(message, fail_silently=True)
+    t = texts(number=invoice.number, club=due.club.name)
+    rows = [("Club", due.club.name), ("Period", f"{due.period_start} to {due.period_end}"), ("Due date", str(due.grace_until)), ("Total incl. VAT", f"EUR {due.total}")]
+    body = f"Invoice {invoice.number} was issued for {due.club.name}: EUR {due.total} for {due.period_start} to {due.period_end}."
+    send_branded(subject=t["notice_subject"], text=body, template="billing/email/notice.html", ctx={"t": t, "rows": rows}, to=emails, fail_silently=True)
 
 
 def invoice_context(invoice: Invoice) -> dict:
@@ -189,6 +186,10 @@ def invoice_pdf(invoice: Invoice) -> bytes:
     return HTML(string=invoice_html(invoice)).write_pdf()
 
 
+def snap_reverse(ctx: dict) -> bool:
+    return bool(ctx["snap"].get("reverse_charge"))
+
+
 def club_recipients(club) -> list[str]:
     from club.services import club_admins
 
@@ -202,13 +203,35 @@ def send_invoice(invoice: Invoice, *, actor=None) -> Invoice:
     recipients = club_recipients(invoice.due.club)
     if not recipients:
         raise BillingError("This club has no administrator with an email address.")
-    message = EmailMessage(
-        subject=f"Invoice {invoice.number}",
-        body=f"Please find attached invoice {invoice.number} for {invoice.due.club.name}.",
+    ctx = invoice_context(invoice)
+    club_name = invoice.due.club.name
+    period = f"{ctx['period_start']} to {ctx['period_end']}"
+    t = texts(number=invoice.number, club=club_name, period=period)
+    issuer = ctx["issuer"]
+    rows = [
+        ("Invoice number", invoice.number),
+        ("Period", period),
+        ("Total excl. VAT", f"EUR {ctx['net']}"),
+        ("VAT" + ("" if snap_reverse(ctx) else f" {ctx['vat_rate'].normalize():f}%"), f"EUR {ctx['vat']}"),
+        ("Due date", str(ctx["due_date"])),
+        ("Total incl. VAT", f"EUR {ctx['total']}"),
+    ]
+    pay_rows = []
+    if issuer.get("iban") or issuer.get("bic"):
+        pay_rows = [(label, value) for label, value in [("Beneficiary", issuer.get("legal_name")), ("IBAN", issuer.get("iban")), ("BIC", issuer.get("bic")), ("Reference", invoice.number), ("Amount", f"EUR {ctx['balance']}"), ("Pay before", str(ctx["due_date"]))] if value]
+    text = f"{t['invoice_intro']}\n\n" + "\n".join(f"{label}: {value}" for label, value in rows)
+    if pay_rows:
+        text += "\n\nPayment\n" + "\n".join(f"{label}: {value}" for label, value in pay_rows)
+    text += f"\n\nPlease find attached invoice {invoice.number} for {club_name}."
+    sent = send_branded(
+        subject=t["invoice_subject"],
+        text=text,
+        template="billing/email/invoice.html",
+        ctx={"t": t, "rows": rows, "pay_rows": pay_rows, "terms": issuer.get("payment_terms", "")},
         to=recipients,
+        attachments=[(f"{invoice.number}.pdf", invoice_pdf(invoice), "application/pdf")],
     )
-    message.attach(f"{invoice.number}.pdf", invoice_pdf(invoice), "application/pdf")
-    if not send_message(message):
+    if not sent:
         raise BillingError("Automated email is paused, so the invoice was not sent.")
     invoice.sent_at, invoice.sent_method, invoice.sent_by = timezone.now(), Invoice.EMAIL, actor
     invoice.save(update_fields=["sent_at", "sent_method", "sent_by", "modified"])

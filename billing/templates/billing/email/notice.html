@@ -1,0 +1,17 @@
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ t.notice_heading }}{% endblock %}
+{% block intro %}{{ t.notice_intro }}{% endblock %}
+{% block action %}{% include "billing/email/_summary.html" with rows=rows highlight=True %}{% endblock %}
+{% block details %}
+{% if pay_rows %}
+<tr><td style="padding:12px 32px 8px;">
+  <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px;">Payment</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:10px;">
+    <tr><td style="padding:12px 18px;font-size:14px;line-height:1.7;color:#334155;">
+      {% for label, value in pay_rows %}<span style="color:#64748b;">{{ label }}</span> <strong style="color:#0f172a;">{{ value }}</strong><br>{% endfor %}
+    </td></tr>
+  </table>
+</td></tr>
+{% endif %}
+{% if terms %}<tr><td style="padding:12px 32px 0;font-size:13px;line-height:1.5;color:#64748b;white-space:pre-line;">{{ terms }}</td></tr>{% endif %}
+{% endblock %}

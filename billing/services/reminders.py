@@ -2,10 +2,9 @@
 
 import datetime
 
-from django.core.mail import EmailMessage
 from django.utils import timezone
 
-from rosterchief.mail import send_message
+from billing.emails import send_branded, texts
 
 from ..models import BillingSettings, Due
 from .dues import dues_overdue, owing_dues, today
@@ -42,13 +41,17 @@ def send_reminder(due: Due, level: str) -> bool:
         return False
     subject = {INFO: "Upcoming invoice", WARNING: "Payment due", ERROR: "Payment overdue"}[level]
     body = f"{subject}: EUR {due.balance} is open for {due.club.name} ({due.period_start} to {due.period_end}). Grace ends {due.grace_until}."
+    extra = ""
     if level == ERROR:
         if due.club.billing.auto_archive:
             days = BillingSettings.current().archive_after_days
-            body += f" If it stays unpaid the club is first moved to the free plan and archived {days} days later."
+            extra = f"If it stays unpaid the club is first moved to the free plan and archived {days} days later."
         else:
-            body += " If it stays unpaid the club is moved to the free plan."
-    if not send_message(EmailMessage(subject=f"{subject} - {due.club.name}", body=body, to=recipients), fail_silently=True):
+            extra = "If it stays unpaid the club is moved to the free plan."
+        body += f" {extra}"
+    summary = [("Club", due.club.name), ("Period", f"{due.period_start} to {due.period_end}"), ("Grace ends", str(due.grace_until)), ("Open balance", f"EUR {due.balance}")]
+    ctx = {"t": texts(), "title": subject, "intro": f"{subject}: EUR {due.balance} is open for {due.club.name}.", "rows": summary, "extra": extra}
+    if not send_branded(subject=f"{subject} - {due.club.name}", text=body, template="billing/email/reminder.html", ctx=ctx, to=recipients, fail_silently=True):
         return False
     due.last_reminder_level, due.last_reminder_sent_at = level, timezone.now()
     due.save(update_fields=["last_reminder_level", "last_reminder_sent_at", "modified"])
