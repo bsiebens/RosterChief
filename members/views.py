@@ -21,7 +21,7 @@ def request_user(request):
     if user is not None and user.is_authenticated:
         return user
     try:
-        return TokenAuth()(request)
+        return TokenAuth(door=False)(request)
     except MFARequired:
         return None
 

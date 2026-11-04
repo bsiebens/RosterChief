@@ -10,16 +10,15 @@ streamed by ``members.views.MemberPhotoView`` after this check; there is no publ
   fallback is shown club-wide like a profile picture (otherwise rosters would show broken images); asked for directly
   it keeps the stricter rules.
 
-Parents and guardians are not modelled in this version; when family links exist they belong next to the "member
-themselves" checks below.
+Parents and guardians (families) do exist now (``members.models.FamilyMembership``) but do not grant picture access
+yet; if that is wanted, the check belongs next to the "member themselves" checks below.
 """
 
 from django.core.exceptions import ObjectDoesNotExist
 
-from authorization.permissions import is_platform_owner
 from members.models import Member
-
-MANAGE_MEMBERS = "members.manage_members"
+from members.services import access
+from members.services.access import MANAGE_MEMBERS  # noqa: F401  (re-exported)
 
 
 def is_member_themselves(user, member: Member) -> bool:
@@ -37,7 +36,7 @@ def is_user_of_club(user, club) -> bool:
 
 
 def can_manage_members(user, club) -> bool:
-    return club is not None and (is_platform_owner(user) or user.has_perm(MANAGE_MEMBERS))
+    return club is not None and access.can_manage_members(user)
 
 
 def can_view_member_photo(user, member: Member, club=None, field: str | None = None) -> bool:
