@@ -127,6 +127,10 @@ class ClubDetailOut(ClubListOut):
     legal_country: str  # ISO 3166-1 alpha-2 code, "" when not set
     legal_country_name: str
     vat_id: str
+    season_start: str  # ISO date; only its month and day matter
+    season_duration_months: int
+    primary_color: str  # "#rrggbb" or "" when the club uses the theme default
+    secondary_color: str
     domains: list[str]
     admins: list[ClubAdminOut]
 
@@ -144,6 +148,10 @@ class ClubDetailOut(ClubListOut):
             legal_country=club.legal_country.code or "",
             legal_country_name=club.legal_country.name if club.legal_country else "",
             vat_id=club.vat_id,
+            season_start=club.season_start.isoformat(),
+            season_duration_months=club.season_duration_months,
+            primary_color=club.primary_color,
+            secondary_color=club.secondary_color,
             domains=domains,
             admins=[ClubAdminOut.of(u, club) for u in admins],
         )
@@ -176,6 +184,10 @@ class ClubUpdateIn(Schema):
     legal_city: str | None = None
     legal_country: str | None = None
     vat_id: str | None = None
+    season_start: _dt.date | None = None
+    season_duration_months: int | None = None
+    primary_color: str | None = None  # "#rrggbb"; "" resets to the theme default
+    secondary_color: str | None = None
 
 
 class ClubDeleteIn(Schema):

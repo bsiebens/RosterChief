@@ -4,6 +4,7 @@
 	import { platform } from '#lib/api.ts';
 	import type { ClubDetail, Country, Sport } from '#lib/clubs.ts';
 	import Alert from '../Alert.svelte';
+	import ColorField from '../ColorField.svelte';
 	import Field from '../Field.svelte';
 	import Modal from '../Modal.svelte';
 
@@ -19,8 +20,14 @@
 		legal_address: club.legal_address,
 		legal_zip_code: club.legal_zip_code,
 		legal_city: club.legal_city,
-		legal_country: club.legal_country
+		legal_country: club.legal_country,
+		season_start: club.season_start,
+		season_duration_months: String(club.season_duration_months),
+		primary_color: club.primary_color,
+		secondary_color: club.secondary_color
 	});
+	const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+	const NUMERIC = ['season_duration_months'];
 
 	let open = $state(false);
 	let f = $state(initial());
@@ -51,8 +58,8 @@
 		error = '';
 		fields = {};
 		const base = initial() as Record<string, string>;
-		const changes: Record<string, string | null> = {};
-		for (const [key, value] of Object.entries(f) as [string, string][]) if (value !== base[key]) changes[key] = key === 'sport_id' ? value || null : value.trim();
+		const changes: Record<string, string | number | null> = {};
+		for (const [key, value] of Object.entries(f) as [string, string][]) if (value !== base[key]) changes[key] = key === 'sport_id' ? value || null : NUMERIC.includes(key) ? Number(value) : value.trim();
 		if (!Object.keys(changes).length) {
 			open = false;
 			busy = false;
@@ -77,6 +84,7 @@
 		['VAT number', club.vat_id],
 		['Contact email', club.contact_email],
 		['Website', club.website],
+		['Season', `starts ${MONTHS[Number(club.season_start.slice(5, 7)) - 1]} ${Number(club.season_start.slice(8, 10))}, lasts ${club.season_duration_months} month${club.season_duration_months === 1 ? '' : 's'}`],
 		['Address', [club.legal_address, [club.legal_zip_code, club.legal_city].filter(Boolean).join(' '), club.legal_country_name].filter(Boolean).join(', ')]
 	]);
 </script>
@@ -93,6 +101,15 @@
 				<div class="flex items-baseline justify-between gap-4 py-1.5">
 					<dt class="shrink-0 text-sm text-muted">{label}</dt>
 					<dd class="text-right text-sm {value ? 'text-ink' : 'text-dim'}">{value || '—'}</dd>
+				</div>
+			{/each}
+			{#each [['Primary colour', club.primary_color], ['Secondary colour', club.secondary_color]] as [label, color] (label)}
+				<div class="flex items-baseline justify-between gap-4 py-1.5">
+					<dt class="shrink-0 text-sm text-muted">{label}</dt>
+					<dd class="flex items-center gap-2 text-right text-sm {color ? 'font-mono text-ink' : 'text-dim'}">
+						{#if color}<span class="inline-block h-4 w-4 rounded border border-line" style:background-color={color} aria-hidden="true"></span>{/if}
+						{color || 'Theme default'}
+					</dd>
 				</div>
 			{/each}
 		</dl>
@@ -129,6 +146,14 @@
 				</select>
 				{#if fields.legal_country}<span class="mt-1 block text-xs text-club-dark">{fields.legal_country}</span>{/if}
 			</div>
+		</div>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<Field label="Season starts on" type="date" bind:value={f.season_start} error={fields.season_start} help="Only the month and day are used; the year is ignored." />
+			<Field label="Season duration (months)" type="number" min="1" max="24" bind:value={f.season_duration_months} error={fields.season_duration_months} help="Missing seasons are created automatically with this length." />
+		</div>
+		<div class="grid gap-4 sm:grid-cols-2">
+			<ColorField label="Primary colour" bind:value={f.primary_color} error={fields.primary_color} help="Sidebar and navigation in the club's apps." />
+			<ColorField label="Secondary colour" bind:value={f.secondary_color} error={fields.secondary_color} help="Buttons, links and highlights in the club's apps." />
 		</div>
 		<div class="modal-action mt-0">
 			<button type="button" class="btn btn-outline" onclick={() => (open = false)}>Cancel</button>

@@ -444,7 +444,11 @@ def club_overview(club) -> dict:
         new_30d = members.filter(created__gte=now - datetime.timedelta(days=30)).count()
         this_year = members.filter(created__year=now.year).count()
         with_login = members.filter(user__isnull=False).count()
-        by_type = {row["member_type"]: row["n"] for row in members.values("member_type").annotate(n=Count("pk"))}
+        by_type = {
+            Member.Role.MEMBER: members.members().count(),
+            Member.Role.GUARDIAN: members.guardians().count(),
+            Member.Role.STAFF: members.staff().count(),
+        }
         signups = _monthly(members, "created")
         admins = len(Role.objects.get(slug=OWNER_SLUG).group.user_set.values_list("pk", flat=True))
         live = Event.objects.filter(cancelled=False)
@@ -458,8 +462,9 @@ def club_overview(club) -> dict:
             "has_season": season is not None,
         }
 
-    labels = dict(Member.MemberType.choices)
-    types = [{"type": code, "label": labels.get(code, code), "count": n} for code, n in sorted(by_type.items(), key=lambda x: -x[1])]
+    # Roles overlap (a parent who plays counts as both), so these are per-role counts, not a partition.
+    labels = dict(Member.Role.choices)
+    types = [{"type": code, "label": labels[code], "count": n} for code, n in sorted(by_type.items(), key=lambda x: -x[1]) if n]
     return {
         "kpis": {"members": total, "new_members_30d": new_30d, "renewal_rate": None, "renewal_note": "Needs seasons and renewals, which don't exist yet."},
         "signups": signups,

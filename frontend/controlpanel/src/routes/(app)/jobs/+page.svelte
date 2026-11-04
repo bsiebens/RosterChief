@@ -152,7 +152,7 @@
 				</div>
 
 				{#if open}
-					<div class="grid gap-4 border-t border-rule bg-subhead px-4 py-3 text-sm lg:grid-cols-[1fr_18rem]">
+					<div class="grid gap-4 border-t border-rule bg-subhead px-4 py-3 text-sm lg:grid-cols-[1fr_auto]">
 						<div class="flex min-w-0 flex-col gap-2">
 							<p class="text-slate">{job.description || 'No description.'}</p>
 							<div class="font-mono text-[11px] text-muted">{job.task}{job.schedule?.timezone ? ` · ${job.schedule.timezone}` : ''} · {job.total_run_count} scheduled run{job.total_run_count === 1 ? '' : 's'}</div>
@@ -168,7 +168,7 @@
 						<div class="flex flex-col items-start gap-2">
 							{#if job.default_schedule}
 								<div class="font-mono text-[10px] tracking-[.06em] text-dim uppercase">Default schedule</div>
-								<div class="text-xs text-ink">{describe(job.default_schedule)}{job.schedule?.timezone ? ` ${scheduleZone(job.schedule.timezone)}` : ''} <span class="font-mono text-muted">· {raw(job.default_schedule)}</span></div>
+								<div class="text-xs text-ink lg:whitespace-nowrap">{describe(job.default_schedule)}{job.schedule?.timezone ? ` ${scheduleZone(job.schedule.timezone)}` : ''} <span class="font-mono text-muted">· {raw(job.default_schedule)}</span></div>
 								{#if job.edited && canEdit}
 									<button class="btn btn-outline btn-xs" onclick={() => reset(job)} disabled={busy === `${job.name}:reset`}><RotateCcw size={12} aria-hidden="true" /> Reset to default</button>
 								{/if}

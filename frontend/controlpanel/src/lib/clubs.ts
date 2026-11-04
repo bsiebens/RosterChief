@@ -28,6 +28,12 @@ export type ClubDetail = ClubRow & {
 	legal_country: string;
 	legal_country_name: string;
 	vat_id: string;
+	/** ISO date; only its month and day matter. */
+	season_start: string;
+	season_duration_months: number;
+	/** "#rrggbb", or "" when the club uses the theme default. */
+	primary_color: string;
+	secondary_color: string;
 	domains: string[];
 	admins: ClubAdmin[];
 };
