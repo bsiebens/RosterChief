@@ -1,0 +1,27 @@
+{% if from_email or to_email or deleted_email %}
+<tr><td style="padding:0 32px 8px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;">
+    <tr><td style="padding:14px 18px;font-size:14px;line-height:1.7;color:#334155;">
+      {% if from_email %}{{ t.from }}: <strong style="color:#0f172a;">{{ from_email }}</strong><br>{% endif %}
+      {% if to_email %}{{ t.to }}: <strong style="color:#0f172a;">{{ to_email }}</strong>{% endif %}
+      {% if deleted_email %}{{ t.removed }}: <strong style="color:#0f172a;">{{ deleted_email }}</strong>{% endif %}
+    </td></tr>
+  </table>
+</td></tr>
+{% endif %}
+{% if ip or user_agent or timestamp %}
+<tr><td style="padding:8px 32px 8px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;">
+    <tr><td style="padding:14px 18px;font-size:13px;line-height:1.7;color:#64748b;">
+      {% if ip %}{{ t.ip }}: <span style="color:#334155;">{{ ip }}</span><br>{% endif %}
+      {% if user_agent %}{{ t.browser }}: <span style="color:#334155;">{{ user_agent }}</span><br>{% endif %}
+      {% if timestamp %}{{ t.date }}: <span style="color:#334155;">{{ timestamp|date:"j M Y, H:i T" }}</span>{% endif %}
+    </td></tr>
+  </table>
+</td></tr>
+{% endif %}
+<tr><td style="padding:8px 32px 8px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;">
+    <tr><td style="padding:14px 18px;font-size:13px;line-height:1.55;color:#9a3412;">{{ t.security }}</td></tr>
+  </table>
+</td></tr>

@@ -1,4 +1,5 @@
 import datetime
+import logging
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -109,6 +110,24 @@ class Club(TenantBase):
 
     def __str__(self) -> str:
         return self.name
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The logo as loaded, to notice a change on save (None while deferred).
+        loaded = self.__dict__.get("logo")
+        self._loaded_logo = str(loaded) if loaded is not None else None
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        logo = str(self.__dict__.get("logo") or "")
+        if self._loaded_logo is not None and logo != self._loaded_logo:
+            from .icons import generate_icons
+
+            try:
+                generate_icons(self)  # builds the new set, or only removes the old one when the logo was cleared
+            except Exception:  # an unreadable image must not fail the save; the branding endpoint retries lazily
+                logging.getLogger(__name__).exception("Icon generation failed for club %s", self.slug)
+        self._loaded_logo = logo
 
     @property
     def is_archived(self) -> bool:

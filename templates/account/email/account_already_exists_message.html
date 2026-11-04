@@ -1,0 +1,4 @@
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ t.heading }}{% endblock %}
+{% block intro %}{{ t.intro }}{% if email %}<br><strong style="color:#0f172a;">{{ email }}</strong>{% endif %}{% endblock %}
+{% block action %}{% include "club/email/_button.html" with button_url=password_reset_url button_label=t.button %}{% endblock %}

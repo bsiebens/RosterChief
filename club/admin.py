@@ -1,17 +1,17 @@
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
-from django.db import connection
 from django_tenants.admin import TenantAdminMixin
 
 from authorization.models import Role
+from authorization.permissions import is_platform_owner
 from authorization.services import ProtectedRoleError, roles_by_club, set_roles, validate_roles
 from rosterchief.admin import PlatformAdminMixin, in_club, is_club_admin_user
-from authorization.permissions import is_platform_owner
 
-from .models import Club, Domain, Sport, User
+from .models import Club, Competition, Domain, RefereeType, Sport, User
 from .services import create_account, provision_club, send_password_setup_email
 
 
@@ -175,3 +175,21 @@ class UserAdmin(admin.ModelAdmin):
 @admin.register(Domain)
 class DomainAdmin(PlatformAdminMixin, admin.ModelAdmin):
     list_display = ["domain", "tenant", "is_primary"]
+
+
+@admin.register(Competition)
+class CompetitionAdmin(PlatformAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "module", "sport", "feature"]
+    list_filter = ["sport"]
+    search_fields = ["name", "module"]
+    ordering = ["name"]
+    list_select_related = ["sport", "feature"]
+
+
+@admin.register(RefereeType)
+class RefereeTypeAdmin(PlatformAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "sport", "kind", "ordering"]
+    list_filter = ["sport", "kind"]
+    search_fields = ["name"]
+    ordering = ["sport", "kind", "ordering", "name"]
+    list_select_related = ["sport"]

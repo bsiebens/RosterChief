@@ -1,0 +1,11 @@
+{% autoescape off %}{{ t.heading }}
+
+{{ t.intro }}{% if email %}
+{{ email }}{% endif %}
+{% if signup_url %}
+{{ t.button }}: {{ signup_url }}
+{% endif %}
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

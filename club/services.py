@@ -10,12 +10,11 @@ from django_tenants.utils import get_public_schema_name, schema_context
 
 from authorization.models import Role
 from authorization.services import assign_role
-from members.models import Member
-
 from features.catalog import DEFAULT_PLAN
 from features.entitlements import resolve_entitlements
 from features.models import Plan
 from features.services import subscribe
+from members.models import Member
 
 from .models import Club, Domain
 

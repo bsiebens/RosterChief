@@ -15,7 +15,17 @@ class AccountAdapter(DefaultAccountAdapter):
 
         if email_paused() and not template_prefix.startswith("account/email/"):
             return
-        super().send_mail(template_prefix, email, context)
+        from club.emails import auth_email_context
+
+        # Same branded layout as the "login granted" email: the club's logo and colours (the platform's on the base domain).
+        super().send_mail(template_prefix, email, {**context, **auth_email_context(self.request, template_prefix)})
+
+    def render_mail(self, template_prefix, email, context, headers=None):
+        from club.emails import attach_platform_logo
+
+        message = super().render_mail(template_prefix, email, context, headers)
+        attach_platform_logo(message)  # platform emails (control panel) carry the RosterChief logo inline
+        return message
 
     def is_open_for_signup(self, request):
         return False
