@@ -38,6 +38,36 @@ class Priority(models.TextChoices):
     CRITICAL = "critical", _("Critical")  # bypasses quiet hours; category and master switches still apply
 
 
+# --- in-app inbox -----------------------------------------------------------------------------------------------------
+
+
+class InboxNotification(UUIDModel):
+    """A message in a user's in-app inbox (the bell in the management app), for one club. Lives with the account like the
+    rest of this app; ``notifications.inbox`` creates and reads them."""
+
+    class Kind(models.TextChoices):
+        INFO = "info", _("Info")
+        SUCCESS = "success", _("Success")
+        WARNING = "warning", _("Warning")
+
+    user = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="inbox_notifications", verbose_name=_("user"))
+    club = models.ForeignKey("club.Club", on_delete=models.CASCADE, related_name="+", verbose_name=_("club"))
+    kind = models.CharField(_("kind"), max_length=10, choices=Kind.choices, default=Kind.INFO)
+    title = models.CharField(_("title"), max_length=255)
+    body = models.TextField(_("body"), blank=True)
+    href = models.CharField(_("link"), max_length=500, blank=True, help_text=_("A path inside the management app, e.g. /members."))
+    read_at = models.DateTimeField(_("read at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("inbox notification")
+        verbose_name_plural = _("inbox notifications")
+        ordering = ["-created"]
+        indexes = [models.Index(fields=["user", "club", "-created"], name="inbox_user_club_created")]
+
+    def __str__(self):
+        return f"{self.title} -> {self.user_id}"
+
+
 # --- devices ----------------------------------------------------------------------------------------------------------
 
 
