@@ -54,8 +54,8 @@ class Season(UUIDModel):
 
     @property
     def name(self):
-        """Short label built from the start/end years, e.g. "season '25 - '26"."""
-        return f"season '{self.start_date:%y} - '{self.end_date:%y}"
+        """Short label built from the start/end years, e.g. "Season '25 - '26"."""
+        return f"Season '{self.start_date:%y} - '{self.end_date:%y}"
 
     @classmethod
     def get_current(cls, date: datetime.date | None = None):
@@ -68,13 +68,13 @@ class Season(UUIDModel):
     @classmethod
     def covering(cls, club, date: datetime.date):
         """Return ``club``'s season covering ``date`` (no tenant context needed)."""
-        return cls.objects.filter(club=club, start_date__lte=date, end_date__gte=date).first()
+        return cls.objects.filter(start_date__lte=date, end_date__gte=date).first()
 
     @classmethod
     def next_after(cls, club, date: datetime.date):
         """Return ``club``'s soonest season starting after ``date`` (no tenant
         context needed) -- the season that follows the one covering ``date``."""
-        return cls.objects.filter(club=club, start_date__gt=date).order_by("start_date").first()
+        return cls.objects.filter(start_date__gt=date).order_by("start_date").first()
 
     @classmethod
     def before(cls, club, season):
@@ -82,7 +82,7 @@ class Season(UUIDModel):
         e.g. the management dashboard's member-count trend compares against
         this. Mirrors next_after's own "adjacent by date" reasoning, just
         looking the other way."""
-        return cls.objects.filter(club=club, start_date__lt=season.start_date).order_by("-start_date").first()
+        return cls.objects.filter(start_date__lt=season.start_date).order_by("-start_date").first()
 
 
 class Location(UUIDModel):
