@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { LayoutDashboard, Settings, Shirt, Users } from '@lucide/svelte';
+import { CalendarDays, LayoutDashboard, Settings, Shirt, Users } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -46,6 +46,18 @@ export const NAV: NavItem[] = [
 			{ href: '/teams', label: 'shell.nav.teams_list', match: (p) => p === '/teams' || (p.startsWith('/teams/') && !p.startsWith('/teams/numbers') && !p.startsWith('/teams/officials')) },
 			{ href: '/teams/numbers', label: 'shell.nav.teams_numbers', match: (p) => p.startsWith('/teams/numbers') },
 			{ href: '/teams/officials', label: 'shell.nav.teams_officials', match: (p) => p.startsWith('/teams/officials'), visible: (me) => me.features.includes('referee_officials') }
+		]
+	},
+	{
+		key: 'calendar',
+		href: '/calendar',
+		label: 'shell.nav.calendar',
+		icon: CalendarDays,
+		match: (p) => p === '/calendar' || p.startsWith('/calendar/'),
+		children: [
+			{ href: '/calendar', label: 'shell.nav.events', match: (p) => p === '/calendar' || p === '/calendar/events' || p.startsWith('/calendar/events/') },
+			{ href: '/calendar/locations', label: 'shell.nav.locations', match: (p) => p.startsWith('/calendar/locations') },
+			{ href: '/calendar/opponents', label: 'shell.nav.opponents', match: (p) => p.startsWith('/calendar/opponents') }
 		]
 	},
 	{
