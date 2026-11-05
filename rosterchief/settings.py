@@ -127,6 +127,16 @@ DATABASES = {
         cast=lambda url: db_url(url, engine="django_tenants.postgresql_backend"),
     )
 }
+# Shared cache (fixture-import previews wait in it between the preview and the import, so every web worker must see
+# them): set CACHE_URL=redis://localhost:6379/1 in production. Without it each process keeps its own in-memory cache.
+CACHES = {
+    "default": (
+        {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": config("CACHE_URL")}
+        if config("CACHE_URL", default="")
+        else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    )
+}
+
 # Parallel test runs (several agents or terminals) need their own test database: set TEST_DB_NAME=test_something.
 if config("TEST_DB_NAME", default=""):
     DATABASES["default"]["TEST"] = {"NAME": config("TEST_DB_NAME")}

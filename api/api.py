@@ -12,9 +12,11 @@ from members.services import access
 
 from .auth import AUTHENTICATORS
 from .errors import register_error_handlers
+from .routers import analytics as analytics_router
 from .routers import calendar_data as calendar_data_router
 from .routers import club_settings as club_settings_router
 from .routers import events as events_router
+from .routers import fixture_imports as fixture_imports_router
 from .routers import members as members_router
 from .routers import memberships as memberships_router
 from .routers import notifications_inbox as notifications_router
@@ -42,7 +44,12 @@ api.add_router("/overview", overview_router.router, tags=["overview"])
 api.add_router("/locations", calendar_data_router.locations_router, tags=["calendar"])
 api.add_router("/opponents", calendar_data_router.opponents_router, tags=["calendar"])
 api.add_router("/teams", teams_router.router, tags=["teams"])
+api.add_router("/teams", fixture_imports_router.teams_router, tags=["fixture imports"])
+api.add_router("/fixture-imports", fixture_imports_router.json_router, tags=["fixture imports"])
 api.add_router("/events", events_router.router, tags=["events"])
+api.add_router("/teams", analytics_router.teams_router, tags=["analytics"])
+api.add_router("/members", analytics_router.members_router, tags=["analytics"])
+api.add_router("/events", analytics_router.events_router, tags=["analytics"])
 api.add_router("", team_settings_router.router, tags=["team settings"])
 
 

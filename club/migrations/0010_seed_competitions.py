@@ -4,7 +4,7 @@ One club.Competition per data source of events.competition.hockey (``module`` + 
 Sport and the catalog feature that unlocks it (features.catalog: competition_rbihf / competition_dfel /
 competition_ijnl). Feature rows are normally mirrored from the catalog after migrate (features.signals.sync_features);
 they are get_or_create'd here with the catalog's own code/name/description so the competitions can point at them on a
-fresh database. CEHL has its own feature too (competition_cehl): no club is offered a competition until the platform
+fresh database. CEHL has no catalog feature: its row is created without one, so no club is offered it until the platform
 links a feature (as the old flagless competitions).
 
 Idempotent (get_or_create; an existing row with the same name is only completed, never overwritten). Reverse removes the
@@ -22,10 +22,9 @@ FEATURES = {
     "competition_rbihf": ("RBIHF fixtures", "Import fixtures from the RBIHF competition."),
     "competition_dfel": ("DFEL fixtures", "Import fixtures from the DFEL competition."),
     "competition_ijnl": ("IJNL fixtures", "Import fixtures from the IJNL competition."),
-    "competition_cehl": ("CEHL fixtures", "Import fixtures from the CEHL competition."),
 }
 
-COMPETITIONS = {"RBIHF": "competition_rbihf", "CEHL": "competition_cehl", "DFEL": "competition_dfel", "IJNL": "competition_ijnl"}
+COMPETITIONS = {"RBIHF": "competition_rbihf", "CEHL": None, "DFEL": "competition_dfel", "IJNL": "competition_ijnl"}
 
 
 def seed(apps, schema_editor):

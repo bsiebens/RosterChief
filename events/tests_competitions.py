@@ -31,7 +31,7 @@ class SeededCompetitionTests(ClubTestBase):
         rows = {competition.name: competition for competition in Competition.objects.select_related("sport", "feature")}
 
         self.assertTrue({"RBIHF", "CEHL", "DFEL", "IJNL"} <= set(rows))
-        for name, code in [("RBIHF", "competition_rbihf"), ("DFEL", "competition_dfel"), ("IJNL", "competition_ijnl"), ("CEHL", "competition_cehl")]:
+        for name, code in [("RBIHF", "competition_rbihf"), ("DFEL", "competition_dfel"), ("IJNL", "competition_ijnl"), ("CEHL", None)]:
             with self.subTest(name=name):
                 row = rows[name]
                 self.assertEqual((row.module, row.sport.name), ("events.competition.hockey", "Ice hockey"))
@@ -41,7 +41,7 @@ class SeededCompetitionTests(ClubTestBase):
     def test_the_features_match_the_catalog(self):
         from features.catalog import CATALOG
 
-        for code in ("competition_rbihf", "competition_dfel", "competition_ijnl", "competition_cehl"):
+        for code in ("competition_rbihf", "competition_dfel", "competition_ijnl"):
             feature = Feature.objects.get(code=code)
             self.assertEqual((feature.name, feature.description), (CATALOG[code].name, CATALOG[code].description))
 

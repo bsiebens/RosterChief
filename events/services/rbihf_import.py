@@ -172,6 +172,7 @@ class ImportPlan:
     to_delete: list[Event] = field(default_factory=list)
     unchanged_count: int = 0
     competition: str = COMPETITION  # Event.competition for every created event, and which existing events are diffed
+    unchanged: list = field(default_factory=list)  # [(fixture, event)] still listed exactly as stored (for previews)
 
     @property
     def rbihf_team_id(self) -> str:
@@ -239,6 +240,7 @@ def plan_from_fixtures(team, *, competition: str, source_id: str, scraped_team_n
             plan.to_update.append(PlannedUpdate(fixture=fixture, event=existing, changes=changes, suggested_location=default_location, suggested_opponent=default_opponent))
         else:
             plan.unchanged_count += 1
+            plan.unchanged.append((fixture, existing))
 
     now = timezone.now()
     for game_id, event in existing_by_game_id.items():

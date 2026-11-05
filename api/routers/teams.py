@@ -8,6 +8,7 @@ from typing import Literal
 from ninja import File, Form, Router, UploadedFile
 from ninja.errors import HttpError
 
+from api.routers.analytics import analytics_available
 from api.schemas_events import TeamAttendanceOut
 from api.schemas_teams import (
     EligibleRefereeOut,
@@ -48,6 +49,10 @@ def _season(season_id):
     return season
 
 
+def _detail(request, team, season) -> dict:
+    return {**svc.team_detail(request.user, team, season), "analytics_available": analytics_available(request)}
+
+
 def _team(team_id):
     team = svc.get_team(team_id)
     if team is None:
@@ -83,7 +88,7 @@ def numbers_overview(request, season: uuid.UUID | None = None, pool: uuid.UUID |
 @router.get("/{team_id}", response=TeamDetailOut, summary="A team with its roster and staff for a season", operation_id="get_team")
 def get_team(request, team_id: uuid.UUID, season: uuid.UUID | None = None):
     team = _team(team_id)
-    return svc.team_detail(request.user, team, _season(season))
+    return _detail(request, team, _season(season))
 
 
 @router.patch("/{team_id}", response=TeamBase, summary="Edit a team (team manager)", operation_id="update_team")
@@ -108,7 +113,7 @@ def set_team_photo(request, team_id: uuid.UUID, file: File[UploadedFile], season
     if season is None:
         raise Invalid("There is no current season.", {"season_id": ["There is no current season."]})
     svc.set_photo(request.user, team, season, file)
-    return svc.team_detail(request.user, team, season)
+    return _detail(request, team, season)
 
 
 @router.delete("/{team_id}/photo", response={204: None}, summary="Remove the team photo of a season (team manager)", operation_id="remove_team_photo")

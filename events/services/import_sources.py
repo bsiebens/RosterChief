@@ -307,13 +307,16 @@ class CheckResult:
 
 def check_entry(team, entry: dict) -> CheckResult:
     """Fetches ``entry`` and summarises what changed, never raising for a fetch/parse problem (reported on the result)."""
-    result = CheckResult(entry=entry)
     try:
         plan = build_plan_for(team, entry, fetch(entry))
     except ImportSourceError as error:
-        result.error = str(error) or _("Could not fetch this fixture list.")
-        return result
+        return CheckResult(entry=entry, error=str(error) or _("Could not fetch this fixture list."))
+    return result_from_plan(entry, plan)
 
+
+def result_from_plan(entry: dict, plan) -> CheckResult:
+    """The CheckResult of an already built plan (so a caller that keeps the raw payload fetches only once)."""
+    result = CheckResult(entry=entry)
     for planned in plan.to_update:
         if "start" in planned.changes:
             old, new = planned.changes["start"]

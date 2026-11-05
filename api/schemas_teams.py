@@ -80,6 +80,7 @@ class StaffEntryOut(Schema):
 class TeamDetailOut(TeamBase):
     season_id: UUID | None = None
     photo_url: str | None = None  # the team photo of that season
+    analytics_available: bool = False  # game analytics exist for this club (hockey + the analytics feature): GET /teams/{id}/analytics
     roster: list[RosterEntryOut]
     staff: list[StaffEntryOut]
 
