@@ -3,6 +3,7 @@
 import datetime
 import io
 import json
+import uuid
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -80,6 +81,18 @@ class ImportTests(TestCase):
         f = SimpleUploadedFile(name, data)
         return self.call("post", "/preview", user or self.owner, {"season_id": str(self.season.pk)} if season else {}, {"file": f})
 
+    def commit(self, rows, season=True, user=None):
+        """POST /commit, run the queued job the way a worker would, and return the finished job."""
+        from members.tasks import run_member_import
+
+        body = {"season_id": str(self.season.pk), "rows": rows} if season else {"rows": rows}
+        with mock.patch("members.tasks.run_member_import.delay", side_effect=lambda job_id: run_member_import(job_id)), self.captureOnCommitCallbacks(execute=True):
+            r = self.call("post", "/commit", user or self.owner, body)
+        self.assertEqual(r.status_code, 202, r.content)
+        self.assertEqual(r.json()["status"], "queued")
+        job = self.call("get", f"/jobs/{r.json()['id']}", user or self.owner).json()
+        return job
+
     # -- preview --
 
     def test_preview_statuses(self):
@@ -127,9 +140,9 @@ class ImportTests(TestCase):
 
     def test_commit_creates_everything_and_skips_the_rest(self):
         rows = self.upload().json()["rows"]
-        r = self.call("post", "/commit", self.owner, {"season_id": str(self.season.pk), "rows": rows})
-        self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(r.json()["counts"], {"created": 2, "duplicate": 2, "error": 2})
+        job = self.commit(rows)
+        self.assertEqual((job["status"], job["processed"], job["total"]), ("done", 6, 6))
+        self.assertEqual(job["result"]["counts"], {"created": 2, "duplicate": 2, "error": 2})
         with schema_context(self.club.schema_name):
             jane = Member.objects.get(email="jane@imp.test")
             self.assertEqual((jane.language, str(jane.phone)), ("nl", "+32470123456"))
@@ -139,15 +152,29 @@ class ImportTests(TestCase):
             self.assertEqual(sorted(FamilyMembership.objects.filter(family=fam).values_list("role", flat=True)), ["child", "parent"])
             self.assertEqual(Member.objects.filter(email__iexact="exists@imp.test").count(), 1)
             self.assertEqual(AuditEntry.objects.filter(action="club.members_imported").count(), 1)
-        again = self.call("post", "/commit", self.owner, {"season_id": str(self.season.pk), "rows": rows}).json()
-        self.assertEqual(again["counts"]["created"], 0)  # a second run only finds duplicates
+        again = self.commit(rows)
+        self.assertEqual(again["result"]["counts"]["created"], 0)  # a second run only finds duplicates
         with schema_context(self.club.schema_name):
             self.assertEqual(Family.objects.filter(name="Doe").count(), 1)
 
     def test_commit_revalidates(self):
         bad = {"line": 2, "first_name": "Evil", "last_name": "Row", "email": "nope"}
-        r = self.call("post", "/commit", self.owner, {"rows": [bad]})
-        self.assertEqual(r.json()["counts"], {"created": 0, "duplicate": 0, "error": 1})
+        job = self.commit([bad], season=False)
+        self.assertEqual(job["result"]["counts"], {"created": 0, "duplicate": 0, "error": 1})
+        self.assertEqual(self.call("post", "/commit", self.owner, {"rows": []}).status_code, 422)  # nothing to import
+
+    def test_the_job_tells_the_starter_and_reports_failures(self):
+        from notifications.models import InboxNotification
+
+        job = self.commit(self.upload().json()["rows"])
+        self.assertEqual(job["status"], "done")
+        note = InboxNotification.objects.filter(user=self.owner, title="Import finished").first()
+        self.assertIsNotNone(note)
+        self.assertIn("2 members were imported", note.body)
+        with mock.patch("members.services.importing.commit", side_effect=RuntimeError("boom")):
+            failed = self.commit([{"line": 2, "first_name": "A", "last_name": "B"}], season=False)
+        self.assertEqual((failed["status"], failed["error"]), ("failed", "boom"))
+        self.assertTrue(InboxNotification.objects.filter(user=self.owner, title="Import failed").exists())
 
     def test_team_needs_a_season(self):
         r = self.upload(season=False)
@@ -158,6 +185,8 @@ class ImportTests(TestCase):
     def test_needs_manage_members(self):
         self.assertEqual(self.upload(user=self.coach_user).status_code, 403)
         self.assertEqual(self.call("post", "/commit", self.coach_user, {"rows": []}).status_code, 403)
+        self.assertEqual(self.call("get", f"/jobs/{uuid.uuid4()}", self.coach_user).status_code, 403)
+        self.assertEqual(self.call("get", f"/jobs/{uuid.uuid4()}", self.owner).status_code, 404)
         self.assertEqual(self.call("get", "/template", self.coach_user).status_code, 403)
         r = self.call("get", "/template", self.owner)
         self.assertEqual(r.status_code, 200)

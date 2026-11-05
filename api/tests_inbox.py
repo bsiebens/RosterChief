@@ -81,6 +81,18 @@ class InboxApiTests(TestCase):
         theirs.refresh_from_db()
         self.assertIsNone(theirs.read_at)
 
+    def test_push_is_queued_only_when_asked_and_carries_the_category(self):
+        from notifications.models import OutboxEntry
+
+        before = OutboxEntry.objects.count()
+        inbox.notify(self.owner, self.club, title="Quiet")
+        self.assertEqual(OutboxEntry.objects.count(), before)  # inbox only by default
+        item = inbox.notify(self.owner, self.club, title="Loud", body="b", href="/calendar", push=True, category="event")
+        self.assertEqual(OutboxEntry.objects.count(), before + 1)
+        payload = OutboxEntry.objects.order_by("-created").first().payload
+        self.assertEqual((payload["title"], payload["category"], payload["data"]["href"], payload["data"]["inbox_id"]), ("Loud", "event", "/calendar", str(item.pk)))
+        self.assertEqual(payload["user_id"], str(self.owner.pk))
+
     def test_anonymous_and_platform_host(self):
         self.assertIn(self.call("get").status_code, (401, 403))
         headers = {"HTTP_HOST": "testserver", "HTTP_X_SESSION_TOKEN": login_session(self.owner)}

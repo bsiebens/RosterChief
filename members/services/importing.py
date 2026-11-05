@@ -299,10 +299,28 @@ def preview(actor, upload, season_id=None) -> dict:
 # -- committing --
 
 
+def start_import(actor, rows: list[dict], season_id=None):
+    """Queue a background import (``members.tasks.run_member_import``) and return its ``ImportJob``. The rows are
+    validated again when the job runs; only the rows that previewed as new need to be sent."""
+    from members.models import ImportJob
+
+    require_admin(actor)
+    if not rows:
+        raise Invalid("There is nothing to import.", {"rows": ["There is nothing to import."]})
+    if len(rows) > MAX_ROWS:
+        raise Invalid(f"At most {MAX_ROWS} rows.", {"rows": [f"At most {MAX_ROWS} rows."]})
+    get_season(season_id)
+    job = ImportJob.objects.create(created_by=actor, season_id=season_id, rows=rows, total=len(rows))
+    from members.tasks import run_member_import
+
+    transaction.on_commit(lambda: run_member_import.delay(str(job.pk)))
+    return job
+
+
 @transaction.atomic
-def commit(actor, club, rows: list[dict], season_id=None, *, features=None) -> dict:
+def commit(actor, club, rows: list[dict], season_id=None, *, features=None, progress=None) -> dict:
     """Create the rows that validate as ``new``; skip duplicates and report errors. A plan-limit error
-    (``LimitExceeded``) aborts the whole import, nothing is saved."""
+    (``LimitExceeded``) aborts the whole import, nothing is saved. ``progress(done, total)`` is called after each row."""
     require_admin(actor)
     if len(rows) > MAX_ROWS:
         raise Invalid(f"At most {MAX_ROWS} rows.", {"rows": [f"At most {MAX_ROWS} rows."]})
@@ -310,7 +328,10 @@ def commit(actor, club, rows: list[dict], season_id=None, *, features=None) -> d
     results = validate_rows(actor, rows, season)
     teams = _team_lookup()
     created: list[tuple[dict, Member]] = []
-    for r in results:
+    total = len(results)
+    for index, r in enumerate(results, start=1):
+        if progress is not None:
+            progress(index - 1, total)
         if r["status"] != "new":
             continue
         try:
@@ -330,6 +351,8 @@ def commit(actor, club, rows: list[dict], season_id=None, *, features=None) -> d
             r["status"] = "created"
         except Invalid as e:
             r["status"], r["errors"] = "error", e.errors or {"__all__": [str(e)]}
+    if progress is not None:
+        progress(total, total)
     _link_families(actor, created)
     counts = {"created": len(created), "duplicate": sum(1 for r in results if r["status"] == "duplicate"), "error": sum(1 for r in results if r["status"] == "error")}
     audit.record(actor, "club.members_imported", changes={k: {"from": None, "to": v} for k, v in {**counts, "season": season.name if season else None}.items()})

@@ -10,6 +10,7 @@ from members.models import (
     FeePayment,
     Group,
     GroupMembership,
+    ImportJob,
     Member,
     MemberRequirementStatus,
     OnboardingRequirement,
@@ -183,3 +184,16 @@ class AuditEntryAdmin(ClubAdminMixin, admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ImportJob)
+class ImportJobAdmin(ClubAdminMixin, admin.ModelAdmin):
+    """Background member imports (the rows and the per-row result are kept for the run, then dropped)."""
+
+    list_display = ["created", "status", "total", "processed", "created_by", "finished_at"]
+    list_filter = ["status"]
+    list_select_related = ["created_by"]
+    ordering = ["-created"]
+
+    def get_readonly_fields(self, request, obj=None):
+        return [f.name for f in self.model._meta.fields]

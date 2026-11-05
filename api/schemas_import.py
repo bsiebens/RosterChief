@@ -52,3 +52,12 @@ class ImportCommitCounts(Schema):
 class ImportCommitOut(Schema):
     counts: ImportCommitCounts
     rows: list[ImportRowOut]
+
+
+class ImportJobOut(Schema):
+    id: uuid.UUID
+    status: str  # queued | running | done | failed
+    total: int
+    processed: int
+    error: str = ""
+    result: ImportCommitOut | None = None  # when done

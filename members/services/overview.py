@@ -7,6 +7,8 @@ Definitions (so the page and the member list agree):
 * *new* = a member whose first ever membership is this season, *returning* = anyone with an earlier one;
 * a team has *no coach* when nobody on its staff holds a management position this season;
 * *renewal rate* = share of last season's (non-cancelled) members who are members again this season.
+* *attendance* = turnout (present / (present + absent)) over this season's past events and how many past,
+  non-cancelled events there were (``events.services.attendance_report.club_report``); null without past events.
 """
 
 import datetime
@@ -16,6 +18,7 @@ from django.db.models import Count, Exists, Min, OuterRef
 from django.utils import timezone
 
 from events.models import Event, Season
+from events.services.attendance_report import club_report
 from members.models import ClubMembership, Member
 from teams.models import StaffAssignment, Team, TeamMembership
 
@@ -109,7 +112,7 @@ def overview(*, include_fees: bool, today: datetime.date | None = None) -> dict:
     previous = _previous_season(season)
     months = signups_per_month(season, today) if season else []
     if season is None:
-        return {"season": None, "previous_season": None, "kpis": None, "signups": months, "fees": None, "renewal": None, "cards": None}
+        return {"season": None, "previous_season": None, "kpis": None, "signups": months, "fees": None, "renewal": None, "cards": None, "attendance": None}
 
     members = _members_in(season)
     open_ms = members.filter(status__in=[Status.ACTIVE, Status.PENDING])
@@ -162,4 +165,5 @@ def overview(*, include_fees: bool, today: datetime.date | None = None) -> dict:
         "fees": fee_status_counts(season) if include_fees else None,
         "renewal": renewal(season, previous) if include_fees else None,
         "cards": cards,
+        "attendance": club_report(season),
     }

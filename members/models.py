@@ -520,3 +520,32 @@ class AuditEntry(UUIDModel):
 
     def __str__(self):
         return f"{self.created:%Y-%m-%d %H:%M} {self.action}"
+
+
+class ImportJob(UUIDModel):
+    """A member import running in the background (``members.tasks.run_member_import``): the rows to create go in,
+    progress and the per-row results come out. The rows are dropped when it is done."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", _("queued")
+        RUNNING = "running", _("running")
+        DONE = "done", _("done")
+        FAILED = "failed", _("failed")
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("created by"), null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    status = models.CharField(_("status"), max_length=10, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    season_id = models.UUIDField(_("season"), null=True, blank=True)
+    rows = models.JSONField(_("rows"), default=list, blank=True)
+    total = models.PositiveIntegerField(_("rows to import"), default=0)
+    processed = models.PositiveIntegerField(_("rows processed"), default=0)
+    result = models.JSONField(_("result"), null=True, blank=True)
+    error = models.TextField(_("error"), blank=True)
+    finished_at = models.DateTimeField(_("finished at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("import job")
+        verbose_name_plural = _("import jobs")
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"import {self.pk} ({self.status})"

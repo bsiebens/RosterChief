@@ -141,6 +141,38 @@ def can_manage_team(user, team) -> bool:
     return team is not None and team.pk in managed_team_ids(user)
 
 
+def user_group_ids(user) -> set:
+    """Ids of the groups the user's own member record is in."""
+    from members.models import GroupMembership
+
+    if user is None or not user.is_authenticated:
+        return set()
+    return set(GroupMembership.objects.filter(member__user=user).values_list("group_id", flat=True))
+
+
+def can_schedule(user, *, team_ids=(), group_ids=(), club_wide=False) -> bool:
+    """May ``user`` create or edit an event with this audience? Settings holders always; everyone else only for events
+    that are entirely about teams they manage and/or groups they are in (never club-wide, never audience-less)."""
+    if can_manage_settings(user):
+        return True
+    team_ids, group_ids = set(team_ids), set(group_ids)
+    if club_wide or not (team_ids or group_ids) or not user.is_authenticated or not user.is_active:
+        return False
+    return team_ids <= managed_team_ids(user) and group_ids <= user_group_ids(user)
+
+
+def can_manage_event(user, event) -> bool:
+    """Edit or delete ``event`` (or its series): same rule as creating one with its audience."""
+    return can_schedule(user, team_ids=event.teams.values_list("pk", flat=True), group_ids=event.groups.values_list("pk", flat=True), club_wide=event.club_wide)
+
+
+def can_manage_attendance(user, event) -> bool:
+    """Set answers, notes, check-ins and the line-up of ``event``: settings holders, or a manager of any of its teams."""
+    if can_manage_settings(user):
+        return True
+    return bool(set(event.teams.values_list("pk", flat=True)) & managed_team_ids(user))
+
+
 def can_manage_any_team(user) -> bool:
     return can_manage_settings(user) or bool(managed_team_ids(user))
 
