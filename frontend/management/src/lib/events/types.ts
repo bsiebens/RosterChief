@@ -5,7 +5,10 @@
 import { getLang, t } from '#lib/i18n.svelte.ts';
 
 export type Ref = { id: string; name: string };
-export type LocationRef = { id: string; name: string; city: string };
+/** `is_home`: one of the club's own venues (a game there is a home game). */
+export type LocationRef = { id: string; name: string; city: string; address?: string; is_home?: boolean };
+/** A team as the options offer it; `short_name` is what a game title uses when the API sends it (it does not yet). */
+export type TeamRef = Ref & { short_name?: string };
 export type OpponentRef = { id: string; name: string; logo_url: string | null };
 export type Choice = { value: string; label: string };
 
@@ -94,8 +97,11 @@ export type WeekdayChoice = { code: string; label: string };
 /** GET /events/options */
 export type EventOptions = {
 	can_create: boolean;
-	teams: Ref[];
+	teams: TeamRef[];
 	groups: Ref[];
+	/** Every team / group (the calendar filters); `teams` / `groups` are only what the user may schedule for. */
+	filter_teams?: TeamRef[];
+	filter_groups?: Ref[];
 	can_club_wide: boolean;
 	locations: LocationRef[];
 	opponents: OpponentRef[];

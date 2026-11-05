@@ -26,6 +26,8 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 		initial: blankState({
 			kind,
 			start,
+			// New events start at the club's own ground; clear it for a different one.
+			location_id: options.locations.find((l) => l.is_home)?.id ?? '',
 			team_ids: pickTeam ? [pickTeam.id] : [],
 			group_ids: group ? [group.id] : []
 		})

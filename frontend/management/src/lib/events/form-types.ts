@@ -8,7 +8,7 @@
  * which may run in UTC during SSR).
  */
 import { getLang, t } from '#lib/i18n.svelte.ts';
-import type { EventIn, EventPatch, EventValues, RecurrenceIn, RecurrenceValues, Ref } from '#lib/events/types.ts';
+import type { EventIn, EventOptions, EventPatch, EventValues, RecurrenceIn, RecurrenceValues, Ref } from '#lib/events/types.ts';
 
 export const CLUB_TZ = 'Europe/Brussels';
 
@@ -88,6 +88,18 @@ function fromWallMinutes(min: number): string {
 export function shiftLocal(local: string, minutes: number): string {
 	const m = wallMinutes(local);
 	return m === null ? '' : fromWallMinutes(m + minutes);
+}
+/**
+ * The Monday before an event at a fixed time ("2026-11-02T18:00"): the latest Monday strictly before the event's date
+ * (an event on a Monday gets the Monday a week earlier). "" when `start` is not a datetime-local value.
+ */
+export function mondayBefore(start: string, time = '18:00'): string {
+	const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(start);
+	if (!m) return '';
+	const js = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay(); // 0 = Sunday
+	const sinceMonday = (js + 6) % 7; // Monday = 0
+	const back = sinceMonday === 0 ? 7 : sinceMonday;
+	return `${shiftLocal(`${m[1]}-${m[2]}-${m[3]}T00:00`, -back * 1440).slice(0, 10)}T${time}`;
 }
 /** b - a in minutes (null when either is missing). */
 export function diffMinutes(a: string, b: string): number | null {
@@ -254,6 +266,37 @@ export function patchPayload(s: FormState, initial: FormState, opts: { seriesShi
 		for (const k of TIME_KEYS) if (normLocal(s[k]) !== normLocal(initial[k])) body[k] = orNull(normLocal(s[k]));
 	}
 	return { body, recurrence: rec };
+}
+
+// -- generated game title ---------------------------------------------------------------------------------------------
+
+/**
+ * Whether the chosen location makes this an away game: a location that is not one of the club's home venues. No
+ * location counts as home (events/services/events.py `_auto_title`).
+ */
+export function isAwayGame(s: FormState, o: EventOptions): boolean {
+	const loc = o.locations.find((l) => l.id === s.location_id);
+	return !!loc && !loc.is_home;
+}
+
+/**
+ * The game title the API will generate (port of `_auto_title` in events/services/events.py): our teams (short name,
+ * else name; in the order they were picked, joined with ", ") and the opponent, home side first; with only one side
+ * known just that side; with neither the kind's label (`fallback`). A whole-club event sends no teams.
+ */
+export function gameTitle(s: FormState, o: EventOptions, fallback: string): string {
+	const known = [...o.teams, ...(o.filter_teams ?? [])];
+	const ids = s.club_wide ? [] : [...new Set(s.team_ids)];
+	const us = ids
+		.map((id) => known.find((x) => x.id === id))
+		.filter((x) => !!x)
+		.map((x) => x.short_name || x.name)
+		.join(', ');
+	const them = o.opponents.find((x) => x.id === s.opponent_id)?.name ?? '';
+	if (us && them) return isAwayGame(s, o) ? `${them} vs ${us}` : `${us} vs ${them}`;
+	if (them) return them;
+	// No opponent: "Game U12" (several teams: "Game U12, U14"), "Development Game ..." when tagged friendly. Like the server, not translated.
+	return us ? `${s.is_friendly ? 'Development Game' : 'Game'} ${us}` : fallback;
 }
 
 // -- labels -----------------------------------------------------------------------------------------------------------

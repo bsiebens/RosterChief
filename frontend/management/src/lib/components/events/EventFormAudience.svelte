@@ -25,14 +25,17 @@
 
 {#snippet box(title: string, Icon: typeof Users, items: { id: string; name: string }[], selected: string[], onToggle: (id: string) => void, error?: string)}
 	<fieldset class="grid gap-2" disabled={s.club_wide}>
-		<legend class="mb-2 flex items-center gap-2 font-display text-sm font-bold tracking-wide text-ink uppercase"><Icon size={15} aria-hidden="true" /> {title}</legend>
-		<div class="grid max-h-64 gap-1 overflow-y-auto rounded-lg border p-2 sm:grid-cols-2 {error ? 'border-danger' : 'border-line'} {s.club_wide ? 'opacity-50' : ''}">
-			{#each items as item (item.id)}
-				<label class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface">
-					<input type="checkbox" class="checkbox" checked={selected.includes(item.id)} onchange={() => onToggle(item.id)} />
-					<span class="truncate">{item.name}</span>
-				</label>
-			{/each}
+		<legend class="mb-1 flex items-center gap-2 font-display text-sm font-bold tracking-wide text-ink uppercase"><Icon size={15} aria-hidden="true" /> {title}{#if selected.length}<span class="font-mono text-xs font-normal tracking-normal text-muted normal-case">· {selected.length}</span>{/if}</legend>
+		<!-- Columns follow the box's own width (1 / 2 / at most 3), so the list fits a narrow side card as well as a full row. -->
+		<div class="@container max-h-64 overflow-y-auto rounded-lg border p-2 {error ? 'border-danger' : 'border-line'} {s.club_wide ? 'opacity-50' : ''}">
+			<div class="grid grid-cols-1 gap-1 @[18rem]:grid-cols-2 @[32rem]:grid-cols-3">
+				{#each items as item (item.id)}
+					<label class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface" title={item.name}>
+						<input type="checkbox" class="checkbox" checked={selected.includes(item.id)} onchange={() => onToggle(item.id)} />
+						<span class="truncate">{item.name}</span>
+					</label>
+				{/each}
+			</div>
 		</div>
 		{#if error}<span class="block text-xs text-error">{error}</span>{/if}
 	</fieldset>
@@ -52,7 +55,7 @@
 		{#if fields.club_wide}<span class="-mt-3 block text-xs text-error">{fields.club_wide}</span>{/if}
 	{/if}
 
-	<div class="grid gap-5 lg:grid-cols-2">
+	<div class="grid gap-5">
 		{#if options.teams.length}
 			{@render box(t('eventform.audience.teams'), Shield, options.teams, s.team_ids, (id) => (s.team_ids = toggle(s.team_ids, id)), fields.team_ids || (gameNeedsTeam ? t('eventform.err.game_team') : undefined))}
 		{:else if gameNeedsTeam || fields.team_ids}
@@ -63,7 +66,7 @@
 		{/if}
 	</div>
 
-	<div class="grid gap-5 lg:grid-cols-2">
+	<div class="grid gap-5 border-t border-rule pt-4">
 		<div class="grid gap-1">
 			<EventFormMembers label={t('eventform.audience.invited')} help={t('eventform.audience.invited_help')} bind:items={s.invited} exclude={s.excluded.map((m) => m.id)} error={fields.invited_member_ids} />
 		</div>
