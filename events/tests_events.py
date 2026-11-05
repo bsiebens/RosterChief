@@ -108,7 +108,13 @@ class EventServiceTests(TestCase):
         svc.update_event(self.admin, g, location_id=self.away.pk)
         g.refresh_from_db()
         self.assertEqual(g.title, "Rivals vs U12")
-        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk]).title, "U12")
+        # no opponent: "Game <teams>", "Development Game <teams>" when friendly
+        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk]).title, "Game U12")
+        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk], is_friendly=True).title, "Development Game U12")
+        both = svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk, self.team_b.pk], is_friendly=True)
+        self.assertTrue(both.title.startswith("Development Game ") and "U12" in both.title and ", " in both.title)
+        friendly_vs = svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk], opponent_id=self.rivals.pk, location_id=self.home.pk, is_friendly=True)
+        self.assertEqual(friendly_vs.title, "U12 vs Rivals")  # a named opponent always wins
 
     def test_validation(self):
         e = self.errors(svc.create_event, self.admin, kind="meeting")

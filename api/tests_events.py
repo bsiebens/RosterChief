@@ -172,8 +172,8 @@ class EventsApiTests(TestCase):
         rows = {e["title"]: e for e in self.call("get", f"/events?{self.range()}", self.head.user).json()}
         self.assertEqual(rows["A"]["attendance"]["total"], 3)  # the roster (staff are not invited)
         self.assertEqual(rows["A"]["attendance"]["no_response"], 3)
-        self.assertEqual(rows["A"]["teams"], [{"id": str(self.team_a.pk), "name": "U12"}])
-        self.assertEqual(rows["G"]["groups"], [{"id": str(self.group.pk), "name": "Committee"}])
+        self.assertEqual(rows["A"]["teams"], [{"id": str(self.team_a.pk), "name": "U12", "short_name": "U12"}])
+        self.assertEqual(rows["G"]["groups"], [{"id": str(self.group.pk), "name": "Committee", "short_name": ""}])
 
         titles = lambda q, user=self.owner: {e["title"] for e in self.call("get", f"/events?{self.range()}&{q}", user).json()}  # noqa: E731
         self.assertEqual(titles(f"team={self.team_a.pk}"), {"A", "AB"})
@@ -408,6 +408,7 @@ class EventsApiTests(TestCase):
         r = self.call("get", "/events/options", self.head.user).json()
         self.assertTrue(len(r["filter_teams"]) >= len(r["teams"]) >= 1)
         self.assertTrue(all("address" in loc and "is_home" in loc for loc in r["locations"]))
+        self.assertTrue(all("short_name" in t for t in r["teams"] + r["filter_teams"]))
         me = self.call("get", "/me", self.head.user).json()
         self.assertEqual(me["member_id"], str(self.head.pk))
 

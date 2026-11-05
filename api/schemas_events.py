@@ -11,6 +11,7 @@ from ninja import Schema
 class Ref(Schema):
     id: uuid.UUID
     name: str
+    short_name: str = ""  # teams only: what a generated game title uses
 
 
 class LocationRef(Schema):

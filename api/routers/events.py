@@ -120,7 +120,10 @@ def _member(member_id) -> Member:
 
 
 def _ref(obj, name=None) -> dict:
-    return {"id": obj.pk, "name": name if name is not None else (obj.get_full_name() if isinstance(obj, Member) else obj.name)}
+    out = {"id": obj.pk, "name": name if name is not None else (obj.get_full_name() if isinstance(obj, Member) else obj.name)}
+    if isinstance(obj, Team):
+        out["short_name"] = obj.short_name
+    return out
 
 
 def _location(loc) -> dict | None:

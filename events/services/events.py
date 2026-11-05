@@ -161,17 +161,19 @@ def _many(model, values, field, errors, message):
     return [found[pk] for pk in ids]
 
 
-def _auto_title(kind, title, teams, opponent, location, *, creating):
-    """Port of the old EventForm title rules: a game is always named after its match-up (home side first; just our
-    teams, the opponent or "Game" while a side is missing); a new training / tournament without a title is called
-    after its kind."""
+def _auto_title(kind, title, teams, opponent, location, *, creating, friendly=False):
+    """Port of the old EventForm title rules: a game is always named after its match-up (home side first, "U12 vs
+    Rivals"); without an opponent it is "Game U12" (or "Game U12, U14" for several teams), and "Development Game U12" when
+    it is tagged friendly; a new training / tournament without a title is called after its kind."""
     if kind == Event.EventKind.GAME:
         us = ", ".join(t.short_name or t.name for t in teams)
         if us and opponent:
             is_away = location is not None and not location.is_home
             home, away = (opponent.name, us) if is_away else (us, opponent.name)
             return f"{home} vs {away}"
-        return us or (opponent.name if opponent else str(Event.EventKind.GAME.label))
+        if opponent:
+            return opponent.name  # (a game always has a team, so this is only reached while one is being fixed)
+        return f"{'Development Game' if friendly else 'Game'} {us}".strip()
     if not title and creating and kind in (Event.EventKind.TRAINING, Event.EventKind.TOURNAMENT):
         return str(Event.EventKind(kind).label)
     return title
@@ -214,7 +216,7 @@ def _clean(values: dict, errors: dict, *, creating: bool) -> dict:
     if kind == Event.EventKind.GAME and not out["teams"] and "team_ids" not in errors:
         errors["team_ids"] = ["A game needs at least one team."]
 
-    title = _auto_title(kind, (values.get("title") or "").strip(), out["teams"], out["opponent"], out["location"], creating=creating)
+    title = _auto_title(kind, (values.get("title") or "").strip(), out["teams"], out["opponent"], out["location"], creating=creating, friendly=bool(values.get("is_friendly")))
     if not title:
         errors["title"] = ["Give this event a title."]
     out["title"] = title[:255]
