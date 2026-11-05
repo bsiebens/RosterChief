@@ -14,6 +14,7 @@
 	import AttendanceCard from '#lib/components/members/detail/AttendanceCard.svelte';
 	import DocumentsCard from '#lib/components/members/detail/DocumentsCard.svelte';
 	import EvaluationsCard from '#lib/components/members/detail/EvaluationsCard.svelte';
+	import GameStatsCard from '#lib/components/members/detail/GameStatsCard.svelte';
 	import ProfileHero from '#lib/components/members/detail/ProfileHero.svelte';
 	import { page } from '$app/state';
 	import { canExecuteEvaluations } from '#lib/permissions.ts';
@@ -104,6 +105,7 @@
 				{#if data.isAdmin}<PicturesCard {member} />{/if}
 				<FamiliesCard {member} families={data.families} isAdmin={data.isAdmin} {form} />
 				<TeamsCard {member} seasons={data.seasons} />
+				{#if data.gameStats}<GameStatsCard stats={data.gameStats} />{/if}
 				{#if data.isAdmin}<GroupsCard groups={member.groups} />{/if}
 			</div>
 		</div>

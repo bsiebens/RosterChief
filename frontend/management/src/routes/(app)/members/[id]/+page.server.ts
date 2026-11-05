@@ -1,4 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
+import type { MemberGameStats } from '#lib/analytics.ts';
 import type { MemberAttendance } from '#lib/attendance.ts';
 import { api } from '#lib/management-api.ts';
 import { grantLoginFor } from '#lib/members/form-server.ts';
@@ -16,11 +17,15 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	// Season names (the member payload only has ids), the people in each family and this season's attendance, in parallel.
 	// Attendance feeds both the hero tile (every tab) and the Attendance tab; the load does not read `?tab`, so switching
 	// tabs reuses it instead of fetching again. A failure only blanks those boxes.
-	const [seasons, attendanceRes, familyRes] = await Promise.all([
+	// Game stats (every season) only exist for hockey clubs with the analytics feature: 404 otherwise, and any failure
+	// just leaves the card out.
+	const [seasons, attendanceRes, familyRes, gameStatsRes] = await Promise.all([
 		api<Season[]>('GET', '/memberships/seasons', { f: fetch }),
 		api<MemberAttendance>('GET', `/members/${params.id}/attendance`, { f: fetch }),
-		Promise.all(member.families.map((f) => api<FamilyDetail>('GET', `/members/families/${f.id}`, { f: fetch })))
+		Promise.all(member.families.map((f) => api<FamilyDetail>('GET', `/members/families/${f.id}`, { f: fetch }))),
+		me?.features?.includes('analytics') ? api<MemberGameStats>('GET', `/members/${params.id}/game-stats`, { f: fetch }) : Promise.resolve(null)
 	]);
+	const gameStats = gameStatsRes?.ok && gameStatsRes.data && gameStatsRes.data.games > 0 ? gameStatsRes.data : null;
 	const families = familyRes.flatMap((r) => (r.ok && r.data ? [r.data] : []));
 
 	// For a child: the guardians' phones, when the viewer may see those guardians (otherwise the lookup 404s and is skipped).
@@ -44,7 +49,7 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	}
 
 	const attendance = attendanceRes.ok ? (attendanceRes.data ?? null) : null;
-	return { member, seasons: seasons.data ?? [], attendance, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
+	return { member, seasons: seasons.data ?? [], attendance, gameStats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
 };
 
 export const actions: Actions = {
