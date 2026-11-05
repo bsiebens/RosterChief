@@ -11,3 +11,5 @@ export const canManageTeam = (me: Who, teamId: string | undefined) => !!me && (m
 export const canReserveNumbers = (me: Who) => !!me && (me.can_manage_settings || (me.managed_team_ids ?? []).length > 0);
 /** Sees the Evaluations tab on a member (and, later, gives evaluations). */
 export const canExecuteEvaluations = (me: Who) => !!me?.can_execute_evaluations;
+/** Add and change locations and opponents: the settings permission, or a management position on any team. */
+export const canManageCalendar = (me: Who) => canReserveNumbers(me);
