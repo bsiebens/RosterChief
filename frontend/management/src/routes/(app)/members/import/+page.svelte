@@ -5,7 +5,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import type { ImportRow } from './+page.server.ts';
+	import type { ImportJob, ImportRow } from './+page.server.ts';
 
 	let { data, form } = $props();
 	let busy = $state(false);
@@ -13,11 +13,29 @@
 	let filter = $state<'all' | 'new' | 'duplicate' | 'error'>('all');
 	let fileName = $state('');
 
-	const step = $derived(form?.step === 'preview' ? 'preview' : form?.step === 'done' ? 'done' : 'upload');
+	// A started import is followed in the browser: poll the job until it is done or failed.
+	let job = $state<ImportJob | null>(null);
+	$effect(() => {
+		job = form?.step === 'running' ? (form.job as ImportJob) : null;
+	});
+	$effect(() => {
+		const id = job?.id;
+		if (!id || job?.status === 'done' || job?.status === 'failed') return;
+		const timer = setInterval(async () => {
+			try {
+				const res = await fetch(`/api/v1/members/import/jobs/${id}`, { headers: { accept: 'application/json' } });
+				if (res.ok) job = (await res.json()) as ImportJob;
+			} catch {
+				// try again on the next tick
+			}
+		}, 1000);
+		return () => clearInterval(timer);
+	});
+	const step = $derived(job?.status === 'done' ? 'done' : job ? 'running' : form?.step === 'preview' ? 'preview' : 'upload');
 	const STEPS = ['upload', 'preview', 'done'] as const;
-	const stepIndex = $derived(STEPS.indexOf(step));
+	const stepIndex = $derived(STEPS.indexOf(step === 'running' ? 'preview' : step));
 	const preview = $derived(form?.step === 'preview' ? form.preview : null);
-	const result = $derived(form?.step === 'done' ? form.result : null);
+	const result = $derived(job?.status === 'done' ? job.result : null);
 	const rows = $derived<ImportRow[]>((preview?.rows ?? result?.rows ?? []) as ImportRow[]);
 	const shown = $derived(rows.filter((r) => filter === 'all' || r.status === filter || (filter === 'new' && r.status === 'created')));
 	// Only the rows that will be created travel back: the server checks them again.
@@ -89,6 +107,18 @@
 			<a class="btn btn-outline btn-sm mt-2 gap-2" href="/members/import/template" download><Download size={14} /> {t('import.template')}</a>
 			<p class="text-xs text-muted">{t('import.duplicates_note')}</p>
 		</div>
+	</div>
+{:else if step === 'running'}
+	<div class="card card-body max-w-2xl gap-3">
+		<h2 class="card-title"><Users size={18} /> {t('import.running.title')}</h2>
+		{#if job?.status === 'failed'}
+			<Alert kind="error" title={t('import.running.failed')}>{job.error}</Alert>
+			<a class="btn btn-outline self-start" href="/members/import">{t('import.again')}</a>
+		{:else}
+			<p class="text-sm text-muted">{t('import.running.body', { done: job?.processed ?? 0, total: job?.total ?? 0 })}</p>
+			<progress class="progress w-full" value={job?.processed ?? 0} max={job?.total || 1}></progress>
+			<p class="text-xs text-muted">{t('import.running.hint')}</p>
+		{/if}
 	</div>
 {:else}
 	{#if preview}

@@ -23,6 +23,7 @@ export type ImportRow = {
 };
 export type ImportPreview = { season_id: string | null; counts: { new: number; duplicate: number; error: number }; rows: ImportRow[] };
 export type ImportResult = { counts: { created: number; duplicate: number; error: number }; rows: ImportRow[] };
+export type ImportJob = { id: string; status: 'queued' | 'running' | 'done' | 'failed'; total: number; processed: number; error: string; result: ImportResult | null };
 
 export const load: PageServerLoad = async ({ parent, fetch }) => {
 	await requireAdmin(parent, '/members');
@@ -51,8 +52,9 @@ export const actions: Actions = {
 			return fail(400, { step: 'upload', error: 'Invalid data.', fields: {} });
 		}
 		const season = String(form.get('season_id') ?? '');
-		const res = await api<ImportResult>('POST', '/members/import/commit', { body: { season_id: season || null, rows }, f: fetch });
-		if (!res.ok) return fail(res.status === 403 ? 403 : 422, { step: 'upload', error: res.message || '', fields: res.fields, code: res.code });
-		return { step: 'done', result: res.data! };
+		// The import runs in the background: the page follows the job until it is done.
+		const res = await api<ImportJob>('POST', '/members/import/commit', { body: { season_id: season || null, rows }, f: fetch });
+		if (!res.ok) return fail(res.status === 403 ? 403 : 422, { step: 'upload', error: res.fields.rows || res.message || '', fields: res.fields, code: res.code });
+		return { step: 'running', job: res.data! };
 	}
 };

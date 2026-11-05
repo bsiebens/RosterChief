@@ -1,5 +1,9 @@
 export default {
 	en: {
+		'import.running.title': 'Importing members…',
+		'import.running.body': '{done} of {total} rows processed.',
+		'import.running.hint': 'This runs in the background: you can leave this page and you will get a notification when it is done.',
+		'import.running.failed': 'The import failed',
 		'import.title': 'Import members',
 		'import.context': 'Add many people at once from a spreadsheet',
 		'import.back': 'Back to members',
@@ -53,6 +57,10 @@ export default {
 		'import.button': 'Import'
 	},
 	nl: {
+		'import.running.title': 'Leden worden geïmporteerd…',
+		'import.running.body': '{done} van {total} rijen verwerkt.',
+		'import.running.hint': 'Dit loopt op de achtergrond: je kan deze pagina verlaten en krijgt een melding wanneer het klaar is.',
+		'import.running.failed': 'De import is mislukt',
 		'import.title': 'Leden importeren',
 		'import.context': 'Voeg veel mensen tegelijk toe vanuit een spreadsheet',
 		'import.back': 'Terug naar leden',
@@ -106,6 +114,10 @@ export default {
 		'import.button': 'Importeren'
 	},
 	fr: {
+		'import.running.title': 'Import des membres en cours…',
+		'import.running.body': '{done} lignes sur {total} traitées.',
+		'import.running.hint': 'Cela tourne en arrière-plan : vous pouvez quitter cette page et vous recevrez une notification à la fin.',
+		'import.running.failed': 'L’import a échoué',
 		'import.title': 'Importer des membres',
 		'import.context': 'Ajoutez beaucoup de personnes à la fois depuis un tableur',
 		'import.back': 'Retour aux membres',
