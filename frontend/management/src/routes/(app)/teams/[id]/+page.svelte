@@ -2,7 +2,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, Download, Pencil, RefreshCw, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, UserX } from '@lucide/svelte';
+	import { ArrowLeft, BarChart3, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, UserX } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -10,15 +10,16 @@
 	import RosterModal from '#lib/components/teams/RosterModal.svelte';
 	import StaffModal from '#lib/components/teams/StaffModal.svelte';
 	import TeamFormModal from '#lib/components/teams/TeamFormModal.svelte';
+	import FixtureSourcesCard from '#lib/components/teams/FixtureSourcesCard.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { canManageSettings, canManageTeam } from '#lib/permissions.ts';
 	import { kindIcon } from '#lib/officiating-icons.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import { sampleFixtureSources } from '#lib/teams/mock.ts';
 	import { eventHref, formatEventDate, formatRate, memberHref, rateTone, TONE } from '#lib/attendance.ts';
 	import { TILE_STYLE, type NumberStatus } from '#lib/teams/status.ts';
 	import type { RosterEntry, StaffEntry } from '#lib/teams/server.ts';
+	import { analyticsHref } from '#lib/analytics.ts';
 
 	let { data, form } = $props();
 	const team = $derived(data.team);
@@ -63,8 +64,6 @@
 		{ key: 'top', list: attendance?.top_attenders ?? [], Icon: TrendingUp },
 		{ key: 'attention', list: attendance?.needs_attention ?? [], Icon: TrendingDown }
 	]);
-	// Sample rows until the fixture import exists.
-	const fixtureSources = $derived(sampleFixtureSources(seasonName));
 	const isSettings = $derived(canManageSettings(data.me));
 
 	// Next to the name in the top bar: the age range and where the team feeds into.
@@ -155,6 +154,7 @@
 					</p>
 				</div>
 				<div class="flex flex-wrap gap-2">
+					{#if team.analytics_available}<a class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" href={analyticsHref(team.id, season || seasonId)}><BarChart3 size={14} aria-hidden="true" /> {t('analytics.button')}</a>{/if}
 					{#if manage}<button class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" type="button" onclick={() => (editOpen = true)}><Pencil size={14} /> {t('common.edit')}</button>{/if}
 					{#if isSettings}<button class="btn gap-2 border-white/25 bg-white/10 text-white hover:bg-white/20" type="button" onclick={() => (deleteOpen = true)}><Trash2 size={14} /> {t('common.delete')}</button>{/if}
 					{#if manage}<a class="btn btn-primary gap-2" href={addHref}><UserPlus size={16} /> {t('teampage.add.button')}</a>{/if}
@@ -336,34 +336,7 @@
 		</div>
 	{/if}
 
-	<!-- Fixture import sources (sample data until the fixture import is brought over). -->
-	<div class="card card-body sample-stripes gap-2" title={t('teampage.sample_hint')}>
-		<div class="flex flex-wrap items-center justify-between gap-2">
-			<h2 class="flex items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><Download size={18} aria-hidden="true" /> {t('teampage.fixtures.title')}</h2>
-			<button class="btn btn-outline btn-sm gap-2" type="button" disabled><RefreshCw size={14} aria-hidden="true" /> {t('teampage.fixtures.recheck_team')}</button>
-		</div>
-		<p class="text-sm text-muted">{t('teampage.fixtures.help')}</p>
-		<div class="overflow-x-auto rounded-lg bg-white/70">
-			<table class="table">
-				<thead>
-					<tr><th>{t('teampage.fixtures.col.season')}</th><th>{t('teampage.fixtures.col.source')}</th><th>{t('teampage.fixtures.col.competition')}</th><th>{t('teampage.fixtures.col.url')}</th><th>{t('teampage.fixtures.col.imported')}</th><th>{t('teampage.fixtures.col.checked')}</th><th></th></tr>
-				</thead>
-				<tbody>
-					{#each fixtureSources as f (f.url)}
-						<tr>
-							<td class="font-mono text-xs">{f.season}</td>
-							<td class="font-semibold">{f.source}</td>
-							<td class="text-muted">{f.competition}</td>
-							<td class="max-w-[16rem] truncate text-sm"><a class="link" href={f.url} target="_blank" rel="noreferrer">{f.url}</a></td>
-							<td class="font-mono text-xs">{f.imported}</td>
-							<td><span class="font-mono text-xs">{f.checked}</span><span class="block text-xs text-muted">{f.summary}</span></td>
-							<td class="text-right"><button class="btn btn-outline btn-xs" type="button" disabled>{t('teampage.fixtures.recheck')}</button></td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	</div>
+	<FixtureSourcesCard teamId={team.id} {seasonId} fixtures={data.fixtures} canImportFallback={isSettings} />
 </div>
 
 <TeamFormModal bind:open={editOpen} title={t('teams.edit')} {team} pools={data.pools} teams={data.teams} action={act('save')} name="save" {form} submitLabel={t('common.save')} lockStructure={!canManageSettings(data.me)} />

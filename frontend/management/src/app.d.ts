@@ -1,5 +1,6 @@
 import type { AuthState, Branding, HostMode, MyClub } from '#lib/types.ts';
 import type { Lang } from '#lib/i18n.svelte.ts';
+import type { FixturePreview } from '#lib/fixtures.ts';
 
 declare global {
 	namespace App {
@@ -14,6 +15,10 @@ declare global {
 			myClubs: MyClub[];
 			/** Why mode is 'error'. */
 			hostError: 'not_found' | 'unreachable' | null;
+		}
+		interface PageState {
+			/** A re-check's preview handed from the team page to the fixture import wizard (never stored anywhere else). */
+			fixturePreview?: FixturePreview;
 		}
 	}
 }

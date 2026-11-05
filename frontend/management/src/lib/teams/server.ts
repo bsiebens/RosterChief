@@ -32,7 +32,7 @@ export type RosterEntry = {
 	is_alternate_captain: boolean;
 };
 export type StaffEntry = { id: string; member_id: string; first_name: string; last_name: string; photo_url: string | null; position_id: string | null; position_name: string | null };
-export type TeamDetail = TeamRow & { season_id: string; photo_url?: string | null; roster: RosterEntry[]; staff: StaffEntry[] };
+export type TeamDetail = TeamRow & { season_id: string; photo_url?: string | null; analytics_available?: boolean; roster: RosterEntry[]; staff: StaffEntry[] };
 export type EligibleReferee = { member_id: string; first_name: string; last_name: string; photo_url: string | null; level_name: string; valid_until: string | null };
 export type Position = { id: string; name: string; short_name: string; ordering: number; staff_position: boolean; management_position: boolean; in_use_count: number };
 
