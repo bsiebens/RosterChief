@@ -1,14 +1,18 @@
 import datetime
+import secrets
 
-from django.core.exceptions import ValidationError
+from django.conf import settings
+from django.core.exceptions import SuspiciousFileOperation, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
 
 from members.models import Group, Member
 from rosterchief.base import UUIDModel
+from rosterchief.storage import get_private_storage
 
 ASSUMED_EVENT_DURATION = datetime.timedelta(hours=2)
 
@@ -255,3 +259,290 @@ class EventSeries(UUIDModel):
 
     def __str__(self):
         return self.title
+
+
+class Attendance(UUIDModel):
+    """One invited member's answer for one event: the RSVP/coach status, the check-in (``showed_up``) and notes."""
+
+    class AttendanceStatus(models.TextChoices):
+        PRESENT = "present", _("Present")
+        ABSENT = "absent", _("Absent")
+        EXCUSED = "excused", _("Excused")
+        SELECTED = "selected", _("Selected")
+        NOT_SELECTED = "not_selected", _("Not selected")
+        MAYBE = "maybe", _("Maybe")
+        NO_RESPONSE = "no_response", _("No response")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("event"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("member"))
+    status = models.CharField(_("status"), max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.NO_RESPONSE)
+    showed_up = models.BooleanField(
+        _("showed up"),
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_("Recorded by a check-in, separate from the RSVP status above. Blank means no check-in has been recorded yet."),
+    )
+    note = models.TextField(_("note"), blank=True)
+    coach_note = models.TextField(
+        _("coach note"),
+        blank=True,
+        help_text=_("Private to the team's managers: never shown to the player or their guardians, in any app or notification."),
+    )
+    answered_by_coach = models.BooleanField(_("answered by a coach"), default=False, help_text=_("The current answer was set by a coach for the player. A reply from the player themselves, or a reset, clears this."))
+    coach_set_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("last changed by coach"))
+    coach_set_at = models.DateTimeField(_("last changed by a coach at"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("attendance")
+        verbose_name_plural = _("attendances")
+        ordering = ["event", "member__last_name", "member__first_name"]
+        constraints = [models.UniqueConstraint(fields=["event", "member"], name="unique_attendance_per_event_per_member")]
+        indexes = [models.Index(fields=["event", "status"])]
+
+    def __str__(self):
+        return f"{self.event} - {self.member}"
+
+
+class Lineup(UUIDModel):
+    """A game's selection: a plain yes/no pick per player (``selections``), not lines or slots. Publishing flips every
+    selected member's attendance to SELECTED and every other available member's to NOT_SELECTED."""
+
+    event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="lineup", verbose_name=_("event"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="lineups", verbose_name=_("team"))
+    published_at = models.DateTimeField(_("published at"), null=True, blank=True)
+    scheduled_publish_at = models.DateTimeField(
+        _("scheduled publish at"),
+        null=True,
+        blank=True,
+        help_text=_("If set (and not yet published), this line-up publishes itself at this time: a periodic task sweeps for due ones."),
+    )
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_lineups", verbose_name=_("created by"))
+
+    class Meta:
+        verbose_name = _("line-up")
+        verbose_name_plural = _("line-ups")
+
+    def __str__(self):
+        return f"{self.team} - {self.event}"
+
+
+class LineupSelection(UUIDModel):
+    """One player the coach marked "in" for a line-up: the row's presence is the yes, there is no "no" row."""
+
+    lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="selections", verbose_name=_("line-up"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="lineup_selections", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("line-up selection")
+        verbose_name_plural = _("line-up selections")
+        constraints = [models.UniqueConstraint(fields=["lineup", "member"], name="unique_selection_per_lineup_per_member")]
+
+    def __str__(self):
+        return f"{self.lineup} - {self.member}"
+
+
+class EventTask(UUIDModel):
+    """A logistics ask a team manager attaches to an event (e.g. "Bring fruit for half-time"): members confirm they can
+    take it, up to ``needed_quantity`` at once (see EventTaskClaim). Any kind of event can have tasks."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="tasks", verbose_name=_("event"))
+    title = models.CharField(_("title"), max_length=255)
+    description = models.TextField(_("description"), blank=True)
+    needed_quantity = models.PositiveSmallIntegerField(_("needed quantity"), default=1, help_text=_("How many people/families need to take this on."))
+    created_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("created by"))
+
+    class Meta:
+        verbose_name = _("event task")
+        verbose_name_plural = _("event tasks")
+        ordering = ["event", "created"]
+
+    def __str__(self):
+        return f"{self.event} - {self.title}"
+
+
+class EventTaskClaim(UUIDModel):
+    """One person's claim on one slot of an EventTask (capacity is checked against ``needed_quantity``)."""
+
+    task = models.ForeignKey(EventTask, on_delete=models.CASCADE, related_name="claims", verbose_name=_("task"))
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="event_task_claims", verbose_name=_("member"))
+
+    class Meta:
+        verbose_name = _("event task claim")
+        verbose_name_plural = _("event task claims")
+        ordering = ["task", "created"]
+        constraints = [models.UniqueConstraint(fields=["task", "member"], name="unique_claim_per_member_per_task")]
+
+    def __str__(self):
+        return f"{self.task} - {self.member}"
+
+
+def event_attachment_path(attachment, filename):
+    """``event-attachments/<event id>/<random>-<safe file name>`` in private storage: the random prefix keeps same-named
+    uploads apart and the path unguessable; the original name is kept (made filesystem-safe) so a download is recognisable."""
+    try:
+        safe_name = get_valid_filename(filename)
+    except SuspiciousFileOperation:
+        safe_name = "file"
+    if len(safe_name) > 100:
+        stem, dot, extension = safe_name.rpartition(".")
+        safe_name = f"{stem[: 100 - len(extension) - 1]}.{extension}" if dot and len(extension) < 10 else safe_name[:100]
+    return f"event-attachments/{attachment.event_id}/{secrets.token_hex(8)}-{safe_name}"
+
+
+class EventAttachment(UUIDModel):
+    """A file attached to an event (a tournament schedule, a map, a consent form) for the invited people to open. Stored
+    privately and only ever streamed through an authenticated view, never a public /media link."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("event"))
+    file = models.FileField(_("file"), storage=get_private_storage, upload_to=event_attachment_path, max_length=255)
+    name = models.CharField(_("name"), max_length=255, help_text=_("The file name as uploaded -- what a download is called."))
+    size = models.PositiveIntegerField(_("size"), default=0, help_text=_("Bytes."))
+    uploaded_by = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("uploaded by"))
+
+    class Meta:
+        verbose_name = _("event attachment")
+        verbose_name_plural = _("event attachments")
+        ordering = ["event", "created"]
+
+    def __str__(self):
+        return f"{self.event} - {self.name}"
+
+
+class GameTimeline(UUIDModel):
+    """What happened during one game (goals and who scored them, penalties, goalie changes, time-outs, period scores) as
+    fetched from the game's competition. A one-to-one side table: ``data`` is the normalised document (one shape for every
+    source), ``data_hash`` lets a poll that found nothing new skip the write, ``raw`` is the last payload it was parsed
+    from so a parser fix can re-parse stored games."""
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", _("scheduled")
+        LIVE = "live", _("live")
+        FINAL = "final", _("final")
+
+    event = models.OneToOneField(Event, on_delete=models.CASCADE, related_name="timeline", verbose_name=_("event"))
+    source = models.CharField(_("source"), max_length=50, help_text=_("The competition this was fetched from (Event.competition at fetch time)."))
+    data = models.JSONField(_("data"), default=dict, blank=True)
+    data_hash = models.CharField(_("data hash"), max_length=64, blank=True)
+    raw = models.TextField(_("raw payload"), blank=True)
+    status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.SCHEDULED, db_index=True)
+    fetched_at = models.DateTimeField(_("fetched at"), null=True, blank=True, help_text=_("Last successful fetch."))
+    changed_at = models.DateTimeField(_("changed at"), null=True, blank=True, help_text=_("Last time the timeline actually changed."))
+    finalized_at = models.DateTimeField(_("finalized at"), null=True, blank=True, help_text=_("Set once a finished game's timeline stopped changing; it isn't re-fetched after that."))
+    last_error = models.TextField(_("last error"), blank=True, help_text=_("The last fetch/parse error, if the latest attempt failed; the previous data is kept."))
+    strength_overrides = models.JSONField(
+        _("strength overrides"), default=dict, blank=True, help_text=_("Goal strengths staff corrected or confirmed, {timeline event id: strength}. Applied to the game's stats, and kept when the timeline is fetched again.")
+    )
+
+    class Meta:
+        verbose_name = _("game timeline")
+        verbose_name_plural = _("game timelines")
+
+    def __str__(self):
+        return f"{self.event} ({self.status})"
+
+
+class GameMoment(UUIDModel):
+    """One piece of news detected in a game's timeline from the club's own side (a goal for or against, a penalty, a period
+    or the game ending). Recorded once per (event, key) so a repeated or racing fetch cannot record it twice; ``notifiable``
+    says it is recent enough to be worth telling anyone, ``delivered_at`` that it was pushed."""
+
+    class Kind(models.TextChoices):
+        GAME_STARTED = "game_started", _("game started")
+        GOAL_FOR = "goal_for", _("goal for")
+        GOAL_AGAINST = "goal_against", _("goal against")
+        GOAL_CANCELLED = "goal_cancelled", _("goal cancelled")
+        PENALTY_FOR = "penalty_for", _("penalty for")
+        PENALTY_AGAINST = "penalty_against", _("penalty against")
+        PENALTY_SHOT_FOR = "penalty_shot_for", _("penalty shot for")
+        PENALTY_SHOT_AGAINST = "penalty_shot_against", _("penalty shot against")
+        PERIOD_STARTED = "period_started", _("period started")
+        PERIOD_ENDED = "period_ended", _("period ended")
+        GAME_FINAL = "game_final", _("game final")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="moments", verbose_name=_("event"))
+    key = models.CharField(_("key"), max_length=255)
+    kind = models.CharField(_("kind"), max_length=30, choices=Kind.choices)
+    payload = models.JSONField(_("payload"), default=dict, blank=True)
+    game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
+    notifiable = models.BooleanField(_("notifiable"), default=True, help_text=_("Recent enough in game time to be worth notifying about (not a catch-up after an outage)."))
+    delivered_at = models.DateTimeField(_("delivered at"), null=True, blank=True, help_text=_("When it was pushed out."))
+
+    class Meta:
+        verbose_name = _("game moment")
+        verbose_name_plural = _("game moments")
+        ordering = ["event", "created"]
+        constraints = [models.UniqueConstraint(fields=["event", "key"], name="unique_game_moment_per_event")]
+
+    def __str__(self):
+        return f"{self.event} - {self.get_kind_display()}"
+
+
+class GameStat(UUIDModel):
+    """One countable thing a player (or the opposition) did in a game (a goal, an assist, penalty minutes), flattened out of
+    the game's timeline so team analytics can sum it with a query. Sport-agnostic: ``stat_type`` is a free slug and ``value``
+    how much this row counts. One row per (game, team of ours, source event, stat type); ``is_ours`` is resolved from the
+    club's own side; ``member`` is matched to the roster when the jersey number or name allows."""
+
+    class StatType(models.TextChoices):
+        GOAL = "goal", _("goal")
+        ASSIST = "assist", _("assist")
+        PENALTY_MINUTES = "penalty_minutes", _("penalty minutes")
+        SHOT = "shot", _("shot on goal")
+        POWER_PLAY_OPPORTUNITY = "pp_opportunity", _("power-play opportunity")
+        GOAL_CONCEDED = "goal_conceded", _("goal conceded")
+        GOALIE_SECONDS = "goalie_seconds", _("goalie time in net (seconds)")
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="stats", verbose_name=_("event"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="game_stats", verbose_name=_("team"))
+    season = models.ForeignKey(Season, on_delete=models.CASCADE, null=True, blank=True, related_name="game_stats", verbose_name=_("season"))
+    stat_type = models.CharField(_("stat"), max_length=30, db_index=True)
+    value = models.PositiveSmallIntegerField(_("value"), default=1)
+    is_ours = models.BooleanField(_("our side"), help_text=_("Whether the club's own side did this (False: the opposition)."))
+    member = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="game_stats", verbose_name=_("member"))
+    player_name = models.CharField(_("player name"), max_length=255, blank=True)
+    player_number = models.PositiveSmallIntegerField(_("player number"), null=True, blank=True)
+    period = models.CharField(_("period"), max_length=10, blank=True)
+    game_seconds = models.PositiveIntegerField(_("game time (seconds)"), null=True, blank=True)
+    source_key = models.CharField(_("source key"), max_length=255, help_text=_("The timeline event this came from (plus the slot, for several rows from one event)."))
+    meta = models.JSONField(_("details"), default=dict, blank=True)
+
+    class Meta:
+        verbose_name = _("game stat")
+        verbose_name_plural = _("game stats")
+        indexes = [models.Index(fields=["team", "season", "stat_type"])]
+        constraints = [models.UniqueConstraint(fields=["event", "team", "stat_type", "source_key"], name="unique_game_stat_per_source")]
+
+    def __str__(self):
+        return f"{self.event} - {self.stat_type} {self.value}"
+
+
+class GameFollow(UUIDModel):
+    """An account following one of the club's teams for live game pushes (goals, penalties, the result). Opt-in, per
+    account (not per member) since pushes go to an account's devices."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="game_follows", verbose_name=_("user"))
+    team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="followers", verbose_name=_("team"))
+
+    class Meta:
+        verbose_name = _("game follow")
+        verbose_name_plural = _("game follows")
+        constraints = [models.UniqueConstraint(fields=["user", "team"], name="unique_game_follow_per_team")]
+
+    def __str__(self):
+        return f"{self.user} -> {self.team}"
+
+
+class EventFollow(UUIDModel):
+    """An account following ONE game for live updates; the single-game counterpart to GameFollow."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="event_follows", verbose_name=_("user"))
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="followers", verbose_name=_("event"))
+
+    class Meta:
+        verbose_name = _("followed game")
+        verbose_name_plural = _("followed games")
+        constraints = [models.UniqueConstraint(fields=["user", "event"], name="unique_event_follow_per_game")]
+
+    def __str__(self):
+        return f"{self.user} -> {self.event}"
