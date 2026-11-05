@@ -127,6 +127,9 @@ DATABASES = {
         cast=lambda url: db_url(url, engine="django_tenants.postgresql_backend"),
     )
 }
+# Parallel test runs (several agents or terminals) need their own test database: set TEST_DB_NAME=test_something.
+if config("TEST_DB_NAME", default=""):
+    DATABASES["default"]["TEST"] = {"NAME": config("TEST_DB_NAME")}
 DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
 
 

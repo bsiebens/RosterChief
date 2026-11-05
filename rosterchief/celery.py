@@ -30,5 +30,11 @@ app.conf.beat_schedule = {
     "notifications-cleanup": {"task": "notifications.cleanup", "schedule": crontab(hour=3, minute=30)},
     # Mondays 02:00.
     "events-create-missing-seasons": {"task": "events.create_missing_seasons", "schedule": crontab(hour=2, minute=0, day_of_week=1)},
+    "events-publish-scheduled-lineups": {"task": "events.publish_scheduled_lineups", "schedule": crontab()},  # every minute
+    "events-extend-event-series": {"task": "events.extend_event_series", "schedule": crontab(hour=1, minute=30)},
+    "events-poll-live-games": {"task": "events.poll_live_games", "schedule": crontab()},  # every minute
+    "events-settle-game-timelines": {"task": "events.settle_game_timelines", "schedule": crontab(hour=1, minute=45)},
+    "events-refresh-fixtures": {"task": "events.refresh_fixtures", "schedule": crontab(hour=6, minute=15, day_of_week=1)},  # Mondays
+    "events-refresh-standings": {"task": "events.refresh_standings", "schedule": crontab(hour=4, minute=30)},
     "billing-archive-overdue": {"task": "billing.archive_overdue_clubs", "schedule": crontab(hour=6, minute=0)},
 }

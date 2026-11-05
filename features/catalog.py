@@ -33,6 +33,7 @@ CATALOG: dict[str, FeatureDef] = {
         FeatureDef("competition_rbihf", "RBIHF fixtures", "Import fixtures from the RBIHF competition."),
         FeatureDef("competition_dfel", "DFEL fixtures", "Import fixtures from the DFEL competition."),
         FeatureDef("competition_ijnl", "IJNL fixtures", "Import fixtures from the IJNL competition."),
+        FeatureDef("competition_cehl", "CEHL fixtures", "Import fixtures from the CEHL competition."),
     ]
 }
 
