@@ -29,11 +29,17 @@ POWER_PLAY_KINDS = ("minor", "bench_minor", "double_minor", "major", "")
 POWER_PLAY = ("PP1", "PP2")
 
 
-def analytics_supported(club) -> bool:
-    """Whether team analytics exist for ``club``'s sport -- the timeline stats are ice hockey only today (a club whose
-    sport is called "...hockey..." by name or slug)."""
+def analytics_supported(club, features=None) -> bool:
+    """Whether team analytics are available to ``club``: the sport must support them (the timeline stats are ice hockey
+    only today: a sport called "...hockey..." by name or slug) AND the club needs the ``analytics`` feature. ``features``
+    is an ``Entitlements`` (e.g. ``request.features``); without it they are resolved for the club."""
     sport = getattr(club, "sport", None) if club is not None else None
-    return sport is not None and ("hockey" in (sport.slug or "").lower() or "hockey" in (sport.name or "").lower())
+    if sport is None or not ("hockey" in (sport.slug or "").lower() or "hockey" in (sport.name or "").lower()):
+        return False
+    from .competitions import entitlements_for
+
+    entitlements = entitlements_for(features if features is not None else club)
+    return bool(entitlements is not None and entitlements.has("analytics"))
 
 
 def _tokens(name: str) -> frozenset:

@@ -187,14 +187,19 @@ class GameStatsTests(GameTestBase):
         leaders = team_leaders(self.team, self.season)
         self.assertEqual((leaders["top_scorers"][0]["name"], leaders["top_scorers"][0]["total"]), ("Sam Scorer", 2))
 
-    def test_analytics_are_for_hockey_clubs(self):
+    def test_analytics_need_a_hockey_club_with_the_analytics_feature(self):
+        from features.entitlements import Entitlement, Entitlements
+
+        on, off = Entitlements({"analytics": Entitlement(True)}), Entitlements({})
         self.assertFalse(analytics_supported(None))
         self.club.sport = None
-        self.assertFalse(analytics_supported(self.club))
+        self.assertFalse(analytics_supported(self.club, on))
         self.club.sport = Sport(name="Ice Hockey", slug="ice-hockey")
-        self.assertTrue(analytics_supported(self.club))
+        self.assertTrue(analytics_supported(self.club, on))
+        self.assertFalse(analytics_supported(self.club, off))  # the right sport, but the feature is not on
+        self.assertTrue(analytics_supported(self.club, Entitlements(bypass=True)))  # the platform owner's bypass
         self.club.sport = Sport(name="Football", slug="football")
-        self.assertFalse(analytics_supported(self.club))
+        self.assertFalse(analytics_supported(self.club, on))
 
     # -- strength corrections -----------------------------------------------------------------------------------------
 
