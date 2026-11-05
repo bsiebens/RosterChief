@@ -29,21 +29,10 @@ const daysFromNow = (n: number, hours = 0, minutes = 0) => {
 	return d.toISOString();
 };
 export type NewsItem = { id: string; title: string; date: string };
-export type UpcomingItem = { id: string; title: string; start: string; team: string };
 export const mockNews = (): NewsItem[] => [
 	{ id: 'n1', title: 'New shirts for the Sharks', date: daysFromNow(-3) },
 	{ id: 'n2', title: 'Sharks score at the fan day of the local derby', date: daysFromNow(-15) },
 	{ id: 'n3', title: 'U15 opens the season away', date: daysFromNow(-42) },
 	{ id: 'n4', title: 'U13 opens the season with a fifth place', date: daysFromNow(-49) },
 	{ id: 'n5', title: 'Club dinner: save the date', date: daysFromNow(-52) }
-];
-export const mockUpcoming = (): UpcomingItem[] => [
-	{ id: 'u1', title: 'Rivals vs Sharks', start: daysFromNow(1, 21, 15), team: 'Sharks' },
-	{ id: 'u2', title: 'Development game', start: daysFromNow(2, 9, 30), team: 'U12' },
-	{ id: 'u3', title: 'U18 vs Bulldogs', start: daysFromNow(2, 16, 15), team: 'U18' },
-	{ id: 'u4', title: 'Knights vs Sharks', start: daysFromNow(2, 19, 30), team: 'Sharks' },
-	{ id: 'u5', title: 'Div 3 vs Knights', start: daysFromNow(3, 11, 55), team: 'Div 3' },
-	{ id: 'u6', title: 'U14 vs Bulldogs', start: daysFromNow(3, 12, 0), team: 'U14' },
-	{ id: 'u7', title: 'Development game', start: daysFromNow(3, 13, 0), team: 'U12' },
-	{ id: 'u8', title: 'Women vs Lions', start: daysFromNow(3, 16, 45), team: 'Women' }
 ];

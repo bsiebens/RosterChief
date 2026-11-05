@@ -40,7 +40,7 @@
 				<NewsCard />
 				<NeedsAttention overview={o} noTypeCount={data.noTypeCount} />
 				<SignupsChart months={o.signups} />
-				<div class="xl:col-start-2 xl:row-span-2 xl:row-start-2 [&>*]:h-full"><UpcomingCard /></div>
+				<div class="xl:col-start-2 xl:row-span-2 xl:row-start-2 [&>*]:h-full"><UpcomingCard events={data.upcoming ?? []} /></div>
 				{#if o.fees}
 					<div class="grid gap-4 md:grid-cols-2 xl:col-start-1 xl:row-start-3">
 						<FeeStatusCard fees={o.fees} />

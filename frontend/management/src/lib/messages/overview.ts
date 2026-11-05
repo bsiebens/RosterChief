@@ -1,5 +1,7 @@
 export default {
 	en: {
+		'overview.upcoming.empty': 'No events coming up.',
+		'overview.upcoming.club': 'Whole club',
 		'overview.sample': 'Sample data',
 		'overview.news.title': 'Latest news',
 		'overview.news.view_all': 'View all',
@@ -80,6 +82,8 @@ export default {
 		'overview.row.orders_unpaid': 'Orders unpaid'
 	},
 	nl: {
+		'overview.upcoming.empty': 'Geen evenementen op komst.',
+		'overview.upcoming.club': 'Hele club',
 		'overview.sample': 'Voorbeelddata',
 		'overview.news.title': 'Laatste nieuws',
 		'overview.news.view_all': 'Alles bekijken',
@@ -160,6 +164,8 @@ export default {
 		'overview.row.orders_unpaid': 'Onbetaalde bestellingen'
 	},
 	fr: {
+		'overview.upcoming.empty': 'Aucun événement à venir.',
+		'overview.upcoming.club': 'Tout le club',
 		'overview.sample': 'Données d’exemple',
 		'overview.news.title': 'Dernières actualités',
 		'overview.news.view_all': 'Tout voir',
