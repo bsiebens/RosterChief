@@ -66,6 +66,11 @@ class CardsOut(Schema):
     events: EventsCard
 
 
+class AttendanceCard(Schema):
+    rate: int | None = None  # present / (present + absent) over the season's past events; None without answers
+    sessions: int  # past, non-cancelled events this season
+
+
 class OverviewOut(Schema):
     season: SeasonRef | None = None
     previous_season: SeasonRef | None = None
@@ -74,3 +79,4 @@ class OverviewOut(Schema):
     fees: dict[str, int] | None = None  # only for holders of members.manage_members
     renewal: RenewalOut | None = None  # idem
     cards: CardsOut | None = None
+    attendance: AttendanceCard | None = None  # None when the season has no past events yet

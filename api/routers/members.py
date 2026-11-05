@@ -10,12 +10,15 @@ clash with it.
 
 import uuid
 
-from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce, Lower, NullIf
 from django.http import HttpResponse
 from ninja import File, Form, Query, Router, UploadedFile
 from ninja.errors import HttpError
 from ninja.pagination import paginate
 
+from api.schemas_events import MemberAttendanceOut
+from api.schemas_import import ImportCommitIn, ImportJobOut, ImportPreviewOut
 from api.schemas_members import (
     FamilyIn,
     FamilyMemberIn,
@@ -34,11 +37,11 @@ from api.schemas_members import (
     MemberPatch,
     MemberSummary,
 )
-from api.schemas_import import ImportCommitIn, ImportCommitOut, ImportPreviewOut
 from api.schemas_officiating import OfficialIn, OfficiatingOptionsOut, OfficiatingOut, ProfileOut, RefereeIn
 from club.emails import send_login_granted_email
 from events.models import Season
-from members.models import AuditEntry, ClubMembership, Family, FamilyMembership, Group, Member
+from events.services import attendance_report
+from members.models import AuditEntry, ClubMembership, Family, FamilyMembership, Group, ImportJob, Member
 from members.services import access, audit, families, groups, importing, officiating
 from members.services import members as member_services
 from members.services.errors import Invalid
@@ -349,22 +352,27 @@ def import_preview(request, file: File[UploadedFile], season_id: uuid.UUID | Non
     return importing.preview(request.user, file, season_id)
 
 
-@router.post("/import/commit", response=ImportCommitOut, summary="Create the members of a previewed import (admin)", operation_id="member_import_commit")
+@router.post("/import/commit", response={202: ImportJobOut}, summary="Start creating the members of a previewed import in the background (admin)", operation_id="member_import_commit")
 def import_commit(request, payload: ImportCommitIn):
-    """Send the rows of the preview back. They are validated again; duplicates are skipped and rows with errors are
-    reported, the rest is created (member, membership for the season, roster spot, family link)."""
+    """Send the rows of the preview back (only the ones to create are needed). A background job validates them again,
+    skips duplicates, reports rows with errors and creates the rest (member, membership for the season, roster spot,
+    family link). Poll ``/import/jobs/{id}`` for progress and the result; the starter also gets an inbox note."""
     access.require_admin(request.user)
-    result = importing.commit(request.user, request.tenant, [r.dict() for r in payload.rows], payload.season_id, features=getattr(request, "features", None))
-    c = result["counts"]
-    inbox.notify(
-        request.user,
-        request.tenant,
-        title="Import finished",
-        body=f"{c['created']} members were imported, {c['duplicate']} skipped as duplicates and {c['error']} left out because of errors.",
-        kind=inbox.Kind.WARNING if c["error"] else inbox.Kind.SUCCESS,
-        href="/members",
-    )
-    return result
+    job = importing.start_import(request.user, [r.dict() for r in payload.rows], payload.season_id)
+    return 202, _job_out(job)
+
+
+@router.get("/import/jobs/{job_id}", response=ImportJobOut, summary="Progress and result of an import job (admin)", operation_id="member_import_job")
+def import_job(request, job_id: uuid.UUID):
+    access.require_admin(request.user)
+    job = ImportJob.objects.filter(pk=job_id).first()
+    if job is None:
+        raise HttpError(404, "Not found.")
+    return _job_out(job)
+
+
+def _job_out(job) -> dict:
+    return {"id": job.pk, "status": job.status, "total": job.total, "processed": job.processed, "error": job.error, "result": job.result}
 
 
 @router.get("/teams", summary="Teams, for the member list's team filter")
@@ -404,7 +412,10 @@ def list_families(request, q: str | None = None, role: str | None = None):
         qs = qs.filter(Q(name__icontains=word) | Exists(FamilyMembership.objects.filter(family=OuterRef("pk")).filter(Q(member__first_name__icontains=word) | Q(member__last_name__icontains=word))))
     if role:
         qs = qs.filter(Exists(FamilyMembership.objects.filter(family=OuterRef("pk"), role=role)))
-    return _Mapped(qs.order_by("name", "pk"), lambda f: _family_out(request, f))
+    # Alphabetical by what the list shows: the family name, else its first surname (a nameless family would sort first otherwise).
+    first_surname = FamilyMembership.objects.filter(family=OuterRef("pk")).exclude(member__last_name="").order_by("member__last_name").values("member__last_name")[:1]
+    qs = qs.annotate(sort_name=Lower(Coalesce(NullIf("name", Value("")), Subquery(first_surname), Value("~"))))
+    return _Mapped(qs.order_by("sort_name", "pk"), lambda f: _family_out(request, f))
 
 
 @router.post("/families", response={201: FamilyOut}, summary="Create a family (admin)")
@@ -539,6 +550,22 @@ def club_history(request, filters: Query[HistoryFilters]):
     if filters.since:
         qs = qs.filter(created__gte=filters.since)
     return _Mapped(qs, _history_out)
+
+
+# -- attendance statistics (registered before /{member_id}) ---------------------------------------------------------
+
+
+@router.get("/{member_id}/attendance", response=MemberAttendanceOut, summary="A member's attendance for a season", operation_id="member_attendance")
+def member_attendance(request, member_id: uuid.UUID, season: uuid.UUID | None = None):
+    """Rule: 404 unless the caller can see the member. Season totals over past events, the turnout, the last 12 events
+    (sparkline) and the 10 most recent past events with the answer. Coach notes are never part of it."""
+    member = _visible_member(request, member_id)
+    chosen = None
+    if season is not None:
+        chosen = Season.objects.filter(pk=season).first()
+        if chosen is None:
+            raise Invalid("Unknown season.", {"season": ["Unknown season."]})
+    return attendance_report.member_report(member, chosen)
 
 
 # -- one member ------------------------------------------------------------------------------------------------------

@@ -33,6 +33,7 @@ class MyClubOut(Schema):
 
 class MeOut(Schema):
     id: str
+    member_id: str | None = None
     email: str
     first_name: str
     last_name: str

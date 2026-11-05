@@ -7,11 +7,14 @@ from authorization.permissions import is_club_admin
 from authorization.services import user_perm_codes
 from club.icons import ensure_icons
 from club.models import Domain
+from members.models import Member
 from members.services import access
 
 from .auth import AUTHENTICATORS
 from .errors import register_error_handlers
+from .routers import calendar_data as calendar_data_router
 from .routers import club_settings as club_settings_router
+from .routers import events as events_router
 from .routers import members as members_router
 from .routers import memberships as memberships_router
 from .routers import notifications_inbox as notifications_router
@@ -36,8 +39,19 @@ api.add_router("/club", club_settings_router.router, tags=["club settings"])
 api.add_router("/officiating", officiating_levels_router.router, tags=["officiating levels"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])
+api.add_router("/locations", calendar_data_router.locations_router, tags=["calendar"])
+api.add_router("/opponents", calendar_data_router.opponents_router, tags=["calendar"])
 api.add_router("/teams", teams_router.router, tags=["teams"])
+api.add_router("/events", events_router.router, tags=["events"])
 api.add_router("", team_settings_router.router, tags=["team settings"])
+
+
+def _member_id(user, club) -> str | None:
+    """The user's own member record in this club (none on the platform host or for a login without one)."""
+    if club.schema_name == get_public_schema_name():
+        return None
+    member = Member.objects.filter(user=user).first()
+    return str(member.pk) if member else None
 
 
 @api.get("/me", response=MeOut, summary="The signed-in user in the current club")
@@ -50,6 +64,7 @@ def me(request):
         raise PermissionDenied from None  # signed in, but not a user of this club
     return {
         "id": str(user.pk),
+        "member_id": _member_id(user, club),
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,

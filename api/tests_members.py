@@ -186,6 +186,15 @@ class MembersApiTests(TestCase):
         self.assertEqual(d["team_memberships"][0]["team_name"], "U12")
         self.assertEqual(d["phone"], "+32470111111")
 
+    def test_families_are_listed_alphabetically(self):
+        in_family = lambda m: [{"member_id": str(m.pk), "role": "parent"}]  # noqa: E731  (a family is only listed with someone in it)
+        self.admin_post("/families", {"name": "beta", "members": in_family(self.player)})
+        self.admin_post("/families", {"name": "Alpha", "members": in_family(self.elsewhere)})
+        self.admin_post("/families", {"name": "", "members": in_family(self.stranger)})  # no name: sorted by its surname ("Test")
+        names = [f["display_name"] for f in self.get("/families", self.owner).json()["items"]]
+        self.assertEqual(names, sorted(names, key=str.lower))
+        self.assertEqual(names[:2], ["Alpha", "beta"])
+
     def test_families_crud(self):
         r = self.admin_post("/families", {"name": "Fam", "members": [{"member_id": str(self.stranger.pk), "role": "parent"}]})
         self.assertEqual(r.status_code, 201, r.content)

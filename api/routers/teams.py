@@ -8,6 +8,7 @@ from typing import Literal
 from ninja import File, Form, Router, UploadedFile
 from ninja.errors import HttpError
 
+from api.schemas_events import TeamAttendanceOut
 from api.schemas_teams import (
     EligibleRefereeOut,
     PeopleIn,
@@ -19,14 +20,15 @@ from api.schemas_teams import (
     StaffEntryOut,
     StaffIn,
     StaffPatch,
-    TeamDetailOut,
     TeamBase,
+    TeamDetailOut,
     TeamIn,
     TeamListOut,
     TeamNumbersOut,
     TeamOrderIn,
     TeamPatch,
 )
+from events.services import attendance_report
 from members.services import access
 from members.services.errors import Invalid
 from teams.services import teams as svc
@@ -136,6 +138,13 @@ def eligible_officials(request, team_id: uuid.UUID):
 def team_numbers(request, team_id: uuid.UUID, season: uuid.UUID | None = None):
     team = _team(team_id)
     return svc.team_numbers(request.user, team, _season(season))
+
+
+@router.get("/{team_id}/attendance", response=TeamAttendanceOut, summary="A team's attendance statistics for a season", operation_id="team_attendance")
+def team_attendance(request, team_id: uuid.UUID, season: uuid.UUID | None = None):
+    """Turnout (present / (present + absent) over past events), sessions, the top 3 attenders and the 3 needing attention
+    (at least 3 answers), who missed the last 2 practices, and no-shows (said yes, checked in as not there)."""
+    return attendance_report.team_report(_team(team_id), _season(season))
 
 
 # -- roster --
