@@ -1,3 +1,5 @@
+import type { ClubAttendance } from '#lib/attendance.ts';
+
 /** GET /api/v1/overview (see api/schemas_overview.py) plus the placeholder numbers for the parts that have no data yet. */
 export type Overview = {
 	season: { id: string; name: string } | null;
@@ -12,10 +14,11 @@ export type Overview = {
 		teams: { teams: number; players: number; staff: number };
 		events: { upcoming: number; this_season: number };
 	} | null;
+	/** Club-wide turnout over the season's past events; null when the season has no past events yet. */
+	attendance: ClubAttendance | null;
 };
 
-/** Sample numbers until attendance tracking and the shop exist. */
-export const mockAttendance = { rate: 86, sessions: 42 };
+/** Sample numbers until the shop exists. */
 export const mockShop = { orders: 18, revenue: '1240.50', outstanding: '185.00', unpaid: 3 };
 
 /** Sample news and fixtures until the news and calendar modules exist. Dates are relative to today so the page always looks current. */

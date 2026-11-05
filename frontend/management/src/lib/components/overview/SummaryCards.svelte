@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarDays, IdCard, ShoppingCart, Shield, Users } from '@lucide/svelte';
+	import { CalendarDays, IdCard, ShoppingCart, Shirt, Users } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { mockShop, type Overview } from '#lib/overview.ts';
 
@@ -7,9 +7,9 @@
 	let { cards, showShop = false }: { cards: NonNullable<Overview['cards']>; showShop?: boolean } = $props();
 	const money = (v: string) => `€${Number(v).toFixed(2)}`;
 	const groups = $derived([
-		{ title: t('overview.card.people'), icon: IdCard, rows: [['overview.row.admins', cards.people.admins], ['overview.row.staff', cards.people.staff], ['overview.row.members', cards.people.members], ['overview.row.guardians', cards.people.guardians]] as [string, string | number][] },
-		{ title: t('overview.card.members'), icon: Users, rows: [['overview.row.total', cards.members.total], ['overview.row.active', cards.members.active], ['overview.row.pending', cards.members.pending], ['overview.row.lapsed', cards.members.lapsed]] as [string, string | number][] },
-		{ title: t('overview.card.teams'), icon: Shield, rows: [['overview.row.teams', cards.teams.teams], ['overview.row.players', cards.teams.players], ['overview.row.staff_season', cards.teams.staff]] as [string, string | number][] },
+		{ title: t('overview.card.people'), icon: Users, rows: [['overview.row.admins', cards.people.admins], ['overview.row.staff', cards.people.staff], ['overview.row.members', cards.people.members], ['overview.row.guardians', cards.people.guardians]] as [string, string | number][] },
+		{ title: t('overview.card.members'), icon: IdCard, rows: [['overview.row.total', cards.members.total], ['overview.row.active', cards.members.active], ['overview.row.pending', cards.members.pending], ['overview.row.lapsed', cards.members.lapsed]] as [string, string | number][] },
+		{ title: t('overview.card.teams'), icon: Shirt, rows: [['overview.row.teams', cards.teams.teams], ['overview.row.players', cards.teams.players], ['overview.row.staff_season', cards.teams.staff]] as [string, string | number][] },
 		{ title: t('overview.card.events'), icon: CalendarDays, rows: [['overview.row.upcoming', cards.events.upcoming], ['overview.row.this_season', cards.events.this_season]] as [string, string | number][] },
 		...(showShop
 			? [{ title: t('overview.card.shop'), icon: ShoppingCart, sample: true, rows: [['overview.row.orders', mockShop.orders], ['overview.row.revenue', money(mockShop.revenue)], ['overview.row.outstanding', money(mockShop.outstanding)], ['overview.row.orders_unpaid', mockShop.unpaid]] as [string, string | number][] }]

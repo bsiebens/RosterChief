@@ -15,7 +15,8 @@
 	import { canManageSettings, canManageTeam } from '#lib/permissions.ts';
 	import { kindIcon } from '#lib/officiating-icons.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import { sampleAttendance, sampleFixtureSources } from '#lib/teams/mock.ts';
+	import { sampleFixtureSources } from '#lib/teams/mock.ts';
+	import { eventHref, formatEventDate, formatRate, memberHref, rateTone, TONE } from '#lib/attendance.ts';
 	import { TILE_STYLE, type NumberStatus } from '#lib/teams/status.ts';
 	import type { RosterEntry, StaffEntry } from '#lib/teams/server.ts';
 
@@ -55,8 +56,14 @@
 	const seasonObj = $derived((data.seasons ?? []).find((x) => x.id === seasonId));
 	const seasonName = $derived(seasonObj?.name ?? '');
 	const sinceYear = $derived(seasonObj?.start_date ? new Date(seasonObj.start_date).getFullYear() : null);
-	// Sample numbers (names from the real roster) until attendance tracking and the fixture import exist.
-	const attendance = $derived(sampleAttendance(team?.roster ?? []));
+	// Attendance statistics of the season (null when they could not be loaded: the cards then say there is no data).
+	const attendance = $derived(data.attendance);
+	const hasRate = $derived(attendance?.rate !== null && attendance?.rate !== undefined);
+	const rankings = $derived([
+		{ key: 'top', list: attendance?.top_attenders ?? [], Icon: TrendingUp },
+		{ key: 'attention', list: attendance?.needs_attention ?? [], Icon: TrendingDown }
+	]);
+	// Sample rows until the fixture import exists.
 	const fixtureSources = $derived(sampleFixtureSources(seasonName));
 	const isSettings = $derived(canManageSettings(data.me));
 
@@ -157,18 +164,26 @@
 	</section>
 	{#if form?.teamAction === 'photo' && form.teamError}<Alert kind="error" title={t('teampage.photo_failed')}>{form.teamError}</Alert>{/if}
 
-	<!-- Attendance (sample data until attendance tracking exists). -->
+	<!-- Attendance of the season: turnout = present / (present + absent) over the team's past events. -->
 	<div class="grid gap-4 lg:grid-cols-3">
-		<div class="card card-body sample-stripes" title={t('teampage.sample_hint')}>
+		<div class="card card-body">
 			<span class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('teampage.att.rate')}</span>
-			<span class="font-display text-5xl leading-none font-extrabold text-ice">{attendance.rate}%</span>
-			<span class="text-sm text-muted">{t('teampage.att.sessions', { n: attendance.sessions })}</span>
+			<span class="font-display text-5xl leading-none font-extrabold {hasRate ? TONE[rateTone(attendance?.rate)].text : 'text-muted'}">{formatRate(attendance?.rate)}</span>
+			{#if attendance && attendance.sessions > 0}
+				<span class="text-sm text-muted">{attendance.sessions === 1 ? t('attbox.based_on_one') : t('attbox.based_on', { n: attendance.sessions })}</span>
+				{#if hasRate}<div class="mt-1 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full {TONE[rateTone(attendance.rate)].bar}" style="width: {attendance.rate}%"></div></div>{/if}
+			{:else}
+				<span class="text-sm text-muted">{t('teampage.att.no_data')}</span>
+			{/if}
 		</div>
-		{#each [{ key: 'top', list: attendance.top, Icon: TrendingUp }, { key: 'attention', list: attendance.attention, Icon: TrendingDown }] as { key, list, Icon } (key)}
-			<div class="card card-body sample-stripes gap-2" title={t('teampage.sample_hint')}>
+		{#each rankings as { key, list, Icon } (key)}
+			<div class="card card-body gap-2">
 				<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Icon size={16} aria-hidden="true" /> {t(`teampage.att.${key}`)}</h2>
-				{#each list as p (p.href)}
-					<div class="flex items-baseline justify-between gap-3 text-sm"><a class="link truncate font-semibold" href={p.href}>{p.name}</a><span class="font-mono text-xs text-muted">{p.pct}%</span></div>
+				{#each list as p (p.id)}
+					<div class="flex items-baseline justify-between gap-3 text-sm">
+						<a class="link truncate font-semibold" href={memberHref(p.id)}>{p.name}</a>
+						<span class="rounded border px-1.5 font-mono text-xs {TONE[rateTone(p.rate)].pill}" title={t('attbox.responses', { n: p.responses })}>{formatRate(p.rate)}</span>
+					</div>
 				{:else}
 					<p class="py-3 text-center text-sm text-muted">{t('teampage.att.no_data')}</p>
 				{/each}
@@ -176,13 +191,29 @@
 		{/each}
 	</div>
 	<div class="grid gap-4 lg:grid-cols-2">
-		<div class="card card-body sample-stripes gap-2" title={t('teampage.sample_hint')}>
+		<div class="card card-body gap-2">
 			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><TriangleAlert size={16} aria-hidden="true" /> {t('teampage.att.missed')}</h2>
-			{#each attendance.missedLastTwo as p (p.href)}<a class="link text-sm font-semibold" href={p.href}>{p.name}</a>{:else}<p class="py-3 text-center text-sm text-muted">{t('teampage.att.no_one')}</p>{/each}
+			{#if !attendance}
+				<p class="py-3 text-center text-sm text-muted">{t('teampage.att.no_data')}</p>
+			{:else}
+				{#each attendance.missed_recent_practices as p (p.id)}<a class="link text-sm font-semibold" href={memberHref(p.id)}>{p.name}</a>{:else}<p class="py-3 text-center text-sm text-muted">{t('teampage.att.no_one')}</p>{/each}
+			{/if}
 		</div>
-		<div class="card card-body sample-stripes gap-2" title={t('teampage.sample_hint')}>
-			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><UserX size={16} aria-hidden="true" /> {t('teampage.att.noshows')}</h2>
-			{#each attendance.noShows as p (p.href)}<a class="link text-sm font-semibold" href={p.href}>{p.name}</a>{:else}<p class="py-3 text-center text-sm text-muted">{t('teampage.att.none_recorded')}</p>{/each}
+		<div class="card card-body gap-2">
+			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><UserX size={16} aria-hidden="true" /> {t('teampage.att.noshows')}{#if attendance?.no_show_count}&nbsp;<span class="font-mono text-xs font-normal text-muted">· {attendance.no_show_count}</span>{/if}</h2>
+			{#if !attendance}
+				<p class="py-3 text-center text-sm text-muted">{t('teampage.att.no_data')}</p>
+			{:else}
+				{#each attendance.no_shows as n (`${n.member.id}-${n.event.id}`)}
+					<div class="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+						<a class="link font-semibold" href={memberHref(n.member.id)}>{n.member.name}</a>
+						<span class="min-w-0 truncate text-muted"><a class="link" href={eventHref(n.event.id)}>{n.event.title}</a> · <span class="font-mono text-xs">{formatEventDate(n.event.start)}</span></span>
+					</div>
+				{:else}
+					<p class="py-3 text-center text-sm text-muted">{t('teampage.att.none_recorded')}</p>
+				{/each}
+				{#if attendance.no_show_count > attendance.no_shows.length}<p class="text-xs text-muted">{t('attbox.noshow_more', { n: attendance.no_show_count - attendance.no_shows.length })}</p>{/if}
+			{/if}
 		</div>
 	</div>
 

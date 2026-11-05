@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { Mail, Phone } from '@lucide/svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
+	import { formatRate, rateTone, TONE, type MemberAttendance } from '#lib/attendance.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { fullName, statusBadge, statusLabel, telHref } from '#lib/members/detail-helpers.ts';
 	import type { ClubMembership, MemberDetail } from '#lib/members/detail-types.ts';
 
 	/** Profile header: club-coloured banner, big avatar, name, roles, contact chips and a strip of key figures. */
-	let { member, current, attendance, docsDone, docsTotal }: { member: MemberDetail; current?: ClubMembership | null; attendance: number; docsDone: number; docsTotal: number } = $props();
+	let { member, current, attendance, docsDone, docsTotal }: { member: MemberDetail; current?: ClubMembership | null; attendance: MemberAttendance | null; docsDone: number; docsTotal: number } = $props();
+	const rate = $derived(attendance?.rate ?? null);
 	const teams = $derived(new Set([...member.team_memberships.map((x) => x.team_id), ...member.staff_assignments.map((x) => x.team_id)]).size);
 </script>
 
@@ -44,10 +46,14 @@
 				<dd class="mt-1 font-display text-2xl font-extrabold text-ink">{teams}</dd>
 				<p class="mt-1 truncate text-xs text-muted">{[...member.team_memberships.map((x) => x.team_name), ...member.staff_assignments.map((x) => x.team_name)].filter((n, i, a) => a.indexOf(n) === i).join(', ') || '—'}</p>
 			</div>
-			<div class="sample-stripes bg-white p-4" title={t('profile.sample_hint')}>
+			<div class="bg-white p-4">
 				<dt class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('profile.stat.attendance')}</dt>
-				<dd class="mt-1 font-display text-2xl font-extrabold text-ink">{attendance}%</dd>
-				<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full bg-club" style="width: {attendance}%"></div></div>
+				<dd class="mt-1 font-display text-2xl font-extrabold"><a class="hover:underline {rate === null ? 'text-muted' : TONE[rateTone(rate)].text}" href="?tab=attendance" data-sveltekit-noscroll data-sveltekit-keepfocus>{formatRate(rate)}</a></dd>
+				{#if rate !== null}
+					<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full {TONE[rateTone(rate)].bar}" style="width: {rate}%"></div></div>
+				{:else}
+					<p class="mt-1 text-xs text-muted">{attendance ? t('attbox.no_data') : t('attbox.failed')}</p>
+				{/if}
 			</div>
 			<div class="sample-stripes bg-white p-4" title={t('profile.sample_hint')}>
 				<dt class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('profile.stat.documents')}</dt>

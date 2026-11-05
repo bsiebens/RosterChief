@@ -1,4 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
+import type { MemberAttendance } from '#lib/attendance.ts';
 import { api } from '#lib/management-api.ts';
 import { grantLoginFor } from '#lib/members/form-server.ts';
 import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
@@ -12,9 +13,12 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	if (!res.ok) error(res.status === 404 ? 404 : res.status || 500);
 	const member = res.data!;
 
-	// Season names (the member payload only has ids) and the people in each family, in parallel.
-	const [seasons, familyRes] = await Promise.all([
+	// Season names (the member payload only has ids), the people in each family and this season's attendance, in parallel.
+	// Attendance feeds both the hero tile (every tab) and the Attendance tab; the load does not read `?tab`, so switching
+	// tabs reuses it instead of fetching again. A failure only blanks those boxes.
+	const [seasons, attendanceRes, familyRes] = await Promise.all([
 		api<Season[]>('GET', '/memberships/seasons', { f: fetch }),
+		api<MemberAttendance>('GET', `/members/${params.id}/attendance`, { f: fetch }),
 		Promise.all(member.families.map((f) => api<FamilyDetail>('GET', `/members/families/${f.id}`, { f: fetch })))
 	]);
 	const families = familyRes.flatMap((r) => (r.ok && r.data ? [r.data] : []));
@@ -39,7 +43,8 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 		if (opts.ok && opts.data) officiatingOptions = opts.data;
 	}
 
-	return { member, seasons: seasons.data ?? [], families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
+	const attendance = attendanceRes.ok ? (attendanceRes.data ?? null) : null;
+	return { member, seasons: seasons.data ?? [], attendance, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
 };
 
 export const actions: Actions = {

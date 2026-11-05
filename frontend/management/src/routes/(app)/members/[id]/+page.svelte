@@ -17,7 +17,7 @@
 	import ProfileHero from '#lib/components/members/detail/ProfileHero.svelte';
 	import { page } from '$app/state';
 	import { canExecuteEvaluations } from '#lib/permissions.ts';
-	import { attendanceSummary, documentsDone, mockDocuments, mockSessions } from '#lib/members/mock.ts';
+	import { documentsDone, mockDocuments } from '#lib/members/mock.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { currentMembership, fullName, statusBadge, statusLabel } from '#lib/members/detail-helpers.ts';
@@ -35,9 +35,8 @@
 		{ key: 'attendance', label: t('profile.tab.attendance') }
 	]);
 	const tab = $derived(tabs.find((x) => x.key === page.url.searchParams.get('tab'))?.key ?? 'overview');
-	// Placeholder figures for the hero until the real evaluations, documents and attendance exist.
+	// Placeholder figures for the hero's documents tile until the real documents exist.
 	const docs = mockDocuments();
-	const attendance = attendanceSummary(mockSessions());
 
 	usePageHeader(() => ({
 		title: (member && fullName(member)) || t('members.detail.title.fallback'),
@@ -67,7 +66,7 @@
 {#if form?.granted}<GrantResult granted={form.granted} />{/if}
 
 <div class="grid gap-4">
-	<ProfileHero {member} {current} attendance={attendance.rate} docsDone={documentsDone(docs)} docsTotal={docs.length} />
+	<ProfileHero {member} {current} attendance={data.attendance} docsDone={documentsDone(docs)} docsTotal={docs.length} />
 
 	<nav class="card flex flex-wrap items-center justify-between gap-x-3 px-3" aria-label={t('profile.tabs')}>
 		<div class="flex flex-wrap">
@@ -80,7 +79,7 @@
 					class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
 			{/each}
 		</div>
-		{#if tab !== 'overview'}<span class="badge badge-outline badge-sm shrink-0" title={t('profile.sample_hint')}>{t('profile.sample')}</span>{/if}
+		{#if tab === 'evaluations' || tab === 'documents'}<span class="badge badge-outline badge-sm shrink-0" title={t('profile.sample_hint')}>{t('profile.sample')}</span>{/if}
 	</nav>
 
 	{#if tab === 'evaluations'}
@@ -88,7 +87,7 @@
 	{:else if tab === 'documents'}
 		<DocumentsCard canManage={data.isAdmin} />
 	{:else if tab === 'attendance'}
-		<AttendanceCard />
+		<AttendanceCard attendance={data.attendance} />
 	{:else}
 		<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_34rem]">
 			<div class="grid gap-4">

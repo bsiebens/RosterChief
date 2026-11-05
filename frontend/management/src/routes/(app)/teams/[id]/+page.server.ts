@@ -1,4 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
+import type { TeamAttendance } from '#lib/attendance.ts';
 import { api } from '#lib/management-api.ts';
 import { loadPools, loadSeasons, strOrNull, teamBody, teamCall, text, intOrNull, type EligibleReferee, type Position, type TeamDetail, type TeamRow } from '#lib/teams/server.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -16,19 +17,21 @@ export type TeamNumbers = {
 export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 	const { me } = (await parent()) as { me?: { features?: string[] } };
 	const season = url.searchParams.get('season') ?? '';
-	const [team, seasons, pools, positions, teams, numbers, referees, officials] = await Promise.all([
+	const [team, seasons, pools, positions, teams, numbers, attendance, referees, officials] = await Promise.all([
 		api<TeamDetail>('GET', `/teams/${params.id}`, { query: { season }, f: fetch }),
 		loadSeasons(fetch),
 		loadPools(fetch),
 		api<Position[]>('GET', '/team-positions', { f: fetch }),
 		api<TeamRow[]>('GET', '/teams', { query: { season }, f: fetch }),
 		api<TeamNumbers>('GET', `/teams/${params.id}/numbers`, { query: { season }, f: fetch }),
+		// Attendance statistics of the season; a failure only empties the attendance cards.
+		api<TeamAttendance>('GET', `/teams/${params.id}/attendance`, { query: { season }, f: fetch }),
 		// Eligible referees only exist for clubs with the referee_officials feature.
 		me?.features?.includes('referee_officials') ? api<EligibleReferee[]>('GET', `/teams/${params.id}/referees`, { f: fetch }) : Promise.resolve(null),
 		me?.features?.includes('referee_officials') ? api<EligibleReferee[]>('GET', `/teams/${params.id}/officials`, { f: fetch }) : Promise.resolve(null)
 	]);
 	if (!team.ok) error(team.status === 404 ? 404 : team.status || 500);
-	return { team: team.data!, season, seasons, pools, positions: positions.data ?? [], teams: teams.data ?? [], numbers: numbers.ok ? (numbers.data ?? null) : null, referees: referees?.ok ? (referees.data ?? []) : null, officials: officials?.ok ? (officials.data ?? []) : null };
+	return { team: team.data!, season, seasons, pools, positions: positions.data ?? [], teams: teams.data ?? [], numbers: numbers.ok ? (numbers.data ?? null) : null, attendance: attendance.ok ? (attendance.data ?? null) : null, referees: referees?.ok ? (referees.data ?? []) : null, officials: officials?.ok ? (officials.data ?? []) : null };
 };
 
 const flag = (form: FormData, k: string) => form.get(k) === 'on';

@@ -46,20 +46,8 @@ export default {
 		'profile.docs.transfer': 'Transfer certificate',
 		'profile.docs.view': 'View',
 		'profile.docs.remind': 'Send reminder',
-		'profile.att.title': 'Attendance',
 		'profile.att.rate': 'Attendance rate',
-		'profile.att.present': 'Present',
-		'profile.att.excused': 'Excused',
-		'profile.att.absent': 'Absent',
-		'profile.att.weeks': 'Last 12 weeks',
-		'profile.att.recent': 'Recent sessions',
-		'profile.att.col.date': 'Date',
-		'profile.att.col.session': 'Session',
-		'profile.att.col.team': 'Team',
-		'profile.att.col.status': 'Status',
-		'profile.att.kind.training': 'Training',
-		'profile.att.kind.match': 'Match',
-		'profile.att.sessions': '{n} sessions'
+		'profile.att.recent': 'Recent sessions'
 	},
 	nl: {
 		'profile.sample': 'Voorbeelddata',
@@ -108,20 +96,8 @@ export default {
 		'profile.docs.transfer': 'Overschrijvingsattest',
 		'profile.docs.view': 'Bekijken',
 		'profile.docs.remind': 'Herinnering sturen',
-		'profile.att.title': 'Aanwezigheid',
 		'profile.att.rate': 'Aanwezigheidsgraad',
-		'profile.att.present': 'Aanwezig',
-		'profile.att.excused': 'Verontschuldigd',
-		'profile.att.absent': 'Afwezig',
-		'profile.att.weeks': 'Laatste 12 weken',
-		'profile.att.recent': 'Recente sessies',
-		'profile.att.col.date': 'Datum',
-		'profile.att.col.session': 'Sessie',
-		'profile.att.col.team': 'Ploeg',
-		'profile.att.col.status': 'Status',
-		'profile.att.kind.training': 'Training',
-		'profile.att.kind.match': 'Wedstrijd',
-		'profile.att.sessions': '{n} sessies'
+		'profile.att.recent': 'Recente sessies'
 	},
 	fr: {
 		'profile.sample': 'Données d’exemple',
@@ -170,19 +146,7 @@ export default {
 		'profile.docs.transfer': 'Certificat de transfert',
 		'profile.docs.view': 'Voir',
 		'profile.docs.remind': 'Envoyer un rappel',
-		'profile.att.title': 'Présences',
 		'profile.att.rate': 'Taux de présence',
-		'profile.att.present': 'Présent',
-		'profile.att.excused': 'Excusé',
-		'profile.att.absent': 'Absent',
-		'profile.att.weeks': '12 dernières semaines',
-		'profile.att.recent': 'Séances récentes',
-		'profile.att.col.date': 'Date',
-		'profile.att.col.session': 'Séance',
-		'profile.att.col.team': 'Équipe',
-		'profile.att.col.status': 'Statut',
-		'profile.att.kind.training': 'Entraînement',
-		'profile.att.kind.match': 'Match',
-		'profile.att.sessions': '{n} séances'
+		'profile.att.recent': 'Séances récentes'
 	}
 };
