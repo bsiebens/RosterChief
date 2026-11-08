@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { CalendarDays, LayoutDashboard, Settings, Shirt, Users } from '@lucide/svelte';
+import { CalendarDays, LayoutDashboard, Newspaper, Settings, Shirt, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -33,7 +33,7 @@ export const NAV: NavItem[] = [
 		children: [
 			{ href: '/members', label: 'shell.nav.all_members', match: (p) => p.startsWith('/members') },
 			{ href: '/families', label: 'shell.nav.families', match: (p) => p.startsWith('/families'), visible: (me) => me.can_manage_members },
-			{ href: '/groups', label: 'shell.nav.groups', match: (p) => p.startsWith('/groups'), visible: (me) => me.can_manage_members }
+			{ href: '/groups', label: 'shell.nav.groups', match: (p) => p.startsWith('/groups'), visible: (me) => me.can_manage_members || (me.admin_group_ids?.length ?? 0) > 0 }
 		]
 	},
 	{
@@ -61,6 +61,22 @@ export const NAV: NavItem[] = [
 		]
 	},
 	{
+		key: 'news',
+		href: '/news',
+		label: 'shell.nav.news',
+		icon: Newspaper,
+		match: (p) => p === '/news' || p.startsWith('/news/'),
+		visible: (me) => me.can_add_news
+	},
+	{
+		key: 'referees',
+		href: '/referees',
+		label: 'shell.nav.referees',
+		icon: Whistle,
+		match: (p) => p === '/referees' || p.startsWith('/referees/'),
+		visible: (me) => me.can_manage_referees && me.features.includes('referee_officials')
+	},
+	{
 		key: 'settings',
 		href: '/settings',
 		label: 'shell.nav.settings',
@@ -70,6 +86,7 @@ export const NAV: NavItem[] = [
 		children: [
 			{ href: '/settings', label: 'shell.nav.settings_general', match: (p) => p === '/settings' || p.startsWith('/settings/preview') },
 			{ href: '/settings/positions', label: 'shell.nav.positions', match: (p) => p.startsWith('/settings/positions') },
+			{ href: '/settings/event-types', label: 'shell.nav.event_types', match: (p) => p.startsWith('/settings/event-types') },
 			{ href: '/settings/number-pools', label: 'shell.nav.number_pools', match: (p) => p.startsWith('/settings/number-pools') },
 			{ href: '/settings/officiating', label: 'shell.nav.officiating', match: (p) => p.startsWith('/settings/officiating'), visible: (me) => me.features.includes('referee_officials') }
 		]

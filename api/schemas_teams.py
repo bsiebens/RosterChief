@@ -18,6 +18,8 @@ class TeamBase(Schema):
     ordering: int | None = None
     feeds_into_id: UUID | None = None
     feeds_into_name: str | None = None
+    referee_management: str = "club"  # club | federation: who arranges referees for the team's home games
+    official_management: str = "club"
 
 
 class TeamListOut(TeamBase):
@@ -38,6 +40,8 @@ class TeamIn(Schema):
     tournament_only: bool = False
     ordering: int | None = None
     feeds_into_id: UUID | None = None
+    referee_management: str = "club"
+    official_management: str = "club"
 
 
 class TeamPatch(Schema):
@@ -51,6 +55,8 @@ class TeamPatch(Schema):
     tournament_only: bool | None = None
     ordering: int | None = None
     feeds_into_id: UUID | None = None
+    referee_management: str | None = None
+    official_management: str | None = None
 
 
 class RosterEntryOut(Schema):

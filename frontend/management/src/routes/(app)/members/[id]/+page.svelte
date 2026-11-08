@@ -14,9 +14,10 @@
 	import AttendanceCard from '#lib/components/members/detail/AttendanceCard.svelte';
 	import DocumentsCard from '#lib/components/members/detail/DocumentsCard.svelte';
 	import EvaluationsCard from '#lib/components/members/detail/EvaluationsCard.svelte';
-	import GameStatsCard from '#lib/components/members/detail/GameStatsCard.svelte';
+	import StatsTab from '#lib/components/members/detail/StatsTab.svelte';
 	import ProfileHero from '#lib/components/members/detail/ProfileHero.svelte';
 	import { page } from '$app/state';
+	import { hasStats } from '#lib/member-stats.ts';
 	import { canExecuteEvaluations } from '#lib/permissions.ts';
 	import { documentsDone, mockDocuments } from '#lib/members/mock.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -33,7 +34,9 @@
 		{ key: 'overview', label: t('profile.tab.overview') },
 		...(canExecuteEvaluations(data.me) ? [{ key: 'evaluations', label: t('profile.tab.evaluations') }] : []),
 		{ key: 'documents', label: t('profile.tab.documents') },
-		{ key: 'attendance', label: t('profile.tab.attendance') }
+		{ key: 'attendance', label: t('profile.tab.attendance') },
+		// Only when there is something to chart (game sheets, attendance, staff history) or an officiating profile.
+		...(hasStats(data.stats) || data.officiating?.referee || data.officiating?.official ? [{ key: 'stats', label: t('profile.tab.stats') }] : [])
 	]);
 	const tab = $derived(tabs.find((x) => x.key === page.url.searchParams.get('tab'))?.key ?? 'overview');
 	// Placeholder figures for the hero's documents tile until the real documents exist.
@@ -89,6 +92,8 @@
 		<DocumentsCard canManage={data.isAdmin} />
 	{:else if tab === 'attendance'}
 		<AttendanceCard attendance={data.attendance} />
+	{:else if tab === 'stats'}
+		<StatsTab stats={data.stats} gameStats={data.gameStats} officiating={data.officiating} memberId={data.member.id} canShare={!!data.me?.can_manage_members} />
 	{:else}
 		<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_34rem]">
 			<div class="grid gap-4">
@@ -105,7 +110,6 @@
 				{#if data.isAdmin}<PicturesCard {member} />{/if}
 				<FamiliesCard {member} families={data.families} isAdmin={data.isAdmin} {form} />
 				<TeamsCard {member} seasons={data.seasons} />
-				{#if data.gameStats}<GameStatsCard stats={data.gameStats} />{/if}
 				{#if data.isAdmin}<GroupsCard groups={member.groups} />{/if}
 			</div>
 		</div>

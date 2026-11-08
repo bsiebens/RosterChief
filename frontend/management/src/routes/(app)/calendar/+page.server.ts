@@ -6,7 +6,7 @@ import type { PageServerLoad } from './$types';
 export type CalendarView = 'month' | 'week' | 'agenda';
 const VIEWS: CalendarView[] = ['month', 'week', 'agenda'];
 /** The API refuses ranges longer than this (api/routers/events.py MAX_RANGE_DAYS). */
-const MAX_RANGE_DAYS = 100;
+const MAX_RANGE_DAYS = 400;
 /** The first and last day the view shows (both inclusive). */
 function range(view: CalendarView, anchor: Date): { from: Date; to: Date } {
 	if (view === 'week') {
@@ -19,11 +19,25 @@ function range(view: CalendarView, anchor: Date): { from: Date; to: Date } {
 	return { from, to: addDays(from, 41) };
 }
 
+type SeasonRow = { id: string; name: string; start_date: string; end_date: string; is_current: boolean };
+
 export const load: PageServerLoad = async ({ url, fetch }) => {
 	const p = url.searchParams;
 	const view: CalendarView = VIEWS.includes(p.get('view') as CalendarView) ? (p.get('view') as CalendarView) : 'month';
 	const anchor = parseIsoDate(p.get('date')) ?? new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-	const { from, to: rawTo } = range(view, anchor);
+	// The agenda lists the whole season (the one covering the date, else the current one); the page scrolls to today.
+	let seasonName = '';
+	let { from, to: rawTo } = range(view, anchor);
+	if (view === 'agenda') {
+		const seasons = (await api<SeasonRow[]>('GET', '/memberships/seasons', { f: fetch })).data ?? [];
+		const day = isoDate(anchor);
+		const season = seasons.find((s) => s.start_date <= day && day <= s.end_date) ?? seasons.find((s) => s.is_current);
+		if (season) {
+			from = parseIsoDate(season.start_date) ?? from;
+			rawTo = parseIsoDate(season.end_date) ?? rawTo;
+			seasonName = season.name;
+		}
+	}
 	const to = (rawTo.getTime() - from.getTime()) / 86_400_000 > MAX_RANGE_DAYS ? addDays(from, MAX_RANGE_DAYS) : rawTo;
 	const filters = { team: p.get('team') ?? '', location: p.get('location') ?? '', opponent: p.get('opponent') ?? '', kind: p.get('kind') ?? '', mine: p.get('mine') === '1' };
 
@@ -36,6 +50,7 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 
 	return {
 		view,
+		seasonName,
 		date: isoDate(anchor),
 		from: isoDate(from),
 		to: isoDate(to),

@@ -1,13 +1,13 @@
 import { redirect } from '@sveltejs/kit';
 import { apiPage } from '#lib/management-api.ts';
 import { groupCall, type GroupDetail } from '#lib/groups/server.ts';
-import { requireAdmin } from '#lib/members/form-server.ts';
+import { requireGroupAccess } from '#lib/members/form-server.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 25;
 
 export const load: PageServerLoad = async ({ url, fetch, parent }) => {
-	await requireAdmin(parent, '/members');
+	await requireGroupAccess(parent, '/members');
 	const q = (url.searchParams.get('q') ?? '').trim();
 	const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10) || 0);
 	const res = await apiPage<GroupDetail>('/members/groups', { q, limit: PAGE_SIZE, offset: offset || undefined }, fetch);

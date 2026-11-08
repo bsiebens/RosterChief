@@ -1,8 +1,9 @@
 """Previews of the club-branded documents the platform sends on behalf of a club.
 
-What exists today: the "login granted" email and the allauth account emails (all share ``club/email/layout.html``).
-There is no club-branded PDF: invoices and credit notes are issued by RosterChief to the club (platform branding).
-The registry supports ``kind="pdf"`` entries (HTML source + WeasyPrint) for when one appears."""
+What exists today: the "login granted" email and the allauth account emails (all share ``club/email/layout.html``), and the
+referee / official payment forms (PDF, ``events.services.payment_forms``; only for clubs with the ``referee_officials`` feature).
+Invoices and credit notes are issued by RosterChief to the club (platform branding), not by the club.
+``kind="pdf"`` entries are HTML (``render_email`` returns it) that ``render_pdf`` turns into the file with WeasyPrint."""
 
 import base64
 import mimetypes
@@ -46,7 +47,13 @@ _AUTH = {
 
 PREVIEWS = [Preview("login_granted", "email", "Login granted", "Sent to a member when the club gives them a login.")]
 PREVIEWS += [Preview(key, "email", title, desc) for key, (title, desc) in _AUTH.items()]
+PDF_PREVIEWS = [
+    Preview("referee_payment_form", "pdf", "Referee payment form", "The sheet printed for a game's referees to sign for their fee and kilometres."),
+    Preview("official_payment_form", "pdf", "Official payment form", "The same sheet for a game's match officials."),
+]
+PREVIEWS += PDF_PREVIEWS
 BY_KEY = {p.key: p for p in PREVIEWS}
+PAYMENT_FORM_KINDS = {"referee_payment_form": "referee", "official_payment_form": "official"}
 
 
 def _logo_data_uri(club) -> str:
@@ -81,6 +88,10 @@ def render_email(request, key: str, lang: str = "en") -> tuple[str, str]:
     """(subject, full html) of the email ``key`` with the current saved branding of ``request.tenant`` and sample data."""
     club = request.tenant
     logo = _logo_data_uri(club)
+    if key in PAYMENT_FORM_KINDS:
+        from events.services import payment_forms
+
+        return BY_KEY[key].title, payment_forms.render_html(payment_forms.sample_context(club, PAYMENT_FORM_KINDS[key], lang))
     with translation.override(lang):
         if key == "login_granted":
             member = SimpleNamespace(first_name="Alex", language=lang)

@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
 	// The next events everyone in the app may see (the calendar API returns all of them), soonest first.
 	const today = new Date();
 	const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-	const horizon = new Date(today.getTime() + 28 * 86_400_000);
+	const horizon = new Date(today.getTime() + 60 * 86_400_000);
 	const [overview, noType, events] = await Promise.all([
 		api<Overview>('GET', '/overview', { f: fetch }),
 		// People holding no role (member, staff or guardian) in the current season: an issue for member managers.
@@ -24,6 +24,6 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
 		api<EventRow[]>('GET', '/events', { query: { from: iso(today), to: iso(horizon) }, f: fetch })
 	]);
 	const now = Date.now();
-	const upcoming = (events.ok ? (events.data ?? []) : []).filter((e) => !e.cancelled && new Date(e.end ?? e.start).getTime() >= now).slice(0, 8);
+	const upcoming = (events.ok ? (events.data ?? []) : []).filter((e) => !e.cancelled && new Date(e.end ?? e.start).getTime() >= now).slice(0, 12);
 	return { upcoming, overview: overview.ok ? (overview.data ?? null) : null, noTypeCount: noType?.ok && noType.data ? noType.data.count : null };
 };

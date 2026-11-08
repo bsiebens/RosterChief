@@ -124,6 +124,10 @@ def sync_on_roster_save(sender, instance, created, **kwargs):
     if _skip_save(kwargs, {"team", "team_id", "season", "season_id", "member", "member_id"}):
         return
     _sync_member(instance.member, attendance.future_events(teams=instance.team_id), created=created, via=instance.team.name)
+    if created:
+        from events.services import stats_refresh
+
+        stats_refresh.queue_for_roster(instance)  # re-link the team's stored game sheets to the new player (background)
 
 
 @receiver(post_delete, sender=TeamMembership, dispatch_uid="events.attendance.roster_deleted")
@@ -135,9 +139,9 @@ def sync_on_roster_delete(sender, instance, origin=None, **kwargs):
 
 @receiver(post_save, sender=GroupMembership, dispatch_uid="events.attendance.group_member_saved")
 def sync_on_group_membership_save(sender, instance, created, **kwargs):
-    if _skip_save(kwargs, {"group", "group_id", "member", "member_id"}):
+    if _skip_save(kwargs, {"group", "group_id", "member", "member_id", "must_respond"}):
         return
-    _sync_member(instance.member, attendance.future_events(groups=instance.group_id), created=created, via=instance.group.name)
+    _sync_member(instance.member, attendance.future_events(groups=instance.group_id), created=created and instance.must_respond, via=instance.group.name)
 
 
 @receiver(post_delete, sender=GroupMembership, dispatch_uid="events.attendance.group_member_deleted")

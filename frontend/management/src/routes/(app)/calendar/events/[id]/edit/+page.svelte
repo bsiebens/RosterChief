@@ -18,7 +18,7 @@
 	const deleteError = $derived(form && 'deleteError' in form ? (form.deleteStatus === 403 ? t('eventform.err.forbidden') : String(form.deleteError)) : '');
 	const saveForm = $derived(form && 'fields' in form ? form : null);
 
-	usePageHeader(() => ({ title: t('eventform.title_edit'), context: data.event.title, actions }));
+	usePageHeader(() => ({ title: t('eventform.title_edit'), context: data.event?.title ?? '', actions }));
 </script>
 
 {#snippet actions()}
@@ -29,6 +29,7 @@
 
 {#if deleteError}<div class="mb-4"><Alert kind="error" title={t('eventform.delete_failed')}>{deleteError}</Alert></div>{/if}
 
+{#if data.event}
 <EventForm
 	mode="edit"
 	options={data.options}
@@ -39,6 +40,7 @@
 	status={saveForm?.status}
 	cancelHref={back}
 	ondelete={() => ((deleteScope = 'this'), (deleteOpen = true))} />
+{/if}
 
 <Modal bind:open={deleteOpen} title={t('eventform.delete_title')}>
 	<form
@@ -54,7 +56,7 @@
 			};
 		}}>
 		<input type="hidden" name="scope" value={data.series ? deleteScope : 'this'} />
-		<p>{t('eventform.delete_body', { title: data.event.title })}</p>
+		<p>{t('eventform.delete_body', { title: data.event?.title ?? '' })}</p>
 		{#if data.series}<EventFormScope bind:scope={deleteScope} purpose="delete" />{/if}
 		<Alert kind="info">{t('eventform.delete_no_notice')}</Alert>
 		<div class="modal-action mt-2 flex justify-end gap-2">

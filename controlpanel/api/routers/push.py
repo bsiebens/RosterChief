@@ -46,6 +46,7 @@ from ..push_schemas import (
     SendIn,
     SendOut,
     TargetOut,
+    UserFollowingOut,
     UserPushOut,
 )
 
@@ -397,6 +398,36 @@ def user_push(request, user_id: UUID):
         "preferences": _preferences(user),
         "recent_deliveries": [{"id": d.pk, "created": d.created, "provider": d.provider, "status": d.status, "category": d.category, "title": d.title, "attempts": d.attempts, "error": d.last_error} for d in recent],
     }
+
+
+@router.get("/users/{user_id}/push/following", response=UserFollowingOut, summary="The teams and games an account follows for live game pushes, per club")
+def user_following(request, user_id: UUID):
+    """Following is per club (it lives in the club's schema), so every club the account belongs to is looked at. Clubs
+    where the account follows nothing are left out."""
+    import logging
+
+    from django.db import ProgrammingError, transaction
+    from django_tenants.utils import schema_context
+
+    from controlpanel.services import accounts
+    from events.models import EventFollow, GameFollow
+
+    user = _user(user_id)
+    clubs, total_teams, total_games = [], 0, 0
+    for row in accounts.user_clubs(user):
+        club = row["club"]
+        try:
+            with transaction.atomic(), schema_context(club.schema_name):
+                teams = [{"id": f.team_id, "name": f.team.name} for f in GameFollow.objects.filter(user=user).select_related("team").order_by("team__name")]
+                games = [{"id": f.event_id, "title": f.event.title, "start": f.event.start} for f in EventFollow.objects.filter(user=user).select_related("event").order_by("-event__start")[:50]]
+        except ProgrammingError:  # the club's schema is missing or not migrated
+            logging.getLogger(__name__).warning("push.following_skipped club=%s", club.slug)
+            continue
+        if teams or games:
+            clubs.append({"club": _club(club), "teams": teams, "games": games})
+            total_teams += len(teams)
+            total_games += len(games)
+    return {"clubs": clubs, "total_teams": total_teams, "total_games": total_games}
 
 
 @router.delete("/users/{user_id}/push/devices/{device_id}", response={204: None}, summary="Remove one of an account's devices")

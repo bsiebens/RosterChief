@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { MapPin, Pencil, Repeat } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { eventEditHref, eventHref, formatTime, kindLabelKey, kindStyle, type AttendanceCounts, type EventRow } from '#lib/events/types.ts';
+	import { eventEditHref, eventHref, formatTime, kindLabelKey, kindStyle, resultStyle, scoreText, type AttendanceCounts, type EventRow } from '#lib/events/types.ts';
 
 	/**
 	 * One event in the calendar. `chip`: one line for a month cell; `card`: the full card for the week and agenda views.
@@ -21,6 +21,7 @@
 		return parts.join(' · ');
 	}
 	const att = $derived(summary(event.attendance));
+	const score = $derived(scoreText(event));
 	const label = $derived([time, event.title, t(kindLabelKey(event.kind)), audience, event.location?.name ?? '', event.cancelled ? t('events.cancelled') : ''].filter(Boolean).join(', '));
 </script>
 
@@ -28,6 +29,7 @@
 	<div class="group relative flex min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-xs hover:bg-paper focus-within:bg-paper {event.cancelled ? 'opacity-60' : ''}">
 		<span class="h-2 w-2 shrink-0 rounded-full {style.dot}" aria-hidden="true"></span>
 		<span class="shrink-0 font-mono text-[11px] text-muted">{formatTime(event.start)}</span>
+		{#if score}<span class="shrink-0 rounded border px-1 font-mono text-[10px] font-bold {resultStyle(event)}">{score}</span>{/if}
 		<a href={eventHref(event.id)} class="min-w-0 flex-1 truncate font-semibold text-ink after:absolute after:inset-0 focus:outline-none {event.cancelled ? 'line-through' : ''}" aria-label={label} title={label}>{event.title}</a>
 		{#if event.series_id}<Repeat size={11} class="shrink-0 text-dim" aria-hidden="true" />{/if}
 	</div>
@@ -35,7 +37,7 @@
 	<article class="relative rounded-lg border border-l-4 border-line bg-white p-3 transition-shadow hover:shadow-md focus-within:shadow-md {style.bar} {event.cancelled ? 'bg-subhead' : ''}">
 		<div class="flex items-start justify-between gap-2">
 			<div class="min-w-0">
-				<p class="font-mono text-xs text-muted">{time}</p>
+				<p class="font-mono text-xs text-muted">{time}{#if score} <span class="ml-1 rounded border px-1 font-bold {resultStyle(event)}">{score}</span>{/if}</p>
 				<h3 class="mt-0.5 font-semibold text-ink">
 					<a href={eventHref(event.id)} class="after:absolute after:inset-0 after:rounded-lg focus:outline-none {event.cancelled ? 'line-through decoration-2' : ''}" aria-label={label}>{event.title}</a>
 				</h3>

@@ -494,3 +494,50 @@ class MemberAndAuditTests(ServiceTestBase):
         self.assertEqual(entry.changes["amount"]["to"], "20.00")
         self.assertEqual(entry.actor, self.admin)
         self.assertEqual(FeePayment.objects.get().recorded_by, self.admin)
+
+
+class RecipientsTests(ServiceTestBase):
+    def family(self):
+        from members.models import Family
+
+        family = Family.objects.create(name="Kid family")
+        child = Member.objects.create(first_name="Alex", last_name="Kid", email="alex@kid.test")
+        mum = Member.objects.create(first_name="Mia", last_name="Kid", email="mia@kid.test")
+        dad = Member.objects.create(first_name="Dan", last_name="Kid", email="dan@kid.test")
+        for member, role in ((child, Role.CHILD), (mum, Role.PARENT), (dad, Role.GUARDIAN)):
+            FamilyMembership.objects.create(family=family, member=member, role=role)
+        return child, mum, dad
+
+    def test_a_child_is_reached_through_the_parents_on_their_behalf(self):
+        from unittest import mock
+
+        from members.services import recipients
+
+        child, mum, dad = self.family()
+        mum_user = self.login_for(mum)
+        dad_user = self.login_for(dad)
+        with mock.patch("notifications.inbox.notify") as notify:
+            told = recipients.deliver(child, self.club, title="New events on your calendar", body="x")
+        self.assertEqual({u.pk for u in told}, {mum_user.pk, dad_user.pk})
+        self.assertEqual({call.kwargs["title"] for call in notify.call_args_list}, {"For Alex: New events on your calendar"})
+
+        # With their own login the child hears it as themself, the parents on their behalf.
+        child_user = self.login_for(child)
+        with mock.patch("notifications.inbox.notify") as notify:
+            recipients.deliver(child, self.club, title="Hello", body="x")
+        titles = {call.args[0].pk: call.kwargs["title"] for call in notify.call_args_list}
+        self.assertEqual(titles[child_user.pk], "Hello")
+        self.assertEqual(titles[mum_user.pk], "For Alex: Hello")
+
+    def test_adults_are_not_copied_to_anyone(self):
+        from unittest import mock
+
+        from members.services import recipients
+
+        child, mum, _dad = self.family()
+        self.login_for(child)
+        mum_user = self.login_for(mum)
+        with mock.patch("notifications.inbox.notify") as notify:
+            told = recipients.deliver(mum, self.club, title="Hello", body="x")
+        self.assertEqual([u.pk for u in told], [mum_user.pk])
+        self.assertEqual(notify.call_count, 1)

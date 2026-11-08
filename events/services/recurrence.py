@@ -179,6 +179,7 @@ def apply_template(series: EventSeries, event: Event, audience: dict | None = No
     ``.set()`` so the attendance-sync signals fire by themselves."""
     event.series = series
     event.kind = series.kind
+    event.subtype_id = series.subtype_id
     event.title = series.title
     event.location_id = series.location_id
     event.opponent_id = series.opponent_id
@@ -330,6 +331,7 @@ def split_series(series: EventSeries, at: datetime.datetime) -> EventSeries:
         excluded_dates=excluded,
         generated_until=series.generated_until,
         kind=series.kind,
+        subtype_id=series.subtype_id,
         title=series.title,
         location_id=series.location_id,
         opponent_id=series.opponent_id,

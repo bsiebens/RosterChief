@@ -72,11 +72,10 @@ def _notify_members(members, *, title, body, kind, href, category, club=None) ->
     if club is None:
         return []
     told = []
+    from members.services import recipients
+
     for member in members:
-        if member.user_id is None:
-            continue
-        inbox.notify(member.user, club, title=title, body=body, kind=kind, href=href, push=True, category=category)
-        told.append(member.user)
+        told.extend(recipients.deliver(member, club, title=title, body=body, kind=kind, href=href, push=True, category=category))
     return told
 
 

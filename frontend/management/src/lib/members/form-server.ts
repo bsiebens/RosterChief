@@ -11,6 +11,13 @@ export async function requireAdmin(parent: () => Promise<unknown>, redirectTo?: 
 	error(403);
 }
 
+/** The groups pages: members managers, and the admins of at least one group (who only see their own groups). */
+export async function requireGroupAccess(parent: () => Promise<unknown>, redirectTo = '/'): Promise<void> {
+	const { me } = (await parent()) as { me?: ShellMe };
+	if (me?.can_manage_members || me?.admin_group_ids?.length) return;
+	redirect(303, redirectTo);
+}
+
 /** The settings pages need admin.manage_settings (or the Owner role). */
 export async function requireSettings(parent: () => Promise<unknown>, redirectTo = '/'): Promise<void> {
 	const { me } = (await parent()) as { me?: ShellMe };

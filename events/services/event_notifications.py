@@ -39,15 +39,19 @@ def _send(event: Event, *, title: str, body: str, actor=None, href: str | None =
         return 0
     from notifications import inbox
 
+    from members.services import recipients
+
     actor_id = getattr(actor, "pk", None)
     told = 0
-    seen = set()
-    for member in effective_members(event).filter(user__isnull=False).select_related("user"):
-        if member.user_id in seen or member.user_id == actor_id:
-            continue
-        seen.add(member.user_id)
-        inbox.notify(member.user, club, title=title, body=body, kind=inbox.Kind.INFO, href=href or _href(event), push=True, category=CATEGORY)
-        told += 1
+    seen = set()  # (account, child it is for): a parent is told once per child, an adult once
+    for member in effective_members(event).select_related("user"):
+        for user, child in recipients.recipients(member):
+            key = (user.pk, child.pk if child is not None else None)
+            if user.pk == actor_id or key in seen:
+                continue
+            seen.add(key)
+            inbox.notify(user, club, title=recipients.on_behalf_title(title, child) if child is not None else title, body=body, kind=inbox.Kind.INFO, href=href or _href(event), push=True, category=CATEGORY)
+            told += 1
     return told
 
 

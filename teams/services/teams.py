@@ -24,8 +24,8 @@ from teams.models import NumberPool, NumberReservation, Position, StaffAssignmen
 
 from . import numbers
 
-FIELDS = ("name", "short_name", "pool_id", "age_min", "age_max", "tournament_only", "ordering", "feeds_into_id")
-STRUCTURE_FIELDS = ("pool_id", "age_min", "age_max", "feeds_into_id")  # need the settings permission to change
+FIELDS = ("name", "short_name", "pool_id", "age_min", "age_max", "tournament_only", "ordering", "feeds_into_id", "referee_management", "official_management")
+STRUCTURE_FIELDS = ("pool_id", "age_min", "age_max", "feeds_into_id", "referee_management", "official_management")  # need the settings permission to change
 MSG = "Please correct the highlighted fields."
 
 
@@ -64,6 +64,8 @@ def team_out(team) -> dict:
         "ordering": team.ordering,
         "feeds_into_id": team.feeds_into_id,
         "feeds_into_name": team.feeds_into.name if team.feeds_into_id else None,
+        "referee_management": team.referee_management,
+        "official_management": team.official_management,
     }
 
 
@@ -119,12 +121,17 @@ def _validate(team, values):
             errors[f] = ["Must be between 0 and 32767."]
     if amin is not None and amax is not None and amin > amax and "age_max" not in errors:
         errors["age_max"] = ["Must be greater than or equal to the minimum age."]
+    for field in ("referee_management", "official_management"):
+        if (values.get(field) or Team.Management.CLUB) not in Team.Management.values:
+            errors[field] = ["Choose club or federation."]
     if errors:
         raise Invalid(MSG, errors)
     team.name, team.short_name = name, (values.get("short_name") or "").strip() or name
     team.pool, team.feeds_into = pool, feeds
     team.age_min, team.age_max = amin, amax
     team.tournament_only, team.ordering = bool(values.get("tournament_only")), values.get("ordering")
+    for field in ("referee_management", "official_management"):
+        setattr(team, field, values.get(field) or Team.Management.CLUB)
 
 
 def _state(team) -> dict:
@@ -149,7 +156,7 @@ def update_team(actor, team, values: dict):
         # Placing a team in the club's structure is a settings decision; resending the current values is harmless.
         locked = [f for f in STRUCTURE_FIELDS if f in values and values[f] != before[f]]
         if locked:
-            raise NotAllowed("Changing the number pool, ages or 'feeds into' needs the settings permission.")
+            raise NotAllowed("Changing the number pool, ages, 'feeds into' or referee management needs the settings permission.")
     merged = {**before, **values}
     _validate(team, merged)
     team.save()
@@ -191,7 +198,7 @@ def delete_team(actor, team) -> None:
     try:
         with transaction.atomic():
             team.delete()
-    except (ProtectedError, RestrictedError):
+    except ProtectedError, RestrictedError:
         msg = "This team can't be deleted because other records (such as events) still refer to it."
         raise Invalid(msg, {"__all__": [msg]}) from None
     entry = audit.record(actor, "team.deleted", changes=snapshot)
@@ -233,11 +240,7 @@ def staff_out(a: StaffAssignment) -> dict:
 def roster_for(team, season) -> list[TeamMembership]:
     if season is None:
         return []
-    return list(
-        TeamMembership.objects.filter(team=team, season=season)
-        .select_related("member", "position")
-        .order_by(F("position__ordering").asc(nulls_last=True), "position__name", "member__last_name", "member__first_name")
-    )
+    return list(TeamMembership.objects.filter(team=team, season=season).select_related("member", "position").order_by(F("position__ordering").asc(nulls_last=True), "position__name", "member__last_name", "member__first_name"))
 
 
 def photo_url(team, season) -> str | None:
@@ -489,8 +492,14 @@ def add_people(actor, team, *, season_id, rows: list[dict]) -> dict:
                     result["role"] = "staff"
                 else:
                     add_player(
-                        actor, team, member_id=row["member_id"], season_id=season.pk, position_id=position.pk,
-                        jersey_number=row.get("jersey_number"), is_captain=bool(row.get("is_captain")), is_alternate_captain=bool(row.get("is_alternate_captain")),
+                        actor,
+                        team,
+                        member_id=row["member_id"],
+                        season_id=season.pk,
+                        position_id=position.pk,
+                        jersey_number=row.get("jersey_number"),
+                        is_captain=bool(row.get("is_captain")),
+                        is_alternate_captain=bool(row.get("is_alternate_captain")),
                     )
                     result["role"] = "player"
             result["ok"] = True

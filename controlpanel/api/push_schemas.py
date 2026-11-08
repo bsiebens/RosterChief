@@ -358,3 +358,28 @@ class UserPushOut(Schema):
     web_subscriptions: list[UserWebSubscriptionOut]
     preferences: UserPreferencesOut
     recent_deliveries: list[UserDeliveryOut]
+
+
+class FollowedTeamOut(Schema):
+    id: UUID
+    name: str
+
+
+class FollowedGameOut(Schema):
+    id: UUID
+    title: str
+    start: datetime
+
+
+class FollowingClubOut(Schema):
+    club: dict  # {id, name}
+    teams: list[FollowedTeamOut]
+    games: list[FollowedGameOut]
+
+
+class UserFollowingOut(Schema):
+    """Which teams (and single games) an account follows for live game pushes, per club."""
+
+    clubs: list[FollowingClubOut]
+    total_teams: int
+    total_games: int

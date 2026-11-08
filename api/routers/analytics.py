@@ -70,7 +70,7 @@ def _for_against(row: dict | None) -> dict | None:
 
 
 def _leaders(rows: list[dict]) -> list[dict]:
-    return [{key: value for key, value in row.items() if key != "member"} for row in rows]
+    return [{**{key: value for key, value in row.items() if key != "member"}, "photo_url": row["member"].player_photo_url if row.get("member") is not None else None} for row in rows]
 
 
 def analytics_document(user, team, season, *, scope="all", friendlies=True, competition="") -> dict:

@@ -103,10 +103,20 @@ class MembershipApiTests(TestCase):
         m = self.make(self.alice)
         mid = m["id"]
         checks = [
-            ("get", ""), ("get", "/summary"), ("post", ""), ("get", "/requirements"), ("post", "/requirements"),
-            ("patch", f"/{mid}"), ("post", f"/{mid}/activate"), ("post", f"/{mid}/cancel"), ("post", f"/{mid}/waive"),
-            ("get", f"/{mid}/payments"), ("post", f"/{mid}/payments"), ("post", f"/{mid}/mark-paid"),
-            ("get", f"/{mid}/checklist"), ("get", f"/{mid}/history"),
+            ("get", ""),
+            ("get", "/summary"),
+            ("post", ""),
+            ("get", "/requirements"),
+            ("post", "/requirements"),
+            ("patch", f"/{mid}"),
+            ("post", f"/{mid}/activate"),
+            ("post", f"/{mid}/cancel"),
+            ("post", f"/{mid}/waive"),
+            ("get", f"/{mid}/payments"),
+            ("post", f"/{mid}/payments"),
+            ("post", f"/{mid}/mark-paid"),
+            ("get", f"/{mid}/checklist"),
+            ("get", f"/{mid}/history"),
         ]
         for method, path in checks:
             body = {"member_id": str(self.bob.pk), "season_id": str(self.season.pk), "name": "N", "amount": "1"} if method != "get" else None

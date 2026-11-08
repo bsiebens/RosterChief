@@ -7,14 +7,16 @@ broken input raises ``Invalid`` (422) with field errors keyed by the value names
 
 Values (keyword arguments; every key optional on update = PATCH semantics, missing keys keep their value)::
 
-    title: str                      required, except: a game's title is always generated ("U12 vs Rivals", home side
-                                    first), and a training / tournament without a title is called after its kind
+    title: str                      required, except: a game's title is always generated from its template ("U12 vs
+                                    Rivals", home side first), and a training without a title follows its template
     kind: str                       Event.EventKind value, default "other"
     start: datetime                 required (aware; naive is read as local time)
     end, gathering, deadline: datetime | None
                                     end > start, gathering <= start, deadline <= start. When only ``start`` changes on
                                     an update, the others move along with it.
     location_id, opponent_id: UUID | str | None
+    subtype_id: UUID | str | None   one of the club's event subtypes (settings); must belong to ``kind``. Its title
+                                    template names a training / game that has no title (see events.services.subtypes)
     team_ids, group_ids, invited_member_ids, excluded_member_ids: list[UUID | str]
     club_wide: bool                 cannot be combined with teams or groups
     # events only
@@ -56,27 +58,28 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
-from events.models import Event, EventSeries, Location, Opponent, Season
+from events.models import Event, EventSeries, EventSubtype, Location, Opponent, Season
 from members.models import Group, Member
 from members.services import audit
-from members.services.access import can_manage_any_team, can_manage_event, can_schedule, user_group_ids
+from members.services.access import admin_group_ids, can_manage_any_team, can_manage_event, can_schedule
 from members.services.errors import Invalid, NotAllowed
 from teams.models import Team
 
 from . import recurrence as rec
+from . import subtypes
 
 MSG = "Please correct the highlighted fields."
 SCOPES = ("this", "following", "all")
 
 COMMON_KEYS = (
-    "title", "kind", "start", "end", "gathering", "deadline", "location_id", "opponent_id",
+    "title", "kind", "subtype_id", "start", "end", "gathering", "deadline", "location_id", "opponent_id",
     "team_ids", "group_ids", "club_wide", "invited_member_ids", "excluded_member_ids",
 )  # fmt: skip
 EVENT_KEYS = (*COMMON_KEYS, "season_id", "is_friendly", "cancelled")
 SERIES_KEYS = (*COMMON_KEYS, "recurrence", "rrule")
 M2M = {"team_ids": "teams", "group_ids": "groups", "invited_member_ids": "invited_members", "excluded_member_ids": "excluded_members"}
 DEFAULTS = {
-    "title": "", "kind": Event.EventKind.OTHER, "start": None, "end": None, "gathering": None, "deadline": None,
+    "title": "", "kind": Event.EventKind.OTHER, "subtype_id": None, "start": None, "end": None, "gathering": None, "deadline": None,
     "location_id": None, "opponent_id": None, "team_ids": [], "group_ids": [], "club_wide": False,
     "invited_member_ids": [], "excluded_member_ids": [], "season_id": None, "is_friendly": False, "cancelled": False,
 }  # fmt: skip
@@ -86,13 +89,13 @@ DEFAULTS = {
 
 
 def _require_any_scheduling(actor) -> None:
-    if not (can_manage_any_team(actor) or user_group_ids(actor)):
+    if not (can_manage_any_team(actor) or admin_group_ids(actor)):
         raise NotAllowed("You are not allowed to schedule events.")
 
 
 def _require_schedule(actor, cleaned) -> None:
     if not can_schedule(actor, team_ids=[t.pk for t in cleaned["teams"]], group_ids=[g.pk for g in cleaned["groups"]], club_wide=cleaned["club_wide"]):
-        raise NotAllowed("You can only schedule events for teams you manage and groups you are in; club-wide events need the settings permission.")
+        raise NotAllowed("You can only schedule events for teams you manage and groups you administer; club-wide events need the settings permission.")
 
 
 def _require_manage(actor, event) -> None:
@@ -161,20 +164,34 @@ def _many(model, values, field, errors, message):
     return [found[pk] for pk in ids]
 
 
-def _auto_title(kind, title, teams, opponent, location, *, creating, friendly=False):
-    """Port of the old EventForm title rules: a game is always named after its match-up (home side first, "U12 vs
-    Rivals"); without an opponent it is "Game U12" (or "Game U12, U14" for several teams), and "Development Game U12" when
-    it is tagged friendly; a new training / tournament without a title is called after its kind."""
+def _subtype(value, kind, errors):
+    if value in (None, ""):
+        return None
+    subtype = _one(EventSubtype, value, "subtype_id", errors, "Unknown subtype.")
+    if subtype is not None and subtype.kind != kind:
+        errors["subtype_id"] = ["This subtype belongs to another kind of event."]
+        return None
+    return subtype
+
+
+def _auto_title(kind, title, teams, groups, opponent, location, *, creating, subtype=None):
+    """A game is always named by its template (the subtype's, else ``{teams}``): ``{teams}`` is the match-up, home side
+    first ("U12 vs Rivals"; the opponent leads at an away location), or just our teams / groups without an opponent. A
+    training without a title follows its template too ("Training U12"). A new tournament without a title is called
+    after its kind; other kinds keep the title they were given. See events.services.subtypes."""
+    us = ", ".join([t.short_name or t.name for t in teams] + [g.name for g in groups])
     if kind == Event.EventKind.GAME:
-        us = ", ".join(t.short_name or t.name for t in teams)
+        match_up = us
         if us and opponent:
             is_away = location is not None and not location.is_home
             home, away = (opponent.name, us) if is_away else (us, opponent.name)
-            return f"{home} vs {away}"
-        if opponent:
-            return opponent.name  # (a game always has a team, so this is only reached while one is being fixed)
-        return f"{'Development Game' if friendly else 'Game'} {us}".strip()
-    if not title and creating and kind in (Event.EventKind.TRAINING, Event.EventKind.TOURNAMENT):
+            match_up = f"{home} vs {away}"
+        elif opponent:
+            match_up = opponent.name  # (a game always has a team, so this is only reached while one is being fixed)
+        return subtypes.render_title(subtypes.template_for(subtype, kind), kind, teams=match_up)
+    if not title and kind == Event.EventKind.TRAINING:
+        return subtypes.render_title(subtypes.template_for(subtype, kind), kind, teams=us)
+    if not title and creating and kind == Event.EventKind.TOURNAMENT:
         return str(Event.EventKind(kind).label)
     return title
 
@@ -206,6 +223,7 @@ def _clean(values: dict, errors: dict, *, creating: bool) -> dict:
 
     out["location"] = _one(Location, values.get("location_id"), "location_id", errors, "Unknown location.")
     out["opponent"] = _one(Opponent, values.get("opponent_id"), "opponent_id", errors, "Unknown opponent.")
+    out["subtype"] = _subtype(values.get("subtype_id"), kind, errors)
     out["teams"] = _many(Team, values.get("team_ids"), "team_ids", errors, "Unknown team.")
     out["groups"] = _many(Group, values.get("group_ids"), "group_ids", errors, "Unknown group.")
     out["invited_members"] = _many(Member, values.get("invited_member_ids"), "invited_member_ids", errors, "Unknown member.")
@@ -216,8 +234,8 @@ def _clean(values: dict, errors: dict, *, creating: bool) -> dict:
     if kind == Event.EventKind.GAME and not out["teams"] and "team_ids" not in errors:
         errors["team_ids"] = ["A game needs at least one team."]
 
-    title = _auto_title(kind, (values.get("title") or "").strip(), out["teams"], out["opponent"], out["location"], creating=creating, friendly=bool(values.get("is_friendly")))
-    if not title:
+    title = _auto_title(kind, (values.get("title") or "").strip(), out["teams"], out["groups"], out["opponent"], out["location"], creating=creating, subtype=out["subtype"])
+    if not title and kind != Event.EventKind.GAME:  # (a game without a team already has its own error)
         errors["title"] = ["Give this event a title."]
     out["title"] = title[:255]
 
@@ -305,7 +323,7 @@ def _ids(objs):
 def event_values(event: Event) -> dict:
     """The editable values of ``event`` in the input shape (ids as UUIDs)."""
     return {
-        "title": event.title, "kind": event.kind, "start": event.start, "end": event.end, "gathering": event.gathering,
+        "title": event.title, "kind": event.kind, "subtype_id": event.subtype_id, "start": event.start, "end": event.end, "gathering": event.gathering,
         "deadline": event.deadline, "location_id": event.location_id, "opponent_id": event.opponent_id,
         "team_ids": _ids(event.teams.all()), "group_ids": _ids(event.groups.all()), "club_wide": event.club_wide,
         "invited_member_ids": _ids(event.invited_members.all()), "excluded_member_ids": _ids(event.excluded_members.all()),
@@ -318,7 +336,7 @@ def series_values(series: EventSeries) -> dict:
     ``recurrence`` = recurrence.recurrence_values(series) (``friendly`` False means: edit ``rrule`` as raw text)."""
     start = series.dtstart
     return {
-        "title": series.title, "kind": series.kind, "start": start,
+        "title": series.title, "kind": series.kind, "subtype_id": series.subtype_id, "start": start,
         "end": start + series.duration if series.duration is not None else None,
         "gathering": start - series.gathering_offset if series.gathering_offset is not None else None,
         "deadline": start - series.deadline_offset if series.deadline_offset is not None else None,
@@ -330,7 +348,7 @@ def series_values(series: EventSeries) -> dict:
 
 
 def _state(obj) -> dict:
-    fields = ["title", "kind", "location_id", "opponent_id", "club_wide"]
+    fields = ["title", "kind", "subtype_id", "location_id", "opponent_id", "club_wide"]
     if isinstance(obj, Event):
         fields += ["start", "end", "gathering", "deadline", "season_id", "is_friendly", "cancelled", "detached", "series_id"]
     else:
@@ -352,6 +370,8 @@ def _created(state: dict) -> dict:
 def _merge(current: dict, values: dict) -> dict:
     """``current`` overlaid with ``values``; when only the start moves, end / gathering / deadline move with it."""
     merged = {**current, **values}
+    if "kind" in values and values["kind"] != current.get("kind") and "subtype_id" not in values:
+        merged["subtype_id"] = None  # a subtype belongs to one kind
     old_start, new_start = current.get("start"), values.get("start")
     if "start" in values and old_start is not None and new_start is not None:
         try:
@@ -374,7 +394,7 @@ def _member_of(actor):
 
 
 def _assign_event(event: Event, c: dict) -> None:
-    for f in ("title", "kind", "start", "end", "gathering", "deadline", "location", "opponent", "season", "club_wide", "is_friendly", "cancelled"):
+    for f in ("title", "kind", "subtype", "start", "end", "gathering", "deadline", "location", "opponent", "season", "club_wide", "is_friendly", "cancelled"):
         setattr(event, f, c[f])
     event.save()
     for rel in M2M.values():
@@ -383,7 +403,7 @@ def _assign_event(event: Event, c: dict) -> None:
 
 def _assign_template(series: EventSeries, c: dict) -> None:
     start = c["start"]
-    series.title, series.kind, series.location, series.opponent, series.club_wide = c["title"], c["kind"], c["location"], c["opponent"], c["club_wide"]
+    series.title, series.kind, series.subtype, series.location, series.opponent, series.club_wide = c["title"], c["kind"], c["subtype"], c["location"], c["opponent"], c["club_wide"]
     series.duration = c["end"] - start if c["end"] is not None else None
     series.gathering_offset = start - c["gathering"] if c["gathering"] is not None else None
     series.deadline_offset = start - c["deadline"] if c["deadline"] is not None else None

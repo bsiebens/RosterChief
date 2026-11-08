@@ -31,14 +31,16 @@
 	<svg viewBox="0 0 {W} {H}" class="w-full" role="img" aria-label={ariaLabel}>
 		{#each ticks as v (v)}
 			<line x1={L} x2={W} y1={y(v)} y2={y(v)} class="stroke-line" stroke-width="1" />
-			<text x={L - 6} y={y(v) + 3.5} text-anchor="end" class="fill-muted font-mono" font-size="10">{v}</text>
+			<text x={L - 6} y={y(v) + 3.5} text-anchor="end" class="fill-muted font-mono" font-size="7.5">{v}</text>
 		{/each}
 		{#each rows as row, i (row.label)}
 			{@const cx = L + i * step + step / 2}
 			{#if hover === i}<rect x={L + i * step} y="0" width={step} height={H - B} class="fill-ink/5" />{/if}
+			<text x={cx - bar / 2 - 1} y={y(row.goals_for) - 3} text-anchor="middle" class="fill-ink font-mono font-semibold" font-size="7.5">{row.goals_for}</text>
+			<text x={cx + bar / 2 + 1} y={y(row.goals_against) - 3} text-anchor="middle" class="fill-club-dark font-mono font-semibold" font-size="7.5">{row.goals_against}</text>
 			{#if row.goals_for}<rect x={cx - bar - 1} y={y(row.goals_for)} width={bar} height={y(0) - y(row.goals_for)} rx="2" class="fill-ink" />{/if}
 			{#if row.goals_against}<rect x={cx + 1} y={y(row.goals_against)} width={bar} height={y(0) - y(row.goals_against)} rx="2" class="fill-club" />{/if}
-			<text x={cx} y={H - 7} text-anchor="middle" class="fill-muted font-mono" font-size="10">{axisLabel(row)}</text>
+			<text x={cx} y={H - 7} text-anchor="middle" class="fill-muted font-mono" font-size="7.5">{axisLabel(row)}</text>
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<rect
 				x={L + i * step}

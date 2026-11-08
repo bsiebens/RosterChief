@@ -1,5 +1,6 @@
 export default {
 	en: {
+		'overview.upcoming.in': '{n}/{total} in',
 		'overview.upcoming.empty': 'No events coming up.',
 		'overview.upcoming.club': 'Whole club',
 		'overview.sample': 'Sample data',
@@ -82,6 +83,7 @@ export default {
 		'overview.row.orders_unpaid': 'Orders unpaid'
 	},
 	nl: {
+		'overview.upcoming.in': '{n}/{total} aanwezig',
 		'overview.upcoming.empty': 'Geen evenementen op komst.',
 		'overview.upcoming.club': 'Hele club',
 		'overview.sample': 'Voorbeelddata',
@@ -164,6 +166,7 @@ export default {
 		'overview.row.orders_unpaid': 'Onbetaalde bestellingen'
 	},
 	fr: {
+		'overview.upcoming.in': '{n}/{total} présents',
 		'overview.upcoming.empty': 'Aucun événement à venir.',
 		'overview.upcoming.club': 'Tout le club',
 		'overview.sample': 'Données d’exemple',

@@ -40,6 +40,13 @@ class Choice(Schema):
     label: str
 
 
+class EventSubtypeRef(Schema):
+    id: uuid.UUID
+    kind: str
+    name: str
+    title_template: str = ""
+
+
 # -- calendar --
 
 
@@ -58,6 +65,8 @@ class EventRowOut(Schema):
     id: uuid.UUID
     title: str
     kind: str
+    subtype_id: uuid.UUID | None = None
+    subtype_name: str = ""
     start: datetime.datetime
     end: datetime.datetime | None = None
     gathering: datetime.datetime | None = None
@@ -71,6 +80,10 @@ class EventRowOut(Schema):
     series_id: uuid.UUID | None = None
     detached: bool
     is_friendly: bool
+    score_for: int | None = None
+    score_against: int | None = None
+    is_home_game: bool = False
+    has_game_source: bool = False  # a competition game id to fetch the score and game sheet from
     attendance: AttendanceCounts
     can_edit: bool
     can_manage_attendance: bool
@@ -104,6 +117,15 @@ class LineupInfo(Schema):
     scheduled_publish_at: datetime.datetime | None = None
 
 
+class OfficiatingRef(Schema):
+    """A referee or official on the game (no fees: those are for the referee management screen)."""
+
+    name: str
+    member_id: uuid.UUID | None = None
+    type_name: str = ""
+    is_external: bool = False
+
+
 class EventDetailOut(EventRowOut):
     season: Ref | None = None
     invited_member_ids: list[uuid.UUID]
@@ -114,13 +136,13 @@ class EventDetailOut(EventRowOut):
     lineup: LineupInfo
     competition: str = ""
     competition_label: str = ""
-    score_for: int | None = None
-    score_against: int | None = None
     is_live: bool = False
-    is_home_game: bool = False
     created_by: Ref | None = None
     task_count: int = 0
     attachment_count: int = 0
+    has_game_sheet: bool = False
+    referees: list[OfficiatingRef] = []
+    officials: list[OfficiatingRef] = []
 
 
 class WeekdayChoice(Schema):
@@ -140,6 +162,7 @@ class EventOptionsOut(Schema):
     locations: list[LocationRef]
     opponents: list[OpponentRef]
     kinds: list[Choice]
+    subtypes: list[EventSubtypeRef]
     frequencies: list[str]
     weekdays: list[WeekdayChoice]
 
@@ -158,6 +181,7 @@ class EventIn(Schema):
 
     title: str = ""
     kind: str = "other"
+    subtype_id: uuid.UUID | None = None
     start: datetime.datetime
     end: datetime.datetime | None = None
     gathering: datetime.datetime | None = None
@@ -181,6 +205,7 @@ class EventPatch(Schema):
 
     title: str | None = None
     kind: str | None = None
+    subtype_id: uuid.UUID | None = None
     start: datetime.datetime | None = None
     end: datetime.datetime | None = None
     gathering: datetime.datetime | None = None
@@ -203,6 +228,7 @@ class EventPatch(Schema):
 class EventValues(Schema):
     title: str
     kind: str
+    subtype_id: uuid.UUID | None = None
     start: datetime.datetime | None = None
     end: datetime.datetime | None = None
     gathering: datetime.datetime | None = None
@@ -240,12 +266,24 @@ class AttendanceRowOut(Schema):
     note: str = ""
     coach_note: str | None = None  # only for people who manage this event's attendance
     answered_by_coach: bool = False
+    answered_by_name: str | None = None
+    answered_via: str | None = None
     coach_set_at: datetime.datetime | None = None
     position: str = ""
     jersey_number: int | None = None
     team_id: uuid.UUID | None = None
     selected: bool = False
     has_user: bool = False
+
+
+class AttendanceChangeOut(Schema):
+    id: uuid.UUID
+    created: datetime.datetime
+    from_status: str
+    to_status: str
+    changed_by_name: str
+    via: str
+    note_changed: bool = False
 
 
 class AttendanceListOut(Schema):
@@ -445,3 +483,89 @@ class MemberAttendanceOut(Schema):
     rate: int | None = None
     sparkline: list[SparkBar]
     recent: list[RecentEvent]
+
+
+class GameSheetRow(Schema):
+    time: str = ""
+    type: str
+    ours: bool | None = None
+    team: str = ""
+    icon: str = ""
+    kind: str = ""
+    who: str = ""
+    detail: str = ""
+    tag: str = ""
+    score: str = ""
+    serious: bool = False
+
+
+class GameSheetPeriod(Schema):
+    label: str
+    title: str
+    score: str = ""
+    rows: list[GameSheetRow]
+
+
+class PeriodScore(Schema):
+    label: str
+    score: str
+
+
+class LineupPlayerOut(Schema):
+    pos: str = ""
+    number: int | None = None
+    name: str
+    member_id: uuid.UUID | None = None  # our side only: the roster member the sheet name matched
+    photo_url: str | None = None
+    initials: str = ""
+    goals: int = 0
+    assists: int = 0
+    penalty_minutes: int = 0
+
+
+class GameLineupOut(Schema):
+    """Who dressed for each side, as the competition's game page lists them (ours first)."""
+
+    ours_label: str
+    theirs_label: str
+    ours: list[LineupPlayerOut]
+    theirs: list[LineupPlayerOut]
+
+
+class GameSheetOut(Schema):
+    """The game's timeline laid out from the club's own side (ours first), names included."""
+
+    status: str
+    final: bool
+    updated_at: datetime.datetime | None = None
+    source: str
+    ours_label: str
+    theirs_label: str
+    score: str = ""
+    period_scores: list[PeriodScore]
+    periods: list[GameSheetPeriod]
+    lineup: GameLineupOut | None = None
+
+
+class GameMomentOut(Schema):
+    """One detected piece of news of a game, for debugging the live push."""
+
+    id: uuid.UUID
+    key: str
+    kind: str
+    kind_label: str
+    description: str
+    game_seconds: int | None = None
+    detected_at: datetime.datetime
+    notifiable: bool  # false: recorded as a catch-up (too old in game time to tell anyone)
+    delivered_at: datetime.datetime | None = None
+    state: str  # pushed | catch_up | not_pushed
+
+
+class FollowStateOut(Schema):
+    directly: bool
+    via_team: bool
+
+
+class FollowedTeamsOut(Schema):
+    team_ids: list[uuid.UUID]

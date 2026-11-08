@@ -12,6 +12,8 @@ everyone else gets 403 ``no_access`` from every endpoint. Behind the door there 
   on that very team in the current season. Creating, deleting and reordering teams is club-wide, so it needs the
   settings permission instead.
 * **Evaluations** (``members.execute_evaluations``, the Owner role or the platform owner): see and give evaluations.
+* **Referees** (``events.manage_referees``, the Owner role or the platform owner): assign referees and officials to home games,
+  set their fees and print the payment forms.
 * **Settings** (``admin.manage_settings``, the Owner role or the platform owner): club details and branding,
   positions, number pools, referee / official levels, creating, deleting and ordering teams.
 """
@@ -26,6 +28,7 @@ from members.models import ClubMembership, FamilyMembership, Member
 MANAGE_MEMBERS = "members.manage_members"
 MANAGE_SETTINGS = "admin.manage_settings"
 EXECUTE_EVALUATIONS = "members.execute_evaluations"
+MANAGE_REFEREES = "events.manage_referees"
 
 
 def can_manage_members(user) -> bool:
@@ -89,7 +92,7 @@ def can_access_management(user) -> bool:
 
     if user is None or not user.is_authenticated or not user.is_active:
         return False
-    return is_club_admin(user) or _is_club_owner(user) or has_staff_role(user)
+    return is_club_admin(user) or _is_club_owner(user) or has_staff_role(user) or bool(admin_group_ids(user))
 
 
 def can_manage_settings(user) -> bool:
@@ -104,6 +107,13 @@ def can_execute_evaluations(user) -> bool:
     if user is None or not user.is_authenticated or not user.is_active:
         return False
     return is_platform_owner(user) or user.has_perm(EXECUTE_EVALUATIONS) or _is_club_owner(user)
+
+
+def can_manage_referees(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``events.manage_referees``: arranges referees and officials."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(MANAGE_REFEREES) or _is_club_owner(user)
 
 
 def _is_club_owner(user) -> bool:
@@ -129,9 +139,7 @@ def managed_team_ids(user, *, on: datetime.date | None = None) -> set:
     season = Season.get_current(on)
     if season is None:
         return set()
-    return set(
-        StaffAssignment.objects.filter(member__user=user, season=season, position__management_position=True).values_list("team_id", flat=True)
-    )
+    return set(StaffAssignment.objects.filter(member__user=user, season=season, position__management_position=True).values_list("team_id", flat=True))
 
 
 def can_manage_team(user, team) -> bool:
@@ -150,15 +158,31 @@ def user_group_ids(user) -> set:
     return set(GroupMembership.objects.filter(member__user=user).values_list("group_id", flat=True))
 
 
+def admin_group_ids(user) -> set:
+    """Ids of the groups the user's own member record administers (``GroupMembership.is_admin``)."""
+    from members.models import GroupMembership
+
+    if user is None or not user.is_authenticated or not user.is_active:
+        return set()
+    return set(GroupMembership.objects.filter(member__user=user, is_admin=True).values_list("group_id", flat=True))
+
+
+def can_manage_group(user, group) -> bool:
+    """Members managers manage every group (create, rename, delete, appoint admins); a group's own admins manage its members."""
+    if can_manage_members(user):
+        return True
+    return group is not None and group.pk in admin_group_ids(user)
+
+
 def can_schedule(user, *, team_ids=(), group_ids=(), club_wide=False) -> bool:
     """May ``user`` create or edit an event with this audience? Settings holders always; everyone else only for events
-    that are entirely about teams they manage and/or groups they are in (never club-wide, never audience-less)."""
+    that are entirely about teams they manage and/or groups they administer (never club-wide, never audience-less)."""
     if can_manage_settings(user):
         return True
     team_ids, group_ids = set(team_ids), set(group_ids)
     if club_wide or not (team_ids or group_ids) or not user.is_authenticated or not user.is_active:
         return False
-    return team_ids <= managed_team_ids(user) and group_ids <= user_group_ids(user)
+    return team_ids <= managed_team_ids(user) and group_ids <= admin_group_ids(user)
 
 
 def can_manage_event(user, event) -> bool:
@@ -167,10 +191,11 @@ def can_manage_event(user, event) -> bool:
 
 
 def can_manage_attendance(user, event) -> bool:
-    """Set answers, notes, check-ins and the line-up of ``event``: settings holders, or a manager of any of its teams."""
+    """Set answers, notes, check-ins and the line-up of ``event``: settings holders, a manager of any of its teams, or an
+    admin of any of its groups."""
     if can_manage_settings(user):
         return True
-    return bool(set(event.teams.values_list("pk", flat=True)) & managed_team_ids(user))
+    return bool(set(event.teams.values_list("pk", flat=True)) & managed_team_ids(user)) or bool(set(event.groups.values_list("pk", flat=True)) & admin_group_ids(user))
 
 
 def can_manage_any_team(user) -> bool:
@@ -185,6 +210,14 @@ def require_admin(actor) -> None:
         raise NotAllowed("You are not allowed to manage members.")
 
 
+def require_group_manager(actor, group) -> None:
+    """Raise ``NotAllowed`` unless ``actor`` manages ``group``'s members (members manager, or an admin of the group)."""
+    from .errors import NotAllowed
+
+    if not can_manage_group(actor, group):
+        raise NotAllowed("You are not allowed to manage this group.")
+
+
 def require_settings(actor) -> None:
     """Raise ``NotAllowed`` unless ``actor`` may manage the club's settings."""
     from .errors import NotAllowed
@@ -193,9 +226,74 @@ def require_settings(actor) -> None:
         raise NotAllowed("You are not allowed to manage the club settings.")
 
 
+def require_referees(actor) -> None:
+    """Raise ``NotAllowed`` unless ``actor`` may arrange referees and officials."""
+    from .errors import NotAllowed
+
+    if not can_manage_referees(actor):
+        raise NotAllowed("You are not allowed to manage referees.")
+
+
 def require_team_manager(actor, team) -> None:
     """Raise ``NotAllowed`` unless ``actor`` manages ``team`` (a management position on it, or the settings permission)."""
     from .errors import NotAllowed
 
     if not can_manage_team(actor, team):
         raise NotAllowed("You are not allowed to manage this team.")
+
+
+PUBLISH_NEWS = "news.publish_newsitems"
+
+
+def can_publish_news(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``news.publish_newsitems``: sees and edits every news item,
+    publishes, unpublishes and approves."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(PUBLISH_NEWS) or _is_club_owner(user)
+
+
+def can_add_news(user) -> bool:
+    """Publishers, and anyone who may use the management app and has a member record in this club (they may write a draft)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return can_publish_news(user) or (can_access_management(user) and Member.objects.filter(user=user).exists())
+
+
+def can_edit_news(user, item) -> bool:
+    """Publishers edit (and delete) every item. Anyone else only their own, and only while it is a draft or pending review."""
+    if can_publish_news(user):
+        return True
+    if user is None or not user.is_authenticated or not user.is_active or item.created_by_id is None:
+        return False
+    from news.models import News
+
+    return item.status != News.Status.PUBLISHED and item.created_by.user_id == user.pk
+
+
+def can_view_news(user, item) -> bool:
+    """Publishers see everything, everyone else only their own items (also once published)."""
+    if can_publish_news(user):
+        return True
+    return user is not None and user.is_authenticated and user.is_active and item.created_by_id is not None and item.created_by.user_id == user.pk
+
+
+def require_publish_news(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_publish_news(actor):
+        raise NotAllowed("You are not allowed to publish news.")
+
+
+def require_add_news(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_add_news(actor):
+        raise NotAllowed("You are not allowed to write news.")
+
+
+def require_edit_news(actor, item) -> None:
+    from .errors import NotAllowed
+
+    if not can_edit_news(actor, item):
+        raise NotAllowed("You are not allowed to change this news item.")

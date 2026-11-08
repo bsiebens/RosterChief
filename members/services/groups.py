@@ -5,7 +5,7 @@ from django.db import transaction
 from members.models import Group, GroupMembership, Member
 
 from . import audit
-from .access import require_admin
+from .access import require_admin, require_group_manager
 from .errors import Invalid
 
 
@@ -53,18 +53,43 @@ def delete_group(actor, group: Group) -> None:
 
 
 @transaction.atomic
-def add_member(actor, group: Group, member: Member) -> GroupMembership:
-    require_admin(actor)
+def add_member(actor, group: Group, member: Member, *, is_admin: bool = False, must_respond: bool = True) -> GroupMembership:
+    """Members managers and the group's own admins may add people; only members managers may add an admin."""
+    require_group_manager(actor, group)
+    if is_admin:
+        require_admin(actor)
     if GroupMembership.objects.filter(group=group, member=member).exists():
         raise Invalid("This person is already in the group.")
-    link = GroupMembership.objects.create(group=group, member=member)
+    link = GroupMembership.objects.create(group=group, member=member, is_admin=is_admin, must_respond=must_respond)
     audit.record(actor, "group.member_added", member=member, target=group, changes={"group": {"from": None, "to": group.name}})
     return link
 
 
 @transaction.atomic
+def update_member(actor, group: Group, member: Member, *, is_admin: bool | None = None, must_respond: bool | None = None) -> GroupMembership:
+    """Appoint / dismiss a group admin (members managers only) and say whether the person must answer the group's invites
+    (members managers and the group's admins). The next upcoming events' attendance rows follow (events.signals)."""
+    require_group_manager(actor, group)
+    link = GroupMembership.objects.filter(group=group, member=member).first()
+    if link is None:
+        raise Invalid("This person is not in the group.")
+    changes = {}
+    if is_admin is not None and is_admin != link.is_admin:
+        require_admin(actor)
+        changes["is_admin"] = {"from": link.is_admin, "to": is_admin}
+        link.is_admin = is_admin
+    if must_respond is not None and must_respond != link.must_respond:
+        changes["must_respond"] = {"from": link.must_respond, "to": must_respond}
+        link.must_respond = must_respond
+    if changes:
+        link.save()
+        audit.record(actor, "group.member_updated", member=member, target=group, changes=changes)
+    return link
+
+
+@transaction.atomic
 def remove_member(actor, group: Group, member: Member) -> None:
-    require_admin(actor)
+    require_group_manager(actor, group)
     deleted, _ = GroupMembership.objects.filter(group=group, member=member).delete()
     if not deleted:
         raise Invalid("This person is not in the group.")

@@ -697,6 +697,23 @@ class UserPushTests(PushBase):
         self.sub = WebPushSubscription.objects.create(user=self.user, club=self.club, endpoint="https://push.example/" + "e" * 60, p256dh="p", auth="a", user_agent="Firefox")
         self.theirs = PushDevice.objects.create(user=self.other, installation_id="ios-2", platform="ios", push_token="t3")
 
+    def test_following_lists_teams_and_games_per_club(self):
+        from django_tenants.utils import schema_context
+
+        from events.models import Event, EventFollow, GameFollow
+        from teams.models import Team
+
+        self.assertEqual(self.get(f"/users/{self.user.pk}/push/following").json(), {"clubs": [], "total_teams": 0, "total_games": 0})
+        self.club.add_user(self.user) if hasattr(self.club, "add_user") else None
+        with schema_context(self.club.schema_name):
+            team = Team.objects.create(name="Sharks U16", short_name="U16")
+            GameFollow.objects.create(user=self.user, team=team)
+            game = Event.objects.create(title="Sharks vs Bears", kind="game", start=timezone.now())
+            EventFollow.objects.create(user=self.user, event=game)
+        body = self.get(f"/users/{self.user.pk}/push/following").json()
+        self.assertEqual((body["total_teams"], body["total_games"]), (1, 1))
+        self.assertEqual((body["clubs"][0]["club"]["name"], body["clubs"][0]["teams"][0]["name"], body["clubs"][0]["games"][0]["title"]), ("Push FC", "Sharks U16", "Sharks vs Bears"))
+
     def test_shape(self):
         QuietHours.objects.create(user=self.user, start=datetime.time(22, 0), end=datetime.time(7, 0), timezone="Europe/Brussels")
         UserNotificationSettings.objects.create(user=self.user, email_mode="unless_app")

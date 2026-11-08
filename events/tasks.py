@@ -2,6 +2,7 @@ import datetime
 import logging
 
 from celery import shared_task
+from django.db import connection
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name, get_tenant_model, schema_context
 
@@ -170,3 +171,37 @@ def refresh_standings(today: datetime.date | None = None) -> str:
     counts, failed = _each_club_with("Refreshing standings", work)
     summary = f"refreshed standings for {counts.get('refreshed', 0)} competition source(s); {counts.get('failed', 0)} failed"
     return summary + (f"; clubs failed: {', '.join(failed)}" if failed else "")
+
+
+@shared_task(name="events.run_team_fixtures")
+def run_team_fixtures(team_id: str, apply: bool = False) -> dict:
+    """Check (or, with ``apply``, import) one team's stored fixture sources for the current season. Runs in the club
+    schema it was queued from; started from the calendar's import page."""
+    from teams.models import Team
+
+    from .services.import_sources import run_team
+
+    club = get_tenant_model().objects.get(schema_name=connection.schema_name)
+    return run_team(club, Team.objects.get(pk=team_id), apply=apply)
+
+
+@shared_task(name="events.update_past_games")
+def update_past_games(team_id: str) -> dict:
+    """Fetch score and game sheet of every played, imported game of one team (queued from the calendar's import page).
+    Runs in the club schema it was queued from."""
+    from teams.models import Team
+
+    from .services.game_timeline import update_past_games as update
+
+    return update(Team.objects.get(pk=team_id))
+
+
+@shared_task(name="events.refresh_member_stats")
+def refresh_member_stats(job_id: str) -> dict:
+    """Re-link a team's stored game sheets to its roster after someone joined it (the member's Stats tab shows a banner
+    meanwhile). Runs in the club schema it was queued from."""
+    from .models import StatsRefresh
+    from .services.stats_refresh import run
+
+    job = run(StatsRefresh.objects.get(pk=job_id))
+    return {"games": job.games, "updated": job.updated, "status": job.status}

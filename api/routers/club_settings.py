@@ -63,12 +63,13 @@ def delete_logo(request):
 @router.get("/settings/previews", response=list[PreviewOut], summary="Club-branded outgoing documents (settings permission)")
 def list_previews(request):
     _club(request)
-    return [p.__dict__ for p in previews.PREVIEWS]
+    has_referees = request.features.has("referee_officials")
+    return [p.__dict__ for p in previews.PREVIEWS if has_referees or p.key not in previews.PAYMENT_FORM_KINDS]
 
 
-def _preview(key: str) -> previews.Preview:
+def _preview(request, key: str) -> previews.Preview:
     preview = previews.BY_KEY.get(key)
-    if preview is None:
+    if preview is None or (key in previews.PAYMENT_FORM_KINDS and not request.features.has("referee_officials")):
         raise HttpError(404, "Not found.")
     return preview
 
@@ -77,7 +78,7 @@ def _preview(key: str) -> previews.Preview:
 def preview_html(request, key: str, lang: str = "en"):
     """``text/html``; the subject is in the url-encoded ``X-Preview-Subject`` header. ``lang`` (en, nl, fr) picks the language."""
     _club(request)
-    preview = _preview(key)
+    preview = _preview(request, key)
     subject, html = previews.render_email(request, preview.key, lang if lang in previews.LANGUAGES else "en")
     response = HttpResponse(html, content_type="text/html; charset=utf-8")
     response["X-Preview-Subject"] = quote(subject)
@@ -89,7 +90,7 @@ def preview_html(request, key: str, lang: str = "en"):
 def preview_file(request, key: str, lang: str = "en"):
     """``application/pdf``. 404 for an unknown key or a document that is not a PDF; 503 when PDF rendering is unavailable."""
     _club(request)
-    preview = _preview(key)
+    preview = _preview(request, key)
     if preview.kind != "pdf":
         raise HttpError(404, "Not found.")
     _subject, html = previews.render_email(request, preview.key, lang if lang in previews.LANGUAGES else "en")

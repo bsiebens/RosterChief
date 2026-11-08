@@ -26,6 +26,7 @@ class FixtureSourceOut(Schema):
     season_name: str
     season_exists: bool
     competition_label: str
+    include_past: bool = False
     last_imported: datetime | None = None
     last_checked: datetime | None = None
     last_check: LastCheckOut | None = None
@@ -113,6 +114,7 @@ class FixturePreviewOut(Schema):
     season_id: UUID | None = None
     season_name: str
     competition_label: str
+    include_past: bool = False
     scraped_team_name: str
     team: RefOut
     counts: PlanCountsOut
@@ -128,6 +130,7 @@ class FixturePreviewIn(Schema):
     url: str
     season_id: UUID | None = None
     competition_label: str = ""
+    include_past: bool = False
 
 
 # -- import --
@@ -270,3 +273,18 @@ class PlayDayImportIn(Schema):
 class PlayDayImportOut(Schema):
     created: int
     updated: int
+
+
+# -- background run (check / import all stored sources of a team) --
+
+
+class RunIn(Schema):
+    apply: bool = False
+
+
+class TaskOut(Schema):
+    id: str
+    state: str
+    done: bool
+    ok: bool
+    result: dict | None = None

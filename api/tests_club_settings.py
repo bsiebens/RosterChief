@@ -194,7 +194,7 @@ class ClubSettingsApiTests(TestCase):
             subject = unquote(r["X-Preview-Subject"])
             self.assertIn("Brand FC", subject, item["key"])
         r = self.admin("get", "/previews/login_granted/html?lang=nl")
-        self.assertIn("lang=\"nl\"", r.content.decode())
+        self.assertIn('lang="nl"', r.content.decode())
 
     def test_preview_without_logo_shows_initials(self):
         html = self.admin("get", "/previews/password_reset_key/html").content.decode()

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarClock, Megaphone, Save, Users, X } from '@lucide/svelte';
+	import { CalendarClock, Megaphone, Save, Trash2, Users, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api, type ApiCall } from '#lib/management-api.ts';
@@ -44,7 +44,15 @@
 		return [...groups.entries()];
 	}
 	const groups = $derived(byPosition(lineup.members));
+	/** Takes one player out of the pick (saved with "Save draft" or "Publish"). */
+	const drop = (id: string) => (picked = picked.filter((x) => x !== id));
 	const pickedMembers = $derived(lineup.members.filter((m) => picked.includes(m.member.id)));
+	/** The pick grouped by position (the same order as the Players card), jersey number within a position. */
+	const pickedGroups = $derived(
+		groups
+			.map(([position, members]) => [position, members.filter((m) => picked.includes(m.member.id)).sort((a, b) => (a.jersey_number ?? 999) - (b.jersey_number ?? 999))] as [string, LineupMember[]])
+			.filter(([, members]) => members.length)
+	);
 
 	async function call<T>(fn: () => Promise<ApiCall<T>>, done?: (data: T) => void) {
 		busy = true;
@@ -82,9 +90,9 @@
 </script>
 
 <div class="grid gap-4">
-	<div class="flex flex-wrap items-center gap-3">
+	<!-- Managers see the status on their Players card; everyone else gets it here. -->
+	<div class="flex flex-wrap items-center gap-3 {manage && lineup.team ? 'hidden' : ''}">
 		<span class="badge border {STATUS_CHIP[lineup.status] ?? STATUS_CHIP.none}">{t(`events.lineup.status.${lineup.status}`)}</span>
-		{#if lineup.team}<span class="text-sm text-muted">{t('events.lineup.for_team', { name: lineup.team.name })}</span>{/if}
 		{#if lineup.published_at}<span class="font-mono text-xs text-muted">{t('events.lineup.published_at', { when: formatDateTime(lineup.published_at) })}</span>{/if}
 		{#if lineup.scheduled_publish_at && !lineup.published_at}<span class="font-mono text-xs text-info-text">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</span>{/if}
 	</div>
@@ -106,17 +114,23 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="grid gap-4 lg:grid-cols-[2fr_1fr]">
+			<div class="grid gap-4 lg:grid-cols-2">
 				<div class="card">
-					<div class="border-b border-line px-5 py-3">
-						<h3 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">{t('events.lineup.players')}</h3>
-						<p class="text-xs text-muted">{t('events.lineup.players_help')}</p>
+					<div class="flex items-start justify-between gap-3 border-b border-line px-5 py-3">
+						<div>
+							<h3 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">{t('events.lineup.players')}</h3>
+							<p class="text-xs text-muted">{t('events.lineup.players_help')}</p>
+						</div>
+						<div class="flex shrink-0 flex-col items-end gap-1">
+							<span class="badge border {STATUS_CHIP[lineup.status] ?? STATUS_CHIP.none}">{t(`events.lineup.status.${lineup.status}`)}</span>
+							{#if lineup.published_at}<span class="font-mono text-[11px] text-muted">{t('events.lineup.published_at', { when: formatDateTime(lineup.published_at) })}</span>{:else if lineup.scheduled_publish_at}<span class="font-mono text-[11px] text-info-text">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</span>{/if}
+						</div>
 					</div>
 					{#each groups as [position, members] (position)}
 						<fieldset class="border-b border-rule px-5 py-3 last:border-b-0">
 							<legend class="sr-only">{position}</legend>
 							<p class="mb-1.5 font-display text-xs font-bold tracking-[.08em] text-muted uppercase" aria-hidden="true">{position}</p>
-							<ul class="grid gap-1 sm:grid-cols-2">
+							<ul class="grid gap-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
 								{#each members as m (m.member.id)}
 									<li>
 										<label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-paper {m.available ? '' : 'cursor-not-allowed opacity-50'}">
@@ -137,15 +151,27 @@
 
 				<div class="grid content-start gap-4">
 					<div class="card card-body gap-2">
-						<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('events.lineup.picked', { n: picked.length })}</h3>
-						<ul class="grid gap-1 text-sm">
-							{#each pickedMembers as m (m.member.id)}<li class="flex gap-2"><span class="w-7 text-right font-display font-extrabold">{m.jersey_number ?? ''}</span>{m.member.name}</li>{:else}<li class="text-muted">{t('events.lineup.none_picked')}</li>{/each}
+						<div class="flex items-center justify-between gap-2">
+							<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('events.lineup.picked', { n: picked.length })}</h3>
+							{#if dirty}<span class="badge badge-sm border border-warn-border bg-warn-bg text-warn-text">{t('events.lineup.unsaved').replace(/\.$/, '')}</span>{/if}
+						</div>
+						<ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+							{#each pickedGroups as [position, members] (position)}
+								<li class="col-span-2 mt-1 font-display text-[11px] font-bold tracking-[.08em] text-muted uppercase first:mt-0" aria-hidden="true">{position}</li>
+								{#each members as m (m.member.id)}
+									<li class="group flex items-center gap-2">
+										<span class="w-7 shrink-0 text-right font-display font-extrabold">{m.jersey_number ?? ''}</span>
+										<span class="min-w-0 flex-1 truncate">{m.member.name}</span>
+										<button type="button" class="btn btn-ghost btn-sm btn-square shrink-0 text-muted hover:bg-danger-bg hover:text-danger" disabled={busy} aria-label={t('events.lineup.drop_named', { name: m.member.name })} title={t('events.lineup.drop')} onclick={() => drop(m.member.id)}><Trash2 size={17} aria-hidden="true" /></button>
+									</li>
+								{/each}
+							{:else}<li class="col-span-2 text-muted">{t('events.lineup.none_picked')}</li>{/each}
 						</ul>
 						<div class="mt-2 flex flex-wrap gap-2">
 							<button class="btn btn-outline btn-sm gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={14} /> {t('events.lineup.save')}</button>
-							<button class="btn btn-primary btn-sm gap-2" type="button" disabled={busy || !picked.length} onclick={publish}><Megaphone size={14} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
+							<button class="btn btn-primary btn-sm gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={publish}><Megaphone size={14} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
 						</div>
-						{#if dirty}<p class="text-xs text-warn-text">{t('events.lineup.unsaved')}</p>{/if}
+						<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
 					</div>
 					{#if !lineup.published_at}
 						<div class="card card-body gap-2">
@@ -157,7 +183,7 @@
 								<form class="flex flex-wrap items-end gap-2" onsubmit={schedule}>
 									<label class="form-control">
 										<span class="label"><span class="label-text">{t('events.lineup.schedule_when')}</span></span>
-										<input class="input input-sm" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
+										<input class="input input-sm w-56 max-w-full" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
 									</label>
 									<button class="btn btn-outline btn-sm" type="submit" disabled={busy || !when || !picked.length}>{t('events.lineup.schedule_button')}</button>
 								</form>

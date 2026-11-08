@@ -71,6 +71,16 @@ class Member(UUIDModel):
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, verbose_name=_("user"), null=True, blank=True, on_delete=models.DO_NOTHING, related_name="+")
 
+    stats_share_token = models.CharField(
+        _("stats share token"),
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        help_text=_("Secret in the personal public link to this person's game stats; empty = not shared. Replacing it kills the old link."),
+    )
+
     first_name = models.CharField(_("first_name"), max_length=75)
     last_name = models.CharField(_("last_name"), max_length=75)
     email = models.EmailField(_("email"), blank=True, help_text=_("Contact address. Also used as the login email when access is granted."))
@@ -243,6 +253,12 @@ class Group(UUIDModel):
 class GroupMembership(UUIDModel):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="memberships", verbose_name=_("group"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="group_memberships", verbose_name=_("member"))
+    is_admin = models.BooleanField(_("group admin"), default=False, help_text=_("Can schedule events for this group and add or remove its members -- like a management position on a team."))
+    must_respond = models.BooleanField(
+        _("responds to invites"),
+        default=True,
+        help_text=_("Whether this person is expected to answer the group's event invites. Untick it for e.g. the admins of a training group: they see the events, but get no attendance row to answer."),
+    )
 
     class Meta:
         verbose_name = _("group membership")

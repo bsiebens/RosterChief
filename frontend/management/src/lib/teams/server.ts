@@ -15,6 +15,9 @@ export type TeamRow = {
 	ordering: number | null;
 	feeds_into_id: string | null;
 	feeds_into_name: string | null;
+	/** Who arranges referees / match officials for the team's home games: the club or the federation. */
+	referee_management: 'club' | 'federation';
+	official_management: 'club' | 'federation';
 	player_count: number;
 	staff_count: number;
 };
@@ -61,7 +64,9 @@ export function teamBody(form: FormData) {
 		...(form.has('age_min') ? { age_min: intOrNull(form, 'age_min') } : {}),
 		...(form.has('age_max') ? { age_max: intOrNull(form, 'age_max') } : {}),
 		tournament_only: form.get('tournament_only') === 'on',
-		...(form.has('feeds_into_id') ? { feeds_into_id: strOrNull(form, 'feeds_into_id') } : {})
+		...(form.has('feeds_into_id') ? { feeds_into_id: strOrNull(form, 'feeds_into_id') } : {}),
+		...(form.has('referee_management') ? { referee_management: text(form, 'referee_management') } : {}),
+		...(form.has('official_management') ? { official_management: text(form, 'official_management') } : {})
 	};
 }
 

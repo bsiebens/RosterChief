@@ -39,6 +39,7 @@
 		diffMinutes,
 		formatLocal,
 		gameTitle as buildGameTitle,
+		generatesTitle,
 		isAwayGame,
 		isGame,
 		normLocal,
@@ -48,6 +49,7 @@
 		mondayBefore,
 		shiftLocal,
 		titleOptional,
+		titleSuggestion,
 		type FormState
 	} from '#lib/events/form-types.ts';
 
@@ -106,9 +108,11 @@
 	};
 
 	const game = $derived(isGame(v.kind));
+	// A game and a training are named by the subtype's template: the form shows that title instead of a field.
+	const generated = $derived(generatesTitle(v.kind));
 	// A new series cannot be "friendly"; an occurrence can (scope "this" only, see EventFormScope).
 	const repeating = $derived(mode === 'create' && (v.repeat !== 'none' || !!v.rrule.trim()));
-	const titleRequired = $derived(!game && (mode === 'edit' || !titleOptional(v.kind)));
+	const titleRequired = $derived(!generated && !titleOptional(v.kind));
 	const recurrenceShown = $derived(mode === 'create' || !!series);
 	const kindLabel = (value: string) => {
 		const key = `eventform.kind.${value}`;
@@ -117,7 +121,11 @@
 	};
 
 	// Generated game title exactly as the API builds it (home side first; an away location puts the opponent first).
-	const gameTitle = $derived(buildGameTitle(v, options, options.kinds.find((k) => k.value === 'game')?.label || kindLabel('game')));
+	const gameTitle = $derived(game ? buildGameTitle(v, options, kindLabel('game')) : '');
+	// Subtypes of the chosen kind (set up under Settings > Event types); the title box suggests the subtype's title.
+	const kindSubtypes = $derived((options.subtypes ?? []).filter((x) => x.kind === v.kind));
+	const suggestion = $derived(titleSuggestion(v, options, kindLabel(v.kind)));
+	const shownTitle = $derived(game ? gameTitle : suggestion || kindLabel(v.kind));
 	const away = $derived(isAwayGame(v, options));
 	const opponent = $derived(options.opponents.find((o) => o.id === v.opponent_id) ?? null);
 	const location = $derived(options.locations.find((l) => l.id === v.location_id) ?? null);
@@ -286,7 +294,7 @@
 						class="flex min-h-22 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 px-2 py-3 text-center transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-club has-[:focus-visible]:ring-offset-2 {on
 							? 'border-club bg-club text-club-content'
 							: 'border-line bg-white text-slate hover:border-stroke hover:bg-subhead'}">
-						<input class="sr-only" type="radio" name="{uid}-kind" value={k.value} bind:group={v.kind} />
+						<input class="sr-only" type="radio" name="{uid}-kind" value={k.value} bind:group={v.kind} onchange={() => (v.subtype_id = '')} />
 						<Icon size={26} strokeWidth={on ? 2.25 : 1.75} aria-hidden="true" />
 						<span class="font-display text-sm leading-tight font-bold tracking-wide uppercase">{kindLabel(k.value)}</span>
 					</label>
@@ -294,6 +302,17 @@
 			</div>
 			{#if fe('kind')}<span class="mt-1 block text-xs text-error">{fe('kind')}</span>{/if}
 		</fieldset>
+		{#if kindSubtypes.length}
+			<fieldset class="mt-3 flex flex-wrap items-center gap-2">
+				<legend class="sr-only">{t('eventform.subtypes_label', { kind: kindLabel(v.kind) })}</legend>
+				<span class="mr-1 font-mono text-[11px] tracking-wide text-muted uppercase" aria-hidden="true">{t('eventform.subtype')}</span>
+				{#each kindSubtypes as st (st.id)}
+					{@const on = v.subtype_id === st.id}
+					<button type="button" class="btn btn-sm rounded-full {on ? 'btn-primary' : 'btn-outline'}" aria-pressed={on} onclick={() => (v.subtype_id = on ? '' : st.id)}>{st.name}</button>
+				{/each}
+				{#if fe('subtype_id')}<span class="block w-full text-xs text-error">{fe('subtype_id')}</span>{/if}
+			</fieldset>
+		{/if}
 	</section>
 
 	<div class="grid gap-5 xl:grid-cols-3">
@@ -301,38 +320,40 @@
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<!-- Details -->
 			<section class="card card-body" aria-labelledby="{uid}-h-details">
-				{@render head(`${uid}-h-details`, t('eventform.card.details'), game ? t('eventform.card.details_desc') : t('eventform.card.details_desc_plain'), FilePenLine)}
+				{@render head(`${uid}-h-details`, t('eventform.card.details'), generated ? t('eventform.card.details_desc') : t('eventform.card.details_desc_plain'), FilePenLine)}
 				<div class="grid gap-4">
-					{#if game}
+					{#if generated}
 						<div class="rounded-lg border border-line bg-subhead px-3 py-2.5" aria-live="polite">
 							<div class="font-mono text-[11px] tracking-wide text-muted uppercase">{t('eventform.title_generated')}</div>
-							<div class="font-display text-xl font-bold break-words text-ink">{gameTitle}</div>
-							<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-								{#if !location}
-									<span class="inline-flex items-center gap-1 text-muted"><House size={13} aria-hidden="true" /> {t('eventform.no_location_home')}</span>
-								{:else if away}
-									<span class="badge badge-warning gap-1"><BusFront size={12} aria-hidden="true" /> {t('eventform.away_game')}</span>
-								{:else}
-									<span class="badge badge-success gap-1"><House size={12} aria-hidden="true" /> {t('eventform.home_game')}</span>
-								{/if}
-							</div>
-							<div class="mt-1 text-xs text-muted">{t('eventform.title_generated_help')}</div>
+							<div class="font-display text-xl font-bold break-words text-ink">{shownTitle}</div>
+							{#if game}
+								<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+									{#if !location}
+										<span class="inline-flex items-center gap-1 text-muted"><House size={13} aria-hidden="true" /> {t('eventform.no_location_home')}</span>
+									{:else if away}
+										<span class="badge badge-warning gap-1"><BusFront size={12} aria-hidden="true" /> {t('eventform.away_game')}</span>
+									{:else}
+										<span class="badge badge-success gap-1"><House size={12} aria-hidden="true" /> {t('eventform.home_game')}</span>
+									{/if}
+								</div>
+							{/if}
+							<div class="mt-1 text-xs text-muted">{game ? t('eventform.title_generated_help') : t('eventform.title_generated_help_training')}</div>
 							{#if fe('title')}<span class="mt-1 block text-xs text-error">{fe('title')}</span>{/if}
 						</div>
 					{/if}
 
 					<div class="grid gap-4 sm:grid-cols-2">
-						{#if !game}
-							<!-- Not a game: the title sits beside the location, like the opponent does for a game. -->
+						{#if !generated}
+							<!-- Not a game or training: the title sits beside the location, like the opponent does for a game. -->
 							<Field
 								label={titleRequired ? t('eventform.title') : t('eventform.title_optional')}
 								bind:value={v.title}
 								error={fe('title')}
 								maxlength={255}
 								autocomplete="off"
-								placeholder={titleRequired ? '' : kindLabel(v.kind)}
-								help={titleRequired ? undefined : t('eventform.title_kind_help', { kind: kindLabel(v.kind) })} />
-						{:else}
+								placeholder={suggestion || (titleRequired ? '' : kindLabel(v.kind))}
+								help={titleRequired ? undefined : t('eventform.title_kind_help', { kind: suggestion || kindLabel(v.kind) })} />
+						{:else if game}
 							<div class="form-control w-full min-w-0">
 								<label class="label" for="{uid}-opp"><span class="label-text">{t('eventform.opponent')}</span></label>
 								<div class="flex w-full items-center gap-2">
@@ -418,7 +439,7 @@
 			<section class="card card-body gap-4 xl:sticky xl:top-20" aria-labelledby="{uid}-h-save">
 				{@render head(`${uid}-h-save`, t('eventform.card.save'), mode === 'create' ? t('eventform.card.save_desc_create') : t('eventform.card.save_desc_edit'), CircleCheck)}
 				<dl class="grid gap-2.5 rounded-lg border border-line bg-subhead p-3">
-					{@render summaryRow(game ? Swords : (KIND_ICONS[v.kind] ?? CalendarDays), kindLabel(v.kind), game ? gameTitle : v.title.trim() || (titleRequired ? '—' : kindLabel(v.kind)))}
+					{@render summaryRow(KIND_ICONS[v.kind] ?? CalendarDays, kindLabel(v.kind), generated ? shownTitle : v.title.trim() || (titleRequired ? '—' : suggestion || kindLabel(v.kind)))}
 					{@render summaryRow(Clock, t('eventform.sum.when'), summaryWhen)}
 					{@render summaryRow(Users, t('eventform.sum.who'), summaryWho)}
 					{#if recurrenceShown}{@render summaryRow(RepeatIcon, t('eventform.sum.repeats'), summaryRepeat)}{/if}

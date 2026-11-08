@@ -71,8 +71,30 @@ def _team_id_from_href(href: str) -> str | None:
     return match.group(1) if match else None
 
 
-def parse_fixtures(html: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
-    """Returns (the scraped team's own display name, its upcoming fixtures)."""
+def _game_tables(soup, include_past: bool):
+    """The schedule tables of a team page: the "Upcoming games" one, plus (``include_past``) every other ``games-*``
+    section (the played games)."""
+    tables = []
+    for heading in soup.find_all(id=re.compile(r"^games-")):
+        if heading.get("id") != "games-upcoming" and not include_past:
+            continue
+        table = heading.find_next("table")
+        if table is not None and table not in tables:
+            tables.append(table)
+    return tables
+
+
+def _columns(row) -> dict:
+    """Column positions by header text (date, hour, location, home, visit); the upcoming table's fixed layout when a
+    header is missing."""
+    names = [cell.get_text(strip=True).lower() for cell in row.find_all(["th", "td"])]
+    defaults = {"date": 1, "hour": 2, "location": 3, "home": 4, "visit": 5}
+    return {key: (names.index(key) if key in names else default) for key, default in defaults.items()}
+
+
+def parse_fixtures(html: str, team_id: str, include_past: bool = False) -> tuple[str, list[ScrapedFixture]]:
+    """Returns (the scraped team's own display name, its fixtures: the upcoming ones, plus the played ones with
+    ``include_past``)."""
     soup = BeautifulSoup(html, "html.parser")
 
     team_heading = soup.find("h2")
@@ -86,9 +108,19 @@ def parse_fixtures(html: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
         raise RBIHFImportError(_("Could not find an “Upcoming games” table on this page."))
 
     fixtures = []
+    seen = set()
+    for table in _game_tables(soup, include_past):
+        fixtures.extend(_table_fixtures(table, team_id, seen))
+    return team_name, fixtures
+
+
+def _table_fixtures(table, team_id: str, seen: set) -> list[ScrapedFixture]:
+    fixtures = []
+    header = table.find("tr")
+    cols = _columns(header) if header is not None else _columns(table)
     for row in table.find_all("tr"):
         cells = row.find_all("td")
-        if len(cells) < 6:
+        if len(cells) <= max(cols.values()):
             continue  # the header row (<th>s) and any stray rows
 
         game_link = cells[0].find("a")
@@ -97,13 +129,13 @@ def parse_fixtures(html: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
             continue
 
         try:
-            naive_start = datetime.strptime(f"{cells[1].get_text(strip=True)} {cells[2].get_text(strip=True)}", "%Y-%m-%d %H:%M")
+            naive_start = datetime.strptime(f"{cells[cols['date']].get_text(strip=True)} {cells[cols['hour']].get_text(strip=True)}", "%Y-%m-%d %H:%M")
         except ValueError:
             continue  # a row that doesn't match the expected shape: skip rather than blow up the whole import
         start = timezone.make_aware(naive_start)
 
-        venue_text = cells[3].get_text(strip=True)
-        home_link, visit_link = cells[4].find("a"), cells[5].find("a")
+        venue_text = cells[cols["location"]].get_text(strip=True)
+        home_link, visit_link = cells[cols["home"]].find("a"), cells[cols["visit"]].find("a")
         if home_link is None or visit_link is None:
             continue
 
@@ -116,9 +148,12 @@ def parse_fixtures(html: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
         else:
             continue  # neither side is the team we asked about: inconsistent row, skip it
 
+        if game_id in seen:
+            continue
+        seen.add(game_id)
         fixtures.append(ScrapedFixture(external_game_id=game_id, start=start, is_home=is_home, opponent_name=opponent_name, venue_text=venue_text))
 
-    return team_name, fixtures
+    return fixtures
 
 
 def suggested_location(fixture: ScrapedFixture) -> Location | None:
@@ -198,11 +233,11 @@ def _describe_changes(event: Event, fixture: ScrapedFixture, competition_label: 
     return changes
 
 
-def build_plan(team, rbihf_team_id: str, html: str, competition_label: str = "") -> ImportPlan:
+def build_plan(team, rbihf_team_id: str, html: str, competition_label: str = "", include_past: bool = False) -> ImportPlan:
     """Parses ``html`` (from ``fetch_html``) and diffs it against ``team``'s existing RBIHF games. ``rbihf_team_id`` is
     RBIHF's id for the scraped page: a team in several competitions (Division 1, Cup) has a page, and an id, per
     competition, and every game is stamped with it so re-importing one never deletes another's games."""
-    scraped_team_name, fixtures = parse_fixtures(html, rbihf_team_id)
+    scraped_team_name, fixtures = parse_fixtures(html, rbihf_team_id, include_past)
     return plan_from_fixtures(team, competition=COMPETITION, source_id=rbihf_team_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
 
 

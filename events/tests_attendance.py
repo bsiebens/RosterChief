@@ -13,9 +13,9 @@ from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
 from events import tasks
-from events.models import Attendance, Event, Season
+from events.models import Attendance, AttendanceChange, Event, Season
 from events.services import attendance as svc
-from members.models import AuditEntry, ClubMembership, Group, GroupMembership, Member
+from members.models import AuditEntry, ClubMembership, Family, FamilyMembership, Group, GroupMembership, Member
 from members.services import memberships
 from members.services.errors import Invalid, NotAllowed
 from notifications.models import InboxNotification, OutboxEntry
@@ -322,6 +322,32 @@ class RosterSignalTests(AttendanceTestBase):
         team_services.remove_player(self.admin, spot)
         self.assertEqual(self.invited(e), set())
 
+    def test_group_only_event_tracks_attendance_rows(self):
+        """A group linked to an event (no team at all) gets attendance rows just like a roster would."""
+        GroupMembership.objects.create(group=self.group, member=self.cara)
+        e = self.event("Volunteer briefing", groups=[self.group], kind=Event.EventKind.MEETING)
+        row = Attendance.objects.get(event=e, member=self.cara)
+        self.assertEqual(row.status, Attendance.AttendanceStatus.NO_RESPONSE)
+        row.status = Attendance.AttendanceStatus.PRESENT
+        row.save()
+        self.assertEqual(Attendance.objects.filter(event=e, status=Attendance.AttendanceStatus.PRESENT).count(), 1)
+
+    def test_group_members_who_need_not_respond_get_no_attendance_row(self):
+        link = GroupMembership.objects.create(group=self.group, member=self.cara, must_respond=False)
+        e = self.event("Training", groups=[self.group], kind=Event.EventKind.TRAINING)
+        self.assertEqual(self.invited(e), set())
+        self.assertEqual(self.inbox_for(self.cara_user).count(), 0)
+        link.must_respond = True
+        link.save()
+        self.assertEqual(self.invited(e), {self.cara.pk})
+        link.must_respond = False
+        link.save()
+        self.assertEqual(self.invited(e), set())
+        # still invited through a team: the roster spot counts, the group flag doesn't take it away
+        self.roster(self.cara)
+        e2 = self.event("Mixed", teams=[self.u12], groups=[self.group])
+        self.assertEqual(self.invited(e2), {self.cara.pk})
+
     def test_group_membership_add_and_remove(self):
         e = self.event("Volunteer briefing", groups=[self.group], kind=Event.EventKind.MEETING)
         gm = GroupMembership.objects.create(group=self.group, member=self.cara)
@@ -416,6 +442,29 @@ class CoachAnswerTests(AttendanceTestBase):
         self.assertEqual(entry.member, self.alice)
         self.assertEqual(entry.changes["status"], {"from": "no_response", "to": "present"})
         self.assertFalse(InboxNotification.objects.exists())  # notify=False
+
+    def test_status_changes_are_logged_with_who_and_via(self):
+        svc.set_answer_as_coach(self.coach_user, self.a, "absent", None)
+        svc.set_answer_as_coach(self.coach_user, self.a, "absent", "only a note")  # unchanged: no entry
+        svc.set_answer_as_coach(self.coach_user, self.a, "present", None)
+        changes = list(self.a.changes.order_by("created"))
+        self.assertEqual([(c.from_status, c.to_status, c.via, c.changed_by_name, c.changed_by) for c in changes], [("no_response", "absent", "coach", "Cody Coach", self.coach_user), ("absent", "present", "coach", "Cody Coach", self.coach_user)])
+
+    def test_via_is_self_guardian_coach_or_system(self):
+        family = Family.objects.create(name="Able")
+        mum = Member.objects.create(first_name="Mia", last_name="Able", email="mia@att.test")
+        mum_user, _ = grant_login(self.club, mum)
+        FamilyMembership.objects.create(family=family, member=mum, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=self.alice, role=FamilyMembership.FamilyRole.CHILD)
+        self.assertEqual(svc.change_via(self.alice_user, self.alice), "self")
+        self.assertEqual(svc.change_via(mum_user, self.alice), "guardian")
+        self.assertEqual(svc.change_via(self.coach_user, self.alice), "coach")
+        self.assertEqual(svc.change_via(None, self.alice), "system")
+        change = svc.record_status_change(mum_user, self.a, "no_response", "present")
+        self.assertEqual((change.via, change.changed_by_name), ("guardian", "Mia Able"))
+        self.assertIsNone(svc.record_status_change(mum_user, self.a, "present", "present"))
+        self.assertEqual(svc.record_status_change(None, self.a, "present", "absent").changed_by_name, "")
+        self.assertEqual(AttendanceChange.objects.filter(attendance=self.a).count(), 2)
 
     def test_no_response_resets_and_note_handling(self):
         svc.set_answer_as_coach(self.coach_user, self.a, "absent", "injured")
@@ -581,6 +630,16 @@ class StatisticsTests(AttendanceTestBase):
         self.assertEqual([b["state"] for b in bars], ["present", "present", "absent", "present", "upcoming"])
         self.assertEqual(bars[-1]["event"], self.upcoming)
         self.assertEqual(len(svc.member_attendance_sparkline(self.alice, limit=2)), 2)
+
+    def test_sparkline_shows_the_latest_past_events_not_the_furthest_future_ones(self):
+        for days in range(2, 16):
+            self.event(f"Future {days}", start=timezone.now() + datetime.timedelta(days=days), teams=(self.u12,))
+        bars = svc.member_attendance_sparkline(self.alice)
+        self.assertEqual(len(bars), 12)
+        # The past events come first (oldest to newest); upcoming ones only fill what is left.
+        states = [b["state"] for b in bars]
+        self.assertEqual(states[:4], ["present", "present", "absent", "present"])
+        self.assertTrue(all(state == "upcoming" for state in states[4:]))
 
     def test_members_attendance_summary(self):
         summary = svc.members_attendance_summary([self.alice, self.bob, self.coach.pk], last=None)

@@ -26,7 +26,9 @@ from api.schemas_fixture_imports import (
     PlayDayPreviewOut,
     RecheckAllOut,
     RecheckOut,
+    RunIn,
     StandingsCompetitionOut,
+    TaskOut,
 )
 from events.services import fixture_previews as svc
 from events.services import import_sources, json_import, rbihf_standings
@@ -102,7 +104,7 @@ def preview(request, team_id: uuid.UUID, payload: FixturePreviewIn):
     team = _team(team_id)
     svc.require_import(request.user, payload.source, request.features)
     season = _season(payload.season_id)
-    entry, raw, plan = import_sources.preview_import(request.user, team, source=payload.source, url=payload.url, season=season, competition_label=payload.competition_label)
+    entry, raw, plan = import_sources.preview_import(request.user, team, source=payload.source, url=payload.url, season=season, competition_label=payload.competition_label, include_past=payload.include_past)
     token = svc.stash(request.user, kind="fixtures", team_id=str(team.pk), entry=entry, raw=raw)
     return svc.plan_out(plan, entry, token)
 
@@ -128,6 +130,46 @@ def import_previewed(request, team_id: uuid.UUID, payload: FixtureImportIn):
     result = svc.import_with_choices(request.user, team, data["entry"], data["raw"], opponents=body["opponents"], locations=body["locations"], game_locations=body["game_locations"])
     team.refresh_from_db(fields=["import_sources"])
     return {**result, "sources": svc.sources_out(team, request.features)}
+
+
+@teams_router.post("/{team_id}/fixture-sources/run", response={202: TaskOut}, summary="Check or import a team's stored fixture sources in the background (settings permission)", operation_id="run_team_fixtures")
+def run_sources(request, team_id: uuid.UUID, payload: RunIn):
+    """Queues ``events.run_team_fixtures`` for this team's stored sources of the current season: ``apply`` false only
+    checks them (records what changed on each source), true imports them using the suggested locations and opponents.
+    Poll ``/fixture-imports/tasks/{id}`` for the result."""
+    from events.tasks import run_team_fixtures
+
+    team = _team(team_id)
+    access.require_settings(request.user)
+    if not import_sources.sources_for(team, _season(None)):
+        raise Invalid("This team has no stored fixture sources.", {"team": ["This team has no stored fixture sources."]})
+    async_result = run_team_fixtures.delay(str(team.pk), payload.apply)
+    return 202, _task_out(async_result)
+
+
+@teams_router.post("/{team_id}/fixture-sources/update-past", response={202: TaskOut}, summary="Update the score and game sheet of all played games in the background (settings permission)", operation_id="update_past_games")
+def update_past(request, team_id: uuid.UUID):
+    """Queues ``events.update_past_games`` for this team's played, imported games; poll ``/fixture-imports/tasks/{id}``."""
+    from events.tasks import update_past_games
+
+    team = _team(team_id)
+    access.require_settings(request.user)
+    return 202, _task_out(update_past_games.delay(str(team.pk)))
+
+
+@json_router.get("/tasks/{task_id}", response=TaskOut, summary="State and result of a queued fixture task (settings permission)", operation_id="fixture_task")
+def task_state(request, task_id: str):
+    from celery.result import AsyncResult
+
+    access.require_settings(request.user)
+    return _task_out(AsyncResult(task_id))
+
+
+def _task_out(result) -> dict:
+    state = result.state
+    done = state in ("SUCCESS", "FAILURE", "REVOKED")
+    value = result.result if state == "SUCCESS" and isinstance(result.result, dict) else None
+    return {"id": str(result.id), "state": state, "done": done, "ok": state == "SUCCESS", "result": value}
 
 
 @teams_router.post("/{team_id}/fixture-sources/recheck-all", response=RecheckAllOut, summary="Re-check every stored fixture source of a season (settings permission)", operation_id="recheck_all_fixture_sources")

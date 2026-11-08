@@ -137,7 +137,7 @@ def _start(game: dict) -> datetime | None:
     return naive_start.replace(tzinfo=SOURCE_TIMEZONE)
 
 
-def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixture], list[str]]:
+def parse_fixtures(raw_json: str, team_id: str, include_past: bool = False) -> tuple[str, list[ScrapedFixture], list[str]]:
     """Returns (the team's own display name, its upcoming fixtures, the ids of listed games with no date yet).
 
     A game with no date yet ("TBD" on the site) can't become an Event, but it is still on the schedule (typically a
@@ -166,8 +166,8 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
         if start is None:
             undated_game_ids.append(game_id)
             continue
-        if start <= now:
-            continue  # already played (or under way): only upcoming games are imported
+        if start <= now and not include_past:
+            continue  # already played (or under way): only upcoming games are imported unless asked
 
         fixtures.append(ScrapedFixture(external_game_id=game_id, start=start, is_home=is_home, opponent_name=(opponent_name or "").strip(), venue_text=(game.get("locatie") or "").strip()))
 
@@ -177,11 +177,11 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
     return team_name, fixtures, undated_game_ids
 
 
-def build_plan(team, source_id: str, raw_json: str, competition_label: str = "") -> ImportPlan:
+def build_plan(team, source_id: str, raw_json: str, competition_label: str = "", include_past: bool = False) -> ImportPlan:
     """IJNL counterpart to rbihf_import.build_plan: ``source_id`` is ``source_id(team_id, season)``, ``raw_json`` what
     fetch_team_data returned."""
     team_id = source_id.split("/", 1)[0]
-    scraped_team_name, fixtures, undated_game_ids = parse_fixtures(raw_json, team_id)
+    scraped_team_name, fixtures, undated_game_ids = parse_fixtures(raw_json, team_id, include_past)
     return plan_from_fixtures(team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label, keep_game_ids=undated_game_ids)
 
 

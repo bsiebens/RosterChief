@@ -22,7 +22,7 @@ class MemberFilters(Schema):
     season: uuid.UUID | None = Field(None, description="Only people with a club membership in this season.")
     status: str | None = Field(None, description="Club membership status (active, pending, lapsed, cancelled, or open = active or pending) in the season (default: the current one).")
     fee_status: str | None = Field(None, description="Fee status (unpaid, paid, partially_paid, waived) of that membership.")
-    team: str | None = Field(None, description="A team id: on this team's roster or staff in the season (default: the current one); or \"none\": on no team at all that season.")
+    team: str | None = Field(None, description='A team id: on this team\'s roster or staff in the season (default: the current one); or "none": on no team at all that season.')
     include_guardians: bool = Field(False, description="Also list people who are only a guardian or only staff. Implied by role=guardian|staff.")
     ordering: str = Field("last_name", description="One of last_name, first_name, date_of_birth, license_number, email; prefix with - to reverse.")
 
@@ -225,6 +225,8 @@ class GroupMemberOut(Schema):
     first_name: str
     last_name: str
     email: str = ""
+    is_admin: bool = False
+    must_respond: bool = True
 
 
 class GroupOut(Schema):
@@ -232,6 +234,18 @@ class GroupOut(Schema):
     name: str
     member_count: int
     members: list[GroupMemberOut] = []
+    can_manage: bool = False  # rename / delete / appoint admins (members managers); the group's admins manage its members
+    can_manage_members: bool = False
+
+
+class GroupMemberIn(Schema):
+    is_admin: bool = False
+    must_respond: bool = True
+
+
+class GroupMemberPatch(Schema):
+    is_admin: bool | None = None
+    must_respond: bool | None = None
 
 
 class GroupIn(Schema):

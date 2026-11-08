@@ -22,6 +22,7 @@ from teams.models import TeamMembership
 GOAL, ASSIST, PIM = GameStat.StatType.GOAL, GameStat.StatType.ASSIST, GameStat.StatType.PENALTY_MINUTES
 SHOT, PP_OPPORTUNITY, CONCEDED = GameStat.StatType.SHOT, GameStat.StatType.POWER_PLAY_OPPORTUNITY, GameStat.StatType.GOAL_CONCEDED
 GOALIE_SECONDS = GameStat.StatType.GOALIE_SECONDS
+APPEARANCE = GameStat.StatType.APPEARANCE
 #: GameStat.value is a PositiveSmallIntegerField.
 _MAX_STAT_VALUE = 32767
 #: Penalty kinds that put the other side on a power play (a major or misconduct isn't counted when the source says so).
@@ -115,6 +116,11 @@ def _rows_for(event, team, document, roster, overrides=None) -> list[GameStat]:
                 meta=meta or {},
             )
         )
+
+    # Who dressed (the source's line-up tables): one row per matched player, so a game played without a goal, penalty or
+    # save still counts as a game played.
+    for entry in (document.get("lineups") or {}).get(our_side) or []:
+        add({"id": f"lineup:{our_side}:{entry.get('license') or entry.get('number') or entry.get('name')}", "side": our_side}, APPEARANCE, {"name": entry.get("name"), "number": entry.get("number")}, meta={"pos": entry.get("pos") or "", "license": entry.get("license") or ""}, ours=True)
 
     goalie = None  # who is in our net right now, as far as the timeline says
     goalie_since = 0
@@ -536,6 +542,7 @@ def member_stats(member, season=None) -> dict:
             "goals": sum(row.value for row in goals),
             "assists": assists,
             "points": sum(row.value for row in goals) + assists,
+            "penalties": sum(1 for row in rows if row.stat_type == PIM),
             "penalty_minutes": sum(row.value for row in rows if row.stat_type == PIM),
             "pp_goals": sum(row.value for row in goals if row.meta.get("strength") in POWER_PLAY),
             "game_winning_goals": sum(row.value for row in goals if row.meta.get("game_winning")),

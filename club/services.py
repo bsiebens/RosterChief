@@ -92,11 +92,7 @@ def generate_club_slug(name: str) -> str:
 
 
 def _slug_taken(slug: str) -> bool:
-    return (
-        Club.objects.filter(slug=slug).exists()
-        or Club.objects.filter(schema_name__iexact=schema_name_for(slug)).exists()
-        or Domain.objects.filter(domain__iexact=club_domain(slug)).exists()
-    )
+    return Club.objects.filter(slug=slug).exists() or Club.objects.filter(schema_name__iexact=schema_name_for(slug)).exists() or Domain.objects.filter(domain__iexact=club_domain(slug)).exists()
 
 
 def club_domain(slug: str) -> str:

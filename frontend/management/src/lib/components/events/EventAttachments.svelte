@@ -50,18 +50,22 @@
 
 <div class="grid gap-4">
 	{#if errorMsg}<Alert kind="error" title={t('events.files.failed')}>{errorMsg}</Alert>{/if}
-	{#if list.can_manage}
-		<div class="flex flex-wrap items-center gap-3">
+	<section class="card overflow-hidden">
+	<header class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+		<div>
+			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Paperclip size={16} aria-hidden="true" /> {t('events.tab.files')} <span class="font-mono text-xs font-normal text-muted">· {list.attachments.length}</span></h2>
+			{#if list.can_manage}<p class="text-xs text-muted">{t('events.files.limits')}</p>{/if}
+		</div>
+		{#if list.can_manage}
 			<label class="btn btn-primary btn-sm cursor-pointer gap-2 {busy ? 'pointer-events-none opacity-60' : ''}">
 				<Upload size={14} aria-hidden="true" />
 				{busy ? t('events.files.uploading') : t('events.files.upload')}
 				<input bind:this={input} type="file" multiple class="sr-only" onchange={upload} disabled={busy} />
 			</label>
-			<span class="text-xs text-muted">{t('events.files.limits')}</span>
-		</div>
-	{/if}
+		{/if}
+	</header>
 	{#if list.attachments.length}
-		<div class="card overflow-x-auto">
+		<div class="overflow-x-auto border-t border-rule">
 			<table class="table">
 				<thead><tr><th>{t('events.files.col.name')}</th><th>{t('events.files.col.size')}</th><th>{t('events.files.col.uploaded')}</th><th></th></tr></thead>
 				<tbody>
@@ -80,8 +84,9 @@
 			</table>
 		</div>
 	{:else}
-		<div class="card card-body items-center py-10 text-center text-muted"><Paperclip size={28} aria-hidden="true" /><p>{t('events.files.none')}</p></div>
+		<div class="flex flex-col items-center gap-1 border-t border-rule px-5 py-10 text-center text-muted"><Paperclip size={28} aria-hidden="true" /><p>{t('events.files.none')}</p></div>
 	{/if}
+	</section>
 </div>
 
 <Modal bind:open={deleteOpen} title={t('events.files.delete')}>

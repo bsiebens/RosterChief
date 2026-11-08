@@ -4,6 +4,7 @@ from rosterchief.admin import ClubAdminMixin
 
 from .models import (
     Attendance,
+    AttendanceChange,
     Event,
     EventAttachment,
     EventFollow,
@@ -14,9 +15,11 @@ from .models import (
     GameMoment,
     GameStat,
     GameTimeline,
+    StatsRefresh,
     Lineup,
     LineupSelection,
     Location,
+    EventSubtype,
     Opponent,
     Season,
 )
@@ -88,6 +91,13 @@ class OpponentAdmin(ClubAdminMixin, admin.ModelAdmin):
     readonly_fields = ["alternative_names"]
 
 
+@admin.register(EventSubtype)
+class EventSubtypeAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["name", "kind", "title_template", "ordering"]
+    list_filter = ["kind"]
+    search_fields = ["name"]
+
+
 @admin.register(Season)
 class SeasonAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_display = ["name", "start_date", "end_date"]
@@ -102,6 +112,14 @@ class AttendanceAdmin(ClubAdminMixin, admin.ModelAdmin):
     search_fields = ["event__title", "member__first_name", "member__last_name"]
     list_select_related = ["event", "member"]
     raw_id_fields = ["event", "member", "coach_set_by"]
+
+
+@admin.register(AttendanceChange)
+class AttendanceChangeAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["attendance", "from_status", "to_status", "changed_by_name", "via", "created"]
+    list_filter = ["via", "to_status"]
+    search_fields = ["changed_by_name", "attendance__event__title", "attendance__member__first_name", "attendance__member__last_name"]
+    raw_id_fields = ["attendance", "changed_by"]
 
 
 class LineupSelectionInline(admin.TabularInline):
@@ -201,3 +219,10 @@ class EventTaskClaimAdmin(ClubAdminMixin, admin.ModelAdmin):
     search_fields = ["task__title", "member__first_name", "member__last_name"]
     list_select_related = ["task__event", "member"]
     raw_id_fields = ["task", "member"]
+
+
+@admin.register(StatsRefresh)
+class StatsRefreshAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ("member", "team", "status", "games", "updated", "created", "finished_at")
+    list_filter = ("status",)
+    raw_id_fields = ("member", "team")

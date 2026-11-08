@@ -144,3 +144,9 @@ export const CATEGORIES: [string, string][] = [
 
 export const pct = (n: number | null) => (n === null || n === undefined ? '—' : `${n}%`);
 export const ms = (n: number | null) => (n === null || n === undefined ? '—' : `${n} ms`);
+
+export type UserFollowing = {
+	clubs: { club: { id: string; name: string }; teams: { id: string; name: string }[]; games: { id: string; title: string; start: string }[] }[];
+	total_teams: number;
+	total_games: number;
+};

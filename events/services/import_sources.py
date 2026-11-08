@@ -56,7 +56,7 @@ def entry_key(entry: dict) -> tuple:
     return _key(entry.get("source", ""), entry.get("season_id", ""), entry.get("competition_label", ""))
 
 
-def record_source(team, *, source: str, url: str, season, competition_label: str = "") -> dict:
+def record_source(team, *, source: str, url: str, season, competition_label: str = "", include_past: bool = False) -> dict:
     """Upserts ``team``'s entry for (source, season, competition label) and saves just that field. Returns the stored
     entry. Computed standings survive a re-import from the same URL (they are about the league, not the import)."""
     if source not in SOURCES:
@@ -69,6 +69,7 @@ def record_source(team, *, source: str, url: str, season, competition_label: str
         "season_name": season.name,
         "competition_label": (competition_label or "").strip(),
         "recorded_at": timezone.now().isoformat(),
+        "include_past": bool(include_past),
     }
     key = entry_key(entry)
     replaced = next((existing for existing in (team.import_sources or []) if entry_key(existing) == key), None)
@@ -180,22 +181,23 @@ def build_plan_for(team, entry: dict, raw: str) -> rbihf_import.ImportPlan:
     """Network-free: diffs ``raw`` (from ``fetch``) against the database, with the entry's own competition label."""
     source_id = source_id_for(entry)
     label = entry.get("competition_label", "")
+    include_past = bool(entry.get("include_past"))
     try:
         if entry["source"] == SOURCE_RBIHF:
-            return rbihf_import.build_plan(team, source_id, raw, label)
+            return rbihf_import.build_plan(team, source_id, raw, label, include_past)
         if entry["source"] == SOURCE_IJNL:
-            return ijnl_import.build_plan(team, source_id, raw, label)
-        return dfel_import.build_plan(team, source_id, raw, label)
+            return ijnl_import.build_plan(team, source_id, raw, label, include_past)
+        return dfel_import.build_plan(team, source_id, raw, label, include_past)
     except _IMPORT_ERRORS as error:
         raise ImportSourceError(str(error)) from error
 
 
-def normalize_entry(*, source: str, url: str, season, competition_label: str = "", raw: str | None = None) -> tuple[dict, str]:
+def normalize_entry(*, source: str, url: str, season, competition_label: str = "", include_past: bool = False, raw: str | None = None) -> tuple[dict, str]:
     """A not-yet-stored entry for a pasted URL, and its raw payload (fetched unless ``raw`` is given). An IJNL URL
     without a season is pinned to the season the fetched data is for, so the stored URL always names one."""
     if source not in SOURCES:
         raise ImportSourceError(_("Unknown fixture source “%(source)s”.") % {"source": source})
-    entry = {"source": source, "url": (url or "").strip(), "season_id": str(season.pk), "season_name": season.name, "competition_label": (competition_label or "").strip()}
+    entry = {"source": source, "url": (url or "").strip(), "season_id": str(season.pk), "season_name": season.name, "competition_label": (competition_label or "").strip(), "include_past": bool(include_past)}
     if source == SOURCE_IJNL:
         try:
             team_id, source_season = ijnl_import.extract_ids(entry["url"])
@@ -230,7 +232,7 @@ def apply_entry(team, entry: dict, raw: str, *, locations_by_game_id: dict | Non
     result = rbihf_import.apply_plan(plan, locations, opponents)
     season = _season(entry)
     if season is not None:
-        record_source(team, source=entry["source"], url=entry["url"], season=season, competition_label=entry.get("competition_label", ""))
+        record_source(team, source=entry["source"], url=entry["url"], season=season, competition_label=entry.get("competition_label", ""), include_past=bool(entry.get("include_past")))
     return result
 
 
@@ -252,7 +254,7 @@ def _require_import(actor, source: str) -> None:
         raise NotAllowed(_("This club can't import fixtures from %(source)s.") % {"source": source})
 
 
-def preview_import(actor, team, *, source: str, url: str, season, competition_label: str = "") -> tuple[dict, str, rbihf_import.ImportPlan]:
+def preview_import(actor, team, *, source: str, url: str, season, competition_label: str = "", include_past: bool = False) -> tuple[dict, str, rbihf_import.ImportPlan]:
     """Step 1 of a one-off import: fetch the pasted URL and diff it. Returns (entry, raw, plan); the caller keeps
     ``entry`` and ``raw`` for the confirm step (never the parsed plan). Settings holders only, and the club needs the
     source's feature. A fetch/parse problem raises ``Invalid`` on ``url``."""
@@ -260,7 +262,7 @@ def preview_import(actor, team, *, source: str, url: str, season, competition_la
 
     _require_import(actor, source)
     try:
-        entry, raw = normalize_entry(source=source, url=url, season=season, competition_label=competition_label)
+        entry, raw = normalize_entry(source=source, url=url, season=season, competition_label=competition_label, include_past=include_past)
         plan = build_plan_for(team, entry, raw)
     except ImportSourceError as error:
         raise Invalid(str(error), {"url": [str(error)]}) from error
@@ -410,3 +412,43 @@ def notify_admins(club, changes: list) -> int:
         notify(user, club, title=_("Fixture changes found for %(club)s") % {"club": club.name}, body=body, kind="warning", href=href, push=True, category="admin")
         told += 1
     return told
+
+
+def run_team(club, team, *, apply: bool, today=None) -> dict:
+    """Checks (``apply`` false: diff and record the outcome on each entry) or imports (``apply`` true: diff and apply, the
+    planner's suggested location/opponent for every game) every stored source of ``team`` for the season covering
+    ``today`` that the club may still use. Run inside the club's schema (``events.run_team_fixtures``). Returns counts
+    and a line per source."""
+    from events.models import Season
+
+    today = today or timezone.localdate()
+    out = {"mode": "import" if apply else "check", "sources": 0, "errors": 0, "created": 0, "updated": 0, "deleted": 0, "new": 0, "rescheduled": 0, "removed": 0, "lines": []}
+    season = Season.covering(club, today)
+    if season is None:
+        out["lines"].append(str(_("There is no current season.")))
+        return out
+    enabled = set(enabled_sources(club))
+    for entry in sources_for(team, season):
+        if entry["source"] not in enabled:
+            continue
+        out["sources"] += 1
+        label = " · ".join(x for x in (entry["source"], entry.get("competition_label", "")) if x)
+        try:
+            raw = fetch(entry)
+            if apply:
+                counts = apply_entry(team, entry, raw, use_suggestions=True)
+                for key in ("created", "updated", "deleted"):
+                    out[key] += counts.get(key, 0)
+                update_entry(team, entry, last_checked_at=timezone.now().isoformat(), last_check={"rescheduled": 0, "new_games": 0, "removed_games": 0, "error": ""})
+                out["lines"].append(f"{label}: {counts.get('created', 0)} / {counts.get('updated', 0)} / {counts.get('deleted', 0)}")
+            else:
+                result = result_from_plan(entry, build_plan_for(team, entry, raw))
+                update_entry(team, entry, last_checked_at=timezone.now().isoformat(), last_check=result.as_dict())
+                out["new"] += len(result.new_games)
+                out["rescheduled"] += len(result.rescheduled)
+                out["removed"] += len(result.removed_games)
+                out["lines"].append(f"{label}: {describe_result(team, result)}" if result.has_changes else f"{label}: ok")
+        except ImportSourceError as error:
+            out["errors"] += 1
+            out["lines"].append(f"{label}: {error}")
+    return out

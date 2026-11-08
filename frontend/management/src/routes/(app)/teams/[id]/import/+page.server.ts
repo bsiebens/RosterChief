@@ -31,11 +31,11 @@ export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 		locations: (locations.data ?? []).map((l) => ({ id: l.id, name: l.name, city: l.city, is_home: l.is_home })),
 		countries: countries.data ?? [],
 		// "Review changes" on the team page (and the import button) prefill step 1; `run` starts the preview at once.
-		prefill: { source: q('source'), url: q('url'), season: q('season'), label: q('label'), run: q('run') === '1' }
+		prefill: { source: q('source'), url: q('url'), season: q('season'), label: q('label'), past: q('past') === '1', run: q('run') === '1' }
 	};
 };
 
-type Input = { source: string; url: string; season_id: string; competition_label: string };
+type Input = { source: string; url: string; season_id: string; competition_label: string; include_past: boolean };
 const text = (form: FormData, k: string) => String(form.get(k) ?? '').trim();
 const failure = (step: string, res: ApiCall<unknown>, extra: Record<string, unknown> = {}) =>
 	fail(res.status >= 400 && res.status < 600 ? res.status : 500, { step, status: res.status, code: res.code ?? '', error: res.message || (res.status === 0 ? 'network' : 'failed'), fields: res.fields, ...extra });
@@ -50,7 +50,7 @@ const parse = (raw: string) => {
 export const actions: Actions = {
 	preview: async ({ request, params, fetch }) => {
 		const form = await request.formData();
-		const input: Input = { source: text(form, 'source'), url: text(form, 'url'), season_id: text(form, 'season_id'), competition_label: text(form, 'competition_label') };
+		const input: Input = { source: text(form, 'source'), url: text(form, 'url'), season_id: text(form, 'season_id'), competition_label: text(form, 'competition_label'), include_past: text(form, 'include_past') === '1' };
 		const res = await api<FixturePreview>('POST', `/teams/${params.id}/fixture-sources/preview`, { body: { ...input, season_id: input.season_id || null }, f: fetch });
 		if (!res.ok) return failure('source', res, { input });
 		return { step: 'review', preview: res.data!, input };

@@ -19,6 +19,8 @@ export const WEEKDAY_CODES = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'] as const
 
 export type FormState = {
 	kind: string;
+	/** Id of the chosen event subtype ('' = none); always one of `kind`. */
+	subtype_id: string;
 	title: string;
 	/** Wall-clock datetime-local values ("" = not set). */
 	start: string;
@@ -46,9 +48,11 @@ export type FormState = {
 	notify: boolean;
 };
 
-/** Kinds whose title the backend generates or fills in when left blank. */
 export const isGame = (kind: string) => kind === 'game';
-export const titleOptional = (kind: string) => kind === 'game' || kind === 'training' || kind === 'tournament';
+/** Kinds whose title the backend generates (from the subtype's template); the form shows it instead of a title field. */
+export const generatesTitle = (kind: string) => kind === 'game' || kind === 'training';
+/** A tournament without a title is called after its kind, so it needs none; every other kind does. */
+export const titleOptional = (kind: string) => kind === 'tournament';
 
 // -- time -------------------------------------------------------------------------------------------------------------
 
@@ -121,6 +125,7 @@ export const normLocal = (v: string) => (LOCAL_RE.test(v) ? v.slice(0, 16) : '')
 export function blankState(init: Partial<FormState> = {}): FormState {
 	return {
 		kind: 'training',
+		subtype_id: '',
 		title: '',
 		start: '',
 		end: '',
@@ -166,6 +171,7 @@ export function valuesToState(v: EventValues, names: { invited: Ref[]; excluded:
 	const byId = (ids: string[], refs: Ref[]) => ids.map((id) => refs.find((r) => r.id === id) ?? { id, name: '…' });
 	return blankState({
 		kind: v.kind,
+		subtype_id: v.subtype_id ?? '',
 		title: v.title,
 		start: isoToLocalInput(v.start),
 		end: isoToLocalInput(v.end),
@@ -208,7 +214,8 @@ export function createPayload(s: FormState): EventIn {
 	const repeating = !!(rec.recurrence || rec.rrule);
 	const body: EventIn = {
 		kind: s.kind,
-		title: isGame(s.kind) ? '' : s.title.trim(),
+		subtype_id: orNull(s.subtype_id),
+		title: generatesTitle(s.kind) ? '' : s.title.trim(),
 		start: normLocal(s.start),
 		end: orNull(normLocal(s.end)),
 		gathering: orNull(normLocal(s.gathering)),
@@ -238,7 +245,12 @@ const TIME_KEYS = ['start', 'end', 'gathering', 'deadline'] as const;
 export function patchPayload(s: FormState, initial: FormState, opts: { seriesShiftDays?: number; allowRecurrence?: boolean } = {}): { body: EventPatch; recurrence: boolean } {
 	const body: EventPatch = {};
 	if (s.kind !== initial.kind) body.kind = s.kind;
-	if (!isGame(s.kind) && s.title.trim() !== initial.title.trim()) body.title = s.title.trim();
+	if (s.subtype_id !== initial.subtype_id) body.subtype_id = orNull(s.subtype_id);
+	if (generatesTitle(s.kind)) {
+		// A generated title follows its inputs: ask the API to make it again when one of them changed.
+		const audienceKey = (x: FormState) => `${x.kind}|${x.subtype_id}|${x.club_wide}|${[...x.team_ids].sort()}|${[...x.group_ids].sort()}|${x.opponent_id}|${x.location_id}`;
+		if (audienceKey(s) !== audienceKey(initial)) body.title = '';
+	} else if (s.title.trim() !== initial.title.trim()) body.title = s.title.trim();
 	if (s.location_id !== initial.location_id) body.location_id = orNull(s.location_id);
 	const opponent = isGame(s.kind) ? s.opponent_id : '';
 	if (opponent !== initial.opponent_id) body.opponent_id = orNull(opponent);
@@ -279,24 +291,46 @@ export function isAwayGame(s: FormState, o: EventOptions): boolean {
 	return !!loc && !loc.is_home;
 }
 
+/** Our teams and groups of the form (a team's short name, else its name; in the order picked, joined with ", "). A whole-club event has none. */
+export function audienceNames(s: FormState, o: EventOptions): string {
+	if (s.club_wide) return '';
+	const teams = [...o.teams, ...(o.filter_teams ?? [])];
+	const groups = [...o.groups, ...(o.filter_groups ?? [])];
+	return [
+		...[...new Set(s.team_ids)].map((id) => teams.find((x) => x.id === id)).filter((x) => !!x).map((x) => x.short_name || x.name),
+		...[...new Set(s.group_ids)].map((id) => groups.find((x) => x.id === id)?.name).filter((x) => !!x)
+	].join(', ');
+}
+
+/** The chosen subtype, when it belongs to the chosen kind. */
+export const chosenSubtype = (s: FormState, o: EventOptions) => (o.subtypes ?? []).find((x) => x.id === s.subtype_id && x.kind === s.kind) ?? null;
+
+/** Port of `render_title` in events/services/subtypes.py: fills {teams} and {kind}, tidies the blanks. */
+export function renderTemplate(template: string, vars: { teams: string; kind: string }): string {
+	return template.replace(/\{(teams|kind)\}/g, (_, k: 'teams' | 'kind') => vars[k]).replace(/\s+/g, ' ').trim();
+}
+
+/** Port of `template_for`: the subtype's template, else the kind's default. */
+const templateFor = (s: FormState, o: EventOptions) => chosenSubtype(s, o)?.title_template || (s.kind === 'game' ? '{teams}' : s.kind === 'training' ? '{kind} {teams}' : '');
+
 /**
- * The game title the API will generate (port of `_auto_title` in events/services/events.py): our teams (short name,
- * else name; in the order they were picked, joined with ", ") and the opponent, home side first; with only one side
- * known just that side; with neither the kind's label (`fallback`). A whole-club event sends no teams.
+ * The game title the API will generate (port of `_auto_title` in events/services/events.py): the subtype's template
+ * (default "{teams}"), {teams} being the match-up with the home side first ("U12 vs Rivals"; at an away location the
+ * opponent leads), or just our teams and groups when there is no opponent. With nothing known: `fallback`.
  */
 export function gameTitle(s: FormState, o: EventOptions, fallback: string): string {
-	const known = [...o.teams, ...(o.filter_teams ?? [])];
-	const ids = s.club_wide ? [] : [...new Set(s.team_ids)];
-	const us = ids
-		.map((id) => known.find((x) => x.id === id))
-		.filter((x) => !!x)
-		.map((x) => x.short_name || x.name)
-		.join(', ');
+	const us = audienceNames(s, o);
 	const them = o.opponents.find((x) => x.id === s.opponent_id)?.name ?? '';
-	if (us && them) return isAwayGame(s, o) ? `${them} vs ${us}` : `${us} vs ${them}`;
-	if (them) return them;
-	// No opponent: "Game U12" (several teams: "Game U12, U14"), "Development Game ..." when tagged friendly. Like the server, not translated.
-	return us ? `${s.is_friendly ? 'Development Game' : 'Game'} ${us}` : fallback;
+	const matchUp = us && them ? (isAwayGame(s, o) ? `${them} vs ${us}` : `${us} vs ${them}`) : us || them;
+	return renderTemplate(templateFor(s, o), { teams: matchUp, kind: fallback }) || fallback;
+}
+
+/**
+ * What the title box shows for a title the API generates (a training) or merely suggests (the other kinds): the
+ * subtype's template with {teams} and {kind} filled in; empty when there is nothing to suggest.
+ */
+export function titleSuggestion(s: FormState, o: EventOptions, kindLabel: string): string {
+	return renderTemplate(templateFor(s, o), { teams: audienceNames(s, o), kind: kindLabel });
 }
 
 // -- labels -----------------------------------------------------------------------------------------------------------
@@ -359,7 +393,7 @@ export function describeRecurrence(s: FormState): string {
 
 /** The API's field names the form shows next to an input; other field errors go into the summary at the top. */
 export const SHOWN_FIELDS = [
-	'kind', 'title', 'start', 'end', 'gathering', 'deadline', 'location_id', 'opponent_id', 'is_friendly', 'team_ids', 'group_ids', 'club_wide',
+	'kind', 'subtype_id', 'title', 'start', 'end', 'gathering', 'deadline', 'location_id', 'opponent_id', 'is_friendly', 'team_ids', 'group_ids', 'club_wide',
 	'invited_member_ids', 'excluded_member_ids', 'frequency', 'interval', 'weekdays', 'until', 'count', 'rrule', 'recurrence', 'scope'
 ]; // prettier-ignore
 

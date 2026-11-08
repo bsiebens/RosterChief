@@ -95,6 +95,51 @@ class GameStatsTests(GameTestBase):
         self.assertTrue(ensure_game_stats(self.game, DOCUMENT))
         self.assertEqual(GameStat.objects.filter(event=self.game).count(), 7)
 
+    def test_a_new_roster_spot_queues_a_relink_that_picks_up_the_player(self):
+        from unittest import mock
+
+        from events.models import GameTimeline, StatsRefresh
+        from events.services import stats_refresh
+
+        # The game was stored before the player joined: the goal is unmatched.
+        newcomer = Member.objects.create(first_name="Nina", last_name="Newcomer", email="nina@stats.test")
+        document = {"events": [{"id": "g9", "type": "goal", "period": "1", "seconds": 60, "side": "home" if self.game.is_home_game else "away", "goal": {"scorer": {"name": "Nina Newcomer", "number": 55}, "assists": []}}]}
+        GameTimeline.objects.create(event=self.game, source="RBIHF", data=document, data_hash="x", status="final")
+        sync_game_stats(self.game, document)
+        self.assertIsNone(GameStat.objects.get(stat_type=GameStat.StatType.GOAL, is_ours=True).member)
+
+        with mock.patch("events.tasks.refresh_member_stats.delay") as delay, self.captureOnCommitCallbacks(execute=True):
+            membership = TeamMembership.objects.create(team=self.team, member=newcomer, season=self.season, jersey_number=55)
+        job = StatsRefresh.objects.get(member=newcomer)
+        delay.assert_called_once_with(str(job.pk))
+        self.assertTrue(stats_refresh.in_progress(newcomer))
+
+        stats_refresh.run(job)
+        job.refresh_from_db()
+        self.assertEqual((job.status, job.updated), ("done", 1))
+        self.assertFalse(stats_refresh.in_progress(newcomer))
+        self.assertEqual(GameStat.objects.get(stat_type=GameStat.StatType.GOAL, is_ours=True).member, newcomer)
+        self.assertIsNotNone(membership.pk)
+
+    def test_lineups_count_as_games_played_and_parse_from_the_game_page(self):
+        from events.services.timeline_parsers import rbihf_extract_lineups
+
+        page = (
+            '<div id="game-home"><table><tr><th>Pos</th><th>Nr</th><th>Lic</th><th>Name</th></tr>'
+            '<tr><td class="pos">DF</td><td class="nr">78</td><td class="lic">111</td><td class="name">Scorer Sam</td></tr></table></div>'
+            '<div id="game-visit"><table><tr><td class="pos">GO</td><td class="nr">1</td><td class="lic">9</td><td class="name">Keeper Kim</td></tr></table></div>'
+        )
+        lineups = rbihf_extract_lineups(page)
+        self.assertEqual(lineups["home"], [{"pos": "DF", "number": 78, "license": "111", "name": "Scorer Sam"}])
+        self.assertEqual(lineups["away"][0]["pos"], "GO")
+
+        side = "home" if self.game.is_home_game else "away"
+        document = {"events": [], "lineups": {side: [{"pos": "DF", "number": 78, "license": "111", "name": "Sam Scorer"}]}}
+        sync_game_stats(self.game, document)
+        row = GameStat.objects.get(event=self.game, stat_type=GameStat.StatType.APPEARANCE)
+        self.assertEqual((row.member, row.meta["pos"]), (self.scorer, "DF"))
+        self.assertEqual(member_stats(self.scorer)["games"], 1)  # played without a single recorded stat
+
     def test_analytics_sums_goals_penalties_and_leaders(self):
         sync_game_stats(self.game, DOCUMENT)
 

@@ -134,8 +134,18 @@ def _notify_users(users, *, title: str, body: str, href: str, actor=None) -> Non
         inbox.notify(user, club, title=title, body=body, kind=inbox.Kind.INFO, href=href, push=True, category="event")
 
 
-def _notify_members(members, **kwargs) -> None:
-    _notify_users([m.user for m in members if m is not None and m.user_id], **kwargs)
+def _notify_members(members, *, title: str, body: str, href: str, actor=None) -> None:
+    """The members and, for children, their parents (on the child's behalf)."""
+    club = current_club()
+    if club is None:
+        return
+    from members.services import recipients
+    from notifications import inbox
+
+    skip = getattr(actor, "pk", None)
+    for member in members:
+        if member is not None:
+            recipients.deliver(member, club, title=title, body=body, skip_user_id=skip, kind=inbox.Kind.INFO, href=href, push=True, category="event")
 
 
 # --- tasks ---------------------------------------------------------------------------------------------------------

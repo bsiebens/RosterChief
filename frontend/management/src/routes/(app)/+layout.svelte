@@ -6,6 +6,8 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import NotificationBell from '#lib/components/NotificationBell.svelte';
 
+	import { page } from '$app/state';
+
 	let { data, children } = $props();
 
 	const a = $derived(data.auth);
@@ -36,17 +38,29 @@
 			{/if}
 			<span class="truncate font-display text-2xl font-extrabold text-ink uppercase">{header.title}</span>
 			{#if header.context}<span class="font-mono text-xs text-muted">{header.context}</span>{/if}
-			{#if header.badge}{@render header.badge()}{/if}
+			<!-- The badge and buttons are snippets owned by the page: while navigating away they can briefly read the next page's data
+			     and throw. The boundary swallows that (the next page sets its own header a moment later). -->
+			<svelte:boundary>
+				{#if header.badge}{@render header.badge()}{/if}
+				{#snippet failed()}{/snippet}
+			</svelte:boundary>
 			<div class="flex-1"></div>
-			{#if header.actions}
-				<div class="flex items-center gap-2">{@render header.actions()}</div>
-			{/if}
+			<svelte:boundary>
+				{#if header.actions}
+					<div class="flex items-center gap-2">{@render header.actions()}</div>
+				{/if}
+				{#snippet failed()}{/snippet}
+			</svelte:boundary>
 			{#if club}<NotificationBell />{:else}<AccountMenu {email} />{/if}
 		</header>
 
 		<main class="flex-1">
 			<div class="flex flex-col gap-4 px-7 py-6">
-				{@render children()}
+				<!-- Keyed by path: on navigation the old page is torn down before it can be handed the next page's data (that
+				     briefly happens otherwise and crashes pages that read fields only their own data has: the 500 on going back). -->
+				{#key page.url.pathname}
+					{@render children()}
+				{/key}
 			</div>
 		</main>
 	</div>

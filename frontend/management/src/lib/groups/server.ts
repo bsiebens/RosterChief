@@ -1,7 +1,8 @@
 import { fail } from '@sveltejs/kit';
 import { api, type Fetch } from '#lib/management-api.ts';
 
-export type GroupDetail = { id: string; name: string; member_count: number; members: { member_id: string; first_name: string; last_name: string; email?: string }[] };
+export type GroupMember = { member_id: string; first_name: string; last_name: string; email?: string; is_admin: boolean; must_respond: boolean };
+export type GroupDetail = { id: string; name: string; member_count: number; members: GroupMember[]; can_manage: boolean; can_manage_members: boolean };
 
 /** One groups API call; failures come back as `fail()` data `{groupError, groupFields, groupAction}` for the page. */
 export async function groupCall<T = unknown>(action: string, method: string, path: string, f: Fetch, body?: unknown) {

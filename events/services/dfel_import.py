@@ -144,8 +144,8 @@ def _venue_text(location) -> str:
     return (location.get("longname") or location.get("shortname") or "").strip()
 
 
-def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixture]]:
-    """Returns (the team's own display name, its upcoming fixtures)."""
+def parse_fixtures(raw_json: str, team_id: str, include_past: bool = False) -> tuple[str, list[ScrapedFixture]]:
+    """Returns (the team's own display name, its upcoming fixtures; ``include_past`` adds the games already played)."""
     team_id = str(team_id)
     team_name = ""
     fixtures = []
@@ -165,8 +165,8 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
         if not game_id or not isinstance(timestamp, int | float):
             continue
         start = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-        if start <= now:
-            continue  # already played (or under way): only upcoming games are imported, same as RBIHF
+        if start <= now and not include_past:
+            continue  # already played (or under way): only upcoming games are imported unless asked
 
         fixtures.append(ScrapedFixture(external_game_id=str(game_id), start=start, is_home=is_home, opponent_name=(opponent_name or "").strip(), venue_text=_venue_text(row.get("location"))))
 
@@ -176,11 +176,11 @@ def parse_fixtures(raw_json: str, team_id: str) -> tuple[str, list[ScrapedFixtur
     return team_name, fixtures
 
 
-def build_plan(team, source_id: str, raw_json: str, competition_label: str = "") -> ImportPlan:
+def build_plan(team, source_id: str, raw_json: str, competition_label: str = "", include_past: bool = False) -> ImportPlan:
     """DFEL counterpart to rbihf_import.build_plan: ``source_id`` is ``source_id(team_id, division_id)``, ``raw_json``
     what fetch_schedule returned."""
     team_id = source_id.split("/", 1)[0]
-    scraped_team_name, fixtures = parse_fixtures(raw_json, team_id)
+    scraped_team_name, fixtures = parse_fixtures(raw_json, team_id, include_past)
     return plan_from_fixtures(team, competition=COMPETITION, source_id=source_id, scraped_team_name=scraped_team_name, fixtures=fixtures, competition_label=competition_label)
 
 

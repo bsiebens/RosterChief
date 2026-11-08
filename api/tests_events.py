@@ -84,7 +84,7 @@ class EventsApiTests(TestCase):
             StaffAssignment.objects.create(team=cls.team_a, member=cls.head, season=cls.season, position=head)
             StaffAssignment.objects.create(team=cls.team_a, member=cls.assistant, season=cls.season, position=assistant)
             StaffAssignment.objects.create(team=cls.team_b, member=cls.bcoach, season=cls.season, position=head)
-            GroupMembership.objects.create(group=cls.group, member=cls.grouper)
+            GroupMembership.objects.create(group=cls.group, member=cls.grouper, is_admin=True)
             for n, p in enumerate((cls.p1, cls.p2, cls.p3), start=1):
                 TeamMembership.objects.create(team=cls.team_a, member=p, season=cls.season, position=cls.forward, jersey_number=n)
         for m in (cls.head, cls.assistant, cls.bcoach, cls.grouper, cls.stranger, cls.p1):
@@ -156,7 +156,7 @@ class EventsApiTests(TestCase):
             "stranger": set(),
             "bcoach": {"B"},
         }
-        expected_attend = {"owner": {"A", "B", "G", "Club", "AB"}, "head": {"A", "AB"}, "assistant": set(), "grouper": set(), "stranger": set(), "bcoach": {"B", "AB"}}
+        expected_attend = {"owner": {"A", "B", "G", "Club", "AB"}, "head": {"A", "AB"}, "assistant": set(), "grouper": {"G"}, "stranger": set(), "bcoach": {"B", "AB"}}
         for key, user in users.items():
             with self.subTest(user=key):
                 r = self.call("get", f"/events?{self.range()}", user)
@@ -185,7 +185,7 @@ class EventsApiTests(TestCase):
         self.assertIn("Later", {e["title"] for e in self.call("get", f"/events?{self.range(40)}", self.owner).json()})
 
         today = timezone.localdate()
-        for query in (f"from={today}&to={today - datetime.timedelta(days=1)}", f"from={today}&to={today + datetime.timedelta(days=101)}", f"to={today}", f"{self.range()}&kind=bogus"):
+        for query in (f"from={today}&to={today - datetime.timedelta(days=1)}", f"from={today}&to={today + datetime.timedelta(days=401)}", f"to={today}", f"{self.range()}&kind=bogus"):
             self.assertEqual(self.call("get", f"/events?{query}", self.owner).status_code, 422, query)
 
     def test_list_has_no_n_plus_one(self):
@@ -403,6 +403,23 @@ class EventsApiTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual((r.json()["status"], r.json()["coach_note"]), ("maybe", "Knee"))
         self.assertEqual(self.call("put", f"/events/{e.pk}/attendance/{self.p1.pk}", self.head.user, {}).status_code, 422)  # neither
+
+    def test_attendance_history_and_answer_name(self):
+        e = self.event(teams=[self.team_a])
+        url = f"/events/{e.pk}/attendance/{self.p1.pk}"
+        self.call("put", url, self.head.user, {"status": "absent"})
+        self.call("put", url, self.head.user, {"status": "absent", "coach_note": "x"})  # unchanged: not logged
+        self.call("put", url, self.head.user, {"status": "present"})
+        r = self.call("get", url + "/history", self.stranger.user)  # everyone can look
+        self.assertEqual(r.status_code, 200, r.content)
+        rows = r.json()
+        self.assertEqual([(c["from_status"], c["to_status"], c["via"], c["changed_by_name"]) for c in rows], [("absent", "present", "coach", "Hank Head"), ("no_response", "absent", "coach", "Hank Head")])
+        listing = {row["member"]["id"]: row for row in self.call("get", f"/events/{e.pk}/attendance", self.assistant.user).json()["rows"]}[str(self.p1.pk)]
+        self.assertEqual((listing["answered_by_name"], listing["answered_via"], listing["answered_by_coach"]), ("Hank Head", "coach", True))
+        self.call("put", url, self.head.user, {"status": "no_response"})
+        listing = {row["member"]["id"]: row for row in self.call("get", f"/events/{e.pk}/attendance", self.assistant.user).json()["rows"]}[str(self.p1.pk)]
+        self.assertEqual((listing["answered_by_name"], listing["answered_via"]), (None, None))
+        self.assertEqual(self.call("get", f"/events/{e.pk}/attendance/{self.p2.pk}/history", self.head.user).json(), [])
 
     def test_options_carry_filters_and_addresses_and_me_the_member_id(self):
         r = self.call("get", "/events/options", self.head.user).json()

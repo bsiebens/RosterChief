@@ -88,14 +88,26 @@ class TeamsApiTests(TestCase):
     def test_writes_need_a_permission_and_reads_are_open(self):
         tid = uuid.uuid4()
         writes = [
-            ("post", "", {"name": "X"}), ("post", "/reorder", {"ids": []}), ("delete", f"/{self.u12.pk}", None), ("patch", f"/{self.u12.pk}", {"name": "X"}),
-            ("post", f"/{self.u12.pk}/roster", {"member_id": str(tid)}), ("post", f"/{self.u12.pk}/staff", {"member_id": str(tid), "position_id": str(tid)}),
+            ("post", "", {"name": "X"}),
+            ("post", "/reorder", {"ids": []}),
+            ("delete", f"/{self.u12.pk}", None),
+            ("patch", f"/{self.u12.pk}", {"name": "X"}),
+            ("post", f"/{self.u12.pk}/roster", {"member_id": str(tid)}),
+            ("post", f"/{self.u12.pk}/staff", {"member_id": str(tid), "position_id": str(tid)}),
         ]
         for method, path, data in writes:
             self.assertEqual(self.call(method, path, self.coach_user, data).status_code, 403, (method, path))
             self.assertIn(self.call(method, path, None, data).status_code, (401, 403))
         for path in ("", "/numbers/overview", f"/{self.u12.pk}", f"/{self.u12.pk}/numbers"):
             self.assertEqual(self.call("get", path, self.coach_user).status_code, 200, path)
+
+    def test_referee_management_is_a_settings_field(self):
+        body = self.admin("patch", f"/{self.u12.pk}", {"referee_management": "federation"}).json()
+        self.assertEqual((body["referee_management"], body["official_management"]), ("federation", "club"))
+        self.assertEqual(self.admin("patch", f"/{self.u12.pk}", {"official_management": "federation"}).json()["official_management"], "federation")
+        self.assertEqual(self.admin("patch", f"/{self.u12.pk}", {"referee_management": "nobody"}).status_code, 422)
+        # A team's own coach may resend the current values but not change them.
+        self.assertEqual(self.call("patch", f"/{self.u12.pk}", self.coach_user, {"referee_management": "club"}).status_code, 403)
 
     def test_coach_filter(self):
         head = Position.objects.create(name="Head coach", short_name="HC", staff_position=True, management_position=True)

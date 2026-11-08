@@ -29,8 +29,15 @@ export type Me = {
 	can_manage_settings: boolean;
 	/** members.execute_evaluations (or the Owner role): the Evaluations tab on a member. */
 	can_execute_evaluations: boolean;
+	can_manage_referees: boolean;
+	/** news.publish_newsitems (or the Owner role): edit every news item and publish, unpublish and send back. */
+	can_publish_news: boolean;
+	/** Any club member with a login may add news (and edit their own while it is a draft or pending review). */
+	can_add_news: boolean;
 	/** Teams where the user holds a management position this season: they may edit those teams. */
 	managed_team_ids: string[];
+	/** Groups the user administers: they may schedule events for them and manage their people. */
+	admin_group_ids: string[];
 	features: string[];
 };
 

@@ -1,5 +1,10 @@
 export default {
 	en: {
+		'teams.f.referees': 'Referees arranged by',
+		'teams.f.officials': 'Officials arranged by',
+		'teams.f.managed_club': 'Club',
+		'teams.f.managed_federation': 'Federation',
+		'teams.f.managed_help': 'Federation: the competition appoints them, nothing to manage. Club: the team shows up in the referee tools, where the number of referees and officials per game can be changed.',
 		'teams.numbers.reserved_by': "Reserved by {name}",
 		'teams.numbers.reserved_by_unknown': "Reserved by unknown",
 		'teams.numbers.release_locked': "Only a club admin or {name}, who made this reservation, can release it.",
@@ -20,6 +25,7 @@ export default {
 		'shell.nav.teams_numbers': 'Numbers',
 		'shell.nav.teams_officials': 'Referees & officials',
 		'shell.nav.positions': 'Positions',
+		'shell.nav.event_types': 'Event types',
 		'shell.nav.number_pools': 'Number pools',
 		'teams.title': 'Teams',
 		'teams.count': '{n} teams',
@@ -98,6 +104,11 @@ export default {
 		'teams.numbers.hint': 'Select a number to see who has it, or to reserve it.'
 	},
 	nl: {
+		'teams.f.referees': 'Scheidsrechters geregeld door',
+		'teams.f.officials': 'Officials geregeld door',
+		'teams.f.managed_club': 'Club',
+		'teams.f.managed_federation': 'Federatie',
+		'teams.f.managed_help': 'Federatie: de competitie duidt ze aan, niets te beheren. Club: de ploeg verschijnt in de scheidsrechtertools, waar het aantal scheidsrechters en officials per wedstrijd kan worden aangepast.',
 		'teams.numbers.reserved_by': "Gereserveerd door {name}",
 		'teams.numbers.reserved_by_unknown': "Gereserveerd door onbekend",
 		'teams.numbers.release_locked': "Alleen een clubbeheerder of {name}, die deze reservatie maakte, kan ze opheffen.",
@@ -118,6 +129,7 @@ export default {
 		'shell.nav.teams_numbers': 'Nummers',
 		'shell.nav.teams_officials': 'Scheidsrechters & officials',
 		'shell.nav.positions': 'Posities',
+		'shell.nav.event_types': 'Soorten activiteiten',
 		'shell.nav.number_pools': 'Nummerreeksen',
 		'teams.title': 'Ploegen',
 		'teams.count': '{n} ploegen',
@@ -196,6 +208,11 @@ export default {
 		'teams.numbers.hint': 'Kies een nummer om te zien wie het draagt, of om het te reserveren.'
 	},
 	fr: {
+		'teams.f.referees': 'Arbitres gérés par',
+		'teams.f.officials': 'Officiels gérés par',
+		'teams.f.managed_club': 'Club',
+		'teams.f.managed_federation': 'Fédération',
+		'teams.f.managed_help': 'Fédération : la compétition les désigne, rien à gérer. Club : l’équipe apparaît dans les outils d’arbitrage, où le nombre d’arbitres et d’officiels par match peut être modifié.',
 		'teams.numbers.reserved_by': "Réservé par {name}",
 		'teams.numbers.reserved_by_unknown': "Réservé par inconnu",
 		'teams.numbers.release_locked': "Seul un administrateur du club ou {name}, qui a fait cette réservation, peut la lever.",
@@ -216,6 +233,7 @@ export default {
 		'shell.nav.teams_numbers': 'Numéros',
 		'shell.nav.teams_officials': 'Arbitres & officiels',
 		'shell.nav.positions': 'Postes',
+		'shell.nav.event_types': 'Types d’événements',
 		'shell.nav.number_pools': 'Plages de numéros',
 		'teams.title': 'Équipes',
 		'teams.count': '{n} équipes',

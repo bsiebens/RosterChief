@@ -89,18 +89,20 @@ class RBIHF(CompetitionBaseClass):
             return None
         season = season_code(event)
         game_url = f"https://www.rbihf.be/game/{season}/{event.external_game_id}"
-        cache_key = f"rbihf:game-data:{season}:{event.external_game_id}"
-        game_data = cache.get(cache_key)
-        if game_data is None:
+        cache_key = f"rbihf:game-page:{season}:{event.external_game_id}"
+        cached = cache.get(cache_key)
+        if cached is None:
             page = requests.get(game_url, headers=RBIHF_PAGE_HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
             page.raise_for_status()
-            game_data = timeline_parsers.rbihf_extract_gd(page.text)
-            cache.set(cache_key, game_data, RBIHF_GAME_DATA_CACHE_SECONDS)
+            # The page also holds the line-up tables (who dressed), next to the object the timeline needs.
+            cached = {"gd": timeline_parsers.rbihf_extract_gd(page.text), "lineups": timeline_parsers.rbihf_extract_lineups(page.text)}
+            cache.set(cache_key, cached, RBIHF_GAME_DATA_CACHE_SECONDS)
+        game_data, lineups = cached["gd"], cached["lineups"]
 
         headers = {**RBIHF_PAGE_HEADERS, "X-Requested-With": "XMLHttpRequest", "Referer": game_url}
         response = requests.post("https://www.rbihf.be/modules/league/ajax/timeline.php", data=timeline_parsers.rbihf_form_fields(game_data), headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
-        return _timeline_fetch(document=timeline_parsers.parse_rbihf(response.text, game_data), raw=response.text)
+        return _timeline_fetch(document=timeline_parsers.parse_rbihf(response.text, game_data, lineups), raw=response.text)
 
 
 class CEHL(CompetitionBaseClass):

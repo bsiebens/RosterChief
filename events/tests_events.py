@@ -11,10 +11,11 @@ from django_tenants.utils import schema_context
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
-from events.models import Event, EventSeries, Location, Opponent, Season
+from events.models import Event, EventSeries, EventSubtype, Location, Opponent, Season
 from events.services import calendar
 from events.services import events as svc
 from events.services import recurrence as rec
+from events.services import subtypes
 from members.models import AuditEntry, Group, GroupMembership, Member
 from members.services.errors import Invalid, NotAllowed
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -58,7 +59,7 @@ class EventServiceTests(TestCase):
             cls.player = Member.objects.create(first_name="Pla", last_name="Yer", email="player@ev.test")
             StaffAssignment.objects.create(team=cls.team_a, member=cls.head_m, season=cls.season, position=head)
             StaffAssignment.objects.create(team=cls.team_a, member=cls.assistant_m, season=cls.season, position=assistant)
-            GroupMembership.objects.create(group=cls.group_1, member=cls.group_m)
+            GroupMembership.objects.create(group=cls.group_1, member=cls.group_m, is_admin=True)
             TeamMembership.objects.create(team=cls.team_a, member=cls.player, season=cls.season)
             cls.away = Location.objects.create(name="Their Rink", address="1 Road", city="Ghent", zip_code="9000", country="BE")
             cls.home = Location.objects.create(name="Our Rink", address="2 Road", city="Mechelen", zip_code="2800", country="BE", is_home=True)
@@ -94,7 +95,7 @@ class EventServiceTests(TestCase):
 
     def test_create_one_off(self):
         e = self.training(deadline=at(2))
-        self.assertEqual((e.title, e.season, e.series, e.created_by.user_id), ("Training", self.season, None, self.admin.pk))
+        self.assertEqual((e.title, e.season, e.series, e.created_by.user_id), ("Training U12", self.season, None, self.admin.pk))
         self.assertEqual(list(e.teams.all()), [self.team_a])
         entry = AuditEntry.objects.get(action="event.created")
         self.assertEqual(entry.target_id, str(e.pk))
@@ -108,13 +109,69 @@ class EventServiceTests(TestCase):
         svc.update_event(self.admin, g, location_id=self.away.pk)
         g.refresh_from_db()
         self.assertEqual(g.title, "Rivals vs U12")
-        # no opponent: "Game <teams>", "Development Game <teams>" when friendly
-        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk]).title, "Game U12")
-        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk], is_friendly=True).title, "Development Game U12")
-        both = svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk, self.team_b.pk], is_friendly=True)
-        self.assertTrue(both.title.startswith("Development Game ") and "U12" in both.title and ", " in both.title)
-        friendly_vs = svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk], opponent_id=self.rivals.pk, location_id=self.home.pk, is_friendly=True)
-        self.assertEqual(friendly_vs.title, "U12 vs Rivals")  # a named opponent always wins
+        # no opponent: just our teams (and groups); the friendly flag no longer changes the title
+        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk]).title, "U12")
+        self.assertEqual(svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk], is_friendly=True).title, "U12")
+        both = svc.create_event(self.admin, kind="game", start=at(5), team_ids=[self.team_a.pk, self.team_b.pk])
+        self.assertEqual(both.title, "U12, U14")
+        # the game's subtype template always applies, {teams} being the match-up with the home side first
+        dev = subtypes.create_subtype(self.admin, kind="game", name="Development", title_template="Development Game {teams}")
+        home = svc.create_event(self.admin, kind="game", subtype_id=dev.pk, start=at(5), team_ids=[self.team_a.pk], opponent_id=self.rivals.pk, location_id=self.home.pk)
+        self.assertEqual(home.title, "Development Game U12 vs Rivals")
+        away = svc.create_event(self.admin, kind="game", subtype_id=dev.pk, start=at(5), team_ids=[self.team_a.pk], opponent_id=self.rivals.pk, location_id=self.away.pk)
+        self.assertEqual(away.title, "Development Game Rivals vs U12")
+        self.assertEqual(svc.create_event(self.admin, kind="game", subtype_id=dev.pk, start=at(5), team_ids=[self.team_a.pk]).title, "Development Game U12")
+
+    def test_group_names_are_part_of_the_title(self):
+        e = svc.create_event(self.admin, kind="training", start=at(3), team_ids=[self.team_a.pk], group_ids=[self.group_1.pk])
+        self.assertEqual(e.title, "Training U12, Committee")
+
+    def test_training_title_comes_from_the_subtype_template(self):
+        plain = svc.create_event(self.admin, kind="training", start=at(3), team_ids=[self.team_a.pk, self.team_b.pk])
+        self.assertEqual(plain.title, "Training U12, U14")
+        fitness = subtypes.create_subtype(self.admin, kind="training", name="Fitness", title_template="Fitness {teams}")
+        e = svc.create_event(self.admin, kind="training", subtype_id=fitness.pk, start=at(3), team_ids=[self.team_a.pk])
+        self.assertEqual((e.title, e.subtype), ("Fitness U12", fitness))
+        self.assertEqual(svc.create_event(self.admin, kind="training", subtype_id=fitness.pk, title="Own", start=at(3), team_ids=[self.team_a.pk]).title, "Own")
+        # a game follows its subtype's template
+        derby = subtypes.create_subtype(self.admin, kind="game", name="Derby", title_template="Derby {teams}")
+        g = svc.create_event(self.admin, kind="game", subtype_id=derby.pk, start=at(5), team_ids=[self.team_a.pk])
+        self.assertEqual(g.title, "Derby U12")
+        # other kinds always need their own title
+        meet = subtypes.create_subtype(self.admin, kind="meeting", name="Board", title_template="Board meeting")
+        self.assertEqual(set(self.errors(svc.create_event, self.admin, kind="meeting", subtype_id=meet.pk, start=at(2))), {"title"})
+
+    def test_subtype_must_match_the_kind_and_resets_when_the_kind_changes(self):
+        fitness = subtypes.create_subtype(self.admin, kind="training", name="Fitness")
+        self.assertEqual(set(self.errors(svc.create_event, self.admin, kind="meeting", title="x", subtype_id=fitness.pk, start=at(2))), {"subtype_id"})
+        e = self.training(subtype_id=fitness.pk)
+        svc.update_event(self.admin, e, kind="meeting", title="Chat")
+        e.refresh_from_db()
+        self.assertIsNone(e.subtype)
+        fitness.delete()  # deleting a subtype keeps the events
+        self.assertTrue(Event.objects.filter(pk=e.pk).exists())
+
+    def test_subtype_carries_over_to_series_occurrences(self):
+        fitness = subtypes.create_subtype(self.admin, kind="training", name="Fitness")
+        series = self.series(subtype_id=fitness.pk)
+        self.assertEqual(series.subtype, fitness)
+        self.assertTrue(series.occurrences.exists())
+        self.assertFalse(series.occurrences.exclude(subtype=fitness).exists())
+
+    def test_subtype_management_needs_the_settings_permission(self):
+        with self.assertRaises(NotAllowed):
+            subtypes.create_subtype(self.head, kind="training", name="Nope")
+        a = subtypes.create_subtype(self.admin, kind="training", name="Fitness")
+        self.assertEqual(set(self.errors(subtypes.create_subtype, self.admin, kind="training", name="fitness")), {"name"})
+        self.assertEqual(set(self.errors(subtypes.create_subtype, self.admin, kind="bogus", name="X")), {"kind"})
+        self.training(subtype_id=a.pk)
+        self.assertEqual(set(self.errors(subtypes.update_subtype, self.admin, a, kind="meeting")), {"kind"})
+        subtypes.update_subtype(self.admin, a, name="Strength")
+        self.assertTrue(AuditEntry.objects.filter(action="event_subtype.updated").exists())
+        with self.assertRaises(NotAllowed):
+            subtypes.delete_subtype(self.head, a)
+        subtypes.delete_subtype(self.admin, a)
+        self.assertFalse(EventSubtype.objects.exists())
 
     def test_validation(self):
         e = self.errors(svc.create_event, self.admin, kind="meeting")
@@ -127,7 +184,9 @@ class EventServiceTests(TestCase):
         self.assertEqual(set(e), {"team_ids", "group_ids", "location_id", "opponent_id", "invited_member_ids"})
         self.assertEqual(set(self.errors(svc.create_event, self.admin, kind="game", start=at(1))), {"team_ids"})
         ev = self.training()
-        self.assertEqual(set(self.errors(svc.update_event, self.admin, ev, title="")), {"title"})  # no auto title when editing
+        self.assertEqual(svc.update_event(self.admin, ev, title="").title, "Training U12")  # a training without a title follows its template
+        meeting = svc.create_event(self.admin, kind="meeting", title="Board", start=at(2))
+        self.assertEqual(set(self.errors(svc.update_event, self.admin, meeting, title="")), {"title"})  # other kinds keep needing one
         self.assertEqual(set(self.errors(svc.update_event, self.admin, ev, scope="sometimes", title="x")), {"scope"})
         with self.assertRaises(TypeError):
             svc.create_event(self.admin, title="x", start=at(1), score_for=3)

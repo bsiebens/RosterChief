@@ -75,6 +75,7 @@ TENANT_APPS = [
     "sponsoring",
     "teams",
     "events",
+    "news",
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]

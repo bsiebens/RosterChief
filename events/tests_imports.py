@@ -189,6 +189,35 @@ def ijnl_game_data(state="live", home="2", away="1"):
 # -- RBIHF ---------------------------------------------------------------------------------------------------------------
 
 
+class RBIHFPastGamesTests(TestCase):
+    """The played-games table of a team page is only read with include_past."""
+
+    def page(self):
+        played = (
+            '<div class="block"><h2 id="games-past">Played games</h2><table>'
+            "<tr><th>#</th><th>Date</th><th>Hour</th><th>Location</th><th>Home</th><th>Score</th><th>Visit</th></tr>"
+            f'<tr><td><a href="/game/4001">4001</a></td><td>2020-01-05</td><td>10:00</td><td>Deurne</td>'
+            f'<td><a href="/league/team/{RBIHF_TEAM_ID}" title="{RBIHF_TEAM_NAME}">x</a></td><td>3-1</td>'
+            '<td><a href="/league/team/4464" title="Amsterdam Tigers">y</a></td></tr></table></div>'
+        )
+        return rbihf_sample_html([rbihf_row("5002")]).replace("</body>", played + "</body>")
+
+    def test_only_upcoming_by_default(self):
+        from events.services.rbihf_import import parse_fixtures
+
+        _, fixtures = parse_fixtures(self.page(), RBIHF_TEAM_ID)
+        self.assertEqual([f.external_game_id for f in fixtures], ["5002"])
+
+    def test_include_past_adds_the_played_games(self):
+        from events.services.rbihf_import import parse_fixtures
+
+        _, fixtures = parse_fixtures(self.page(), RBIHF_TEAM_ID, include_past=True)
+        self.assertEqual(sorted(f.external_game_id for f in fixtures), ["4001", "5002"])
+        played = next(f for f in fixtures if f.external_game_id == "4001")
+        self.assertTrue(played.is_home)
+        self.assertEqual(played.opponent_name, "Amsterdam Tigers")
+
+
 class RBIHFParseTests(TestCase):
     """Pure parsing: no network, no database."""
 

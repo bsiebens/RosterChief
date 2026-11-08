@@ -5,10 +5,10 @@ Rights (``members.services.access``):
 * **View**: everyone who got into the management app sees every event, its attendance (without coach notes), its
   published line-up, its tasks and attachments.
 * **Schedule** (create / edit / delete / cancel an event or series): ``can_schedule`` for the audience. Settings holders
-  always; others only for events entirely about teams they manage and/or groups they are in, never club-wide.
+  always; others only for events entirely about teams they manage and/or groups they administer, never club-wide.
   ``GET /events/options`` only offers what that rule allows. Rows carry ``can_edit``.
 * **Attendance** (answers, coach notes, check-ins, line-up, tasks, attachments): ``can_manage_attendance``: settings
-  holders or a manager of one of the event's teams. Rows carry ``can_manage_attendance``. ``coach_note`` is only ever
+  holders, a manager of one of the event's teams or an admin of one of its groups. Rows carry ``can_manage_attendance``. ``coach_note`` is only ever
   returned to these people.
 
 403 for a refused write, 404 for unknown ids, 422 ``{detail, code, errors}`` for rule violations. Writes go through
@@ -31,6 +31,7 @@ from api.schemas_events import (
     AnswerIn,
     AttachmentListOut,
     AttachmentOut,
+    AttendanceChangeOut,
     AttendanceListOut,
     AttendanceRowOut,
     BulkAnswerIn,
@@ -38,6 +39,10 @@ from api.schemas_events import (
     CheckInIn,
     ClaimIn,
     EventDetailOut,
+    FollowedTeamsOut,
+    FollowStateOut,
+    GameMomentOut,
+    GameSheetOut,
     EventFormOut,
     EventIn,
     EventOptionsOut,
@@ -52,7 +57,7 @@ from api.schemas_events import (
     TaskOut,
     TaskPatch,
 )
-from events.models import Attendance, Event, EventAttachment, EventTask, Lineup, LineupSelection, Location, Opponent
+from events.models import Attendance, AttendanceChange, Event, EventAttachment, EventTask, EventSubtype, GameTimeline, Lineup, LineupSelection, Location, Opponent
 from events.services import attachments as attachment_svc
 from events.services import attendance as attendance_svc
 from events.services import calendar as calendar_svc
@@ -68,7 +73,7 @@ from teams.models import Team, TeamMembership
 
 router = Router()
 
-MAX_RANGE_DAYS = 100
+MAX_RANGE_DAYS = 400
 SCOPE_HELP = "this | following | all (occurrences of a series; ignored for one-off events)"
 STATUS_KEYS = ("present", "absent", "excused", "maybe", "no_response", "selected", "not_selected")
 
@@ -84,7 +89,7 @@ class Rights:
         self.settings = access.can_manage_settings(user)
         self.active = bool(user is not None and user.is_authenticated and user.is_active)
         self.managed = set() if self.settings else access.managed_team_ids(user)
-        self.groups = set() if self.settings else access.user_group_ids(user)
+        self.groups = set() if self.settings else access.admin_group_ids(user)
 
     def can_edit(self, team_ids: set, group_ids: set, club_wide: bool) -> bool:
         if self.settings:
@@ -93,12 +98,12 @@ class Rights:
             return False
         return team_ids <= self.managed and group_ids <= self.groups
 
-    def can_attend(self, team_ids: set) -> bool:
-        return self.settings or bool(team_ids & self.managed)
+    def can_attend(self, team_ids: set, group_ids: set = frozenset()) -> bool:
+        return self.settings or bool(team_ids & self.managed) or bool(group_ids & self.groups)
 
 
 def _event(event_id) -> Event:
-    event = Event.objects.select_related("location", "opponent", "series", "season", "created_by").filter(pk=event_id).first()
+    event = Event.objects.select_related("location", "opponent", "subtype", "series", "season", "created_by").filter(pk=event_id).first()
     if event is None:
         raise HttpError(404, "Not found.")
     return event
@@ -156,6 +161,8 @@ def _row(event, rights: Rights, counts: dict) -> dict:
         "id": event.pk,
         "title": event.title,
         "kind": event.kind,
+        "subtype_id": event.subtype_id,
+        "subtype_name": event.subtype.name if event.subtype_id else "",
         "start": event.start,
         "end": event.end,
         "gathering": event.gathering,
@@ -169,9 +176,13 @@ def _row(event, rights: Rights, counts: dict) -> dict:
         "series_id": event.series_id,
         "detached": event.detached,
         "is_friendly": event.is_friendly,
+        "score_for": event.score_for,
+        "score_against": event.score_against,
+        "is_home_game": event.is_home_game,
+        "has_game_source": bool(event.competition and event.external_game_id),
         "attendance": counts,
         "can_edit": rights.can_edit(team_ids, group_ids, event.club_wide),
-        "can_manage_attendance": rights.can_attend(team_ids),
+        "can_manage_attendance": rights.can_attend(team_ids, group_ids),
     }
 
 
@@ -204,8 +215,15 @@ def _lineup_info(event) -> dict:
     }
 
 
+def _officiating(rows) -> list[dict]:
+    """The referees or officials on a game, by type then name (members link to their profile)."""
+    from events.services.referees import order_assignments
+
+    return [{"name": row.display_name, "member_id": row.member_id, "type_name": row.referee_type.name if row.referee_type_id else "", "is_external": row.member_id is None} for row in order_assignments(list(rows.select_related("member", "referee_type")))]
+
+
 def _detail(request, event) -> dict:
-    event = Event.objects.select_related("location", "opponent", "series", "season", "created_by").prefetch_related("teams", "groups", "invited_members", "excluded_members").get(pk=event.pk)
+    event = Event.objects.select_related("location", "opponent", "subtype", "series", "season", "created_by").prefetch_related("teams", "groups", "invited_members", "excluded_members").get(pk=event.pk)
     out = _row(event, Rights(request.user), _counts_for([event.pk])[event.pk])
     invited, excluded = list(event.invited_members.all()), list(event.excluded_members.all())
     out.update(
@@ -225,6 +243,9 @@ def _detail(request, event) -> dict:
         created_by=_ref(event.created_by) if event.created_by_id else None,
         task_count=event.tasks.count(),
         attachment_count=event.attachments.count(),
+        referees=_officiating(event.referees),
+        officials=_officiating(event.officials),
+        has_game_sheet=GameTimeline.objects.filter(event=event).exclude(data={}).exists(),
     )
     return out
 
@@ -285,6 +306,7 @@ def event_options(request):
         "locations": [_location(loc) for loc in Location.objects.order_by("name")],
         "opponents": [_opponent(o) for o in Opponent.objects.order_by("name")],
         "kinds": [{"value": value, "label": str(label)} for value, label in Event.EventKind.choices],
+        "subtypes": [{"id": s.pk, "kind": s.kind, "name": s.name, "title_template": s.title_template} for s in EventSubtype.objects.all()],
         "frequencies": list(rec.FREQUENCIES),
         "weekdays": [{"code": code, "label": str(rec.WEEKDAY_LABELS[code])} for code in rec.WEEKDAY_CODES],
     }
@@ -419,6 +441,163 @@ def _set_cancelled(request, event_id, cancelled: bool, notify: bool):
     return _detail(request, event)
 
 
+def _game_lineup(event, timeline, shown: dict) -> dict | None:
+    """The line-up tables stored on the game's timeline, ours first: our players are linked to the roster member the name
+    matched (with their goals, assists and penalty minutes in this game)."""
+    from events.models import GameStat
+
+    lineups = (timeline.data or {}).get("lineups") or {}
+    our_side = "home" if event.is_home_game else "away"
+    their_side = "away" if our_side == "home" else "home"
+    if not lineups.get(our_side) and not lineups.get(their_side):
+        return None
+    by_member: dict = {}
+    members: dict = {}
+    for row in GameStat.objects.filter(event=event, is_ours=True).select_related("member"):
+        if row.member_id is None:
+            continue
+        counters = by_member.setdefault(row.member_id, {"goals": 0, "assists": 0, "penalty_minutes": 0})
+        if row.stat_type == GameStat.StatType.GOAL:
+            counters["goals"] += row.value
+        elif row.stat_type == GameStat.StatType.ASSIST:
+            counters["assists"] += row.value
+        elif row.stat_type == GameStat.StatType.PENALTY_MINUTES:
+            counters["penalty_minutes"] += row.value
+        if row.stat_type == GameStat.StatType.APPEARANCE:
+            members[(row.meta or {}).get("license") or row.player_number] = row.member
+    ours = []
+    for entry in lineups.get(our_side) or []:
+        member = members.get(entry.get("license") or entry.get("number"))
+        name = f"{member.first_name} {member.last_name}".strip() if member else entry["name"]
+        ours.append({**entry, "member_id": member.pk if member else None, "photo_url": member.player_photo_url if member else None, "initials": "".join(part[0] for part in name.split()[:2]).upper(), **(by_member.get(member.pk, {}) if member else {})})
+    theirs = [{**entry, "initials": "".join(part[0] for part in entry["name"].split()[:2]).upper()} for entry in lineups.get(their_side) or []]
+    return {"ours_label": shown["ours_label"], "theirs_label": shown["theirs_label"], "ours": ours, "theirs": theirs}
+
+
+@router.get("/{event_id}/game-sheet", response=GameSheetOut, summary="The game sheet (goals, penalties, goalie changes) of a game", operation_id="event_game_sheet")
+def game_sheet(request, event_id: uuid.UUID):
+    """Everyone in the management app may read it. 404 when the game has no game sheet (yet)."""
+    import json
+
+    from events.services import game_timeline
+
+    event = _event(event_id)
+    timeline = GameTimeline.objects.filter(event=event).first()
+    if timeline is None or not timeline.data:
+        raise HttpError(404, "Not found.")
+    out = game_timeline.display_timeline(timeline, event)
+    out["lineup"] = _game_lineup(event, timeline, out)
+    out = json.loads(json.dumps(out, default=str))  # lazy translations -> plain strings
+    full_names = ", ".join(team.name for team in event.teams.all())
+    if full_names:
+        out["ours_label"] = full_names  # the scoreboard has room for the full team name
+    out.update(status=timeline.status, final=timeline.finalized_at is not None, updated_at=timeline.changed_at, source=timeline.source)
+    return out
+
+
+# -- following games for the live pushes (opt-in, per account) ------------------------------------------------------------
+
+
+@router.get("/follow-teams", response=FollowedTeamsOut, summary="The teams whose games you follow", operation_id="followed_teams")
+def followed_teams(request):
+    from events.services import follows
+
+    return {"team_ids": sorted(follows.followed_team_ids(request.user))}
+
+
+@router.put("/follow-teams/{team_id}", response=FollowedTeamsOut, summary="Follow a team's games (live pushes)", operation_id="follow_team")
+def follow_team(request, team_id: uuid.UUID):
+    from events.services import follows
+
+    team = Team.objects.filter(pk=team_id).first()
+    if team is None:
+        raise HttpError(404, "Not found.")
+    follows.follow_team(request.user, team)
+    return {"team_ids": sorted(follows.followed_team_ids(request.user))}
+
+
+@router.delete("/follow-teams/{team_id}", response=FollowedTeamsOut, summary="Stop following a team's games", operation_id="unfollow_team")
+def unfollow_team(request, team_id: uuid.UUID):
+    from events.services import follows
+
+    team = Team.objects.filter(pk=team_id).first()
+    if team is not None:
+        follows.unfollow_team(request.user, team)
+    return {"team_ids": sorted(follows.followed_team_ids(request.user))}
+
+
+@router.get("/{event_id}/follow", response=FollowStateOut, summary="Whether you follow this game", operation_id="event_follow_state")
+def follow_state(request, event_id: uuid.UUID):
+    from events.services import follows
+
+    return follows.follow_state(request.user, _event(event_id))
+
+
+@router.put("/{event_id}/follow", response=FollowStateOut, summary="Follow this game (live pushes)", operation_id="follow_event")
+def follow_event(request, event_id: uuid.UUID):
+    from events.services import follows
+
+    event = _event(event_id)
+    follows.follow_event(request.user, event)
+    return follows.follow_state(request.user, event)
+
+
+@router.delete("/{event_id}/follow", response=FollowStateOut, summary="Stop following this game", operation_id="unfollow_event")
+def unfollow_event(request, event_id: uuid.UUID):
+    from events.services import follows
+
+    event = _event(event_id)
+    follows.unfollow_event(request.user, event)
+    return follows.follow_state(request.user, event)
+
+
+@router.get("/{event_id}/game-moments", response=list[GameMomentOut], summary="Detected game moments and whether they were pushed (settings permission)", operation_id="event_game_moments")
+def game_moments(request, event_id: uuid.UUID):
+    """What the live-game detection recorded for this game, oldest first: ``state`` is ``pushed`` (delivered),
+    ``catch_up`` (recorded after the fact, never pushed) or ``not_pushed`` (notifiable but not delivered, yet)."""
+    from events.services.game_moments import describe_moment
+
+    access.require_settings(request.user)
+    event = _event(event_id)
+    out = []
+    for moment in event.moments.order_by("created"):
+        state = "pushed" if moment.delivered_at else ("catch_up" if not moment.notifiable else "not_pushed")
+        out.append(
+            {
+                "id": moment.pk,
+                "key": moment.key,
+                "kind": moment.kind,
+                "kind_label": str(moment.get_kind_display()),
+                "description": str(describe_moment(moment)),
+                "game_seconds": moment.game_seconds,
+                "detected_at": moment.created,
+                "notifiable": moment.notifiable,
+                "delivered_at": moment.delivered_at,
+                "state": state,
+            }
+        )
+    return out
+
+
+@router.post("/{event_id}/update-game", response=EventDetailOut, summary="Fetch the score and game sheet of a played game from its competition", operation_id="update_game_details")
+def update_game(request, event_id: uuid.UUID):
+    """Score, live flag and game sheet of one played game, straight from its competition's data source. Managers of the
+    event's teams (or whoever may edit it) only; 422 for a game that hasn't started or has no competition game id."""
+    from events.services import game_timeline
+
+    event = _event(event_id)
+    if not (access.can_manage_event(request.user, event) or access.can_manage_attendance(request.user, event)):
+        raise NotAllowed("You may not update this game.")
+    if event.start > timezone.now() or not (event.competition and event.external_game_id):
+        raise Invalid("Only played games imported from a competition can be updated.", {"event": ["Only played games imported from a competition can be updated."]})
+    try:
+        if game_timeline.fetch_game(event) is None:
+            raise Invalid("This club has no data source for this game's competition.", {"event": ["No data source for this competition."]})
+    except game_timeline.CompetitionFetchError as error:
+        raise Invalid(str(error), {"event": [str(error)]}) from error
+    return _detail(request, event)
+
+
 @router.post("/{event_id}/cancel", response=EventDetailOut, summary="Cancel an event (kept, struck through)", operation_id="cancel_event")
 def cancel_event(request, event_id: uuid.UUID, notify: bool = True):
     """An occurrence of a series is detached from it. Invited people are told unless ``notify`` is false."""
@@ -451,8 +630,17 @@ def _visible_selection(event, manager: bool) -> set:
     return set(LineupSelection.objects.filter(lineup=lineup).values_list("member_id", flat=True))
 
 
-def _attendance_row(attendance, *, manager: bool, roster: dict, selected: set) -> dict:
+def _latest_changes(attendance_ids) -> dict:
+    """``{attendance_id: newest AttendanceChange}`` for the given attendances."""
+    out = {}
+    for change in AttendanceChange.objects.filter(attendance_id__in=list(attendance_ids)).order_by("created"):
+        out[change.attendance_id] = change
+    return out
+
+
+def _attendance_row(attendance, *, manager: bool, roster: dict, selected: set, latest: dict | None = None) -> dict:
     member = attendance.member
+    change = (latest or {}).get(attendance.pk) if attendance.status != Attendance.AttendanceStatus.NO_RESPONSE else None
     tm = roster.get(member.pk)
     return {
         "member": _ref(member),
@@ -463,6 +651,8 @@ def _attendance_row(attendance, *, manager: bool, roster: dict, selected: set) -
         "note": attendance.note,
         "coach_note": attendance.coach_note if manager else None,
         "answered_by_coach": attendance.answered_by_coach,
+        "answered_by_name": (change.changed_by_name or None) if change is not None else None,
+        "answered_via": change.via if change is not None else None,
         "coach_set_at": attendance.coach_set_at,
         "position": tm.position.name if tm is not None and tm.position_id else "",
         "jersey_number": tm.jersey_number if tm is not None else None,
@@ -498,6 +688,7 @@ def event_attendance(request, event_id: uuid.UUID):
     rows = _attendances(event)
     roster = _roster_info(event, [a.member_id for a in rows])
     selected = _visible_selection(event, manager)
+    latest = _latest_changes([a.pk for a in rows if a._state.adding is False])
     counts = _empty_counts()
     for a in rows:
         if a.status in counts:
@@ -508,8 +699,16 @@ def event_attendance(request, event_id: uuid.UUID):
         "counts": counts,
         "checked_in": sum(1 for a in rows if a.showed_up is True),
         "no_shows": sum(1 for a in rows if a.showed_up is False and a.status in ("present", "selected")),
-        "rows": [_attendance_row(a, manager=manager, roster=roster, selected=selected) for a in rows],
+        "rows": [_attendance_row(a, manager=manager, roster=roster, selected=selected, latest=latest) for a in rows],
     }
+
+
+@router.get("/{event_id}/attendance/{member_id}/history", response=list[AttendanceChangeOut], summary="Who changed a member's answer, when (newest first)", operation_id="event_attendance_history")
+def event_attendance_history(request, event_id: uuid.UUID, member_id: uuid.UUID):
+    """Visible to everyone who can see the attendance list."""
+    event = _event(event_id)
+    member = _member(member_id)
+    return list(AttendanceChange.objects.filter(attendance__event=event, attendance__member=member).order_by("-created"))
 
 
 def _attendance_for(event, member, invited: set | None = None) -> Attendance:
@@ -525,7 +724,7 @@ def _attendance_for(event, member, invited: set | None = None) -> Attendance:
 
 def _one_row(event, attendance) -> dict:
     roster = _roster_info(event, [attendance.member_id])
-    return _attendance_row(attendance, manager=True, roster=roster, selected=_visible_selection(event, True))
+    return _attendance_row(attendance, manager=True, roster=roster, selected=_visible_selection(event, True), latest=_latest_changes([attendance.pk]))
 
 
 @router.post("/{event_id}/attendance/bulk", response=BulkAnswerOut, summary="Set the same answer for several members (attendance manager)", operation_id="set_event_answers_bulk")

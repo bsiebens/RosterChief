@@ -17,12 +17,18 @@ from .routers import calendar_data as calendar_data_router
 from .routers import club_settings as club_settings_router
 from .routers import events as events_router
 from .routers import fixture_imports as fixture_imports_router
+from .routers import member_stats as member_stats_router
+from .routers import public_news as public_news_router
+from .routers import public_stats as public_stats_router
 from .routers import members as members_router
 from .routers import memberships as memberships_router
+from .routers import news as news_router
 from .routers import notifications_inbox as notifications_router
 from .routers import officiating_levels as officiating_levels_router
 from .routers import overview as overview_router
+from .routers import referees as referees_router
 from .routers import teams as teams_router
+from .routers import event_subtypes as event_subtypes_router
 from .routers import team_settings as team_settings_router
 from .schemas import BrandingOut, MeOut, MyClubOut
 
@@ -39,6 +45,8 @@ api.add_router("/members", members_router.router, tags=["members"])
 api.add_router("/memberships", memberships_router.router, tags=["memberships"])
 api.add_router("/club", club_settings_router.router, tags=["club settings"])
 api.add_router("/officiating", officiating_levels_router.router, tags=["officiating levels"])
+api.add_router("/referee-management", referees_router.router, tags=["referee management"])
+api.add_router("/news", news_router.router, tags=["news"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])
 api.add_router("/locations", calendar_data_router.locations_router, tags=["calendar"])
@@ -49,8 +57,12 @@ api.add_router("/fixture-imports", fixture_imports_router.json_router, tags=["fi
 api.add_router("/events", events_router.router, tags=["events"])
 api.add_router("/teams", analytics_router.teams_router, tags=["analytics"])
 api.add_router("/members", analytics_router.members_router, tags=["analytics"])
+api.add_router("/members", member_stats_router.router, tags=["members"])
+api.add_router("/public", public_stats_router.router, tags=["public"])
+api.add_router("/public/news", public_news_router.router, tags=["public"])
 api.add_router("/events", analytics_router.events_router, tags=["analytics"])
 api.add_router("", team_settings_router.router, tags=["team settings"])
+api.add_router("", event_subtypes_router.router, tags=["event subtypes"])
 
 
 def _member_id(user, club) -> str | None:
@@ -61,7 +73,7 @@ def _member_id(user, club) -> str | None:
     return str(member.pk) if member else None
 
 
-@api.get("/me", response=MeOut, summary="The signed-in user in the current club")
+@api.get("/me", response=MeOut, auth=AUTHENTICATORS, summary="The signed-in user in the current club")
 def me(request):
     """Who am I here: identity, roles in this club and the features the club has."""
     user, club = request.user, request.tenant
@@ -82,6 +94,10 @@ def me(request):
         "can_manage_members": access.can_manage_members(user),
         "can_manage_settings": access.can_manage_settings(user),
         "can_execute_evaluations": access.can_execute_evaluations(user),
+        "can_manage_referees": access.can_manage_referees(user),
+        "can_publish_news": access.can_publish_news(user),
+        "can_add_news": club.schema_name != get_public_schema_name() and access.can_add_news(user),
+        "admin_group_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.admin_group_ids(user)),
         "managed_team_ids": [] if club.schema_name == get_public_schema_name() else sorted(str(i) for i in access.managed_team_ids(user)),
         "features": sorted(request.features.enabled_codes()),
     }

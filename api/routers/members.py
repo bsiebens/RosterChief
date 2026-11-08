@@ -28,6 +28,7 @@ from api.schemas_members import (
     GrantLoginIn,
     GrantLoginOut,
     GroupIn,
+    GroupMemberPatch,
     GroupOut,
     HistoryEntryOut,
     HistoryFilters,
@@ -125,8 +126,7 @@ def _member_detail(request, member: Member) -> dict:
         "groups": [{"id": g.group_id, "name": g.group.name} for g in member.group_memberships.select_related("group")] if admin else [],
         "club_memberships": [_club_membership(cm, admin) for cm in memberships],
         "staff_assignments": [
-            {"id": sa.pk, "team_id": sa.team_id, "team_name": sa.team.name, "season_id": sa.season_id, "position": sa.position.name}
-            for sa in member.staff_assignments.select_related("team", "position").order_by("-season__start_date")
+            {"id": sa.pk, "team_id": sa.team_id, "team_name": sa.team.name, "season_id": sa.season_id, "position": sa.position.name} for sa in member.staff_assignments.select_related("team", "position").order_by("-season__start_date")
         ],
         "team_memberships": [
             {"id": tm.pk, "team_id": tm.team_id, "team_name": tm.team.name, "season_id": tm.season_id, "position": tm.position.name if tm.position else None, "jersey_number": tm.jersey_number}
@@ -184,21 +184,36 @@ def _lookup_member(member_id) -> Member:
     return member
 
 
-def _group_out(group: Group, *, with_members: bool = True) -> dict:
+def _group_out(group: Group, *, with_members: bool = True, user=None) -> dict:
     links = group.memberships.select_related("member")
+    manager = user is not None and access.can_manage_members(user)
     return {
         "id": group.pk,
         "name": group.name,
         "member_count": links.count(),
-        "members": [{"member_id": link.member_id, "first_name": link.member.first_name, "last_name": link.member.last_name, "email": link.member.email} for link in links] if with_members else [],
+        "members": [
+            {"member_id": link.member_id, "first_name": link.member.first_name, "last_name": link.member.last_name, "email": link.member.email, "is_admin": link.is_admin, "must_respond": link.must_respond}
+            for link in links
+        ]
+        if with_members
+        else [],
+        "can_manage": manager,
+        "can_manage_members": user is not None and access.can_manage_group(user, group),
     }
 
 
-def _get_group(request, group_id) -> Group:
-    access.require_admin(request.user)
+def _get_group(request, group_id, *, members_only: bool = False) -> Group:
+    """403 first; then 404. ``members_only``: a group's own admins pass too (they manage its members)."""
+    if members_only:
+        if not (access.can_manage_members(request.user) or access.admin_group_ids(request.user)):
+            access.require_admin(request.user)
+    else:
+        access.require_admin(request.user)
     group = Group.objects.filter(pk=group_id).first()
     if group is None:
         raise HttpError(404, "Not found.")
+    if members_only:
+        access.require_group_manager(request.user, group)
     return group
 
 
@@ -474,35 +489,40 @@ def delete_family_member(request, family_id: uuid.UUID, member_id: uuid.UUID):
 # -- groups ----------------------------------------------------------------------------------------------------------
 
 
-@router.get("/groups", response=list[GroupOut], summary="List groups (admin)")
+@router.get("/groups", response=list[GroupOut], summary="List groups (admin; a group admin sees their own groups)")
 @paginate
 def list_groups(request, q: str | None = None):
-    """Rule: admin only (403 otherwise). ``q``: every word matches the group name or the name of one of its people."""
-    access.require_admin(request.user)
+    """Rule: members managers see every group, a group's admins their own (403 for anyone else). ``q``: every word matches the group name or the name of one of its people."""
+    user = request.user
     qs = Group.objects.order_by("name")
+    if not access.can_manage_members(user):
+        ids = access.admin_group_ids(user)
+        if not ids:
+            access.require_admin(user)
+        qs = qs.filter(pk__in=ids)
     for word in (q or "").split():
         qs = qs.filter(Q(name__icontains=word) | Q(memberships__member__first_name__icontains=word) | Q(memberships__member__last_name__icontains=word)).distinct()
-    return _Mapped(qs, lambda g: _group_out(g, with_members=False))
+    return _Mapped(qs, lambda g: _group_out(g, with_members=False, user=user))
 
 
 @router.post("/groups", response={201: GroupOut}, summary="Create a group (admin)")
 def create_group(request, payload: GroupIn):
     """Rule: admin only. 422 for an empty or duplicate name."""
     access.require_admin(request.user)
-    return 201, _group_out(groups.create_group(request.user, payload.name))
+    return 201, _group_out(groups.create_group(request.user, payload.name), user=request.user)
 
 
-@router.get("/groups/{group_id}", response=GroupOut, summary="One group with its members (admin)")
+@router.get("/groups/{group_id}", response=GroupOut, summary="One group with its members (admin or group admin)")
 def get_group(request, group_id: uuid.UUID):
-    """Rule: admin only."""
-    return _group_out(_get_group(request, group_id))
+    """Rule: members managers, or an admin of this group. ``is_admin`` / ``must_respond`` per person."""
+    return _group_out(_get_group(request, group_id, members_only=True), user=request.user)
 
 
 @router.patch("/groups/{group_id}", response=GroupOut, summary="Rename a group (admin)")
 def patch_group(request, group_id: uuid.UUID, payload: GroupIn):
     """Rule: admin only. 422 for an empty or duplicate name."""
     group = _get_group(request, group_id)
-    return _group_out(groups.rename_group(request.user, group, payload.name))
+    return _group_out(groups.rename_group(request.user, group, payload.name), user=request.user)
 
 
 @router.delete("/groups/{group_id}", response={204: None}, summary="Delete a group (admin)")
@@ -512,18 +532,27 @@ def delete_group(request, group_id: uuid.UUID):
     return 204, None
 
 
-@router.post("/groups/{group_id}/members/{member_id}", response={201: GroupOut}, summary="Add a person to a group (admin)")
-def add_group_member(request, group_id: uuid.UUID, member_id: uuid.UUID):
-    """Rule: admin only. 422 when already in the group."""
-    group = _get_group(request, group_id)
-    groups.add_member(request.user, group, _lookup_member(member_id))
-    return 201, _group_out(group)
+@router.post("/groups/{group_id}/members/{member_id}", response={201: GroupOut}, summary="Add a person to a group (admin or group admin)")
+def add_group_member(request, group_id: uuid.UUID, member_id: uuid.UUID, is_admin: bool = False, must_respond: bool = True):
+    """Rule: members managers, or an admin of this group (only members managers may add an admin). 422 when already in the group.
+    Optional query parameters ``is_admin`` (default false) and ``must_respond`` (default true)."""
+    group = _get_group(request, group_id, members_only=True)
+    groups.add_member(request.user, group, _lookup_member(member_id), is_admin=is_admin, must_respond=must_respond)
+    return 201, _group_out(group, user=request.user)
 
 
-@router.delete("/groups/{group_id}/members/{member_id}", response={204: None}, summary="Remove a person from a group (admin)")
+@router.patch("/groups/{group_id}/members/{member_id}", response=GroupOut, summary="Set whether a person administers the group / must respond to its invites")
+def update_group_member(request, group_id: uuid.UUID, member_id: uuid.UUID, payload: GroupMemberPatch):
+    """``is_admin``: members managers only. ``must_respond``: members managers and the group's admins. 422 when not in the group."""
+    group = _get_group(request, group_id, members_only=True)
+    groups.update_member(request.user, group, _lookup_member(member_id), **payload.dict(exclude_unset=True))
+    return _group_out(group, user=request.user)
+
+
+@router.delete("/groups/{group_id}/members/{member_id}", response={204: None}, summary="Remove a person from a group (admin or group admin)")
 def remove_group_member(request, group_id: uuid.UUID, member_id: uuid.UUID):
-    """Rule: admin only. 422 when not in the group."""
-    group = _get_group(request, group_id)
+    """Rule: members managers, or an admin of this group. 422 when not in the group."""
+    group = _get_group(request, group_id, members_only=True)
     groups.remove_member(request.user, group, _lookup_member(member_id))
     return 204, None
 
@@ -541,7 +570,7 @@ def club_history(request, filters: Query[HistoryFilters]):
     if filters.actor:
         try:
             qs = qs.filter(actor__pk=filters.actor)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             raise Invalid("Unknown actor.", {"actor": ["Not a valid user id."]}) from None
     if filters.action:
         qs = qs.filter(action__startswith=filters.action)

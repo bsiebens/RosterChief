@@ -4,6 +4,7 @@ numbers from a seeded game timeline (the documents of events/tests_game_stats), 
 correct a goal's strength."""
 
 import json
+import uuid
 from datetime import timedelta
 from unittest import mock
 
@@ -15,12 +16,12 @@ from django_tenants.utils import schema_context
 from club.models import Domain, Sport
 from club.services import grant_login
 from controlpanel.tests import login_session
-from events.models import Event, GameTimeline
+from events.models import Attendance, Event, GameTimeline
 from events.services.game_stats import sync_game_stats
 from events.tests_game_stats import DOCUMENT, FLAGGED
 from events.tests_timelines import GameTestBase
 from features.services import set_override
-from members.models import Member
+from members.models import AuditEntry, Member
 from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 BASE = "/api/v1"
@@ -184,6 +185,124 @@ class AnalyticsApiTests(GameTestBase):
         self.enable()
         with mock.patch("members.services.access.can_view_member", return_value=False):
             self.assertEqual(self.call("get", f"/members/{self.scorer.pk}/game-stats", self.other_user).status_code, 404)
+
+    # -- member stats tab --
+
+    def test_member_stats_player_attendance_and_staff(self):
+        self.enable()
+        second = self.make_game(external_game_id="2", location=None, start=timezone.now() - timedelta(days=1), score_for=1, score_against=0)
+        sync_game_stats(second, {"events": [{"id": "x", "type": "goal", "period": "1", "seconds": 10, "side": "away", "goal": {"scorer": {"name": "Sam Scorer", "number": 78}, "assists": []}}]})
+        training = Event.objects.create(kind=Event.EventKind.TRAINING, title="Practice", start=timezone.now() - timedelta(days=3), season=self.season)
+        Attendance.objects.create(event=training, member=self.scorer, status=Attendance.AttendanceStatus.PRESENT)
+        Attendance.objects.create(event=self.game, member=self.scorer, status=Attendance.AttendanceStatus.ABSENT)
+
+        data = self.call("get", f"/members/{self.scorer.pk}/stats").json()
+
+        self.assertTrue(data["analytics_available"])
+        player = data["player"]
+        self.assertEqual([(s["games"], s["goals"], s["points"]) for s in player["seasons"]], [(2, 2, 2)])
+        self.assertEqual((player["goals_per_game"], player["longest_point_streak"], player["current_point_streak"]), (1.0, 2, 2))
+        self.assertEqual((player["away"]["games"], player["home"]["games"], len(player["form"])), (2, 0, 2))
+        self.assertIsNone(data["goalie"])
+        att = data["attendance"]
+        self.assertEqual((att["present"], att["absent"], att["rate"], len(att["months"])), (1, 1, 50, 12))
+        self.assertEqual({k["kind"] for k in att["kinds"]}, {"training", "game"})
+        self.assertEqual(data["staff"], [])
+        coach = self.call("get", f"/members/{self.coach.pk}/stats").json()
+        self.assertEqual((coach["player"], coach["attendance"]), (None, None))
+        [line] = coach["staff"]
+        self.assertEqual((line["team"]["name"], line["position"], line["games"], line["won"], line["gf"]), ("First Team", "Coach", 2, 2, 4))
+
+    def test_member_stats_without_analytics_still_has_attendance(self):
+        training = Event.objects.create(kind=Event.EventKind.TRAINING, title="Practice", start=timezone.now() - timedelta(days=3), season=self.season)
+        Attendance.objects.create(event=training, member=self.scorer, status=Attendance.AttendanceStatus.PRESENT)
+        data = self.call("get", f"/members/{self.scorer.pk}/stats").json()
+        self.assertEqual((data["analytics_available"], data["player"], data["goalie"], data["attendance"]["rate"]), (False, None, None, 100))
+
+    def test_member_stats_officiating_is_built_from_the_real_assignments(self):
+        from decimal import Decimal
+
+        from club.models import RefereeType
+        from events.models import EventOfficial, EventReferee, GameMoment
+
+        self.assertIsNone(self.call("get", f"/members/{self.scorer.pk}/stats").json()["officiating"])  # nothing officiated yet
+        head = RefereeType.objects.create(name="Head referee", sport=self.hockey)
+        line = RefereeType.objects.create(name="Linesman", sport=self.hockey)
+        self.game.competition = "RBIHF"
+        self.game.save(update_fields=["competition"])
+        other = self.make_game(external_game_id="9", location=None, start=timezone.now() - timedelta(days=5))
+        other.competition = ""
+        other.save(update_fields=["competition"])
+        EventReferee.objects.create(event=self.game, member=self.scorer, referee_type=head, fee=Decimal("20.00"))
+        EventReferee.objects.create(event=other, member=self.scorer, referee_type=line, fee=Decimal("10.00"))
+        EventOfficial.objects.create(event=self.game, member=self.scorer, fee=Decimal("5.00"))
+        GameMoment.objects.create(event=self.game, key="p1", kind=GameMoment.Kind.PENALTY_FOR)
+        GameMoment.objects.create(event=self.game, key="p2", kind=GameMoment.Kind.PENALTY_AGAINST)
+        # a game that hasn't been played yet doesn't count
+        future = self.make_game(external_game_id="10", location=None, start=timezone.now() + timedelta(days=5))
+        EventReferee.objects.create(event=future, member=self.scorer, fee=Decimal("99.00"))
+
+        data = self.call("get", f"/members/{self.scorer.pk}/stats").json()["officiating"]
+
+        ref = data["referee"]
+        self.assertEqual((ref["games"], ref["games_this_season"], ref["penalties_per_game"]), (2, 2, 2.0))
+        self.assertEqual(ref["fees"], "30.00")
+        self.assertEqual(sorted(ref["types"]), ["Head referee", "Linesman"])
+        self.assertEqual(len(ref["months"]), 12)
+        self.assertEqual(sum(sum(m["counts"]) for m in ref["months"]), 2)
+        self.assertEqual([(s["season"]["name"], s["games"]) for s in ref["seasons"]], [(self.season.name, 2)])
+        # competition buckets: federation + our team(s)
+        self.assertEqual({(c["competition"], c["games"]) for c in ref["competitions"]}, {("RBIHF", 1), ("", 1)})
+        self.assertTrue(all(c["teams"] for c in ref["competitions"]))
+        self.assertEqual(sorted(c["competition"] for c in ref["competitions"]), ["", "RBIHF"])
+        self.assertEqual(data["official"]["games"], 1)
+
+    def public(self, token):
+        # no session at all: the personal link is for anybody
+        response = Client().get(f"{BASE}/public/player-stats/{token}", HTTP_HOST=self.host)
+        connection.set_tenant(self.club)
+        return response
+
+    def test_personal_public_link_shows_only_the_game_stats(self):
+        self.enable()
+        path = f"/members/{self.scorer.pk}/stats-share"
+        self.assertEqual(self.public("nope").status_code, 404)
+        self.assertIsNone(self.call("get", f"/members/{self.scorer.pk}/stats").json()["share_token"])
+        # only members managers switch it on
+        self.assertEqual(self.call("post", path, self.coach_user).status_code, 403)
+        token = self.call("post", path).json()["share_token"]
+        self.assertEqual(self.call("post", path).json()["share_token"], token)  # idempotent
+        self.assertEqual(self.call("get", f"/members/{self.scorer.pk}/stats").json()["share_token"], token)
+
+        body = self.public(token).json()
+        self.assertEqual((body["first_name"], body["last_name"]), ("Sam", "Scorer"))
+        self.assertEqual(body["player"]["seasons"][0]["goals"], 1)
+        self.assertEqual(body["game_stats"]["goals"], 1)
+        # nothing but names and game numbers goes out
+        self.assertEqual(set(body), {"first_name", "last_name", "game_stats", "player", "goalie"})
+
+        self.assertEqual(self.public(f"{token}?season={self.season.pk}").json()["game_stats"]["season"]["id"], str(self.season.pk))
+        self.assertEqual(self.public(f"{token}?season={uuid.uuid4()}").status_code, 404)
+
+        new = self.call("post", f"{path}?rotate=true").json()["share_token"]
+        self.assertNotEqual(new, token)
+        self.assertEqual(self.public(token).status_code, 404)  # the old link is dead
+        self.assertEqual(self.public(new).status_code, 200)
+        self.assertEqual(self.call("delete", path).status_code, 204)
+        self.assertEqual(self.public(new).status_code, 404)
+        actions = set(AuditEntry.objects.filter(action__startswith="member.stats_share").values_list("action", flat=True))
+        self.assertEqual(actions, {"member.stats_share_enabled", "member.stats_share_rotated", "member.stats_share_disabled"})
+
+    def test_public_link_needs_the_analytics_feature(self):
+        token = self.call("post", f"/members/{self.scorer.pk}/stats-share").json()["share_token"]
+        self.assertEqual(self.public(token).status_code, 404)  # feature off
+        self.enable()
+        self.assertEqual(self.public(token).status_code, 200)
+
+    def test_member_stats_follow_member_visibility(self):
+        self.assertEqual(self.call("get", "/members/00000000-0000-0000-0000-000000000000/stats").status_code, 404)
+        with mock.patch("members.services.access.can_view_member", return_value=False):
+            self.assertEqual(self.call("get", f"/members/{self.scorer.pk}/stats", self.other_user).status_code, 404)
 
     # -- strength corrections --
 

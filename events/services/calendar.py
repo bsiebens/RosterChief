@@ -48,7 +48,7 @@ def events_between(
         qs = qs.filter(kind=kind)
     if mine_member is not None:
         qs = qs.filter(audience_q(mine_member))
-    return qs.select_related("location", "opponent", "series", "season").prefetch_related(Prefetch("teams"), Prefetch("groups")).order_by("start", "title").distinct()
+    return qs.select_related("location", "opponent", "subtype", "series", "season").prefetch_related(Prefetch("teams"), Prefetch("groups")).order_by("start", "title").distinct()
 
 
 def audience_q(member) -> Q:

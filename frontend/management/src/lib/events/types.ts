@@ -38,6 +38,8 @@ export type EventRow = {
 	id: string;
 	title: string;
 	kind: EventKind | string;
+	subtype_id: string | null;
+	subtype_name: string;
 	start: string;
 	end: string | null;
 	gathering: string | null;
@@ -51,6 +53,11 @@ export type EventRow = {
 	series_id: string | null;
 	detached: boolean;
 	is_friendly: boolean;
+	score_for: number | null;
+	score_against: number | null;
+	is_home_game: boolean;
+	/** A competition game id exists: the score and game sheet can be fetched. */
+	has_game_source: boolean;
 	attendance: AttendanceCounts;
 	can_edit: boolean;
 	can_manage_attendance: boolean;
@@ -73,6 +80,8 @@ export type LineupStatus = 'none' | 'draft' | 'scheduled' | 'published';
 export type LineupInfo = { available: boolean; status: LineupStatus; team_id: string | null; published_at: string | null; scheduled_publish_at: string | null };
 
 /** GET /events/{id} */
+/** A referee or official on the game (member links to their profile; no fees). */
+export type Officiating = { name: string; member_id: string | null; type_name: string; is_external: boolean };
 export type EventDetail = EventRow & {
 	season: Ref | null;
 	invited_member_ids: string[];
@@ -90,6 +99,9 @@ export type EventDetail = EventRow & {
 	created_by: Ref | null;
 	task_count: number;
 	attachment_count: number;
+	has_game_sheet: boolean;
+	referees: Officiating[];
+	officials: Officiating[];
 };
 
 export type WeekdayChoice = { code: string; label: string };
@@ -106,9 +118,13 @@ export type EventOptions = {
 	locations: LocationRef[];
 	opponents: OpponentRef[];
 	kinds: Choice[];
+	subtypes: EventSubtypeRef[];
 	frequencies: string[];
 	weekdays: WeekdayChoice[];
 };
+
+/** An event subtype as the form offers it; `title_template` may use {teams}, {opponent} and {kind}. */
+export type EventSubtypeRef = { id: string; kind: string; name: string; title_template: string };
 
 export type RecurrenceIn = { frequency: string; interval?: number; weekdays?: string[]; until?: string | null; count?: number | null };
 
@@ -116,6 +132,7 @@ export type RecurrenceIn = { frequency: string; interval?: number; weekdays?: st
 export type EventIn = {
 	title?: string;
 	kind?: string;
+	subtype_id?: string | null;
 	start: string;
 	end?: string | null;
 	gathering?: string | null;
@@ -141,6 +158,7 @@ export type EditScope = 'this' | 'following' | 'all';
 export type EventValues = {
 	title: string;
 	kind: string;
+	subtype_id: string | null;
 	start: string | null;
 	end: string | null;
 	gathering: string | null;
@@ -172,6 +190,9 @@ export type AttendanceRow = {
 	/** Only for people who manage this event's attendance. */
 	coach_note: string | null;
 	answered_by_coach: boolean;
+	/** Who set the current answer (null for a reset or when nobody did) and how. */
+	answered_by_name?: string | null;
+	answered_via?: 'coach' | 'self' | 'guardian' | 'system' | null;
 	coach_set_at: string | null;
 	position: string;
 	jersey_number: number | null;
@@ -212,6 +233,22 @@ export type TaskList = { can_manage: boolean; tasks: Task[] };
 
 export type Attachment = { id: string; name: string; size: number; uploaded_by: Ref | null; created: string; download_url: string };
 /** GET /events/{id}/attachments */
+export type GameSheetRow = { time: string; type: string; ours: boolean | null; team: string; icon: string; kind: string; who: string; detail: string; tag: string; score: string; serious: boolean };
+export type LineupPlayer = { pos: string; number: number | null; name: string; member_id?: string | null; photo_url?: string | null; initials: string; goals?: number; assists?: number; penalty_minutes?: number };
+export type GameLineup = { ours_label: string; theirs_label: string; ours: LineupPlayer[]; theirs: LineupPlayer[] };
+export type GameSheet = {
+	status: string;
+	final: boolean;
+	updated_at: string | null;
+	source: string;
+	ours_label: string;
+	theirs_label: string;
+	score: string;
+	period_scores: { label: string; score: string }[];
+	periods: { label: string; title: string; score: string; rows: GameSheetRow[] }[];
+	lineup: GameLineup | null;
+};
+
 export type AttachmentList = { can_manage: boolean; attachments: Attachment[] };
 
 // -- helpers --
@@ -236,6 +273,12 @@ export const KIND_STYLE: Record<EventKind, { dot: string; chip: string; bar: str
 	social: { dot: 'bg-ok', chip: 'bg-ok-bg text-ok-text border-ok-border', bar: 'border-l-ok' },
 	other: { dot: 'bg-dim', chip: 'bg-subhead text-slate border-line', bar: 'border-l-dim' }
 };
+/** "5 – 2" (our score first) for a played game with a score, else ''. */
+export const scoreText = (e: { score_for: number | null; score_against: number | null }) => (e.score_for === null || e.score_against === null ? '' : `${e.score_for} – ${e.score_against}`);
+/** Badge colours of a result: won / drawn / lost for us. */
+export const resultStyle = (e: { score_for: number | null; score_against: number | null }) =>
+	e.score_for === null || e.score_against === null ? '' : e.score_for > e.score_against ? 'bg-ok-bg text-ok-text border-ok-border' : e.score_for < e.score_against ? 'bg-danger-bg text-danger border-danger-border' : 'bg-subhead text-muted border-line';
+
 export const kindStyle = (kind: string) => KIND_STYLE[(kind as EventKind) in KIND_STYLE ? (kind as EventKind) : 'other'];
 
 /** Pill classes per attendance status. */
@@ -324,3 +367,14 @@ export function describeRecurrence(r: RecurrenceValues | null | undefined, fallb
 	else if (r.count) out += `, ${t('events.rec.times', { n: r.count })}`;
 	return out;
 }
+
+/** One logged change of an answer, newest first from the history endpoint. */
+export type AttendanceChange = {
+	id: string;
+	created: string;
+	from_status: string;
+	to_status: string;
+	changed_by_name: string;
+	via: 'coach' | 'self' | 'guardian' | 'system' | string;
+	note_changed: boolean;
+};

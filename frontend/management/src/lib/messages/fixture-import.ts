@@ -1,5 +1,8 @@
 export default {
 	en: {
+		'fixtures.bar.title': 'Import',
+		'fixtures.f.past': 'Include games that were already played',
+		'fixtures.f.past_help': 'Also import the games already played (with their date and opponent), not only the upcoming ones. Handy when you start mid-season.',
 		'fixtures.summary': '{rescheduled} rescheduled, {new} new, {removed} removed',
 		'fixtures.import': 'Import fixtures',
 		'fixtures.recheck_all': 'Re-check all',
@@ -149,6 +152,9 @@ export default {
 		'fixtures.json.done': 'The play days are in the calendar.'
 	},
 	nl: {
+		'fixtures.bar.title': 'Importeren',
+		'fixtures.f.past': 'Ook reeds gespeelde wedstrijden importeren',
+		'fixtures.f.past_help': 'Importeer ook de al gespeelde wedstrijden (met datum en tegenstander), niet enkel de komende. Handig als je halverwege het seizoen start.',
 		'fixtures.summary': '{rescheduled} verplaatst, {new} nieuw, {removed} verwijderd',
 		'fixtures.import': 'Wedstrijden importeren',
 		'fixtures.recheck_all': 'Alles opnieuw controleren',
@@ -298,6 +304,9 @@ export default {
 		'fixtures.json.done': 'De speeldagen staan in de kalender.'
 	},
 	fr: {
+		'fixtures.bar.title': 'Importer',
+		'fixtures.f.past': 'Importer aussi les matchs déjà joués',
+		'fixtures.f.past_help': 'Importe aussi les matchs déjà joués (avec leur date et leur adversaire), pas seulement ceux à venir. Pratique si vous commencez en cours de saison.',
 		'fixtures.summary': '{rescheduled} reporté(s), {new} nouveau(x), {removed} supprimé(s)',
 		'fixtures.import': 'Importer les matchs',
 		'fixtures.recheck_all': 'Tout revérifier',

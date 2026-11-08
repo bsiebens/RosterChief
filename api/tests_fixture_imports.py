@@ -2,6 +2,7 @@
 feature gating, permissions, preview shape with mapping problems, applying choices, token expiry, idempotency,
 re-checks and forgetting a source. No network: every fetch is mocked as in events/tests_imports."""
 
+import datetime
 import json
 from datetime import timedelta
 from unittest import mock
@@ -265,6 +266,113 @@ class FixtureImportsApiTests(FixtureApiTestBase):
         self.assertEqual(skipped["source"], "DFEL")
         self.assertIn("DFEL fixtures", skipped["reason"])
         self.assertEqual(self.call("post", f"{self.path}/recheck-all", self.coach_user).status_code, 403)
+
+    def test_run_checks_or_imports_the_stored_sources(self):
+        self.enable("competition_rbihf")
+        self.store()
+        with self.patch_fetch(rbihf_sample_html([rbihf_row()])):
+            checked = import_sources.run_team(self.club, self.team, apply=False)
+            self.assertEqual((checked["sources"], checked["new"], checked["created"]), (1, 1, 0))
+            imported = import_sources.run_team(self.club, self.team, apply=True)
+        self.assertEqual((imported["mode"], imported["created"], imported["errors"]), ("import", 1, 0))
+        self.assertEqual(Event.objects.filter(teams=self.team, external_game_id="5002").count(), 1)
+
+    def test_run_endpoint_queues_the_task_for_settings_holders_only(self):
+        self.enable("competition_rbihf")
+        self.store()
+        fake = mock.Mock(id="abc", state="PENDING", result=None)
+        with mock.patch("events.tasks.run_team_fixtures.delay", return_value=fake) as delay:
+            denied = self.call("post", f"{self.path}/run", self.coach_user, {"apply": True})
+            ok = self.call("post", f"{self.path}/run", None, {"apply": True})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual((ok.status_code, ok.json()["id"], ok.json()["done"]), (202, "abc", False))
+        delay.assert_called_once_with(str(self.team.pk), True)
+
+    def played_game(self, game_id="7001"):
+        past = timezone.now() - datetime.timedelta(days=3)
+        event = Event.objects.create(title="Played", kind=Event.EventKind.GAME, start=past, competition="RBIHF", external_game_id=game_id)
+        event.teams.add(self.team)
+        return event
+
+    def fake_source(self):
+        class Source:
+            def update_game_information(self, event):
+                event.score_for, event.score_against = 5, 2
+                event.save(update_fields=["score_for", "score_against"])
+
+            def fetch_timeline(self, event):
+                return None
+
+        return Source()
+
+    def test_update_past_games_fetches_the_scores(self):
+        from events.services import game_timeline
+
+        event = self.played_game()
+        with mock.patch.object(game_timeline, "competition_for", return_value=self.fake_source()):
+            counts = game_timeline.update_past_games(self.team)
+        event.refresh_from_db()
+        self.assertEqual((counts["games"], counts["updated"], event.score_for, event.score_against), (1, 1, 5, 2))
+
+    def test_update_game_endpoint_and_update_past_queue(self):
+        from events.services import game_timeline
+
+        event = self.played_game()
+        with mock.patch.object(game_timeline, "competition_for", return_value=self.fake_source()):
+            ok = self.call("post", f"/events/{event.pk}/update-game")
+        self.assertEqual((ok.status_code, ok.json()["score_for"], ok.json()["has_game_source"]), (200, 5, True))
+        fake = mock.Mock(id="xyz", state="PENDING", result=None)
+        with mock.patch("events.tasks.update_past_games.delay", return_value=fake) as delay:
+            denied = self.call("post", f"{self.path}/update-past", self.coach_user)
+            queued = self.call("post", f"{self.path}/update-past")
+        self.assertEqual((denied.status_code, queued.status_code), (403, 202))
+        delay.assert_called_once_with(str(self.team.pk))
+
+    def test_game_sheet_endpoint(self):
+        from events.models import GameTimeline
+        from events.tests_game_stats import DOCUMENT
+
+        event = self.played_game()
+        self.assertEqual(self.call("get", f"/events/{event.pk}/game-sheet").status_code, 404)
+        self.assertFalse(self.call("get", f"/events/{event.pk}").json()["has_game_sheet"])
+        GameTimeline.objects.create(event=event, source="RBIHF", data=DOCUMENT, status="final")
+        body = self.call("get", f"/events/{event.pk}/game-sheet").json()
+        self.assertTrue(body["periods"])
+        self.assertTrue(self.call("get", f"/events/{event.pk}").json()["has_game_sheet"])
+
+    def test_game_sheet_includes_the_lineup_when_stored(self):
+        from events.models import GameTimeline
+        from events.services.game_stats import sync_game_stats
+        from events.tests_game_stats import DOCUMENT
+
+        event = self.played_game()
+        side = "home" if event.is_home_game else "away"
+        other = "away" if side == "home" else "home"
+        document = {**DOCUMENT, "lineups": {side: [{"pos": "DF", "number": 5, "license": "1", "name": "Some Body"}], other: [{"pos": "GO", "number": 1, "license": "2", "name": "Their Keeper"}]}}
+        GameTimeline.objects.create(event=event, source="RBIHF", data=document, status="final")
+        sync_game_stats(event, document)
+        body = self.call("get", f"/events/{event.pk}/game-sheet").json()
+        self.assertEqual([p["name"] for p in body["lineup"]["ours"]], ["Some Body"])
+        self.assertEqual(body["lineup"]["theirs"][0]["pos"], "GO")
+
+    def test_game_moments_are_for_settings_holders(self):
+        from events.models import GameMoment
+
+        event = self.played_game()
+        GameMoment.objects.create(event=event, key="g1", kind=GameMoment.Kind.GAME_STARTED, notifiable=False)
+        GameMoment.objects.create(event=event, key="g2", kind=GameMoment.Kind.GAME_FINAL, delivered_at=timezone.now())
+        self.assertEqual(self.call("get", f"/events/{event.pk}/game-moments", self.coach_user).status_code, 403)
+        body = self.call("get", f"/events/{event.pk}/game-moments").json()
+        self.assertEqual(sorted(m["state"] for m in body), ["catch_up", "pushed"])
+
+    def test_following_a_game_and_a_team(self):
+        event = self.played_game()
+        self.assertEqual(self.call("put", f"/events/{event.pk}/follow").json(), {"directly": True, "via_team": False})
+        self.assertEqual(self.call("delete", f"/events/{event.pk}/follow").json()["directly"], False)
+        body = self.call("put", f"/events/follow-teams/{self.team.pk}").json()
+        self.assertEqual(body["team_ids"], [str(self.team.pk)])
+        self.assertTrue(self.call("get", f"/events/{event.pk}/follow").json()["via_team"])
+        self.assertEqual(self.call("delete", f"/events/follow-teams/{self.team.pk}").json()["team_ids"], [])
 
     def test_remove_forgets_the_source_but_keeps_its_games(self):
         self.import_rows([rbihf_row()])

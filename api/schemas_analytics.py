@@ -58,6 +58,7 @@ class LeaderOut(Schema):
     number: int | None = None
     member_id: uuid.UUID | None = None
     initials: str = ""
+    photo_url: str | None = None  # the matched member's player picture (the file view enforces who may see it)
     total: int
     goals: int = 0
     pct: int  # share of the leader's total, for a bar
@@ -237,6 +238,7 @@ class MemberStatsCounters(Schema):
     goals: int
     assists: int
     points: int
+    penalties: int = 0  # number of penalties taken
     penalty_minutes: int
     pp_goals: int
     game_winning_goals: int

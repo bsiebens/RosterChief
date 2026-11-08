@@ -12,6 +12,7 @@ class NotAllowed(ServiceError):
 class Invalid(ServiceError):
     """The request breaks a rule (maps to 422). ``errors`` optionally maps field -> list of messages."""
 
-    def __init__(self, message: str = "", errors: dict | None = None):
+    def __init__(self, message: str = "", errors: dict | None = None, code: str = "invalid"):
         super().__init__(message)
         self.errors = errors or {}
+        self.code = code

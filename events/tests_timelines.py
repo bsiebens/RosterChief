@@ -59,7 +59,7 @@ class GameTestBase(TestCase):
         today = timezone.localdate()
         with schema_context(cls.club.schema_name):
             cls.season = Season.objects.create(start_date=today - timedelta(days=30), end_date=today + timedelta(days=300))
-            cls.team = Team.objects.create(name="First Team", short_name="1st")
+            cls.team = Team.objects.create(name="First Team", short_name="First Team")
             cls.home_location = Location.objects.create(name="Home Arena", address="1 St", city="Hasselt", zip_code="3500", is_home=True)
             cls.opponent = Opponent.objects.create(name="Olympia Heist")
 
@@ -366,7 +366,7 @@ class GameTimelineStoreTests(GameTestBase):
 
         self.assertEqual((home["score"], away["score"]), ("5–2", "2–5"))
         self.assertEqual((home_goal["ours"], home_goal["team"], home_goal["score"]), (False, "Olympia Heist", "0–1"))
-        self.assertEqual((away_goal["ours"], away_goal["team"], away_goal["score"]), (True, "1st", "1–0"))
+        self.assertEqual((away_goal["ours"], away_goal["team"], away_goal["score"]), (True, "First Team", "1–0"))
         self.assertTrue(home_goal["who"].startswith("#"))
         self.assertTrue(home_goal["detail"].startswith("Assists: "))
 
@@ -390,7 +390,7 @@ class GameTimelineStoreTests(GameTestBase):
         foul_row, shot_row = game_timeline.display_timeline(game.timeline, game)["periods"][0]["rows"]
 
         self.assertEqual((foul_row["who"], foul_row["ours"]), ("Olympia Heist", False))
-        self.assertEqual((shot_row["type"], shot_row["icon"], shot_row["ours"], shot_row["who"]), ("penalty_shot", "target", True, "1st"))
+        self.assertEqual((shot_row["type"], shot_row["icon"], shot_row["ours"], shot_row["who"]), ("penalty_shot", "target", True, "First Team"))
 
     def test_display_timeline_groups_by_period_without_marker_rows(self):
         game = self.make_game()

@@ -18,6 +18,7 @@ export type FixtureSource = {
 	season_name: string;
 	season_exists: boolean;
 	competition_label: string;
+	include_past?: boolean;
 	last_imported: string | null;
 	last_checked: string | null;
 	last_check: LastCheck | null;
@@ -55,6 +56,7 @@ export type FixturePreview = {
 	season_id: string | null;
 	season_name: string;
 	competition_label: string;
+	include_past: boolean;
 	scraped_team_name: string;
 	team: Ref;
 	counts: Record<GameAction, number>;
@@ -97,9 +99,10 @@ export type PlayDayResult = { created: number; updated: number };
 export const checkSummary = (c: LastCheck | null | undefined) => (!c ? '' : c.error ? c.error : t('fixtures.summary', { rescheduled: c.rescheduled, new: c.new_games, removed: c.removed_games }));
 
 /** The wizard URL that runs the preview of a stored source again (used by "Review changes" on the team page). */
-export const rerunHref = (teamId: string, s: { source: string; url: string; season_id: string | null; competition_label: string }) => {
+export const rerunHref = (teamId: string, s: { source: string; url: string; season_id: string | null; competition_label: string; include_past?: boolean }) => {
 	const q = new URLSearchParams({ source: s.source, url: s.url, run: '1' });
 	if (s.season_id) q.set('season', s.season_id);
 	if (s.competition_label) q.set('label', s.competition_label);
+	if (s.include_past) q.set('past', '1');
 	return `/teams/${teamId}/import?${q}`;
 };

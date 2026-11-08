@@ -42,15 +42,15 @@
 		</div>
 		<label class="flex cursor-pointer items-center gap-2"><input type="radio" class="size-4 accent-club" name="{uid}-mode" value="create" bind:group={choice.mode} /> {t('fixtures.map.create_location')}</label>
 		{#if choice.mode === 'create'}
-			<div class="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2">
+			<div class="grid items-start gap-x-3 gap-y-2 rounded-lg border border-line p-3 sm:grid-cols-2">
 				{#each [['name', 'fixtures.loc.name'], ['address', 'fixtures.loc.address'], ['zip_code', 'fixtures.loc.zip'], ['city', 'fixtures.loc.city']] as const as [k, key] (k)}
-					<label class="grid gap-1 text-xs text-muted">
+					<label class="grid content-start gap-1 text-xs text-muted">
 						{t(key)}
-						<input class="input input-sm w-full {err(k) ? 'input-error' : ''}" bind:value={choice[k]} />
+						<input autocomplete="off" class="input input-sm w-full {err(k) ? 'input-error' : ''}" bind:value={choice[k]} />
 						{#if err(k)}<span class="text-error">{err(k)}</span>{/if}
 					</label>
 				{/each}
-				<label class="grid gap-1 text-xs text-muted">
+				<label class="grid content-start gap-1 text-xs text-muted">
 					{t('fixtures.loc.country')}
 					<select class="select select-sm w-full {err('country') ? 'select-error' : ''}" bind:value={choice.country}>
 						<option value="">—</option>

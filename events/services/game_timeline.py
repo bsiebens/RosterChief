@@ -275,7 +275,7 @@ def display_timeline(timeline: GameTimeline, event) -> dict:
     data = timeline.data or {}
     our_side = "home" if event.is_home_game else "away"
     their_side = "away" if our_side == "home" else "home"
-    ours_label = ", ".join(team.short_name or team.name for team in event.teams.all()) or _club_name()
+    ours_label = ", ".join(team.name for team in event.teams.all()) or _club_name()
     theirs_label = event.opponent.name if event.opponent_id else _("Opponent")
 
     period_scores = {str(period.get("label")): f"{period.get(our_side, 0)}{EN_DASH}{period.get(their_side, 0)}" for period in data.get("periods", [])}
@@ -559,4 +559,28 @@ def backfill_timelines(*, since, refetch=False, dry_run=False, now=None) -> dict
         if outcome in (CHANGED, UNCHANGED) and event.start < now - SETTLE_WINDOW:
             GameTimeline.objects.filter(event=event, finalized_at__isnull=True).update(finalized_at=now)
             counts[FINALIZED] += 1
+    return counts
+
+
+def update_past_games(team) -> dict:
+    """Score, live flag and game sheet of every played, imported game of ``team`` (the import page's "update past
+    games"). A game whose source fails is counted and skipped. Returns counts."""
+    now = timezone.now()
+    games = Event.objects.filter(teams=team, kind=Event.EventKind.GAME, cancelled=False, start__lte=now).exclude(competition="").exclude(external_game_id="").select_related("location", "opponent").order_by("start")
+    counts = {"games": 0, "updated": 0, "failed": 0, "skipped": 0, "with_score": 0}
+    for event in games:
+        counts["games"] += 1
+        try:
+            outcome = fetch_game(event)
+        except CompetitionFetchError:
+            counts["failed"] += 1
+            continue
+        if outcome is None:
+            counts["skipped"] += 1
+            continue
+        counts["updated"] += 1
+        if event.start < now - SETTLE_WINDOW:  # long over: the source won't change it any more, like the backfill
+            GameTimeline.objects.filter(event=event, finalized_at__isnull=True).update(finalized_at=now)
+        event.refresh_from_db(fields=["score_for", "score_against"])
+        counts["with_score"] += event.score_for is not None
     return counts

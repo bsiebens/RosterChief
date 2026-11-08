@@ -162,8 +162,14 @@ def set_fee_waived(actor, membership: ClubMembership, waived: bool = True) -> Cl
     membership.fee_status = FeeStatus.WAIVED if waived else FeeStatus.UNPAID
     membership.save(update_fields=["fee_status", "modified"])
     sync_fee_status(membership)
-    audit.record(actor, "membership.fee_waived" if waived else "membership.fee_unwaived", member=membership.member, target=membership, changes={"fee_status": {"from": before, "to": membership.fee_status}},
-        target_label=f"{membership.season} - {membership.member}")
+    audit.record(
+        actor,
+        "membership.fee_waived" if waived else "membership.fee_unwaived",
+        member=membership.member,
+        target=membership,
+        changes={"fee_status": {"from": before, "to": membership.fee_status}},
+        target_label=f"{membership.season} - {membership.member}",
+    )
     return membership
 
 

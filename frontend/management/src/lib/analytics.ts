@@ -22,7 +22,7 @@ export type GameRef = {
 	score_for: number | null;
 	score_against: number | null;
 };
-export type Leader = { name: string; number: number | null; member_id: string | null; initials: string; total: number; goals: number; pct: number };
+export type Leader = { name: string; number: number | null; member_id: string | null; initials: string; photo_url: string | null; total: number; goals: number; pct: number };
 export type Goalie = Leader & { seconds: number; minutes: number | null; gaa: number | null };
 export type ForAgainst = { label: string; goals_for: number; goals_against: number; for_pct: number; against_pct: number };
 export type SplitRow = { games: number; won: number; drawn: number; lost: number; gf: number; ga: number; diff: number; avg_for: number | null; avg_against: number | null; share_for: number };
@@ -103,7 +103,7 @@ export type TeamAnalytics = {
 };
 
 export type GoalieTotals = { games: number; conceded: number; seconds: number; minutes: number | null; gaa: number | null };
-export type StatCounters = { games: number; goals: number; assists: number; points: number; penalty_minutes: number; pp_goals: number; game_winning_goals: number; goalie: GoalieTotals | null };
+export type StatCounters = { games: number; goals: number; assists: number; points: number; penalties: number; penalty_minutes: number; pp_goals: number; game_winning_goals: number; goalie: GoalieTotals | null };
 export type MemberGameStats = StatCounters & { season: { id: string; name: string } | null; teams: (StatCounters & { team: { id: string; name: string }; season: { id: string; name: string } | null })[] };
 
 /** Strengths a goal can be corrected to (events/services/strength_check.py STRENGTHS). */

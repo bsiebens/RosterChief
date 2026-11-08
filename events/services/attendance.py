@@ -25,7 +25,7 @@ from django.db.models import Count, F, Q, Window
 from django.db.models.functions import RowNumber
 from django.utils import timezone
 
-from events.models import Attendance, Event, Season
+from events.models import Attendance, AttendanceChange, Event, Season
 from members.models import ClubMembership, GroupMembership, Member
 from members.services import access, audit
 from members.services.errors import Invalid, NotAllowed
@@ -115,7 +115,8 @@ def _desired_member_ids(events: list, member_ids: set | None = None) -> dict:
             roster[(team_id, season_id)].add(member_id)
     group_members = defaultdict(set)
     if group_ids:
-        for group_id, member_id in only(GroupMembership.objects.filter(group_id__in=group_ids)).values_list("group_id", "member_id"):
+        # Members who needn't respond (e.g. a training group's admins) still see the events but get no attendance row.
+        for group_id, member_id in only(GroupMembership.objects.filter(group_id__in=group_ids, must_respond=True)).values_list("group_id", "member_id"):
             group_members[group_id].add(member_id)
     active = defaultdict(set)
     if club_wide_seasons:
@@ -207,14 +208,14 @@ def current_club():
 
 
 def _notify(member: Member, *, title: str, body: str, href: str, category: str) -> None:
-    if member.user_id is None:
-        return
+    """The member and, for a child, the parents (on the child's behalf)."""
     club = current_club()
     if club is None:
         return
+    from members.services import recipients
     from notifications import inbox
 
-    inbox.notify(member.user, club, title=title, body=body, kind=inbox.Kind.INFO, href=href, push=True, category=category)
+    recipients.deliver(member, club, title=title, body=body, kind=inbox.Kind.INFO, href=href, push=True, category=category)
 
 
 def notify_newly_invited(member: Member, events: list, *, via: str = "") -> None:
@@ -239,6 +240,33 @@ def _actor_member(actor) -> Member | None:
     if actor is None or not getattr(actor, "pk", None):
         return None
     return Member.objects.filter(user=actor).first()
+
+
+def change_via(actor, member: Member) -> str:
+    """How ``actor`` came to change ``member``'s answer: the member's own account, one of their guardians, a coach, or
+    the system (no actor)."""
+    if actor is None or not getattr(actor, "pk", None):
+        return AttendanceChange.Via.SYSTEM
+    if member.user_id is not None and member.user_id == actor.pk:
+        return AttendanceChange.Via.SELF
+    from members.services import recipients
+
+    actor_member = _actor_member(actor)
+    if actor_member is not None and any(g.pk == actor_member.pk for g in recipients.guardians_of(member)):
+        return AttendanceChange.Via.GUARDIAN
+    return AttendanceChange.Via.COACH
+
+
+def record_status_change(actor, attendance: Attendance, from_status: str, to_status: str, *, note_changed: bool = False) -> AttendanceChange | None:
+    """Log a status change (nothing when the status did not change)."""
+    if from_status == to_status:
+        return None
+    via = change_via(actor, attendance.member)
+    name, user = "", None
+    if via != AttendanceChange.Via.SYSTEM:
+        user = actor
+        name = str(_actor_member(actor) or actor.get_full_name() or actor)
+    return AttendanceChange.objects.create(attendance=attendance, from_status=from_status, to_status=to_status, changed_by=user, changed_by_name=name, via=via, note_changed=note_changed)
 
 
 def require_attendance_manager(actor, event) -> None:
@@ -293,6 +321,7 @@ def set_answer_as_coach(actor, attendance: Attendance, status: str | None, coach
     if coach_note is not None:
         attendance.coach_note = coach_note.strip()
     attendance.save()
+    record_status_change(actor, attendance, was, attendance.status, note_changed=attendance.note != before["note"])
 
     after = {"status": attendance.status, "note": attendance.note, "coach_note": attendance.coach_note, "answered_by_coach": attendance.answered_by_coach}
     changes = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
@@ -399,15 +428,21 @@ def team_no_shows(team, season: Season | None = None):
 
 
 def member_attendance_sparkline(member, season: Season | None = None, *, limit: int = 12) -> list[dict]:
-    """The member's ``limit`` most recent attendance rows in ``season``, oldest first, each as
+    """The member's ``limit`` most recent PAST attendance rows in ``season`` (topped up with the next upcoming events when there
+    are fewer), oldest first, each as
     ``{"event", "state"}`` with state "present" (answered present or was selected) / "absent" (anything else, for a past event)
     / "upcoming". Cancelled events are left out."""
     season = _season(season)
     if season is None:
         return []
     now = timezone.now()
-    rows = list(Attendance.objects.filter(_in_season(season), member=member, event__cancelled=False).select_related("event").order_by("-event__start")[:limit])
+    base = Attendance.objects.filter(_in_season(season), member=member, event__cancelled=False).select_related("event")
+    # The most recent PAST events; only when the season has fewer than ``limit`` of them are the next upcoming ones added
+    # (the furthest future events must never crowd out the games that were actually played).
+    rows = list(base.filter(event__start__lte=now).order_by("-event__start")[:limit])
     rows.reverse()
+    if len(rows) < limit:
+        rows += list(base.filter(event__start__gt=now).order_by("event__start")[: limit - len(rows)])
     bars = []
     for row in rows:
         if row.event.start > now:

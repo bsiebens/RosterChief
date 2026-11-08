@@ -1,22 +1,18 @@
 <script lang="ts">
-	import { pageTitle } from '#lib/title.svelte.ts';
-	import { ArrowLeft } from '@lucide/svelte';
-	import HistoryTable from '#lib/components/members/detail/HistoryTable.svelte';
-	import Pager from '#lib/components/Pager.svelte';
-	import { usePageHeader } from '#lib/header.svelte.ts';
-	import { t } from '#lib/i18n.svelte.ts';
+	import MemberHistoryView from '#lib/components/members/MemberHistoryView.svelte';
 
 	let { data } = $props();
-	usePageHeader(() => ({ title: `${t('members.history.title')} — ${data.name}`, context: t('members.history.context'), actions }));
+
+	// While SvelteKit switches pages this page is briefly handed the next page's data: keep showing the last data that was
+	// this page's own, so nothing reads a missing field while it is torn down.
+	// svelte-ignore state_referenced_locally
+	let last = data;
+	const shown = $derived.by(() => {
+		if ('items' in data) last = data;
+		return last;
+	});
 </script>
 
-{#snippet actions()}
-	<a class="btn btn-outline gap-2" href="/members/{data.id}"><ArrowLeft size={16} /> {t('members.history.back')}</a>
-{/snippet}
-
-<svelte:head><title>{pageTitle(`${t('members.history.title')} · ${data.name}`)}</title></svelte:head>
-
-<div class="card">
-	<HistoryTable items={data.items} />
-	<Pager count={data.count} offset={data.offset} limit={data.limit} href={(o) => `/members/${data.id}/history${o ? `?offset=${o}` : ''}`} />
-</div>
+{#if 'items' in shown}
+	<MemberHistoryView data={shown} />
+{/if}

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { Bell } from '@lucide/svelte';
+	import { Bell, Users } from '@lucide/svelte';
 	import { platform } from '#lib/api.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import { STATUS_BADGE, providerLabel, type UserPush } from '#lib/push.ts';
+	import { STATUS_BADGE, providerLabel, type UserFollowing, type UserPush } from '#lib/push.ts';
 	import { withZone } from '#lib/time.ts';
 
 	let { userId, push, error, ondone }: { userId: string; push: UserPush | null; error: string; ondone: (message: string) => void } = $props();
@@ -32,6 +32,21 @@
 		ondone(removal.kind === 'device' ? 'Device removed.' : 'Web subscription removed.');
 	}
 
+	// -- the teams (and single games) this account follows for live game pushes; loaded when the pop-up opens --
+	let followOpen = $state(false);
+	let following = $state<UserFollowing | null>(null);
+	let followBusy = $state(false);
+	let followError = $state('');
+	async function showFollowing() {
+		followOpen = true;
+		followBusy = true;
+		followError = '';
+		const r = await platform<UserFollowing>('GET', `/users/${userId}/push/following`);
+		followBusy = false;
+		if (r.ok && r.data) following = r.data;
+		else followError = r.message ?? 'The followed teams could not be loaded.';
+	}
+
 	const prefs = $derived(push?.preferences);
 	const clubName = (c: { name: string } | null) => (c ? c.name : 'all clubs');
 	const offSwitches = $derived(prefs?.master_switches.filter((s) => !s.enabled) ?? []);
@@ -46,7 +61,10 @@
 
 <div class="card">
 	<div class="card-body pb-3">
-		<div class="card-title"><Bell size={16} aria-hidden="true" /> Push</div>
+		<div class="card-title">
+			<Bell size={16} aria-hidden="true" /> Push
+			<button type="button" class="btn btn-outline btn-xs ml-auto gap-1.5" onclick={showFollowing}><Users size={13} aria-hidden="true" /> Followed teams</button>
+		</div>
 		{#if error || !push || !prefs}
 			<Alert kind="error">{error || 'The push details could not be loaded.'}</Alert>
 		{/if}
@@ -170,6 +188,37 @@
 		</section>
 	{/if}
 </div>
+
+<Modal bind:open={followOpen} title="Followed teams and games">
+	<div class="flex flex-col gap-4">
+		<p class="text-sm text-muted">Who gets live game pushes: the teams (and single games) this account follows, per club. Following is the user's own choice in the app.</p>
+		{#if followBusy}
+			<p class="text-sm text-muted">Loading…</p>
+		{:else if followError}
+			<Alert kind="error">{followError}</Alert>
+		{:else if following && !following.clubs.length}
+			<p class="text-sm">This account follows no teams or games.</p>
+		{:else if following}
+			<ul class="flex flex-col gap-4">
+				{#each following.clubs as c (c.club.id)}
+					<li class="rounded border border-line p-3">
+						<h4 class="mb-2 font-semibold text-ink">{c.club.name}</h4>
+						{#if c.teams.length}
+							<p class="mb-1 font-mono text-[10px] tracking-[.08em] text-muted uppercase">Teams · {c.teams.length}</p>
+							<ul class="mb-2 flex flex-wrap gap-1.5">{#each c.teams as t (t.id)}<li class="badge badge-neutral">{t.name}</li>{/each}</ul>
+						{/if}
+						{#if c.games.length}
+							<p class="mb-1 font-mono text-[10px] tracking-[.08em] text-muted uppercase">Single games · {c.games.length}</p>
+							<ul class="text-sm">{#each c.games as g (g.id)}<li class="flex justify-between gap-3 py-0.5"><span>{g.title}</span><span class="font-mono text-xs text-muted">{withZone(g.start)}</span></li>{/each}</ul>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+			<p class="text-xs text-muted">{following.total_teams} team{following.total_teams === 1 ? '' : 's'} and {following.total_games} single game{following.total_games === 1 ? '' : 's'} in total.</p>
+		{/if}
+		<div class="modal-action mt-0"><button type="button" class="btn btn-outline" onclick={() => (followOpen = false)}>Close</button></div>
+	</div>
+</Modal>
 
 <Modal bind:open title={removal?.kind === 'web' ? 'Remove web subscription' : 'Remove device'}>
 	<div class="flex flex-col gap-4">

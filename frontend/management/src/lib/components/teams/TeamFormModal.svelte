@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -21,6 +22,8 @@
 	}: { open: boolean; title: string; team?: TeamRow | null; pools: Pool[]; teams: { id: string; name: string }[]; action: string; name: string; form: any; submitLabel: string; lockStructure?: boolean } = $props();
 
 	let busy = $state(false);
+	// Who arranges referees / officials only matters for clubs with the referee tools.
+	const officiating = $derived(!!(page.data as { me?: { features?: string[] } }).me?.features?.includes('referee_officials'));
 	const mine = $derived(form?.teamAction === name);
 	const fields = $derived<Record<string, string>>(mine ? (form?.teamFields ?? {}) : {});
 	const formLevel = $derived(mine && form?.teamError && !Object.keys(fields).length ? (form.teamError as string) : '');
@@ -66,6 +69,21 @@
 			</select>
 			{#if fields.feeds_into_id}<span class="mt-1 block text-xs text-error">{fields.feeds_into_id}</span>{/if}
 		</div>
+		{#if officiating}
+			<div class="grid grid-cols-2 gap-3">
+				{#each [['referee_management', 'teams.f.referees'], ['official_management', 'teams.f.officials']] as [field, label] (field)}
+					<div class="form-control w-full">
+						<label class="label" for="{name}-{field}"><span class="label-text">{t(label)}</span></label>
+						<select id="{name}-{field}" name={field} class="select select-bordered w-full" disabled={lockStructure}>
+							<option value="club" selected={(team?.[field as 'referee_management' | 'official_management'] ?? 'club') === 'club'}>{t('teams.f.managed_club')}</option>
+							<option value="federation" selected={team?.[field as 'referee_management' | 'official_management'] === 'federation'}>{t('teams.f.managed_federation')}</option>
+						</select>
+						{#if fields[field]}<span class="mt-1 block text-xs text-error">{fields[field]}</span>{/if}
+					</div>
+				{/each}
+			</div>
+			<p class="-mt-1 text-xs text-muted">{t('teams.f.managed_help')}</p>
+		{/if}
 		{#if lockStructure}<p class="text-xs text-muted">{t('teams.f.settings_only')}</p>{/if}
 		<label class="flex items-center gap-2 text-sm">
 			<input type="checkbox" name="tournament_only" class="checkbox checkbox-sm" checked={team?.tournament_only ?? false} />

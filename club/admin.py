@@ -171,7 +171,6 @@ class UserAdmin(admin.ModelAdmin):
         self.message_user(request, f"{updated} user(s) deactivated.")
 
 
-
 @admin.register(Domain)
 class DomainAdmin(PlatformAdminMixin, admin.ModelAdmin):
     list_display = ["domain", "tenant", "is_primary"]

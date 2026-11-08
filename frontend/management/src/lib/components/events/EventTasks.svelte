@@ -112,11 +112,13 @@
 
 <div class="grid gap-4">
 	{#if errorMsg}<Alert kind="error">{errorMsg}</Alert>{/if}
-	{#if list.can_manage}
-		<div><button class="btn btn-primary btn-sm gap-2" type="button" onclick={() => openForm(null)}><Plus size={14} /> {t('events.tasks.add')}</button></div>
-	{/if}
+	<section class="card overflow-hidden">
+	<header class="flex items-center justify-between gap-3 px-5 py-3">
+		<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" /> {t('events.tab.tasks')} <span class="font-mono text-xs font-normal text-muted">· {list.tasks.length}</span></h2>
+		{#if list.can_manage}<button class="btn btn-primary btn-sm gap-2" type="button" onclick={() => openForm(null)}><Plus size={14} /> {t('events.tasks.add')}</button>{/if}
+	</header>
 	{#each list.tasks as task (task.id)}
-		<article class="card card-body gap-2">
+		<article class="grid gap-2 border-t border-rule px-5 py-4">
 			<div class="flex flex-wrap items-start justify-between gap-2">
 				<div class="min-w-0">
 					<h3 class="font-semibold text-ink">{task.title}</h3>
@@ -136,7 +138,7 @@
 						<span class="font-semibold text-ink">{c.label}</span>
 						{#if c.member_name && c.member_name !== c.label}<span class="text-muted">({c.member_name})</span>{/if}
 						{#if list.can_manage && c.member_id}
-							<button class="btn btn-ghost btn-xs btn-square h-5 min-h-5 w-5" type="button" disabled={busy} aria-label={t('events.tasks.unclaim_named', { name: c.member_name ?? c.label })} onclick={() => unclaim(task, c.member_id)}><X size={11} /></button>
+							<button class="btn btn-ghost btn-circle btn-sm -my-0.5 size-8 min-h-8 hover:bg-error/10 hover:text-error" type="button" disabled={busy} aria-label={t('events.tasks.unclaim_named', { name: c.member_name ?? c.label })} onclick={() => unclaim(task, c.member_id)}><X size={16} strokeWidth={2.5} /></button>
 						{/if}
 					</li>
 				{:else}
@@ -155,8 +157,9 @@
 			</div>
 		</article>
 	{:else}
-		<div class="card card-body items-center py-10 text-center text-muted"><ClipboardList size={28} aria-hidden="true" /><p>{t('events.tasks.none')}</p></div>
+		<div class="flex flex-col items-center gap-1 border-t border-rule px-5 py-10 text-center text-muted"><ClipboardList size={28} aria-hidden="true" /><p>{t('events.tasks.none')}</p></div>
 	{/each}
+	</section>
 </div>
 
 <Modal bind:open={formOpen} title={editing ? t('events.tasks.edit') : t('events.tasks.add')}>

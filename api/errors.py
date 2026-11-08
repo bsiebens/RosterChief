@@ -37,4 +37,4 @@ def register_error_handlers(api: NinjaAPI) -> None:
 
     @api.exception_handler(Invalid)
     def invalid(request: HttpRequest, exc: Invalid):
-        return api.create_response(request, {"detail": str(exc), "code": "invalid", "errors": exc.errors or {}}, status=422)
+        return api.create_response(request, {"detail": str(exc), "code": getattr(exc, "code", "invalid"), "errors": exc.errors or {}}, status=422)

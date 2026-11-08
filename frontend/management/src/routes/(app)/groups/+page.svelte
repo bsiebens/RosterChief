@@ -38,7 +38,7 @@
 </script>
 
 {#snippet actions()}
-	<button class="btn btn-primary gap-2" type="button" onclick={() => (addOpen = true)}><Plus size={16} /> {t('groups.add')}</button>
+	{#if data.me?.can_manage_members}<button class="btn btn-primary gap-2" type="button" onclick={() => (addOpen = true)}><Plus size={16} /> {t('groups.add')}</button>{/if}
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('groups.title'))}</title></svelte:head>

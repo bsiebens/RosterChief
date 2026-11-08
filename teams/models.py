@@ -30,6 +30,10 @@ class NumberPool(UUIDModel):
 
 
 class Team(UUIDModel):
+    class Management(models.TextChoices):
+        CLUB = "club", _("Club")
+        FEDERATION = "federation", _("Federation")
+
     name = models.CharField(_("name"), max_length=255, unique=True)
     short_name = models.CharField(_("short name"), max_length=255)
 
@@ -45,6 +49,11 @@ class Team(UUIDModel):
 
     age_min = models.PositiveSmallIntegerField(_("minimum age"), null=True, blank=True)
     age_max = models.PositiveSmallIntegerField(_("maximum age"), null=True, blank=True)
+
+    referee_management = models.CharField(
+        _("referee management"), max_length=20, choices=Management.choices, default=Management.CLUB, help_text=_("Who arranges referees for this team's home games. Federation-managed teams are left out of the referee tools.")
+    )
+    official_management = models.CharField(_("official management"), max_length=20, choices=Management.choices, default=Management.CLUB, help_text=_("Who arranges match officials for this team's home games."))
 
     tournament_only = models.BooleanField(_("tournament only"), default=False, help_text=_("This team only plays in tournaments. The club's public website can hide tournament-only teams from its team list."))
 

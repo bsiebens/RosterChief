@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { Mail, Phone } from '@lucide/svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import { formatRate, rateTone, TONE, type MemberAttendance } from '#lib/attendance.ts';
@@ -8,12 +9,15 @@
 
 	/** Profile header: club-coloured banner, big avatar, name, roles, contact chips and a strip of key figures. */
 	let { member, current, attendance, docsDone, docsTotal }: { member: MemberDetail; current?: ClubMembership | null; attendance: MemberAttendance | null; docsDone: number; docsTotal: number } = $props();
+	const clubName = $derived((page.data as { branding?: { name?: string } }).branding?.name ?? '');
 	const rate = $derived(attendance?.rate ?? null);
 	const teams = $derived(new Set([...member.team_memberships.map((x) => x.team_id), ...member.staff_assignments.map((x) => x.team_id)]).size);
 </script>
 
 <section class="card overflow-hidden">
-	<div class="h-24 bg-primary" style="background-image: linear-gradient(120deg, color-mix(in srgb, var(--color-club) 55%, var(--color-primary)) 0%, var(--color-primary) 62%);"></div>
+	<div class="flex h-24 items-center justify-end bg-primary px-8" style="background-image: linear-gradient(120deg, color-mix(in srgb, var(--color-club) 55%, var(--color-primary)) 0%, var(--color-primary) 62%);">
+		{#if clubName}<span class="max-w-[75%] truncate font-display text-5xl leading-none font-extrabold tracking-[.1em] text-primary-content uppercase drop-shadow-sm sm:text-6xl lg:text-7xl">{clubName}</span>{/if}
+	</div>
 	<div class="px-6 pb-5">
 		<div class="-mt-12 flex flex-wrap items-end gap-x-5 gap-y-3">
 			<div class="flex rounded-full bg-white ring-4 ring-white">

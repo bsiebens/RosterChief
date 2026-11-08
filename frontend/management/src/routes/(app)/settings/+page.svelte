@@ -8,6 +8,7 @@
 	import Tabs from '#lib/components/Tabs.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { withPageMargins } from '#lib/pdf-preview.ts';
 
 	let { data, form } = $props();
 
@@ -323,7 +324,7 @@
 								<p class="text-sm"><span class="font-display text-xs font-bold tracking-wide text-muted uppercase">{t('settings.previews.subject')}</span> <span class="font-semibold text-ink">{pv.subject}</span></p>
 							{/if}
 							{#if pv.pdfUnavailable}<Alert kind="warning">{t('settings.previews.pdf_unavailable')}</Alert>{/if}
-							<iframe title={t('settings.previews.frame', { title: current.title })} sandbox="" srcdoc={pv.html} class="h-[40rem] w-full rounded-lg border border-line bg-white"></iframe>
+							<iframe title={t('settings.previews.frame', { title: current.title })} sandbox="" srcdoc={current.kind === 'pdf' ? withPageMargins(pv.html) : pv.html} class="h-[40rem] w-full rounded-lg border border-line bg-white"></iframe>
 						{/if}
 					{/if}
 				</div>
