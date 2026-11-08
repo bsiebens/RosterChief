@@ -154,6 +154,16 @@ class NewsApiTests(TestCase):
         self.assertEqual((r.json()["is_scheduled"], r.json()["notified_at"] is not None), (False, True))
         hook.assert_not_called()
 
+    def test_live_filter_orders_by_publish_date_and_skips_scheduled(self):
+        now = timezone.now()
+        ids = {name: self.write(self.ann_user, name)["id"] for name in ("Older", "Newer", "Later", "Draft")}
+        with mock.patch("news.services.notifications.dispatch_publish_notification"), self.captureOnCommitCallbacks(execute=True):
+            for name, at in (("Older", now), ("Newer", now), ("Later", now + datetime.timedelta(days=2))):
+                self.call("post", f"/news/{ids[name]}/publish", self.owner, {"published_at": at.isoformat(), "notify": False})
+        r = self.call("get", "/news?live=true", self.owner).json()
+        self.assertEqual([i["title"] for i in r["results"]], ["Newer", "Older"])  # newest publish date first (a past date means "publish now")
+        self.assertEqual(r["count"], 2)
+
     def test_delete_own_draft(self):
         nid = self.write(self.ann_user)["id"]
         self.assertEqual(self.call("delete", f"/news/{nid}", self.ann_user).status_code, 204)

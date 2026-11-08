@@ -4,6 +4,7 @@
 	import Alert from '#lib/components/Alert.svelte';
 	import NewsFields from '#lib/components/news/NewsFields.svelte';
 	import NewsPreview from '#lib/components/news/NewsPreview.svelte';
+	import PanelTabs from '#lib/components/news/PanelTabs.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { NewsIn } from '#lib/news.ts';
@@ -14,6 +15,9 @@
 	let v = $state<NewsIn>($state.snapshot(data.initial));
 	let tried = $state(false);
 	let busy = $state(false);
+	let tab = $state('edit');
+	const tabId = $props.id();
+	const tabs = $derived([{ key: 'edit', label: t('news.tab.edit') }, { key: 'preview', label: t('news.tab.preview') }]);
 
 	const fields = $derived(form?.fields ?? {});
 	const errorText = $derived(form?.status ? form.message || (form.status === 403 ? t('news.err.forbidden') : t('news.err.failed')) : '');
@@ -49,7 +53,13 @@
 	{#if errorText}<Alert kind="error" title={t('news.save_failed')}>{errorText}</Alert>{/if}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
-			<NewsFields bind:v teams={data.teams} {fields} {tried} />
+			<PanelTabs {tabs} bind:active={tab} label={t('news.tab.label')} idBase={tabId} />
+			<div id="{tabId}-panel-edit" role="tabpanel" aria-labelledby="{tabId}-tab-edit" hidden={tab !== 'edit'}>
+				<NewsFields bind:v teams={data.teams} {fields} {tried} />
+			</div>
+			<div id="{tabId}-panel-preview" role="tabpanel" aria-labelledby="{tabId}-tab-preview" hidden={tab !== 'preview'}>
+				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} teams={teamNames} />
+			</div>
 		</div>
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
@@ -61,5 +71,4 @@
 			</section>
 		</div>
 	</div>
-	<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} teams={teamNames} />
 </form>

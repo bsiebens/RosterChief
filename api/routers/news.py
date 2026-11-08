@@ -66,11 +66,16 @@ def _photo(item: News, photo_id: uuid.UUID):
 
 
 @router.get("", response=NewsListOut, summary="List news items (publishers: all; others: their own)", operation_id="list_news")
-def list_news(request, status: str | None = None, mine: bool = False, q: str | None = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
-    """Newest first. ``status`` filters on draft / pending_review / published, ``mine`` on the user's own items, ``q`` on title and body."""
+def list_news(request, status: str | None = None, mine: bool = False, live: bool = False, q: str | None = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    """Newest first. ``status`` filters on draft / pending_review / published, ``mine`` on the user's own items, ``q`` on title and body.
+    ``live`` keeps only published items whose publish date has passed (not the scheduled ones) and orders them by publish date."""
     qs = svc.visible_news(request.user)
     if status:
         qs = qs.filter(status=status)
+    if live:
+        from django.utils import timezone
+
+        qs = qs.filter(status="published", published_at__lte=timezone.now()).order_by("-published_at")
     if mine:
         qs = qs.filter(created_by__user=request.user)
     if q:

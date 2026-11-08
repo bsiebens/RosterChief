@@ -37,7 +37,7 @@
 			<KpiBar overview={o} />
 			<!-- Left: news, signups, fees + renewal. Right: needs attention (as tall as the news), then the fixtures down to the bottom of the renewal card. -->
 			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-				<NewsCard />
+				<NewsCard items={data.news ?? []} pending={data.newsPending ?? 0} />
 				<NeedsAttention overview={o} noTypeCount={data.noTypeCount} />
 				<SignupsChart months={o.signups} />
 				<div class="xl:col-start-2 xl:row-span-2 xl:row-start-2 [&>*]:h-full"><UpcomingCard events={data.upcoming ?? []} /></div>

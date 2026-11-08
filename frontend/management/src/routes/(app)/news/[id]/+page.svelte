@@ -7,6 +7,7 @@
 	import NewsFields from '#lib/components/news/NewsFields.svelte';
 	import NewsPhotos from '#lib/components/news/NewsPhotos.svelte';
 	import NewsPreview from '#lib/components/news/NewsPreview.svelte';
+	import PanelTabs from '#lib/components/news/PanelTabs.svelte';
 	import NewsPublishModal from '#lib/components/news/NewsPublishModal.svelte';
 	import NewsStatusBadge from '#lib/components/news/NewsStatusBadge.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
@@ -39,6 +40,8 @@
 
 	let tried = $state(false);
 	let busy = $state(false);
+	let tab = $state('edit');
+	const tabs = $derived([{ key: 'edit', label: t('news.tab.edit') }, { key: 'preview', label: t('news.tab.preview') }]);
 	let publishOpen = $state(false);
 	let unpublishOpen = $state(false);
 	let deleteOpen = $state(false);
@@ -91,26 +94,30 @@
 
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
-			<form
-				id={formId}
-				method="POST"
-				action="?/save"
-				novalidate
-				use:enhance={(e) => {
-					guard(e);
-					return async ({ update }) => {
-						await update({ reset: false });
-						busy = false;
-						tried = false;
-					};
-				}}>
-				<input type="hidden" name="payload" value={payload} />
-				<NewsFields bind:v teams={data.teams} {fields} {tried} disabled={!canEdit} />
-			</form>
+			<PanelTabs {tabs} bind:active={tab} label={t('news.tab.label')} idBase={formId} />
+			<div class="grid content-start gap-5" id="{formId}-panel-edit" role="tabpanel" aria-labelledby="{formId}-tab-edit" hidden={tab !== 'edit'}>
+				<form
+					id={formId}
+					method="POST"
+					action="?/save"
+					novalidate
+					use:enhance={(e) => {
+						guard(e);
+						return async ({ update }) => {
+							await update({ reset: false });
+							busy = false;
+							tried = false;
+						};
+					}}>
+					<input type="hidden" name="payload" value={payload} />
+					<NewsFields bind:v teams={data.teams} {fields} {tried} disabled={!canEdit} />
+				</form>
 
-			<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} html={item.body_html} live={dirty} teams={teamNames} photoUrl={main?.url ?? null} focal={main ? { x: main.focal_x, y: main.focal_y } : null} author={item.created_by?.name ?? null} />
-
-			<NewsPhotos newsId={item.id} bind:photos {canEdit} />
+				<NewsPhotos newsId={item.id} bind:photos {canEdit} />
+			</div>
+			<div id="{formId}-panel-preview" role="tabpanel" aria-labelledby="{formId}-tab-preview" hidden={tab !== 'preview'}>
+				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} html={item.body_html} live={dirty} teams={teamNames} photoUrl={main?.url ?? null} focal={main ? { x: main.focal_x, y: main.focal_y } : null} author={item.created_by?.name ?? null} />
+			</div>
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-wf">

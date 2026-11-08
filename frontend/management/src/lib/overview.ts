@@ -20,19 +20,3 @@ export type Overview = {
 
 /** Sample numbers until the shop exists. */
 export const mockShop = { orders: 18, revenue: '1240.50', outstanding: '185.00', unpaid: 3 };
-
-/** Sample news and fixtures until the news and calendar modules exist. Dates are relative to today so the page always looks current. */
-const daysFromNow = (n: number, hours = 0, minutes = 0) => {
-	const d = new Date();
-	d.setHours(hours, minutes, 0, 0);
-	d.setDate(d.getDate() + n);
-	return d.toISOString();
-};
-export type NewsItem = { id: string; title: string; date: string };
-export const mockNews = (): NewsItem[] => [
-	{ id: 'n1', title: 'New shirts for the Sharks', date: daysFromNow(-3) },
-	{ id: 'n2', title: 'Sharks score at the fan day of the local derby', date: daysFromNow(-15) },
-	{ id: 'n3', title: 'U15 opens the season away', date: daysFromNow(-42) },
-	{ id: 'n4', title: 'U13 opens the season with a fifth place', date: daysFromNow(-49) },
-	{ id: 'n5', title: 'Club dinner: save the date', date: daysFromNow(-52) }
-];

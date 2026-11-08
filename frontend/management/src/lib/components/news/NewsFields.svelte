@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Building2, FilePenLine, Shield } from '@lucide/svelte';
 	import Field from '#lib/components/Field.svelte';
+	import RichTextEditor from '#lib/components/news/RichTextEditor.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { NEWS_VISIBILITIES, type NewsIn, type TeamOption } from '#lib/news.ts';
 
@@ -24,15 +25,13 @@
 		<div class="grid gap-4 md:grid-cols-2">
 			<Field label={t('news.f.title')} bind:value={v.title} error={err.title} required maxlength={255} />
 			<Field label={t('news.f.title_en')} bind:value={v.title_en} error={fields.title_en} help={t('news.f.title_en_help')} maxlength={255} />
-			<div class="form-control w-full">
-				<label class="label" for="{uid}-body"><span class="label-text">{t('news.f.body')}</span></label>
-				<textarea id="{uid}-body" class="textarea textarea-bordered w-full font-mono text-sm {err.body ? 'textarea-error' : ''}" rows="12" bind:value={v.body} aria-invalid={err.body ? 'true' : undefined} required></textarea>
-				{#if err.body}<span class="mt-1 block text-xs text-error">{err.body}</span>{:else}<span class="label-text-alt mt-1 block">{t('news.f.markdown_help')}</span>{/if}
+			<div class="w-full">
+				<RichTextEditor bind:value={v.body} label={t('news.f.body')} lang="nl" invalid={!!err.body} required describedby="{uid}-body-note" {disabled} />
+				{#if err.body}<span id="{uid}-body-note" class="mt-1 block text-xs text-error">{err.body}</span>{:else}<span id="{uid}-body-note" class="label-text-alt mt-1 block">{t('news.f.markdown_help')}</span>{/if}
 			</div>
-			<div class="form-control w-full">
-				<label class="label" for="{uid}-body-en"><span class="label-text">{t('news.f.body_en')}</span></label>
-				<textarea id="{uid}-body-en" class="textarea textarea-bordered w-full font-mono text-sm {fields.body_en ? 'textarea-error' : ''}" rows="12" bind:value={v.body_en}></textarea>
-				{#if fields.body_en}<span class="mt-1 block text-xs text-error">{fields.body_en}</span>{:else}<span class="label-text-alt mt-1 block">{t('news.f.body_en_help')}</span>{/if}
+			<div class="w-full">
+				<RichTextEditor bind:value={v.body_en} label={t('news.f.body_en')} lang="en" invalid={!!fields.body_en} describedby="{uid}-body-en-note" {disabled} />
+				{#if fields.body_en}<span id="{uid}-body-en-note" class="mt-1 block text-xs text-error">{fields.body_en}</span>{:else}<span id="{uid}-body-en-note" class="label-text-alt mt-1 block">{t('news.f.body_en_help')}</span>{/if}
 			</div>
 		</div>
 	</section>
