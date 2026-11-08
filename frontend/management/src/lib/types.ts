@@ -34,6 +34,8 @@ export type Me = {
 	can_publish_news: boolean;
 	/** Any club member with a login may add news (and edit their own while it is a draft or pending review). */
 	can_add_news: boolean;
+	/** forms.manage_forms (or the Owner role): build forms, send them to members and read the responses. */
+	can_manage_forms: boolean;
 	/** Teams where the user holds a management position this season: they may edit those teams. */
 	managed_team_ids: string[];
 	/** Groups the user administers: they may schedule events for them and manage their people. */

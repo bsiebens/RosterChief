@@ -107,6 +107,15 @@ class NewsApiTests(TestCase):
         self.assertEqual(self.call("patch", f"/news/{theirs['id']}", self.ann_user, {"title": "x"}).status_code, 404)
         self.assertEqual(self.call("delete", f"/news/{theirs['id']}", self.ann_user).status_code, 404)
         self.assertEqual(self.call("get", f"/news/{mine['id']}", self.ann_user).status_code, 200)
+        # once published (and live) everyone sees it, but only its author and publishers may change it
+        with mock.patch("news.services.notifications.dispatch_publish_notification"), self.captureOnCommitCallbacks(execute=True):
+            self.call("post", f"/news/{theirs['id']}/publish", self.owner, {"notify": False})
+        self.assertEqual(titles(self.ann_user), ["Mine", "Theirs"])
+        self.assertEqual(self.call("get", f"/news/{theirs['id']}", self.ann_user).status_code, 200)
+        self.assertEqual(self.call("get", f"/news/{theirs['id']}", self.ann_user).json()["can_edit"], False)
+        self.assertEqual(self.call("patch", f"/news/{theirs['id']}", self.ann_user, {"title": "x"}).status_code, 403)
+        self.assertEqual(self.call("delete", f"/news/{theirs['id']}", self.ann_user).status_code, 403)
+        self.assertEqual(titles(self.ann_user, "?live=true"), ["Theirs"])
         # a publisher edits someone else's item
         r = self.call("patch", f"/news/{theirs['id']}", self.owner, {"title": "Edited", "team_ids": []})
         self.assertEqual((r.status_code, r.json()["title"], r.json()["team_ids"]), (200, "Edited", []))

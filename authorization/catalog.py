@@ -26,6 +26,7 @@ CATALOG: dict[str, Perm] = {
         Perm("shop.manage_shop", "Manage shop", admin=True),
         Perm("events.manage_referees", "Manage referees", admin=True),
         Perm("news.publish_newsitems", "Publish newsitems", admin=True),
+        Perm("forms.manage_forms", "Manage forms"),
     ]
 }
 

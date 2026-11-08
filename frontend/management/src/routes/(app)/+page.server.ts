@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
 		// People holding no role (member, staff or guardian) in the current season: an issue for member managers.
 		me?.can_manage_members ? apiPage<unknown>('/members', { role: 'none', limit: 1 }, fetch) : Promise.resolve(null),
 		api<EventRow[]>('GET', '/events', { query: { from: iso(today), to: iso(horizon) }, f: fetch }),
-		// The latest live news the user may see (publishers: all; others: their own), and for publishers the review queue size.
+		// The latest live club news (everyone sees published items), and for publishers the review queue size.
 		me?.can_add_news ? api<{ results: NewsListItem[] }>('GET', '/news', { query: { live: true, limit: 5 }, f: fetch }) : Promise.resolve(null),
 		me?.can_publish_news ? api<{ count: number }>('GET', '/news', { query: { status: 'pending_review', limit: 1 }, f: fetch }) : Promise.resolve(null)
 	]);

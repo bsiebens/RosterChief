@@ -9,6 +9,7 @@ import uuid
 import markdown as _markdown
 import nh3
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.html import strip_tags
 from django.utils.text import Truncator
@@ -65,11 +66,14 @@ def localized_news(item: News, language: str | None) -> tuple[str, str, str]:
 
 
 def visible_news(user):
-    """The news items ``user`` may see: all for publishers, otherwise the user's own."""
+    """The news items ``user`` may see: everything for publishers; for everyone else the live published items (publish date
+    passed) plus their own items in any state. Drafts, items in review and scheduled items are only for their author and publishers."""
     qs = News.objects.select_related("created_by").prefetch_related("photos", "teams")
     if access.can_publish_news(user):
         return qs
-    return qs.filter(created_by__user=user) if user is not None and user.is_authenticated else qs.none()
+    if user is None or not user.is_authenticated:
+        return qs.none()
+    return qs.filter(Q(status=News.Status.PUBLISHED, published_at__lte=timezone.now()) | Q(created_by__user=user))
 
 
 def get_news(user, news_id) -> News | None:

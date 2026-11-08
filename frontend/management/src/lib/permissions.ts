@@ -1,7 +1,7 @@
 import type { Me } from '#lib/types.ts';
 
 /** What the signed-in user may do. The API enforces all of it; this only decides what to show. */
-type Who = Pick<Me, 'can_manage_members' | 'can_manage_settings' | 'can_manage_referees' | 'can_publish_news' | 'can_add_news' | 'can_execute_evaluations' | 'managed_team_ids'> | null | undefined;
+type Who = Pick<Me, 'can_manage_members' | 'can_manage_settings' | 'can_manage_referees' | 'can_publish_news' | 'can_add_news' | 'can_manage_forms' | 'can_execute_evaluations' | 'managed_team_ids'> | null | undefined;
 
 export const canManageMembers = (me: Who) => !!me?.can_manage_members;
 /** Arrange referees and officials for home games and print their payment forms. */
@@ -19,3 +19,5 @@ export const canManageCalendar = (me: Who) => canReserveNumbers(me);
 export const canAddNews = (me: Who) => !!me?.can_add_news;
 /** Edit all news and publish, unpublish and send back. */
 export const canPublishNews = (me: Who) => !!me?.can_publish_news;
+/** Build forms, send them to members and read the responses. */
+export const canManageForms = (me: Who) => !!me?.can_manage_forms;

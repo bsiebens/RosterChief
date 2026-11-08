@@ -2,7 +2,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { NewsListItem } from '#lib/news.ts';
 
-	/** The latest published news (real data, newest publish date first). Publishers also see how many items wait for review. */
+	/** The latest published club news (real data, newest publish date first). Publishers also see how many items wait for review. */
 	let { items, pending = 0 }: { items: NewsListItem[]; pending?: number } = $props();
 	const day = (iso: string) => new Intl.DateTimeFormat(getLang(), { day: 'numeric', month: 'short' }).format(new Date(iso));
 </script>

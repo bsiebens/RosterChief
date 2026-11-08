@@ -4,6 +4,7 @@ from ninja import NinjaAPI
 from authorization.middleware import MFA_REQUIRED_MESSAGE
 from authorization.services import ProtectedRoleError
 from features.entitlements import LimitExceeded, UnknownFeature
+from formbuilder.services.management import Conflict
 from members.services.errors import Invalid, NotAllowed
 
 from .auth import MFARequired, NoManagementAccess
@@ -38,3 +39,7 @@ def register_error_handlers(api: NinjaAPI) -> None:
     @api.exception_handler(Invalid)
     def invalid(request: HttpRequest, exc: Invalid):
         return api.create_response(request, {"detail": str(exc), "code": getattr(exc, "code", "invalid"), "errors": exc.errors or {}}, status=422)
+
+    @api.exception_handler(Conflict)
+    def conflict(request: HttpRequest, exc: Conflict):
+        return api.create_response(request, {"detail": str(exc), "code": exc.code}, status=409)

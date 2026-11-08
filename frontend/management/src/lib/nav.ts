@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { CalendarDays, LayoutDashboard, Newspaper, Settings, Shirt, Users, Whistle } from '@lucide/svelte';
+import { CalendarDays, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -67,6 +67,18 @@ export const NAV: NavItem[] = [
 		icon: Newspaper,
 		match: (p) => p === '/news' || p.startsWith('/news/'),
 		visible: (me) => me.can_add_news
+	},
+	{
+		key: 'forms',
+		href: '/forms',
+		label: 'forms.nav',
+		icon: ClipboardList,
+		match: (p) => p === '/forms' || p.startsWith('/forms/'),
+		visible: (me) => me.can_manage_forms,
+		children: [
+			{ href: '/forms', label: 'forms.nav.forms', match: (p) => p === '/forms' || (p.startsWith('/forms/') && !p.startsWith('/forms/sends')) },
+			{ href: '/forms/sends', label: 'forms.nav.sends', match: (p) => p.startsWith('/forms/sends') }
+		]
 	},
 	{
 		key: 'referees',

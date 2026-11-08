@@ -47,6 +47,7 @@ class MeOut(Schema):
     can_manage_referees: bool = False
     can_publish_news: bool = False
     can_add_news: bool = False
+    can_manage_forms: bool = False
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []
     features: list[str]

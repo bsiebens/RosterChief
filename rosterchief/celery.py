@@ -32,6 +32,8 @@ app.conf.beat_schedule = {
     "events-create-missing-seasons": {"task": "events.create_missing_seasons", "schedule": crontab(hour=2, minute=0, day_of_week=1)},
     "events-publish-scheduled-lineups": {"task": "events.publish_scheduled_lineups", "schedule": crontab()},  # every minute
     "news-notify-due-news": {"task": "news.notify_due_news", "schedule": crontab()},  # every minute
+    "formbuilder-notify-due-sends": {"task": "formbuilder.notify_due_sends", "schedule": crontab()},  # every minute: scheduled sends opening
+    "formbuilder-send-form-reminders": {"task": "formbuilder.send_form_reminders", "schedule": crontab(minute=10)},  # hourly
     "events-extend-event-series": {"task": "events.extend_event_series", "schedule": crontab(hour=1, minute=30)},
     "events-poll-live-games": {"task": "events.poll_live_games", "schedule": crontab()},  # every minute
     "events-settle-game-timelines": {"task": "events.settle_game_timelines", "schedule": crontab(hour=1, minute=45)},

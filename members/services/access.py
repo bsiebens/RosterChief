@@ -21,6 +21,7 @@ everyone else gets 403 ``no_access`` from every endpoint. Behind the door there 
 import datetime
 
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 
 from authorization.permissions import is_platform_owner
 from members.models import ClubMembership, FamilyMembership, Member
@@ -272,8 +273,10 @@ def can_edit_news(user, item) -> bool:
 
 
 def can_view_news(user, item) -> bool:
-    """Publishers see everything, everyone else only their own items (also once published)."""
+    """Publishers see everything; everyone else sees live published items and their own items in any state."""
     if can_publish_news(user):
+        return True
+    if item.status == item.Status.PUBLISHED and item.published_at is not None and item.published_at <= timezone.now():
         return True
     return user is not None and user.is_authenticated and user.is_active and item.created_by_id is not None and item.created_by.user_id == user.pk
 
@@ -297,3 +300,21 @@ def require_edit_news(actor, item) -> None:
 
     if not can_edit_news(actor, item):
         raise NotAllowed("You are not allowed to change this news item.")
+
+
+MANAGE_FORMS = "forms.manage_forms"
+
+
+def can_manage_forms(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``forms.manage_forms``: builds forms, sends them, reads the
+    responses."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(MANAGE_FORMS) or _is_club_owner(user)
+
+
+def require_manage_forms(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_forms(actor):
+        raise NotAllowed("You are not allowed to manage forms.")
