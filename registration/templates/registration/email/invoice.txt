@@ -2,8 +2,9 @@
 
 {{ t.intro }}
 
-{% for l in lines %}- {{ l.name }} ({{ l.description }}): {{ l.amount }}
-{% endfor %}{% if discount %}- {{ t.discount }}{% if discount_note %} ({{ discount_note }}){% endif %}: -{{ discount }}
+{% for l in lines %}- {{ l.name }} ({% if l.credit %}{{ t.credit }}: {% endif %}{{ l.description }}): {{ l.amount }}
+{% endfor %}{% if unused_credit %}- {{ t.credit_unused }}: {{ unused_credit }}
+{% endif %}{% if discount %}- {{ t.discount }}{% if discount_note %} ({{ discount_note }}){% endif %}: -{{ discount }}
 {% endif %}{{ t.total }}: {{ total }}
 {% if due %}{{ t.due }}
 {% endif %}{% for line in t.early_lines %}{{ line }}

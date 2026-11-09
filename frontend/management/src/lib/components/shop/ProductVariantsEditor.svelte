@@ -5,14 +5,14 @@
 	import type { VariantIn } from '#lib/shop.ts';
 
 	/** The variant rows on the add page (sent along with the product; blank names are skipped). */
-	let { variants = $bindable() }: { variants: VariantIn[] } = $props();
+	let { variants = $bindable(), membership = false }: { variants: VariantIn[]; membership?: boolean } = $props();
 </script>
 
 <div class="grid gap-3">
 	{#each variants as row, i (i)}
 		<div class="grid items-end gap-3 md:grid-cols-[1fr_12rem_auto]">
 			<Field label={t('shop.variant.f.name')} bind:value={row.name} placeholder={t('shop.variant.placeholder')} maxlength={255} />
-			<Field label={t('shop.variant.f.price')} type="number" step="0.01" min="0" placeholder={t('shop.variant.same_price')} value={row.price ?? ''} oninput={(e) => (row.price = e.currentTarget.value || null)} />
+			<Field label={t('shop.variant.f.price')} type="number" step="0.01" min={membership ? undefined : '0'} placeholder={t('shop.variant.same_price')} value={row.price ?? ''} oninput={(e) => (row.price = e.currentTarget.value || null)} />
 			<button class="btn btn-ghost btn-square" type="button" aria-label={t('common.delete')} onclick={() => variants.splice(i, 1)}><X size={16} /></button>
 		</div>
 	{/each}

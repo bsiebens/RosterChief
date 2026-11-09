@@ -8,7 +8,9 @@
 	let { v = $bindable(), categories, seasons = [], fields = {}, tried = false }: { v: ProductIn; categories: Category[]; seasons?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
 	const uid = $props.id();
 	const nameErr = $derived(fields.name || (tried && !v.name.trim() ? t('shop.product.err.name') : ''));
-	const priceErr = $derived(fields.price || (tried && (v.price === '' || Number(v.price) < 0) ? t('shop.product.err.price') : ''));
+	// Only membership products may be negative: that is a credit on a registration (e.g. for volunteers).
+	const membership = $derived(v.product_type === 'membership');
+	const priceErr = $derived(fields.price || (tried && (v.price === '' || (!membership && Number(v.price) < 0)) ? t('shop.product.err.price') : ''));
 	const flags = $derived([
 		{ k: 'is_active' as const, label: t('shop.product.f.is_active'), help: t('shop.product.f.is_active_help') },
 		{ k: 'is_public' as const, label: t('shop.product.f.is_public'), help: t('shop.product.f.is_public_help') },
@@ -20,7 +22,7 @@
 <div class="grid gap-4">
 	<div class="grid gap-4 md:grid-cols-2">
 		<Field label={t('shop.product.f.name')} bind:value={v.name} error={nameErr} required maxlength={255} />
-		<Field label={t('shop.product.f.price')} type="number" step="0.01" min="0" inputmode="decimal" bind:value={v.price} error={priceErr} required />
+		<Field label={t('shop.product.f.price')} type="number" step="0.01" min={membership ? undefined : '0'} inputmode="decimal" bind:value={v.price} error={priceErr} help={membership ? t('shop.product.price_credit_hint') : undefined} required />
 		<div class="form-control w-full">
 			<label class="label" for="{uid}-cat"><span class="label-text">{t('shop.product.f.category')}</span></label>
 			<select id="{uid}-cat" class="select select-bordered w-full" value={v.category_id ?? ''} onchange={(e) => (v.category_id = e.currentTarget.value || null)}>

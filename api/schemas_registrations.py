@@ -60,8 +60,15 @@ class LineOut(Schema):
     discount_amount: Decimal
     price_override: Decimal | None = None
     excluded: bool
-    #: What the line costs before the manual discount: the override, else base - discount; 0 when excluded.
+    #: What the line costs before the credits and the manual discount: the override, else base - discount; 0 when excluded. A credit line (negative
+    #: base price): its negative amount.
     price: Decimal
+    #: A line of a negative-priced product: it is not charged, it takes ``credit_total`` off the other lines.
+    is_credit: bool = False
+    #: This line's share of the credits (already out of ``payable``).
+    credit_share: Decimal = Decimal("0.00")
+    #: What the person pays before the manual discount: ``price`` - ``credit_share``, never below 0 (0 for a credit line).
+    payable: Decimal = Decimal("0.00")
     fee_amount: Decimal
     early_payment_deadline: datetime.date | None = None
     early_payment_discount: Decimal
@@ -70,7 +77,11 @@ class LineOut(Schema):
 class RegistrationDetail(RegistrationItem):
     season_id: uuid.UUID
     lines: list[LineOut]
+    #: The lines less the credits, before the manual discount.
     subtotal: Decimal
+    #: The credits of the registration (as a positive amount) and how much of that came off the other lines (the rest is unused).
+    credit_total: Decimal = Decimal("0.00")
+    credit_applied: Decimal = Decimal("0.00")
     manual_discount_amount: Decimal
     manual_discount_note: str
     invoice_due_date: datetime.date | None = None

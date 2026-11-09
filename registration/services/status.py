@@ -39,7 +39,7 @@ def status_data(batch: RegistrationBatch) -> dict:
         people.append(
             {
                 "member_id": d.member_id, "name": str(d.member), "entry_kind": d.entry_kind, "description": d.description, "requested_team": d.requested_team.name if d.requested_team else None,
-                "membership_status": d.membership.status, "fee": _fee(batch, d.membership),
+                "membership_status": d.membership.status, "is_credit": d.is_credit, "credit": (-d.price if d.is_credit else d.credit_share) if batch.confirmed_at else None, "fee": _fee(batch, d.membership),
                 "checklist": [
                     {
                         "requirement_id": i.requirement.pk, "name": i.requirement.name, "description": i.requirement.description, "requires_document": i.requirement.requires_document, "state": i.state,

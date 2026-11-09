@@ -26,7 +26,13 @@ export type RegistrationLine = {
 	discount_amount: string;
 	price_override: string | null;
 	excluded: boolean;
+	/** Before the credits and the manual discount; a credit line (negative base price): its negative amount. */
 	price: string;
+	/** A line of a negative-priced product: not charged, it takes money off the other lines. */
+	is_credit: boolean;
+	credit_share: string;
+	/** What the person pays before the manual discount (price less the credit share, never below 0). */
+	payable: string;
 	fee_amount: string;
 	early_payment_deadline: string | null;
 	early_payment_discount: string;
@@ -35,6 +41,8 @@ export type RegistrationDetail = RegistrationItem & {
 	season_id: string;
 	lines: RegistrationLine[];
 	subtotal: string;
+	credit_total: string;
+	credit_applied: string;
 	manual_discount_amount: string;
 	manual_discount_note: string;
 	invoice_due_date: string | null;

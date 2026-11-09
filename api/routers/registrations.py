@@ -50,11 +50,12 @@ def _detail(b: RegistrationBatch) -> dict:
                 "id": d.pk, "member": _person(d.member), "membership_id": m.pk, "entry_kind": d.entry_kind, "description": d.description,
                 "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_name": d.requested_position.name if d.requested_position else None,
                 "requested_jersey_number": d.requested_jersey_number, "base_price": d.base_price, "discount_amount": d.discount_amount, "price_override": d.price_override,
-                "excluded": d.excluded, "price": d.price, "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
+                "excluded": d.excluded, "price": d.price, "is_credit": d.is_credit, "credit_share": d.credit_share, "payable": d.payable, "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
             }
         )  # fmt: skip
+    credit_total, credit_applied = invoicing.credits(b)
     return {
-        **_item(b), "season_id": b.season_id, "lines": lines, "subtotal": invoicing.subtotal(b), "manual_discount_amount": b.manual_discount_amount, "manual_discount_note": b.manual_discount_note,
+        **_item(b), "season_id": b.season_id, "lines": lines, "subtotal": invoicing.subtotal(b), "credit_total": credit_total, "credit_applied": credit_applied, "manual_discount_amount": b.manual_discount_amount, "manual_discount_note": b.manual_discount_note,
         "invoice_due_date": b.invoice_due_date, "invoice_sent_at": b.invoice_sent_at, "confirmation_sent_at": b.confirmation_sent_at, "cancelled_at": b.cancelled_at, "status_path": f"/join/status/{b.status_token}",
     }  # fmt: skip
 

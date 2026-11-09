@@ -34,13 +34,23 @@
 	});
 	const dirty = $derived(JSON.stringify(d) !== JSON.stringify(draftOf(item)));
 
-	/** The line's price while editing: the override, else base minus the registrant discount; nothing when excluded. */
-	const linePrice = (id: string) => {
+	/** The line while editing, before the credits: the override, else base minus the registrant discount; nothing when excluded. A credit line (negative
+	 * base price) is its negative amount: it is never overridden. */
+	const lineBefore = (id: string) => {
 		const l = item.lines.find((x) => x.id === id)!;
 		const e = d.lines[id];
 		if (e.excluded) return 0;
+		if (l.is_credit) return Number(l.base_price);
 		return e.override !== '' ? Number(e.override) : Math.max(0, Number(l.base_price) - Number(l.discount_amount));
 	};
+	/** The credits (as a positive amount) and how much of that the other lines can take (never more than they cost). */
+	const creditTotal = $derived(item.lines.filter((l) => l.is_credit).reduce((s, l) => s - lineBefore(l.id), 0));
+	const costs = $derived(item.lines.filter((l) => !l.is_credit).reduce((s, l) => s + lineBefore(l.id), 0));
+	const creditApplied = $derived(Math.min(creditTotal, costs));
+	/** A line's share of the credit (in proportion to what it costs; the server settles the cents). */
+	const creditShare = (id: string) => (costs > 0 ? Math.round(((creditApplied * lineBefore(id)) / costs) * 100) / 100 : 0);
+	/** What the person pays before the manual discount: nothing for a credit line. */
+	const linePrice = (id: string) => (item.lines.find((x) => x.id === id)!.is_credit ? 0 : Math.max(0, lineBefore(id) - creditShare(id)));
 	const subtotal = $derived(item.lines.reduce((s, l) => s + linePrice(l.id), 0));
 	const manual = $derived(Math.min(Math.max(0, Number(d.discount) || 0), subtotal));
 	const total = $derived(subtotal - manual);
@@ -137,13 +147,20 @@
 												{[l.requested_team_name, l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}
 											{:else}<span class="text-muted">–</span>{/if}
 										</td>
-										<td class="text-right font-mono text-sm">{money(l.base_price)}</td>
+										<td class="text-right font-mono text-sm {l.is_credit ? 'text-ok-text' : ''}">{money(l.base_price)}</td>
 										<td class="text-right font-mono text-sm">{Number(l.discount_amount) ? `−${money(l.discount_amount)}` : '–'}</td>
 										<td class="text-right">
-											<input class="input input-bordered input-sm w-28 text-right font-mono" type="number" step="0.01" min="0" inputmode="decimal" aria-label={t('reg.line.override_named', { name: l.member.name })} placeholder="–" bind:value={e.override} disabled={!editable || e.excluded} />
+											<input class="input input-bordered input-sm w-28 text-right font-mono" type="number" step="0.01" min="0" inputmode="decimal" aria-label={t('reg.line.override_named', { name: l.member.name })} placeholder="–" bind:value={e.override} disabled={!editable || e.excluded || l.is_credit} />
 										</td>
 										<td class="text-center"><input type="checkbox" class="checkbox checkbox-sm" aria-label={t('reg.line.exclude_named', { name: l.member.name })} bind:checked={e.excluded} disabled={!editable} /></td>
-										<td class="text-right font-mono text-sm font-semibold">{money(editable ? linePrice(l.id) : l.price)}</td>
+										<td class="text-right font-mono text-sm font-semibold">
+											{#if l.is_credit}
+												<span class="badge badge-sm badge-success mr-1">{t('regr.credit')}</span><span class="text-ok-text">{money(editable ? lineBefore(l.id) : l.price)}</span>
+											{:else}
+												{money(editable ? linePrice(l.id) : l.payable)}
+												{#if (editable ? creditShare(l.id) : Number(l.credit_share)) > 0}<span class="block text-xs font-normal text-ok-text">{t('regr.credit_taken', { amount: money(editable ? creditShare(l.id) : l.credit_share) })}</span>{/if}
+											{/if}
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -181,6 +198,8 @@
 					<dt class="text-muted">{t('reg.sum.season')}</dt><dd class="text-right">{item.season_name}</dd>
 					<dt class="text-muted">{t('reg.sum.submitted')}</dt><dd class="text-right">{formatDay(item.submitted_at)}</dd>
 					{#if item.invoice_due_date}<dt class="text-muted">{t('reg.sum.due')}</dt><dd class="text-right">{formatDay(item.invoice_due_date)}</dd>{/if}
+					{#if (editable ? creditTotal : Number(item.credit_total)) > 0}<dt class="text-muted">{t('regr.sum.credit')}</dt><dd class="text-right font-mono text-ok-text">−{money(editable ? creditApplied : item.credit_applied)}</dd>{/if}
+					{#if (editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied)) > 0}<dt class="text-xs text-muted">{t('regr.sum.credit_unused')}</dt><dd class="text-right font-mono text-xs text-muted">{money(editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied))}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.subtotal')}</dt><dd class="text-right font-mono">{money(editable ? subtotal : item.subtotal)}</dd>
 					{#if (editable ? manual : Number(item.manual_discount_amount)) > 0}<dt class="text-muted">{t('reg.sum.manual')}</dt><dd class="text-right font-mono">−{money(editable ? manual : item.manual_discount_amount)}</dd>{/if}
 				</dl>

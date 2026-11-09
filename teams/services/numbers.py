@@ -91,6 +91,50 @@ def range_message(number, team) -> str | None:
     return None
 
 
+def probe_membership(team, season, date_of_birth=None, number=None) -> TeamMembership:
+    """An unsaved roster spot for a person who is not a member yet (only the date of birth matters for the age gap rule). Each probe is a
+    different person, so two probes never count as one player keeping their number across teams."""
+    from members.models import Member
+
+    return TeamMembership(team=team, member=Member(date_of_birth=date_of_birth), season=season, jersey_number=number)
+
+
+def number_available(number, season, team, date_of_birth=None, extra=()) -> bool:
+    """Whether a new player born on ``date_of_birth`` (``None`` = unknown: nobody shares) may wear ``number`` on ``team`` in ``season``. ``extra``
+    are further unsaved ``probe_membership`` spots (people in the same registration) that count as holders. No names are ever involved."""
+    if range_message(number, team) is not None:
+        return False
+    pool = team.pool
+    if pool is not None and NumberReservation.objects.filter(pool=pool, number=number).exists():
+        return False
+    probe = probe_membership(team, season, date_of_birth, number)
+    holders = holders_of(number, season, team) + [e for e in extra if e.jersey_number == number]
+    return all(can_share(probe, other, pool) for other in holders)
+
+
+def available_numbers(team, season, date_of_birth=None, taken_in_batch=(), batch=()) -> dict:
+    """The numbers a new player born on ``date_of_birth`` could wear on ``team`` in ``season``.
+
+    ``{"pool": {"name", "min", "max"} | None, "numbers": [free numbers] | None, "taken": [numbers in the range that are not free]}``.
+    A team without a pool has no range: ``numbers`` is ``None`` (any number) and ``taken`` lists the numbers its own roster holds.
+    ``taken_in_batch`` are numbers to leave out whatever their holders (people in the same form); ``batch`` are unsaved ``probe_membership``
+    spots that count as holders like roster members (the age gap rule can still let a younger / older sibling on another team share)."""
+    pool = team.pool
+    blocked = {int(n) for n in taken_in_batch}
+    by_number: dict[int, list] = {}
+    for holder in [*memberships_for(season, team, pool), *batch]:
+        by_number.setdefault(holder.jersey_number, []).append(holder)
+    if pool is None:
+        return {"pool": None, "numbers": None, "taken": sorted(set(by_number) | blocked)}
+    reserved = set(NumberReservation.objects.filter(pool=pool).values_list("number", flat=True))
+    probe = probe_membership(team, season, date_of_birth)
+    free, taken = [], []
+    for n in range(pool.min_number, pool.max_number + 1):
+        ok = n not in reserved and n not in blocked and all(can_share(probe, other, pool) for other in by_number.get(n, ()))
+        (free if ok else taken).append(n)
+    return {"pool": {"name": pool.name, "min": pool.min_number, "max": pool.max_number}, "numbers": free, "taken": taken}
+
+
 def status_for(holders, reservation, pool) -> str:
     if reservation is not None:
         return "conflict" if holders else "reserved"

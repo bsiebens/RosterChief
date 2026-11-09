@@ -18,7 +18,7 @@ from news.tests import NewsClubMixin
 from registration.models import RegistrationBatch
 from registration.services import config, pricing
 from shop.models import DiscountType, Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
-from teams.models import Position, TeamMembership
+from teams.models import NumberPool, NumberReservation, Position, TeamMembership
 
 BASE = "/api/v1"
 TODAY = datetime.date.today()
@@ -327,7 +327,10 @@ class ReviewTests(RegistrationMixin, TestCase):
         self.assertEqual(self.staff("patch", f"/registrations/{batch.pk}", {"manual_discount_amount": "5"}).json()["code"], "confirmed")
 
     def test_a_taken_jersey_number_is_dropped_not_an_error(self):
-        batch = self.batch(entries=[self.entry(requested_team_id=str(self.team.pk), requested_jersey_number=7), self.entry("Two", requested_team_id=str(self.team.pk), requested_jersey_number=7)])
+        # both numbers are free when they register; somebody else takes 8 before staff confirm the invoice (placement then drops it, no error)
+        batch = self.batch(entries=[self.entry(requested_team_id=str(self.team.pk), requested_jersey_number=7), self.entry("Two", requested_team_id=str(self.team.pk), requested_jersey_number=8)])
+        holder = Member.objects.create(first_name="Late", last_name="Holder")
+        TeamMembership.objects.create(team=self.team, member=holder, season=self.season, jersey_number=8)
         self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
         self.assertEqual(sorted(str(n) for n in TeamMembership.objects.filter(team=self.team, member__registration_details__batch=batch).values_list("jersey_number", flat=True)), ["7", "None"])
 
@@ -486,3 +489,318 @@ class ProductPricingFieldsTests(RegistrationMixin, TestCase):
         self.assertEqual(self.staff("post", "/shop/products", self.membership_payload(registrant_tiers=[{"min_registrants": 1, "discount_type": "percentage", "discount_amount": "5"}])).status_code, 422)
         plain = self.staff("post", "/shop/products", {"name": "Cap", "price": "5.00"}).json()
         self.assertEqual((plain["season_id"], plain["registrant_tiers"], plain["registrant_discount_scope"]), (None, [], "per_person"))
+
+
+class JerseyNumberTests(RegistrationMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.pool = NumberPool.objects.create(name="Juniors", min_number=1, max_number=5, min_age_gap_years=5)
+        self.team.pool = self.pool
+        self.team.save()
+        self.other_team.pool = self.pool
+        self.other_team.save()
+
+    def numbers(self, team=None, **params):
+        query = "&".join(f"{k}={v}" for k, v in {"team_id": (team or self.team).pk, "variant_id": self.variant.pk, **params}.items())
+        return self.public("get", f"/numbers?{query}")
+
+    def asking(self, number, team=None, **extra):
+        return self.entry(requested_team_id=str((team or self.team).pk), requested_jersey_number=number, **extra)
+
+    def test_the_endpoint_lists_the_free_numbers_without_names(self):
+        holder = Member.objects.create(first_name="Secret", last_name="Holder", date_of_birth=datetime.date(2014, 1, 1))
+        TeamMembership.objects.create(team=self.team, member=holder, season=self.season, jersey_number=2)
+        NumberReservation.objects.create(pool=self.pool, number=4)
+        r = self.numbers(date_of_birth="2015-05-05", exclude="5")
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual((body["numbers"], body["taken"]), ([1, 3], [2, 4, 5]))
+        self.assertEqual(body["pool"], {"name": "Juniors", "min": 1, "max": 5})
+        self.assertNotIn("Secret", r.content.decode())
+
+    def test_the_endpoint_for_a_team_without_a_pool(self):
+        self.team.pool = None
+        self.team.save()
+        holder = Member.objects.create(first_name="A", last_name="B")
+        TeamMembership.objects.create(team=self.team, member=holder, season=self.season, jersey_number=11)
+        body = self.numbers().json()
+        self.assertEqual((body["pool"], body["numbers"], body["taken"]), (None, None, [11]))
+
+    def test_the_endpoint_needs_a_known_team_and_a_season(self):
+        self.assertEqual(self.public("get", f"/numbers?team_id={self.club.pk}&variant_id={self.variant.pk}").status_code, 404)
+        self.assertEqual(self.public("get", f"/numbers?team_id={self.team.pk}").json()["numbers"], [1, 2, 3, 4, 5])  # one offerable season: no variant needed
+        later = type(self.season).objects.create(start_date=TODAY + datetime.timedelta(days=400), end_date=TODAY + datetime.timedelta(days=700))
+        other = Product.objects.create(name="Next", price=Decimal("10"), product_type=Product.ProductType.MEMBERSHIP, season=later)
+        ProductVariant.objects.create(product=other, name="Next")
+        r = self.public("get", f"/numbers?team_id={self.team.pk}")
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "no_season"))
+
+    def test_the_endpoint_is_throttled(self):
+        with mock.patch("api.routers.public_registration.LIMITS", {"numbers": 2, "preview": 60, "submit": 10, "status": 120, "upload": 20}):
+            codes = [self.numbers().status_code for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 429])
+
+    def test_a_free_number_is_accepted_and_stored(self):
+        batch = self.batch(entries=[self.asking(3)])
+        self.assertEqual(batch.details.get().requested_jersey_number, 3)
+
+    def test_out_of_range_reserved_and_held_numbers_are_refused(self):
+        NumberReservation.objects.create(pool=self.pool, number=4)
+        holder = Member.objects.create(first_name="H", last_name="H", date_of_birth=datetime.date(2015, 1, 1))
+        TeamMembership.objects.create(team=self.team, member=holder, season=self.season, jersey_number=2)
+        for number in (9, 4, 2):
+            r = self.register(entries=[self.asking(number)])
+            self.assertEqual(r.status_code, 422, number)
+            self.assertIn("entries.0.requested_jersey_number", r.json()["errors"], number)
+        self.assertNotIn("H H", json.dumps(r.json()))  # who holds it is never told
+        self.assertEqual(RegistrationBatch.objects.count(), 0)
+
+    def test_the_age_gap_decides_on_the_registrants_birthday(self):
+        holder = Member.objects.create(first_name="H", last_name="H", date_of_birth=datetime.date(2000, 1, 1))
+        TeamMembership.objects.create(team=self.other_team, member=holder, season=self.season, jersey_number=2)
+        self.assertEqual(self.register(entries=[self.asking(2, date_of_birth="2015-05-05")]).status_code, 201)
+        self.assertEqual(self.register(entries=[self.asking(2, date_of_birth="2001-05-05")]).status_code, 422)
+
+    def test_two_people_in_one_registration_cannot_ask_for_the_same_number(self):
+        r = self.register(entries=[self.asking(3, first="One"), self.asking(3, first="Two")])
+        self.assertEqual(r.status_code, 422)
+        self.assertNotIn("entries.0.requested_jersey_number", r.json()["errors"])
+        self.assertIn("entries.1.requested_jersey_number", r.json()["errors"])
+        self.assertEqual(self.register(entries=[self.asking(3, first="One"), self.asking(4, first="Two")]).status_code, 201)
+
+    def test_siblings_on_different_teams_of_the_pool_may_share_with_an_age_gap(self):
+        two = [self.asking(3, first="Old", date_of_birth="2000-01-01", team=self.team), self.asking(3, first="Young", date_of_birth="2015-01-01", team=self.other_team)]
+        self.assertEqual(self.register(entries=two).status_code, 201)
+        close = [self.asking(3, first="Old", date_of_birth="2014-01-01", team=self.team), self.asking(3, first="Young", date_of_birth="2015-01-01", team=self.other_team)]
+        r = self.register(entries=close)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("entries.1.requested_jersey_number", r.json()["errors"])
+
+    def test_a_team_without_a_pool_only_needs_a_free_number_up_to_999(self):
+        self.team.pool = None
+        self.team.save()
+        holder = Member.objects.create(first_name="H", last_name="H")
+        TeamMembership.objects.create(team=self.team, member=holder, season=self.season, jersey_number=11)
+        self.assertEqual(self.register(entries=[self.asking(11)]).status_code, 422)
+        self.assertEqual(self.register(entries=[self.asking(1000)]).status_code, 422)
+        self.assertEqual(self.register(entries=[self.asking(123)]).status_code, 201)
+
+    def test_volunteers_are_not_checked(self):
+        r = self.register(entries=[self.asking(99, kind="volunteer", variant_id=str(self.free_variant.pk))])
+        self.assertEqual(r.status_code, 201, r.content)
+
+
+class TiersPerProductTests(RegistrationMixin, TestCase):
+    """A registrant tier counts the people registered for THAT product (all its variants), not everybody in the form."""
+
+    def setUp(self):
+        super().setUp()
+        self.youth = Product.objects.create(name="Youth", price=Decimal("100.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        self.u_a = ProductVariant.objects.create(product=self.youth, name="U8")
+        self.u_b = ProductVariant.objects.create(product=self.youth, name="U10")
+        self.d1 = Product.objects.create(name="D1", price=Decimal("200.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        self.d1_variant = ProductVariant.objects.create(product=self.d1, name="D1")
+        for product in (self.youth, self.d1):
+            for n, pct in ((2, 10), (3, 20)):
+                ProductRegistrantDiscountTier.objects.create(product=product, min_registrants=n, discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal(pct))
+
+    def prices(self, *variants):
+        return pricing.price_entries(list(variants)).lines
+
+    def test_one_youth_and_one_d1_get_no_discount(self):
+        lines = self.prices(self.u_a, self.d1_variant)
+        self.assertEqual([ln.discount for ln in lines], [Decimal("0.00"), Decimal("0.00")])
+
+    def test_two_youth_and_one_d1_only_the_youth_tier_applies(self):
+        lines = self.prices(self.u_a, self.d1_variant, self.u_b)
+        self.assertEqual([ln.price for ln in lines], [Decimal("90.00"), Decimal("200.00"), Decimal("90.00")])  # variants of the product add up
+
+    def test_three_youth_reach_the_third_tier(self):
+        lines = self.prices(self.u_a, self.u_a, self.u_b)
+        self.assertEqual([ln.price for ln in lines], [Decimal("80.00")] * 3)
+
+    def test_a_per_order_fixed_tier_is_shared_over_that_products_lines_only(self):
+        self.youth.registrant_discount_scope = Product.RegistrantDiscountScope.PER_ORDER
+        self.youth.save()
+        ProductRegistrantDiscountTier.objects.filter(product=self.youth).delete()
+        ProductRegistrantDiscountTier.objects.create(product=self.youth, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("30.00"))
+        lines = self.prices(self.u_a, self.d1_variant, self.u_b)
+        self.assertEqual(sum(ln.discount for ln in lines if ln.product == self.youth), Decimal("30.00"))
+        self.assertEqual(sum(ln.discount for ln in lines if ln.product == self.d1), Decimal("0.00"))
+
+    def test_the_preview_endpoint_follows_the_same_rule(self):
+        def total(*variants):
+            r = self.public("post", "/preview", {"entries": [{**self.entry(), "variant_id": str(v.pk)} for v in variants]})
+            self.assertEqual(r.status_code, 200, r.content)
+            return Decimal(r.json()["total"])
+
+        self.assertEqual(total(self.u_a, self.d1_variant), Decimal("300.00"))
+        self.assertEqual(total(self.u_a, self.u_b, self.d1_variant), Decimal("380.00"))
+
+
+class VariantlessProductTests(RegistrationMixin, TestCase):
+    """A membership product without variants is offered as it is: one option at the product price."""
+
+    def setUp(self):
+        super().setUp()
+        self.plain = Product.objects.create(name="Supporter", price=Decimal("25.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        self.key = f"product:{self.plain.pk}"
+
+    def offer(self, name):
+        products = {p["name"]: p for p in self.public("get", "").json()["products"]}
+        return products.get(name)
+
+    def test_it_is_offered_as_a_single_option_named_like_the_product(self):
+        offered = self.offer("Supporter")
+        self.assertEqual([(v["option_id"], v["name"], v["price"], v["id"]) for v in offered["variants"]], [(self.key, "Supporter", "25.00", str(self.plain.pk))])
+        with_variants = self.offer("Player membership")
+        self.assertEqual(with_variants["variants"][0]["option_id"], f"variant:{self.variant.pk}")  # products with variants are unchanged
+
+    def test_a_product_whose_variants_are_all_inactive_is_not_offered(self):
+        ProductVariant.objects.filter(pk=self.variant.pk).update(is_active=False)
+        self.assertIsNone(self.offer("Player membership"))
+        self.assertIsNotNone(self.offer("Supporter"))
+
+    def test_the_old_variant_id_still_works(self):
+        r = self.public("post", "/preview", {"entries": [self.entry()]})
+        self.assertEqual((r.status_code, r.json()["total"]), (200, "100.00"))
+
+    def test_preview_prices_it_and_tiers_and_early_bird_use_the_product(self):
+        self.plain.early_bird_discount_type, self.plain.early_bird_discount_amount, self.plain.early_bird_deadline = DiscountType.PERCENTAGE, Decimal("20"), TODAY + datetime.timedelta(days=3)
+        self.plain.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.plain, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("5.00"))
+        one = self.public("post", "/preview", {"entries": [{**self.entry(), "variant_id": None, "option_id": self.key}]}).json()
+        self.assertEqual((one["lines"][0]["description"], one["total"], one["early_bird_discount"]), ("Supporter", "25.00", "5.00"))
+        two = self.public("post", "/preview", {"entries": [{**self.entry(), "variant_id": None, "option_id": self.key}] * 2}).json()
+        self.assertEqual(two["total"], "40.00")  # 2 x (25 - 5)
+
+    def test_submit_stores_the_product_and_the_review_shows_it(self):
+        batch = self.batch(entries=[{**self.entry(), "variant_id": None, "option_id": self.key}])
+        d = batch.details.get()
+        self.assertEqual((d.product, d.product_variant, d.description, d.base_price), (self.plain, None, "Supporter", Decimal("25.00")))
+        self.assertEqual(d.membership.fee_amount, Decimal("25.00"))
+        detail = self.staff("get", f"/registrations/{batch.pk}").json()
+        self.assertEqual([ln["description"] for ln in detail["lines"]], ["Supporter"])
+        status = self.public("get", f"/status/{batch.status_token}").json()
+        self.assertEqual(status["people"][0]["description"], "Supporter")
+
+    def test_the_kind_category_applies_to_the_product(self):
+        volunteer = ProductCategory.objects.get(system_key="volunteer")
+        self.plain.category = volunteer
+        self.plain.save()
+        self.assertEqual(self.register(entries=[{**self.entry(), "variant_id": None, "option_id": self.key}]).status_code, 422)  # a player can't pick it
+        ok = self.register(entries=[{**self.entry(), "variant_id": None, "option_id": self.key, "kind": "volunteer"}])
+        self.assertEqual(ok.status_code, 201, ok.content)
+
+    def test_an_unknown_or_malformed_option_is_refused(self):
+        for bad in ("product:00000000-0000-0000-0000-000000000000", "nonsense", "variant:xyz", ""):
+            r = self.register(entries=[{**self.entry(), "variant_id": None, "option_id": bad}])
+            self.assertEqual(r.status_code, 422, bad)
+            self.assertIn("entries.0.variant_id", r.json()["errors"], bad)
+
+    def test_the_numbers_endpoint_takes_an_option_id(self):
+        r = self.public("get", f"/numbers?team_id={self.team.pk}&option_id={self.key}")
+        self.assertEqual(r.status_code, 200, r.content)
+
+
+class CreditTests(RegistrationMixin, TestCase):
+    """A negative price on a membership product is a credit: nobody pays less than 0, the credit is spread over the registration's positive lines."""
+
+    def setUp(self):
+        super().setUp()
+        self.credit = Product.objects.create(name="Volunteer credit", price=Decimal("-20.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        self.key = f"product:{self.credit.pk}"
+        self.positive = pricing.Option(product=self.product, variant=self.variant)  # 100.00
+        self.credit_option = pricing.Option(product=self.credit)
+
+    def priced(self, *options):
+        return pricing.price_entries(list(options), today=TODAY)
+
+    def test_the_credit_comes_off_the_positive_line(self):
+        p = self.priced(self.positive, self.credit_option)
+        self.assertEqual([ln.price for ln in p.lines], [Decimal("80.00"), Decimal("0.00")])
+        self.assertEqual((p.total, p.credit_total, p.credit_applied), (Decimal("80.00"), Decimal("20.00"), Decimal("20.00")))
+        self.assertEqual([ln.is_credit for ln in p.lines], [False, True])
+
+    def test_the_credit_is_spread_in_proportion_and_the_cents_are_not_lost(self):
+        ten = Product.objects.create(name="Tenner", price=Decimal("10.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        small = Product.objects.create(name="Small credit", price=Decimal("-10.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        p = self.priced(self.positive, pricing.Option(product=ten), pricing.Option(product=small))  # 100 and 10, credit 10
+        self.assertEqual([ln.credit_share for ln in p.lines[:2]], [Decimal("9.09"), Decimal("0.91")])
+        self.assertEqual(p.total, Decimal("100.00"))
+        three = self.priced(self.positive, self.positive, self.positive, pricing.Option(product=small))
+        self.assertEqual(sum(ln.credit_share for ln in three.lines), Decimal("10.00"))  # 3.33 x 3 + the cent
+        self.assertEqual(three.total, Decimal("290.00"))
+
+    def test_only_a_credit_costs_nothing(self):
+        p = self.priced(self.credit_option)
+        self.assertEqual((p.lines[0].price, p.total, p.credit_total, p.credit_applied), (Decimal("0.00"), Decimal("0.00"), Decimal("20.00"), Decimal("0.00")))
+
+    def test_a_credit_larger_than_the_rest_never_makes_the_total_negative(self):
+        cheap = Product.objects.create(name="Cheap", price=Decimal("15.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        p = self.priced(pricing.Option(product=cheap), self.credit_option)
+        self.assertEqual((p.lines[0].price, p.total, p.credit_applied), (Decimal("0.00"), Decimal("0.00"), Decimal("15.00")))
+
+    def test_credits_get_no_tiers_and_no_early_bird(self):
+        both = Product.objects.create(name="Both", price=Decimal("50.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        plus = ProductVariant.objects.create(product=both, name="Plus")
+        minus = ProductVariant.objects.create(product=both, name="Minus", price=Decimal("-10.00"))
+        ProductRegistrantDiscountTier.objects.create(product=both, min_registrants=2, discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("50"))
+        both.early_bird_discount_type, both.early_bird_discount_amount, both.early_bird_deadline = DiscountType.PERCENTAGE, Decimal("20"), TODAY + datetime.timedelta(days=5)
+        both.save()
+        p = self.priced(pricing.Option(product=both, variant=plus), pricing.Option(product=both, variant=minus))
+        self.assertEqual(p.lines[0].discount, Decimal("0.00"))  # only one positive registrant on the product: the credit does not make two
+        self.assertEqual(p.lines[1].early_bird_discount, Decimal("0.00"))
+        self.assertEqual((p.lines[0].price, p.lines[0].early_bird_discount), (Decimal("40.00"), Decimal("10.00")))  # early-bird on the 50, capped by the fee
+        two = self.priced(pricing.Option(product=both, variant=plus), pricing.Option(product=both, variant=plus), pricing.Option(product=both, variant=minus))
+        self.assertEqual([ln.discount for ln in two.lines], [Decimal("25.00"), Decimal("25.00"), Decimal("0.00")])
+
+    def test_the_preview_shows_the_credit(self):
+        r = self.public("post", "/preview", {"entries": [self.entry(), {**self.entry("Vol"), "variant_id": None, "option_id": self.key, "kind": "player"}]})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual((body["total"], body["credit_total"], body["credit_applied"]), ("80.00", "20.00", "20.00"))
+        self.assertEqual([(ln["base_price"], ln["price"], ln["is_credit"], ln["credit_share"]) for ln in body["lines"]], [("100.00", "80.00", False, "20.00"), ("-20.00", "0.00", True, "0.00")])
+
+    def batch_with_credit(self):
+        return self.batch(entries=[self.entry(), {**self.entry("Vol"), "variant_id": None, "option_id": self.key}])
+
+    def test_submit_stores_the_fees(self):
+        batch = self.batch_with_credit()
+        fees = {d.description: (d.base_price, d.credit_share, d.membership.fee_amount) for d in batch.details.all()}
+        self.assertEqual(fees, {"Player membership": (Decimal("100.00"), Decimal("20.00"), Decimal("80.00")), "Volunteer credit": (Decimal("-20.00"), Decimal("0.00"), Decimal("0.00"))})
+        only = self.batch(entries=[{**self.entry("Solo"), "variant_id": None, "option_id": self.key}])
+        self.assertEqual(only.details.get().membership.fee_amount, Decimal("0.00"))
+
+    def test_the_staff_review_shows_credit_lines_and_keeps_working(self):
+        batch = self.batch_with_credit()
+        detail = self.staff("get", f"/registrations/{batch.pk}").json()
+        lines = {ln["description"]: ln for ln in detail["lines"]}
+        self.assertEqual((lines["Volunteer credit"]["is_credit"], lines["Volunteer credit"]["price"], lines["Volunteer credit"]["payable"]), (True, "-20.00", "0.00"))
+        self.assertEqual((lines["Player membership"]["credit_share"], lines["Player membership"]["payable"], lines["Player membership"]["fee_amount"]), ("20.00", "80.00", "80.00"))
+        self.assertEqual((detail["subtotal"], detail["total"], detail["credit_total"], detail["credit_applied"]), ("80.00", "80.00", "20.00", "20.00"))
+        credit_id, player_id = lines["Volunteer credit"]["id"], lines["Player membership"]["id"]
+        # a manual discount comes off what is left after the credit
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"manual_discount_amount": "10.00", "manual_discount_note": "Friend"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()["total"], {x["description"]: x["fee_amount"] for x in r.json()["lines"]}), ("70.00", {"Player membership": "70.00", "Volunteer credit": "0.00"}))
+        # a credit line has no price to override; an override of the player line is respected and the credit follows it
+        self.assertEqual(self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": credit_id, "price": "5.00"}]}).status_code, 422)
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": player_id, "price": "50.00"}], "manual_discount_amount": "0"})
+        self.assertEqual(r.json()["total"], "30.00")
+        # leaving the credit line out puts the full price back; leaving the player out leaves the credit unused and the total at 0
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": player_id, "price": None}, {"id": credit_id, "excluded": True}]})
+        self.assertEqual((r.json()["total"], r.json()["credit_applied"]), ("100.00", "0.00"))
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": credit_id, "excluded": False}, {"id": player_id, "excluded": True}]})
+        self.assertEqual((r.json()["total"], r.json()["credit_total"], r.json()["credit_applied"]), ("0.00", "20.00", "0.00"))
+
+    def test_confirm_status_and_invoice_show_the_credit(self):
+        batch = self.batch_with_credit()
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
+        people = {p["description"]: p for p in self.public("get", f"/status/{batch.status_token}").json()["people"]}
+        self.assertEqual((people["Volunteer credit"]["is_credit"], people["Volunteer credit"]["credit"], people["Volunteer credit"]["fee"]["fee_amount"]), (True, "20.00", "0.00"))
+        self.assertEqual((people["Player membership"]["credit"], people["Player membership"]["fee"]["fee_amount"]), ("20.00", "80.00"))
+        mail.outbox.clear()
+        self.assertTrue(self.staff("post", f"/registrations/{batch.pk}/resend-invoice").json()["sent"])
+        self.assertIn("Credit: Volunteer credit", mail.outbox[0].body)
+        self.assertIn("-", mail.outbox[0].body.split("Credit: Volunteer credit")[1].split("\n")[0])

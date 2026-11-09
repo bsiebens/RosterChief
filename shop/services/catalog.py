@@ -19,9 +19,10 @@ PRODUCT_FIELDS = (
 )  # fmt: skip
 
 
-def _check_price(price, field="price"):
-    if price is not None and price < 0:
-        raise Invalid("The price can't be negative.", {field: ["Can't be negative."]})
+def _check_price(price, field="price", *, allow_negative=False):
+    """A price is never negative, except on membership products and their variants: there it works as a credit on a registration."""
+    if price is not None and price < 0 and not allow_negative:
+        raise Invalid("The price can't be negative.", {field: ["Can't be negative. Only membership products can have a negative price (a credit on the registration)."]})
 
 
 # --- categories ---------------------------------------------------------------------------------------------------
@@ -70,7 +71,10 @@ def products_queryset():
 
 
 def _validate_product(product):
-    _check_price(product.price)
+    membership = product.product_type == Product.ProductType.MEMBERSHIP
+    _check_price(product.price, allow_negative=membership)
+    if not membership and product.pk and product.variants.filter(price__lt=0).exists():
+        raise Invalid("Remove the negative variant prices first.", {"product_type": ["A variant of this product has a negative price, which only membership products can have."]})
     if product.inventory_managed and product.product_type != Product.ProductType.MERCHANDISE:
         raise Invalid("Only merchandise can be inventory managed.", {"inventory_managed": ["Only merchandise can be inventory managed."]})
     if product.inventory_managed is False and product.pk and InventoryMovement.objects.filter(product=product).exists():
@@ -331,7 +335,7 @@ def _add_variant(product, *, name, price=None, is_active=True, ordering=0) -> Pr
     name = (name or "").strip()
     if not name:
         raise Invalid("A name is required.", {"name": ["Required."]})
-    _check_price(price)
+    _check_price(price, allow_negative=product.product_type == Product.ProductType.MEMBERSHIP)
     if product.variants.filter(name__iexact=name).exists():
         raise Invalid("That option already exists.", {"name": ["Already exists."]})
     return ProductVariant.objects.create(product=product, name=name, price=price, is_active=is_active, ordering=ordering)
@@ -353,7 +357,7 @@ def update_variant(actor, variant, **fields) -> ProductVariant:
             raise Invalid("That option already exists.", {"name": ["Already exists."]})
         fields["name"] = name
     if "price" in fields:
-        _check_price(fields["price"])
+        _check_price(fields["price"], allow_negative=variant.product.product_type == Product.ProductType.MEMBERSHIP)
     for k, v in fields.items():
         setattr(variant, k, v)
     variant.save()

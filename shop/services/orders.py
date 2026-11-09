@@ -62,6 +62,8 @@ def _resolve_spec(spec: LineSpec, index: int) -> None:
         raise Invalid(f"Choose a variant for {p.name}.", {key: ["A variant is required."]})
     if v is not None and (v.product_id != p.pk or not v.is_active):
         raise Invalid(f"Invalid variant for {p.name}.", {key: ["Not an active variant of this product."]})
+    if _price(spec) < 0:
+        raise Invalid(f"{p.name} can't be ordered.", {key: ["A negative price is only a credit on a registration."]})
     if (spec.personalization_number or spec.personalization_name) and not p.personalization_enabled:
         raise Invalid(f"{p.name} can't be personalized.", {key: ["Personalization is not enabled for this product."]})
 
@@ -253,6 +255,8 @@ def update_line(order, line: OrderLine, *, quantity=None, variant="keep", benefi
         if getattr(variant, "pk", None) != old_variant_id:
             line.variant = variant
             line.unit_price = variant.effective_price if variant else line.product.price
+            if line.unit_price < 0:
+                raise Invalid("Invalid variant.", {"variant_id": ["A negative price is only a credit on a registration."]})
     if beneficiary != "keep":
         line.beneficiary = beneficiary
     if team != "keep":

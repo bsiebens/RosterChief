@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CircleCheck, Clock, Lock } from '@lucide/svelte';
+	import { CircleCheck, Clock, Copyright, Lock } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { api } from '#lib/management-api.ts';
 	import type { PublicField, PublicFormStatus } from './+page.server.ts';
@@ -169,7 +169,7 @@
 	</main>
 
 	<footer class="mx-auto flex max-w-2xl items-center justify-between gap-4 px-4 pb-8 sm:px-6">
-		<p class="font-mono text-[11px] text-muted">{t('pubform.footer')}</p>
+		<p class="flex items-center gap-1 font-mono text-[11px] text-muted"><Copyright size={12} aria-hidden="true" /> RosterChief {new Date().getFullYear()}</p>
 		<LangSwitcher />
 	</footer>
 </div>

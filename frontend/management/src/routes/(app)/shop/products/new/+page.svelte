@@ -33,7 +33,7 @@
 	class="grid gap-5"
 	novalidate
 	use:enhance={({ cancel }) => {
-		if (!v.name.trim() || v.price === '' || Number(v.price) < 0) {
+		if (!v.name.trim() || v.price === '' || (v.product_type !== 'membership' && Number(v.price) < 0)) {
 			tried = true;
 			cancel();
 			return;
@@ -57,7 +57,7 @@
 					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc')}</p>
 				</header>
-				<ProductVariantsEditor bind:variants />
+				<ProductVariantsEditor bind:variants membership={v.product_type === 'membership'} />
 			</section>
 		</div>
 		<section class="card card-body gap-3 xl:sticky xl:top-20">

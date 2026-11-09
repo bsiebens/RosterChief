@@ -7,7 +7,7 @@
 	import { money, type Variant } from '#lib/shop.ts';
 
 	/** Manage the variants of a saved product. Every action calls the API from the browser and updates `variants`. */
-	let { productId, variants = $bindable(), price, inventoryManaged }: { productId: string; variants: Variant[]; price: string; inventoryManaged: boolean } = $props();
+	let { productId, variants = $bindable(), price, inventoryManaged, membership = false }: { productId: string; variants: Variant[]; price: string; inventoryManaged: boolean; membership?: boolean } = $props();
 
 	let busy = $state(false);
 	let errorMsg = $state('');
@@ -111,7 +111,7 @@
 {#snippet editor()}
 	<div class="grid items-start gap-3 md:grid-cols-[1fr_12rem_auto]">
 		<Field label={t('shop.variant.f.name')} bind:value={draft.name} error={fieldErr.name} maxlength={255} />
-		<Field label={t('shop.variant.f.price')} type="number" step="0.01" min="0" bind:value={draft.price} error={fieldErr.price} placeholder={money(price)} />
+		<Field label={t('shop.variant.f.price')} type="number" step="0.01" min={membership ? undefined : '0'} bind:value={draft.price} error={fieldErr.price} placeholder={money(price)} />
 		<div class="flex gap-1 md:mt-9">
 			<button class="btn btn-primary btn-square" type="button" aria-label={t('common.save')} disabled={busy} onclick={save}><Check size={16} /></button>
 			<button class="btn btn-ghost btn-square" type="button" aria-label={t('common.cancel')} onclick={() => (editing = null)}><X size={16} /></button>

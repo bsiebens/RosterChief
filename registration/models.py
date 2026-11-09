@@ -84,11 +84,15 @@ class RegistrationDetails(UUIDModel):
     requested_team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("requested team"))
     requested_position = models.ForeignKey("teams.Position", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("requested position"))
     requested_jersey_number = models.PositiveSmallIntegerField(_("requested jersey number"), null=True, blank=True)
-    product_variant = models.ForeignKey("shop.ProductVariant", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("product"))
+    #: What was bought: the product, and its variant (none for a product without variants, which is bought "as is").
+    product = models.ForeignKey("shop.Product", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("product"))
+    product_variant = models.ForeignKey("shop.ProductVariant", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("variant"))
     description = models.CharField(_("description"), max_length=255, blank=True, help_text=_("The product name when it was bought."))
     base_price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
     #: The registrant discount (tiers) already taken off ``base_price``; the line's price is ``base_price - discount_amount``.
     discount_amount = models.DecimalField(_("discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: This line's share of the registration's credits (negative-priced products), already out of what the person pays.
+    credit_share = models.DecimalField(_("credit share"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
     #: Staff's override of the line price in the billing review (``None`` = the computed price).
     price_override = models.DecimalField(_("price override"), max_digits=10, decimal_places=2, null=True, blank=True)
     excluded = models.BooleanField(_("excluded"), default=False, help_text=_("Left out of the invoice in the billing review."))
@@ -103,10 +107,23 @@ class RegistrationDetails(UUIDModel):
         return f"{self.member} - {self.description}"
 
     @property
+    def is_credit(self) -> bool:
+        """A line of a negative-priced product: not charged itself, it takes money off the registration's other lines."""
+        return self.base_price < 0
+
+    @property
     def price(self) -> Decimal:
-        """What this line costs before the manual discount: the override, else the computed price; nothing when excluded."""
+        """What this line costs before the credits and the manual discount: the override, else base - discount; nothing when excluded. For a credit line:
+        its negative amount (never overridden)."""
         if self.excluded:
             return Decimal("0.00")
+        if self.is_credit:
+            return self.base_price
         if self.price_override is not None:
             return self.price_override
         return max(self.base_price - self.discount_amount, Decimal("0.00"))
+
+    @property
+    def payable(self) -> Decimal:
+        """What the person pays before the manual discount: the price less this line's credit share, never below 0 (0 for a credit line)."""
+        return Decimal("0.00") if self.is_credit else max(self.price - self.credit_share, Decimal("0.00"))

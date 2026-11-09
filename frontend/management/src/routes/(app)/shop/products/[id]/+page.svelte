@@ -61,7 +61,7 @@
 		if (form.message) return String(form.message);
 		return form.status === 403 ? t('common.error.forbidden') : t('shop.err.failed');
 	});
-	const valid = () => !!v.name.trim() && v.price !== '' && Number(v.price) >= 0;
+	const valid = () => !!v.name.trim() && v.price !== '' && (v.product_type === 'membership' || Number(v.price) >= 0);
 
 	usePageHeader(() => ({ title: t('shop.product.title_edit'), context: data.item.name, actions }));
 </script>
@@ -122,7 +122,7 @@
 					<h2 id="{formId}-variants" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc_saved')}</p>
 				</header>
-				<ProductVariants productId={item.id} bind:variants price={item.price} inventoryManaged={item.inventory_managed} />
+				<ProductVariants productId={item.id} bind:variants price={item.price} inventoryManaged={item.inventory_managed} membership={v.product_type === 'membership'} />
 			</section>
 		</div>
 

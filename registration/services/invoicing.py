@@ -8,6 +8,7 @@ and emails the invoice (PDF) to the contact. Everything here needs ``members.man
 
 import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.db import transaction
 from django.utils import timezone
@@ -18,7 +19,7 @@ from members.services import memberships as fees
 from members.services.access import require_admin
 from members.services.errors import Invalid
 from registration.models import RegistrationBatch, RegistrationDetails
-from registration.services import config
+from registration.services import config, pricing
 from teams.models import TeamMembership
 
 CENT = Decimal("0.01")
@@ -47,28 +48,50 @@ def _editable(batch: RegistrationBatch) -> None:
 
 
 def subtotal(batch: RegistrationBatch) -> Decimal:
-    return sum((d.price for d in batch.details.all()), Decimal("0.00"))
+    """What the registration costs before the manual discount: the lines less the credits (credit lines count nothing themselves)."""
+    return sum((d.payable for d in batch.details.all()), Decimal("0.00"))
 
 
 def total(batch: RegistrationBatch) -> Decimal:
     return max(subtotal(batch) - batch.manual_discount_amount, Decimal("0.00"))
 
 
+def credits(batch: RegistrationBatch) -> tuple[Decimal, Decimal]:
+    """``(credit_total, credit_applied)``: the negative lines of the registration (as a positive amount) and how much of that came off the other lines."""
+    details = list(batch.details.all())
+    return sum((-d.price for d in details if d.is_credit), Decimal("0.00")), sum((d.credit_share for d in details), Decimal("0.00"))
+
+
+def _spread_credits(details) -> None:
+    """Recompute every line's credit share from the current prices (after staff edited or excluded lines) and save the changed ones."""
+    rows = []
+    for d in details:
+        price = d.price
+        rows.append(SimpleNamespace(is_credit=d.is_credit and not d.excluded, base=price, before_credit=price, credit_share=Decimal("0.00")))
+    pricing.spread_credits(rows)
+    for d, row in zip(details, rows, strict=True):
+        if d.credit_share != row.credit_share:
+            d.credit_share = row.credit_share
+            d.save(update_fields=["credit_share", "modified"])
+
+
 def recompute(actor, batch: RegistrationBatch) -> None:
-    """Write line prices minus the manual discount (spread in proportion to the lines) onto every membership's fee."""
+    """Write the line prices less the credits and the manual discount (spread in proportion to the lines) onto every membership's fee."""
     details = list(batch.details.select_related("membership"))
-    base = sum((d.price for d in details), Decimal("0.00"))
+    _spread_credits(details)
+    base = sum((d.payable for d in details), Decimal("0.00"))
     discount = min(batch.manual_discount_amount, base)
     shares, given = {}, Decimal("0.00")
     for d in details:
-        share = (discount * d.price / base).quantize(CENT) if base else Decimal("0.00")
+        share = (discount * d.payable / base).quantize(CENT) if base else Decimal("0.00")
         shares[d.pk] = share
         given += share
     if details and discount:
-        shares[details[0].pk] += discount - given  # the cents that rounding left over
+        first = next(d for d in details if d.payable > 0)
+        shares[first.pk] += discount - given  # the cents that rounding left over
     for d in details:
         m = d.membership
-        fee = max(d.price - shares[d.pk], Decimal("0.00"))
+        fee = max(d.payable - shares[d.pk], Decimal("0.00"))
         changes = audit.diff(m, {"fee_amount": fee, "early_payment_discount": min(m.early_payment_discount, fee)})
         if changes:
             m.fee_amount, m.early_payment_discount = fee, min(m.early_payment_discount, fee)
@@ -93,6 +116,9 @@ def update_review(actor, batch: RegistrationBatch, *, lines=None, manual_discoun
             price = row["price"]
             if price is not None and price < 0:
                 errors[f"lines.{i}.price"] = ["Can't be negative."]
+                continue
+            if d.is_credit and price is not None:
+                errors[f"lines.{i}.price"] = ["A credit line has no price to override. Leave it out instead."]
                 continue
             d.price_override = fees.money(price) if price is not None else None
         if row.get("excluded") is not None:

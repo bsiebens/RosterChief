@@ -35,6 +35,8 @@ TEXTS = {
             "intro": "Your registration for {season} is confirmed. Invoice {number} is attached to this email.",
             "item": "Registration",
             "discount": "Discount",
+            "credit": "Credit",
+            "credit_unused": "Credit that could not be used",
             "total": "Total",
             "due": "Please pay before {due}.",
             "early": "Pay on or before {deadline} and {person} pays {fee} instead.",
@@ -59,6 +61,8 @@ TEXTS = {
             "intro": "Je inschrijving voor {season} is bevestigd. Factuur {number} zit als bijlage bij deze e-mail.",
             "item": "Inschrijving",
             "discount": "Korting",
+            "credit": "Tegoed",
+            "credit_unused": "Tegoed dat niet gebruikt kon worden",
             "total": "Totaal",
             "due": "Gelieve te betalen voor {due}.",
             "early": "Betaal op of voor {deadline} en {person} betaalt {fee} in plaats daarvan.",
@@ -83,6 +87,8 @@ TEXTS = {
             "intro": "Votre inscription pour {season} est confirmée. La facture {number} est jointe à cet e-mail.",
             "item": "Inscription",
             "discount": "Remise",
+            "credit": "Crédit",
+            "credit_unused": "Crédit non utilisé",
             "total": "Total",
             "due": "Merci de payer avant le {due}.",
             "early": "Payez au plus tard le {deadline} et {person} paie {fee} au lieu de cela.",
@@ -160,14 +166,18 @@ def send_confirmation(batch_id) -> bool:
 
 
 def invoice_context(batch: RegistrationBatch, club) -> dict:
-    lines = [{"name": str(d.member), "description": d.description, "amount": money(d.price)} for d in batch.details.select_related("member") if not d.excluded]
+    details = [d for d in batch.details.select_related("member") if not d.excluded]
+    lines = [{"name": str(d.member), "description": d.description, "amount": f"-{money(-d.price)}" if d.is_credit else money(d.price), "credit": d.is_credit} for d in details]
+    credit_total, credit_applied = invoicing.credits(batch)
+    unused_credit = credit_total - credit_applied
     early = [
         {"name": str(d.member), "deadline": d.membership.early_payment_deadline, "fee": money(max(d.membership.fee_amount - d.membership.early_payment_discount, 0))}
         for d in batch.details.select_related("member", "membership")
         if d.membership.early_payment_deadline and d.membership.early_payment_discount
     ]
     return {
-        "club": club, "batch": batch, "lines": lines, "discount": money(batch.manual_discount_amount) if batch.manual_discount_amount else "", "discount_note": batch.manual_discount_note,
+        "club": club, "batch": batch, "lines": lines, "unused_credit": money(unused_credit) if unused_credit > 0 else "",
+        "discount": money(batch.manual_discount_amount) if batch.manual_discount_amount else "", "discount_note": batch.manual_discount_note,
         "total": money(invoicing.total(batch)), "early": early, "payment_instructions": config.get_settings().payment_instructions,
     }  # fmt: skip
 
@@ -198,6 +208,7 @@ def send_invoice(batch_id) -> bool:
             "lang": _lang(batch),
             "t": t,
             "lines": base["lines"],
+            "unused_credit": base["unused_credit"],
             "discount": base["discount"],
             "discount_note": base["discount_note"],
             "total": base["total"],

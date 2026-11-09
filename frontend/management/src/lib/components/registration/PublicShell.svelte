@@ -1,8 +1,8 @@
 <script lang="ts">
+	import { Copyright } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import LangSwitcher from '#lib/components/LangSwitcher.svelte';
-	import { t } from '#lib/i18n.svelte.ts';
 	import type { ClubBrand } from '#lib/registration-public.ts';
 
 	/** The club-branded frame of the public registration pages: gradient header with the club name and crest, a narrow main column and the language switch. */
@@ -29,7 +29,7 @@
 	<main class="mx-auto grid gap-4 px-4 py-6 sm:px-6 {width}">{@render children()}</main>
 
 	<footer class="mx-auto flex items-center justify-between gap-4 px-4 pb-8 sm:px-6 {width}">
-		<p class="font-mono text-[11px] text-muted">{t('reg.footer')}</p>
+		<p class="flex items-center gap-1 font-mono text-[11px] text-muted"><Copyright size={12} aria-hidden="true" /> RosterChief {new Date().getFullYear()}</p>
 		<LangSwitcher />
 	</footer>
 </div>

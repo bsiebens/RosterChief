@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { CircleAlert, Lock, Plus, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import JerseyNumberField from '#lib/components/registration/JerseyNumberField.svelte';
 	import PublicShell from '#lib/components/registration/PublicShell.svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
@@ -19,8 +20,8 @@
 	/** Keep the chosen option valid for the person's kind: drop an incompatible choice, and pick the only option when there is just one. */
 	function reconcile(e: EntryDraft) {
 		const options = variantsFor(e.kind);
-		if (e.variant_id && !options.some((v) => v.id === e.variant_id)) e.variant_id = '';
-		if (!e.variant_id && options.length === 1) e.variant_id = options[0].id;
+		if (e.variant_id && !options.some((v) => v.option_id === e.variant_id)) e.variant_id = '';
+		if (!e.variant_id && options.length === 1) e.variant_id = options[0].option_id;
 	}
 	const fresh = (patch: Partial<EntryDraft> = {}): EntryDraft => {
 		const e = { ...blankEntry(''), ...patch };
@@ -71,6 +72,13 @@
 	// Only one person can be "myself"; a second one is a child.
 	const hasSelf = (uid: number) => entries.some((e) => e.who === 'self' && e.uid !== uid);
 
+	/** The numbers the other people in this form picked on the same team (they are not free for this one). */
+	const othersOn = (e: EntryDraft) =>
+		entries
+			.filter((o) => o.uid !== e.uid && o.kind === 'player' && e.requested_team_id && o.requested_team_id === e.requested_team_id && o.requested_jersey_number.trim() !== '')
+			.map((o) => Number(o.requested_jersey_number))
+			.filter((n) => Number.isInteger(n));
+
 	const summary = $derived(Object.entries(errors).filter(([, m]) => !!m));
 
 	function clientErrors(): Record<string, string> {
@@ -120,11 +128,11 @@
 </script>
 
 <svelte:head>
-	<title>{pageTitle(t('reg.title'))}</title>
+	<title>{pageTitle(t('join.title'))}</title>
 	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
-<PublicShell title={t('reg.title')} kicker={t('reg.kicker')} club={cfg.club} wide>
+<PublicShell title={t('join.title')} kicker={t('reg.kicker')} club={cfg.club} wide>
 	{#if !cfg.is_open || closedNow}
 		<div class="card card-body items-center gap-2 py-10 text-center" role="status">
 			<Lock size={32} class="text-dim" aria-hidden="true" />
@@ -225,10 +233,10 @@
 					{/if}
 
 					<fieldset class="grid gap-2">
-						<legend class="label-text mb-1">{t('reg.kind.label')}</legend>
+						<legend class="label-text mb-1">{t('join.kind.label')}</legend>
 						<div class="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="player" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('reg.kind.player')}</label>
-							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="volunteer" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('reg.kind.volunteer')}</label>
+							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="player" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('join.kind.player')}</label>
+							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="volunteer" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('join.kind.volunteer')}</label>
 						</div>
 					</fieldset>
 
@@ -238,9 +246,13 @@
 							<select id="{fid}-offer" class="select select-bordered w-full {eerr(i, 'variant_id') ? 'select-error' : ''}" bind:value={e.variant_id} aria-invalid={eerr(i, 'variant_id') ? 'true' : undefined}>
 								<option value="">{t('reg.f.offer_pick')}</option>
 								{#each groupedFor(e.kind) as g (g.product.id)}
-									<optgroup label={g.product.name}>
-										{#each g.variants as v (v.id)}<option value={v.id}>{v.name === g.product.name ? g.product.name : v.name} · {money(v.price)}</option>{/each}
-									</optgroup>
+									{#if g.variants.length === 1 && g.variants[0].name === g.product.name}
+										<option value={g.variants[0].option_id}>{g.product.name} · {money(g.variants[0].price)}</option>
+									{:else}
+										<optgroup label={g.product.name}>
+											{#each g.variants as v (v.option_id)}<option value={v.option_id}>{v.name} · {money(v.price)}</option>{/each}
+										</optgroup>
+									{/if}
 								{/each}
 							</select>
 						{:else}
@@ -265,11 +277,7 @@
 									{#each cfg.positions as pos (pos.id)}<option value={pos.id}>{pos.name}</option>{/each}
 								</select>
 							</div>
-							<div class="form-control">
-								<label class="label" for="{fid}-jersey"><span class="label-text">{t('reg.f.jersey')}</span></label>
-								<input id="{fid}-jersey" type="number" inputmode="numeric" min="0" max="99" class="input input-bordered w-full {eerr(i, 'requested_jersey_number') ? 'input-error' : ''}" bind:value={e.requested_jersey_number} />
-								{#if eerr(i, 'requested_jersey_number')}<span class="mt-1 block text-xs text-error">{eerr(i, 'requested_jersey_number')}</span>{/if}
-							</div>
+							<JerseyNumberField id="{fid}-jersey" teamId={e.requested_team_id} dob={e.date_of_birth} variantId={e.variant_id} exclude={othersOn(e)} bind:value={e.requested_jersey_number} error={eerr(i, 'requested_jersey_number')} />
 						</div>
 						<p class="-mt-2 text-xs text-muted">{t('reg.f.team_help')}</p>
 					{/if}
@@ -293,10 +301,16 @@
 						{#each preview.lines as l (l.index)}
 							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
 								<span><span class="font-semibold text-ink">{entries[l.index]?.who === 'self' ? `${contact.first_name} ${contact.last_name}`.trim() || t('reg.who.self') : `${entries[l.index]?.first_name ?? ''} ${entries[l.index]?.last_name ?? ''}`.trim() || t('reg.person.n', { n: l.index + 1 })}</span> <span class="text-muted">· {l.description}</span></span>
-								<span class="font-mono">
-									{#if Number(l.discount) > 0}<span class="mr-2 text-muted line-through">{money(l.base_price)}</span>{/if}{money(l.price)}
-								</span>
-								{#if Number(l.discount) > 0}<span class="w-full text-xs text-ok-text">{t('reg.price.discount', { amount: money(l.discount) })}</span>{/if}
+								{#if l.is_credit}
+									<span class="font-mono text-ok-text"><span class="badge badge-sm badge-success mr-2">{t('join.price.credit')}</span>{money(l.base_price)}</span>
+									<span class="w-full text-xs text-muted">{t('join.price.credit_help')}</span>
+								{:else}
+									<span class="font-mono">
+										{#if Number(l.discount) > 0 || Number(l.credit_share) > 0}<span class="mr-2 text-muted line-through">{money(Number(l.base_price))}</span>{/if}{money(l.price)}
+									</span>
+									{#if Number(l.discount) > 0}<span class="w-full text-xs text-ok-text">{t('reg.price.discount', { amount: money(l.discount) })}</span>{/if}
+									{#if Number(l.credit_share) > 0}<span class="w-full text-xs text-ok-text">{t('join.price.credit_taken', { amount: money(l.credit_share) })}</span>{/if}
+								{/if}
 							</li>
 						{/each}
 					</ul>
@@ -304,9 +318,12 @@
 						<span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('reg.price.total')}</span>
 						<span class="font-display text-2xl font-extrabold text-ink">{money(preview.total)}</span>
 					</div>
+					{#if Number(preview.credit_total) > Number(preview.credit_applied)}
+						<p class="text-xs text-muted">{t('join.price.credit_unused', { amount: money(Number(preview.credit_total) - Number(preview.credit_applied)) })}</p>
+					{/if}
 					{#if Number(preview.early_bird_discount) > 0}
 						{@const deadline = preview.lines.find((l) => l.early_bird_deadline)?.early_bird_deadline}
-						<p class="rounded-md bg-ok-bg px-3 py-2 text-sm text-ok-text">{t('reg.price.early', { amount: money(preview.early_bird_discount), total: money(preview.total_if_early) })}{#if deadline} {t('reg.price.early_by', { date: when(deadline) })}{/if}</p>
+						<p class="rounded-md bg-ok-bg px-4 py-3 text-sm leading-relaxed text-ok-text"><span>{t('reg.price.early', { amount: money(preview.early_bird_discount), total: money(preview.total_if_early) })}</span>{#if deadline}<span class="ml-1.5 font-semibold">{t('reg.price.early_by', { date: when(deadline) })}</span>{/if}</p>
 					{/if}
 					<p class="text-xs text-muted">{t('reg.price.note')}</p>
 				{/if}

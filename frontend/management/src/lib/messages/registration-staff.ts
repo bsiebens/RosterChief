@@ -1,6 +1,10 @@
 /** Strings for the staff side of registration: the registrations review, its settings and the extra sign-up queue pieces. */
 export default {
 	en: {
+		'regr.credit': "Credit",
+		'regr.credit_taken': "Credit: -{amount}",
+		'regr.sum.credit': "Credit",
+		'regr.sum.credit_unused': "Credit that could not be used",
 		'reg.nav': "Registrations",
 		'reg.badge': "{n} registrations waiting for review",
 		'reg.badge_members': "{n} items need attention",
@@ -130,6 +134,10 @@ export default {
 		'signups.err.already_member': "This person already has a membership this season, so the sign-up cannot be merged into them.",
 	},
 	nl: {
+		'regr.credit': "Tegoed",
+		'regr.credit_taken': "Tegoed: -{amount}",
+		'regr.sum.credit': "Tegoed",
+		'regr.sum.credit_unused': "Tegoed dat niet gebruikt kon worden",
 		'reg.nav': "Inschrijvingen",
 		'reg.badge': "{n} inschrijvingen wachten op controle",
 		'reg.badge_members': "{n} zaken vragen aandacht",
@@ -259,6 +267,10 @@ export default {
 		'signups.err.already_member': "Deze persoon heeft dit seizoen al een lidmaatschap, dus de aanmelding kan er niet in samengevoegd worden.",
 	},
 	fr: {
+		'regr.credit': "Crédit",
+		'regr.credit_taken': "Crédit : -{amount}",
+		'regr.sum.credit': "Crédit",
+		'regr.sum.credit_unused': "Crédit non utilisé",
 		'reg.nav': "Inscriptions",
 		'reg.badge': "{n} inscriptions à vérifier",
 		'reg.badge_members': "{n} éléments demandent votre attention",

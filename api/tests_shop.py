@@ -140,6 +140,31 @@ class ShopApiTests(ShopClubMixin, TestCase):
         self.assertEqual(self.as_("products", "get", f"/products/{uuid.uuid4()}").status_code, 404)
         self.assertEqual(self.as_("products", "delete", f"/products/{pid}").status_code, 204)
 
+    def test_negative_prices_are_only_for_membership_products(self):
+        """A negative price is a credit on a registration: membership products and their variants only."""
+        ok = self.as_("owner", "post", "/products", {"name": "Volunteer credit", "price": "-20.00", "product_type": "membership"})
+        self.assertEqual(ok.status_code, 201, ok.content)
+        self.assertEqual(ok.json()["price"], "-20.00")
+        pid = ok.json()["id"]
+        v = self.as_("owner", "post", f"/products/{pid}/variants", {"name": "Half", "price": "-10.00"})
+        self.assertEqual(v.status_code, 201, v.content)
+        self.assertEqual(self.as_("owner", "patch", f"/products/{pid}/variants/{v.json()['id']}", {"price": "-15.00"}).status_code, 200)
+        # merchandise and event fees stay at zero or more, and a product can't become one while a variant is negative
+        for kind in ("merchandise", "event_fee"):
+            r = self.as_("owner", "post", "/products", {"name": f"Bad {kind}", "price": "-1.00", "product_type": kind})
+            self.assertEqual(r.status_code, 422, kind)
+            self.assertIn("price", r.json()["errors"])
+        merch = self.as_("owner", "post", "/products", {"name": "Shirt", "price": "10.00", "product_type": "merchandise"}).json()["id"]
+        r = self.as_("owner", "post", f"/products/{merch}/variants", {"name": "S", "price": "-1.00"})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.as_("owner", "patch", f"/products/{pid}", {"product_type": "merchandise", "price": "5.00"}).status_code, 422)
+
+    def test_a_negative_product_cannot_be_ordered(self):
+        pid = self.as_("owner", "post", "/products", {"name": "Credit", "price": "-5.00", "product_type": "membership"}).json()["id"]
+        r = self.as_("owner", "post", "/orders", {"purchaser_id": str(self.buyer.pk), "lines": [{"product_id": pid, "quantity": 1}]})
+        self.assertEqual(r.status_code, 422, r.content)
+        self.assertIn("credit", r.content.decode())  # refused for that reason, not for a malformed request
+
     def test_product_with_orders_cannot_be_deleted(self):
         product = self.merch()
         self.make_order(product)
