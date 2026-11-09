@@ -118,7 +118,7 @@
 				<NewsPhotos newsId={item.id} bind:photos {canEdit} />
 			</div>
 			<div id="{formId}-panel-preview" role="tabpanel" aria-labelledby="{formId}-tab-preview" hidden={tab !== 'preview'}>
-				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} html={item.body_html} live={dirty} teams={teamNames} photoUrl={main?.url ?? null} focal={main ? { x: main.focal_x, y: main.focal_y } : null} author={item.created_by?.name ?? null} />
+				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} html={item.body_html} live={dirty} photoUrl={main?.url ?? null} focal={main ? { x: main.focal_x, y: main.focal_y } : null} author={item.created_by?.name ?? null} />
 			</div>
 		</div>
 
@@ -127,6 +127,14 @@
 				<h2 id="{formId}-wf" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('news.card.workflow')}</h2>
 				<div class="flex flex-wrap items-center gap-2"><NewsStatusBadge {item} /><span class="font-mono text-xs text-dim">{t(`news.visibility.short.${item.visibility}`)}</span></div>
 				<p class="text-sm text-muted">{stateText}</p>
+				<div class="grid gap-1.5">
+					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('news.card.audience')}</p>
+					{#if teamNames.length}
+						<div class="flex flex-wrap gap-1.5">{#each teamNames as name (name)}<span class="badge badge-neutral">{name}</span>{/each}</div>
+					{:else}
+						<span class="font-display text-xs font-bold tracking-[.14em] text-club uppercase">{t('news.club_wide')}</span>
+					{/if}
+				</div>
 				{#if item.notified_at}<p class="font-mono text-[11px] text-dim">{t('news.workflow.notified', { date: formatDateTime(item.notified_at) })}</p>{/if}
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('news.unsaved')}</p>{/if}
 

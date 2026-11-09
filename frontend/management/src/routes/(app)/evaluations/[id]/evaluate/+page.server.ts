@@ -34,7 +34,7 @@ export const actions: Actions = {
 		const res = await api<EvaluationOut>('POST', `/evaluations/checklists/${params.id}/evaluations`, { body, f: fetch });
 		if (!res.ok) return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { fields: res.fields, message: res.fields.__all__ || res.message || '', playerId });
 		// Came from a member's page: back to it. From the checklist: stay, ready for the next player.
-		if (url.searchParams.get('player')) redirect(303, `/members/${playerId}?tab=evaluations`);
+		if (url.searchParams.get('player')) redirect(303, `/members/${playerId}?tab=evaluations&evaluated=1`);
 		return { saved: res.data!.player.name };
 	}
 };

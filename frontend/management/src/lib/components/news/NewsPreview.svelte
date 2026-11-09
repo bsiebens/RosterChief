@@ -13,7 +13,6 @@
 		body_en = '',
 		html = '',
 		live = true,
-		teams = [],
 		photoUrl = null,
 		focal = null,
 		author = null
@@ -25,7 +24,6 @@
 		/** Server-rendered HTML of the Dutch body (saved version). */
 		html?: string;
 		live?: boolean;
-		teams?: string[];
 		photoUrl?: string | null;
 		focal?: { x: number; y: number } | null;
 		author?: string | null;
@@ -44,20 +42,14 @@
 		<img class="h-48 w-full object-cover" style:object-position={focal ? `${focal.x}% ${focal.y}%` : undefined} src={photoUrl} alt="" />
 	{/if}
 	<div class="card-body">
-		<div class="mb-1 flex flex-wrap items-center justify-between gap-3">
-			<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('news.card.preview')}>
+		<div class="mb-1 flex flex-wrap items-center justify-end gap-3">
+			{#if lang === 'en' && !hasEn}<span class="mr-auto font-mono text-xs text-dim">{t('news.preview.no_en')}</span>{/if}
+			<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('news.card.preview')}>
 				{#each ['nl', 'en'] as const as l (l)}
-					<button type="button" aria-pressed={lang === l} class="rounded-full px-3 py-1 font-display text-xs font-bold tracking-[.08em] uppercase {lang === l ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}" onclick={() => (lang = l)}>{t(`news.preview.${l}`)}</button>
+					<button type="button" aria-pressed={lang === l} class="rounded-md px-3 py-1 font-display text-xs font-bold tracking-[.08em] uppercase {lang === l ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" onclick={() => (lang = l)}>{t(`news.preview.${l}`)}</button>
 				{/each}
 			</div>
-			{#if lang === 'en' && !hasEn}<span class="font-mono text-xs text-dim">{t('news.preview.no_en')}</span>{/if}
 		</div>
-
-		{#if teams.length}
-			<div class="flex flex-wrap gap-2">{#each teams as name (name)}<span class="badge badge-neutral">{name}</span>{/each}</div>
-		{:else}
-			<div class="font-display text-xs font-bold tracking-[.14em] text-club uppercase">{t('news.club_wide')}</div>
-		{/if}
 
 		<h2 class="font-display text-3xl leading-[1.05] font-extrabold break-words text-ink uppercase">{shownTitle || t('news.preview.untitled')}</h2>
 		<div class="my-2 h-[3px] w-14 bg-club"></div>

@@ -114,7 +114,7 @@
 					<tbody>
 						{#each data.pools as p (p.id)}
 							<tr class="hover:bg-surface">
-								<td class="font-semibold">{p.name}</td>
+								<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(p)}>{p.name}</button></td>
 								<td class="font-mono text-xs">{p.min_number}–{p.max_number}</td>
 								<td class="font-mono text-xs">{t('pools.years', { n: p.min_age_gap_years })}</td>
 								<td>
@@ -126,7 +126,7 @@
 								<td class="text-right whitespace-nowrap">
 									<button class="btn btn-outline btn-xs" type="button" onclick={() => openReservations(p)}><Bookmark size={13} /> {t('pools.reservations')}</button>
 									<button class="btn btn-outline btn-xs" type="button" aria-label={t('pools.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={13} /> {t('common.edit')}</button>
-									<button class="btn btn-outline btn-xs" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
+									<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
 								</td>
 							</tr>
 						{/each}
@@ -199,7 +199,7 @@
 							<form method="POST" action="?/release" use:enhance={submitRes()}>
 								<input type="hidden" name="pool" value={resPool?.id ?? ''} />
 								<input type="hidden" name="rid" value={r.id} />
-								<button class="btn btn-outline btn-xs" type="submit" disabled={busy} aria-label={t('pools.res.release_named', { n: r.number })}><Trash2 size={13} /> {t('pools.res.release')}</button>
+								<button class="btn btn-outline btn-error btn-xs" type="submit" disabled={busy} aria-label={t('pools.res.release_named', { n: r.number })}><Trash2 size={13} /> {t('pools.res.release')}</button>
 							</form>
 						{:else}
 							<span class="text-xs text-muted">{t('pools.res.locked')}</span>

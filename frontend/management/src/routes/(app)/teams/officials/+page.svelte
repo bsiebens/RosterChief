@@ -73,13 +73,13 @@
 			{/if}
 		</div>
 		<div class="flex-1"></div>
-		<div class="flex items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('officials.kind_label')}>
+		<div class="flex items-center gap-1 " role="group" aria-label={t('officials.kind_label')}>
 			{#each KINDS as kind (kind)}
 				<a
 					href={href({ kind, level: '' })}
 					aria-current={f.kind === kind ? 'true' : undefined}
 					onclick={(e) => { e.preventDefault(); navigate(href({ kind, level: '' })); }}
-					class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {f.kind === kind ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}">{t(`officials.kind.${kind}`)}</a>
+					class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {f.kind === kind ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`officials.kind.${kind}`)}</a>
 			{/each}
 		</div>
 		<InfoTip label={t('officials.info_label')} text={t('officials.info')} align="right" />

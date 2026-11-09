@@ -3,7 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { ArrowLeft, ArrowRight, Check, ClipboardCheck, FileDown, Play, Square, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import AttendancePanel from '#lib/components/evaluations/AttendancePanel.svelte';
 	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
+	import { bySection } from '#lib/forms.ts';
 	import { answerShown, evaluateHref, outcomesPdfHref } from '#lib/evaluations.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
@@ -17,6 +19,7 @@
 	const prev = $derived(index > 0 ? data.players[index - 1] : null);
 	const next = $derived(index >= 0 && index < data.players.length - 1 ? data.players[index + 1] : null);
 	const review = $derived(data.review);
+	const groups = $derived(review ? bySection(review.questions.filter((q) => q.entries.length).map((q) => ({ section: q.field.section, q }))) : []);
 	const own = $derived(data.selected ? (decided.get(data.selected) ?? '') : '');
 	const day = (iso: string) => new Intl.DateTimeFormat(getLang(), { dateStyle: 'medium' }).format(new Date(iso));
 	const stamp = (iso: string) => new Intl.DateTimeFormat(getLang(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
@@ -110,14 +113,12 @@
 							<div class="grid gap-1">
 								<h2 class="font-display text-2xl font-extrabold tracking-wide text-ink uppercase"><a class="hover:underline" href="/members/{review.player.id}?tab=evaluations">{review.player.name}</a></h2>
 								<p class="text-sm text-muted">{review.teams.length ? review.teams.map((x) => x.name).join(', ') : t('eval.meeting.no_team')}</p>
-								{#if review.attendance.rate !== null}
-									<p class="font-mono text-xs text-muted">{t('eval.meeting.attendance', { rate: review.attendance.rate, present: review.attendance.present, absent: review.attendance.absent })}</p>
-								{/if}
 							</div>
 							<div class="flex flex-wrap gap-2">
 								{#if data.checklist.is_active && data.checklist.criteria_count}<a class="btn btn-outline btn-sm gap-1" href={evaluateHref(data.checklist.id, review.player.id)}><ClipboardCheck size={14} /> {t('eval.meeting.new_evaluation')}</a>{/if}
 							</div>
 						</div>
+						<AttendancePanel att={review.attendance} />
 						<div class="flex justify-between gap-2 border-t border-rule pt-3 text-sm">
 							{#if prev}<a class="btn btn-ghost btn-sm gap-1" href={to(prev.id)} data-sveltekit-noscroll><ArrowLeft size={14} /> {prev.name}</a>{:else}<span></span>{/if}
 							<span class="self-center font-mono text-xs text-muted">{index + 1} / {data.players.length}</span>
@@ -125,21 +126,26 @@
 						</div>
 					</section>
 
-					{#each review.questions as q (q.field.id)}
-						{#if q.entries.length}
-							<section class="card card-body gap-2">
-								<h3 class="font-semibold text-ink">{q.field.label}{#if !q.field.is_active}<span class="badge badge-sm badge-warning ml-2">{t('eval.meeting.removed')}</span>{/if}</h3>
-								{#if q.trend.length}
-									<TrendChart label={q.field.label} points={q.trend.map((p) => ({ id: p.evaluation_id, label: day(p.at), value: p.value }))} height={130} />
-								{:else}
-									<ul class="grid gap-1.5">
-										{#each q.entries as e (e.evaluation_id)}
-											<li class="flex gap-3 text-sm"><span class="w-24 shrink-0 font-mono text-xs text-muted">{day(e.at)}</span><span>{answerShown({ field_type: q.field.field_type, options: q.field.options, value: e.value }, t('common.yes'), t('common.no'))}</span></li>
-										{/each}
-									</ul>
-								{/if}
-							</section>
-						{/if}
+					{#each groups as g, gi (gi)}
+						<section class="grid gap-3">
+							{#if g.section}<h3 class="border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{g.section}</h3>{/if}
+							<div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(18rem,1fr))]">
+								{#each g.items as { q } (q.field.id)}
+									<section class="card card-body gap-2 p-4">
+										<h4 class="font-semibold text-ink">{q.field.label}{#if !q.field.is_active}<span class="badge badge-sm badge-warning ml-2">{t('eval.meeting.removed')}</span>{/if}</h4>
+										{#if q.trend.length}
+											<TrendChart label={q.field.label} points={q.trend.map((p) => ({ id: p.evaluation_id, label: day(p.at), value: p.value }))} />
+										{:else}
+											<ul class="grid gap-1.5">
+												{#each q.entries as e (e.evaluation_id)}
+													<li class="flex gap-3 text-sm"><span class="w-24 shrink-0 font-mono text-xs text-muted">{day(e.at)}</span><span>{answerShown({ field_type: q.field.field_type, options: q.field.options, value: e.value }, t('common.yes'), t('common.no'))}</span></li>
+												{/each}
+											</ul>
+										{/if}
+									</section>
+								{/each}
+							</div>
+						</section>
 					{:else}
 						<div class="card card-body text-center text-muted">{t('eval.meeting.no_scores')}</div>
 					{/each}
@@ -180,7 +186,7 @@
 									<textarea id="decision" name="decision" class="textarea textarea-bordered w-full" rows="2" placeholder={t('eval.outcome.placeholder')}>{own}</textarea>
 									<div class="flex items-center gap-3">
 										<button class="btn btn-primary btn-sm" type="submit" disabled={busy}>{t('eval.outcome.save')}</button>
-										{#if form && 'done' in form && form.done === 'outcome'}<span class="text-xs text-success">{t('eval.outcome.saved')}</span>{/if}
+										{#if form && 'done' in form && form.done === 'outcome'}<span role="status" class="badge badge-success h-8 gap-1.5 px-3 font-semibold"><Check size={14} aria-hidden="true" /> {t('eval.outcome.saved')}</span>{/if}
 									</div>
 								</form>
 							{/key}

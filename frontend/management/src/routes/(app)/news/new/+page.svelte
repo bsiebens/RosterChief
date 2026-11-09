@@ -58,11 +58,19 @@
 				<NewsFields bind:v teams={data.teams} {fields} {tried} />
 			</div>
 			<div id="{tabId}-panel-preview" role="tabpanel" aria-labelledby="{tabId}-tab-preview" hidden={tab !== 'preview'}>
-				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} teams={teamNames} />
+				<NewsPreview title={v.title} body={v.body} title_en={v.title_en} body_en={v.body_en} />
 			</div>
 		</div>
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
+				<div class="grid gap-1.5">
+					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('news.card.audience')}</p>
+					{#if teamNames.length}
+						<div class="flex flex-wrap gap-1.5">{#each teamNames as name (name)}<span class="badge badge-neutral">{name}</span>{/each}</div>
+					{:else}
+						<span class="font-display text-xs font-bold tracking-[.14em] text-club uppercase">{t('news.club_wide')}</span>
+					{/if}
+				</div>
 				<p class="text-sm text-muted">{t('news.photos.save_first')}</p>
 				<div class="grid gap-2">
 					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('news.save_draft')}</button>

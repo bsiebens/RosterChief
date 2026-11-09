@@ -280,7 +280,7 @@ def review(request, checklist_id: uuid.UUID, player_id: uuid.UUID):
     full = {e.pk: e for e in svc.evaluations_queryset().filter(pk__in=by_id)}
     return {
         "player": _ref(player), "evaluations": [_evaluation(full[e.pk]) for e in data["evaluations"]], "questions": questions, "notes": [_note(n) for n in data["notes"]],
-        "teams": [_named(t) for t in data["teams"]], "attendance": {"season": _named(season) if season else None, "present": attendance["present"], "absent": attendance["absent"], "rate": attendance["rate"]},
+        "teams": [_named(t) for t in data["teams"]], "attendance": {**attendance, "season": _named(season) if season else None},
     }  # fmt: skip
 
 

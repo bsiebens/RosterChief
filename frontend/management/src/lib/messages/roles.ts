@@ -1,5 +1,8 @@
 export default {
 	en: {
+		'roles.info_label': "About roles",
+		'roles.col.actions': "Actions",
+		'roles.delete_named': "Delete {name}",
 		'roles.tab.label': "Role views",
 		'roles.tab.roles': "Roles",
 		'roles.tab.people': "People",
@@ -71,6 +74,9 @@ export default {
 		'roles.perm.forms.manage_forms': 'Build forms, send them and read the responses.'
 	},
 	nl: {
+		'roles.info_label': "Over rollen",
+		'roles.col.actions': "Acties",
+		'roles.delete_named': "{name} verwijderen",
 		'roles.tab.label': "Weergaven van rollen",
 		'roles.tab.roles': "Rollen",
 		'roles.tab.people': "Personen",
@@ -142,6 +148,9 @@ export default {
 		'roles.perm.forms.manage_forms': 'Formulieren bouwen, versturen en de antwoorden lezen.'
 	},
 	fr: {
+		'roles.info_label': "À propos des rôles",
+		'roles.col.actions': "Actions",
+		'roles.delete_named': "Supprimer {name}",
 		'roles.tab.label': "Vues des rôles",
 		'roles.tab.roles': "Rôles",
 		'roles.tab.people': "Personnes",

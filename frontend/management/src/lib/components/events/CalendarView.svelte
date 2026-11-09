@@ -248,14 +248,14 @@
         </div>
         <h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase" aria-live="polite">{periodLabel}</h2>
         <div class="flex-1"></div>
-        <div class="hidden w-fit items-center gap-1 rounded-full bg-primary p-1 lg:flex" role="group" aria-label={t('events.cal.view')}>
+        <div class="hidden w-fit items-center gap-1  lg:flex" role="group" aria-label={t('events.cal.view')}>
             {#each views as v (v.key)}
                 <a
                         href={link({ view: v.key === 'month' ? null : v.key })}
                         data-sveltekit-noscroll
                         data-sveltekit-keepfocus
                         aria-current={data.view === v.key ? 'true' : undefined}
-                        class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.view === v.key ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}">{v.label}</a>
+                        class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.view === v.key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{v.label}</a>
             {/each}
         </div>
     </div>

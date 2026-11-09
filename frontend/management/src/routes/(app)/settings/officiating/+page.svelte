@@ -95,7 +95,7 @@
 				<tbody>
 					{#each data.levels as l (l.id)}
 						<tr class="hover:bg-surface">
-							<td class="font-semibold">{l.name}</td>
+							<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(l)}>{l.name}</button></td>
 							<td>{levelName(l.inherits_from_id) || t('common.none')}</td>
 							<td>
 								<div class="flex flex-wrap gap-1">
@@ -107,7 +107,7 @@
 							<td class="text-right font-mono text-xs">{l.member_count}</td>
 							<td class="text-right whitespace-nowrap">
 								<button class="btn btn-outline btn-xs" type="button" aria-label={t('levels.edit_named', { name: l.name })} onclick={() => openForm(l)}><Pencil size={13} /> {t('common.edit')}</button>
-								<button class="btn btn-outline btn-xs" type="button" aria-label={t('levels.delete_named', { name: l.name })} onclick={() => openDelete(l)}><Trash2 size={13} /> {t('common.delete')}</button>
+								<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('levels.delete_named', { name: l.name })} onclick={() => openDelete(l)}><Trash2 size={13} /> {t('common.delete')}</button>
 							</td>
 						</tr>
 					{/each}

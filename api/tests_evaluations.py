@@ -259,6 +259,34 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         self.assertEqual([n["note"] for n in review["notes"]], ["Move up"])
         self.assertEqual(self.call("delete", f"/evaluations/notes/{r.json()['id']}", self.bob_user).status_code, 204)
 
+    def test_review_attendance_split_into_games_and_practices(self):
+        import datetime
+
+        from django.utils import timezone
+
+        from events.models import Attendance, Event
+
+        c = self.checklist()
+        self.evaluate(c, self.cara, {"skating": 3})
+        now = timezone.now()
+        Status = Attendance.AttendanceStatus
+
+        def event(kind, days, status):
+            e = Event.objects.create(title=kind, kind=kind, start=now - datetime.timedelta(days=days), season=self.season)
+            Attendance.objects.update_or_create(event=e, member=self.cara, defaults={"status": status})
+
+        event("game", 5, Status.PRESENT)
+        event("game", 4, Status.ABSENT)
+        event("training", 3, Status.PRESENT)
+        event("training", 2, Status.NO_RESPONSE)
+        event("training", 1, Status.PRESENT)
+        att = self.call("get", f"/evaluations/checklists/{c['id']}/players/{self.cara.pk}", self.bob_user).json()["attendance"]
+        self.assertEqual((att["games"]["present"], att["games"]["absent"], att["games"]["rate"]), (1, 1, 50))
+        self.assertEqual((att["practices"]["present"], att["practices"]["no_reply"], att["practices"]["rate"]), (2, 1, 100))
+        self.assertEqual((att["present"], att["absent"], att["no_reply"]), (3, 1, 1))
+        self.assertEqual([b["state"] for b in att["recent"]], ["present", "absent", "present", "no_reply", "present"])
+        self.assertEqual(att["recent_limit"], 40)
+
     def test_players_list(self):
         c = self.checklist()
         self.evaluate(c, self.cara, {"skating": 3})

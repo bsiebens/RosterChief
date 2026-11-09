@@ -4,11 +4,12 @@ HTTP. The caller has already checked ``evaluations.execute_evaluations``."""
 import datetime
 from decimal import Decimal, InvalidOperation
 
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from evaluations.models import EvaluationChecklist, EvaluationNote, PlayerEvaluation
 from evaluations.services.checklists import active_criteria, history_criteria
-from events.models import Season
+from events.models import Attendance, Event, Season
 from events.services import attendance
 from formbuilder.models import Answer, Field
 from members.models import Member
@@ -94,13 +95,65 @@ def player_review(checklist: EvaluationChecklist, player: Member) -> dict:
         questions.append(question)
     season = Season.get_current()
     teams = list(TeamMembership.objects.filter(member=player, season=season).select_related("team").order_by("team__name")) if season else []
-    counts = attendance.member_attendance_counts(player, season)
-    answered = counts["present"] + counts["absent"]
+    summary = attendance_summary(player, season)
     return {
         "evaluations": list(reversed(evaluations)), "questions": questions, "notes": player_notes(checklist, player), "teams": [m.team for m in teams],
-        "attendance": {"season": season, "present": counts["present"], "absent": counts["absent"], "rate": round(100 * counts["present"] / answered) if answered else None},
+        "attendance": summary,
     }  # fmt: skip
 
 
 def player_notes(checklist: EvaluationChecklist, player: Member) -> list[EvaluationNote]:
     return list(EvaluationNote.objects.filter(checklist=checklist, player=player).select_related("author").order_by("-created"))
+
+
+RECENT_EVENTS = 40
+_PRESENT = (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED)
+_ABSENT = (Attendance.AttendanceStatus.ABSENT,)
+_EXCUSED = (Attendance.AttendanceStatus.EXCUSED,)
+_GAME_KINDS = (Event.EventKind.GAME, Event.EventKind.TOURNAMENT)
+
+
+def _counts(rows) -> dict:
+    """Past attendance rows -> present / absent / excused / no reply (not answered, or "maybe") / no-shows, and the turnout of those who answered."""
+    c = rows.aggregate(
+        present=Count("id", filter=Q(status__in=_PRESENT)),
+        absent=Count("id", filter=Q(status__in=_ABSENT)),
+        excused=Count("id", filter=Q(status__in=_EXCUSED)),
+        no_shows=Count("id", filter=Q(status__in=_PRESENT, showed_up=False)),
+        total=Count("id"),
+    )
+    answered = c["present"] + c["absent"]
+    c["no_reply"] = c["total"] - c["present"] - c["absent"] - c["excused"]
+    c["rate"] = round(100 * c["present"] / answered) if answered else None
+    return c
+
+
+def _state(row, now) -> str:
+    if row.event.start > now:
+        return "upcoming"
+    if row.status in _PRESENT:
+        return "present"
+    if row.status in _ABSENT:
+        return "absent"
+    if row.status in _EXCUSED:
+        return "excused"
+    return "no_reply"
+
+
+def attendance_summary(player: Member, season: Season | None) -> dict:
+    """This season's attendance of ``player`` over past events: overall, for games (and tournaments) and for practices, plus the last
+    ``RECENT_EVENTS`` events oldest first (topped up with the next upcoming ones when there are fewer)."""
+    empty = {"present": 0, "absent": 0, "excused": 0, "no_reply": 0, "no_shows": 0, "total": 0, "rate": None}
+    if season is None:
+        return {"season": None, **empty, "games": empty, "practices": empty, "recent": [], "recent_limit": RECENT_EVENTS}
+    now = timezone.now()
+    base = Attendance.objects.filter(attendance._in_season(season), member=player, event__cancelled=False).select_related("event")
+    past = base.filter(event__start__lt=now)
+    recent = list(base.filter(event__start__lt=now).order_by("-event__start")[:RECENT_EVENTS])
+    recent.reverse()
+    if len(recent) < RECENT_EVENTS:
+        recent += list(base.filter(event__start__gte=now).order_by("event__start")[: RECENT_EVENTS - len(recent)])
+    return {
+        "season": season, **_counts(past), "games": _counts(past.filter(event__kind__in=_GAME_KINDS)), "practices": _counts(past.filter(event__kind=Event.EventKind.TRAINING)),
+        "recent": [{"state": _state(r, now), "kind": r.event.kind, "date": r.event.start, "title": str(r.event)} for r in recent], "recent_limit": RECENT_EVENTS,
+    }  # fmt: skip

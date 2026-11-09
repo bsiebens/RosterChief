@@ -43,7 +43,7 @@
 			};
 		}}
 	>
-		<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t(role === 'parent' ? 'families.add_parent' : 'families.add_child')}>
+		<div class="flex w-fit items-center gap-1 " role="group" aria-label={t(role === 'parent' ? 'families.add_parent' : 'families.add_child')}>
 			{#each [['existing', t('families.person_existing')], ['new', t('families.person_new')]] as [key, label] (key)}
 				<button
 					type="button"

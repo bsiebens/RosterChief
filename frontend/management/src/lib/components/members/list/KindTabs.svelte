@@ -12,7 +12,7 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (open = false)} onclick={() => (open = false)} />
 
 <div class="flex items-center gap-2">
-	<div class="flex items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('members.list.kind_label')}>
+	<div class="flex items-center gap-1 " role="group" aria-label={t('members.list.kind_label')}>
 		{#each KINDS as kind (kind)}
 			{@const active = filters.kind === (kind as Kind)}
 			<a
@@ -22,7 +22,7 @@
 					e.preventDefault();
 					onnavigate(pageHref(filters, { kind }));
 				}}
-				class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {active ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}">{t(`members.list.kind.${kind}`)}</a>
+				class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {active ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`members.list.kind.${kind}`)}</a>
 		{/each}
 	</div>
 	<div class="relative" role="presentation" onmouseenter={() => (hover = true)} onmouseleave={() => (hover = false)}>

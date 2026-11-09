@@ -143,11 +143,31 @@ class NoteIn(Schema):
     note: str
 
 
-class AttendanceOut(Schema):
-    season: NamedRef | None = None
-    present: int
-    absent: int
+class AttendanceBar(Schema):
+    #: present / absent / excused / no_reply / upcoming
+    state: str
+    kind: str
+    date: datetime.datetime
+    title: str
+
+
+class AttendanceCounts(Schema):
+    present: int = 0
+    absent: int = 0
+    excused: int = 0
+    no_reply: int = 0
+    no_shows: int = 0
+    total: int = 0
     rate: int | None = None
+
+
+class AttendanceOut(AttendanceCounts):
+    season: NamedRef | None = None
+    games: AttendanceCounts
+    practices: AttendanceCounts
+    #: The most recent events, oldest first.
+    recent: list[AttendanceBar] = []
+    recent_limit: int = 40
 
 
 class ReviewOut(Schema):

@@ -20,7 +20,10 @@ export type Matrix = { season: Ref | null; fields: FieldOut[]; rows: { player: R
 export type Entry = { evaluation_id: string; evaluator: Ref | null; at: string; season: Ref; value: unknown };
 export type Question = { field: FieldOut; entries: Entry[]; trend: { evaluation_id: string; at: string; value: number }[] };
 export type Note = { id: string; note: string; author: Ref | null; created: string };
-export type Review = { player: Ref; evaluations: EvaluationOut[]; questions: Question[]; notes: Note[]; teams: Ref[]; attendance: { season: Ref | null; present: number; absent: number; rate: number | null } };
+export type AttendanceBar = { state: 'present' | 'absent' | 'excused' | 'no_reply' | 'upcoming'; kind: string; date: string; title: string };
+export type AttendanceCounts = { present: number; absent: number; excused: number; no_reply: number; no_shows: number; total: number; rate: number | null };
+export type Attendance = AttendanceCounts & { season: Ref | null; games: AttendanceCounts; practices: AttendanceCounts; recent: AttendanceBar[]; recent_limit: number };
+export type Review = { player: Ref; evaluations: EvaluationOut[]; questions: Question[]; notes: Note[]; teams: Ref[]; attendance: Attendance };
 
 export type Session = { id: string; started_at: string; ended_at: string | null; is_open: boolean; started_by: Ref | null };
 export type Outcome = { player: Ref; decision: string; recorded_by: Ref | null; modified: string };

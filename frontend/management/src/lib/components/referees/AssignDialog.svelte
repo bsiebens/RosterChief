@@ -89,9 +89,9 @@
 
 <Modal bind:open title={t('referees.assign_title', { kind: t(`referees.kind_one.${kind}`) })}>
 	{#snippet aside()}
-		<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group">
+		<div class="flex w-fit items-center gap-1 " role="group">
 			{#each ['member', 'external'] as m (m)}
-				<button type="button" aria-pressed={mode === m} class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {mode === m ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}" onclick={() => (mode = m as 'member' | 'external')}>{t(`referees.assign.${m}`)}</button>
+				<button type="button" aria-pressed={mode === m} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {mode === m ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" onclick={() => (mode = m as 'member' | 'external')}>{t(`referees.assign.${m}`)}</button>
 			{/each}
 		</div>
 	{/snippet}

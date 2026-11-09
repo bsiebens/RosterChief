@@ -95,13 +95,13 @@
 </div>
 
 {#snippet modeSwitch()}
-	<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('families.member.add_title')}>
+	<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('families.member.add_title')}>
 		{#each [['existing', t('families.member.existing')], ['new', t('families.member.new')]] as [key, label] (key)}
 			<button
 				type="button"
 				aria-pressed={mode === key}
 				onclick={() => (mode = key as 'existing' | 'new')}
-				class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {mode === key ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}">{label}</button>
+				class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {mode === key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{label}</button>
 		{/each}
 	</div>
 {/snippet}

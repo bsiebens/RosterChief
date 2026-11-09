@@ -2,14 +2,15 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ChevronDown, ChevronRight, Lock, Pencil, Plus, ShieldCheck, UserMinus } from '@lucide/svelte';
+	import { ChevronDown, ChevronRight, Lock, Pencil, Plus, ShieldCheck, Trash2, UserMinus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
+	import InfoTip from '#lib/components/InfoTip.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { roleHref, type RoleDetail } from '#lib/roles.ts';
+	import { roleHref, type Role, type RoleDetail } from '#lib/roles.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
@@ -23,6 +24,8 @@
 	});
 
 	let addOpen = $state(false);
+	let deleteOpen = $state(false);
+	let deleting = $state<Role | null>(null);
 	let target = $state<RoleDetail | null>(null);
 	let picked = $state('');
 	let busy = $state(false);
@@ -50,12 +53,15 @@
 
 <svelte:head><title>{pageTitle(t('roles.title'))}</title></svelte:head>
 
-<div class="grid gap-4">
-	<div class="flex flex-wrap items-center justify-between gap-3">
+<div class="-mx-7 -my-6 flex flex-col">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+		<div class="flex-1"></div>
 		<FilterTabs {tabs} active={data.tab} label={t('roles.tab.label')} hrefFor={(key) => (key === 'roles' ? '?' : `?tab=${key}`)} onnavigate={navigate} />
-		<p class="max-w-2xl text-sm text-muted">{data.tab === 'people' ? t('roles.people_intro') : t('roles.intro')}</p>
+		<InfoTip label={t('roles.info_label')} text={data.tab === 'people' ? t('roles.people_intro') : t('roles.intro')} align="right" />
 	</div>
-	{#if page.url.searchParams.get('deleted') === '1'}<Alert kind="success">{t('roles.deleted')}</Alert>{/if}
+
+	<div class="grid gap-4 px-7 py-5">
+	{#if page.url.searchParams.get('deleted') === '1' || (form && 'done' in form && form.done === 'delete')}<Alert kind="success">{t('roles.deleted')}</Alert>{/if}
 	{#if failure}<Alert kind="error" title={t('roles.action_failed')}>{failure}</Alert>{/if}
 
 	{#if data.error}
@@ -63,7 +69,7 @@
 	{:else if data.tab === 'roles'}
 		<div class="card overflow-x-auto">
 			<table class="table">
-				<thead><tr><th>{t('roles.col.role')}</th><th class="text-right">{t('roles.col.permissions')}</th><th class="text-right">{t('roles.col.people')}</th></tr></thead>
+				<thead><tr><th>{t('roles.col.role')}</th><th class="text-right">{t('roles.col.permissions')}</th><th class="text-right">{t('roles.col.people')}</th><th><span class="sr-only">{t('roles.col.actions')}</span></th></tr></thead>
 				<tbody>
 					{#each data.roles as r (r.id)}
 						<tr class="hover:bg-surface">
@@ -74,6 +80,12 @@
 							</td>
 							<td class="text-right font-mono text-sm">{r.is_owner ? t('roles.all') : r.permissions.length}</td>
 							<td class="text-right font-mono text-sm">{r.member_count}</td>
+							<td class="text-right whitespace-nowrap">
+								<div class="flex justify-end gap-1">
+									<a class="btn btn-outline btn-xs gap-1" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><Pencil size={13} /> {t('common.edit')}</a>
+									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{/if}
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -96,7 +108,7 @@
 										{#if r.is_system}<Lock size={12} class="text-muted" aria-label={t('roles.system')} />{/if}
 									</button>
 									<div class="flex shrink-0 items-center gap-1 pr-3">
-										<a class="btn btn-ghost btn-xs btn-square" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><Pencil size={13} /></a>
+										<a class="btn btn-outline btn-xs btn-square" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><Pencil size={13} /></a>
 										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askAdd(r)} aria-label={t('roles.add_to_named', { name: r.name })}><Plus size={13} /> {t('roles.add_person_short')}</button>
 									</div>
 								</div>
@@ -111,7 +123,7 @@
 										<form method="POST" action="?/removeMember" use:enhance>
 											<input type="hidden" name="role_id" value={r.id} />
 											<input type="hidden" name="member_id" value={m.id} />
-											<button class="btn btn-ghost btn-xs gap-1" type="submit" aria-label={t('roles.remove_named', { name: m.name })}><UserMinus size={13} /> {t('roles.remove')}</button>
+											<button class="btn btn-outline btn-error btn-xs gap-1" type="submit" aria-label={t('roles.remove_named', { name: m.name })}><UserMinus size={13} /> {t('roles.remove')}</button>
 										</form>
 									</td>
 								</tr>
@@ -125,6 +137,7 @@
 		</div>
 	{/if}
 </div>
+</div>
 
 <Modal bind:open={addOpen} title={target ? t('roles.add_to_title', { name: target.name }) : ''}>
 	<form method="POST" action="?/addMember" class="grid gap-4" use:enhance={submit}>
@@ -134,6 +147,17 @@
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (addOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-primary gap-2" type="submit" disabled={busy || !picked}><Plus size={16} /> {t('roles.give')}</button>
+		</div>
+	</form>
+</Modal>
+
+<Modal bind:open={deleteOpen} title={t('roles.delete.title')}>
+	<form method="POST" action="?/delete" class="grid gap-3" use:enhance={() => { busy = true; return async ({ update }) => { await update({ reset: false }); busy = false; deleteOpen = false; }; }}>
+		<input type="hidden" name="role_id" value={deleting?.id ?? ''} />
+		<p>{t('roles.delete.body', { name: deleting?.name ?? '', n: deleting?.member_count ?? 0 })}</p>
+		<div class="modal-action mt-2 flex justify-end gap-2">
+			<button class="btn btn-outline" type="button" onclick={() => (deleteOpen = false)}>{t('common.cancel')}</button>
+			<button class="btn btn-error gap-2" type="submit" disabled={busy}><Trash2 size={16} /> {t('common.delete')}</button>
 		</div>
 	</form>
 </Modal>

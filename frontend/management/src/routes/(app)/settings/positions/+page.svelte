@@ -135,7 +135,7 @@
 										<button class="btn btn-ghost btn-xs btn-square" type="button" disabled={i === list.length - 1} aria-label={t('positions.move_down', { name: p.name })} onclick={() => move(i, i + 1)}><ArrowDown size={14} /></button>
 									</span>
 								</td>
-								<td class="font-semibold">{p.name}</td>
+								<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(p)}>{p.name}</button></td>
 								<td>{p.short_name}</td>
 								<td>
 									<div class="flex flex-wrap gap-1">
@@ -146,7 +146,7 @@
 								<td class="text-right font-mono text-xs">{p.in_use_count}</td>
 								<td class="text-right whitespace-nowrap">
 									<button class="btn btn-outline btn-xs" type="button" aria-label={t('positions.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={13} /> {t('common.edit')}</button>
-									<button class="btn btn-outline btn-xs" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
+									<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
 								</td>
 							</tr>
 						{/each}

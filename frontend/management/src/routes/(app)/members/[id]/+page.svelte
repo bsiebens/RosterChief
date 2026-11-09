@@ -87,6 +87,8 @@
 	</nav>
 
 	{#if tab === 'evaluations'}
+		{#if page.url.searchParams.get('evaluated') === '1'}<Alert kind="success">{t('profile.eval.saved')}</Alert>{/if}
+		{#if form && 'evaluationDeleted' in form}<Alert kind="success">{t('profile.eval.deleted')}</Alert>{/if}
 		<EvaluationsCard evaluations={data.evaluations} checklists={data.checklists} memberId={member.id} myMemberId={data.me?.member_id ?? null} canManage={!!data.me?.can_manage_evaluations} error={data.evaluationsError} />
 	{:else if tab === 'documents'}
 		<DocumentsCard canManage={data.isAdmin} />

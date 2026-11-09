@@ -15,6 +15,11 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 const failed = (op: string, res: ApiCall<unknown>, roleId: string) => fail(res.status >= 400 && res.status < 600 ? res.status : 500, { op, roleId, message: res.fields.member_id || res.fields.__all__ || res.message || '' });
 
 export const actions: Actions = {
+	delete: async ({ request, fetch }) => {
+		const id = String((await request.formData()).get('role_id') ?? '');
+		const res = await api('DELETE', `/roles/${id}`, { f: fetch });
+		return res.ok ? { done: 'delete', roleId: id } : failed('delete', res, id);
+	},
 	addMember: async ({ request, fetch }) => {
 		const f = await request.formData();
 		const roleId = String(f.get('role_id') ?? '');

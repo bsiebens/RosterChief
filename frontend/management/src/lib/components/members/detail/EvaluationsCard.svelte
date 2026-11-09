@@ -25,7 +25,7 @@
 	const mayDelete = (e: EvaluationOut) => canManage || (!!myMemberId && e.evaluator?.id === myMemberId);
 </script>
 
-<div class="grid gap-4 {latest || points.length ? 'lg:grid-cols-[22rem_1fr]' : ''}">
+<div class="grid items-start gap-4 {latest || points.length ? 'lg:grid-cols-[22rem_1fr]' : ''}">
 	{#if latest || points.length}
 	<div class="grid content-start gap-4">
 		{#if latest}

@@ -18,9 +18,9 @@
 <section class="card overflow-hidden">
 	<header class="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-subhead px-4 py-2.5">
 		<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('events.tab.roster')}</h3>
-		<div class="flex items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('events.tab.roster')}>
+		<div class="flex items-center gap-1 " role="group" aria-label={t('events.tab.roster')}>
 			{#each [{ key: 'ours', label: lineup.ours_label }, { key: 'theirs', label: lineup.theirs_label }] as s (s.key)}
-				<button type="button" class="max-w-36 truncate rounded-full px-3 py-1 font-display text-xs font-bold tracking-[.06em] uppercase {side === s.key ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}" aria-pressed={side === s.key} onclick={() => (side = s.key as 'ours' | 'theirs')}>{s.label}</button>
+				<button type="button" class="max-w-36 truncate rounded-md px-3 py-1 font-display text-xs font-bold tracking-[.06em] uppercase {side === s.key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" aria-pressed={side === s.key} onclick={() => (side = s.key as 'ours' | 'theirs')}>{s.label}</button>
 			{/each}
 		</div>
 	</header>

@@ -84,9 +84,9 @@
 				</select>
 			{/if}
 			<div class="flex-1"></div>
-			<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('analytics.scope')}>
+			<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('analytics.scope')}>
 				{#each SCOPES as scope (scope)}
-					<button type="button" class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.scope === scope ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}" aria-pressed={data.scope === scope} onclick={() => setScope(scope)}>{t(`analytics.scope.${scope}`)}</button>
+					<button type="button" class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.scope === scope ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" aria-pressed={data.scope === scope} onclick={() => setScope(scope)}>{t(`analytics.scope.${scope}`)}</button>
 				{/each}
 			</div>
 		</div>

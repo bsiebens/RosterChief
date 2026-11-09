@@ -8,7 +8,7 @@
 	let { tabs, active, label, hrefFor, onnavigate }: { tabs: Tab[]; active: string; label: string; hrefFor: (key: string) => string; onnavigate: (href: string) => void } = $props();
 </script>
 
-<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={label}>
+<div class="flex w-fit items-center gap-1 " role="group" aria-label={label}>
 	{#each tabs as tab (tab.key)}
 		<a
 			href={hrefFor(tab.key)}
@@ -17,7 +17,7 @@
 				e.preventDefault();
 				onnavigate(hrefFor(tab.key));
 			}}
-			class="flex items-center gap-1.5 rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {active === tab.key ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}"
-			>{tab.label}{#if tab.count !== undefined}<span class="badge badge-sm font-mono {tab.warn && tab.count > 0 ? 'badge-warning' : active === tab.key ? 'border-primary/20 bg-primary/10 text-primary' : 'border-white/20 bg-white/15 text-primary-content'}">{tab.count > 99 ? '99+' : tab.count}</span>{/if}</a>
+			class="flex items-center gap-1.5 rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {active === tab.key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}"
+			>{tab.label}{#if tab.count !== undefined}<span class="badge badge-sm font-mono {tab.warn && tab.count > 0 ? 'badge-warning' : active === tab.key ? 'border-white/30 bg-white/20 text-white' : 'border-line bg-surface text-slate'}">{tab.count > 99 ? '99+' : tab.count}</span>{/if}</a>
 	{/each}
 </div>

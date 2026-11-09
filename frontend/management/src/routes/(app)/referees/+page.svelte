@@ -101,9 +101,9 @@
 			</div>
 		{/if}
 		<div class="flex-1"></div>
-		<div class="flex w-fit items-center gap-1 rounded-full bg-primary p-1" role="group" aria-label={t('referees.tabs')}>
+		<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('referees.tabs')}>
 			{#each tabs as tab (tab.key)}
-				<a href={href({ tab: tab.key })} onclick={go(href({ tab: tab.key }))} aria-current={shown.tab === tab.key ? 'true' : undefined} class="rounded-full px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {shown.tab === tab.key ? 'bg-primary-content text-primary' : 'text-primary-dim hover:text-primary-content'}">{tab.label}</a>
+				<a href={href({ tab: tab.key })} onclick={go(href({ tab: tab.key }))} aria-current={shown.tab === tab.key ? 'true' : undefined} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {shown.tab === tab.key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{tab.label}</a>
 			{/each}
 		</div>
 		<InfoTip label={t('referees.info_label')} text={t('referees.info')} align="right" />

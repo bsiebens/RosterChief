@@ -177,7 +177,7 @@
 												</span>
 											{/if}
 										</td>
-										<td class="px-4 font-semibold">{s.name}</td>
+										<td class="px-4"><button type="button" class="link text-left font-semibold" onclick={() => openForm(s)}>{s.name}</button></td>
 										<td class="px-4">
 											{#if s.title_template}
 												<code class="text-xs">{s.title_template}</code>
@@ -187,7 +187,7 @@
 										<td class="px-4 text-right font-mono text-xs">{s.in_use_count}</td>
 										<td class="px-4 text-right whitespace-nowrap">
 											<button class="btn btn-outline btn-xs" type="button" aria-label={t('eventtypes.edit_named', { name: s.name })} onclick={() => openForm(s)}><Pencil size={13} /> {t('common.edit')}</button>
-											<button class="btn btn-outline btn-xs" type="button" aria-label={t('eventtypes.delete_named', { name: s.name })} onclick={() => openDelete(s)}><Trash2 size={13} /> {t('common.delete')}</button>
+											<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('eventtypes.delete_named', { name: s.name })} onclick={() => openDelete(s)}><Trash2 size={13} /> {t('common.delete')}</button>
 										</td>
 									</tr>
 								{/each}
