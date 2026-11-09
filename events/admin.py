@@ -8,20 +8,24 @@ from .models import (
     Event,
     EventAttachment,
     EventFollow,
+    EventOfficial,
+    EventReferee,
     EventSeries,
+    EventSubtype,
     EventTask,
     EventTaskClaim,
     GameFollow,
     GameMoment,
     GameStat,
     GameTimeline,
-    StatsRefresh,
     Lineup,
     LineupSelection,
     Location,
-    EventSubtype,
+    OfficialSignup,
     Opponent,
+    RefereeSignup,
     Season,
+    StatsRefresh,
 )
 
 
@@ -226,3 +230,37 @@ class StatsRefreshAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_display = ("member", "team", "status", "games", "updated", "created", "finished_at")
     list_filter = ("status",)
     raw_id_fields = ("member", "team")
+
+
+class _AssignmentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "external_name", "referee_type", "fee", "no_fee"]
+    search_fields = ["event__title", "member__first_name", "member__last_name", "external_name"]
+    list_select_related = ["event", "member", "referee_type"]
+    raw_id_fields = ["event", "member", "assigned_by"]
+
+
+@admin.register(EventReferee)
+class EventRefereeAdmin(_AssignmentAdmin):
+    pass
+
+
+@admin.register(EventOfficial)
+class EventOfficialAdmin(_AssignmentAdmin):
+    pass
+
+
+class _SignupAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["event", "member", "created"]
+    search_fields = ["event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["event", "member"]
+    raw_id_fields = ["event", "member"]
+
+
+@admin.register(RefereeSignup)
+class RefereeSignupAdmin(_SignupAdmin):
+    pass
+
+
+@admin.register(OfficialSignup)
+class OfficialSignupAdmin(_SignupAdmin):
+    pass

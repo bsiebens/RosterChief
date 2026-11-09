@@ -12,6 +12,13 @@ def get_current_entitlements():
         return value
     from django.db import connection
 
+    from club.models import Club
+
     from .entitlements import resolve_entitlements
 
-    return resolve_entitlements(getattr(connection, "tenant", None))
+    tenant = getattr(connection, "tenant", None)
+    if tenant is not None and not isinstance(tenant, Club):
+        # ``schema_context(...)`` (Celery sweeps, commands, tests) sets django-tenants' FakeTenant, which only knows its schema
+        # name: resolve the real club, or fall back to the platform's bypass when there is none (the public schema).
+        tenant = Club.objects.filter(schema_name=tenant.schema_name).first()
+    return resolve_entitlements(tenant)
