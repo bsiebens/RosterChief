@@ -8,6 +8,7 @@ import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
 import type { FamilyDetail, GuardianContact, MemberDetail, Season, ShellMe } from '#lib/members/detail-types.ts';
 import type { Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
 import type { ChecklistItem, EvaluationOut } from '#lib/evaluations.ts';
+import type { Checklist } from '#lib/requirements.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, fetch, parent }) => {
@@ -21,14 +22,17 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	// tabs reuses it instead of fetching again. A failure only blanks those boxes.
 	// Game stats (every season) only exist for hockey clubs with the analytics feature: 404 otherwise, and any failure
 	// just leaves the card out.
-	const [seasons, attendanceRes, familyRes, gameStatsRes, statsRes] = await Promise.all([
+	const [seasons, attendanceRes, familyRes, gameStatsRes, statsRes, checklistRes] = await Promise.all([
 		api<Season[]>('GET', '/memberships/seasons', { f: fetch }),
 		api<MemberAttendance>('GET', `/members/${params.id}/attendance`, { f: fetch }),
 		Promise.all(member.families.map((f) => api<FamilyDetail>('GET', `/members/families/${f.id}`, { f: fetch }))),
 		me?.features?.includes('analytics') ? api<MemberGameStats>('GET', `/members/${params.id}/game-stats`, { f: fetch }) : Promise.resolve(null),
 		// The Stats tab's charts (player, goalie, turnout per month, staff history); a failure just hides the tab.
-		api<MemberStats>('GET', `/members/${params.id}/stats`, { f: fetch })
+		api<MemberStats>('GET', `/members/${params.id}/stats`, { f: fetch }),
+		// The Documents tab and the hero tile: the member's requirements for the current season (a failure just leaves them empty).
+		api<Checklist>('GET', `/requirements/members/${params.id}/checklist`, { f: fetch })
 	]);
+	const checklist = checklistRes.ok ? (checklistRes.data ?? null) : null;
 	const stats = statsRes.ok ? (statsRes.data ?? null) : null;
 	const gameStats = gameStatsRes?.ok && gameStatsRes.data && gameStatsRes.data.games > 0 ? gameStatsRes.data : null;
 	const families = familyRes.flatMap((r) => (r.ok && r.data ? [r.data] : []));
@@ -68,10 +72,28 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 	}
 
 	const attendance = attendanceRes.ok ? (attendanceRes.data ?? null) : null;
-	return { member, seasons: seasons.data ?? [], attendance, evaluations, checklists, evaluationsError, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
+	return { member, seasons: seasons.data ?? [], attendance, checklist, evaluations, checklists, evaluationsError, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
 };
 
 export const actions: Actions = {
+	completeRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		const out = new FormData();
+		out.set('note', String(f.get('note') ?? '').trim());
+		const until = String(f.get('valid_until') ?? '').trim();
+		if (until) out.set('valid_until', until);
+		const file = f.get('document');
+		if (file instanceof File && file.size > 0) out.set('document', file);
+		return docResult('complete', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/complete`, { form: out, f: fetch }));
+	},
+	bypassRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('bypass', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/bypass`, { body: { note: String(f.get('note') ?? '') }, f: fetch }));
+	},
+	reopenRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('reopen', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/reopen`, { f: fetch }));
+	},
 	saveEligibility: async ({ params, request, fetch }) => {
 		const form = await request.formData();
 		const kind = form.get('kind') === 'official' ? 'official' : 'referee';
@@ -159,4 +181,10 @@ async function membershipAction(request: Request, f: typeof fetch, action: strin
 	const res = await api('POST', path(id), { body: body ? body(form) : undefined, f });
 	if (!res.ok) return fail(res.status || 500, { membershipActionError: res.message || 'failed', membershipActionFields: res.fields, membershipAction: action });
 	return { membershipActionDone: action };
+}
+
+/** The result of a Documents-tab action as `fail()` data for the card, or `{ docDone }`. */
+function docResult(action: string, res: { ok: boolean; status: number; message?: string; fields: Record<string, string> }) {
+	if (res.ok) return { docDone: action };
+	return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { docAction: action, docError: res.fields.__all__ || res.message || 'failed', docFields: res.fields });
 }

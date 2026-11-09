@@ -10,6 +10,7 @@ clash with it.
 
 import uuid
 
+from django.db import transaction
 from django.db.models import Exists, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
 from django.http import HttpResponse
@@ -32,9 +33,10 @@ from api.schemas_members import (
     GroupOut,
     HistoryEntryOut,
     HistoryFilters,
+    MemberCreateIn,
+    MemberCreateOut,
     MemberDetail,
     MemberFilters,
-    MemberIn,
     MemberPatch,
     MemberSummary,
 )
@@ -43,7 +45,7 @@ from club.emails import send_login_granted_email
 from events.models import Season
 from events.services import attendance_report
 from members.models import AuditEntry, ClubMembership, Family, FamilyMembership, Group, ImportJob, Member
-from members.services import access, audit, families, groups, importing, officiating
+from members.services import access, audit, families, groups, importing, officiating, signups
 from members.services import members as member_services
 from members.services.errors import Invalid
 from teams.models import StaffAssignment, TeamMembership
@@ -329,16 +331,70 @@ def list_members(request, filters: Query[MemberFilters]):
     return _annotate_roles(qs).prefetch_related("family_memberships__family__memberships__member").order_by(*order)
 
 
-@router.post("", response={201: MemberDetail}, summary="Add a member (admin)")
-def create_member(request, payload: MemberIn):
-    """Create a person on the roster (no login). Rule: admin only (403 otherwise). Respects the club's member limit
-    (403 ``limit_exceeded``). Writes an audit entry."""
+def _invite(request, member, role_slug: str) -> tuple[dict, tuple]:
+    """Grant the login now (inside the creating transaction, so a missing email undoes the whole add); the email goes out after."""
+    user, created = member_services.grant_login(request.user, request.tenant, member, role_slug=role_slug)
+    return {"user_created": created, "email": user.email}, (member, user, created)
+
+
+@router.post("", response={201: MemberCreateOut}, summary="Add a member (admin)")
+def create_member(request, payload: MemberCreateIn):
+    """Create a person on the roster. Rule: admin only (403 otherwise). Respects the club's member limit (403 ``limit_exceeded``).
+    Optionally in the same step (all or nothing, 422 undoes everything): a season ``membership`` (``active`` skips the sign-up queue,
+    ``pending`` joins it), a ``family`` to join or ``guardians`` (existing or new people) who become the parents of a new family,
+    and an ``invite`` (a login plus the set-password email, which needs an email address). Writes audit entries."""
     access.require_admin(request.user)
-    values = _clean_values(payload.dict())
-    first, last = values.pop("first_name"), values.pop("last_name")
-    email = values.pop("email")
-    member = member_services.create_member(request.user, request.tenant, first_name=first, last_name=last, email=email, features=getattr(request, "features", None), **values)
-    return 201, _member_detail(request, member)
+    data = payload.dict()
+    membership_in, family_in, guardians_in, invite_in = (data.pop(k) for k in ("membership", "family", "guardians", "invite"))
+    values = _clean_values(data)
+    first, last, email = values.pop("first_name"), values.pop("last_name"), values.pop("email")
+    features = getattr(request, "features", None)
+    emails: list[tuple] = []
+    with transaction.atomic():
+        member = member_services.create_member(request.user, request.tenant, first_name=first, last_name=last, email=email, features=features, **values)
+        membership = None
+        if membership_in is not None:
+            season = Season.objects.filter(pk=membership_in["season_id"]).first() if membership_in["season_id"] else Season.get_current()
+            if season is None:
+                raise Invalid("There is no current season to sign the person up for.", {"membership.season_id": ["Choose a season."]})
+            membership = signups.enrol(request.user, member, season, status=membership_in["status"], fee_amount=membership_in["fee_amount"], waived=membership_in["waived"])
+        guardians = []
+        family = None
+        if family_in is not None:
+            family = Family.objects.filter(pk=family_in["family_id"]).first()
+            if family is None:
+                raise Invalid("Unknown family.", {"family.family_id": ["Unknown family."]})
+            families.add_member(request.user, family, member, family_in["role"])
+        elif guardians_in:
+            family = families.create_family(request.user)
+            families.add_member(request.user, family, member, FamilyMembership.FamilyRole.CHILD)
+        guardian_results = []
+        for g in guardians_in:
+            if g["member_id"]:
+                guardian = Member.objects.filter(pk=g["member_id"]).first()
+                if guardian is None:
+                    raise Invalid("Unknown guardian.", {"guardians": ["Unknown member."]})
+            else:
+                guardian = member_services.create_member(request.user, request.tenant, first_name=g["first_name"], last_name=g["last_name"], email=g["email"], features=features)
+            families.add_member(request.user, family, guardian, FamilyMembership.FamilyRole.PARENT)
+            guardians.append(guardian)
+            if g["invite"]:
+                info, mail = _invite(request, guardian, "member")
+                guardian_results.append(info)
+                emails.append(mail)
+        invite_result = None
+        if invite_in is not None and invite_in["send"]:
+            invite_result, mail = _invite(request, member, invite_in["role_slug"])
+            emails.append(mail)
+    sent = {m.pk: send_login_granted_email(request, request.tenant, m, user, user_created=created) for m, user, created in emails}
+    detail = _member_detail(request, member)
+    detail.update(
+        membership_id=membership.pk if membership else None,
+        guardian_ids=[g.pk for g in guardians],
+        invite={**invite_result, "sent": sent[member.pk]} if invite_result else None,
+        guardian_invites=[{**info, "sent": sent[g.pk]} for g, info in zip([g for g, gi in zip(guardians, guardians_in, strict=True) if gi["invite"]], guardian_results, strict=True)],
+    )
+    return 201, detail
 
 
 # -- families (registered before /{member_id}) ----------------------------------------------------------------------

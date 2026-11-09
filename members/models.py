@@ -325,7 +325,8 @@ class ClubMembership(UUIDModel):
         this is separate from status/fee_status. One query per call; for a list of
         memberships, use ``members.services.onboarding.checklist_for`` per
         membership instead."""
-        met = set(self.requirement_statuses.filter(Q(is_complete=True) | Q(is_bypassed=True)).values_list("requirement_id", flat=True))
+        today = timezone.localdate()
+        met = set(self.requirement_statuses.filter(Q(is_bypassed=True) | Q(is_complete=True) & (Q(valid_until__isnull=True) | Q(valid_until__gte=today))).values_list("requirement_id", flat=True))
         required = set(OnboardingRequirement.objects.filter(is_active=True).values_list("pk", flat=True))
         return len(required - met)
 
@@ -465,6 +466,11 @@ class OnboardingRequirement(UUIDModel):
     requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
     blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
+    #: Optional expiry: a completed item stays valid this many months (e.g. a medical certificate valid for 12). Blank = never expires.
+    #: When it runs out the item counts as open again, exactly like a missing one.
+    valid_for_months = models.PositiveSmallIntegerField(_("valid for (months)"), null=True, blank=True)
+    #: How many days before it expires the member (or their guardians) is reminded.
+    reminder_days_before = models.PositiveSmallIntegerField(_("remind before expiry (days)"), default=30)
 
     class Meta:
         verbose_name = _("onboarding requirement")
@@ -496,6 +502,11 @@ class MemberRequirementStatus(UUIDModel):
     completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("completed by"))
     document = models.FileField(_("document"), storage=get_private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
     note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
+    #: The last day the completed item is valid (from the requirement's ``valid_for_months`` unless staff set it). Blank = no expiry.
+    valid_until = models.DateField(_("valid until"), null=True, blank=True)
+    #: The last reminder sent about this item (``expiring`` / ``expired`` / ``missing``), so the daily sweep never repeats itself.
+    last_reminder_at = models.DateTimeField(_("last reminder at"), null=True, blank=True)
+    last_reminder_kind = models.CharField(_("last reminder kind"), max_length=20, blank=True)
 
     class Meta:
         verbose_name = _("member requirement status")

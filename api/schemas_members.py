@@ -154,6 +154,60 @@ class MemberIn(Schema):
     license_number: str | None = None
 
 
+class MembershipPartIn(Schema):
+    """Sign the new person up for a season while adding them. ``active`` skips the sign-up queue (staff-added people, no fee needed);
+    ``pending`` sends them to the queue with ``fee_amount`` (or ``waived``)."""
+
+    season_id: uuid.UUID | None = Field(None, description="Default: the current season.")
+    status: Literal["active", "pending"] = "active"
+    fee_amount: Decimal = Decimal("0.00")
+    waived: bool = False
+
+
+class FamilyPartIn(Schema):
+    family_id: uuid.UUID
+    role: Literal["parent", "child", "guardian", "other"] = "child"
+
+
+class GuardianIn(Schema):
+    """A guardian for the new person: an existing member (``member_id``), or a new one (names, optional email). Becomes a parent in the person's family."""
+
+    member_id: uuid.UUID | None = None
+    first_name: str = ""
+    last_name: str = ""
+    email: str = ""
+    invite: bool = False
+
+
+class InvitePartIn(Schema):
+    """Give the new person a login (needs an email address) and email them a link to set a password."""
+
+    send: bool = True
+    role_slug: str = "member"
+
+
+class MemberCreateIn(MemberIn):
+    """``POST /members``. The extra parts are all optional, so a plain member payload still works exactly as before."""
+
+    membership: MembershipPartIn | None = None
+    family: FamilyPartIn | None = Field(None, description="Join an existing family with a role.")
+    guardians: list[GuardianIn] = Field(default_factory=list, description="Without ``family``: a new family is made with the person as a child and these as parents. With it: they are added to that family.")
+    invite: InvitePartIn | None = None
+
+
+class InviteResultOut(Schema):
+    sent: bool
+    user_created: bool
+    email: str
+
+
+class MemberCreateOut(MemberDetail):
+    membership_id: uuid.UUID | None = None
+    guardian_ids: list[uuid.UUID] = Field(default_factory=list)
+    invite: InviteResultOut | None = None
+    guardian_invites: list[InviteResultOut] = Field(default_factory=list)
+
+
 class MemberPatch(Schema):
     """Only the fields that are sent are changed."""
 

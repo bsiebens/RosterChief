@@ -10,4 +10,4 @@
 
 <svelte:head><title>{pageTitle(t('members.form.title_new'))}</title></svelte:head>
 
-<MemberForm initial={form?.values ?? data.initial} fields={form?.fields} message={form?.message} code={form?.code} cancelHref="/members" />
+<MemberForm initial={form?.values ?? data.initial} fields={form?.fields} message={form?.message} code={form?.code} cancelHref="/members" onboarding={{ seasons: data.seasons }} />

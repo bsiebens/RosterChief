@@ -31,8 +31,10 @@ from .routers import public_forms as public_forms_router
 from .routers import public_news as public_news_router
 from .routers import public_stats as public_stats_router
 from .routers import referees as referees_router
+from .routers import requirements as requirements_router
 from .routers import roles as roles_router
 from .routers import shop_catalog as shop_catalog_router
+from .routers import signups as signups_router
 from .routers import shop_delivery as shop_delivery_router
 from .routers import shop_discounts as shop_discounts_router
 from .routers import shop_inventory as shop_inventory_router
@@ -59,8 +61,10 @@ api.add_router("/memberships", memberships_router.router, tags=["memberships"])
 api.add_router("/club", club_settings_router.router, tags=["club settings"])
 api.add_router("/officiating", officiating_levels_router.router, tags=["officiating levels"])
 api.add_router("/referee-management", referees_router.router, tags=["referee management"])
+api.add_router("/requirements", requirements_router.router, tags=["requirements"])
 api.add_router("/news", news_router.router, tags=["news"])
 api.add_router("/roles", roles_router.router, tags=["roles"])
+api.add_router("/signups", signups_router.router, tags=["signups"])
 api.add_router("/evaluations", evaluations_router.router, tags=["evaluations"])
 api.add_router("/forms", forms_router.router, tags=["forms"])
 api.add_router("/form-sends", forms_router.sends_router, tags=["forms"])

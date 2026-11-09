@@ -8,7 +8,7 @@
 	import type { ClubMembership, MemberDetail } from '#lib/members/detail-types.ts';
 
 	/** Profile header: club-coloured banner, big avatar, name, roles, contact chips and a strip of key figures. */
-	let { member, current, attendance, docsDone, docsTotal }: { member: MemberDetail; current?: ClubMembership | null; attendance: MemberAttendance | null; docsDone: number; docsTotal: number } = $props();
+	let { member, current, attendance, docsDone, docsTotal, docsExpired = 0 }: { member: MemberDetail; current?: ClubMembership | null; attendance: MemberAttendance | null; docsDone: number; docsTotal: number; docsExpired?: number } = $props();
 	const clubName = $derived((page.data as { branding?: { name?: string } }).branding?.name ?? '');
 	const rate = $derived(attendance?.rate ?? null);
 	const teams = $derived(new Set([...member.team_memberships.map((x) => x.team_id), ...member.staff_assignments.map((x) => x.team_id)]).size);
@@ -59,10 +59,17 @@
 					<p class="mt-1 text-xs text-muted">{attendance ? t('attbox.no_data') : t('attbox.failed')}</p>
 				{/if}
 			</div>
-			<div class="sample-stripes bg-white p-4" title={t('profile.sample_hint')}>
+			<div class="bg-white p-4">
 				<dt class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('profile.stat.documents')}</dt>
-				<dd class="mt-1 font-display text-2xl font-extrabold text-ink">{t('profile.stat.documents_value', { done: docsDone, total: docsTotal })}</dd>
-				<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full bg-club" style="width: {docsTotal ? (docsDone / docsTotal) * 100 : 0}%"></div></div>
+				<dd class="mt-1 font-display text-2xl font-extrabold {docsTotal ? (docsExpired ? 'text-danger' : 'text-ink') : 'text-muted'}">
+					<a class="hover:underline" href="?tab=documents" data-sveltekit-noscroll data-sveltekit-keepfocus>{docsTotal ? t('profile.stat.documents_value', { done: docsDone, total: docsTotal }) : '–'}</a>
+				</dd>
+				{#if docsTotal}
+					<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full {docsExpired ? 'bg-danger' : 'bg-club'}" style="width: {(docsDone / docsTotal) * 100}%"></div></div>
+					{#if docsExpired}<p class="mt-1 text-xs text-danger">{t('doc.expired_n', { n: docsExpired })}</p>{/if}
+				{:else}
+					<p class="mt-1 text-xs text-muted">{t('profile.stat.documents_none')}</p>
+				{/if}
 			</div>
 		</dl>
 	</div>

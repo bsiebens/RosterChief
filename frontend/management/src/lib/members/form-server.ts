@@ -28,9 +28,11 @@ export async function requireSettings(parent: () => Promise<unknown>, redirectTo
 /** Shared create/update action: 422 field errors and the plan-limit 403 come back as `fail()` data for the form. */
 export async function saveMember(event: RequestEvent, id?: string) {
 	const form = await event.request.formData();
+	// Adding a person can carry a season membership, a family / guardians and a login invite (one hidden JSON field, see OnboardingFields).
+	const extra = id ? {} : onboardingParts(form);
 	const res = id
 		? await api<MemberDetail>('PATCH', `/members/${id}`, { body: formToBody(form), f: event.fetch })
-		: await api<MemberDetail>('POST', '/members', { body: formToBody(form), f: event.fetch });
+		: await api<MemberDetail & { invite?: { sent: boolean } | null; membership_id?: string | null }>('POST', '/members', { body: { ...formToBody(form), ...extra }, f: event.fetch });
 	if (!res.ok) {
 		if (res.status === 404) error(404);
 		return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { fields: res.fields, message: res.fields && Object.keys(res.fields).length ? '' : (res.message ?? ''), code: res.code ?? '', values: valuesFromForm(form) });
@@ -47,7 +49,30 @@ export async function saveMember(event: RequestEvent, id?: string) {
 		// The member itself is saved at this point; stay on the form so the picture error can be fixed.
 		if (!pr.ok) return fail(pr.status >= 400 && pr.status < 600 ? pr.status : 500, { fields: { [field]: pr.fields.photo || pr.message || '' }, message: '', code: pr.code ?? '', values: valuesFromForm(form) });
 	}
+	// A newly added person lands on their page with a note about what was set up (see the banner on the member page).
+	if (!id) {
+		const made = res.data as { membership_id?: string | null; invite?: { sent: boolean } | null };
+		const q = new URLSearchParams({ added: '1' });
+		if (made.membership_id) q.set('enrolled', (extra as { membership?: { status?: string } }).membership?.status ?? 'active');
+		if (made.invite) q.set('invite', made.invite.sent ? 'sent' : 'unsent');
+		redirect(303, `/members/${memberId}?${q}`);
+	}
 	redirect(303, `/members/${memberId}`);
+}
+
+/** The optional membership / family / guardians / invite chosen on the add form (empty when none, or when the field is missing or broken). */
+function onboardingParts(form: FormData): Record<string, unknown> {
+	try {
+		const p = JSON.parse(String(form.get('ob_payload') ?? '{}')) as { membership?: unknown; family?: unknown; guardians?: unknown[]; invite?: unknown };
+		return {
+			...(p.membership ? { membership: p.membership } : {}),
+			...(p.family ? { family: p.family } : {}),
+			...(Array.isArray(p.guardians) && p.guardians.length ? { guardians: p.guardians } : {}),
+			...(p.invite ? { invite: p.invite } : {})
+		};
+	} catch {
+		return {};
+	}
 }
 
 /**

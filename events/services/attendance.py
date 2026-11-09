@@ -139,7 +139,18 @@ def _desired_member_ids(events: list, member_ids: set | None = None) -> dict:
         ids |= invited[event.pk]
         ids -= excluded[event.pk]
         desired[event.pk] = ids
-    return desired
+    return _without_blocked(events, season_of, desired)
+
+
+def _without_blocked(events: list, season_of: dict, desired: dict) -> dict:
+    """Drop members whose open onboarding requirements block this kind of event (see ``onboarding.blocked_member_ids``)."""
+    from members.services import onboarding
+
+    groups: dict[tuple, set] = defaultdict(set)
+    for event in events:
+        groups[(event.kind, season_of[event.pk])] |= desired[event.pk]
+    blocked = onboarding.blocked_member_ids(groups)
+    return {event.pk: desired[event.pk] - blocked[(event.kind, season_of[event.pk])] for event in events}
 
 
 def effective_members(event):

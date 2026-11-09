@@ -12,6 +12,16 @@
 
 	const items = $derived(visibleNav(me));
 	const path = $derived(page.url.pathname);
+	// Counts behind the nav badges (not-yet-ready sign-ups), for people who manage members. Refreshed whenever the page changes.
+	let counts = $state<Record<string, number>>({});
+	$effect(() => {
+		void path;
+		if (!me.can_manage_members) return;
+		fetch('/api/v1/signups/summary', { headers: { accept: 'application/json' } })
+			.then((r) => (r.ok ? r.json() : null))
+			.then((j) => j && (counts.signups = j.not_clean ?? 0))
+			.catch(() => {});
+	});
 	const fullName = $derived(`${me.first_name} ${me.last_name}`.trim() || me.email);
 	const initials = $derived(((me.first_name[0] ?? '') + (me.last_name[0] ?? '')).toUpperCase() || me.email[0]?.toUpperCase() || '?');
 
@@ -37,12 +47,13 @@
 				<a class="nav-item {active ? 'active' : ''}" href={item.href} aria-current={active ? 'page' : undefined}>
 					<item.icon size={17} aria-hidden="true" />
 					{t(item.label)}
+					{#if item.badge && counts[item.badge]}<span class="ml-auto rounded-full bg-sidebar-chip px-1.5 font-mono text-[10px] leading-4 font-bold text-sidebar-fg" aria-label={t('signups.badge', { n: counts[item.badge] })}>{counts[item.badge]}</span>{/if}
 				</a>
 				{#if active && item.children?.length}
 					<div class="flex flex-col">
 						{#each item.children as child (child.href)}
 							{@const childActive = child.match ? child.match(path) : path === child.href}
-							<a class="nav-subitem {childActive ? 'active' : ''}" href={child.href} aria-current={childActive ? 'page' : undefined}>{t(child.label)}</a>
+							<a class="nav-subitem {childActive ? 'active' : ''}" href={child.href} aria-current={childActive ? 'page' : undefined}>{t(child.label)}{#if child.badge && counts[child.badge]}<span class="ml-2 rounded-full bg-sidebar-chip px-1.5 font-mono text-[10px] leading-4 font-bold text-sidebar-fg" aria-label={t('signups.badge', { n: counts[child.badge] })}>{counts[child.badge]}</span>{/if}</a>
 						{/each}
 					</div>
 				{/if}

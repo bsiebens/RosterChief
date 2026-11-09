@@ -68,3 +68,25 @@ def _tell(job, *, title, body, kind):
         inbox.notify(job.created_by, _club(connection.schema_name), title=title, body=body, kind=kind, href="/members", push=True, category="admin")
     except Exception:  # noqa: BLE001
         log.exception("Import notification failed")
+
+
+@shared_task(name="members.send_requirement_reminders")
+def send_requirement_reminders() -> str:
+    """Remind members (or their guardians) about onboarding documents that are expiring, expired or still missing, in every
+    active club. Scheduled daily; each item is only nagged about now and then (see ``requirement_reminders``)."""
+    from django_tenants.utils import get_tenant_model
+
+    from members.services import requirement_reminders
+
+    reminders = told = 0
+    failed = []
+    for club in get_tenant_model().objects.filter(archived_at__isnull=True).exclude(schema_name=get_public_schema_name()):
+        try:
+            with schema_context(club.schema_name):
+                counts = requirement_reminders.send_due()
+                reminders += counts["reminders"]
+                told += counts["told"]
+        except Exception:
+            log.exception("Requirement reminders failed for club %s", club.slug)
+            failed.append(club.slug)
+    return f"{reminders} reminder(s), {told} account(s) told" + (f"; failed: {', '.join(failed)}" if failed else "")

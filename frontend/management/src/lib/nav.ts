@@ -7,7 +7,9 @@ import type { Me } from './types.ts';
  * icon = a lucide icon, `visible` = optional predicate on /me, `children` = sub-items shown only while the section
  * is active). Sections that are not built yet (Teams, Calendar, Finance, Settings ...) are deliberately absent.
  */
-export type NavChild = { href: string; label: string; match?: (path: string) => boolean; visible?: (me: Me) => boolean };
+/** A count shown as a small badge next to a nav entry; the sidebar fetches the numbers (see `Sidebar.svelte`). */
+export type NavBadge = 'signups';
+export type NavChild = { href: string; label: string; match?: (path: string) => boolean; visible?: (me: Me) => boolean; badge?: NavBadge };
 export type NavItem = {
 	key: string;
 	href: string;
@@ -16,6 +18,7 @@ export type NavItem = {
 	/** Is the section active on this path? Defaults to a prefix match on `href`. */
 	match?: (path: string) => boolean;
 	visible?: (me: Me) => boolean;
+	badge?: NavBadge;
 	children?: NavChild[];
 };
 
@@ -29,9 +32,11 @@ export const NAV: NavItem[] = [
 		href: '/members',
 		label: 'shell.nav.members',
 		icon: Users,
-		match: (p) => p.startsWith('/members') || p.startsWith('/families') || p.startsWith('/groups'),
+		match: (p) => p.startsWith('/members') || p.startsWith('/families') || p.startsWith('/groups') || p.startsWith('/signups'),
+		badge: 'signups',
 		children: [
 			{ href: '/members', label: 'shell.nav.all_members', match: (p) => p.startsWith('/members') },
+			{ href: '/signups', label: 'signups.nav', match: (p) => p.startsWith('/signups'), visible: (me) => me.can_manage_members, badge: 'signups' },
 			{ href: '/families', label: 'shell.nav.families', match: (p) => p.startsWith('/families'), visible: (me) => me.can_manage_members },
 			{ href: '/groups', label: 'shell.nav.groups', match: (p) => p.startsWith('/groups'), visible: (me) => me.can_manage_members || (me.admin_group_ids?.length ?? 0) > 0 }
 		]
@@ -120,13 +125,14 @@ export const NAV: NavItem[] = [
 		label: 'shell.nav.settings',
 		icon: Settings,
 		match: (p) => p === '/settings' || p.startsWith('/settings/'),
-		visible: (me) => me.can_manage_settings || me.can_manage_roles,
+		visible: (me) => me.can_manage_settings || me.can_manage_roles || me.can_manage_members,
 		children: [
 			{ href: '/settings', label: 'shell.nav.settings_general', match: (p) => p === '/settings' || p.startsWith('/settings/preview'), visible: (me) => me.can_manage_settings },
 			{ href: '/settings/positions', label: 'shell.nav.positions', match: (p) => p.startsWith('/settings/positions'), visible: (me) => me.can_manage_settings },
 			{ href: '/settings/event-types', label: 'shell.nav.event_types', match: (p) => p.startsWith('/settings/event-types'), visible: (me) => me.can_manage_settings },
 			{ href: '/settings/number-pools', label: 'shell.nav.number_pools', match: (p) => p.startsWith('/settings/number-pools'), visible: (me) => me.can_manage_settings },
 			{ href: '/settings/officiating', label: 'shell.nav.officiating', match: (p) => p.startsWith('/settings/officiating'), visible: (me) => me.can_manage_settings && me.features.includes('referee_officials') },
+			{ href: '/settings/requirements', label: 'req.nav', match: (p) => p.startsWith('/settings/requirements'), visible: (me) => me.can_manage_members },
 			{ href: '/settings/roles', label: 'roles.nav', match: (p) => p.startsWith('/settings/roles'), visible: (me) => me.can_manage_roles }
 		]
 	}

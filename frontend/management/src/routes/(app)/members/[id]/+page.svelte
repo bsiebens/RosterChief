@@ -19,7 +19,6 @@
 	import { page } from '$app/state';
 	import { hasStats } from '#lib/member-stats.ts';
 	import { canExecuteEvaluations } from '#lib/permissions.ts';
-	import { documentsDone, mockDocuments } from '#lib/members/mock.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { currentMembership, fullName, statusBadge, statusLabel } from '#lib/members/detail-helpers.ts';
@@ -39,8 +38,6 @@
 		...(hasStats(data.stats) || data.officiating?.referee || data.officiating?.official ? [{ key: 'stats', label: t('profile.tab.stats') }] : [])
 	]);
 	const tab = $derived(tabs.find((x) => x.key === page.url.searchParams.get('tab'))?.key ?? 'overview');
-	// Placeholder figures for the hero's documents tile until the real documents exist.
-	const docs = mockDocuments();
 
 	usePageHeader(() => ({
 		title: (member && fullName(member)) || t('members.detail.title.fallback'),
@@ -68,9 +65,17 @@
 
 {#if member}
 {#if form?.granted}<GrantResult granted={form.granted} />{/if}
+{#if page.url.searchParams.get('added') === '1' && member}
+	<Alert kind="success" title={t('members.form.added_title', { name: fullName(member) })}>
+		<ul class="list-disc pl-5">
+			{#if page.url.searchParams.get('enrolled')}<li>{t(`members.form.added_enrolled_${page.url.searchParams.get('enrolled') === 'pending' ? 'pending' : 'active'}`)}</li>{/if}
+			{#if page.url.searchParams.get('invite')}<li>{t(`members.form.added_invite_${page.url.searchParams.get('invite') === 'sent' ? 'sent' : 'unsent'}`)}</li>{/if}
+		</ul>
+	</Alert>
+{/if}
 
 <div class="grid gap-4">
-	<ProfileHero {member} {current} attendance={data.attendance} docsDone={documentsDone(docs)} docsTotal={docs.length} />
+	<ProfileHero {member} {current} attendance={data.attendance} docsDone={data.checklist?.done ?? 0} docsTotal={data.checklist?.total ?? 0} docsExpired={data.checklist?.expired ?? 0} />
 
 	<nav class="card flex flex-wrap items-center justify-between gap-x-3 px-3" aria-label={t('profile.tabs')}>
 		<div class="flex flex-wrap">
@@ -83,7 +88,6 @@
 					class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
 			{/each}
 		</div>
-		{#if tab === 'documents'}<span class="badge badge-outline badge-sm shrink-0" title={t('profile.sample_hint')}>{t('profile.sample')}</span>{/if}
 	</nav>
 
 	{#if tab === 'evaluations'}
@@ -91,7 +95,7 @@
 		{#if form && 'evaluationDeleted' in form}<Alert kind="success">{t('profile.eval.deleted')}</Alert>{/if}
 		<EvaluationsCard evaluations={data.evaluations} checklists={data.checklists} memberId={member.id} myMemberId={data.me?.member_id ?? null} canManage={!!data.me?.can_manage_evaluations} error={data.evaluationsError} />
 	{:else if tab === 'documents'}
-		<DocumentsCard canManage={data.isAdmin} />
+		<DocumentsCard checklist={data.checklist} canManage={data.isAdmin} {form} />
 	{:else if tab === 'attendance'}
 		<AttendanceCard attendance={data.attendance} />
 	{:else if tab === 'stats'}

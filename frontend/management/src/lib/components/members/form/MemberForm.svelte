@@ -4,11 +4,12 @@
 	import { Save } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
+	import OnboardingFields from '#lib/components/members/form/OnboardingFields.svelte';
 	import PhotoPicker from '#lib/components/members/form/PhotoPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { LANGUAGES } from '#lib/members/detail-helpers.ts';
-	import type { FormValues } from '#lib/members/detail-types.ts';
+	import type { FormValues, Season } from '#lib/members/detail-types.ts';
 
 	/**
 	 * Create/edit form. Posts to the page's default action, or to `action` (e.g. `?/save`) when the page has named actions (works without JS; `use:enhance` upgrades it).
@@ -23,8 +24,9 @@
 		profilePhotoUrl = null,
 		playerPhotoUrl = null,
 		id,
-		action
-	}: { action?: string; initial: FormValues; fields?: Record<string, string>; message?: string; code?: string; cancelHref: string; profilePhotoUrl?: string | null; playerPhotoUrl?: string | null; id?: string } = $props();
+		action,
+		onboarding = null
+	}: { onboarding?: { seasons: Season[] } | null; action?: string; initial: FormValues; fields?: Record<string, string>; message?: string; code?: string; cancelHref: string; profilePhotoUrl?: string | null; playerPhotoUrl?: string | null; id?: string } = $props();
 
 	let v = $state(untrack(() => ({ ...initial })));
 	let busy = $state(false);
@@ -93,6 +95,8 @@
 			</label>
 			{#if fields.photo_public_consent}<span class="block text-xs text-error">{fields.photo_public_consent}</span>{/if}
 		</div>
+
+		{#if onboarding}<OnboardingFields seasons={onboarding.seasons} email={v.email} />{/if}
 
 		</section>
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">

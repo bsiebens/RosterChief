@@ -29,8 +29,9 @@ const COLOR_FIELDS = ['primary_color', 'secondary_color', 'primary_text_color', 
 
 export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 	// Someone who only manages roles lands on the roles page.
-	const { me } = (await parent()) as { me?: { can_manage_settings?: boolean; can_manage_roles?: boolean } };
+	const { me } = (await parent()) as { me?: { can_manage_settings?: boolean; can_manage_roles?: boolean; can_manage_members?: boolean } };
 	if (!me?.can_manage_settings && me?.can_manage_roles) redirect(303, '/settings/roles');
+	if (!me?.can_manage_settings && me?.can_manage_members) redirect(303, '/settings/requirements');
 	await requireSettings(parent);
 	const raw = url.searchParams.get('tab');
 	const tab = raw === 'email' || raw === 'previews' ? 'email' : raw === 'pdf' ? 'pdf' : 'identity';

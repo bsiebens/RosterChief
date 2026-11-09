@@ -10,6 +10,7 @@ from uuid import UUID
 from django.db.models import Count, Exists, OuterRef, Q, Value
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from ninja import File, Form, Router, UploadedFile
 from ninja.pagination import paginate
 
@@ -65,7 +66,8 @@ def _queryset():
     active = OnboardingRequirement.objects.filter(is_active=True).count()
     resolved = Count(
         "requirement_statuses",
-        filter=Q(requirement_statuses__requirement__is_active=True) & (Q(requirement_statuses__is_complete=True) | Q(requirement_statuses__is_bypassed=True)),
+        filter=Q(requirement_statuses__requirement__is_active=True)
+        & (Q(requirement_statuses__is_bypassed=True) | Q(requirement_statuses__is_complete=True) & (Q(requirement_statuses__valid_until__isnull=True) | Q(requirement_statuses__valid_until__gte=timezone.localdate()))),
         distinct=True,
     )
     return ClubMembership.objects.select_related("member", "season").prefetch_related("payments").annotate(open_count=Value(active) - resolved)
