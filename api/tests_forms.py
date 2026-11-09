@@ -92,11 +92,17 @@ class FormsApiTests(NewsClubMixin, TestCase):
         name, size = form["fields"]
         self.assertEqual((name["key"], name["order"], size["order"], size["options"], size["required"]), ("name", 0, 1, ["S", {"value": "M", "label": "Medium"}], True))
         # reorder, edit, add; key stays stable
-        r = self.call("put", f"/forms/{form['id']}/fields", data={"fields": [
-            {"id": size["id"], "key": "hacked", "label": "T-shirt", "field_type": "choice", "options": ["S", "M", "L"]},
-            {"id": name["id"], "label": "Full name", "field_type": "text", "required": False},
-            {"label": "Born", "field_type": "date", "key": "dob"},
-        ]}).json()
+        r = self.call(
+            "put",
+            f"/forms/{form['id']}/fields",
+            data={
+                "fields": [
+                    {"id": size["id"], "key": "hacked", "label": "T-shirt", "field_type": "choice", "options": ["S", "M", "L"]},
+                    {"id": name["id"], "label": "Full name", "field_type": "text", "required": False},
+                    {"label": "Born", "field_type": "date", "key": "dob"},
+                ]
+            },
+        ).json()
         self.assertEqual([(f["label"], f["key"], f["order"]) for f in r["fields"]], [("T-shirt", "size", 0), ("Full name", "name", 1), ("Born", "dob", 2)])
         self.assertEqual(r["field_count"], 3)
         # omitted without answers: deleted

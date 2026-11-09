@@ -15,7 +15,7 @@ from controlpanel.tests import login_session, make_user
 from events.models import Season
 from features.entitlements import Entitlement, Entitlements
 from members.models import AuditEntry, Member
-from teams.models import NumberPool, OfficialLevel, OfficialProfile, Position, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
+from teams.models import OfficialLevel, OfficialProfile, RefereeLevel, RefereeProfile, StaffAssignment, Team, TeamMembership
 
 BASE = "/api/v1"
 WITH_FEATURE = Entitlements({"referee_officials": Entitlement(True)})

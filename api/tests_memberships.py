@@ -17,7 +17,7 @@ from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
 from events.models import Season
-from members.models import AuditEntry, ClubMembership, Member
+from members.models import AuditEntry, Member
 from teams.models import Team, TeamMembership
 
 BASE = "/api/v1/memberships"

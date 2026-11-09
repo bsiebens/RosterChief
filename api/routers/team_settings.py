@@ -5,7 +5,7 @@ Writes go through ``teams.services.settings``."""
 import uuid
 from typing import Literal
 
-from ninja import Query, Router
+from ninja import Router
 from ninja.errors import HttpError
 
 from api.schemas_team_settings import (

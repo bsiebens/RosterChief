@@ -1,6 +1,5 @@
 """The in-app inbox API: always the caller's own notifications."""
 
-import json
 from unittest import mock
 
 from django.db import connection

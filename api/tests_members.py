@@ -227,9 +227,10 @@ class MembersApiTests(TestCase):
         self.assertTrue(EmailAddress.objects.get(email="kid@mail.test").verified)
 
     def test_grant_login_email_respects_the_pause(self):
-        from controlpanel.models import EmailSuppression
         from django.core import mail
         from django_tenants.utils import schema_context
+
+        from controlpanel.models import EmailSuppression
 
         mid = self.admin_post("", {"first_name": "Kid", "last_name": "Quiet", "email": "quiet@mail.test"}).json()["id"]
         mail.outbox.clear()

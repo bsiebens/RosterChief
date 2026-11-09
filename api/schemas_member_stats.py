@@ -1,8 +1,8 @@
 """Schemas for ``GET /members/{id}/stats`` (``api.routers.member_stats``)."""
 
 import datetime
-from decimal import Decimal
 import uuid
+from decimal import Decimal
 
 from ninja import Schema
 

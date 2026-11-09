@@ -129,7 +129,6 @@ class TeamsApiTests(TestCase):
         return buf.getvalue()
 
     def test_add_people(self):
-        from members.models import ClubMembership
         from members.services import memberships
 
         with schema_context(self.club.schema_name):

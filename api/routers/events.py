@@ -39,15 +39,15 @@ from api.schemas_events import (
     CheckInIn,
     ClaimIn,
     EventDetailOut,
-    FollowedTeamsOut,
-    FollowStateOut,
-    GameMomentOut,
-    GameSheetOut,
     EventFormOut,
     EventIn,
     EventOptionsOut,
     EventPatch,
     EventRowOut,
+    FollowedTeamsOut,
+    FollowStateOut,
+    GameMomentOut,
+    GameSheetOut,
     LineupIn,
     LineupOut,
     LineupPublishOut,
@@ -57,7 +57,7 @@ from api.schemas_events import (
     TaskOut,
     TaskPatch,
 )
-from events.models import Attendance, AttendanceChange, Event, EventAttachment, EventTask, EventSubtype, GameTimeline, Lineup, LineupSelection, Location, Opponent
+from events.models import Attendance, AttendanceChange, Event, EventAttachment, EventSubtype, EventTask, GameTimeline, Lineup, LineupSelection, Location, Opponent
 from events.services import attachments as attachment_svc
 from events.services import attendance as attendance_svc
 from events.services import calendar as calendar_svc
@@ -219,7 +219,9 @@ def _officiating(rows) -> list[dict]:
     """The referees or officials on a game, by type then name (members link to their profile)."""
     from events.services.referees import order_assignments
 
-    return [{"name": row.display_name, "member_id": row.member_id, "type_name": row.referee_type.name if row.referee_type_id else "", "is_external": row.member_id is None} for row in order_assignments(list(rows.select_related("member", "referee_type")))]
+    return [
+        {"name": row.display_name, "member_id": row.member_id, "type_name": row.referee_type.name if row.referee_type_id else "", "is_external": row.member_id is None} for row in order_assignments(list(rows.select_related("member", "referee_type")))
+    ]
 
 
 def _detail(request, event) -> dict:
@@ -469,7 +471,9 @@ def _game_lineup(event, timeline, shown: dict) -> dict | None:
     for entry in lineups.get(our_side) or []:
         member = members.get(entry.get("license") or entry.get("number"))
         name = f"{member.first_name} {member.last_name}".strip() if member else entry["name"]
-        ours.append({**entry, "member_id": member.pk if member else None, "photo_url": member.player_photo_url if member else None, "initials": "".join(part[0] for part in name.split()[:2]).upper(), **(by_member.get(member.pk, {}) if member else {})})
+        ours.append(
+            {**entry, "member_id": member.pk if member else None, "photo_url": member.player_photo_url if member else None, "initials": "".join(part[0] for part in name.split()[:2]).upper(), **(by_member.get(member.pk, {}) if member else {})}
+        )
     theirs = [{**entry, "initials": "".join(part[0] for part in entry["name"].split()[:2]).upper()} for entry in lineups.get(their_side) or []]
     return {"ours_label": shown["ours_label"], "theirs_label": shown["theirs_label"], "ours": ours, "theirs": theirs}
 

@@ -46,7 +46,6 @@ from members.models import AuditEntry, ClubMembership, Family, FamilyMembership,
 from members.services import access, audit, families, groups, importing, officiating
 from members.services import members as member_services
 from members.services.errors import Invalid
-from notifications import inbox
 from teams.models import StaffAssignment, TeamMembership
 
 router = Router()
@@ -191,10 +190,7 @@ def _group_out(group: Group, *, with_members: bool = True, user=None) -> dict:
         "id": group.pk,
         "name": group.name,
         "member_count": links.count(),
-        "members": [
-            {"member_id": link.member_id, "first_name": link.member.first_name, "last_name": link.member.last_name, "email": link.member.email, "is_admin": link.is_admin, "must_respond": link.must_respond}
-            for link in links
-        ]
+        "members": [{"member_id": link.member_id, "first_name": link.member.first_name, "last_name": link.member.last_name, "email": link.member.email, "is_admin": link.is_admin, "must_respond": link.must_respond} for link in links]
         if with_members
         else [],
         "can_manage": manager,

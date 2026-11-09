@@ -124,7 +124,14 @@ class NewsApiTests(TestCase):
         item = self.write(self.ann_user)
         nid = item["id"]
         self.assertEqual(self.call("post", f"/news/{nid}/publish", self.ann_user, {}).status_code, 403)
-        self.assertEqual(self.call("post", f"/news/{nid}/send-back", self.owner, ).status_code, 422)
+        self.assertEqual(
+            self.call(
+                "post",
+                f"/news/{nid}/send-back",
+                self.owner,
+            ).status_code,
+            422,
+        )
         with mock.patch("news.services.notifications.dispatch_notify_editors_of_pending_review") as hook, self.captureOnCommitCallbacks(execute=True):
             r = self.call("post", f"/news/{nid}/submit-for-review", self.ann_user)
         self.assertEqual((r.status_code, r.json()["status"]), (200, "pending_review"))
