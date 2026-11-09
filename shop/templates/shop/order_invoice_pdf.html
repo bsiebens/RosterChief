@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ invoice.number }}</title>
+<style>
+@page { size: A4; margin: 20mm; @bottom-center { content: "{{ invoice.number }} - " counter(page) " / " counter(pages); font-size: 8pt; color: #666; } }
+body { font-family: sans-serif; font-size: 10pt; color: #111; }
+h1 { font-size: 20pt; margin: 0 0 2mm; }
+.muted { color: #666; }
+.header { display: flex; justify-content: space-between; margin-bottom: 12mm; }
+.logo { height: 16mm; width: 16mm; object-fit: contain; }
+.brand { display: flex; align-items: center; margin-bottom: 3mm; }
+.brand .logo { margin-right: 4mm; }
+.brand-name { font-size: 13pt; font-weight: bold; }
+.accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+.right { text-align: right; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; }
+th { text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; border-bottom: 1px solid #ccc; padding: 2mm 0; }
+td { padding: 2mm 0; border-bottom: 1px solid #eee; }
+.discount td { color: #b91c1c; }
+.total td { font-weight: bold; border-top: 1px solid #111; border-bottom: 2px solid #111; }
+.qr { height: 20mm; width: 20mm; margin-top: 3mm; }
+.paid { color: #15803d; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="brand">
+      {% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="">{% endif %}
+      <div class="brand-name">{{ snapshot.club.name|default:club.name }}</div>
+    </div>
+    {% if snapshot.club.address %}<div class="muted">{{ snapshot.club.address }}</div>{% endif %}
+    {% if snapshot.club.zip_code or snapshot.club.city %}<div class="muted">{{ snapshot.club.zip_code }} {{ snapshot.club.city }}</div>{% endif %}
+    {% if snapshot.club.contact_email %}<div class="muted">{{ snapshot.club.contact_email }}</div>{% endif %}
+    {% if snapshot.club.vat_id %}<div class="muted">VAT {{ snapshot.club.vat_id }}</div>{% endif %}
+  </div>
+  <div class="right">
+    <h1 class="accent">Invoice</h1>
+    <div><strong>{{ invoice.number }}</strong></div>
+    <div class="muted">Issued {{ invoice.issued_at|date:"j F Y" }}</div>
+    {% if invoice.due_date %}<div class="muted">Due {{ invoice.due_date|date:"j F Y" }}</div>{% endif %}
+  </div>
+</div>
+<div class="header">
+  <div><div class="muted">Billed to</div><strong>{{ snapshot.purchaser.name|default:order.purchaser }}</strong></div>
+  <div class="right"><div class="muted">Order</div>{{ order.number }}
+    {% if qr_data_uri %}<div><img class="qr" src="{{ qr_data_uri }}" alt=""></div>{% endif %}</div>
+</div>
+<table>
+<thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Unit price</th><th class="right">Amount</th></tr></thead>
+<tbody>
+{% for line in lines %}
+<tr>
+  <td><strong>{{ line.product.name }}{% if line.variant %} - {{ line.variant.name }}{% endif %}</strong>
+    {% if line.beneficiary %}<div class="muted">For {{ line.beneficiary }}</div>{% endif %}
+    {% if line.personalization_number or line.personalization_name %}<div class="muted">{{ line.personalization_number }} {{ line.personalization_name }}</div>{% endif %}</td>
+  <td class="right">{{ line.quantity }}</td><td class="right">EUR {{ line.unit_price }}</td><td class="right">EUR {{ line.line_total }}</td>
+</tr>
+{% endfor %}
+{% for d in discounts %}
+<tr class="discount"><td colspan="3">Discount - {{ d.description }}{% if d.discount_type == "percentage" %} ({{ d.discount_amount|floatformat:"-2" }}%){% endif %}</td><td class="right">-EUR {{ d.amount }}</td></tr>
+{% endfor %}
+<tr class="total"><td colspan="3">Total</td><td class="right">EUR {{ order.total }}</td></tr>
+</tbody>
+</table>
+{% if payments %}
+<table class="payments">
+<thead><tr><th>Payments received</th><th>Reference</th><th class="right">Date</th><th class="right">Amount</th></tr></thead>
+<tbody>
+{% for p in payments %}
+<tr><td>{{ p.label }}</td><td class="muted">{{ p.reference|default:"" }}</td><td class="right">{{ p.date|date:"j F Y" }}</td><td class="right">-EUR {{ p.amount }}</td></tr>
+{% endfor %}
+<tr class="total"><td colspan="3">Amount due</td><td class="right">EUR {{ amount_due }}</td></tr>
+</tbody>
+</table>
+{% endif %}
+{% if order.payment_status == "paid" %}<p class="paid"><strong>Paid in full.</strong> Thank you.</p>{% else %}<p class="muted">Please pay before the due date{% if invoice.due_date %} ({{ invoice.due_date|date:"j F Y" }}){% endif %}, quoting {{ invoice.number }}.</p>{% endif %}
+{% if order.payment_status != "paid" %}{% with instructions=snapshot.club.payment_instructions|default:club.payment_instructions %}{% if instructions %}<div class="muted" style="margin-top:8px"><strong>How to pay</strong><div style="white-space:pre-line">{{ instructions }}</div></div>{% endif %}{% endwith %}{% endif %}
+</body>
+</html>

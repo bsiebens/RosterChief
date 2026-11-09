@@ -24,7 +24,7 @@ from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from authorization.permissions import is_platform_owner
-from members.models import ClubMembership, FamilyMembership, Member
+from members.models import ClubMembership, Member
 
 MANAGE_MEMBERS = "members.manage_members"
 MANAGE_SETTINGS = "admin.manage_settings"
@@ -318,3 +318,75 @@ def require_manage_forms(actor) -> None:
 
     if not can_manage_forms(actor):
         raise NotAllowed("You are not allowed to manage forms.")
+
+
+SHOP_SUPERSET = "shop.manage_shop"
+MANAGE_SHOP_PRODUCTS = "shop.manage_products"
+MANAGE_SHOP_INVENTORY = "shop.manage_inventory"
+MANAGE_SHOP_ORDERS = "shop.manage_orders"
+MANAGE_SHOP_DISCOUNTS = "shop.manage_discounts"
+MANAGE_SHOP_INVOICES = "shop.manage_invoices"
+
+
+def _has_shop_perm(user, *codes) -> bool:
+    """Platform owner, the club's Owner role, a holder of ``shop.manage_shop`` (superset) or of one of ``codes``.
+    The club-has-the-shop-feature check is done by the callers (routers, /me)."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or any(user.has_perm(c) for c in (SHOP_SUPERSET, *codes))
+
+
+def can_manage_shop(user) -> bool:
+    """The whole shop: only ``shop.manage_shop`` (the superset), the club's Owner role or the platform owner, not the single-area
+    permissions. For the things that must not be left to one area (the numbering of invoices)."""
+    return _has_shop_perm(user)
+
+
+def can_manage_shop_products(user) -> bool:
+    return _has_shop_perm(user, MANAGE_SHOP_PRODUCTS)
+
+
+def can_manage_shop_inventory(user) -> bool:
+    return _has_shop_perm(user, MANAGE_SHOP_INVENTORY)
+
+
+def can_manage_shop_orders(user) -> bool:
+    return _has_shop_perm(user, MANAGE_SHOP_ORDERS)
+
+
+def can_manage_shop_discounts(user) -> bool:
+    """Discounts and vouchers."""
+    return _has_shop_perm(user, MANAGE_SHOP_DISCOUNTS)
+
+
+def can_manage_shop_invoices(user) -> bool:
+    return _has_shop_perm(user, MANAGE_SHOP_INVOICES)
+
+
+def can_view_shop_catalog(user) -> bool:
+    """Products, categories and variants may be read by whoever manages products, inventory or orders."""
+    return _has_shop_perm(user, MANAGE_SHOP_PRODUCTS, MANAGE_SHOP_INVENTORY, MANAGE_SHOP_ORDERS)
+
+
+def can_manage_shop_any(user) -> bool:
+    return _has_shop_perm(user, MANAGE_SHOP_PRODUCTS, MANAGE_SHOP_INVENTORY, MANAGE_SHOP_ORDERS, MANAGE_SHOP_DISCOUNTS, MANAGE_SHOP_INVOICES)
+
+
+def _require(check, message):
+    def require(actor) -> None:
+        from .errors import NotAllowed
+
+        if not check(actor):
+            raise NotAllowed(message)
+
+    return require
+
+
+require_manage_shop = _require(can_manage_shop, "Only someone who manages the whole shop may do this.")
+require_manage_shop_products = _require(can_manage_shop_products, "You are not allowed to manage shop products.")
+require_manage_shop_inventory = _require(can_manage_shop_inventory, "You are not allowed to manage shop inventory.")
+require_manage_shop_orders = _require(can_manage_shop_orders, "You are not allowed to manage shop orders.")
+require_manage_shop_discounts = _require(can_manage_shop_discounts, "You are not allowed to manage shop discounts and vouchers.")
+require_manage_shop_invoices = _require(can_manage_shop_invoices, "You are not allowed to manage shop invoices.")
+require_view_shop_catalog = _require(can_view_shop_catalog, "You are not allowed to view the shop catalog.")
+require_manage_shop_any = _require(can_manage_shop_any, "You are not allowed to manage the shop.")

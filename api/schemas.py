@@ -48,6 +48,11 @@ class MeOut(Schema):
     can_publish_news: bool = False
     can_add_news: bool = False
     can_manage_forms: bool = False
+    can_manage_shop_products: bool = False
+    can_manage_shop_inventory: bool = False
+    can_manage_shop_orders: bool = False
+    can_manage_shop_discounts: bool = False
+    can_manage_shop_invoices: bool = False
     managed_team_ids: list[str] = []
     admin_group_ids: list[str] = []
     features: list[str]
