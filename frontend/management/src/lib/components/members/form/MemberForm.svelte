@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, Save } from '@lucide/svelte';
+	import { Save } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import Avatar from '#lib/components/Avatar.svelte';
 	import PhotoPicker from '#lib/components/members/form/PhotoPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -28,6 +29,8 @@
 	let v = $state(untrack(() => ({ ...initial })));
 	let busy = $state(false);
 	const langId = $props.id();
+	const fullName = $derived(`${v.first_name} ${v.last_name}`.trim());
+	const summary = $derived([v.email, v.phone, v.date_of_birth].filter(Boolean));
 	const formError = $derived(code === 'limit_exceeded' ? t('members.form.limit_exceeded') : message ? message : '');
 </script>
 
@@ -35,21 +38,23 @@
 	<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase first:mt-0">{title}</h2>
 {/snippet}
 
-<div class="card card-body">
-	<form
-		method="POST"
-		{action}
-		{id}
-		enctype="multipart/form-data"
-		use:enhance={() => {
-			busy = true;
-			return async ({ update }) => {
-				await update({ reset: false });
-				busy = false;
-			};
-		}}
-	>
-		{#if formError}<div class="my-2"><Alert kind="error">{formError}</Alert></div>{/if}
+<form
+	method="POST"
+	{action}
+	{id}
+	enctype="multipart/form-data"
+	class="grid gap-5"
+	use:enhance={() => {
+		busy = true;
+		return async ({ update }) => {
+			await update({ reset: false });
+			busy = false;
+		};
+	}}
+>
+	{#if formError}<Alert kind="error">{formError}</Alert>{/if}
+	<div class="grid items-start gap-5 xl:grid-cols-3">
+		<section class="card card-body xl:col-span-2">
 
 		{@render section(t('members.form.section.photo'))}
 		<div class="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -89,9 +94,21 @@
 			{#if fields.photo_public_consent}<span class="block text-xs text-error">{fields.photo_public_consent}</span>{/if}
 		</div>
 
-		<div class="mt-2 flex items-center gap-2 pt-2">
-			<a class="btn btn-outline gap-2" href={cancelHref}><ArrowLeft size={16} /> {t('members.form.cancel')}</a>
-			<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {busy ? t('members.form.saving') : t('members.form.save')}</button>
+		</section>
+		<div class="grid content-start gap-5 xl:sticky xl:top-20">
+			<section class="card card-body gap-3">
+				<div class="flex items-center gap-3">
+					<Avatar first_name={v.first_name} last_name={v.last_name} photoUrl={profilePhotoUrl} size="h-14 w-14" text="text-lg" />
+					<div class="min-w-0">
+						<p class="truncate font-display text-lg font-extrabold text-ink">{fullName || t('members.form.summary_empty')}</p>
+						{#each summary as line (line)}<p class="truncate text-sm text-muted">{line}</p>{/each}
+					</div>
+				</div>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {busy ? t('members.form.saving') : t('members.form.save')}</button>
+					<a class="btn btn-outline w-full" href={cancelHref}>{t('common.cancel')}</a>
+				</div>
+			</section>
 		</div>
-	</form>
-</div>
+	</div>
+</form>

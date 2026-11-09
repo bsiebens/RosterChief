@@ -15,6 +15,7 @@ from .errors import register_error_handlers
 from .routers import analytics as analytics_router
 from .routers import calendar_data as calendar_data_router
 from .routers import club_settings as club_settings_router
+from .routers import evaluations as evaluations_router
 from .routers import event_subtypes as event_subtypes_router
 from .routers import events as events_router
 from .routers import fixture_imports as fixture_imports_router
@@ -30,14 +31,15 @@ from .routers import public_forms as public_forms_router
 from .routers import public_news as public_news_router
 from .routers import public_stats as public_stats_router
 from .routers import referees as referees_router
+from .routers import roles as roles_router
 from .routers import shop_catalog as shop_catalog_router
+from .routers import shop_delivery as shop_delivery_router
 from .routers import shop_discounts as shop_discounts_router
 from .routers import shop_inventory as shop_inventory_router
-from .routers import shop_delivery as shop_delivery_router
 from .routers import shop_invoices as shop_invoices_router
 from .routers import shop_orders as shop_orders_router
-from .routers import shop_pickup as shop_pickup_router
 from .routers import shop_payments as shop_payments_router
+from .routers import shop_pickup as shop_pickup_router
 from .routers import shop_production as shop_production_router
 from .routers import team_settings as team_settings_router
 from .routers import teams as teams_router
@@ -58,6 +60,8 @@ api.add_router("/club", club_settings_router.router, tags=["club settings"])
 api.add_router("/officiating", officiating_levels_router.router, tags=["officiating levels"])
 api.add_router("/referee-management", referees_router.router, tags=["referee management"])
 api.add_router("/news", news_router.router, tags=["news"])
+api.add_router("/roles", roles_router.router, tags=["roles"])
+api.add_router("/evaluations", evaluations_router.router, tags=["evaluations"])
 api.add_router("/forms", forms_router.router, tags=["forms"])
 api.add_router("/form-sends", forms_router.sends_router, tags=["forms"])
 api.add_router("/form-submissions", forms_router.submissions_router, tags=["forms"])
@@ -106,6 +110,7 @@ def _member_id(user, club) -> str | None:
 def me(request):
     """Who am I here: identity, roles in this club and the features the club has."""
     user, club = request.user, request.tenant
+    evaluations_on = club.schema_name != get_public_schema_name() and request.features.has("evaluations")
     shop_on = club.schema_name != get_public_schema_name() and request.features.has("shop")
     try:
         roles = sorted(user.tenant_perms.groups.values_list("name", flat=True))
@@ -123,7 +128,9 @@ def me(request):
         "is_club_admin": is_club_admin(user),
         "can_manage_members": access.can_manage_members(user),
         "can_manage_settings": access.can_manage_settings(user),
-        "can_execute_evaluations": access.can_execute_evaluations(user),
+        "can_execute_evaluations": evaluations_on and access.can_execute_evaluations(user),
+        "can_manage_evaluations": evaluations_on and access.can_manage_evaluations(user),
+        "can_manage_roles": club.schema_name != get_public_schema_name() and access.can_manage_roles(user),
         "can_manage_referees": access.can_manage_referees(user),
         "can_publish_news": access.can_publish_news(user),
         "can_manage_forms": club.schema_name != get_public_schema_name() and access.can_manage_forms(user),

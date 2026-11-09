@@ -44,6 +44,8 @@ class MeOut(Schema):
     can_manage_members: bool = False
     can_manage_settings: bool = False
     can_execute_evaluations: bool = False
+    can_manage_evaluations: bool = False
+    can_manage_roles: bool = False
     can_manage_referees: bool = False
     can_publish_news: bool = False
     can_add_news: bool = False

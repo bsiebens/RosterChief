@@ -209,7 +209,8 @@ class DiscountCodeIn(Schema):
 class AvailableVoucherOut(Schema):
     id: uuid.UUID
     number: str
-    #: ``own`` (issued to the purchaser), ``family`` (issued to someone in the purchaser's family), ``general`` (issued to nobody).
+    #: ``own`` (issued to the purchaser), ``beneficiary`` (issued to someone the order is for), ``family`` (issued to someone in the
+    #: family of the purchaser or of a beneficiary), ``general`` (issued to nobody).
     scope: str
     issued_to: Ref | None
     available_amount: Money

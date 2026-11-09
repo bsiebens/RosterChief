@@ -21,9 +21,12 @@ export type FieldOut = {
 	order: number;
 	is_active: boolean;
 	options: OptionOut[] | null;
+	/** Number fields: the lowest / highest answer allowed (the API sends decimals as strings). */
+	min_value?: string | number | null;
+	max_value?: string | number | null;
 };
 /** What PUT /forms/{id}/fields takes: a field as returned, with `id` / `key` left out for new ones. */
-export type FieldIn = Omit<FieldOut, 'id' | 'key' | 'order'> & { id?: string; key?: string };
+export type FieldIn = Omit<FieldOut, 'id' | 'key' | 'order' | 'min_value' | 'max_value'> & { id?: string; key?: string; min_value?: number | null; max_value?: number | null };
 
 export type FormListItem = {
 	id: string;
@@ -132,6 +135,9 @@ export type FieldDraft = {
 	section: string;
 	is_active: boolean;
 	options: OptionDraft[];
+	/** Number fields: what was typed in the range boxes ('' = no limit). */
+	min: string;
+	max: string;
 };
 
 let counter = 0;
@@ -139,7 +145,11 @@ const uid = () => `d${++counter}`;
 
 export const optionOf = (o: OptionOut): OptionDraft => (typeof o === 'string' ? { uid: uid(), value: o, label: o, stored: true } : { uid: uid(), value: o.value, label: o.label, stored: true });
 export const blankOption = (): OptionDraft => ({ uid: uid(), value: '', label: '', stored: false });
-export const blankField = (): FieldDraft => ({ uid: uid(), label: '', field_type: 'text', required: false, help_text: '', section: '', is_active: true, options: [] });
+export const blankField = (): FieldDraft => ({ uid: uid(), label: '', field_type: 'text', required: false, help_text: '', section: '', is_active: true, options: [], min: '', max: '' });
+/** A stored limit as it is typed: no limit is empty, "1.0000" is 1. */
+const limitText = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : String(Number(v)));
+const limitOf = (text: string) => (text.trim() !== '' && Number.isFinite(Number(text.replace(',', '.'))) ? Number(text.replace(',', '.')) : null);
+
 export const toDraft = (f: FieldOut): FieldDraft => ({
 	uid: uid(),
 	id: f.id,
@@ -150,9 +160,11 @@ export const toDraft = (f: FieldOut): FieldDraft => ({
 	help_text: f.help_text,
 	section: f.section,
 	is_active: f.is_active,
-	options: (f.options ?? []).map(optionOf)
+	options: (f.options ?? []).map(optionOf),
+	min: limitText(f.min_value),
+	max: limitText(f.max_value)
 });
-export const draftsOf = (f: FormDetail): FieldDraft[] => [...f.fields].sort((a, b) => a.order - b.order).map(toDraft);
+export const draftsOf = (f: { fields: FieldOut[] }): FieldDraft[] => [...f.fields].sort((a, b) => a.order - b.order).map(toDraft);
 
 /** The value stored in answers: kept for options that were saved before, otherwise it follows what was typed. */
 const valueOf = (o: OptionDraft) => (o.stored ? o.value : o.label.trim());
@@ -173,7 +185,9 @@ export function draftToIn(d: FieldDraft): FieldIn {
 		help_text: d.help_text.trim(),
 		section: d.section.trim(),
 		is_active: d.is_active,
-		options
+		options,
+		min_value: d.field_type === 'number' ? limitOf(d.min) : null,
+		max_value: d.field_type === 'number' ? limitOf(d.max) : null
 	};
 }
 /** Comparable snapshot of the list, for the unsaved-changes check. */

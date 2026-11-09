@@ -107,7 +107,7 @@
 						{#each vouchers as v (v.id)}
 							<li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-line px-3 py-2 text-sm">
 								<div class="min-w-0">
-									<div class="flex flex-wrap items-center gap-2"><span class="font-mono font-semibold">{v.number}</span><span class="badge badge-sm {v.scope === 'own' ? 'badge-success' : v.scope === 'family' ? 'badge-info' : 'badge-neutral'}">{t(`shop.orders.adj.scope.${v.scope}`)}</span>{#if v.scope === 'family' && v.issued_to}<span class="text-muted">{v.issued_to.name}</span>{/if}</div>
+									<div class="flex flex-wrap items-center gap-2"><span class="font-mono font-semibold">{v.number}</span><span class="badge badge-sm {v.scope === 'own' ? 'badge-success' : v.scope === 'beneficiary' ? 'badge-warning' : v.scope === 'family' ? 'badge-info' : 'badge-neutral'}">{t(`shop.orders.adj.scope.${v.scope}`)}</span>{#if (v.scope === 'family' || v.scope === 'beneficiary') && v.issued_to}<span class="text-muted">{v.issued_to.name}</span>{/if}</div>
 									<div class="text-xs text-muted">{t('shop.orders.adj.available')}: <span class="font-mono">{money(v.available_amount)}</span><span class="ml-3">{t('shop.orders.adj.expires')}: <span class="font-mono">{day(v.expiry_date)}</span></span></div>
 								</div>
 								<form method="POST" action="?/applyVoucher" use:enhance={run(clearVoucher)}>

@@ -17,6 +17,8 @@ export type User = { id: number | string; email: string; display?: string };
 export type Me = {
 	id: string;
 	email: string;
+	/** The user's own member record in this club, if they have one. */
+	member_id: string | null;
 	first_name: string;
 	last_name: string;
 	club: { slug: string; name: string; is_platform: boolean };
@@ -27,8 +29,12 @@ export type Me = {
 	can_manage_members: boolean;
 	/** admin.manage_settings (or the Owner role): club settings, levels, positions, pools, creating and ordering teams. */
 	can_manage_settings: boolean;
-	/** members.execute_evaluations (or the Owner role): the Evaluations tab on a member. */
+	/** evaluations.execute_evaluations (or the Owner role): give evaluations, run evaluation meetings and see the Evaluations tab on a member. */
 	can_execute_evaluations: boolean;
+	/** evaluations.manage_evaluations (or the Owner role): build the evaluation checklists. */
+	can_manage_evaluations: boolean;
+	/** authorizations.manage_roles (or the Owner role): create roles, set their permissions and give them to people. */
+	can_manage_roles: boolean;
 	can_manage_referees: boolean;
 	/** news.publish_newsitems (or the Owner role): edit every news item and publish, unpublish and send back. */
 	can_publish_news: boolean;

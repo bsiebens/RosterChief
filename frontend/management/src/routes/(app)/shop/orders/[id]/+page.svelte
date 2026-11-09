@@ -2,6 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { ArrowLeft, ArrowRight, Bell, CircleCheck, Package, PackageCheck, RotateCcw, Save, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import OrderAdjust from '#lib/components/shop/OrderAdjust.svelte';
 	import OrderBadges from '#lib/components/shop/OrderBadges.svelte';
@@ -153,23 +155,25 @@
 						{#if order.fulfillment_status === 'not_ready'}
 							<button class="btn btn-info gap-2" type="button" onclick={() => ((pickup = order.pickup_instructions || order.default_pickup_instructions), (readyOpen = true))}><Bell size={16} /> {t('shop.orders.act.ready')}</button>
 						{/if}
-						{#if order.fulfillment_status !== 'delivered'}
-							<form method="POST" action="?/deliver" use:enhance={run()}>
-								<button class="btn btn-outline w-full gap-2" type="submit" disabled={busy}><PackageCheck size={16} /> {t('shop.orders.act.deliver')}</button>
-							</form>
-						{/if}
-						{#if order.fulfillment_status !== 'not_ready'}
-							<form method="POST" action="?/reopen" use:enhance={run()}>
-								<button class="btn btn-outline w-full gap-2" type="submit" disabled={busy}><RotateCcw size={16} /> {t('shop.orders.act.reopen')}</button>
-							</form>
-						{/if}
-						{#if order.fulfillment_status !== 'delivered'}
-							{#if order.can_cancel}
-								<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => (cancelOpen = true)}><X size={16} /> {t('shop.orders.act.cancel')}</button>
-							{:else if order.can_override_cancel}
-								<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => ((overrideAck = false), (overrideOpen = true))}><X size={16} /> {t('shop.orders.act.cancel_anyway')}</button>
-							{/if}
-						{/if}
+							<ActionList>
+								{#if order.fulfillment_status !== 'delivered'}
+									<form method="POST" action="?/deliver" use:enhance={run()}>
+										<ActionRow icon={PackageCheck} type="submit" disabled={busy}>{t('shop.orders.act.deliver')}</ActionRow>
+									</form>
+								{/if}
+								{#if order.fulfillment_status !== 'not_ready'}
+									<form method="POST" action="?/reopen" use:enhance={run()}>
+										<ActionRow icon={RotateCcw} type="submit" disabled={busy}>{order.fulfillment_status === 'delivered' ? t('shop.orders.act.reopen_delivered') : t('shop.orders.act.reopen')}</ActionRow>
+									</form>
+								{/if}
+								{#if order.fulfillment_status !== 'delivered'}
+									{#if order.can_cancel}
+										<ActionRow icon={X} danger onclick={() => (cancelOpen = true)}>{t('shop.orders.act.cancel')}</ActionRow>
+									{:else if order.can_override_cancel}
+										<ActionRow icon={X} danger onclick={() => ((overrideAck = false), (overrideOpen = true))}>{t('shop.orders.act.cancel_anyway')}</ActionRow>
+									{/if}
+								{/if}
+							</ActionList>
 					</div>
 					{#if !order.can_cancel && order.cancel_blocked_reason}
 						<div role="status"><Alert kind="warning" title={t('shop.orders.cancel_blocked')}>{order.cancel_blocked_reason}</Alert></div>

@@ -1,5 +1,5 @@
 /** Shapes of the members API used by the detail / form / history pages (see api/schemas_members.py). */
-export type ShellMe = { id: string; email: string; is_club_admin: boolean; can_manage_members: boolean; can_manage_settings: boolean; can_execute_evaluations: boolean; managed_team_ids: string[]; admin_group_ids?: string[]; permissions: string[] };
+export type ShellMe = { id: string; email: string; is_club_admin: boolean; can_manage_members: boolean; can_manage_settings: boolean; can_execute_evaluations: boolean; can_manage_evaluations: boolean; member_id: string | null; managed_team_ids: string[]; admin_group_ids?: string[]; permissions: string[] };
 
 export type MemberFamily = { id: string; name: string; role: string };
 export type ClubMembership = {

@@ -102,6 +102,7 @@ const en: M = {
     'members.detail.add_membership.failed': 'The membership could not be added.',
     // form
     'members.form.title_new': 'New member',
+    'members.form.summary_empty': 'New member',
     'members.form.title_edit': 'Edit {name}',
     'members.form.first_name': 'First name',
     'members.form.last_name': 'Last name',
@@ -295,6 +296,7 @@ const nl: M = {
     'members.detail.add_membership.signed_up_help': 'Leeg laten voor vandaag.',
     'members.detail.add_membership.failed': 'Het lidmaatschap kon niet worden toegevoegd.',
     'members.form.title_new': 'Nieuw lid',
+    'members.form.summary_empty': 'Nieuw lid',
     'members.form.title_edit': '{name} bewerken',
     'members.form.first_name': 'Voornaam',
     'members.form.last_name': 'Achternaam',
@@ -487,6 +489,7 @@ const fr: M = {
     'members.detail.add_membership.signed_up_help': 'Laisser vide pour aujourd’hui.',
     'members.detail.add_membership.failed': 'L’adhésion n’a pas pu être ajoutée.',
     'members.form.title_new': 'Nouveau membre',
+    'members.form.summary_empty': 'Nouveau membre',
     'members.form.title_edit': 'Modifier {name}',
     'members.form.first_name': 'Prénom',
     'members.form.last_name': 'Nom',

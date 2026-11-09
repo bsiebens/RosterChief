@@ -406,11 +406,11 @@ def mark_delivered(order) -> Order:
 
 @transaction.atomic
 def reopen(order) -> Order:
-    """Back from ready/delivered to 'not ready' (a mistake)."""
+    """One step back (a mistake): picked up -> ready for pickup, ready for pickup -> not ready."""
     order = _lock(order)
     if order.fulfillment_status in (Fulfilment.CANCELLED, Fulfilment.NOT_READY):
         raise Conflict("Nothing to undo.", code="nothing_to_undo")
-    order.fulfillment_status = Fulfilment.NOT_READY
+    order.fulfillment_status = Fulfilment.READY_FOR_PICKUP if order.fulfillment_status == Fulfilment.DELIVERED else Fulfilment.NOT_READY
     order.save(update_fields=["fulfillment_status", "modified"])
     return order
 

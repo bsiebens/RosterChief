@@ -4,6 +4,8 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { ArrowLeft, Check, Copy, Power, Save, Trash2, Undo2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import VoucherFields from '#lib/components/shop/VoucherFields.svelte';
@@ -161,14 +163,14 @@
 					<dt class="text-muted">{t('shop.vch.expiry')}</dt><dd class="text-right">{day(item.expiry_date)}</dd>
 				</dl>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('shop.unsaved')}</p>{/if}
-				<div class="grid gap-2">
-					<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
-					<form method="POST" action="?/toggle" use:enhance class="grid">
+				<button class="btn btn-primary w-full gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
+				<ActionList>
+					<form method="POST" action="?/toggle" use:enhance>
 						<input type="hidden" name="activate" value={item.is_active ? '0' : '1'} />
-						<button class="btn btn-outline gap-2" type="submit" disabled={busy}><Power size={16} /> {item.is_active ? t('shop.deactivate') : t('shop.activate')}</button>
+						<ActionRow icon={Power} type="submit" disabled={busy}>{item.is_active ? t('shop.deactivate') : t('shop.activate')}</ActionRow>
 					</form>
-					<button class="btn btn-outline btn-error gap-2" type="button" disabled={busy} onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('common.delete')}</button>
-				</div>
+					<ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow>
+				</ActionList>
 			</section>
 			<section class="card card-body gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.vch.use_title')}</h2>

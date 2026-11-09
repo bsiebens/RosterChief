@@ -48,7 +48,9 @@ export type ProductItem = {
 	in_stock: boolean;
 	created: string;
 };
-export type ProductDetail = ProductItem & { variants: Variant[]; order_line_count: number };
+export type ProductImageItem = { id: string; url: string; is_main: boolean; ordering: number; alt: string };
+export type ProductAttachmentItem = { id: string; title: string; name: string; url: string; size: number; content_type: string; created: string };
+export type ProductDetail = ProductItem & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[] };
 export type ProductIn = {
 	name: string;
 	category_id: string | null;
@@ -84,7 +86,8 @@ export const productInOf = (p: ProductItem): ProductIn => ({
 });
 export type VariantIn = { name: string; price: string | null; is_active?: boolean };
 
-export type StockRow = { product_id: string; product_name: string; variant_id: string | null; variant_name: string | null; on_hand: number; committed: number; available: number };
+export type StockRow = { product_id: string; product_name: string; variant_id: string | null; variant_name: string | null; on_hand: number; committed: number; available: number; category_id?: string | null; category_name?: string | null };
+export type CountResult = { applied: number; unchanged: number; total_difference: number; lines: { product_id: string; variant_id: string | null; name: string; previous: number; counted: number; difference: number }[] };
 export type MovementReason = 'received' | 'adjustment' | 'order' | 'order_returned';
 export const MOVEMENT_REASONS: MovementReason[] = ['received', 'adjustment', 'order', 'order_returned'];
 export type Movement = {

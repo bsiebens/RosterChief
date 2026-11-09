@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { CalendarDays, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
+import { CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -81,18 +81,25 @@ export const NAV: NavItem[] = [
 		]
 	},
 	{
+		key: 'evaluations',
+		href: '/evaluations',
+		label: 'eval.nav',
+		icon: ClipboardCheck,
+		match: (p) => p === '/evaluations' || p.startsWith('/evaluations/'),
+		visible: (me) => me.features.includes('evaluations') && (me.can_execute_evaluations || me.can_manage_evaluations)
+	},
+	{
 		key: 'shop',
 		href: '/shop',
 		label: 'shop.nav',
 		icon: ShoppingBag,
 		match: (p) => p === '/shop' || p.startsWith('/shop/'),
 		visible: (me) => me.features.includes('shop') && (me.can_manage_shop_products || me.can_manage_shop_inventory || me.can_manage_shop_orders || me.can_manage_shop_discounts || me.can_manage_shop_invoices),
-		// Keep this order: products, inventory, orders, discounts, vouchers, invoices.
+		// Keep this order: products, inventory, orders (production, ready for pickup and the delivery desk are buttons on the orders page), discounts, vouchers, invoices.
 		children: [
 			{ href: '/shop/products', label: 'shop.nav.products', match: (p) => p.startsWith('/shop/products'), visible: (me) => me.can_manage_shop_products },
 			{ href: '/shop/inventory', label: 'shop.nav.inventory', match: (p) => p.startsWith('/shop/inventory'), visible: (me) => me.can_manage_shop_inventory },
-			{ href: '/shop/orders', label: 'shop.nav.orders', match: (p) => p.startsWith('/shop/orders'), visible: (me) => me.can_manage_shop_orders },
-			{ href: '/shop/production', label: 'shop.nav.production', match: (p) => p.startsWith('/shop/production'), visible: (me) => me.can_manage_shop_orders },
+			{ href: '/shop/orders', label: 'shop.nav.orders', match: (p) => ['/shop/orders', '/shop/production', '/shop/pickup', '/shop/delivery'].some((x) => p.startsWith(x)), visible: (me) => me.can_manage_shop_orders },
 			{ href: '/shop/discounts', label: 'shop.nav.discounts', match: (p) => p.startsWith('/shop/discounts'), visible: (me) => me.can_manage_shop_discounts },
 			{ href: '/shop/vouchers', label: 'shop.nav.vouchers', match: (p) => p.startsWith('/shop/vouchers'), visible: (me) => me.can_manage_shop_discounts },
 			{ href: '/shop/invoices', label: 'shop.nav.invoices', match: (p) => p.startsWith('/shop/invoices'), visible: (me) => me.can_manage_shop_invoices },
@@ -113,13 +120,14 @@ export const NAV: NavItem[] = [
 		label: 'shell.nav.settings',
 		icon: Settings,
 		match: (p) => p === '/settings' || p.startsWith('/settings/'),
-		visible: (me) => me.can_manage_settings,
+		visible: (me) => me.can_manage_settings || me.can_manage_roles,
 		children: [
-			{ href: '/settings', label: 'shell.nav.settings_general', match: (p) => p === '/settings' || p.startsWith('/settings/preview') },
-			{ href: '/settings/positions', label: 'shell.nav.positions', match: (p) => p.startsWith('/settings/positions') },
-			{ href: '/settings/event-types', label: 'shell.nav.event_types', match: (p) => p.startsWith('/settings/event-types') },
-			{ href: '/settings/number-pools', label: 'shell.nav.number_pools', match: (p) => p.startsWith('/settings/number-pools') },
-			{ href: '/settings/officiating', label: 'shell.nav.officiating', match: (p) => p.startsWith('/settings/officiating'), visible: (me) => me.features.includes('referee_officials') }
+			{ href: '/settings', label: 'shell.nav.settings_general', match: (p) => p === '/settings' || p.startsWith('/settings/preview'), visible: (me) => me.can_manage_settings },
+			{ href: '/settings/positions', label: 'shell.nav.positions', match: (p) => p.startsWith('/settings/positions'), visible: (me) => me.can_manage_settings },
+			{ href: '/settings/event-types', label: 'shell.nav.event_types', match: (p) => p.startsWith('/settings/event-types'), visible: (me) => me.can_manage_settings },
+			{ href: '/settings/number-pools', label: 'shell.nav.number_pools', match: (p) => p.startsWith('/settings/number-pools'), visible: (me) => me.can_manage_settings },
+			{ href: '/settings/officiating', label: 'shell.nav.officiating', match: (p) => p.startsWith('/settings/officiating'), visible: (me) => me.can_manage_settings && me.features.includes('referee_officials') },
+			{ href: '/settings/roles', label: 'roles.nav', match: (p) => p.startsWith('/settings/roles'), visible: (me) => me.can_manage_roles }
 		]
 	}
 ];

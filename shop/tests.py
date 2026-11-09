@@ -262,3 +262,18 @@ class CatalogServiceTests(ShopClubMixin, TestCase):
             catalog.create_product(user, name="Neg", price=Decimal("-1"))
         with self.assertRaises(NotAllowed):
             catalog.create_product(self.users["plain"], name="Nope", price=Decimal("1"))
+
+
+class ProductImageColumnMigrationTests(ShopClubMixin, TestCase):
+    """0007 drops shop_product.image only when present: a database that applied an earlier 0006 (which already dropped it) must not fail."""
+
+    def test_drop_is_idempotent(self):
+        from django.db import connection as conn
+
+        sql = "ALTER TABLE shop_product DROP COLUMN IF EXISTS image"
+        with schema_context(self.club.schema_name), conn.cursor() as cursor:
+            cursor.execute("ALTER TABLE shop_product ADD COLUMN IF NOT EXISTS image varchar(255) NOT NULL DEFAULT ''")
+            cursor.execute(sql)  # present: removed
+            cursor.execute(sql)  # already gone: no error
+            cursor.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'shop_product' AND column_name = 'image'")
+            self.assertEqual(cursor.fetchone()[0], 0)

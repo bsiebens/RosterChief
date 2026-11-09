@@ -52,6 +52,14 @@ PDF_PREVIEWS = [
     Preview("official_payment_form", "pdf", "Official payment form", "The same sheet for a game's match officials."),
 ]
 PREVIEWS += PDF_PREVIEWS
+# Only for clubs with the ``shop`` feature (shop/services/emails.py and shop/templates/shop/order_invoice_pdf.html)
+SHOP_PREVIEWS = [
+    Preview("shop_order_registered", "email", "Shop: order registered", "Sent to the purchaser (and a child's guardians) when a shop order is placed: lines, discounts, total, what is due and how to pay."),
+    Preview("shop_order_ready", "email", "Shop: order ready for pickup", "Sent when a shop order is ready: pickup instructions and, for an unpaid order, how to pay. The order's invoice PDF is attached."),
+    Preview("shop_invoice", "pdf", "Shop: order invoice", "The invoice PDF of a shop order (also attached to the 'ready for pickup' email), shown with sample data."),
+]
+PREVIEWS += SHOP_PREVIEWS
+SHOP_KEYS = {p.key for p in SHOP_PREVIEWS}
 BY_KEY = {p.key: p for p in PREVIEWS}
 PAYMENT_FORM_KINDS = {"referee_payment_form": "referee", "official_payment_form": "official"}
 
@@ -92,6 +100,8 @@ def render_email(request, key: str, lang: str = "en") -> tuple[str, str]:
         from events.services import payment_forms
 
         return BY_KEY[key].title, payment_forms.render_html(payment_forms.sample_context(club, PAYMENT_FORM_KINDS[key], lang))
+    if key in SHOP_KEYS:
+        return _render_shop(club, key, lang, logo)
     with translation.override(lang):
         if key == "login_granted":
             member = SimpleNamespace(first_name="Alex", language=lang)
@@ -108,6 +118,73 @@ def render_email(request, key: str, lang: str = "en") -> tuple[str, str]:
             ctx["logo_url"] = logo
         subject = re.sub(r"\s+", " ", render_to_string(f"{prefix}_subject.txt", ctx)).strip()
         return subject, render_to_string(f"{prefix}_message.html", ctx)
+
+
+def _render_shop(club, key: str, lang: str, logo: str) -> tuple[str, str]:
+    from decimal import Decimal
+
+    from shop.services import emails
+
+    if key == "shop_invoice":
+        return BY_KEY[key].title, render_to_string("shop/order_invoice_pdf.html", _sample_invoice_context(club, logo))
+    kind = "placed" if key == "shop_order_registered" else "ready"
+    ctx = emails.build_context(
+        club, kind, lang,
+        number="2026-0042",
+        lines=[
+            {"description": "Club jersey - M", "quantity": 2, "line_total": Decimal("80.00"), "personalization": "7 DOE", "beneficiary": "Sam Sample"},
+            {"description": "Training cap", "quantity": 1, "line_total": Decimal("15.00"), "personalization": "", "beneficiary": ""},
+        ],
+        discounts=[{"description": "Member discount", "amount": Decimal("9.50")}],
+        total=Decimal("85.50"), paid=Decimal("20.00"), due=Decimal("65.50"), is_paid=False,
+        how_to_pay=(club.payment_instructions or "").strip() or "IBAN BE00 0000 0000 0000, reference 2026-0042",
+        pickup_instructions="Tuesday 18:00-19:30 at the club desk." if kind == "ready" else "",
+        name="Alex", has_invoice=kind == "ready", logo_url=logo if (logo or not club.logo) else None,
+    )  # fmt: skip
+    subject, _text, html = emails.render(ctx)
+    return subject, html
+
+
+def _sample_invoice_context(club, logo: str) -> dict:
+    """Made-up order, invoice and payments for ``shop/order_invoice_pdf.html`` (no database rows), with the club's real branding."""
+    import datetime
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    now = timezone.now()
+    jersey = SimpleNamespace(
+        product=SimpleNamespace(name="Club jersey"), variant=SimpleNamespace(name="M"), beneficiary="Sam Sample",
+        quantity=2, unit_price=Decimal("40.00"), line_total=Decimal("80.00"), personalization_number="7", personalization_name="DOE",
+    )  # fmt: skip
+    cap = SimpleNamespace(
+        product=SimpleNamespace(name="Training cap"), variant=None, beneficiary=None,
+        quantity=1, unit_price=Decimal("15.00"), line_total=Decimal("15.00"), personalization_number="", personalization_name="",
+    )  # fmt: skip
+    order = SimpleNamespace(number="2026-0042", total=Decimal("85.50"), payment_status="partially_paid", purchaser="Alex Sample")
+    invoice = SimpleNamespace(number="INV-2026-0017", issued_at=now, due_date=(now + datetime.timedelta(days=30)).date())
+    snapshot = {
+        "club": {"name": club.legal_name or club.name, "address": club.legal_address or "Sample Street 1", "zip_code": club.legal_zip_code or "1000", "city": club.legal_city or "Brussels", "contact_email": club.contact_email, "vat_id": club.vat_id,
+                 "payment_instructions": club.payment_instructions},
+        "purchaser": {"name": "Alex Sample", "email": SAMPLE_EMAIL},
+    }  # fmt: skip
+    payments = [
+        {"label": "Voucher V-0003", "reference": "", "date": now - datetime.timedelta(days=2), "amount": Decimal("10.00")},
+        {"label": "Cash", "reference": "", "date": now - datetime.timedelta(days=1), "amount": Decimal("10.00")},
+    ]
+    return {
+        "club": club,
+        "invoice": invoice,
+        "order": order,
+        "lines": [jersey, cap],
+        "discounts": [SimpleNamespace(description="Member discount", discount_type="fixed_amount", discount_amount=Decimal("9.50"), amount=Decimal("9.50"))],
+        "payments": payments,
+        "amount_paid": Decimal("20.00"),
+        "amount_due": Decimal("65.50"),
+        "snapshot": snapshot,
+        "logo_data_uri": logo or None,
+        "qr_data_uri": None,
+    }
 
 
 def render_pdf(html: str) -> bytes:

@@ -6,6 +6,7 @@ import io
 import json
 import uuid
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -13,7 +14,7 @@ from django.test import Client, TestCase
 
 from controlpanel.tests import login_session
 from features.entitlements import Entitlements
-from shop.models import Discount, InventoryMovement, ProductVariant, Voucher
+from shop.models import Discount, InventoryMovement, ProductAttachment, ProductImage, ProductVariant, Voucher
 from shop.tests import ShopClubMixin
 
 BASE = "/api/v1/shop"
@@ -148,19 +149,122 @@ class ShopApiTests(ShopClubMixin, TestCase):
         r = self.as_("products", "delete", f"{base}/{vid}")
         self.assertEqual((r.status_code, r.json()["code"]), (409, "has_orders"))
 
-    def test_product_image(self):
-        product = self.merch()
-        r = self.as_("products", "post", f"/products/{product.pk}/image", image=self.png())
-        self.assertEqual(r.status_code, 200, r.content)
-        self.assertTrue(r.json()["image_url"])
-        bad = SimpleUploadedFile("x.png", b"not an image", content_type="image/png")
-        self.assertEqual(self.as_("products", "post", f"/products/{product.pk}/image", image=bad).status_code, 422)
-        self.assertEqual(self.as_("inventory", "post", f"/products/{product.pk}/image", image=self.png()).status_code, 403)
-        self.assertIsNone(self.as_("products", "delete", f"/products/{product.pk}/image").json()["image_url"])
+    def upload(self, key, path, files, **form):
+        """A multipart POST with several files under one field (``files`` = {field: [file, ...]}) plus text fields."""
+        return self.call("post", path, self.owner if key == "owner" else self.users[key], files={**files, **form})
+
+    def test_product_gallery(self):
         from unittest import mock
 
+        product = self.merch()
+        base = f"/products/{product.pk}"
+        r = self.upload("products", f"{base}/images", {"images": [self.png(), self.png((8, 8))]})
+        self.assertEqual(r.status_code, 200, r.content)
+        images = r.json()["images"]
+        self.assertEqual([(i["is_main"], i["ordering"]) for i in images], [(True, 0), (False, 1)])
+        self.assertEqual(r.json()["image_url"], images[0]["url"])  # the list shows the main picture
+        # rules: type, size, count (all or nothing), permission
+        bad = SimpleUploadedFile("x.png", b"not an image", content_type="image/png")
+        r = self.upload("products", f"{base}/images", {"images": [self.png(), bad]})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("not a valid image", r.json()["errors"]["images"][0])
+        self.assertEqual(len(self.as_("products", "get", base).json()["images"]), 2)  # nothing of the failed batch was kept
+        self.assertEqual(self.upload("inventory", f"{base}/images", {"images": [self.png()]}).status_code, 403)
         with mock.patch("shop.services.catalog.MAX_IMAGE_BYTES", 10):
-            self.assertEqual(self.as_("products", "post", f"/products/{product.pk}/image", image=self.png()).status_code, 422)
+            self.assertEqual(self.upload("products", f"{base}/images", {"images": [self.png()]}).status_code, 422)
+        with mock.patch("shop.services.catalog.MAX_IMAGES", 3):
+            r = self.upload("products", f"{base}/images", {"images": [self.png(), self.png()]})
+            self.assertEqual(r.status_code, 422)
+            self.assertIn("at most 3 pictures", r.json()["errors"]["images"][0])
+
+        # main picture, description, order, delete
+        first, second = images[0]["id"], images[1]["id"]
+        r = self.as_("products", "post", f"{base}/images/{second}/set-main")
+        self.assertEqual([(i["id"], i["is_main"]) for i in r.json()["images"]], [(first, False), (second, True)])
+        self.assertEqual(r.json()["image_url"], images[1]["url"])
+        r = self.as_("products", "patch", f"{base}/images/{first}", {"alt": "  Front  "})
+        self.assertEqual(r.json()["images"][0]["alt"], "Front")
+        r = self.as_("products", "put", f"{base}/images/order", {"ids": [second, first]})
+        self.assertEqual([i["id"] for i in r.json()["images"]], [second, first])
+        self.assertEqual(self.as_("products", "put", f"{base}/images/order", {"ids": [first]}).status_code, 422)  # every picture, once
+        stored = ProductImage.objects.get(pk=second).image.name
+        self.assertTrue(ProductImage.objects.get(pk=second).image.storage.exists(stored))
+        with self.captureOnCommitCallbacks(execute=True):
+            r = self.as_("products", "delete", f"{base}/images/{second}")  # the main one: the next takes over
+        self.assertEqual([(i["id"], i["is_main"]) for i in r.json()["images"]], [(first, True)])
+        self.assertFalse(ProductImage.objects.filter(pk=second).exists())
+        self.assertFalse(ProductImage.objects.get(pk=first).image.storage.exists(stored))  # the removed file left storage
+        self.assertEqual(self.as_("products", "delete", f"{base}/images/{second}").status_code, 409)  # already gone
+        self.as_("products", "delete", f"{base}/images/{first}")
+        self.assertIsNone(self.as_("products", "get", base).json()["image_url"])
+        # a picture of another product is not reachable through this one
+        other = self.merch("Other")
+        pic = self.upload("products", f"/products/{other.pk}/images", {"images": [self.png()]}).json()["images"][0]["id"]
+        self.assertEqual(self.as_("products", "delete", f"{base}/images/{pic}").status_code, 409)
+
+    def test_product_attachments(self):
+        from unittest import mock
+
+        product = self.merch()
+        base = f"/products/{product.pk}"
+        guide = SimpleUploadedFile("Size guide.pdf", b"%PDF-1.4 sample", content_type="application/pdf")
+        r = self.upload("products", f"{base}/attachments", {"files": [guide]}, title="Sizes")
+        self.assertEqual(r.status_code, 200, r.content)
+        (att,) = r.json()["attachments"]
+        self.assertEqual((att["title"], att["name"], att["size"], att["content_type"]), ("Sizes", "Size guide.pdf", 15, "application/pdf"))
+        self.assertTrue(att["url"])
+        # several files: each titled by its file name (the title field only names a single file)
+        two = [SimpleUploadedFile("care.docx", b"x", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"), SimpleUploadedFile("chart.png", b"y", content_type="image/png")]
+        r = self.upload("products", f"{base}/attachments", {"files": two}, title="ignored")
+        self.assertEqual([a["title"] for a in r.json()["attachments"]], ["Sizes", "care", "chart"])
+        # rules: allowed types only, not empty, size, count, permission; nothing is kept from a refused batch
+        html = SimpleUploadedFile("x.html", b"<script>", content_type="text/html")
+        r = self.upload("products", f"{base}/attachments", {"files": [html]})
+        self.assertEqual((r.status_code, "not an allowed file type" in r.json()["errors"]["files"][0]), (422, True))
+        self.assertEqual(self.upload("products", f"{base}/attachments", {"files": [SimpleUploadedFile("e.pdf", b"")]}).status_code, 422)
+        self.assertEqual(self.upload("inventory", f"{base}/attachments", {"files": [guide]}).status_code, 403)
+        with mock.patch("shop.services.catalog.MAX_ATTACHMENT_BYTES", 5):
+            self.assertEqual(self.upload("products", f"{base}/attachments", {"files": [SimpleUploadedFile("big.pdf", b"123456")]}).status_code, 422)
+        with mock.patch("shop.services.catalog.MAX_ATTACHMENTS", 3):
+            r = self.upload("products", f"{base}/attachments", {"files": [SimpleUploadedFile("a.pdf", b"1")]})
+            self.assertEqual((r.status_code, "at most 3 files" in r.json()["errors"]["files"][0]), (422, True))
+        self.assertEqual(ProductAttachment.objects.filter(product=product).count(), 3)
+        # rename and delete (the file leaves storage once the transaction commits)
+        r = self.as_("products", "patch", f"{base}/attachments/{att['id']}", {"title": "  Size guide 2026 "})
+        self.assertEqual(r.json()["attachments"][0]["title"], "Size guide 2026")
+        self.assertEqual(self.as_("products", "patch", f"{base}/attachments/{att['id']}", {"title": "  "}).status_code, 422)
+        stored = ProductAttachment.objects.get(pk=att["id"])
+        name, storage = stored.file.name, stored.file.storage
+        with self.captureOnCommitCallbacks(execute=True):
+            r = self.as_("products", "delete", f"{base}/attachments/{att['id']}")
+        self.assertEqual(len(r.json()["attachments"]), 2)
+        self.assertFalse(storage.exists(name))
+        self.assertEqual(self.as_("products", "delete", f"{base}/attachments/{att['id']}").status_code, 409)
+
+    def test_single_picture_moves_into_the_gallery(self):
+        """The data migration copies each product's old single picture into the gallery as its main picture."""
+        import importlib
+
+        from django.apps import apps as django_apps
+
+        migration = importlib.import_module("shop.migrations.0006_product_gallery_attachments")
+        product = self.merch()
+        legacy = SimpleNamespace(image=SimpleNamespace(name="shop/products/legacy/photo.png"), pk=product.pk)
+
+        class FakeProducts:
+            @staticmethod
+            def exclude(**kwargs):
+                return [legacy]
+
+        class FakeModel:
+            objects = FakeProducts()
+
+        created = []
+        fake_images = SimpleNamespace(objects=SimpleNamespace(create=lambda **kw: created.append(kw)))
+        fake_apps = SimpleNamespace(get_model=lambda app, name: FakeModel if name == "Product" else fake_images)
+        migration.copy_images_to_gallery(fake_apps, None)
+        self.assertEqual(created, [{"product": legacy, "image": "shop/products/legacy/photo.png", "is_main": True, "ordering": 0}])
+        self.assertTrue(django_apps.get_model("shop", "ProductImage"))
 
     # -- inventory --
 

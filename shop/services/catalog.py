@@ -1,5 +1,6 @@
 """Categories, products, variants and their images; and discount codes. Writes need the matching shop permission."""
 
+import os
 import uuid
 
 from django.db import transaction
@@ -8,7 +9,7 @@ from django.db.models import Count
 from formbuilder.services.management import Conflict
 from members.services import access
 from members.services.errors import Invalid
-from shop.models import Discount, DiscountType, InventoryMovement, Product, ProductCategory, ProductVariant
+from shop.models import Discount, DiscountType, InventoryMovement, Product, ProductAttachment, ProductCategory, ProductImage, ProductVariant
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}
@@ -57,7 +58,7 @@ def delete_category(actor, category) -> None:
 
 
 def products_queryset():
-    return Product.objects.select_related("category").prefetch_related("variants")
+    return Product.objects.select_related("category").prefetch_related("variants", "images", "attachments")
 
 
 def _validate_product(product):
@@ -103,37 +104,174 @@ def delete_product(actor, product) -> None:
     product.delete()
 
 
-def _verify_image(image) -> str:
+MAX_IMAGES = 12
+MAX_ATTACHMENTS = 10
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+def _verify_image(image, field: str = "images") -> str:
     from PIL import Image, UnidentifiedImageError
 
+    name = getattr(image, "name", "") or "picture"
     if image.size > MAX_IMAGE_BYTES:
-        raise Invalid("The picture is larger than 10 MB.", {"image": ["The picture is larger than 10 MB."]})
+        message = f"“{name}” is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
+        raise Invalid(message, {field: [message]})
     try:
         with Image.open(image) as img:
             fmt = img.format
             img.verify()
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as e:
-        raise Invalid("This is not a valid image.", {"image": ["This is not a valid image."]}) from e
+        message = f"“{name}” is not a valid image."
+        raise Invalid(message, {field: [message]}) from e
     if fmt not in IMAGE_FORMATS:
-        raise Invalid("Use a JPEG, PNG or WebP picture.", {"image": ["Use a JPEG, PNG or WebP picture."]})
+        message = f"“{name}” is not a JPEG, PNG or WebP picture."
+        raise Invalid(message, {field: [message]})
     image.seek(0)
     return IMAGE_FORMATS[fmt]
 
 
-def set_image(actor, product, image) -> Product:
-    access.require_manage_shop_products(actor)
-    ext = _verify_image(image)
-    if product.image:
-        product.image.delete(save=False)
-    product.image.save(f"photo-{uuid.uuid4().hex[:12]}.{ext}", image, save=True)
-    return product
+# --- pictures (a gallery with one main picture) -----------------------------------------------------------------------------
 
 
-def clear_image(actor, product) -> Product:
+def _image_or_404(product, image_id) -> ProductImage:
+    image = product.images.filter(pk=image_id).first()
+    if image is None:
+        raise Conflict("That picture is not on this product.", "not_found")
+    return image
+
+
+@transaction.atomic
+def add_images(actor, product, files) -> list[ProductImage]:
+    """Add one or more pictures (all or nothing); the first picture of a product becomes its main one."""
     access.require_manage_shop_products(actor)
-    if product.image:
-        product.image.delete(save=True)
-    return product
+    files = list(files)
+    if not files:
+        raise Invalid("Choose at least one picture.", {"images": ["Choose at least one picture."]})
+    existing = product.images.count()
+    if existing + len(files) > MAX_IMAGES:
+        message = f"A product can have at most {MAX_IMAGES} pictures (it has {existing})."
+        raise Invalid(message, {"images": [message]})
+    extensions = [_verify_image(f) for f in files]  # check everything before anything is written
+    last = product.images.order_by("-ordering").values_list("ordering", flat=True).first()
+    created = []
+    for n, (upload, ext) in enumerate(zip(files, extensions, strict=True), start=1):
+        image = ProductImage(product=product, ordering=(last + n) if last is not None else n - 1, is_main=existing == 0 and n == 1)
+        image.image.save(f"photo-{uuid.uuid4().hex[:12]}.{ext}", upload, save=False)
+        image.save()
+        created.append(image)
+    return created
+
+
+@transaction.atomic
+def set_main_image(actor, product, image_id) -> None:
+    access.require_manage_shop_products(actor)
+    image = _image_or_404(product, image_id)
+    product.images.exclude(pk=image.pk).filter(is_main=True).update(is_main=False)  # one at a time: the unique constraint allows a single main
+    if not image.is_main:
+        image.is_main = True
+        image.save(update_fields=["is_main", "modified"])
+
+
+def update_image(actor, product, image_id, *, alt: str) -> None:
+    access.require_manage_shop_products(actor)
+    image = _image_or_404(product, image_id)
+    image.alt = alt.strip()[:255]
+    image.save(update_fields=["alt", "modified"])
+
+
+@transaction.atomic
+def reorder_images(actor, product, ids) -> None:
+    """``ids`` lists every picture of the product in the wanted order."""
+    access.require_manage_shop_products(actor)
+    current = {img.pk: img for img in product.images.all()}
+    if len(ids) != len(set(ids)) or set(ids) != set(current):
+        message = "Give every picture of the product exactly once."
+        raise Invalid(message, {"ids": [message]})
+    for position, pk in enumerate(ids):
+        if current[pk].ordering != position:
+            current[pk].ordering = position
+            current[pk].save(update_fields=["ordering", "modified"])
+
+
+@transaction.atomic
+def delete_image(actor, product, image_id) -> None:
+    """Delete a picture; when it was the main one the next picture takes over."""
+    access.require_manage_shop_products(actor)
+    image = _image_or_404(product, image_id)
+    was_main = image.is_main
+    image.delete()
+    if was_main:
+        nxt = product.images.order_by("ordering", "created").first()
+        if nxt is not None:
+            nxt.is_main = True
+            nxt.save(update_fields=["is_main", "modified"])
+
+
+# --- attachments (size guides and other files) -------------------------------------------------------------------------------
+
+
+def _attachment_or_404(product, attachment_id) -> ProductAttachment:
+    attachment = product.attachments.filter(pk=attachment_id).first()
+    if attachment is None:
+        raise Conflict("That file is not on this product.", "not_found")
+    return attachment
+
+
+def _validate_attachment(uploaded) -> str:
+    """The same file rules as event attachments (documents and pictures only, never HTML or scripts); returns the display name."""
+    from events.services import attachments as rules
+
+    name = rules.display_name(getattr(uploaded, "name", ""))
+    stem, extension = os.path.splitext(name)
+    if not stem or not name:
+        raise Invalid("The file has no usable name.", {"files": ["The file has no usable name."]})
+    if extension.lower() not in rules.ALLOWED_EXTENSIONS:
+        message = f"“{name}” is not an allowed file type."
+        raise Invalid(message, {"files": [message]})
+    size = uploaded.size or 0
+    if size <= 0:
+        raise Invalid(f"“{name}” is empty.", {"files": [f"“{name}” is empty."]})
+    if size > MAX_ATTACHMENT_BYTES:
+        message = f"“{name}” is larger than {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB."
+        raise Invalid(message, {"files": [message]})
+    return name
+
+
+@transaction.atomic
+def add_attachments(actor, product, files, *, title: str = "") -> list[ProductAttachment]:
+    """Add one or more files (all or nothing). ``title`` names a single file; otherwise each is titled by its file name."""
+    access.require_manage_shop_products(actor)
+    files = list(files)
+    if not files:
+        raise Invalid("Choose at least one file.", {"files": ["Choose at least one file."]})
+    existing = product.attachments.count()
+    if existing + len(files) > MAX_ATTACHMENTS:
+        message = f"A product can have at most {MAX_ATTACHMENTS} files (it has {existing})."
+        raise Invalid(message, {"files": [message]})
+    names = [_validate_attachment(f) for f in files]
+    created = []
+    for upload, name in zip(files, names, strict=True):
+        label = title.strip() if len(files) == 1 and title.strip() else os.path.splitext(name)[0]
+        attachment = ProductAttachment(product=product, title=label[:255], name=name, size=upload.size or 0, content_type=(getattr(upload, "content_type", "") or "")[:100])
+        attachment.file.save(name, upload, save=False)
+        attachment.save()
+        created.append(attachment)
+    return created
+
+
+def rename_attachment(actor, product, attachment_id, *, title: str) -> None:
+    access.require_manage_shop_products(actor)
+    attachment = _attachment_or_404(product, attachment_id)
+    title = title.strip()
+    if not title:
+        raise Invalid("Enter a title.", {"title": ["Enter a title."]})
+    attachment.title = title[:255]
+    attachment.save(update_fields=["title", "modified"])
+
+
+def delete_attachment(actor, product, attachment_id) -> None:
+    access.require_manage_shop_products(actor)
+    _attachment_or_404(product, attachment_id).delete()
 
 
 # --- variants -----------------------------------------------------------------------------------------------------

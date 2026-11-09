@@ -3,6 +3,8 @@
 	import { enhance } from '$app/forms';
 	import { ArrowLeft, EyeOff, Save, Send, Trash2, Undo2, Upload } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import NewsFields from '#lib/components/news/NewsFields.svelte';
 	import NewsPhotos from '#lib/components/news/NewsPhotos.svelte';
@@ -128,32 +130,31 @@
 				{#if item.notified_at}<p class="font-mono text-[11px] text-dim">{t('news.workflow.notified', { date: formatDateTime(item.notified_at) })}</p>{/if}
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('news.unsaved')}</p>{/if}
 
-				<div class="grid gap-2">
-					{#if canEdit}
-						<button class="btn {item.can_publish || item.status !== 'draft' ? 'btn-primary' : 'btn-outline'} gap-2" type="submit" form={formId} formaction="?/save" disabled={busy || !dirty}>
-							<Save size={16} /> {item.status === 'published' ? t('news.save') : t('news.save_draft')}
-						</button>
-					{/if}
-
-					{#if item.can_publish}
-						{#if item.status !== 'published'}
-							<button class="btn btn-primary gap-2" type="button" disabled={busy} onclick={() => ((tried = true), v.title.trim() && v.body.trim() && (publishOpen = true))}><Upload size={16} /> {t('news.publish')}</button>
-						{:else}
-							<button class="btn btn-outline btn-warning gap-2" type="button" disabled={busy} onclick={() => (unpublishOpen = true)}><EyeOff size={16} /> {t('news.unpublish')}</button>
+				{#if canEdit}
+					<button class="btn {item.can_publish || item.status !== 'draft' ? 'btn-primary' : 'btn-outline'} w-full gap-2" type="submit" form={formId} formaction="?/save" disabled={busy || !dirty}>
+						<Save size={16} /> {item.status === 'published' ? t('news.save') : t('news.save_draft')}
+					</button>
+				{/if}
+				{#if item.can_publish && item.status !== 'published'}
+					<button class="btn btn-primary w-full gap-2" type="button" disabled={busy} onclick={() => ((tried = true), v.title.trim() && v.body.trim() && (publishOpen = true))}><Upload size={16} /> {t('news.publish')}</button>
+				{:else if !item.can_publish && canEdit && item.status === 'draft'}
+					<button class="btn btn-primary w-full gap-2" type="submit" form={formId} formaction="?/workflow" name="op" value="submit-for-review" disabled={busy}><Send size={16} /> {t('news.submit')}</button>
+					<p class="text-xs text-muted">{t('news.submit_help')}</p>
+				{/if}
+				{#if (item.can_publish && (item.status === 'published' || item.status === 'pending_review')) || item.can_delete}
+					<ActionList>
+						{#if item.can_publish && item.status === 'published'}
+							<ActionRow icon={EyeOff} disabled={busy} onclick={() => (unpublishOpen = true)}>{t('news.unpublish')}</ActionRow>
 						{/if}
-						{#if item.status === 'pending_review'}
-							<button class="btn btn-outline gap-2" type="submit" form={formId} formaction="?/workflow" name="op" value="send-back" disabled={busy}><Undo2 size={16} /> {t('news.send_back')}</button>
-							<p class="text-xs text-muted">{t('news.send_back_help')}</p>
+						{#if item.can_publish && item.status === 'pending_review'}
+							<ActionRow icon={Undo2} type="submit" form={formId} formaction="?/workflow" name="op" value="send-back" disabled={busy}>{t('news.send_back')}</ActionRow>
 						{/if}
-					{:else if canEdit && item.status === 'draft'}
-						<button class="btn btn-primary gap-2" type="submit" form={formId} formaction="?/workflow" name="op" value="submit-for-review" disabled={busy}><Send size={16} /> {t('news.submit')}</button>
-						<p class="text-xs text-muted">{t('news.submit_help')}</p>
-					{/if}
-
-					{#if item.can_delete}
-						<button class="btn btn-outline btn-error gap-2" type="button" disabled={busy} onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('news.delete')}</button>
-					{/if}
-				</div>
+						{#if item.can_delete}
+							<ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('news.delete')}</ActionRow>
+						{/if}
+					</ActionList>
+					{#if item.can_publish && item.status === 'pending_review'}<p class="text-xs text-muted">{t('news.send_back_help')}</p>{/if}
+				{/if}
 			</section>
 		</aside>
 	</div>

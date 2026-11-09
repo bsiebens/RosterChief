@@ -102,6 +102,10 @@ def _clean_value(field, raw, upload):
             raise ValueError("Enter a number.") from None
         if not number.is_finite() or abs(number) >= Decimal(10) ** 15:
             raise ValueError("Enter a number.")
+        if field.min_value is not None and number < field.min_value:
+            raise ValueError(f"Ensure this value is at least {field.min_value.normalize():f}.")
+        if field.max_value is not None and number > field.max_value:
+            raise ValueError(f"Ensure this value is at most {field.max_value.normalize():f}.")
         return number
     if kind == FieldType.EMAIL:
         try:

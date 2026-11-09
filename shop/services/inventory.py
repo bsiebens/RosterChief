@@ -127,7 +127,7 @@ class StockRow:
 def inventory_overview() -> list[StockRow]:
     """One row per stock-keeping combination of the inventory-managed products (each active variant, or the product itself),
     with what is on hand and what open orders hold. A switched-off variant that still has stock stays listed."""
-    products = list(Product.objects.filter(inventory_managed=True).prefetch_related("variants").order_by("name"))
+    products = list(Product.objects.filter(inventory_managed=True).select_related("category").prefetch_related("variants").order_by("name"))
     levels = stock_levels(products)
     rows = []
     for product in products:
@@ -177,3 +177,37 @@ def set_stock(actor, product, variant, counted: int, *, note=""):
     _target(product, variant)
     lock_products([product.pk])
     return record_movement(product, variant, counted - stock_for(product, variant), Reason.ADJUSTMENT, note=note, user=actor)
+
+
+@dataclass
+class CountLine:
+    product: Product
+    variant: object
+    counted: int
+    note: str = ""
+
+
+@transaction.atomic
+def count_stock(actor, lines: list[CountLine], *, note=""):
+    """Apply a stock count in one transaction. For each line whose counted value differs from the current on hand, an
+    adjustment movement (via ``set_stock``) is booked with the note ``Stock count: <previous> -> <counted>[. line note][. overall note]``.
+    Returns ``[(line, previous)]`` in input order; any invalid line (not managed, wrong variant, negative, duplicate) rolls everything back."""
+    access.require_manage_shop_inventory(actor)
+    seen = set()
+    for line in lines:
+        key = (line.product.pk, line.variant.pk if line.variant else None)
+        if key in seen:
+            raise Invalid("The same stock line is counted twice.", {"counts": ["Duplicate line."]})
+        seen.add(key)
+        if line.counted < 0:
+            raise Invalid("A count can't be negative.", {"counted": ["Can't be negative."]})
+        _target(line.product, line.variant)
+    lock_products({line.product.pk for line in lines})
+    result = []
+    for line in lines:
+        previous = stock_for(line.product, line.variant)
+        if line.counted != previous:
+            parts = [f"Stock count: {previous} -> {line.counted}", line.note.strip(), note.strip()]
+            set_stock(actor, line.product, line.variant, line.counted, note=". ".join(p for p in parts if p)[:255])
+        result.append((line, previous))
+    return result

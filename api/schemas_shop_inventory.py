@@ -12,6 +12,8 @@ class StockRowOut(Schema):
     on_hand: int
     committed: int
     available: int
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
 
 
 class StockListOut(Schema):
@@ -63,3 +65,31 @@ class AdjustIn(Schema):
 
 class AdjustOut(Schema):
     movement: MovementOut | None
+
+
+class CountLineIn(Schema):
+    product_id: uuid.UUID
+    variant_id: uuid.UUID | None = None
+    counted: int = Field(ge=0)
+    note: str = Field("", max_length=255)
+
+
+class CountIn(Schema):
+    note: str = Field("", max_length=255)
+    counts: list[CountLineIn] = Field(min_length=1)
+
+
+class CountLineOut(Schema):
+    product_id: uuid.UUID
+    variant_id: uuid.UUID | None
+    name: str
+    previous: int
+    counted: int
+    difference: int
+
+
+class CountOut(Schema):
+    applied: int
+    unchanged: int
+    total_difference: int
+    lines: list[CountLineOut]

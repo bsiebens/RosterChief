@@ -83,11 +83,11 @@
 					class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
 			{/each}
 		</div>
-		{#if tab === 'evaluations' || tab === 'documents'}<span class="badge badge-outline badge-sm shrink-0" title={t('profile.sample_hint')}>{t('profile.sample')}</span>{/if}
+		{#if tab === 'documents'}<span class="badge badge-outline badge-sm shrink-0" title={t('profile.sample_hint')}>{t('profile.sample')}</span>{/if}
 	</nav>
 
 	{#if tab === 'evaluations'}
-		<EvaluationsCard />
+		<EvaluationsCard evaluations={data.evaluations} checklists={data.checklists} memberId={member.id} myMemberId={data.me?.member_id ?? null} canManage={!!data.me?.can_manage_evaluations} error={data.evaluationsError} />
 	{:else if tab === 'documents'}
 		<DocumentsCard canManage={data.isAdmin} />
 	{:else if tab === 'attendance'}

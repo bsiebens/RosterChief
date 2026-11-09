@@ -1,14 +1,15 @@
-"""Shop categories, products, variants and product images (``/shop/categories``, ``/shop/products``)."""
+"""Shop categories, products, variants, product pictures (a gallery with one main picture) and product files such as a size guide
+(``/shop/categories``, ``/shop/products``)."""
 
 import uuid
 
 from django.db.models import Q
-from ninja import File, Query, Router, UploadedFile
+from ninja import File, Form, Query, Router, UploadedFile
 from ninja.errors import HttpError
 
 from api.auth import AUTHENTICATORS
 from api.routers.shop_common import access, gate
-from api.schemas_shop_catalog import CategoryIn, CategoryListOut, CategoryOut, ProductDetail, ProductIn, ProductListOut, ProductPatch, VariantIn, VariantOut, VariantPatch
+from api.schemas_shop_catalog import AttachmentTitleIn, CategoryIn, CategoryListOut, CategoryOut, ImageAltIn, ImageOrderIn, ProductDetail, ProductIn, ProductListOut, ProductPatch, VariantIn, VariantOut, VariantPatch
 from shop.models import Product, ProductCategory, ProductVariant
 from shop.services import catalog as svc
 from shop.services import inventory
@@ -50,7 +51,7 @@ def _item(p, levels) -> dict:
         in_stock = levels.get((p.pk, None), 0) > 0
     return {
         "id": p.pk, "name": p.name, "slug": p.slug, "category": {"id": p.category.pk, "name": p.category.name} if p.category else None,
-        "description": p.description, "image_url": p.image.url if p.image else None, "price": p.price, "product_type": p.product_type,
+        "description": p.description, "image_url": p.main_image.image.url if p.main_image else None, "price": p.price, "product_type": p.product_type,
         "is_active": p.is_active, "is_public": p.is_public, "personalization_enabled": p.personalization_enabled,
         "inventory_managed": p.inventory_managed, "variant_count": len(variants), "in_stock": in_stock, "created": p.created,
     }  # fmt: skip
@@ -59,7 +60,11 @@ def _item(p, levels) -> dict:
 def _detail(product_id) -> dict:
     p = svc.products_queryset().get(pk=product_id)
     levels = _levels([p])
-    return {**_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count()}
+    return {
+        **_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count(),
+        "images": [{"id": i.pk, "url": i.image.url, "is_main": i.is_main, "ordering": i.ordering, "alt": i.alt} for i in p.images.all()],
+        "attachments": [{"id": a.pk, "title": a.title, "name": a.name, "url": a.file.url, "size": a.size, "content_type": a.content_type, "created": a.created} for a in p.attachments.all()],
+    }  # fmt: skip
 
 
 def _get_product(product_id) -> Product:
@@ -188,17 +193,64 @@ def delete_product(request, product_id: uuid.UUID):
     return 204, None
 
 
-@router.post("/products/{product_id}/image", response=ProductDetail, summary="Set the product picture", operation_id="set_shop_product_image")
-def set_image(request, product_id: uuid.UUID, image: File[UploadedFile]):
+@router.post("/products/{product_id}/images", response=ProductDetail, summary="Add pictures to the product", operation_id="add_shop_product_images")
+def add_images(request, product_id: uuid.UUID, images: File[list[UploadedFile]]):
+    """One or more JPEG/PNG/WebP pictures (10 MB each, 12 per product); the first picture becomes the main one. All or nothing."""
     _write(request)
-    svc.set_image(request.user, _get_product(product_id), image)
+    svc.add_images(request.user, _get_product(product_id), images)
     return _detail(product_id)
 
 
-@router.delete("/products/{product_id}/image", response=ProductDetail, summary="Remove the product picture", operation_id="delete_shop_product_image")
-def delete_image(request, product_id: uuid.UUID):
+@router.post("/products/{product_id}/images/{image_id}/set-main", response=ProductDetail, summary="Make a picture the main one", operation_id="set_shop_product_main_image")
+def set_main_image(request, product_id: uuid.UUID, image_id: uuid.UUID):
     _write(request)
-    svc.clear_image(request.user, _get_product(product_id))
+    svc.set_main_image(request.user, _get_product(product_id), image_id)
+    return _detail(product_id)
+
+
+@router.put("/products/{product_id}/images/order", response=ProductDetail, summary="Set the order of the pictures", operation_id="reorder_shop_product_images")
+def reorder_images(request, product_id: uuid.UUID, payload: ImageOrderIn):
+    """``ids`` lists every picture of the product, once, in the wanted order."""
+    _write(request)
+    svc.reorder_images(request.user, _get_product(product_id), payload.ids)
+    return _detail(product_id)
+
+
+@router.patch("/products/{product_id}/images/{image_id}", response=ProductDetail, summary="Describe a picture", operation_id="update_shop_product_image")
+def update_image(request, product_id: uuid.UUID, image_id: uuid.UUID, payload: ImageAltIn):
+    _write(request)
+    svc.update_image(request.user, _get_product(product_id), image_id, alt=payload.alt)
+    return _detail(product_id)
+
+
+@router.delete("/products/{product_id}/images/{image_id}", response=ProductDetail, summary="Remove a picture", operation_id="delete_shop_product_image")
+def delete_image(request, product_id: uuid.UUID, image_id: uuid.UUID):
+    """When the main picture is removed the next one takes over."""
+    _write(request)
+    svc.delete_image(request.user, _get_product(product_id), image_id)
+    return _detail(product_id)
+
+
+@router.post("/products/{product_id}/attachments", response=ProductDetail, summary="Add files to the product", operation_id="add_shop_product_attachments")
+def add_attachments(request, product_id: uuid.UUID, files: File[list[UploadedFile]], title: Form[str] = ""):
+    """Documents and pictures (PDF, Office/OpenDocument, txt/csv, images; 10 MB each, 10 per product), e.g. a size guide. ``title`` names a
+    single file; otherwise each file is titled by its name. All or nothing."""
+    _write(request)
+    svc.add_attachments(request.user, _get_product(product_id), files, title=title)
+    return _detail(product_id)
+
+
+@router.patch("/products/{product_id}/attachments/{attachment_id}", response=ProductDetail, summary="Rename a file", operation_id="update_shop_product_attachment")
+def update_attachment(request, product_id: uuid.UUID, attachment_id: uuid.UUID, payload: AttachmentTitleIn):
+    _write(request)
+    svc.rename_attachment(request.user, _get_product(product_id), attachment_id, title=payload.title)
+    return _detail(product_id)
+
+
+@router.delete("/products/{product_id}/attachments/{attachment_id}", response=ProductDetail, summary="Remove a file", operation_id="delete_shop_product_attachment")
+def delete_attachment(request, product_id: uuid.UUID, attachment_id: uuid.UUID):
+    _write(request)
+    svc.delete_attachment(request.user, _get_product(product_id), attachment_id)
     return _detail(product_id)
 
 

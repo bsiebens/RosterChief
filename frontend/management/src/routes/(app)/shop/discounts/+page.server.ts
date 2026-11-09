@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import { asList, DISCOUNT_STATUSES, failed, shopOn, type Discount, type PagedList } from '#lib/shop.ts';
+import { asList, badPayload, discountHref, DISCOUNT_STATUSES, failed, parsePayload, shopOn, type Discount, type DiscountIn, type PagedList } from '#lib/shop.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 25;
@@ -18,6 +18,13 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 };
 
 export const actions: Actions = {
+	create: async ({ request, fetch }) => {
+		const body = parsePayload<DiscountIn>(await request.formData());
+		if (!body) return badPayload('create');
+		const res = await api<Discount>('POST', '/shop/discounts', { body: { ...body, code: body.code.trim().toUpperCase() }, f: fetch });
+		if (!res.ok) return failed('create', res);
+		redirect(303, `${discountHref(res.data!.id)}?created=1`);
+	},
 	delete: async ({ request, fetch }) => {
 		const id = String((await request.formData()).get('id') ?? '');
 		const res = await api('DELETE', `/shop/discounts/${id}`, { f: fetch });

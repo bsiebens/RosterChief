@@ -61,7 +61,7 @@ class ImportTests(TestCase):
             coach = Member.objects.create(first_name="Coach", last_name="Test", email="coach@imp.test")
         cls.coach_user, _ = grant_login(cls.club, coach)
         with schema_context(cls.club.schema_name):
-            assign_role(cls.coach_user, create_role("Evaluator", ["members.execute_evaluations"]))
+            assign_role(cls.coach_user, create_role("Evaluator", ["evaluations.execute_evaluations"]))
         cls.owner = type(cls.owner).objects.get(pk=cls.owner.pk)
 
     def setUp(self):

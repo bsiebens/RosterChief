@@ -205,9 +205,9 @@
 					<div class="flex justify-between border-t border-line pt-1 text-base font-semibold"><dt>{t('shop.orders.total')}</dt><dd class="font-mono">{money(total)}</dd></div>
 				</dl>
 				{#if !preview}<p class="text-xs text-muted">{t('shop.orders.new.estimate_hint')}</p>{/if}
-				<div class="flex flex-wrap gap-2">
-					<a class="btn btn-outline" href="/shop/orders">{t('common.cancel')}</a>
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.orders.new.save')}</button>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.orders.new.save')}</button>
+					<a class="btn btn-outline w-full" href="/shop/orders">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</aside>

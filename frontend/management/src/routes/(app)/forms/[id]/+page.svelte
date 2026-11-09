@@ -4,6 +4,8 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { ArrowLeft, Lock, Save, Send, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import FieldBuilder from '#lib/components/forms/FieldBuilder.svelte';
 	import FormDetailsFields from '#lib/components/forms/FormDetailsFields.svelte';
 	import FormPreview from '#lib/components/forms/FormPreview.svelte';
@@ -144,15 +146,16 @@
 					<span class="font-mono">{t('forms.counts', { sends: item.send_count, responses: item.response_count })}</span>
 				</div>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('forms.unsaved')}</p>{/if}
-				<div class="grid gap-2">
-					<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
-					{#if item.is_active && !dirty}
-						<a class="btn btn-outline gap-2" href={sendFormHref(item.id)}><Send size={16} /> {t('forms.send')}</a>
-					{:else if item.is_active}
-						<p class="text-xs text-muted">{t('forms.send_save_first')}</p>
-					{/if}
-					<button class="btn btn-outline btn-error gap-2" type="button" disabled={busy} onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('common.delete')}</button>
-				</div>
+				<button class="btn btn-primary w-full gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
+				{#if item.is_active && !dirty}
+					<ActionList>
+						<ActionRow icon={Send} chevron href={sendFormHref(item.id)}>{t('forms.send')}</ActionRow>
+						<ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow>
+					</ActionList>
+				{:else}
+					{#if item.is_active}<p class="text-xs text-muted">{t('forms.send_save_first')}</p>{/if}
+					<ActionList><ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow></ActionList>
+				{/if}
 			</section>
 		</aside>
 	</div>

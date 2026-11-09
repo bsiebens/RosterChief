@@ -51,9 +51,9 @@
 		</section>
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<div class="flex flex-wrap gap-2">
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('forms.create')}</button>
-					<a class="btn btn-outline" href="/forms">{t('common.cancel')}</a>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('forms.create')}</button>
+					<a class="btn btn-outline w-full" href="/forms">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</div>

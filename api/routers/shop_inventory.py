@@ -3,14 +3,16 @@
 import uuid
 
 from django.db.models import Q
+from django.http import HttpResponse
 from ninja import Query, Router
 from ninja.errors import HttpError
 
 from api.auth import AUTHENTICATORS
 from api.routers.shop_common import access, gate
-from api.schemas_shop_inventory import AdjustIn, AdjustOut, MovementListOut, ReceiveIn, ReceiveOut, StockListOut
+from api.schemas_shop_inventory import AdjustIn, AdjustOut, CountIn, CountOut, MovementListOut, ReceiveIn, ReceiveOut, StockListOut
 from members.services.errors import Invalid
 from shop.models import InventoryMovement, Product, ProductVariant
+from shop.services import count_sheet, invoices
 from shop.services import inventory as svc
 
 router = Router(auth=AUTHENTICATORS)
@@ -53,10 +55,26 @@ def list_stock(request, q: str | None = None, low: bool = False, limit: int = Qu
         {
             "product_id": r.product.pk, "product_name": r.product.name, "variant_id": r.variant.pk if r.variant else None,
             "variant_name": r.variant.name if r.variant else None, "on_hand": r.on_hand, "committed": r.committed, "available": r.on_hand,
+            "category_id": r.product.category_id, "category_name": r.product.category.name if r.product.category else None,
         }
         for r in rows[offset : offset + limit]
     ]  # fmt: skip
     return {"count": len(rows), "results": results}
+
+
+@router.get("/count-sheet.pdf", summary="The stock count sheet as a PDF", operation_id="shop_stock_count_sheet")
+def count_sheet_pdf(request, q: str = "", category: str = ""):
+    """An A4 sheet to count by hand: the stock as it is now (narrowed like the count screen by ``q`` and ``category``, an id or
+    ``none``), a blank Counted box and Notes column per line. Opens inline in the browser; 503 ``pdf_unavailable`` without WeasyPrint."""
+    _gate(request)
+    try:
+        data = count_sheet.render_pdf(q, category)
+    except invoices.PDFUnavailable:
+        return HttpResponse('{"detail": "PDF rendering is not available.", "code": "pdf_unavailable"}', status=503, content_type="application/json")
+    response = HttpResponse(data, content_type="application/pdf")
+    response["Content-Disposition"] = 'inline; filename="stock-count-sheet.pdf"'
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @router.get("/movements", response=MovementListOut, summary="Stock movement history", operation_id="list_shop_stock_movements")
@@ -91,6 +109,28 @@ def adjust(request, payload: AdjustIn):
     if m is None:
         return {"movement": None}
     return {"movement": _movement(InventoryMovement.objects.select_related("product", "variant", "order", "created_by").get(pk=m.pk))}
+
+
+@router.post("/count", response=CountOut, summary="Apply a stock count", operation_id="count_shop_stock")
+def count(request, payload: CountIn):
+    """Bulk stock count. Body: ``{note?, counts: [{product_id, variant_id?, counted >= 0, note?}]}``. All in one transaction:
+    every line whose counted value differs from the on-hand stock gets an adjustment movement (note ``Stock count: <previous> -> <counted>``
+    plus the line note and the overall note); unchanged lines are skipped. 422 (nothing applied) for an unknown or not inventory-managed
+    product/variant, a negative count or a duplicate line. Returns ``{applied, unchanged, total_difference, lines: [{product_id,
+    variant_id, name, previous, counted, difference}]}`` (``applied`` = lines whose stock changed)."""
+    _gate(request)
+    lines = []
+    for c in payload.counts:
+        product, variant = _target(c.product_id, c.variant_id)
+        lines.append(svc.CountLine(product, variant, c.counted, c.note))
+    done = svc.count_stock(request.user, lines, note=payload.note)
+    out = [
+        {"product_id": ln.product.pk, "variant_id": ln.variant.pk if ln.variant else None, "name": f"{ln.product.name} ({ln.variant.name})" if ln.variant else ln.product.name,
+         "previous": previous, "counted": ln.counted, "difference": ln.counted - previous}
+        for ln, previous in done
+    ]  # fmt: skip
+    applied = sum(1 for o in out if o["difference"])
+    return {"applied": applied, "unchanged": len(out) - applied, "total_difference": sum(o["difference"] for o in out), "lines": out}
 
 
 __all__ = ["HttpError", "router"]

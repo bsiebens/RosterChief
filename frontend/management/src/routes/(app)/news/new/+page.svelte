@@ -64,9 +64,9 @@
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
 				<p class="text-sm text-muted">{t('news.photos.save_first')}</p>
-				<div class="flex flex-wrap gap-2">
-					<a class="btn btn-outline gap-2" href="/news">{t('news.cancel')}</a>
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('news.save_draft')}</button>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('news.save_draft')}</button>
+					<a class="btn btn-outline w-full" href="/news">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</div>

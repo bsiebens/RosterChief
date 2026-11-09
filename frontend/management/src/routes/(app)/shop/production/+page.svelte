@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import { Download, Factory, Pencil, Send, Trash2, Truck } from '@lucide/svelte';
+	import { ArrowLeft, Download, Factory, Pencil, Send, Trash2, Truck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -57,8 +57,12 @@
 		};
 	};
 
-	usePageHeader(() => ({ title: t('shop.prod.title'), context: t('shop.prod.context') }));
+	usePageHeader(() => ({ title: t('shop.prod.title'), context: t('shop.prod.context'), actions }));
 </script>
+
+{#snippet actions()}
+	<a class="btn btn-outline gap-2" href="/shop/orders"><ArrowLeft size={16} /> {t('shop.orders.back_short')}</a>
+{/snippet}
 
 <svelte:head><title>{pageTitle(t('shop.prod.title'))}</title></svelte:head>
 

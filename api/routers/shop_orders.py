@@ -296,9 +296,9 @@ def remove_discount(request, order_id: uuid.UUID, applied_id: uuid.UUID):
 
 @router.get("/{order_id}/vouchers", response=list[AvailableVoucherOut], summary="Vouchers this order could be paid with", operation_id="list_shop_order_vouchers")
 def available_vouchers(request, order_id: uuid.UUID):
-    """The purchaser's usable vouchers: their own, those of anyone in the same family and the general ones; own first."""
+    """The usable vouchers: the purchaser's own, those of the people the order is for, of anyone in their families, and the general ones."""
     _gate(request)
-    return vouchers.available_for(get_order(order_id).purchaser)
+    return vouchers.available_for_order(get_order(order_id))
 
 
 @router.post("/{order_id}/voucher", response=OrderDetailOut, summary="Pay (part of) what is due with a voucher", operation_id="apply_shop_order_voucher")
@@ -337,7 +337,7 @@ def deliver(request, order_id: uuid.UUID):
     return order_detail(order)
 
 
-@router.post("/{order_id}/reopen", response=OrderDetailOut, summary="Undo ready / delivered", operation_id="reopen_shop_order")
+@router.post("/{order_id}/reopen", response=OrderDetailOut, summary="One step back: picked up to ready for pickup, ready for pickup to not ready", operation_id="reopen_shop_order")
 def reopen(request, order_id: uuid.UUID):
     _gate(request)
     order = get_order(order_id)

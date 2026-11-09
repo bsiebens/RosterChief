@@ -133,6 +133,7 @@ class ShopOrdersApiTests(ShopClubMixin, TestCase):
         self.assertEqual((r["fulfillment_status"], r["member_status"], r["pickup_instructions"]), ("ready_for_pickup", "ready_for_pickup", "Desk"))
         self.assertEqual(self.call("post", f"/shop/orders/{oid}/deliver").json()["member_status"], "completed")
         self.assertEqual(self.call("post", f"/shop/orders/{oid}/cancel").status_code, 409)
+        self.assertEqual(self.call("post", f"/shop/orders/{oid}/reopen").json()["fulfillment_status"], "ready_for_pickup")  # picked up -> back to ready
         self.assertEqual(self.call("post", f"/shop/orders/{oid}/reopen").json()["fulfillment_status"], "not_ready")
         listed = self.call("get", "/shop/orders?closed=false").json()
         self.assertEqual(listed["count"], 1)
@@ -650,6 +651,35 @@ class ShopOrdersApiTests(ShopClubMixin, TestCase):
         note = InboxNotification.objects.get(user=self.users["orders"])
         self.assertEqual(note.title, f"Part of order {mine.number} is in production")
         self.assertIn("Jersey #7 Doe", note.body)
+
+    def test_available_vouchers_include_those_of_the_people_the_order_is_for(self):
+        from members.models import Family, FamilyMembership, Member
+
+        manager = self.buyer  # places the order for somebody else
+        player = Member.objects.create(first_name="Pia", last_name="Player", email="pia@shop.test")
+        parent = Member.objects.create(first_name="Paul", last_name="Player", email="paul@shop.test")
+        stranger = Member.objects.create(first_name="Sam", last_name="Other", email="sam@shop.test")
+        family = Family.objects.create(name="Player")
+        FamilyMembership.objects.create(family=family, member=player, role="child")
+        FamilyMembership.objects.create(family=family, member=parent, role="parent")
+        expiry = datetime.date.today() + datetime.timedelta(days=30)
+        own = Voucher.objects.create(amount=Decimal("5"), expiry_date=expiry, issued_to=manager)
+        for_player = Voucher.objects.create(amount=Decimal("30"), expiry_date=expiry, issued_to=player)
+        of_parent = Voucher.objects.create(amount=Decimal("20"), expiry_date=expiry, issued_to=parent)
+        Voucher.objects.create(amount=Decimal("99"), expiry_date=expiry, issued_to=stranger)  # unrelated
+        general = Voucher.objects.create(amount=Decimal("15"), expiry_date=expiry)
+        jersey = self.merch("Jersey", "40.00")
+        order = self.create([{"product_id": str(jersey.pk), "quantity": 1, "beneficiary_id": str(player.pk)}])
+        rows = self.call("get", f"/shop/orders/{order['id']}/vouchers").json()
+        self.assertEqual([(v["number"], v["scope"]) for v in rows], [(own.number, "own"), (for_player.number, "beneficiary"), (of_parent.number, "family"), (general.number, "general")])
+        self.assertEqual(rows[1]["issued_to"]["name"], "Pia Player")
+        # without a beneficiary the player's vouchers are not offered
+        plain = self.create([{"product_id": str(jersey.pk), "quantity": 1}])
+        numbers = [v["number"] for v in self.call("get", f"/shop/orders/{plain['id']}/vouchers").json()]
+        self.assertEqual(numbers, [own.number, general.number])
+        # and the beneficiary's voucher pays the order
+        r = self.call("post", f"/shop/orders/{order['id']}/voucher", data={"number": for_player.number})
+        self.assertEqual((r.status_code, r.json()["amount_due"]), (200, "10.00"))
 
     def test_ready_to_confirm_flag_and_filter(self):
         in_stock = self.merch("Cap", "10.00", inventory_managed=True)

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { ArrowDown, ArrowUp, EyeOff, Plus, RotateCcw, Trash2, X } from '@lucide/svelte';
-	import { blankField, blankOption, FIELD_TYPES, hasOptions, type FieldDraft } from '#lib/forms.ts';
+	import { blankField, blankOption, FIELD_TYPES, hasOptions, type FieldDraft, type FieldType } from '#lib/forms.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
 	/**
@@ -9,7 +9,7 @@
 	 * ordering never needs a pointer. Removing a stored field only drops it from the list: the server deletes it, or keeps
 	 * it as deactivated when it already has answers. `errors` are keyed `fields.<index>.<name>` as the API reports them.
 	 */
-	let { fields = $bindable(), disabled = false, errors = {}, tried = false }: { fields: FieldDraft[]; disabled?: boolean; errors?: Record<string, string>; tried?: boolean } = $props();
+	let { fields = $bindable(), disabled = false, errors = {}, tried = false, types = FIELD_TYPES }: { fields: FieldDraft[]; disabled?: boolean; errors?: Record<string, string>; tried?: boolean; types?: FieldType[] } = $props();
 	const base = $props.id();
 
 	const err = (i: number, name: string) => errors[`fields.${i}.${name}`] ?? errors[`${i}.${name}`] ?? '';
@@ -102,7 +102,7 @@
 						<div class="form-control">
 							<label class="label" for="{base}-{f.uid}-type"><span class="label-text">{t('forms.field.type')}</span></label>
 							<select id="{base}-{f.uid}-type" class="select select-bordered w-full" value={f.field_type} onchange={(e) => setType(f, e.currentTarget.value as FieldDraft['field_type'])}>
-								{#each FIELD_TYPES as ft (ft)}<option value={ft}>{t(`forms.type.${ft}`)}</option>{/each}
+								{#each types as ft (ft)}<option value={ft}>{t(`forms.type.${ft}`)}</option>{/each}
 							</select>
 						</div>
 						<div class="form-control">
@@ -115,6 +115,20 @@
 							<span id="{base}-{f.uid}-section-help" class="label-text-alt mt-1 block">{t('forms.field.section_help')}</span>
 						</div>
 					</div>
+					{#if f.field_type === 'number'}
+						<div class="mt-3 grid gap-3 sm:grid-cols-2">
+							<div class="form-control">
+								<label class="label" for="{base}-{f.uid}-min"><span class="label-text">{t('forms.field.min')}</span></label>
+								<input id="{base}-{f.uid}-min" class="input input-bordered w-full {err(i, 'min_value') ? 'input-error' : ''}" type="number" step="any" bind:value={f.min} placeholder={t('forms.field.no_limit')} />
+								{#if err(i, 'min_value')}<span class="mt-1 block text-xs text-error">{err(i, 'min_value')}</span>{/if}
+							</div>
+							<div class="form-control">
+								<label class="label" for="{base}-{f.uid}-max"><span class="label-text">{t('forms.field.max')}</span></label>
+								<input id="{base}-{f.uid}-max" class="input input-bordered w-full {err(i, 'max_value') ? 'input-error' : ''}" type="number" step="any" bind:value={f.max} placeholder={t('forms.field.no_limit')} />
+								{#if err(i, 'max_value')}<span class="mt-1 block text-xs text-error">{err(i, 'max_value')}</span>{/if}
+							</div>
+						</div>
+					{/if}
 					<label class="mt-3 flex w-fit cursor-pointer items-center gap-2 text-sm">
 						<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.required} />
 						{t('forms.field.required')}

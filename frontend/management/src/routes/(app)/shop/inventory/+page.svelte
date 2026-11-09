@@ -1,7 +1,7 @@
 <script lang="ts">
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Boxes, History, PackagePlus, SlidersHorizontal } from '@lucide/svelte';
+	import { Boxes, ClipboardList, History, PackagePlus, SlidersHorizontal } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
@@ -48,6 +48,7 @@
 </script>
 
 {#snippet actions()}
+	<a class="btn btn-outline gap-2" href="/shop/inventory/count"><ClipboardList size={16} /> {t('shop.count.button')}</a>
 	<a class="btn btn-outline gap-2" href="/shop/inventory/movements"><History size={16} /> {t('shop.inv.movements')}</a>
 	<a class="btn btn-primary gap-2" href="/shop/inventory/receive"><PackagePlus size={16} /> {t('shop.inv.receive')}</a>
 {/snippet}

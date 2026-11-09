@@ -105,6 +105,9 @@ class Field(UUIDModel):
     section = models.CharField(_("section"), max_length=255, blank=True)
     order = models.PositiveIntegerField(_("order"), default=0)
     is_active = models.BooleanField(_("is active?"), default=True)
+    #: Number fields only: the lowest / highest value an answer may have (either, both or neither).
+    min_value = models.DecimalField(_("minimum value"), max_digits=15, decimal_places=4, null=True, blank=True)
+    max_value = models.DecimalField(_("maximum value"), max_digits=15, decimal_places=4, null=True, blank=True)
     #: Choice definitions: a list of plain strings, or of ``{"value": ..., "label": ...}`` objects.
     options = models.JSONField(_("options"), blank=True, null=True)
 

@@ -1,9 +1,10 @@
 <script lang="ts">
-		import { enhance } from '$app/forms';
+	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Pencil, Percent, Plus, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import DiscountCreateModal from '#lib/components/shop/DiscountCreateModal.svelte';
 	import DiscountValue from '#lib/components/shop/DiscountValue.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -28,18 +29,19 @@
 	const filterTabs = $derived([{ key: '', label: t('shop.filter.all') }, ...DISCOUNT_STATUSES.map((s) => ({ key: s, label: t(`shop.status.${s}`) }))]);
 
 	let busy = $state(false);
+	let addOpen = $state(false);
 	let target = $state<Discount | null>(null);
 	let delOpen = $state(false);
 	const deleted = $derived(page.url.searchParams.get('deleted') === '1');
 	const done = $derived(form && 'done' in form ? String(form.done) : '');
 	const blocked = $derived(!!form && 'code' in form && form.code === 'has_orders');
-	const failure = $derived(form && 'op' in form && !blocked && !('done' in form) ? String(form.message || t('common.error.generic')) : '');
+	const failure = $derived(form && 'op' in form && form.op !== 'create' && !blocked && !('done' in form) ? String(form.message || t('common.error.generic')) : '');
 
 	usePageHeader(() => ({ title: t('shop.disc.title'), context: data.count === 1 ? t('shop.disc.count_one') : t('shop.disc.count', { n: data.count }), actions }));
 </script>
 
 {#snippet actions()}
-	<a class="btn btn-primary gap-2" href="/shop/discounts/new"><Plus size={16} /> {t('shop.disc.add')}</a>
+	<button class="btn btn-primary gap-2" type="button" onclick={() => (addOpen = true)}><Plus size={16} /> {t('shop.disc.add')}</button>
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('shop.disc.title'))}</title></svelte:head>
@@ -97,6 +99,8 @@
 		{/if}
 	</div>
 </div>
+
+<DiscountCreateModal bind:open={addOpen} {form} />
 
 <Modal bind:open={delOpen} title={t('shop.disc.delete.title')}>
 	<form method="POST" action="?/delete" class="grid gap-3" use:enhance={() => { busy = true; return async ({ update }) => { await update({ reset: false }); busy = false; delOpen = false; }; }}>

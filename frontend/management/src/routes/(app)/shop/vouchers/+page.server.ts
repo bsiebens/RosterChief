@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import { asList, failed, shopOn, VOUCHER_STATUSES, type PagedList, type Voucher } from '#lib/shop.ts';
+import { asList, badPayload, failed, parsePayload, shopOn, voucherHref, VOUCHER_STATUSES, type PagedList, type Voucher, type VoucherIn } from '#lib/shop.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 25;
@@ -20,6 +20,15 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 };
 
 export const actions: Actions = {
+	create: async ({ request, fetch }) => {
+		const body = parsePayload<VoucherIn>(await request.formData());
+		if (!body) return badPayload('create');
+		const res = await api<{ count: number; results: Voucher[] }>('POST', '/shop/vouchers', { body: { ...body, count: body.count || 1 }, f: fetch });
+		if (!res.ok) return failed('create', res);
+		const list = res.data?.results ?? [];
+		if (list.length === 1) redirect(303, `${voucherHref(list[0].id)}?created=1`);
+		redirect(303, `/shop/vouchers?created=${res.data?.count ?? list.length}`);
+	},
 	toggle: async ({ request, fetch }) => {
 		const form = await request.formData();
 		const id = String(form.get('id') ?? '');

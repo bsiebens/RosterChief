@@ -1,5 +1,6 @@
 import datetime
 import uuid
+from decimal import Decimal
 
 from ninja import Schema
 
@@ -30,6 +31,8 @@ class FieldOut(Schema):
     order: int
     is_active: bool
     options: list[str | OptionObj] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
 
 
 class FieldIn(Schema):
@@ -42,6 +45,8 @@ class FieldIn(Schema):
     section: str = ""
     is_active: bool = True
     options: list[str | OptionObj] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
 
 
 class FieldsIn(Schema):

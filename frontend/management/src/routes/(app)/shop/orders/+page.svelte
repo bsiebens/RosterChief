@@ -1,7 +1,7 @@
 <script lang="ts">
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { CircleCheck, PackageCheck, Plus, ShoppingBag, TriangleAlert, Truck } from '@lucide/svelte';
+	import { CircleCheck, Factory, PackageCheck, Plus, ShoppingBag, TriangleAlert, Truck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -50,6 +50,7 @@
 </script>
 
 {#snippet actions()}
+	<a class="btn btn-outline gap-2" href="/shop/production"><Factory size={16} /> {t('shop.nav.production')}</a>
 	<a class="btn btn-outline gap-2" href="/shop/pickup"><PackageCheck size={16} /> {t('shop.orders.go_pickup')}</a>
 	<a class="btn btn-outline gap-2" href="/shop/delivery"><Truck size={16} /> {t('shop.orders.go_delivery')}</a>
 	<a class="btn btn-primary gap-2" href="/shop/orders/new"><Plus size={16} /> {t('shop.orders.add')}</a>

@@ -11,7 +11,9 @@ everyone else gets 403 ``no_access`` from every endpoint. Behind the door there 
 * **Teams**: editing a team, its roster and its staff needs a *management position* (``Position.management_position``)
   on that very team in the current season. Creating, deleting and reordering teams is club-wide, so it needs the
   settings permission instead.
-* **Evaluations** (``members.execute_evaluations``, the Owner role or the platform owner): see and give evaluations.
+* **Evaluations**: two permissions, each also held by the Owner role and the platform owner. ``evaluations.manage_evaluations`` builds the
+  checklists (the criteria players are scored on); ``evaluations.execute_evaluations`` gives evaluations, runs evaluation meetings and
+  is the only way to see evaluations (the Evaluations tab on a member). Neither implies the other.
 * **Referees** (``events.manage_referees``, the Owner role or the platform owner): assign referees and officials to home games,
   set their fees and print the payment forms.
 * **Settings** (``admin.manage_settings``, the Owner role or the platform owner): club details and branding,
@@ -28,7 +30,8 @@ from members.models import ClubMembership, Member
 
 MANAGE_MEMBERS = "members.manage_members"
 MANAGE_SETTINGS = "admin.manage_settings"
-EXECUTE_EVALUATIONS = "members.execute_evaluations"
+EXECUTE_EVALUATIONS = "evaluations.execute_evaluations"
+MANAGE_EVALUATIONS = "evaluations.manage_evaluations"
 MANAGE_REFEREES = "events.manage_referees"
 
 
@@ -104,10 +107,49 @@ def can_manage_settings(user) -> bool:
 
 
 def can_execute_evaluations(user) -> bool:
-    """Platform owner, the club's Owner role, or a user holding ``members.execute_evaluations``: sees and gives evaluations."""
+    """Platform owner, the club's Owner role, or a user holding ``evaluations.execute_evaluations``: gives and sees evaluations."""
     if user is None or not user.is_authenticated or not user.is_active:
         return False
     return is_platform_owner(user) or user.has_perm(EXECUTE_EVALUATIONS) or _is_club_owner(user)
+
+
+def can_manage_evaluations(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``evaluations.manage_evaluations``: builds the checklists."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(MANAGE_EVALUATIONS) or _is_club_owner(user)
+
+
+MANAGE_ROLES = "authorizations.manage_roles"
+
+
+def can_manage_roles(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``authorizations.manage_roles``: creates and edits roles, sets their
+    permissions and gives them to people."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(MANAGE_ROLES) or _is_club_owner(user)
+
+
+def require_manage_roles(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_roles(actor):
+        raise NotAllowed("You are not allowed to manage roles.")
+
+
+def require_execute_evaluations(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_execute_evaluations(actor):
+        raise NotAllowed("You are not allowed to give or view evaluations.")
+
+
+def require_manage_evaluations(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_evaluations(actor):
+        raise NotAllowed("You are not allowed to manage evaluations.")
 
 
 def can_manage_referees(user) -> bool:

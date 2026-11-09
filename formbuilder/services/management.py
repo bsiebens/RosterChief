@@ -33,7 +33,7 @@ class Conflict(ServiceError):
 
 def forms_queryset():
     """Forms with ``field_count`` (active fields), ``send_count`` and ``response_count`` annotated."""
-    return Form.objects.annotate(
+    return Form.objects.filter(evaluation_checklist__isnull=True).annotate(  # an evaluation checklist's form is not a form to send
         field_count=Count("fields", filter=Q(fields__is_active=True), distinct=True),
         send_count=Count("sends", distinct=True),
         response_count=Count("sends__submissions", distinct=True),
@@ -88,7 +88,7 @@ def duplicate_form(actor, form: Form, *, title: str | None = None) -> Form:
     for source in form.fields.order_by("order"):
         Field.objects.create(
             form=copy, key=source.key, label=source.label, field_type=source.field_type, required=source.required, help_text=source.help_text,
-            section=source.section, order=source.order, is_active=source.is_active, options=source.options,
+            section=source.section, order=source.order, is_active=source.is_active, options=source.options, min_value=source.min_value, max_value=source.max_value,
         )  # fmt: skip
     return copy
 
@@ -124,16 +124,34 @@ def normalize_options(raw, *, where: str, errors: dict, field_type: str):
     return options
 
 
+def _range(item: dict, *, where: str, errors: dict, field_type: str):
+    """``(min, max)`` for a number field (``None`` = no limit); both are ``None`` for any other type. Records an error when min > max."""
+    low, high = item.get("min_value"), item.get("max_value")
+    if field_type != Field.FieldType.NUMBER:
+        if low is not None or high is not None:
+            errors[f"{where}.min_value"] = ["Only number fields have a range."]
+        return None, None
+    if low is not None and high is not None and low > high:
+        errors[f"{where}.max_value"] = ["Must not be lower than the minimum."]
+    return low, high
+
+
 _KEY_RE = re.compile(r"^[a-z0-9_-]{1,100}$")
 
 
-@transaction.atomic
 def replace_fields(actor, form: Form, items: list[dict]) -> Form:
-    """Replace the whole ordered field list of ``form``. ``items`` are dicts with ``label``, ``field_type``, ``required``,
-    ``help_text``, ``section``, ``is_active``, ``options`` and optionally ``id`` (update that field) and ``key`` (only
-    used for a new field; a field's key never changes). Order is the list position. Fields left out are deleted, or --
-    when they have answers -- kept and deactivated after the listed ones."""
+    """Replace the whole ordered field list of ``form`` (see ``apply_fields``). Needs ``forms.manage_forms``."""
     access.require_manage_forms(actor)
+    return apply_fields(form, items)
+
+
+@transaction.atomic
+def apply_fields(form: Form, items: list[dict]) -> Form:
+    """Replace the whole ordered field list of ``form``, with no permission check (the caller has done its own: evaluation
+    checklists reuse this). ``items`` are dicts with ``label``, ``field_type``, ``required``, ``help_text``, ``section``,
+    ``is_active``, ``options`` and optionally ``id`` (update that field) and ``key`` (only used for a new field; a field's key
+    never changes). Order is the list position. Fields left out are deleted, or -- when they have answers -- kept and
+    deactivated after the listed ones."""
     existing = {f.pk: f for f in form.fields.select_for_update()}
     errors, prepared, seen_ids = {}, [], set()
     for index, item in enumerate(items):
@@ -161,9 +179,11 @@ def replace_fields(actor, form: Form, items: list[dict]) -> Form:
         if current is None and key and not _KEY_RE.match(key):
             errors[f"{where}.key"] = ["Use lowercase letters, digits, dashes and underscores."]
         options = normalize_options(item.get("options"), where=where, errors=errors, field_type=field_type)
+        low, high = _range(item, where=where, errors=errors, field_type=field_type)
         values = {
             "label": label, "field_type": field_type, "required": bool(item.get("required", True)), "help_text": item.get("help_text") or "",
             "section": (item.get("section") or "").strip(), "is_active": bool(item.get("is_active", True)), "options": options,
+            "min_value": low, "max_value": high,
         }  # fmt: skip
         prepared.append((current, values, key))
     if errors:
@@ -212,7 +232,8 @@ def replace_fields(actor, form: Form, items: list[dict]) -> Form:
 
 
 def sends_queryset():
-    return FormSend.objects.select_related("form", "created_by", "season").prefetch_related("teams", "groups", "invited_members", "excluded_members").annotate(response_count=Count("submissions", distinct=True))
+    sends = FormSend.objects.filter(form__evaluation_checklist__isnull=True)  # an evaluation checklist's shadow send is not one to manage
+    return sends.select_related("form", "created_by", "season").prefetch_related("teams", "groups", "invited_members", "excluded_members").annotate(response_count=Count("submissions", distinct=True))
 
 
 def get_send(send_id) -> FormSend | None:

@@ -7,6 +7,7 @@ import { grantLoginFor } from '#lib/members/form-server.ts';
 import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
 import type { FamilyDetail, GuardianContact, MemberDetail, Season, ShellMe } from '#lib/members/detail-types.ts';
 import type { Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
+import type { ChecklistItem, EvaluationOut } from '#lib/evaluations.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, fetch, parent }) => {
@@ -52,8 +53,22 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 		if (opts.ok && opts.data) officiatingOptions = opts.data;
 	}
 
+	// Evaluations only for someone with the execute permission; without it nothing is requested (the API would refuse it anyway).
+	let evaluations: EvaluationOut[] = [];
+	let checklists: ChecklistItem[] = [];
+	let evaluationsError = false;
+	if (me?.can_execute_evaluations) {
+		const [evalRes, listRes] = await Promise.all([
+			api<{ results: EvaluationOut[] }>('GET', `/evaluations/players/${params.id}`, { f: fetch }),
+			api<{ results: ChecklistItem[] }>('GET', '/evaluations/checklists', { f: fetch })
+		]);
+		evaluations = evalRes.data?.results ?? [];
+		checklists = listRes.data?.results ?? [];
+		evaluationsError = !evalRes.ok;
+	}
+
 	const attendance = attendanceRes.ok ? (attendanceRes.data ?? null) : null;
-	return { member, seasons: seasons.data ?? [], attendance, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
+	return { member, seasons: seasons.data ?? [], attendance, evaluations, checklists, evaluationsError, gameStats, stats, families, guardians, isAdmin: !!me?.can_manage_members, hasOfficiating, officiating, officiatingOptions };
 };
 
 export const actions: Actions = {
@@ -79,6 +94,11 @@ export const actions: Actions = {
 		const r = await grantLoginFor(params.id, String(form.get('email') ?? '').trim(), fetch);
 		if (!r.ok) return fail(r.status, { grantError: r.message || Object.values(r.fields)[0] || 'failed', grantFields: r.fields });
 		return { granted: { email: r.email, created: r.created, emailSent: r.emailSent } };
+	},
+	deleteEvaluation: async ({ request, fetch }) => {
+		const res = await api('DELETE', `/evaluations/${String((await request.formData()).get('evaluation_id') ?? '')}`, { f: fetch });
+		if (!res.ok) return fail(res.status || 500, { evaluationError: res.message || 'failed' });
+		return { evaluationDeleted: true };
 	},
 	addMembership: async ({ params, request, fetch }) => {
 		const form = await request.formData();

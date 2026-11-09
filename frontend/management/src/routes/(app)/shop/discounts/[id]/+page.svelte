@@ -4,6 +4,8 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { ArrowLeft, Save, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import DiscountFields from '#lib/components/shop/DiscountFields.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -97,10 +99,8 @@
 				<span class="font-mono">{t('shop.disc.used_n', { n: item.used_count })}</span>
 			</div>
 			{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('shop.unsaved')}</p>{/if}
-			<div class="grid gap-2">
-				<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
-				<button class="btn btn-outline btn-error gap-2" type="button" disabled={busy} onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('common.delete')}</button>
-			</div>
+			<button class="btn btn-primary w-full gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
+			<ActionList><ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow></ActionList>
 		</aside>
 	</div>
 </div>

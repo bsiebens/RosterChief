@@ -79,9 +79,9 @@
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
 				<Field label={t('shop.inv.note')} bind:value={note} maxlength={255} help={t('shop.inv.note_help')} />
-				<div class="flex flex-wrap gap-2">
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.inv.receive_save')}</button>
-					<a class="btn btn-outline" href="/shop/inventory">{t('common.cancel')}</a>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.inv.receive_save')}</button>
+					<a class="btn btn-outline w-full" href="/shop/inventory">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</div>

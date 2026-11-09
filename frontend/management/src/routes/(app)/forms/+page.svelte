@@ -107,8 +107,8 @@
 						{#each data.rows as f (f.id)}
 							<tr class="hover:bg-surface">
 								<td>
-									<a class="link font-semibold" href={formHref(f.id)}>{f.title}</a>
-									<div class="mt-0.5 flex flex-wrap items-center gap-2">
+									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+										<a class="link font-semibold" href={formHref(f.id)}>{f.title}</a>
 										{#if !f.is_active}<span class="badge badge-sm badge-warning">{t('forms.inactive')}</span>{/if}
 										{#if f.login_required}<span class="badge badge-sm gap-1"><Lock size={10} aria-hidden="true" /> {t('forms.login_required')}</span>{/if}
 									</div>

@@ -1,13 +1,15 @@
 """Club shop (one schema per club, so no club FK anywhere). Ported from the old site's ``shop`` app minus carts,
 registration pricing (registrant tiers, early bird, season, staff role) which v2 does not have yet."""
 
+import secrets
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
-from django.db.models import UniqueConstraint
+from django.db.models import Q, UniqueConstraint
 from django.db.models.functions import Lower
 from django.utils import timezone
-from django.utils.text import slugify
+from django.utils.text import get_valid_filename, slugify
 from django.utils.translation import gettext_lazy as _
 
 from members.models import Member
@@ -33,6 +35,15 @@ class ProductionStatus(models.TextChoices):
 
 def product_image_path(instance, filename):
     return f"shop/products/{instance.pk}/{filename}"
+
+
+def product_gallery_path(instance, filename):
+    return f"shop/products/{instance.product_id}/images/{filename}"
+
+
+def product_attachment_path(instance, filename):
+    """A random prefix keeps two uploads with the same name apart; the original name is kept (made filesystem-safe) for recognition."""
+    return f"shop/products/{instance.product_id}/files/{secrets.token_hex(6)}-{get_valid_filename(filename)}"[:255]
 
 
 def next_number(kind: str) -> str:
@@ -94,7 +105,6 @@ class Product(UUIDModel):
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True)
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
     description = models.TextField(_("description"), blank=True)
-    image = models.ImageField(_("photo"), upload_to=product_image_path, max_length=255, blank=True)
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=0)
     product_type = models.CharField(_("product type"), max_length=255, choices=ProductType.choices, default=ProductType.MERCHANDISE)
 
@@ -112,6 +122,12 @@ class Product(UUIDModel):
     def __str__(self):
         return self.name
 
+    @property
+    def main_image(self):
+        """The picture shown in lists: the main one, else the first. Reads ``images.all()`` so a prefetch is honoured."""
+        images = list(self.images.all())
+        return next((img for img in images if img.is_main), None) or (images[0] if images else None)
+
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = unique_slug(self, self.name)
@@ -120,6 +136,44 @@ class Product(UUIDModel):
     def clean(self):
         if self.inventory_managed and self.product_type != self.ProductType.MERCHANDISE:
             raise ValidationError({"inventory_managed": _("Only merchandise can be inventory managed.")})
+
+
+class ProductImage(UUIDModel):
+    """One picture of a product's gallery; exactly one is the main picture (the one shown in lists), the rest follow in ``ordering``."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images", verbose_name=_("product"))
+    image = models.ImageField(_("image"), upload_to=product_gallery_path, max_length=255)
+    alt = models.CharField(_("description"), max_length=255, blank=True)
+    is_main = models.BooleanField(_("main picture"), default=False)
+    ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+
+    class Meta:
+        verbose_name = _("product image")
+        verbose_name_plural = _("product images")
+        ordering = ["ordering", "created"]
+        constraints = [UniqueConstraint(fields=["product"], condition=Q(is_main=True), name="unique_main_image_per_product")]
+
+    def __str__(self):
+        return f"{self.product} - picture"
+
+
+class ProductAttachment(UUIDModel):
+    """A file belonging to a product, e.g. a size guide: served from the same public media as the pictures."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="attachments", verbose_name=_("product"))
+    file = models.FileField(_("file"), upload_to=product_attachment_path, max_length=255)
+    title = models.CharField(_("title"), max_length=255)
+    name = models.CharField(_("file name"), max_length=255, blank=True)
+    size = models.PositiveIntegerField(_("size (bytes)"), default=0)
+    content_type = models.CharField(_("content type"), max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = _("product attachment")
+        verbose_name_plural = _("product attachments")
+        ordering = ["created"]
+
+    def __str__(self):
+        return self.title
 
 
 class ProductVariant(UUIDModel):

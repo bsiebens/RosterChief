@@ -125,9 +125,9 @@
 						<span class="text-xs text-muted">{t('forms.send.notify_help')}</span>
 					</span>
 				</label>
-				<div class="flex flex-wrap gap-2">
-					<a class="btn btn-outline" href="/forms/{item.id}">{t('common.cancel')}</a>
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy || !item.is_active}><Send size={16} /> {t('forms.send.go')}</button>
+				<div class="grid gap-2">
+					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy || !item.is_active}><Send size={16} /> {t('forms.send.go')}</button>
+					<a class="btn btn-outline w-full" href="/forms/{item.id}">{t('common.cancel')}</a>
 				</div>
 			</section>
 		</div>

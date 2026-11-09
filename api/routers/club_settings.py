@@ -64,12 +64,13 @@ def delete_logo(request):
 def list_previews(request):
     _club(request)
     has_referees = request.features.has("referee_officials")
-    return [p.__dict__ for p in previews.PREVIEWS if has_referees or p.key not in previews.PAYMENT_FORM_KINDS]
+    has_shop = request.features.has("shop")
+    return [p.__dict__ for p in previews.PREVIEWS if (has_referees or p.key not in previews.PAYMENT_FORM_KINDS) and (has_shop or p.key not in previews.SHOP_KEYS)]
 
 
 def _preview(request, key: str) -> previews.Preview:
     preview = previews.BY_KEY.get(key)
-    if preview is None or (key in previews.PAYMENT_FORM_KINDS and not request.features.has("referee_officials")):
+    if preview is None or (key in previews.PAYMENT_FORM_KINDS and not request.features.has("referee_officials")) or (key in previews.SHOP_KEYS and not request.features.has("shop")):
         raise HttpError(404, "Not found.")
     return preview
 

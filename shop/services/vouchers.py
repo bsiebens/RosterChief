@@ -117,25 +117,44 @@ def voucher_history(voucher) -> list[dict]:
     return rows
 
 
-def available_for(member) -> list[dict]:
-    """The vouchers a member's order can be paid with: usable ones (active, not expired, balance left) issued to the member
-    themselves, to anyone in the same family (any parent, guardian or child) and the general ones issued to nobody. Own first, then
-    family, then general; soonest expiry first within each."""
-    from django.db.models import F, Q
-
+def _family_of(member_ids) -> set:
+    """Everyone sharing a family with any of ``member_ids`` (parents, guardians, children), the members themselves excluded."""
     from members.models import FamilyMembership
 
+    families = FamilyMembership.objects.filter(member_id__in=member_ids).values_list("family_id", flat=True)
+    return set(FamilyMembership.objects.filter(family_id__in=families).values_list("member_id", flat=True)) - set(member_ids)
+
+
+def available_for_order(order) -> list[dict]:
+    """The vouchers this order can be paid with: usable ones (active, not expired, balance left) that belong to
+    - ``own``: the purchaser,
+    - ``beneficiary``: someone the order is for (a line's beneficiary), also when that person is not in the purchaser's family
+      (a manager ordering for a member),
+    - ``family``: anyone in the family of the purchaser or of a beneficiary (any parent, guardian or child),
+    - ``general``: issued to nobody.
+    Own first, then beneficiary, family, general; soonest expiry first within each."""
+    from django.db.models import F, Q
+
+    purchaser = order.purchaser
+    beneficiaries = set(order.lines.exclude(beneficiary__isnull=True).values_list("beneficiary_id", flat=True)) - {purchaser.pk}
+    families = _family_of({purchaser.pk, *beneficiaries}) - {purchaser.pk, *beneficiaries}
+    holders = {purchaser.pk, *beneficiaries, *families}
     today = timezone.localdate()
-    families = FamilyMembership.objects.filter(member=member).values_list("family_id", flat=True)
-    family_ids = set(FamilyMembership.objects.filter(family_id__in=families).values_list("member_id", flat=True)) - {member.pk}
     qs = (
         Voucher.objects.filter(is_active=True, expiry_date__gte=today, amount__gt=F("consumed_amount"))
-        .filter(Q(issued_to=member) | Q(issued_to_id__in=family_ids) | Q(issued_to__isnull=True))
+        .filter(Q(issued_to_id__in=holders) | Q(issued_to__isnull=True))
         .select_related("issued_to")
     )
-    rank = {"own": 0, "family": 1, "general": 2}
+    rank = {"own": 0, "beneficiary": 1, "family": 2, "general": 3}
     rows = []
     for v in qs:
-        scope = "general" if v.issued_to_id is None else "own" if v.issued_to_id == member.pk else "family"
+        if v.issued_to_id is None:
+            scope = "general"
+        elif v.issued_to_id == purchaser.pk:
+            scope = "own"
+        elif v.issued_to_id in beneficiaries:
+            scope = "beneficiary"
+        else:
+            scope = "family"
         rows.append({"id": v.pk, "number": v.number, "scope": scope, "issued_to": {"id": v.issued_to_id, "name": str(v.issued_to)} if v.issued_to_id else None, "available_amount": v.available_amount, "expiry_date": v.expiry_date, "notes": v.notes})
     return sorted(rows, key=lambda r: (rank[r["scope"]], r["expiry_date"], r["number"]))

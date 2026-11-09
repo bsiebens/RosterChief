@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { Check, Copy, Download, Plus, Power, Ticket, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import VoucherCreateModal from '#lib/components/shop/VoucherCreateModal.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -27,6 +28,7 @@
 	const filterTabs = $derived([...VOUCHER_STATUSES.map((s) => ({ key: s, label: t(`shop.status.${s}`) })), { key: 'all', label: t('shop.filter.all') }]);
 
 	let busy = $state(false);
+	let addOpen = $state(false);
 	let target = $state<Voucher | null>(null);
 	let delOpen = $state(false);
 	let copied = $state('');
@@ -54,14 +56,14 @@
 	const deleted = $derived(page.url.searchParams.get('deleted') === '1');
 	const done = $derived(form && 'done' in form ? String(form.done) : '');
 	const blocked = $derived(!!form && 'code' in form && form.code === 'has_usage');
-	const failure = $derived(form && 'op' in form && !blocked && !('done' in form) ? String(form.message || t('common.error.generic')) : '');
+	const failure = $derived(form && 'op' in form && form.op !== 'create' && !blocked && !('done' in form) ? String(form.message || t('common.error.generic')) : '');
 
 	usePageHeader(() => ({ title: t('shop.vch.title'), context: data.count === 1 ? t('shop.vch.count_one') : t('shop.vch.count', { n: data.count }), actions }));
 </script>
 
 {#snippet actions()}
 	{#if data.rows.length}<button class="btn btn-outline gap-2" type="button" onclick={csv}><Download size={16} /> {t('shop.vch.csv')}</button>{/if}
-	<a class="btn btn-primary gap-2" href="/shop/vouchers/new"><Plus size={16} /> {t('shop.vch.add')}</a>
+	<button class="btn btn-primary gap-2" type="button" onclick={() => (addOpen = true)}><Plus size={16} /> {t('shop.vch.add')}</button>
 {/snippet}
 
 <svelte:head><title>{pageTitle(t('shop.vch.title'))}</title></svelte:head>
@@ -128,6 +130,8 @@
 		{/if}
 	</div>
 </div>
+
+<VoucherCreateModal bind:open={addOpen} {form} />
 
 <Modal bind:open={delOpen} title={t('shop.vch.delete.title')}>
 	<form method="POST" action="?/delete" class="grid gap-3" use:enhance={() => { busy = true; return async ({ update }) => { await update({ reset: false }); busy = false; delOpen = false; }; }}>

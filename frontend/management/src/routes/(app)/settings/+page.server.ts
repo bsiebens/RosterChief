@@ -1,4 +1,4 @@
-import { fail } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
 import { requireSettings } from '#lib/members/form-server.ts';
 import { clearHostInfo } from '#lib/server/backend.ts';
@@ -28,6 +28,9 @@ const DETAIL_FIELDS = ['name', 'legal_name', 'contact_email', 'website', 'legal_
 const COLOR_FIELDS = ['primary_color', 'secondary_color', 'primary_text_color', 'secondary_text_color'];
 
 export const load: PageServerLoad = async ({ url, fetch, parent }) => {
+	// Someone who only manages roles lands on the roles page.
+	const { me } = (await parent()) as { me?: { can_manage_settings?: boolean; can_manage_roles?: boolean } };
+	if (!me?.can_manage_settings && me?.can_manage_roles) redirect(303, '/settings/roles');
 	await requireSettings(parent);
 	const raw = url.searchParams.get('tab');
 	const tab = raw === 'email' || raw === 'previews' ? 'email' : raw === 'pdf' ? 'pdf' : 'identity';

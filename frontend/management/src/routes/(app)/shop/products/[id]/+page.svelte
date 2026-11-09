@@ -4,9 +4,12 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { ArrowLeft, Save, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import ProductFields from '#lib/components/shop/ProductFields.svelte';
-	import ProductImage from '#lib/components/shop/ProductImage.svelte';
+	import ProductAttachments from '#lib/components/shop/ProductAttachments.svelte';
+	import ProductImages from '#lib/components/shop/ProductImages.svelte';
 	import ProductVariants from '#lib/components/shop/ProductVariants.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -22,14 +25,17 @@
 	// svelte-ignore state_referenced_locally
 	let variants = $state(data.item.variants);
 	// svelte-ignore state_referenced_locally
-	let imageUrl = $state<string | null>(data.item.image_url);
+	let images = $state(data.item.images ?? []);
+	// svelte-ignore state_referenced_locally
+	let attachments = $state(data.item.attachments ?? []);
 	// A reload after a save brings the stored product: start the editor from it again.
 	$effect(() => {
 		const stored = data.item;
 		untrack(() => {
 			v = productInOf(stored);
 			variants = stored.variants;
-			imageUrl = stored.image_url;
+			images = stored.images ?? [];
+			attachments = stored.attachments ?? [];
 		});
 	});
 
@@ -129,14 +135,16 @@
 					<span class="font-mono">{t('shop.product.order_lines', { n: item.order_line_count })}</span>
 				</div>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('shop.unsaved')}</p>{/if}
-				<div class="grid gap-2">
-					<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
-					<button class="btn btn-outline btn-error gap-2" type="button" disabled={busy} onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('common.delete')}</button>
-				</div>
+				<button class="btn btn-primary w-full gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
+				<ActionList><ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow></ActionList>
 			</section>
 			<section class="card card-body gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.image')}</h2>
-				<ProductImage productId={item.id} bind:url={imageUrl} name={item.name} />
+				<ProductImages productId={item.id} bind:images name={item.name} />
+			</section>
+			<section class="card card-body gap-3">
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.files')}</h2>
+				<ProductAttachments productId={item.id} bind:attachments />
 			</section>
 		</aside>
 	</div>

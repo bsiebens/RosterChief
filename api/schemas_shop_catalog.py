@@ -78,9 +78,43 @@ class ProductItem(Schema):
     created: datetime.datetime
 
 
+class ProductImageOut(Schema):
+    id: uuid.UUID
+    url: str
+    is_main: bool
+    ordering: int
+    alt: str
+
+
+class ProductAttachmentOut(Schema):
+    id: uuid.UUID
+    title: str
+    #: The file name as uploaded.
+    name: str
+    url: str
+    size: int
+    content_type: str
+    created: datetime.datetime
+
+
 class ProductDetail(ProductItem):
     variants: list[VariantOut]
     order_line_count: int
+    #: The gallery in display order (exactly one ``is_main`` when there is a picture) and the product's files (e.g. a size guide).
+    images: list[ProductImageOut]
+    attachments: list[ProductAttachmentOut]
+
+
+class ImageAltIn(Schema):
+    alt: str = Field("", max_length=255)
+
+
+class ImageOrderIn(Schema):
+    ids: list[uuid.UUID]
+
+
+class AttachmentTitleIn(Schema):
+    title: str = Field(max_length=255)
 
 
 class ProductListOut(Schema):

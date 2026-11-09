@@ -2,6 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { ArrowLeft, CalendarClock, Check, Copy, Lock, LockOpen, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import ActionList from '#lib/components/actions/ActionList.svelte';
+	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import ResponsesView from '#lib/components/forms/ResponsesView.svelte';
 	import SendStatusBadge from '#lib/components/forms/SendStatusBadge.svelte';
@@ -138,19 +140,19 @@
 					</p>
 				{/if}
 
-				<div class="grid gap-2">
+				<ActionList>
 					{#if isClosed || s.status === 'inactive'}
 						<form method="POST" action="?/reopen" use:enhance={plain}>
-							<button class="btn btn-outline w-full gap-2" type="submit" disabled={busy}><LockOpen size={16} /> {t('forms.send.reopen')}</button>
+							<ActionRow icon={LockOpen} type="submit" disabled={busy}>{t('forms.send.reopen')}</ActionRow>
 						</form>
 					{:else}
 						<form method="POST" action="?/close" use:enhance={plain}>
-							<button class="btn btn-outline w-full gap-2" type="submit" disabled={busy}><Lock size={16} /> {t('forms.send.close')}</button>
+							<ActionRow icon={Lock} type="submit" disabled={busy}>{t('forms.send.close')}</ActionRow>
 						</form>
 					{/if}
-					<button class="btn btn-outline gap-2" type="button" onclick={() => (editOpen = true)}><CalendarClock size={16} /> {t('forms.send.edit_window')}</button>
-					<button class="btn btn-outline btn-error gap-2" type="button" onclick={() => (deleteOpen = true)}><Trash2 size={16} /> {t('common.delete')}</button>
-				</div>
+					<ActionRow icon={CalendarClock} onclick={() => (editOpen = true)}>{t('forms.send.edit_window')}</ActionRow>
+					<ActionRow icon={Trash2} danger onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow>
+				</ActionList>
 			</section>
 
 			<section class="card card-body gap-2" aria-labelledby="{id}-pub">

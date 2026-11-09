@@ -19,6 +19,7 @@ from authorization.services import assign_role, create_role
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
+from evaluations.testing import evaluations_feature
 from events.models import Season
 from members.models import Member
 from teams.models import Position, StaffAssignment, Team
@@ -97,8 +98,9 @@ class PermissionModelTests(TestCase):
         self.assertEqual((owner["can_manage_members"], owner["can_manage_settings"]), (True, True))
 
     def test_evaluations_need_their_own_permission(self):
+        self.enterContext(evaluations_feature())
         with schema_context(self.club.schema_name):
-            role = create_role("Evaluator", ["members.execute_evaluations"])
+            role = create_role("Evaluator", ["evaluations.execute_evaluations"])
             assign_role(self.users["assistant"], role)
         me = lambda key: self.call("get", "/me", self.users[key]).json()  # noqa: E731
         self.assertTrue(me("assistant")["can_execute_evaluations"])

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 CATEGORY = "shop"
 DEFAULT_LANGUAGE = "nl"
+EMAIL_KINDS = ("placed", "ready")  # these also get the club-branded email (shop.services.emails)
 
 TEXTS = {
     "nl": {
@@ -77,7 +78,9 @@ def send(kind: str, order, extra: dict | None = None) -> int:
     member = order.purchaser
     language = _lang(member.language)
     told = 0
-    for user, child in recipients.recipients(member):
+    mail_to = []  # (user, on behalf of, language) for the branded email of the placed / ready events
+    entries = recipients.recipients(member)
+    for user, child in entries:
         # a guardian reads in their own language
         from members.models import Member
 
@@ -92,8 +95,22 @@ def send(kind: str, order, extra: dict | None = None) -> int:
         if child is not None:
             title = recipients.on_behalf_title(title, child)
         inbox.notify(user, club, title=title, body=body, href=f"/shop/orders/{order.pk}", push=True, category=CATEGORY)
+        mail_to.append((user, child, _lang(own or language)))
         told += 1
+    if kind in EMAIL_KINDS:
+        if not entries:  # no login to notify: still mail a purchaser who has an address
+            mail_to.append((None, None, language))
+        _email(kind, order, extra, mail_to)
     return told
+
+
+def _email(kind: str, order, extra: dict | None, mail_to: list) -> None:
+    from shop.services import emails
+
+    try:
+        emails.send_order_emails(kind, order, extra, mail_to)
+    except Exception:  # an email problem never fails the notification
+        logger.exception("shop.email_failed %s", kind)
 
 
 def dispatch(kind: str, order_id, extra: dict | None = None) -> None:

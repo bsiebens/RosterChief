@@ -217,3 +217,49 @@ class ClubSettingsApiTests(TestCase):
             with mock.patch("club.previews.render_pdf", return_value=b"%PDF-1.7 fake"):
                 r = self.admin("get", "/previews/sample_pdf/file")
                 self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+
+    # -- shop previews (only for clubs with the shop feature) --
+
+    def with_shop(self):
+        from features.entitlements import Entitlement, Entitlements
+
+        shop = Entitlements({"shop": Entitlement(True)})
+        for target in ("features.middleware.entitlements_for_request", "features.context.get_current_entitlements"):
+            patcher = mock.patch(target, side_effect=lambda *a, **k: shop)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_shop_previews_hidden_without_the_shop_feature(self):
+        keys = [i["key"] for i in self.admin("get", "/previews").json()]
+        self.assertFalse(set(keys) & previews.SHOP_KEYS)
+        for key in previews.SHOP_KEYS:
+            self.assertEqual(self.admin("get", f"/previews/{key}/html").status_code, 404)
+
+    def test_shop_previews_listed_and_rendered_with_the_shop_feature(self):
+        from urllib.parse import unquote
+
+        self.with_shop()
+        self.admin("patch", "", {"name": "Brand FC", "primary_color": "#123456"})
+        items = {i["key"]: i for i in self.admin("get", "/previews").json()}
+        self.assertEqual({k for k in items if k in previews.SHOP_KEYS}, {"shop_order_registered", "shop_order_ready", "shop_invoice"})
+        self.assertEqual((items["shop_order_registered"]["kind"], items["shop_order_ready"]["kind"], items["shop_invoice"]["kind"]), ("email", "email", "pdf"))
+        self.assertIn("PDF", items["shop_order_ready"]["description"])
+        for lang, word in (("en", "Thanks for your order"), ("nl", "Bedankt voor je bestelling"), ("fr", "Merci pour votre commande")):
+            r = self.admin("get", f"/previews/shop_order_registered/html?lang={lang}")
+            self.assertEqual(r.status_code, 200, r.content[:300])
+            html = r.content.decode()
+            self.assertIn(word, html)
+            self.assertIn("#123456", html)
+            self.assertIn("Brand FC", unquote(r["X-Preview-Subject"]))
+        ready = self.admin("get", "/previews/shop_order_ready/html?lang=nl").content.decode()
+        self.assertIn("Tuesday 18:00", ready)
+        self.assertIn("bijlage", ready)
+        invoice = self.admin("get", "/previews/shop_invoice/html")
+        self.assertEqual(invoice.status_code, 200, invoice.content[:300])
+        html = invoice.content.decode()
+        for text in ("INV-2026-0017", "Payments received", "Voucher V-0003", "Cash", "Member discount", "7 DOE"):
+            self.assertIn(text, html)
+        with mock.patch("club.previews.render_pdf", return_value=b"%PDF-1.7 fake"):
+            r = self.admin("get", "/previews/shop_invoice/file")
+            self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+        self.assertEqual(self.admin("get", "/previews/shop_order_ready/file").status_code, 404)

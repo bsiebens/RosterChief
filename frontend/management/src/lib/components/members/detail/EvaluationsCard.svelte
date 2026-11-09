@@ -1,76 +1,111 @@
 <script lang="ts">
-	import { ClipboardCheck, Star } from '@lucide/svelte';
+	import { enhance } from '$app/forms';
+	import { ClipboardCheck, Star, Trash2 } from '@lucide/svelte';
+	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
+	import { answerShown, evaluateHref, fmt, num, overall, type ChecklistItem, type EvaluationOut } from '#lib/evaluations.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import { mockEvaluations } from '#lib/members/mock.ts';
 
-	/** Sample content: the list of coach evaluations with the five skill scores. */
-	const evaluations = mockEvaluations();
-	const latest = evaluations[0];
-	const history = [...evaluations].reverse();
-	const bar = (v: number) => (v / 5) * 100;
-	// Line chart: scores 0-5 up the side, evaluations oldest to newest across.
-	const y = (v: number) => 120 - (v / 5) * 100;
-	const points = history.map((e, i) => ({ id: e.id, overall: e.overall, label: formatDate(e.date).replace(/,? \d{4}$/, ''), x: history.length === 1 ? 160 : 50 + (i * 220) / (history.length - 1), y: y(e.overall) }));
+	/**
+	 * A member's evaluations, newest first, from every checklist: the latest scores, the average over time and the timeline with every
+	 * answer. Only rendered for someone with the execute permission (the API refuses anyone else). `canManage` may delete any evaluation,
+	 * everyone else only the ones they gave themselves.
+	 */
+	let { evaluations, checklists, memberId, myMemberId = null, canManage = false, error = false }: { evaluations: EvaluationOut[]; checklists: ChecklistItem[]; memberId: string; myMemberId?: string | null; canManage?: boolean; error?: boolean } = $props();
+
+	const latest = $derived(evaluations[0]);
+	const numeric = $derived(latest ? latest.answers.filter((a) => a.field_type === 'number' && num(a.value) !== null) : []);
+	const points = $derived(
+		[...evaluations]
+			.reverse()
+			.map((e) => ({ id: e.id, label: formatDate(e.submitted_at).replace(/,? \d{4}$/, ''), value: overall(e) }))
+			.filter((p): p is { id: string; label: string; value: number } => p.value !== null)
+	);
+	const usable = $derived(checklists.filter((c) => c.is_active && c.criteria_count > 0));
+	const mayDelete = (e: EvaluationOut) => canManage || (!!myMemberId && e.evaluator?.id === myMemberId);
 </script>
 
-<div class="grid gap-4 lg:grid-cols-[22rem_1fr]">
+<div class="grid gap-4 {latest || points.length ? 'lg:grid-cols-[22rem_1fr]' : ''}">
+	{#if latest || points.length}
 	<div class="grid content-start gap-4">
-		<div class="card card-body sample-stripes">
-			<h2 class="card-title"><Star size={18} /> {t('profile.eval.latest')}</h2>
-			<div class="flex items-end gap-3">
-				<span class="font-display text-5xl font-extrabold text-ink">{latest.overall.toFixed(1)}</span>
-				<span class="pb-1.5 text-sm text-muted">/ 5 · {t('profile.eval.overall')}</span>
+		{#if latest}
+			<div class="card card-body">
+				<h2 class="card-title"><Star size={18} /> {t('profile.eval.latest')}</h2>
+				<p class="text-sm text-muted">{latest.checklist.name} · {formatDate(latest.submitted_at)}</p>
+				{#if overall(latest) !== null}
+					<div class="flex items-end gap-3">
+						<span class="font-display text-5xl font-extrabold text-ink">{fmt(overall(latest) ?? 0)}</span>
+						<span class="pb-1.5 text-sm text-muted">{t('profile.eval.average')}</span>
+					</div>
+				{/if}
+				{#if numeric.length}
+					<ul class="mt-2 grid gap-2">
+						{#each numeric as a (a.field_id)}
+							<li class="flex items-center justify-between text-sm"><span class="text-muted">{a.label}</span><span class="font-mono text-xs font-semibold text-ink">{fmt(num(a.value) ?? 0)}</span></li>
+						{/each}
+					</ul>
+				{/if}
 			</div>
-			<ul class="mt-2 grid gap-2.5">
-				{#each latest.scores as s (s.key)}
-					<li>
-						<div class="flex items-center justify-between text-sm"><span class="text-muted">{t(`profile.eval.skill.${s.key}`)}</span><span class="font-mono text-xs font-semibold text-ink">{s.value.toFixed(1)}</span></div>
-						<div class="mt-1 h-2 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full bg-club" style="width: {bar(s.value)}%"></div></div>
-					</li>
-				{/each}
-			</ul>
-		</div>
-
-		<div class="card card-body sample-stripes">
-			<h2 class="card-title text-base">{t('profile.eval.trend')}</h2>
-			<svg viewBox="0 0 300 150" class="w-full" role="img" aria-label={t('profile.eval.trend')}>
-				{#each [1, 2, 3, 4, 5] as g (g)}
-					<line x1="28" x2="292" y1={y(g)} y2={y(g)} class="stroke-line" stroke-width="1" />
-					<text x="20" y={y(g) + 3.5} text-anchor="end" class="fill-muted font-mono" font-size="10">{g}</text>
-				{/each}
-				<polyline points={points.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" class="stroke-club" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
-				{#each points as p (p.id)}
-					<circle cx={p.x} cy={p.y} r="4.5" class="fill-club stroke-white" stroke-width="2" />
-					<text x={p.x} y={p.y - 10} text-anchor="middle" class="fill-ink font-mono" font-size="11" font-weight="700">{p.overall.toFixed(1)}</text>
-					<text x={p.x} y="146" text-anchor="middle" class="fill-muted" font-size="10">{p.label}</text>
-				{/each}
-			</svg>
-		</div>
+		{/if}
+		{#if points.length}
+			<div class="card card-body">
+				<h2 class="card-title text-base">{t('profile.eval.trend')}</h2>
+				<TrendChart {points} label={t('profile.eval.trend')} />
+			</div>
+		{/if}
 	</div>
+	{/if}
 
-	<div class="card card-body sample-stripes">
+	<div class="card card-body">
 		<div class="flex items-center justify-between gap-2">
 			<h2 class="card-title"><ClipboardCheck size={18} /> {t('profile.eval.title')}</h2>
-			<button class="btn btn-outline btn-sm" type="button" disabled>{t('profile.eval.add')}</button>
+			{#if usable.length === 1}
+				<a class="btn btn-outline btn-sm" href={evaluateHref(usable[0].id, memberId)}>{t('profile.eval.add')}</a>
+			{:else if usable.length > 1}
+				<details class="dropdown dropdown-end">
+					<summary class="btn btn-outline btn-sm">{t('profile.eval.add')}</summary>
+					<ul class="dropdown-content menu z-10 mt-1 w-56 rounded-lg border border-line bg-white p-1 shadow">
+						{#each usable as c (c.id)}<li><a href={evaluateHref(c.id, memberId)}>{c.name}</a></li>{/each}
+					</ul>
+				</details>
+			{/if}
 		</div>
-		<ol class="relative mt-2 grid gap-5 border-l-2 border-line pl-6">
-			{#each evaluations as e (e.id)}
-				<li class="relative">
-					<span class="absolute top-1.5 -left-[1.9rem] h-3 w-3 rounded-full border-2 border-white bg-club ring-1 ring-club"></span>
-					<div class="flex flex-wrap items-center justify-between gap-2">
-						<div>
-							<p class="font-semibold text-ink">{formatDate(e.date)} <span class="font-normal text-muted">· {e.team} · {e.season}</span></p>
-							<p class="text-sm text-muted">{t('profile.eval.by', { name: e.evaluator })}</p>
+		{#if error}
+			<p class="mt-2 text-sm text-error">{t('common.error.generic')}</p>
+		{:else if !evaluations.length}
+			<p class="mt-2 text-sm text-muted">{usable.length ? t('profile.eval.empty') : t('profile.eval.empty_no_checklist')}</p>
+		{:else}
+			<ol class="relative mt-2 grid gap-5 border-l-2 border-line pl-6">
+				{#each evaluations as e (e.id)}
+					{@const avg = overall(e)}
+					<li class="relative">
+						<span class="absolute top-1.5 -left-[1.9rem] h-3 w-3 rounded-full border-2 border-white bg-club ring-1 ring-club"></span>
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<div>
+								<p class="font-semibold text-ink">{formatDate(e.submitted_at)} <span class="font-normal text-muted">· {e.checklist.name} · {e.season.name}</span></p>
+								<p class="text-sm text-muted">{e.evaluator ? t('profile.eval.by', { name: e.evaluator.name }) : t('profile.eval.by_unknown')}</p>
+							</div>
+							<div class="flex items-center gap-2">
+								{#if avg !== null}<span class="badge badge-neutral gap-1"><Star size={12} /> {fmt(avg)}</span>{/if}
+								{#if mayDelete(e)}
+									<form method="POST" action="?/deleteEvaluation" use:enhance={({ cancel }) => { if (!confirm(t('profile.eval.delete_confirm'))) cancel(); }}>
+										<input type="hidden" name="evaluation_id" value={e.id} />
+										<button class="btn btn-ghost btn-xs btn-square" type="submit" aria-label={t('profile.eval.delete')}><Trash2 size={13} /></button>
+									</form>
+								{/if}
+							</div>
 						</div>
-						<span class="badge badge-neutral gap-1"><Star size={12} /> {e.overall.toFixed(1)}</span>
-					</div>
-					<div class="mt-2 flex flex-wrap gap-1.5">
-						{#each e.scores as s (s.key)}<span class="badge badge-sm badge-outline">{t(`profile.eval.skill.${s.key}`)} <span class="ml-1 font-mono">{s.value}</span></span>{/each}
-					</div>
-					<p class="mt-2 rounded-lg bg-surface p-3 text-sm text-slate">{e.comment}</p>
-				</li>
-			{/each}
-		</ol>
+						<div class="mt-2 flex flex-wrap gap-1.5">
+							{#each e.answers.filter((a) => a.field_type !== 'textarea' && a.field_type !== 'text') as a (a.field_id)}
+								<span class="badge badge-sm badge-outline">{a.label} <span class="ml-1 font-mono">{answerShown(a, t('common.yes'), t('common.no'))}</span></span>
+							{/each}
+						</div>
+						{#each e.answers.filter((a) => a.field_type === 'textarea' || a.field_type === 'text') as a (a.field_id)}
+							<p class="mt-2 rounded-lg bg-surface p-3 text-sm text-slate"><span class="mb-0.5 block text-xs font-semibold text-muted">{a.label}</span>{String(a.value)}</p>
+						{/each}
+					</li>
+				{/each}
+			</ol>
+		{/if}
 	</div>
 </div>

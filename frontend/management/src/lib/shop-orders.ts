@@ -228,7 +228,7 @@ export async function browserApi<T>(method: string, path: string, body?: unknown
 }
 
 /** A usable voucher this order's purchaser can pay with: their own, someone in their family's, or a general one. */
-export type AvailableVoucher = { id: string; number: string; scope: 'own' | 'family' | 'general'; issued_to: { id: string; name: string } | null; available_amount: string; expiry_date: string; notes: string };
+export type AvailableVoucher = { id: string; number: string; scope: 'own' | 'beneficiary' | 'family' | 'general'; issued_to: { id: string; name: string } | null; available_amount: string; expiry_date: string; notes: string };
 
 /** The result of an invoice action (rebuilding the PDF) to show as a note. */
 export type InvoiceOutcome = { kind: 'done' | 'failed'; message: string };

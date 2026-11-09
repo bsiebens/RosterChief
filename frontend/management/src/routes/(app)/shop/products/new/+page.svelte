@@ -62,9 +62,10 @@
 		</div>
 		<section class="card card-body gap-3 xl:sticky xl:top-20">
 			<p class="text-sm text-muted">{t('shop.product.new_help')}</p>
-			<div class="flex flex-wrap gap-2">
-				<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.product.create')}</button>
-				<a class="btn btn-outline" href="/shop/products">{t('common.cancel')}</a>
+			<p class="text-xs text-muted">{t('shop.attach.hint')}</p>
+			<div class="grid gap-2">
+				<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.product.create')}</button>
+				<a class="btn btn-outline w-full" href="/shop/products">{t('common.cancel')}</a>
 			</div>
 		</section>
 	</div>

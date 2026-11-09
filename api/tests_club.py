@@ -14,6 +14,7 @@ from PIL import Image
 from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
+from evaluations.testing import evaluations_feature
 from members.models import Member
 from teams.models import Team
 
@@ -146,6 +147,7 @@ class ClubApiTests(TestCase):
     # -- /me --
 
     def test_me_permissions_and_admin_flag(self):
+        self.enterContext(evaluations_feature())
         r = self.get("/me", user=self.owner)
         self.assertEqual(r.status_code, 200, r.content)
         body = r.json()

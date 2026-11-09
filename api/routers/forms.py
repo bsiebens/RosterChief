@@ -33,7 +33,7 @@ def _ref(member) -> dict | None:
 
 
 def _field(f) -> dict:
-    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options}
+    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options, "min_value": f.min_value, "max_value": f.max_value}
 
 
 def _form_item(f) -> dict:
@@ -49,7 +49,7 @@ def _form_detail(form_id) -> dict:
 
 
 def _get_form(form_id) -> Form:
-    f = Form.objects.filter(pk=form_id).first()
+    f = Form.objects.filter(pk=form_id, evaluation_checklist__isnull=True).first()
     if f is None:
         raise HttpError(404, "Not found.")
     return f
@@ -252,7 +252,7 @@ def report_csv(request, send_id: uuid.UUID):
 @submissions_router.delete("/{submission_id}", response={204: None}, summary="Delete a response", operation_id="delete_form_submission")
 def delete_submission(request, submission_id: uuid.UUID):
     _gate(request)
-    submission = Submission.objects.filter(pk=submission_id).first()
+    submission = Submission.objects.filter(pk=submission_id, player_evaluation__isnull=True).first()  # evaluations are removed through /evaluations
     if submission is None:
         raise HttpError(404, "Not found.")
     svc.delete_submission(request.user, submission)
