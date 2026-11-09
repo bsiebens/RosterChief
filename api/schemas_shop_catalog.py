@@ -97,7 +97,21 @@ class ProductAttachmentOut(Schema):
     created: datetime.datetime
 
 
+class RegistrantTier(Schema):
+    min_registrants: int = Field(ge=2)
+    discount_type: str
+    discount_amount: Decimal = Field(max_digits=10, decimal_places=2)
+
+
 class ProductDetail(ProductItem):
+    #: Registration pricing (membership products; ``None`` / empty / defaults for everything else).
+    season_id: uuid.UUID | None = None
+    season_name: str | None = None
+    early_bird_discount_type: str = ""
+    early_bird_discount_amount: Money = Decimal("0.00")
+    early_bird_deadline: datetime.date | None = None
+    registrant_discount_scope: str = "per_person"
+    registrant_tiers: list[RegistrantTier] = []
     variants: list[VariantOut]
     order_line_count: int
     #: The gallery in display order (exactly one ``is_main`` when there is a picture) and the product's files (e.g. a size guide).
@@ -132,6 +146,12 @@ class ProductIn(Schema):
     is_public: bool = True
     personalization_enabled: bool = False
     inventory_managed: bool = False
+    season_id: uuid.UUID | None = None
+    early_bird_discount_type: str = ""
+    early_bird_discount_amount: Decimal = Field(Decimal("0"), max_digits=10, decimal_places=2)
+    early_bird_deadline: datetime.date | None = None
+    registrant_discount_scope: str = "per_person"
+    registrant_tiers: list[RegistrantTier] = []
     variants: list[VariantRowIn] = []
 
 
@@ -145,3 +165,9 @@ class ProductPatch(Schema):
     is_public: bool | None = None
     personalization_enabled: bool | None = None
     inventory_managed: bool | None = None
+    season_id: uuid.UUID | None = None
+    early_bird_discount_type: str | None = None
+    early_bird_discount_amount: Decimal | None = Field(None, max_digits=10, decimal_places=2)
+    early_bird_deadline: datetime.date | None = None
+    registrant_discount_scope: str | None = None
+    registrant_tiers: list[RegistrantTier] | None = None

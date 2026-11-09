@@ -62,6 +62,9 @@ def _detail(product_id) -> dict:
     levels = _levels([p])
     return {
         **_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count(),
+        "season_id": p.season_id, "season_name": p.season.name if p.season else None, "early_bird_discount_type": p.early_bird_discount_type,
+        "early_bird_discount_amount": p.early_bird_discount_amount, "early_bird_deadline": p.early_bird_deadline, "registrant_discount_scope": p.registrant_discount_scope,
+        "registrant_tiers": [{"min_registrants": t.min_registrants, "discount_type": t.discount_type, "discount_amount": t.discount_amount} for t in p.registrant_tiers.all()],
         "images": [{"id": i.pk, "url": i.image.url, "is_main": i.is_main, "ordering": i.ordering, "alt": i.alt} for i in p.images.all()],
         "attachments": [{"id": a.pk, "title": a.title, "name": a.name, "url": a.file.url, "size": a.size, "content_type": a.content_type, "created": a.created} for a in p.attachments.all()],
     }  # fmt: skip
@@ -79,6 +82,18 @@ def _get_variant(product_id, variant_id) -> ProductVariant:
     if v is None:
         raise HttpError(404, "Not found.")
     return v
+
+
+def _season(season_id):
+    if season_id is None:
+        return None
+    from events.models import Season
+    from members.services.errors import Invalid
+
+    season = Season.objects.filter(pk=season_id).first()
+    if season is None:
+        raise Invalid("Unknown season.", {"season_id": ["Unknown season."]})
+    return season
 
 
 def _category(category_id):
@@ -165,6 +180,7 @@ def create_product(request, payload: ProductIn):
     _write(request)
     data = payload.dict()
     category = _category(data.pop("category_id"))
+    data["season"] = _season(data.pop("season_id"))
     product = svc.create_product(request.user, category=category, **data)
     return 201, _detail(product.pk)
 
@@ -181,7 +197,9 @@ def update_product(request, product_id: uuid.UUID, payload: ProductPatch):
     data = payload.dict(exclude_unset=True)
     if "category_id" in data:
         data["category"] = _category(data.pop("category_id"))
-    data = {k: v for k, v in data.items() if v is not None or k == "category"}
+    if "season_id" in data:
+        data["season"] = _season(data.pop("season_id"))
+    data = {k: v for k, v in data.items() if v is not None or k in ("category", "season", "early_bird_deadline")}
     svc.update_product(request.user, _get_product(product_id), **data)
     return _detail(product_id)
 

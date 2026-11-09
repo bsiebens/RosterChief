@@ -13,7 +13,10 @@ from shop.models import Discount, DiscountType, InventoryMovement, Product, Prod
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}
-PRODUCT_FIELDS = ("name", "category", "description", "price", "product_type", "is_active", "is_public", "personalization_enabled", "inventory_managed")
+PRODUCT_FIELDS = (
+    "name", "category", "description", "price", "product_type", "is_active", "is_public", "personalization_enabled", "inventory_managed",
+    "season", "early_bird_discount_type", "early_bird_discount_amount", "early_bird_deadline", "registrant_discount_scope",
+)  # fmt: skip
 
 
 def _check_price(price, field="price"):
@@ -58,7 +61,7 @@ def delete_category(actor, category) -> None:
 
 
 def products_queryset():
-    return Product.objects.select_related("category").prefetch_related("variants", "images", "attachments")
+    return Product.objects.select_related("category", "season").prefetch_related("variants", "images", "attachments", "registrant_tiers")
 
 
 def _validate_product(product):
@@ -67,10 +70,45 @@ def _validate_product(product):
         raise Invalid("Only merchandise can be inventory managed.", {"inventory_managed": ["Only merchandise can be inventory managed."]})
     if product.inventory_managed is False and product.pk and InventoryMovement.objects.filter(product=product).exists():
         pass  # switching stock keeping off keeps the history
+    if product.product_type != Product.ProductType.MEMBERSHIP and (product.season_id or product.early_bird_discount_type):
+        raise Invalid("Season and early-bird discount are only for membership products.", {"season_id": ["Only for membership products."]})
+    if product.early_bird_discount_type:
+        if product.early_bird_discount_amount is None or product.early_bird_discount_amount <= 0:
+            raise Invalid("The early-bird discount needs an amount.", {"early_bird_discount_amount": ["Must be more than zero."]})
+        if product.early_bird_deadline is None:
+            raise Invalid("The early-bird discount needs a deadline.", {"early_bird_deadline": ["Required."]})
+        if product.early_bird_discount_type == "percentage" and product.early_bird_discount_amount > 100:
+            raise Invalid("A percentage cannot be above 100.", {"early_bird_discount_amount": ["At most 100."]})
+    if not product.early_bird_discount_type:
+        product.early_bird_discount_amount, product.early_bird_deadline = 0, None
+
+
+def set_registrant_tiers(product, tiers) -> None:
+    """Replace the product's registrant discount tiers (``[{min_registrants, discount_type, discount_amount}]``); membership products only."""
+    from shop.models import ProductRegistrantDiscountTier
+
+    tiers = list(tiers or [])
+    if tiers and product.product_type != Product.ProductType.MEMBERSHIP:
+        raise Invalid("Registrant discounts are only for membership products.", {"registrant_tiers": ["Only for membership products."]})
+    seen = set()
+    for i, tier in enumerate(tiers):
+        n, kind, amount = tier["min_registrants"], tier["discount_type"], tier["discount_amount"]
+        errors = {}
+        if n < 2 or n in seen:
+            errors[f"registrant_tiers.{i}.min_registrants"] = ["Must be 2 or more and unique."]
+        if kind not in ("percentage", "fixed_amount"):
+            errors[f"registrant_tiers.{i}.discount_type"] = ["Invalid choice."]
+        if amount <= 0 or (kind == "percentage" and amount > 100):
+            errors[f"registrant_tiers.{i}.discount_amount"] = ["Invalid amount."]
+        if errors:
+            raise Invalid("Check the registrant discounts.", errors)
+        seen.add(n)
+    product.registrant_tiers.all().delete()
+    ProductRegistrantDiscountTier.objects.bulk_create([ProductRegistrantDiscountTier(product=product, **t) for t in tiers])
 
 
 @transaction.atomic
-def create_product(actor, *, variants=(), **fields) -> Product:
+def create_product(actor, *, variants=(), registrant_tiers=None, **fields) -> Product:
     access.require_manage_shop_products(actor)
     product = Product(**{k: v for k, v in fields.items() if k in PRODUCT_FIELDS})
     if not product.name.strip():
@@ -79,12 +117,15 @@ def create_product(actor, *, variants=(), **fields) -> Product:
     product.save()
     for i, v in enumerate(variants):
         _add_variant(product, ordering=i, **v)
+    if registrant_tiers:
+        set_registrant_tiers(product, registrant_tiers)
     return product
 
 
 @transaction.atomic
 def update_product(actor, product, **fields) -> Product:
     access.require_manage_shop_products(actor)
+    tiers = fields.pop("registrant_tiers", None)
     for k, v in fields.items():
         if k in PRODUCT_FIELDS:
             setattr(product, k, v)
@@ -92,6 +133,10 @@ def update_product(actor, product, **fields) -> Product:
         raise Invalid("A name is required.", {"name": ["Required."]})
     _validate_product(product)
     product.save()
+    if tiers is not None:
+        set_registrant_tiers(product, tiers)
+    elif product.product_type != Product.ProductType.MEMBERSHIP:
+        product.registrant_tiers.all().delete()  # a product no longer a membership keeps no registration pricing
     return product
 
 

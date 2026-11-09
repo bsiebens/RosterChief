@@ -1,0 +1,196 @@
+"""The billing review of a registration (ported from the old ``registration.services.invoicing``).
+
+Until staff confirm a batch its memberships are hidden from the Sign-ups queue (``awaiting_membership_ids``). In the review staff can edit a line's
+price, leave a line out and give a manual discount with a note; ``recompute`` writes the result back onto each membership's ``fee_amount``
+(idempotent: always derived from the lines, never from earlier deltas). Confirming numbers the invoice, sets its due date, places the chosen teams
+and emails the invoice (PDF) to the contact. Everything here needs ``members.manage_members``.
+"""
+
+import datetime
+from decimal import Decimal
+
+from django.db import transaction
+from django.utils import timezone
+
+from members.models import ClubMembership, Member
+from members.services import audit
+from members.services import memberships as fees
+from members.services.access import require_admin
+from members.services.errors import Invalid
+from registration.models import RegistrationBatch, RegistrationDetails
+from registration.services import config
+from teams.models import TeamMembership
+
+CENT = Decimal("0.01")
+
+
+def awaiting_membership_ids() -> set:
+    """Ids of the memberships that belong to a registration staff have not confirmed (or cancelled) yet."""
+    return set(RegistrationDetails.objects.filter(batch__confirmed_at__isnull=True, batch__cancelled_at__isnull=True).values_list("membership_id", flat=True))
+
+
+def _editable(batch: RegistrationBatch) -> None:
+    if batch.cancelled_at:
+        raise Invalid("This registration was cancelled.", {"__all__": ["This registration was cancelled."]}, code="cancelled")
+    if batch.confirmed_at:
+        raise Invalid("The invoice is already confirmed.", {"__all__": ["The invoice is already confirmed."]}, code="confirmed")
+
+
+def subtotal(batch: RegistrationBatch) -> Decimal:
+    return sum((d.price for d in batch.details.all()), Decimal("0.00"))
+
+
+def total(batch: RegistrationBatch) -> Decimal:
+    return max(subtotal(batch) - batch.manual_discount_amount, Decimal("0.00"))
+
+
+def recompute(actor, batch: RegistrationBatch) -> None:
+    """Write line prices minus the manual discount (spread in proportion to the lines) onto every membership's fee."""
+    details = list(batch.details.select_related("membership"))
+    base = sum((d.price for d in details), Decimal("0.00"))
+    discount = min(batch.manual_discount_amount, base)
+    shares, given = {}, Decimal("0.00")
+    for d in details:
+        share = (discount * d.price / base).quantize(CENT) if base else Decimal("0.00")
+        shares[d.pk] = share
+        given += share
+    if details and discount:
+        shares[details[0].pk] += discount - given  # the cents that rounding left over
+    for d in details:
+        m = d.membership
+        fee = max(d.price - shares[d.pk], Decimal("0.00"))
+        changes = audit.diff(m, {"fee_amount": fee, "early_payment_discount": min(m.early_payment_discount, fee)})
+        if changes:
+            m.fee_amount, m.early_payment_discount = fee, min(m.early_payment_discount, fee)
+            m.save(update_fields=["fee_amount", "early_payment_discount", "modified"])
+            changes.update(fees.sync_fee_status(m))
+            audit.record(actor, "membership.updated", member=m.member, target=m, changes=changes, target_label=f"{m.season} - {m.member}")
+
+
+@transaction.atomic
+def update_review(actor, batch: RegistrationBatch, *, lines=None, manual_discount_amount=None, manual_discount_note=None) -> RegistrationBatch:
+    """Edit the review: ``lines`` = ``[{id, price (a number, or null to go back to the computed price), excluded}]`` (only the keys present change)."""
+    require_admin(actor)
+    _editable(batch)
+    by_id = {d.pk: d for d in batch.details.all()}
+    errors = {}
+    for i, row in enumerate(lines or []):
+        d = by_id.get(row["id"])
+        if d is None:
+            errors[f"lines.{i}.id"] = ["Not a line of this registration."]
+            continue
+        if "price" in row.keys():
+            price = row["price"]
+            if price is not None and price < 0:
+                errors[f"lines.{i}.price"] = ["Can't be negative."]
+                continue
+            d.price_override = fees.money(price) if price is not None else None
+        if row.get("excluded") is not None:
+            d.excluded = bool(row["excluded"])
+        d.save(update_fields=["price_override", "excluded", "modified"])
+    if manual_discount_amount is not None:
+        try:
+            amount = fees.money(manual_discount_amount)
+        except Invalid:
+            errors["manual_discount_amount"] = ["Invalid amount."]
+        else:
+            if amount > subtotal(batch):
+                errors["manual_discount_amount"] = ["More than the registration costs."]
+            batch.manual_discount_amount = amount
+    if manual_discount_note is not None:
+        batch.manual_discount_note = manual_discount_note.strip()[:255]
+    if errors:
+        raise Invalid("Check the review.", errors)
+    batch.save(update_fields=["manual_discount_amount", "manual_discount_note", "modified"])
+    recompute(actor, batch)
+    return batch
+
+
+def _next_number(today: datetime.date) -> str:
+    """``REG-<year>-0001`` ...: per club, unique, and race-free because the settings row is locked while numbering."""
+    settings_row = config.get_settings()
+    type(settings_row).objects.select_for_update().get(pk=settings_row.pk)
+    prefix = f"REG-{today.year}-"
+    taken = [int(n[len(prefix) :]) for n in RegistrationBatch.objects.filter(invoice_number__startswith=prefix).values_list("invoice_number", flat=True) if n[len(prefix) :].isdigit()]
+    return f"{prefix}{max(taken, default=0) + 1:04d}"
+
+
+def _place_requested_teams(actor, batch: RegistrationBatch) -> None:
+    """Best effort: roster everybody on the team they asked for. A jersey number that is taken or out of range is dropped, not an error."""
+    from teams.services import teams as team_services
+
+    for d in batch.details.select_related("member", "requested_team", "requested_position"):
+        team = d.requested_team
+        if team is None or d.excluded or TeamMembership.objects.filter(team=team, season=batch.season, member=d.member).exists():
+            continue
+        number = d.requested_jersey_number
+        try:
+            team_services._check_number(team, batch.season, d.member, number)
+        except Invalid:
+            number = None
+        spot = TeamMembership.objects.create(team=team, member=d.member, season=batch.season, position=d.requested_position, jersey_number=number)
+        d.resulting_team_membership = spot
+        d.save(update_fields=["resulting_team_membership", "modified"])
+        audit.record(actor, "team.roster_added", member=d.member, target=spot, target_label=f"{d.member} - {team.name}")
+
+
+@transaction.atomic
+def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date | None = None, send: bool = True) -> RegistrationBatch:
+    """Number the invoice, set its due date, roster the requested teams and (unless ``send`` is false) email the invoice. After this the
+    memberships show up in the Sign-ups queue and the review can no longer be edited."""
+    require_admin(actor)
+    _editable(batch)
+    today = timezone.localdate()
+    recompute(actor, batch)
+    batch.invoice_number = _next_number(today)
+    batch.invoice_due_date = due_date or today + datetime.timedelta(days=config.get_settings().invoice_due_days)
+    batch.confirmed_at = timezone.now()
+    batch.save(update_fields=["invoice_number", "invoice_due_date", "confirmed_at", "modified"])
+    _place_requested_teams(actor, batch)
+    for d in batch.details.select_related("member", "membership"):
+        audit.record(actor, "registration.confirmed", member=d.member, target=batch, changes={"invoice_number": {"from": None, "to": batch.invoice_number}}, target_label=batch.invoice_number)
+    if send:
+        from registration.services import notifications
+
+        transaction.on_commit(lambda: notifications.send_invoice(batch.pk))
+    return batch
+
+
+def _removable(membership: ClubMembership) -> bool:
+    """A person who is nothing but this unpaid registration (no other season, no login, no payment) is deleted on cancel."""
+    member = membership.member
+    return fees.can_delete_membership(membership) and not member.user_id and not ClubMembership.objects.filter(member=member).exclude(pk=membership.pk).exists()
+
+
+@transaction.atomic
+def cancel_batch(actor, batch: RegistrationBatch) -> RegistrationBatch:
+    """Turn the whole registration down. Each person who is nothing but this registration is removed together with the roster spot and family link
+    it created; anyone else keeps their record and only the membership is cancelled (payments stay). The contact goes too when nothing else
+    keeps them (no membership, login or other family member)."""
+    require_admin(actor)
+    if batch.cancelled_at:
+        raise Invalid("This registration was cancelled.", {"__all__": ["Already cancelled."]}, code="cancelled")
+    from members.models import Family
+    from members.services import members as member_services
+
+    contact = batch.contact
+    for d in list(batch.details.select_related("membership", "member", "resulting_team_membership")):
+        m = d.membership
+        if m.status != ClubMembership.StatusChoices.PENDING:
+            continue
+        if _removable(m):
+            member_services.delete_member(actor, d.member)
+        else:
+            if d.resulting_team_membership_id:
+                d.resulting_team_membership.delete()
+            fees.cancel(actor, m)
+    if contact is not None and Member.objects.filter(pk=contact.pk).exists() and not contact.user_id and not ClubMembership.objects.filter(member=contact).exists():
+        families = list(Family.objects.filter(memberships__member=contact))
+        if all(not f.memberships.exclude(member=contact).exists() for f in families):
+            for f in families:
+                f.delete()
+            member_services.delete_member(actor, contact)
+            batch.contact = None
+    batch.cancelled_at = timezone.now()
+    batch.save(update_fields=["cancelled_at", "modified"])
+    return batch

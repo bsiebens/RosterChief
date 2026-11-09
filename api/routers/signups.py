@@ -6,7 +6,7 @@ import uuid
 from ninja import Router
 from ninja.errors import HttpError
 
-from api.schemas_signups import ApproveAllIn, ApproveAllOut, CancelOut, PlaceIn, PlaceOut, SignupListOut, SignupOptionsOut, SignupOut, SignupSummaryOut
+from api.schemas_signups import ApproveAllIn, ApproveAllOut, CancelOut, DuplicatesOut, LinkIn, PlaceIn, PlaceOut, SignupListOut, SignupOptionsOut, SignupOut, SignupSummaryOut
 from events.models import Season
 from members.models import ClubMembership
 from members.services import access, signups
@@ -36,6 +36,17 @@ def _membership(membership_id) -> ClubMembership:
     return m
 
 
+def _registration(d) -> dict | None:
+    if d is None:
+        return None
+    contact = d.batch.contact
+    return {
+        "registration_id": d.batch_id, "entry_kind": d.entry_kind, "invoice_number": d.batch.invoice_number, "contact_name": str(contact) if contact else None, "contact_email": contact.email if contact else None,
+        "requested_team_id": d.requested_team_id, "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_id": d.requested_position_id,
+        "requested_position_name": d.requested_position.name if d.requested_position else None, "requested_jersey_number": d.requested_jersey_number, "product": d.description,
+    }  # fmt: skip
+
+
 def _out(row: dict) -> dict:
     m: ClubMembership = row["membership"]
     return {
@@ -43,7 +54,7 @@ def _out(row: dict) -> dict:
         "member": {"id": m.member_id, "name": m.member.get_full_name(), "email": m.member.email, "date_of_birth": m.member.date_of_birth, "has_login": row["has_login"]},
         "season_id": m.season_id, "season_name": m.season.name, "fee_status": m.fee_status, "fee_amount": m.fee_amount, "amount_paid": m.amount_paid,
         "remaining_balance": row["remaining_balance"], "signed_up_at": m.signed_up_at, "open_requirements": row["open_requirements"], "clean": row["clean"],
-        "teams": [{"id": t.pk, "name": t.name} for t in row["teams"]],
+        "teams": [{"id": t.pk, "name": t.name} for t in row["teams"]], "registration": _registration(row.get("registration")),
     }  # fmt: skip
 
 
@@ -99,3 +110,28 @@ def cancel(request, membership_id: uuid.UUID):
     """A person who is nothing but this unpaid sign-up is removed; anyone else keeps their record and the membership is cancelled."""
     _gate(request)
     return {"result": signups.cancel(request.user, _membership(membership_id))}
+
+
+@router.get("/{membership_id}/duplicates", response=DuplicatesOut, summary="People who may be the same as this sign-up (admin)", operation_id="signup_duplicates")
+def duplicates(request, membership_id: uuid.UUID):
+    """Same email, or same name (and birthday when both are known). Public registrations never match an existing person by themselves."""
+    from registration.services import linking
+
+    _gate(request)
+    rows = linking.possible_duplicates(_membership(membership_id))
+    return {"results": [{"member_id": r["member"].pk, "name": r["member"].get_full_name(), "email": r["member"].email, "date_of_birth": r["member"].date_of_birth, "same_email": r["same_email"], "has_membership": r["has_membership"]} for r in rows]}
+
+
+@router.post("/{membership_id}/link", response=SignupOut, summary="Merge this sign-up into an existing member (admin)", operation_id="link_signup")
+def link(request, membership_id: uuid.UUID, payload: LinkIn):
+    """The pending membership, family links and roster spots move to the existing member; the duplicate person is removed. 422 ``already_member``
+    when they already have a membership this season."""
+    from members.models import Member
+    from registration.services import linking
+
+    _gate(request)
+    existing = Member.objects.filter(pk=payload.member_id).first()
+    if existing is None:
+        raise Invalid("Unknown member.", {"member_id": ["Unknown member."]})
+    membership = linking.link_to_existing_member(request.user, _membership(membership_id), existing)
+    return _out(signups.describe(ClubMembership.objects.select_related("member", "season").get(pk=membership.pk)))

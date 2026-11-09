@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ batch.invoice_number }}</title>
+<style>
+@page { size: A4; margin: 20mm; @bottom-center { content: "{{ batch.invoice_number }} - " counter(page) " / " counter(pages); font-size: 8pt; color: #666; } }
+body { font-family: sans-serif; font-size: 10pt; color: #111; }
+h1 { font-size: 20pt; margin: 0 0 2mm; }
+.muted { color: #666; }
+.accent { color: {{ club.primary_color|default:"#4f46e5" }}; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10mm; }
+.logo { height: 16mm; width: 16mm; object-fit: contain; margin-right: 4mm; }
+.brand { display: flex; align-items: center; font-weight: bold; font-size: 12pt; }
+.right { text-align: right; }
+table { width: 100%; border-collapse: collapse; margin-top: 6mm; }
+th { text-align: left; font-size: 8.5pt; text-transform: uppercase; color: #666; border-bottom: 1.5px solid #111; padding: 2mm; }
+td { padding: 2.5mm 2mm; border-bottom: 1px solid #ddd; vertical-align: top; }
+.num { text-align: right; white-space: nowrap; }
+.total td { font-weight: bold; border-top: 2px solid #111; border-bottom: 0; }
+.discount td { color: #b91c1c; }
+.box { margin-top: 10mm; padding: 4mm; background: #f4f4f5; white-space: pre-line; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand">{% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="">{% endif %}<div>{{ club.legal_name|default:club.name }}</div></div>
+  <div class="right"><h1 class="accent">Invoice</h1><strong>{{ batch.invoice_number }}</strong>
+    <div class="muted">Issued {{ issued|date:"j F Y" }}</div>
+    {% if batch.invoice_due_date %}<div class="muted">Due {{ batch.invoice_due_date|date:"j F Y" }}</div>{% endif %}</div>
+</div>
+{% if contact %}<div><strong>{{ contact }}</strong>{% if contact.email %}<br>{{ contact.email }}{% endif %}</div>{% endif %}
+<table>
+<thead><tr><th>Person</th><th>Registration</th><th class="num">Amount</th></tr></thead>
+<tbody>
+{% for l in lines %}<tr><td>{{ l.name }}</td><td>{{ l.description }}</td><td class="num">{{ l.amount }}</td></tr>{% endfor %}
+{% if discount %}<tr class="discount"><td colspan="2">Discount{% if discount_note %}: {{ discount_note }}{% endif %}</td><td class="num">-{{ discount }}</td></tr>{% endif %}
+<tr class="total"><td colspan="2">Total</td><td class="num">{{ total }}</td></tr>
+</tbody>
+</table>
+{% if payment_instructions %}<div class="box"><strong>How to pay</strong><br>{{ payment_instructions }}</div>{% endif %}
+</body>
+</html>

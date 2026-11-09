@@ -136,7 +136,7 @@
 		</div>
 		<fieldset class="grid gap-1.5">
 			<legend class="label-text mb-1">{t('req.f.blocks')}</legend>
-			<div class="flex flex-wrap gap-x-4 gap-y-1.5">
+			<div class="grid grid-flow-col grid-cols-2 grid-rows-3 gap-x-4 gap-y-1.5">
 				{#each EVENT_KINDS as k (k)}
 					<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" name="blocked_event_kinds" value={k} checked={kinds.includes(k)} onchange={(e) => toggleKind(k, e.currentTarget.checked)} /> {t(`eventform.kind.${k}`)}</label>
 				{/each}

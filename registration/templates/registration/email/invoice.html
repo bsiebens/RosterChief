@@ -1,0 +1,18 @@
+{% extends "club/email/layout.html" %}
+{% block heading %}{{ t.heading }}{% endblock %}
+{% block intro %}{{ t.hello }}<br>{{ t.intro }}{% endblock %}
+{% block details %}
+      <tr><td style="padding:0 32px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;line-height:1.5;color:#334155;">
+          {% for l in lines %}<tr><td style="padding:8px 0;border-bottom:1px solid #f1f5f9;"><strong style="color:#0f172a;">{{ l.name }}</strong><br><span style="color:#64748b;">{{ l.description }}</span></td><td align="right" style="padding:8px 0;border-bottom:1px solid #f1f5f9;white-space:nowrap;">{{ l.amount }}</td></tr>{% endfor %}
+          {% if discount %}<tr><td style="padding:8px 0;color:#b91c1c;">{{ t.discount }}{% if discount_note %}: {{ discount_note }}{% endif %}</td><td align="right" style="padding:8px 0;color:#b91c1c;white-space:nowrap;">-{{ discount }}</td></tr>{% endif %}
+          <tr><td style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;">{{ t.total }}</td><td align="right" style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;white-space:nowrap;">{{ total }}</td></tr>
+        </table>
+        {% if due %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.due }}</p>{% endif %}
+        {% for line in t.early_lines %}<p style="margin:6px 0 0;font-size:13px;color:#15803d;">{{ line }}</p>{% endfor %}
+      </td></tr>
+      {% if how_to_pay %}
+      <tr><td style="padding:16px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;"><tr><td style="padding:14px 18px;font-size:14px;line-height:1.6;color:#334155;"><strong style="color:#0f172a;">{{ t.how_to_pay }}</strong><br><span style="white-space:pre-line;">{{ how_to_pay }}</span></td></tr></table></td></tr>
+      {% endif %}
+      <tr><td style="padding:16px 32px 0;font-size:13px;"><a href="{{ status_url }}" style="color:{{ primary }};font-weight:600;">{{ t.button }}</a></td></tr>
+{% endblock %}

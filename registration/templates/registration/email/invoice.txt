@@ -1,0 +1,19 @@
+{% autoescape off %}{{ t.hello }}
+
+{{ t.intro }}
+
+{% for l in lines %}- {{ l.name }} ({{ l.description }}): {{ l.amount }}
+{% endfor %}{% if discount %}- {{ t.discount }}{% if discount_note %} ({{ discount_note }}){% endif %}: -{{ discount }}
+{% endif %}{{ t.total }}: {{ total }}
+{% if due %}{{ t.due }}
+{% endif %}{% for line in t.early_lines %}{{ line }}
+{% endfor %}{% if how_to_pay %}
+{{ t.how_to_pay }}:
+{{ how_to_pay }}
+{% endif %}
+{{ t.button }}: {{ status_url }}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

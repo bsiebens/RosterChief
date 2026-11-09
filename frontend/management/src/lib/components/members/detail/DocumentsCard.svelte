@@ -24,11 +24,11 @@
 		missing: { badge: 'badge-ghost', tint: 'text-muted', icon: FileX }
 	};
 	const detail = (i: ChecklistItem) => {
-		if (i.display === 'expired') return t('doc.d.expired', { date: formatDate(i.valid_until ?? '') });
-		if (i.display === 'expiring_soon') return t('doc.d.expiring_soon', { date: formatDate(i.valid_until ?? ''), n: i.days_left ?? 0 });
-		if (i.display === 'complete') return i.valid_until ? t('doc.d.valid_until', { date: formatDate(i.valid_until) }) : t('doc.d.complete', { date: formatDate(i.completed_at ?? '') });
-		if (i.display === 'bypassed') return i.note ? `${t('doc.d.bypassed')}: ${i.note}` : t('doc.d.bypassed');
-		return t('doc.d.missing');
+		if (i.display === 'expired') return t('req.doc.d.expired', { date: formatDate(i.valid_until ?? '') });
+		if (i.display === 'expiring_soon') return t('req.doc.d.expiring_soon', { date: formatDate(i.valid_until ?? ''), n: i.days_left ?? 0 });
+		if (i.display === 'complete') return i.valid_until ? t('req.doc.d.valid_until', { date: formatDate(i.valid_until) }) : t('req.doc.d.complete', { date: formatDate(i.completed_at ?? '') });
+		if (i.display === 'bypassed') return i.note ? `${t('req.doc.d.bypassed')}: ${i.note}` : t('req.doc.d.bypassed');
+		return t('req.doc.d.missing');
 	};
 
 	let completeFor = $state<ChecklistItem | null>(null);
@@ -53,27 +53,27 @@
 <div class="card card-body">
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div>
-			<h2 class="card-title"><FileText size={18} /> {t('doc.title')}</h2>
-			{#if membership}<p class="text-sm text-muted">{t('doc.subtitle', { season: membership.season.name })}{#if checklist?.total} · {t('doc.progress', { done: checklist.done, total: checklist.total })}{/if}</p>{/if}
+			<h2 class="card-title"><FileText size={18} /> {t('req.doc.title')}</h2>
+			{#if membership}<p class="text-sm text-muted">{t('req.doc.subtitle', { season: membership.season.name })}{#if checklist?.total} · {t('req.doc.progress', { done: checklist.done, total: checklist.total })}{/if}</p>{/if}
 		</div>
 		{#if checklist?.total}
 			<div class="flex flex-wrap items-center gap-2">
-				{#if checklist.expired}<span class="badge badge-error badge-sm">{t('doc.expired_n', { n: checklist.expired })}</span>{/if}
-				{#if checklist.expiring}<span class="badge badge-warning badge-sm">{t('doc.expiring_n', { n: checklist.expiring })}</span>{/if}
+				{#if checklist.expired}<span class="badge badge-error badge-sm">{t('req.doc.expired_n', { n: checklist.expired })}</span>{/if}
+				{#if checklist.expiring}<span class="badge badge-warning badge-sm">{t('req.doc.expiring_n', { n: checklist.expiring })}</span>{/if}
 				<div class="h-2 w-40 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full bg-club" style="width: {(checklist.done / checklist.total) * 100}%"></div></div>
 			</div>
 		{/if}
 	</div>
 
-	{#if saved}<Alert kind="success">{t('doc.saved')}</Alert>{/if}
-	{#if errText && !completeOpen && !bypassOpen}<Alert kind="error" title={t('doc.failed')}>{errText}</Alert>{/if}
+	{#if saved}<Alert kind="success">{t('req.doc.saved')}</Alert>{/if}
+	{#if errText && !completeOpen && !bypassOpen}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 
 	{#if !membership}
-		<p class="mt-3 text-sm text-muted">{t('doc.no_membership')}</p>
+		<p class="mt-3 text-sm text-muted">{t('req.doc.no_membership')}</p>
 	{:else if !items.length}
-		<p class="mt-3 text-sm text-muted">{canManage ? t('doc.none_manage') : t('doc.none')} {#if canManage}<a class="link" href="/settings/requirements">{t('doc.manage_link')}</a>{/if}</p>
+		<p class="mt-3 text-sm text-muted">{canManage ? t('req.doc.none_manage') : t('req.doc.none')} {#if canManage}<a class="link" href="/settings/requirements">{t('req.doc.manage_link')}</a>{/if}</p>
 	{:else}
-		<ul class="mt-3 grid gap-3 lg:grid-cols-2">
+		<ul class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 			{#each items as i (i.requirement.id)}
 				{@const l = look[i.display]}
 				<li class="grid gap-2 rounded-lg border border-line p-3.5">
@@ -83,72 +83,72 @@
 							<p class="truncate font-semibold text-ink" title={i.requirement.description}>{i.requirement.name}</p>
 							<p class="truncate text-xs text-muted">{detail(i)}</p>
 						</div>
-						<span class="badge badge-sm shrink-0 {l.badge}">{t(`doc.status.${i.display}`)}</span>
+						<span class="badge badge-sm shrink-0 {l.badge}">{t(`req.doc.status.${i.display}`)}</span>
 					</div>
 					{#if canManage}
-						<div class="flex flex-wrap gap-1.5">
-							{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('doc.download')}</a>{/if}
-							<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'complete' || i.display === 'expiring_soon' ? t('doc.renew') : t('doc.receive')}</button>
-							{#if i.display === 'missing' || i.display === 'expired'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('doc.bypass')}</button>{/if}
+						<div class="flex flex-wrap justify-end gap-1.5">
+							{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('req.doc.download')}</a>{/if}
 							{#if i.display !== 'missing'}
-								<form method="POST" action="?/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('doc.reopen_confirm'))) cancel(); }}>
+								<form method="POST" action="?/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
 									<input type="hidden" name="membership_id" value={membership.id} />
 									<input type="hidden" name="requirement_id" value={i.requirement.id} />
-									<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t('doc.reopen')}</button>
+									<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t('req.doc.reopen')}</button>
 								</form>
 							{/if}
+							{#if i.display === 'missing' || i.display === 'expired'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('req.doc.bypass')}</button>{/if}
+							<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'complete' || i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.receive')}</button>
 						</div>
 					{/if}
 				</li>
 			{/each}
 		</ul>
-		{#if canManage}<p class="mt-2 text-xs"><a class="link inline-flex items-center gap-1 text-muted" href="/settings/requirements"><Settings2 size={12} /> {t('doc.manage_link')}</a></p>{/if}
+		{#if canManage}<p class="mt-3 text-sm"><a class="link inline-flex items-center gap-1.5 font-semibold" href="/settings/requirements"><Settings2 size={14} aria-hidden="true" /> {t('req.doc.manage_link')}</a></p>{/if}
 	{/if}
 </div>
 
 {#if membership}
-	<Modal bind:open={completeOpen} title={t('doc.complete_title', { name: completeFor?.requirement.name ?? '' })}>
+	<Modal bind:open={completeOpen} title={t('req.doc.complete_title', { name: completeFor?.requirement.name ?? '' })}>
 		<form method="POST" action="?/completeRequirement" enctype="multipart/form-data" class="grid gap-3" use:enhance={submit(() => (completeOpen = false))}>
 			<input type="hidden" name="membership_id" value={membership.id} />
 			<input type="hidden" name="requirement_id" value={completeFor?.requirement.id ?? ''} />
-			{#if errText}<Alert kind="error" title={t('doc.failed')}>{errText}</Alert>{/if}
+			{#if errText}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 			<div class="form-control">
-				<label class="label" for="doc-file"><span class="label-text">{t('doc.file')}{#if completeFor?.requirement.requires_document && !completeFor?.has_document}<span class="text-error" aria-hidden="true"> *</span>{/if}</span></label>
+				<label class="label" for="doc-file"><span class="label-text">{t('req.doc.file')}{#if completeFor?.requirement.requires_document && !completeFor?.has_document}<span class="text-error" aria-hidden="true"> *</span>{/if}</span></label>
 				<input id="doc-file" name="document" type="file" class="file-input file-input-bordered w-full {fieldErr('document') ? 'file-input-error' : ''}" />
-				<span class="label-text-alt mt-1 block">{completeFor?.has_document ? t('doc.file_keep') : completeFor?.requirement.requires_document ? t('doc.file_required') : t('doc.file_help')}</span>
+				<span class="label-text-alt mt-1 block">{completeFor?.has_document ? t('req.doc.file_keep') : completeFor?.requirement.requires_document ? t('req.doc.file_required') : t('req.doc.file_help')}</span>
 				{#if fieldErr('document')}<span class="mt-1 block text-xs text-error">{fieldErr('document')}</span>{/if}
 			</div>
 			<div class="form-control">
-				<label class="label" for="doc-until"><span class="label-text">{t('doc.valid_until')}</span></label>
+				<label class="label" for="doc-until"><span class="label-text">{t('req.doc.valid_until')}</span></label>
 				<input id="doc-until" name="valid_until" type="date" class="input input-bordered w-full {fieldErr('valid_until') ? 'input-error' : ''}" />
-				<span class="label-text-alt mt-1 block">{completeFor?.requirement.valid_for_months ? t('doc.valid_until_default', { n: completeFor.requirement.valid_for_months }) : t('doc.valid_until_help')}</span>
+				<span class="label-text-alt mt-1 block">{completeFor?.requirement.valid_for_months ? t('req.doc.valid_until_default', { n: completeFor.requirement.valid_for_months }) : t('req.doc.valid_until_help')}</span>
 				{#if fieldErr('valid_until')}<span class="mt-1 block text-xs text-error">{fieldErr('valid_until')}</span>{/if}
 			</div>
 			<div class="form-control">
-				<label class="label" for="doc-note"><span class="label-text">{t('doc.note')}</span></label>
+				<label class="label" for="doc-note"><span class="label-text">{t('req.doc.note')}</span></label>
 				<textarea id="doc-note" name="note" class="textarea textarea-bordered w-full" rows="2"></textarea>
-				<span class="label-text-alt mt-1 block">{t('doc.note_help')}</span>
+				<span class="label-text-alt mt-1 block">{t('req.doc.note_help')}</span>
 			</div>
 			<div class="modal-action mt-2 flex justify-end gap-2">
 				<button class="btn btn-outline" type="button" onclick={() => (completeOpen = false)}>{t('common.cancel')}</button>
-				<button class="btn btn-primary" type="submit" disabled={busy}>{t('doc.save')}</button>
+				<button class="btn btn-primary" type="submit" disabled={busy}>{t('req.doc.save')}</button>
 			</div>
 		</form>
 	</Modal>
 
-	<Modal bind:open={bypassOpen} title={t('doc.bypass_title', { name: bypassFor?.requirement.name ?? '' })}>
+	<Modal bind:open={bypassOpen} title={t('req.doc.bypass_title', { name: bypassFor?.requirement.name ?? '' })}>
 		<form method="POST" action="?/bypassRequirement" class="grid gap-3" use:enhance={submit(() => (bypassOpen = false))}>
 			<input type="hidden" name="membership_id" value={membership.id} />
 			<input type="hidden" name="requirement_id" value={bypassFor?.requirement.id ?? ''} />
-			{#if errText && !fieldErr('note')}<Alert kind="error" title={t('doc.failed')}>{errText}</Alert>{/if}
+			{#if errText && !fieldErr('note')}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 			<div class="form-control">
-				<label class="label" for="doc-bypass-note"><span class="label-text">{t('doc.bypass_note')} <span class="text-error" aria-hidden="true">*</span></span></label>
+				<label class="label" for="doc-bypass-note"><span class="label-text">{t('req.doc.bypass_note')} <span class="text-error" aria-hidden="true">*</span></span></label>
 				<textarea id="doc-bypass-note" name="note" class="textarea textarea-bordered w-full {fieldErr('note') ? 'textarea-error' : ''}" rows="2" required></textarea>
 				{#if fieldErr('note')}<span class="mt-1 block text-xs text-error">{fieldErr('note')}</span>{/if}
 			</div>
 			<div class="modal-action mt-2 flex justify-end gap-2">
 				<button class="btn btn-outline" type="button" onclick={() => (bypassOpen = false)}>{t('common.cancel')}</button>
-				<button class="btn btn-primary" type="submit" disabled={busy}>{t('doc.save')}</button>
+				<button class="btn btn-primary" type="submit" disabled={busy}>{t('req.doc.save')}</button>
 			</div>
 		</form>
 	</Modal>

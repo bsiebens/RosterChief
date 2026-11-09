@@ -70,7 +70,9 @@ def _queryset():
         & (Q(requirement_statuses__is_bypassed=True) | Q(requirement_statuses__is_complete=True) & (Q(requirement_statuses__valid_until__isnull=True) | Q(requirement_statuses__valid_until__gte=timezone.localdate()))),
         distinct=True,
     )
-    return ClubMembership.objects.select_related("member", "season").prefetch_related("payments").annotate(open_count=Value(active) - resolved)
+    from registration.services.invoicing import awaiting_membership_ids
+
+    return ClubMembership.objects.exclude(pk__in=awaiting_membership_ids()).select_related("member", "season").prefetch_related("payments").annotate(open_count=Value(active) - resolved)
 
 
 def _fresh(pk) -> ClubMembership:
@@ -143,7 +145,9 @@ def summary(request, season: UUID | None = None):
     chosen = _season_param(season)
     counts = {"total": 0, "paid": 0, "partially_paid": 0, "unpaid": 0, "waived": 0}
     if chosen:
-        qs = ClubMembership.objects.filter(season=chosen).exclude(status=ClubMembership.StatusChoices.CANCELLED)
+        from registration.services.invoicing import awaiting_membership_ids
+
+        qs = ClubMembership.objects.filter(season=chosen).exclude(status=ClubMembership.StatusChoices.CANCELLED).exclude(pk__in=awaiting_membership_ids())  # unconfirmed registrations are not billed yet
         counts = qs.aggregate(
             total=Count("pk"),
             paid=Count("pk", filter=Q(fee_status=Fee.PAID)),

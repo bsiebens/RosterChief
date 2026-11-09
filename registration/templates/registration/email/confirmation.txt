@@ -1,0 +1,14 @@
+{% autoescape off %}{{ t.hello }}
+
+{{ t.intro }}
+
+{{ t.people }}:
+{% for p in people %}- {{ p }}
+{% endfor %}
+{{ t.button }}: {{ status_url }}
+{{ t.next }}
+
+--
+{{ club_name }}
+{{ t.footer }}
+{% endautoescape %}

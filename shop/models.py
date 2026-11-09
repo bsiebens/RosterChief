@@ -1,5 +1,5 @@
-"""Club shop (one schema per club, so no club FK anywhere). Ported from the old site's ``shop`` app minus carts,
-registration pricing (registrant tiers, early bird, season, staff role) which v2 does not have yet."""
+"""Club shop (one schema per club, so no club FK anywhere). Ported from the old site's ``shop`` app minus carts.
+Membership products also carry the registration pricing (season, early bird, registrant tiers) used by public registration."""
 
 import secrets
 
@@ -101,6 +101,10 @@ class Product(UUIDModel):
         EVENT_FEE = "event_fee", _("Event fee")
         MERCHANDISE = "merchandise", _("Merchandise")
 
+    class RegistrantDiscountScope(models.TextChoices):
+        PER_PERSON = "per_person", _("Per person")
+        PER_ORDER = "per_order", _("Once per registration")
+
     name = models.CharField(_("name"), max_length=255)
     slug = models.SlugField(_("slug"), max_length=255, unique=True, blank=True)
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, related_name="products", verbose_name=_("category"), blank=True, null=True)
@@ -111,6 +115,13 @@ class Product(UUIDModel):
     is_active = models.BooleanField(_("is active?"), default=True)
     is_public = models.BooleanField(_("is public?"), default=True, help_text=_("Non-public products are only visible to staff for adding to an order."))
     personalization_enabled = models.BooleanField(_("personalization enabled?"), default=False)
+    #: Membership products only (public registration): the season the fee is for, a discount that only applies when the fee is paid on
+    #: or before a deadline, and how a discount for registering several people at once (the tiers) is applied.
+    season = models.ForeignKey("events.Season", on_delete=models.SET_NULL, related_name="membership_products", null=True, blank=True, verbose_name=_("season"))
+    early_bird_discount_type = models.CharField(_("early-bird discount type"), max_length=20, choices=DiscountType.choices, blank=True, default="")
+    early_bird_discount_amount = models.DecimalField(_("early-bird discount"), max_digits=10, decimal_places=2, default=0)
+    early_bird_deadline = models.DateField(_("early-bird deadline"), null=True, blank=True)
+    registrant_discount_scope = models.CharField(_("registrant discount scope"), max_length=20, choices=RegistrantDiscountScope.choices, default=RegistrantDiscountScope.PER_PERSON)
     #: Bought in bulk and counted (InventoryMovement) instead of made to order: orders draw down stock and skip production.
     inventory_managed = models.BooleanField(_("inventory managed?"), default=False)
 
@@ -136,6 +147,28 @@ class Product(UUIDModel):
     def clean(self):
         if self.inventory_managed and self.product_type != self.ProductType.MERCHANDISE:
             raise ValidationError({"inventory_managed": _("Only merchandise can be inventory managed.")})
+        if self.product_type != self.ProductType.MEMBERSHIP and (self.season_id or self.early_bird_discount_type):
+            raise ValidationError(_("Season and early-bird discount are only for membership products."))
+        if self.early_bird_discount_type and (self.early_bird_deadline is None or self.early_bird_discount_amount <= 0):
+            raise ValidationError({"early_bird_deadline": _("An early-bird discount needs an amount and a deadline.")})
+
+
+class ProductRegistrantDiscountTier(UUIDModel):
+    """Registering at least ``min_registrants`` people at once earns this discount on the membership product (see ``Product.registrant_discount_scope``)."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="registrant_tiers", verbose_name=_("product"))
+    min_registrants = models.PositiveSmallIntegerField(_("minimum registrants"))
+    discount_type = models.CharField(_("discount type"), max_length=20, choices=DiscountType.choices, default=DiscountType.FIXED_AMOUNT)
+    discount_amount = models.DecimalField(_("discount"), max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("registrant discount tier")
+        verbose_name_plural = _("registrant discount tiers")
+        ordering = ["min_registrants"]
+        constraints = [UniqueConstraint(fields=["product", "min_registrants"], name="unique_registrant_tier_per_product")]
+
+    def __str__(self):
+        return f"{self.product} - {self.min_registrants}+"
 
 
 class ProductImage(UUIDModel):

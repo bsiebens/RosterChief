@@ -33,11 +33,16 @@ def current_season() -> Season | None:
 
 
 def pending(season: Season | None):
-    """Pending memberships of ``season`` (the current one by default), newest sign-up first."""
+    """Pending memberships of ``season`` (the current one by default), newest sign-up first. A public registration whose invoice staff have not
+    confirmed yet is left out (the billing review comes first, see ``registration.services.invoicing``)."""
+    from registration.services.invoicing import awaiting_membership_ids
+
     season = season or current_season()
     if season is None:
         return ClubMembership.objects.none()
-    return ClubMembership.objects.filter(season=season, status=Status.PENDING).select_related("member", "season").order_by("-signed_up_at", "member__last_name", "member__first_name")
+    qs = ClubMembership.objects.filter(season=season, status=Status.PENDING).exclude(pk__in=awaiting_membership_ids())
+    qs = qs.select_related("member", "season", "registration_details__batch__contact", "registration_details__requested_team", "registration_details__requested_position")
+    return qs.order_by("-signed_up_at", "member__last_name", "member__first_name")
 
 
 def is_clean(membership: ClubMembership) -> bool:
@@ -52,8 +57,10 @@ def describe(membership: ClubMembership) -> dict:
     open_items = onboarding.unresolved(membership)
     settled = membership.fee_status in (FeeStatus.PAID, FeeStatus.WAIVED)
     teams = list(TeamMembership.objects.filter(member=membership.member, season=membership.season).select_related("team").order_by("team__name"))
+    details = getattr(membership, "registration_details", None)  # None for a sign-up that did not come from the public registration page
     return {
         "membership": membership,
+        "registration": details,
         "open_requirements": [r.name for r in open_items],
         "clean": settled and not open_items,
         "remaining_balance": fees.remaining_balance(membership),

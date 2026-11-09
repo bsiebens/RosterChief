@@ -28,9 +28,11 @@ from .routers import notifications_inbox as notifications_router
 from .routers import officiating_levels as officiating_levels_router
 from .routers import overview as overview_router
 from .routers import public_forms as public_forms_router
+from .routers import public_registration as public_registration_router
 from .routers import public_news as public_news_router
 from .routers import public_stats as public_stats_router
 from .routers import referees as referees_router
+from .routers import registrations as registrations_router
 from .routers import requirements as requirements_router
 from .routers import roles as roles_router
 from .routers import shop_catalog as shop_catalog_router
@@ -97,6 +99,9 @@ api.add_router("/members", member_stats_router.router, tags=["members"])
 api.add_router("/public", public_stats_router.router, tags=["public"])
 api.add_router("/public/news", public_news_router.router, tags=["public"])
 api.add_router("/public/forms", public_forms_router.router, tags=["public"])
+api.add_router("/public/registration", public_registration_router.router, tags=["public"])
+api.add_router("/registrations", registrations_router.router, tags=["registrations"])
+api.add_router("/registration", registrations_router.settings_router, tags=["registrations"])
 api.add_router("/events", analytics_router.events_router, tags=["analytics"])
 api.add_router("", team_settings_router.router, tags=["team settings"])
 api.add_router("", event_subtypes_router.router, tags=["event subtypes"])
