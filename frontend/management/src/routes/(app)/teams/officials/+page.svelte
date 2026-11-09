@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { Search, UserCheck, X } from '@lucide/svelte';
@@ -16,7 +17,11 @@
 	// svelte-ignore state_referenced_locally
 	let q = $state(data.filters.q);
 	$effect(() => {
-		if (f.q !== q.trim()) q = f.q;
+		const external = f.q;
+		// react to the URL changing (clear, back), never to what is being typed
+		untrack(() => {
+			if (external !== q.trim()) q = external;
+		});
 	});
 
 	const levels = $derived(f.kind === 'referee' ? data.refereeLevels : f.kind === 'official' ? data.officialLevels : [...data.refereeLevels, ...data.officialLevels]);
@@ -64,7 +69,7 @@
 				<option value="expired">{t('officials.valid_expired')}</option>
 			</select>
 			{#if hasFilters}
-				<a class="btn btn-outline gap-2" href="?" onclick={(e) => { e.preventDefault(); navigate('?'); }}><X size={14} /> {t('officials.clear')}</a>
+				<a class="btn btn-outline gap-2" href="?" onclick={(e) => { e.preventDefault(); navigate('?'); }}><X size={14} /> {t('common.clear_filters')}</a>
 			{/if}
 		</div>
 		<div class="flex-1"></div>

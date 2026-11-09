@@ -297,7 +297,7 @@
 	</div>
 
 	<div class="card card-body">
-		<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('teams.card.numbers')}{#if numbers?.pool} <span class="font-mono text-xs font-normal text-muted">· {numbers.pool.name} ({numbers.pool.min_number}–{numbers.pool.max_number})</span>{/if}</h2>
+		<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('teams.card.numbers')}{#if numbers?.pool}<span class="ml-1.5 font-mono text-xs font-normal text-muted">· {numbers.pool.name} ({numbers.pool.min_number}–{numbers.pool.max_number})</span>{/if}</h2>
 		{#if !team.pool_id}
 			<p class="text-sm text-muted">{t('teams.num.no_pool')}</p>
 		{:else if !numbers?.pool}

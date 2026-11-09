@@ -291,7 +291,7 @@
             {t('events.cal.f.mine')}
         </label>
         {#if filtered}<a class="btn btn-outline btn-sm gap-2" href={link({ team: null, location: null, opponent: null, kind: null, mine: null })} data-sveltekit-noscroll>
-            <X size={14}/> {t('members.list.clear')}</a>{/if}
+            <X size={14}/> {t('common.clear_filters')}</a>{/if}
         <div class="flex-1"></div>
         <ul class="hidden flex-wrap items-center gap-x-3 gap-y-1 xl:flex" aria-label={t('events.cal.legend')}>
             {#each EVENT_KINDS as k (k)}

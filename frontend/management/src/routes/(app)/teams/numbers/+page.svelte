@@ -66,7 +66,7 @@
 			<option value="">{t('teams.numbers.all_pools')}</option>
 			{#each data.pools as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
 		</select>
-		{#if filtered}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('members.list.clear')}</a>{/if}
+		{#if filtered}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('common.clear_filters')}</a>{/if}
 		<div class="flex-1"></div>
 		<NumberLegend statuses={STATUS_ORDER} />
 	</div>

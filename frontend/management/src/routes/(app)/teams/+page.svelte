@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
@@ -43,7 +44,11 @@
 	// svelte-ignore state_referenced_locally
 	let q = $state(data.filters.q);
 	$effect(() => {
-		if (data.filters.q !== q.trim()) q = data.filters.q;
+		const external = data.filters.q;
+		// react to the URL changing (clear, back), never to what is being typed
+		untrack(() => {
+			if (external !== q.trim()) q = external;
+		});
 	});
 
 	const href = (patch: Partial<{ q: string; season: string; coach: string }>) => {
@@ -87,7 +92,7 @@
 			<option value="none">{t('teams.coach_none')}</option>
 		</select>
 		{#if filtered}
-			<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('members.list.clear')}</a>
+			<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('common.clear_filters')}</a>
 		{/if}
 	</div>
 

@@ -133,7 +133,7 @@
 				{#if s.opens_at || s.closes_at}
 					<p class="text-xs text-muted">
 						{#if s.opens_at}{t('forms.sends.from', { date: formatDateTime(s.opens_at) })}{/if}
-						{#if s.opens_at && s.closes_at} · {/if}
+						{#if s.opens_at && s.closes_at}{' '}·{' '}{/if}
 						{#if s.closes_at}{t('forms.sends.until', { date: formatDateTime(s.closes_at) })}{/if}
 					</p>
 				{/if}

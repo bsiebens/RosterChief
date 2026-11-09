@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { Search, X } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { FEE_STATUSES, STATUSES, hasActiveFilters, pageHref, type ListFilters, type SeasonOption, type TeamOption } from '#lib/members/list.ts';
@@ -26,7 +27,11 @@
 	let q = $state(filters.q);
 	// Keep the box in sync when the URL changes elsewhere (clear filters, back button).
 	$effect(() => {
-		if (filters.q !== q.trim()) q = filters.q;
+		const external = filters.q;
+		// react to the URL changing (clear, back), never to what is being typed
+		untrack(() => {
+			if (external !== q.trim()) q = external;
+		});
 	});
 	const pick = (key: keyof ListFilters) => (e: Event) => onnavigate(pageHref(filters, { [key]: (e.currentTarget as HTMLSelectElement).value }));
 </script>
@@ -64,7 +69,7 @@
 				onclick={(e) => {
 					e.preventDefault();
 					onnavigate('?');
-				}}><X size={14} /> {t('members.list.clear')}</a>
+				}}><X size={14} /> {t('common.clear_filters')}</a>
 		{/if}
 	</div>
 

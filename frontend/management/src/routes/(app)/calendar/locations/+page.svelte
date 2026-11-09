@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
@@ -22,7 +23,11 @@
 	// svelte-ignore state_referenced_locally
 	let q = $state(data.q);
 	$effect(() => {
-		if (data.q !== q.trim()) q = data.q;
+		const external = data.q;
+		// react to the URL changing (clear, back), never to what is being typed
+		untrack(() => {
+			if (external !== q.trim()) q = external;
+		});
 	});
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	function onType() {
@@ -56,7 +61,7 @@
 			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
 			<input type="search" aria-label={t('locations.search')} placeholder={t('locations.search_placeholder')} class="input w-full pl-9" bind:value={q} oninput={onType} />
 		</div>
-		{#if data.q}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('members.list.clear')}</a>{/if}
+		{#if data.q}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('common.clear_filters')}</a>{/if}
 	</div>
 
 	<div class="px-7 py-5">

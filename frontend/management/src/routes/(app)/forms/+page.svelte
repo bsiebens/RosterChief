@@ -2,9 +2,11 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ClipboardList, Copy, Lock, Pencil, Plus, Search, Send, Trash2, X } from '@lucide/svelte';
+	import { ClipboardList, Copy, Lock, Pencil, Plus, Send, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import Field from '#lib/components/Field.svelte';
+	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import { formatDay } from '#lib/events/types.ts';
@@ -14,12 +16,6 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
-	// svelte-ignore state_referenced_locally
-	let q = $state(data.filters.q);
-	$effect(() => {
-		if (data.filters.q !== q.trim()) q = data.filters.q;
-	});
-
 	const href = (patch: Partial<{ q: string; active: string; offset: number }>) => {
 		const f = { ...data.filters, ...('offset' in patch ? {} : { offset: 0 }), ...patch };
 		const sp = new URLSearchParams();
@@ -29,13 +25,9 @@
 		const qs = sp.toString();
 		return qs ? `?${qs}` : '?';
 	};
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	function onType() {
-		clearTimeout(timer);
-		timer = setTimeout(() => q.trim() !== data.filters.q && goto(href({ q: q.trim() }), { replace: true, reset: false }), 400);
-	}
+	const navigate = (to: string) => goto(to, { reset: false });
 	const filtered = $derived(!!data.filters.q || data.filters.active !== 'all');
-	const tabs = $derived([
+	const tabList = $derived([
 		{ key: 'all', label: t('forms.filter.all') },
 		{ key: 'active', label: t('forms.filter.active') },
 		{ key: 'inactive', label: t('forms.filter.inactive') }
@@ -70,21 +62,17 @@
 <svelte:head><title>{pageTitle(t('forms.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
-		<nav class="flex flex-wrap items-center gap-1" aria-label={t('forms.filter.label')}>
-			{#each tabs as tab (tab.key)}
-				<a
-					href={href({ active: tab.key })}
-					aria-current={data.filters.active === tab.key ? 'page' : undefined}
-					class="flex h-8 items-center rounded-md px-3 font-display text-xs font-bold tracking-[.08em] uppercase {data.filters.active === tab.key ? 'bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{tab.label}</a>
-			{/each}
-		</nav>
-		<div class="relative ml-auto" role="search">
-			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
-			<input type="search" aria-label={t('forms.search')} placeholder={t('forms.search_placeholder')} class="input w-64 pl-9" bind:value={q} oninput={onType} />
-		</div>
-		{#if filtered}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('forms.clear')}</a>{/if}
-	</div>
+	<ListFilterBar
+		value={data.filters.q}
+		searchLabel={t('forms.search')}
+		searchPlaceholder={t('forms.search_placeholder')}
+		onsearch={(q) => goto(href({ q }), { replace: true, reset: false })}
+		showClear={filtered}
+		onclear={() => navigate('?')}>
+		{#snippet tabs()}
+			<FilterTabs tabs={tabList} active={data.filters.active} label={t('forms.filter.label')} hrefFor={(key) => href({ active: key })} onnavigate={navigate} />
+		{/snippet}
+	</ListFilterBar>
 
 	<div class="grid gap-4 px-7 py-5">
 		{#if deleted}<Alert kind="success">{t('forms.deleted')}</Alert>{/if}

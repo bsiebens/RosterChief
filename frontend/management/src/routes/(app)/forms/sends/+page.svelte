@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ClipboardList, Eye } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import FilterTabs from '#lib/components/FilterTabs.svelte';
+	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import SendStatusBadge from '#lib/components/forms/SendStatusBadge.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
@@ -19,7 +22,8 @@
 		const qs = sp.toString();
 		return qs ? `?${qs}` : '?';
 	};
-	const tabs = $derived([
+	const navigate = (to: string) => goto(to, { reset: false });
+	const tabList = $derived([
 		{ key: 'open', label: t('forms.sends.tab.open') },
 		{ key: 'scheduled', label: t('forms.sends.tab.scheduled') },
 		{ key: 'closed', label: t('forms.sends.tab.closed') },
@@ -33,16 +37,11 @@
 <svelte:head><title>{pageTitle(t('forms.sends.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
-		<nav class="flex flex-wrap items-center gap-1" aria-label={t('forms.sends.tabs')}>
-			{#each tabs as tab (tab.key)}
-				<a
-					href={href({ tab: tab.key })}
-					aria-current={data.filters.tab === tab.key ? 'page' : undefined}
-					class="flex h-8 items-center rounded-md px-3 font-display text-xs font-bold tracking-[.08em] uppercase {data.filters.tab === tab.key ? 'bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{tab.label}</a>
-			{/each}
-		</nav>
-	</div>
+	<ListFilterBar>
+		{#snippet tabs()}
+			<FilterTabs tabs={tabList} active={data.filters.tab} label={t('forms.sends.tabs')} hrefFor={(key) => href({ tab: key })} onnavigate={navigate} />
+		{/snippet}
+	</ListFilterBar>
 	<div class="grid gap-4 px-7 py-5">
 		{#if deleted}<Alert kind="success">{t('forms.sends.deleted')}</Alert>{/if}
 		{#if data.error}

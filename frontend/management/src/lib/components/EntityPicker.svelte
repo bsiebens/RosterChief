@@ -88,9 +88,9 @@
 	<label class={compact ? 'sr-only' : 'label'} for={id}><span class="label-text">{label}</span></label>
 	<input type="hidden" {name} {value} />
 	{#if picked}
-		<div class="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2">
-			<span class="font-semibold text-ink">{picked.label}</span>
-			<button class="btn btn-ghost btn-xs" type="button" aria-label={t('common.clear')} onclick={clear}><X size={14} /></button>
+		<div class="flex h-9 items-center justify-between gap-2 rounded-lg border border-line bg-white px-3 text-sm">
+			<span class="min-w-0 truncate font-semibold text-ink">{picked.label}</span>
+			<button class="btn btn-ghost btn-xs shrink-0" type="button" aria-label={t('common.clear')} onclick={clear}><X size={14} /></button>
 		</div>
 	{:else}
 		<div class="relative">

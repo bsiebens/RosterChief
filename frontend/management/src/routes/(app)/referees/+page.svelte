@@ -160,7 +160,7 @@
 												<div class="font-semibold">{gameLabel(game)}</div>
 												<div class="font-mono text-xs text-muted">{fmtDay(game.start)} {fmtTime(game.start)}</div>
 											</td>
-											<td class="max-w-xs text-sm">{people(game)}{#if game.fees_pending} <span class="badge badge-xs badge-info">{t('referees.status.fees')}</span>{/if}</td>
+											<td class="max-w-xs text-sm">{people(game)}{#if game.fees_pending}<span class="badge badge-xs badge-info ml-1">{t('referees.status.fees')}</span>{/if}</td>
 											<td class="text-right font-mono font-semibold">{eur(game.total)}</td>
 											<td class="px-4"><div class="flex flex-wrap justify-end gap-1.5">
 												<button class="btn btn-outline btn-xs" type="button" onclick={() => openDrawer(game)}><Settings2 size={12} aria-hidden="true" /> {t('referees.manage')}</button>

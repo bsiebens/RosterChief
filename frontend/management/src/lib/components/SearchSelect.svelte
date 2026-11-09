@@ -79,7 +79,7 @@
 
 <div class="w-full min-w-0">
 	{#if picked}
-		<div class="flex min-h-9 items-center justify-between gap-2 rounded-lg border px-3 py-1.5 {error ? 'border-danger' : 'border-line'}">
+		<div class="flex h-9 items-center justify-between gap-2 rounded-lg border bg-white px-3 text-sm {error ? 'border-danger' : 'border-line'}">
 			<span class="min-w-0 truncate"><span class="font-semibold text-ink">{picked.label}</span>{#if picked.sub}<span class="ml-2 text-xs text-muted">{picked.sub}</span>{/if}{#if picked.badge}<span class="badge badge-sm badge-success ml-2">{picked.badge}</span>{/if}</span>
 			<button class="btn btn-ghost btn-xs btn-square shrink-0" type="button" aria-label={noneLabel || t('common.clear')} onclick={clear}><X size={14} /></button>
 		</div>

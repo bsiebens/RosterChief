@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Image as ImageIcon, Newspaper, Pencil, Plus, Search, X } from '@lucide/svelte';
+	import { Image as ImageIcon, Newspaper, Pencil, Plus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import FilterTabs from '#lib/components/FilterTabs.svelte';
+	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import NewsStatusBadge from '#lib/components/news/NewsStatusBadge.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
@@ -13,12 +15,6 @@
 
 	let { data } = $props();
 	const publisher = $derived(data.me.can_publish_news);
-	// svelte-ignore state_referenced_locally
-	let q = $state(data.filters.q);
-	$effect(() => {
-		if (data.filters.q !== q.trim()) q = data.filters.q;
-	});
-
 	const href = (patch: Partial<{ q: string; tab: string; mine: boolean; offset: number }>) => {
 		const f = { ...data.filters, ...('offset' in patch ? {} : { offset: 0 }), ...patch };
 		const sp = new URLSearchParams();
@@ -29,17 +25,13 @@
 		const qs = sp.toString();
 		return qs ? `?${qs}` : '?';
 	};
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	function onType() {
-		clearTimeout(timer);
-		timer = setTimeout(() => q.trim() !== data.filters.q && goto(href({ q: q.trim() }), { replace: true, reset: false }), 400);
-	}
+	const navigate = (to: string) => goto(to, { reset: false });
 	const filtered = $derived(!!data.filters.q || data.filters.mine || data.filters.tab !== 'all');
-	const tabs = $derived([
-		{ key: 'all', label: t('news.tab.all') },
-		...(publisher ? [{ key: 'review', label: t('news.tab.review'), count: data.reviewCount }] : []),
-		{ key: 'draft', label: t('news.tab.draft') },
-		{ key: 'published', label: t('news.tab.published') }
+	const tabList = $derived([
+		{ key: 'all', label: t('news.tab.all'), count: data.counts.all },
+		...(publisher ? [{ key: 'review', label: t('news.tab.review'), count: data.counts.review, warn: true }] : []),
+		{ key: 'draft', label: t('news.tab.draft'), count: data.counts.draft },
+		{ key: 'published', label: t('news.tab.published'), count: data.counts.published }
 	]);
 	const teamName = (id: string) => data.teams.find((x) => x.id === id);
 	const audience = (ids: string[]) => {
@@ -59,28 +51,21 @@
 <svelte:head><title>{pageTitle(t('news.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
-		<nav class="flex flex-wrap items-center gap-1" aria-label={t('news.tabs')}>
-			{#each tabs as tab (tab.key)}
-				<a
-					href={href({ tab: tab.key })}
-					aria-current={data.filters.tab === tab.key ? 'page' : undefined}
-					class="flex h-8 items-center gap-1.5 rounded-md px-3 font-display text-xs font-bold tracking-[.08em] uppercase {data.filters.tab === tab.key ? 'bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">
-					{tab.label}
-					{#if 'count' in tab && tab.count}<span class="badge badge-warning badge-sm">{tab.count}</span>{/if}
-				</a>
-			{/each}
-		</nav>
+	<ListFilterBar
+		value={data.filters.q}
+		searchLabel={t('news.search')}
+		searchPlaceholder={t('news.search_placeholder')}
+		onsearch={(q) => goto(href({ q }), { replace: true, reset: false })}
+		showClear={filtered}
+		onclear={() => navigate('?')}>
 		<label class="flex cursor-pointer items-center gap-2 text-sm">
-			<input type="checkbox" class="checkbox checkbox-sm" checked={data.filters.mine} onchange={() => goto(href({ mine: !data.filters.mine }))} />
+			<input type="checkbox" class="checkbox checkbox-sm" checked={data.filters.mine} onchange={() => navigate(href({ mine: !data.filters.mine }))} />
 			{t('news.mine')}
 		</label>
-		<div class="relative ml-auto" role="search">
-			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
-			<input type="search" aria-label={t('news.search')} placeholder={t('news.search_placeholder')} class="input w-64 pl-9" bind:value={q} oninput={onType} />
-		</div>
-		{#if filtered}<a class="btn btn-outline gap-2" href="?"><X size={14} /> {t('news.clear')}</a>{/if}
-	</div>
+		{#snippet tabs()}
+			<FilterTabs tabs={tabList} active={data.filters.tab} label={t('news.tabs')} hrefFor={(key) => href({ tab: key })} onnavigate={navigate} />
+		{/snippet}
+	</ListFilterBar>
 
 	<div class="grid gap-4 px-7 py-5">
 		{#if deleted}<Alert kind="success">{t('news.deleted')}</Alert>{/if}
