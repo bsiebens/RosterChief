@@ -29,6 +29,16 @@ def awaiting_membership_ids() -> set:
     return set(RegistrationDetails.objects.filter(batch__confirmed_at__isnull=True, batch__cancelled_at__isnull=True).values_list("membership_id", flat=True))
 
 
+def awaiting_only_member_ids():
+    """Ids of the people whose every membership is of an unconfirmed registration: until the review is done they are not members yet
+    (hidden from the members list the way their memberships are hidden from the queue and the overview)."""
+    from django.db.models import Exists, OuterRef
+
+    awaiting = awaiting_membership_ids()
+    confirmed_elsewhere = ClubMembership.objects.exclude(pk__in=awaiting).filter(member=OuterRef("pk"))
+    return Member.objects.filter(pk__in=ClubMembership.objects.filter(pk__in=awaiting).values("member")).exclude(Exists(confirmed_elsewhere)).values("pk")
+
+
 def _editable(batch: RegistrationBatch) -> None:
     if batch.cancelled_at:
         raise Invalid("This registration was cancelled.", {"__all__": ["This registration was cancelled."]}, code="cancelled")

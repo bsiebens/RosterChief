@@ -13,7 +13,7 @@
 	import ProductVariants from '#lib/components/shop/ProductVariants.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { productInOf, type ProductIn } from '#lib/shop.ts';
+	import { productInOf, productPayload, type ProductIn } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
@@ -111,10 +111,10 @@
 						tried = false;
 					};
 				}}>
-				<input type="hidden" name="payload" value={JSON.stringify(v)} />
+				<input type="hidden" name="payload" value={JSON.stringify(productPayload(v))} />
 				<section class="card card-body gap-3" aria-labelledby="{formId}-details">
 					<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
-					<ProductFields bind:v categories={data.categories} fields={errs} {tried} />
+					<ProductFields bind:v categories={data.categories} seasons={data.seasons} fields={errs} {tried} />
 				</section>
 			</form>
 			<section class="card card-body gap-3" aria-labelledby="{formId}-variants">

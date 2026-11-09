@@ -30,8 +30,15 @@ def _previous_season(season):
     return Season.objects.filter(end_date__lt=season.start_date).order_by("-end_date").first() if season else None
 
 
+def _confirmed():
+    """Memberships that count: not those of a registration whose invoice staff have not confirmed yet (see ``registration.services.invoicing``)."""
+    from registration.services.invoicing import awaiting_membership_ids
+
+    return ClubMembership.objects.exclude(pk__in=awaiting_membership_ids())
+
+
 def _members_in(season):
-    return ClubMembership.objects.filter(season=season).exclude(status=Status.CANCELLED)
+    return _confirmed().filter(season=season).exclude(status=Status.CANCELLED)
 
 
 def _month_starts(today: datetime.date, n: int = 12) -> list[datetime.date]:
@@ -48,8 +55,8 @@ def _month_starts(today: datetime.date, n: int = 12) -> list[datetime.date]:
 def signups_per_month(season, today: datetime.date) -> list[dict]:
     """Last 12 months of sign-ups (by ``signed_up_at``), split into new members and returning ones."""
     months = _month_starts(today)
-    first_season = dict(ClubMembership.objects.values("member").annotate(first=Min("season__start_date")).values_list("member", "first"))
-    rows = ClubMembership.objects.filter(signed_up_at__gte=months[0]).exclude(status=Status.CANCELLED).values_list("member_id", "signed_up_at", "season__start_date")
+    first_season = dict(_confirmed().values("member").annotate(first=Min("season__start_date")).values_list("member", "first"))
+    rows = _confirmed().filter(signed_up_at__gte=months[0]).exclude(status=Status.CANCELLED).values_list("member_id", "signed_up_at", "season__start_date")
     counts: dict = {m: Counter() for m in months}
     for member_id, signed, start in rows:
         key = datetime.date(signed.year, signed.month, 1)
@@ -92,7 +99,7 @@ def renewal(season, previous) -> dict | None:
 
 def _new_members(season) -> int:
     """Members whose first ever membership is ``season``."""
-    earlier = ClubMembership.objects.filter(member=OuterRef("member"), season__start_date__lt=season.start_date)
+    earlier = _confirmed().filter(member=OuterRef("member"), season__start_date__lt=season.start_date)
     return _members_in(season).exclude(Exists(earlier)).count()
 
 

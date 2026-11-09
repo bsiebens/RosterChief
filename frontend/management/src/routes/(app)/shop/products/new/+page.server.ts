@@ -6,8 +6,8 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ parent, fetch }) => {
 	const { me } = await parent();
 	if (!shopOn(me, 'can_manage_shop_products')) redirect(303, '/');
-	const cats = await api<PagedList<Category> | Category[]>('GET', '/shop/categories', { f: fetch });
-	return { initial: emptyProduct(), categories: asList(cats.data).results };
+	const [cats, seasons] = await Promise.all([api<PagedList<Category> | Category[]>('GET', '/shop/categories', { f: fetch }), api<{ id: string; name: string }[]>('GET', '/memberships/seasons', { f: fetch })]);
+	return { initial: emptyProduct(), categories: asList(cats.data).results, seasons: seasons.data ?? [] };
 };
 
 export const actions: Actions = {

@@ -14,7 +14,23 @@ export type SignupRow = {
 	/** Fee settled and nothing open: can be approved now. */
 	clean: boolean;
 	teams: { id: string; name: string }[];
+	/** Present when the sign-up came from the public registration page. */
+	registration: SignupRegistration | null;
 };
+export type SignupRegistration = {
+	registration_id: string;
+	entry_kind: string;
+	invoice_number: string | null;
+	contact_name: string | null;
+	contact_email: string | null;
+	requested_team_id: string | null;
+	requested_team_name: string | null;
+	requested_position_id: string | null;
+	requested_position_name: string | null;
+	requested_jersey_number: number | null;
+	product: string;
+};
+export type Duplicate = { member_id: string; name: string; email: string; date_of_birth: string | null; same_email: boolean; has_membership: boolean };
 export type SignupList = { count: number; clean_count: number; season_id: string | null; season_name: string | null; results: SignupRow[] };
 export type SignupOptions = { teams: { id: string; name: string }[]; positions: { id: string; name: string }[] };
 

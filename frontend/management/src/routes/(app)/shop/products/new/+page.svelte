@@ -6,7 +6,7 @@
 	import ProductVariantsEditor from '#lib/components/shop/ProductVariantsEditor.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import type { ProductIn, VariantIn } from '#lib/shop.ts';
+	import { productPayload, type ProductIn, type VariantIn } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
@@ -44,13 +44,13 @@
 			busy = false;
 		};
 	}}>
-	<input type="hidden" name="payload" value={JSON.stringify({ ...v, variants })} />
+	<input type="hidden" name="payload" value={JSON.stringify({ ...productPayload(v), variants })} />
 	{#if errorText}<Alert kind="error" title={t('shop.save_failed')}>{errorText}</Alert>{/if}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
-				<ProductFields bind:v categories={data.categories} {fields} {tried} />
+				<ProductFields bind:v categories={data.categories} seasons={data.seasons} {fields} {tried} />
 			</section>
 			<section class="card card-body gap-3">
 				<header class="grid gap-0.5">

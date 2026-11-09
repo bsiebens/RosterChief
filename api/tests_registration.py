@@ -235,6 +235,23 @@ class ReviewTests(RegistrationMixin, TestCase):
         self.assertEqual(queue["count"], 1)
         self.assertEqual(queue["results"][0]["registration"]["registration_id"], str(batch.pk))
 
+    def test_unconfirmed_registrations_are_not_counted_as_members(self):
+        """The members list and the overview numbers leave out people of a registration whose invoice is not confirmed yet."""
+        batch = self.batch(entries=[self.entry("Hidden", "Kid")])
+        person = batch.details.get().member_id
+
+        def listed():
+            return [m["id"] for m in self.staff("get", "/members?limit=100&include_guardians=true").json()["items"]]
+
+        def totals():
+            return self.staff("get", "/overview").json()["kpis"]["total_members"]
+
+        before = totals()
+        self.assertNotIn(str(person), listed())
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
+        self.assertIn(str(person), listed())
+        self.assertEqual(totals(), before + 1)
+
     def test_review_prices_exclusion_and_manual_discount(self):
         batch = self.batch(entries=[self.entry("One"), self.entry("Two")])
         one, two = list(batch.details.order_by("created"))

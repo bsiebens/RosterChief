@@ -50,7 +50,10 @@ export type ProductItem = {
 };
 export type ProductImageItem = { id: string; url: string; is_main: boolean; ordering: number; alt: string };
 export type ProductAttachmentItem = { id: string; title: string; name: string; url: string; size: number; content_type: string; created: string };
-export type ProductDetail = ProductItem & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[] };
+/** Registration pricing of a membership product (the API sends nothing useful for other types). */
+export type RegistrantTier = { min_registrants: number; discount_type: 'percentage' | 'fixed_amount'; discount_amount: string };
+export type RegistrationPricing = { season_id: string | null; season_name: string | null; early_bird_discount_type: '' | 'percentage' | 'fixed_amount'; early_bird_discount_amount: string; early_bird_deadline: string | null; registrant_discount_scope: 'per_person' | 'per_order'; registrant_tiers: RegistrantTier[] };
+export type ProductDetail = ProductItem & Partial<RegistrationPricing> & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[] };
 export type ProductIn = {
 	name: string;
 	category_id: string | null;
@@ -61,6 +64,13 @@ export type ProductIn = {
 	is_public: boolean;
 	personalization_enabled: boolean;
 	inventory_managed: boolean;
+	// Membership products only (the form hides them for other types and then sends them cleared).
+	season_id: string | null;
+	early_bird_discount_type: '' | 'percentage' | 'fixed_amount';
+	early_bird_discount_amount: string;
+	early_bird_deadline: string | null;
+	registrant_discount_scope: 'per_person' | 'per_order';
+	registrant_tiers: RegistrantTier[];
 };
 export const emptyProduct = (): ProductIn => ({
 	name: '',
@@ -71,9 +81,15 @@ export const emptyProduct = (): ProductIn => ({
 	is_active: true,
 	is_public: true,
 	personalization_enabled: false,
-	inventory_managed: false
+	inventory_managed: false,
+	season_id: null,
+	early_bird_discount_type: '',
+	early_bird_discount_amount: '',
+	early_bird_deadline: null,
+	registrant_discount_scope: 'per_person',
+	registrant_tiers: []
 });
-export const productInOf = (p: ProductItem): ProductIn => ({
+export const productInOf = (p: ProductDetail): ProductIn => ({
 	name: p.name,
 	category_id: p.category?.id ?? null,
 	description: p.description,
@@ -82,8 +98,26 @@ export const productInOf = (p: ProductItem): ProductIn => ({
 	is_active: p.is_active,
 	is_public: p.is_public,
 	personalization_enabled: p.personalization_enabled,
-	inventory_managed: p.inventory_managed
+	inventory_managed: p.inventory_managed,
+	season_id: p.season_id ?? null,
+	early_bird_discount_type: p.early_bird_discount_type ?? '',
+	early_bird_discount_amount: p.early_bird_discount_type ? String(Number(p.early_bird_discount_amount ?? 0)) : '',
+	early_bird_deadline: p.early_bird_deadline ?? null,
+	registrant_discount_scope: p.registrant_discount_scope ?? 'per_person',
+	registrant_tiers: (p.registrant_tiers ?? []).map((x) => ({ ...x, discount_amount: String(Number(x.discount_amount)) }))
 });
+
+/** What goes to the API: the registration pricing only for membership products (anything else is sent cleared, so a type change drops it). */
+export const productPayload = (v: ProductIn) => {
+	if (v.product_type === 'membership') {
+		return {
+			...v,
+			early_bird_discount_amount: v.early_bird_discount_type ? v.early_bird_discount_amount || '0' : '0',
+			early_bird_deadline: v.early_bird_discount_type ? v.early_bird_deadline || null : null
+		};
+	}
+	return { ...v, season_id: null, early_bird_discount_type: '', early_bird_discount_amount: '0', early_bird_deadline: null, registrant_discount_scope: 'per_person', registrant_tiers: [] as RegistrantTier[] };
+};
 export type VariantIn = { name: string; price: string | null; is_active?: boolean };
 
 export type StockRow = { product_id: string; product_name: string; variant_id: string | null; variant_name: string | null; on_hand: number; committed: number; available: number; category_id?: string | null; category_name?: string | null };

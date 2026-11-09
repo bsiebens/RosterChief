@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Ban, CheckCheck, Check, FileText, Shirt, UserCheck } from '@lucide/svelte';
+	import { Ban, CheckCheck, Check, FileText, Link2, Receipt, Shirt, UserCheck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { documentsHref, feeBadge, type SignupRow } from '#lib/signups.ts';
+	import { documentsHref, feeBadge, type Duplicate, type SignupRow } from '#lib/signups.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
@@ -35,6 +36,22 @@
 	let placeOpen = $state(false);
 	let cancelOpen = $state(false);
 	let allOpen = $state(false);
+	let linkOpen = $state(false);
+	let duplicates = $state<Duplicate[] | null>(null);
+	let linkPick = $state('');
+	/** Open the link dialog: the people who may be the same person as this sign-up are looked up when it opens. */
+	async function askLink(r: SignupRow) {
+		target = r;
+		duplicates = null;
+		linkPick = '';
+		linkOpen = true;
+		try {
+			const res = await fetch(`/api/v1/signups/${r.membership_id}/duplicates`, { headers: { accept: 'application/json' } });
+			duplicates = res.ok ? ((await res.json()).results ?? []) : [];
+		} catch {
+			duplicates = [];
+		}
+	}
 	const run = (close?: () => void) => () => {
 		busy = true;
 		return async ({ update, result }: { update: (o?: { reset?: boolean }) => Promise<void>; result: { type: string } }) => {
@@ -49,6 +66,7 @@
 	const failure = $derived.by(() => {
 		if (!form || 'done' in form || !('op' in form)) return '';
 		const m = String(form.message ?? '');
+		if (form.op === 'link' && form.fields && 'member_id' in (form.fields as object)) return t('signups.err.already_member');
 		if (m.startsWith('requirements:')) return t('signups.err.requirements', { names: m.slice(13) });
 		if (form.fields && 'fee_status' in (form.fields as object)) return t('signups.err.fee');
 		return m || t('common.error.generic');
@@ -78,6 +96,7 @@
 		{#if done === 'approve'}<Alert kind="success">{t('signups.approved_one')}</Alert>{/if}
 		{#if done === 'approveClean'}<Alert kind="success">{t('signups.approved_n', { n: approved })}</Alert>{/if}
 		{#if done === 'place'}<Alert kind="success">{t('signups.placed')}</Alert>{/if}
+		{#if done === 'link'}<Alert kind="success">{t('signups.linked')}</Alert>{/if}
 		{#if done === 'cancel'}<Alert kind="success">{form && 'result' in form && form.result === 'deleted' ? t('signups.cancelled_deleted') : t('signups.cancelled')}</Alert>{/if}
 		{#if failure}<Alert kind="error" title={t('signups.action_failed')}>{failure}</Alert>{/if}
 
@@ -99,6 +118,17 @@
 									<a class="link font-semibold" href="/members/{r.member.id}">{r.member.name}</a>
 									{#if r.clean}<span class="badge badge-sm badge-success ml-2">{t('signups.ready')}</span>{/if}
 									<p class="text-xs text-muted">{r.member.email || t('signups.no_email')}</p>
+									{#if r.registration}
+										<p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+											<span class="badge badge-xs badge-outline">{t('signups.from_registration')}</span>
+											{#if r.registration.contact_name}<span>{t('signups.by', { name: r.registration.contact_name })}</span>{/if}
+											{#if r.registration.product}<span>· {r.registration.product}</span>{/if}
+											{#if r.registration.invoice_number}<a class="link inline-flex items-center gap-1" href="/registrations/{r.registration.registration_id}"><Receipt size={11} aria-hidden="true" /> {r.registration.invoice_number}</a>{:else}<a class="link" href="/registrations/{r.registration.registration_id}">{t('signups.open_registration')}</a>{/if}
+										</p>
+										{#if r.registration.requested_team_name || r.registration.requested_position_name || r.registration.requested_jersey_number !== null}
+											<p class="text-xs text-muted">{t('signups.wants')} {[r.registration.requested_team_name, r.registration.requested_position_name, r.registration.requested_jersey_number !== null ? `#${r.registration.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</p>
+										{/if}
+									{/if}
 								</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{r.signed_up_at ? formatDate(r.signed_up_at) : '–'}</td>
 								<td>
@@ -121,6 +151,7 @@
 											<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy || !r.clean} title={r.clean ? '' : t('signups.approve_blocked')}><Check size={13} /> {t('signups.approve')}</button>
 										</form>
 										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((target = r), (placeOpen = true))}><Shirt size={13} /> {t('signups.place')}</button>
+										{#if r.registration}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askLink(r)}><Link2 size={13} /> {t('signups.link')}</button>{/if}
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('signups.cancel_named', { name: r.member.name })} onclick={() => ((target = r), (cancelOpen = true))}><Ban size={13} /></button>
 									</div>
 								</td>
@@ -145,34 +176,79 @@
 </Modal>
 
 <Modal bind:open={placeOpen} title={target ? t('signups.place_title', { name: target.member.name }) : ''}>
-	<form method="POST" action="?/place" class="grid gap-3" use:enhance={run(() => (placeOpen = false))}>
-		<input type="hidden" name="id" value={target?.membership_id ?? ''} />
-		<p class="text-sm text-muted">{t('signups.place_help')}</p>
-		<div class="form-control">
-			<label class="label" for="place-team"><span class="label-text">{t('signups.team')}</span></label>
-			<select id="place-team" name="team_id" class="select select-bordered w-full" required>
-				<option value="" disabled selected>{t('signups.pick_team')}</option>
-				{#each data.options.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
-			</select>
-		</div>
-		<div class="grid grid-cols-2 gap-3">
+	{#key target?.membership_id}
+		{@const want = target?.registration}
+		<form method="POST" action="?/place" class="grid gap-3" use:enhance={run(() => (placeOpen = false))}>
+			<input type="hidden" name="id" value={target?.membership_id ?? ''} />
+			<p class="text-sm text-muted">{want && (want.requested_team_id || want.requested_position_id || want.requested_jersey_number !== null) ? t('signups.place_help_requested') : t('signups.place_help')}</p>
 			<div class="form-control">
-				<label class="label" for="place-pos"><span class="label-text">{t('signups.position')}</span></label>
-				<select id="place-pos" name="position_id" class="select select-bordered w-full">
-					<option value="">{t('signups.no_position')}</option>
-					{#each data.options.positions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+				<label class="label" for="place-team"><span class="label-text">{t('signups.team')}</span></label>
+				<select id="place-team" name="team_id" class="select select-bordered w-full" required>
+					<option value="" disabled selected={!want?.requested_team_id}>{t('signups.pick_team')}</option>
+					{#each data.options.teams as team (team.id)}<option value={team.id} selected={team.id === want?.requested_team_id}>{team.name}</option>{/each}
 				</select>
 			</div>
-			<div class="form-control">
-				<label class="label" for="place-jersey"><span class="label-text">{t('signups.jersey')}</span></label>
-				<input id="place-jersey" name="jersey_number" type="number" min="0" class="input input-bordered w-full" />
+			<div class="grid grid-cols-2 gap-3">
+				<div class="form-control">
+					<label class="label" for="place-pos"><span class="label-text">{t('signups.position')}</span></label>
+					<select id="place-pos" name="position_id" class="select select-bordered w-full">
+						<option value="">{t('signups.no_position')}</option>
+						{#each data.options.positions as p (p.id)}<option value={p.id} selected={p.id === want?.requested_position_id}>{p.name}</option>{/each}
+					</select>
+				</div>
+				<div class="form-control">
+					<label class="label" for="place-jersey"><span class="label-text">{t('signups.jersey')}</span></label>
+					<input id="place-jersey" name="jersey_number" type="number" min="0" class="input input-bordered w-full" value={want?.requested_jersey_number ?? ''} />
+				</div>
 			</div>
-		</div>
-		<div class="modal-action mt-2 flex justify-end gap-2">
-			<button class="btn btn-outline" type="button" onclick={() => (placeOpen = false)}>{t('common.cancel')}</button>
-			<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Shirt size={16} /> {t('signups.place')}</button>
-		</div>
-	</form>
+			<div class="modal-action mt-2 flex justify-end gap-2">
+				<button class="btn btn-outline" type="button" onclick={() => (placeOpen = false)}>{t('common.cancel')}</button>
+				<button class="btn btn-primary gap-2" type="submit" disabled={busy}><Shirt size={16} /> {t('signups.place')}</button>
+			</div>
+		</form>
+	{/key}
+</Modal>
+
+<Modal bind:open={linkOpen} title={target ? t('signups.link_title', { name: target.member.name }) : ''}>
+	<div class="grid gap-4">
+		<p class="text-sm text-muted">{t('signups.link_help')}</p>
+		{#if duplicates === null}
+			<p class="text-sm text-muted">{t('common.loading')}</p>
+		{:else if !duplicates.length}
+			<p class="text-sm text-muted">{t('signups.link_none')}</p>
+		{:else}
+			<ul class="grid gap-2">
+				{#each duplicates as d (d.member_id)}
+					<li class="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2">
+						<div class="min-w-0">
+							<p class="truncate font-semibold text-ink">{d.name}{#if d.same_email}<span class="badge badge-sm badge-info ml-2">{t('signups.same_email')}</span>{/if}</p>
+							<p class="truncate text-xs text-muted">{d.email || t('signups.no_email')}{#if d.date_of_birth} · {formatDate(d.date_of_birth)}{/if}</p>
+							{#if d.has_membership}<p class="text-xs text-warn-text">{t('signups.err.already_member')}</p>{/if}
+						</div>
+						<form
+							method="POST"
+							action="?/link"
+							use:enhance={({ cancel }) => {
+								if (!confirm(t('signups.link_confirm', { name: d.name }))) return cancel();
+								return run(() => (linkOpen = false))();
+							}}>
+							<input type="hidden" name="id" value={target?.membership_id ?? ''} />
+							<input type="hidden" name="member_id" value={d.member_id} />
+							<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy || d.has_membership}><Link2 size={13} /> {t('signups.link')}</button>
+						</form>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		<form method="POST" action="?/link" class="grid gap-2 border-t border-rule pt-3" use:enhance={run(() => (linkOpen = false))}>
+			<input type="hidden" name="id" value={target?.membership_id ?? ''} />
+			<EntityPicker kind="member" name="member_id" label={t('signups.link_other')} bind:value={linkPick} />
+			<div class="modal-action mt-1 flex justify-end gap-2">
+				<button class="btn btn-outline" type="button" onclick={() => (linkOpen = false)}>{t('common.cancel')}</button>
+				<button class="btn btn-primary gap-2" type="submit" disabled={busy || !linkPick}><Link2 size={16} /> {t('signups.link')}</button>
+			</div>
+		</form>
+	</div>
 </Modal>
 
 <Modal bind:open={cancelOpen} title={t('signups.cancel_title')}>

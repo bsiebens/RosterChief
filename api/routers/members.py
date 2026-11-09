@@ -268,6 +268,9 @@ def list_members(request, filters: Query[MemberFilters]):
     """
     include = filters.include_guardians or filters.role in ("guardian", "staff", "none")
     qs = access.members_visible_to(request.user, include_guardians=include)
+    from registration.services.invoicing import awaiting_only_member_ids
+
+    qs = qs.exclude(pk__in=awaiting_only_member_ids())  # people of a registration staff have not confirmed yet are not members yet
 
     if filters.role == "member":
         qs = qs.filter(pk__in=Member.objects.members(filters.season).values("pk"))

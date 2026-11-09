@@ -4,7 +4,8 @@
 
 	/** Stacked bars: new members (dark) on returning ones (club colour), last 12 months. */
 	let { months }: { months: Overview['signups'] } = $props();
-	const W = 560;
+	// Drawn at the size it is shown (measured), so the axis text keeps its real size instead of scaling up with the card.
+	let W = $state(560);
 	const H = 190;
 	const L = 30;
 	const B = 24;
@@ -30,7 +31,7 @@
 	{#if empty}
 		<p class="py-8 text-center text-sm text-muted">{t('overview.signups.empty')}</p>
 	{:else}
-		<div class="relative" role="presentation" onmouseleave={() => (hover = null)}>
+		<div class="relative" role="presentation" bind:clientWidth={W} onmouseleave={() => (hover = null)}>
 		{#if hovered}
 			<div class="pointer-events-none absolute top-0 z-10 -translate-x-1/2 rounded-lg bg-ink px-3 py-2 text-xs whitespace-nowrap text-white shadow-lg" style="left: {tipLeft}%">
 				<p class="mb-1 font-display text-sm font-bold">{fullLabel(hovered.month)}</p>
@@ -39,16 +40,16 @@
 				<p class="mt-1 flex border-t border-white/20 pt-1">{t('overview.signups.total')}<span class="ml-auto pl-4 font-mono font-semibold">{hovered.new + hovered.returning}</span></p>
 			</div>
 		{/if}
-		<svg viewBox="0 0 {W} {H}" class="w-full" role="img" aria-label={t('overview.signups.title')}>
+		<svg width={W} height={H} viewBox="0 0 {W} {H}" class="block" role="img" aria-label={t('overview.signups.title')}>
 			{#each ticks as v (v)}
 				<line x1={L} x2={W} y1={y(v)} y2={y(v)} class="stroke-line" stroke-width="1" />
-				<text x={L - 6} y={y(v) + 3.5} text-anchor="end" class="fill-muted font-mono" font-size="10">{v}</text>
+				<text x={L - 6} y={y(v) + 3.5} text-anchor="end" class="fill-muted font-mono" font-size="11">{v}</text>
 			{/each}
 			{#each months as m, i (m.month)}
 				{@const x = L + i * step + (step - bar) / 2}
 				{#if m.new}<rect {x} y={y(m.new)} width={bar} height={y(0) - y(m.new)} rx="2" class="fill-ink" />{/if}
 				{#if m.returning}<rect {x} y={y(m.new + m.returning)} width={bar} height={y(m.new) - y(m.new + m.returning)} rx="2" class="fill-club" />{/if}
-				<text x={x + bar / 2} y={H - 8} text-anchor="middle" class="fill-muted" font-size="10">{label(m.month)}</text>
+				<text x={x + bar / 2} y={H - 8} text-anchor="middle" class="fill-muted" font-size="11">{label(m.month)}</text>
 				{#if hover === i}<rect x={L + i * step} y="0" width={step} height={H - B} class="fill-ink/5" />{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<rect

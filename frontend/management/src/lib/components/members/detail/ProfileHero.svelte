@@ -61,11 +61,11 @@
 			</div>
 			<div class="bg-white p-4">
 				<dt class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('profile.stat.documents')}</dt>
-				<dd class="mt-1 font-display text-2xl font-extrabold {docsTotal ? (docsExpired ? 'text-danger' : 'text-ink') : 'text-muted'}">
+				<dd class="mt-1 font-display text-2xl font-extrabold {docsTotal ? (docsExpired ? 'text-danger' : docsDone === docsTotal ? 'text-ok-text' : 'text-ink') : 'text-muted'}">
 					<a class="hover:underline" href="?tab=documents" data-sveltekit-noscroll data-sveltekit-keepfocus>{docsTotal ? t('profile.stat.documents_value', { done: docsDone, total: docsTotal }) : '–'}</a>
 				</dd>
 				{#if docsTotal}
-					<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full {docsExpired ? 'bg-danger' : 'bg-club'}" style="width: {(docsDone / docsTotal) * 100}%"></div></div>
+					<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule"><div class="h-full rounded-full {docsExpired ? 'bg-danger' : docsDone === docsTotal ? 'bg-ok' : 'bg-club'}" style="width: {(docsDone / docsTotal) * 100}%"></div></div>
 					{#if docsExpired}<p class="mt-1 text-xs text-danger">{t('req.doc.expired_n', { n: docsExpired })}</p>{/if}
 				{:else}
 					<p class="mt-1 text-xs text-muted">{t('profile.stat.documents_none')}</p>

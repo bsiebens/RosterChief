@@ -52,6 +52,12 @@ export const actions: Actions = {
 		const res = await api('POST', `/signups/${id}/place`, { body, f: fetch });
 		return res.ok ? { done: 'place', id } : failed('place', res, id);
 	},
+	link: async ({ request, fetch }) => {
+		const f = await request.formData();
+		const id = String(f.get('id') ?? '');
+		const res = await api('POST', `/signups/${id}/link`, { body: { member_id: String(f.get('member_id') ?? '') }, f: fetch });
+		return res.ok ? { done: 'link', id } : failed('link', res, id);
+	},
 	cancel: async ({ request, fetch }) => {
 		const id = String((await request.formData()).get('id') ?? '');
 		const res = await api<{ result: string }>('POST', `/signups/${id}/cancel`, { f: fetch });

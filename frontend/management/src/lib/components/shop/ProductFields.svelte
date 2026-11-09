@@ -1,10 +1,11 @@
 <script lang="ts">
 	import Field from '#lib/components/Field.svelte';
+	import ProductRegistrationFields from '#lib/components/shop/ProductRegistrationFields.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { PRODUCT_TYPES, type Category, type ProductIn } from '#lib/shop.ts';
 
 	/** Name, category, price, type, description and the switches of a product (add page and editor). */
-	let { v = $bindable(), categories, fields = {}, tried = false }: { v: ProductIn; categories: Category[]; fields?: Record<string, string>; tried?: boolean } = $props();
+	let { v = $bindable(), categories, seasons = [], fields = {}, tried = false }: { v: ProductIn; categories: Category[]; seasons?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
 	const uid = $props.id();
 	const nameErr = $derived(fields.name || (tried && !v.name.trim() ? t('shop.product.err.name') : ''));
 	const priceErr = $derived(fields.price || (tried && (v.price === '' || Number(v.price) < 0) ? t('shop.product.err.price') : ''));
@@ -51,4 +52,5 @@
 			</label>
 		{/each}
 	</div>
+	{#if v.product_type === 'membership'}<ProductRegistrationFields bind:v {seasons} {fields} />{/if}
 </div>
