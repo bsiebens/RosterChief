@@ -83,7 +83,14 @@ def unique_slug(instance, value: str) -> str:
 
 
 class ProductCategory(UUIDModel):
+    class SystemKey(models.TextChoices):
+        PLAYER = "player", _("Player")
+        VOLUNTEER = "volunteer", _("Volunteer")
+
     name = models.CharField(_("name"), max_length=255)
+    #: Set for the two fixed categories every club has ("Player" and "Volunteer"): they cannot be renamed or deleted, and decide on which
+    #: registration option a membership product is offered. ``None`` for the club's own categories.
+    system_key = models.CharField(_("system category"), max_length=20, choices=SystemKey.choices, null=True, blank=True, unique=True, editable=False)
 
     class Meta:
         verbose_name = _("product category")
@@ -93,6 +100,10 @@ class ProductCategory(UUIDModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def is_system(self) -> bool:
+        return self.system_key is not None
 
 
 class Product(UUIDModel):

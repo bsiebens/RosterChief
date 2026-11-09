@@ -84,6 +84,8 @@ def validate(contact: dict, entries: list[dict]) -> list[dict]:
         variant = variants.get(entry.get("variant_id"))
         if variant is None:
             errors[f"{where}.variant_id"] = ["Choose what to register for."]
+        elif kind in RegistrationDetails.EntryKind.values and not pricing.fits_kind(variant.product, kind):
+            errors[f"{where}.variant_id"] = [pricing.kind_error(kind)]
         team = teams.get(entry.get("requested_team_id")) if entry.get("requested_team_id") else None
         if entry.get("requested_team_id") and team is None:
             errors[f"{where}.requested_team_id"] = ["Unknown team."]

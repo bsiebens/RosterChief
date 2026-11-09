@@ -2,7 +2,7 @@
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Package, Pencil, Plus, Tags, Trash2 } from '@lucide/svelte';
+	import { Package, Pencil, Plus, Tags, Trash2, Lock } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -66,7 +66,7 @@
 	<ListFilterBar value={data.filters.q} searchLabel={t('shop.product.search')} searchPlaceholder={t('shop.product.search_placeholder')} onsearch={(q) => goto(href({ q }), { replace: true, reset: false })} showClear={filtered} onclear={() => goto('?', { reset: false })}>
 		<select class="select w-auto" aria-label={t('shop.product.f.category')} value={data.filters.category} onchange={(e) => goto(href({ category: e.currentTarget.value }), { replace: true, reset: false })}>
 			<option value="">{t('shop.product.all_categories')}</option>
-			{#each data.categories as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+			{#each data.categories as c (c.id)}<option value={c.id}>{c.name}{c.is_system ? ` (${t('shop.cat.system_short')})` : ''}</option>{/each}
 		</select>
 		{#snippet tabs()}
 			<FilterTabs tabs={filterTabs} active={data.filters.active} label={t('shop.filter.label')} hrefFor={(key) => href({ active: key })} onnavigate={(h) => goto(h, { reset: false })} />
@@ -116,7 +116,7 @@
 											</div>
 										</div>
 									</td>
-									<td class="text-sm">{p.category?.name ?? t('common.none')}</td>
+									<td class="text-sm">{#if p.category?.system_key}<span class="inline-flex items-center gap-1" title={t('shop.cat.system_reason')}><Lock size={11} class="text-muted" aria-hidden="true" />{p.category.name}</span>{:else}{p.category?.name ?? t('common.none')}{/if}</td>
 									<td class="text-right font-mono text-sm whitespace-nowrap">{money(p.price)}</td>
 									<td>
 										{#if p.inventory_managed}<span class="badge badge-sm {p.in_stock ? 'badge-success' : 'badge-error'}">{p.in_stock ? t('shop.in_stock') : t('shop.out_of_stock')}</span>{:else}<span class="text-xs text-muted">{t('shop.not_tracked')}</span>{/if}
@@ -148,15 +148,21 @@
 				<ul class="divide-y divide-rule">
 					{#each data.categories as c (c.id)}
 						<li class="flex items-center justify-between gap-2 py-2">
-							<a class="link text-sm font-semibold" href={href({ category: c.id })}>{c.name}</a>
+							<span class="flex min-w-0 items-center gap-2">
+								<a class="link truncate text-sm font-semibold" href={href({ category: c.id })}>{c.name}</a>
+								{#if c.is_system}<span class="badge badge-sm shrink-0 gap-1" title={t('shop.cat.system_reason')}><Lock size={10} aria-hidden="true" /> {t('shop.cat.system')}</span>{/if}
+							</span>
 							<span class="flex items-center gap-1">
 								<span class="font-mono text-xs text-muted">{c.product_count}</span>
-								<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('common.edit')} onclick={() => askCat(c)}><Pencil size={13} /></button>
-								<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('common.delete')} onclick={() => ((cat = c), (catDelOpen = true))}><Trash2 size={13} /></button>
+								<!-- The system categories keep both buttons, disabled, with the reason as a tooltip and for screen readers. -->
+								<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('common.edit')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => askCat(c)}><Pencil size={13} /></button>
+								<button class="btn btn-ghost btn-xs btn-square {c.is_system ? '' : 'text-error'}" type="button" aria-label={t('common.delete')} aria-describedby={c.is_system ? `sys-${c.id}` : undefined} disabled={c.is_system} title={c.is_system ? t('shop.cat.system_reason') : undefined} onclick={() => ((cat = c), (catDelOpen = true))}><Trash2 size={13} /></button>
+								{#if c.is_system}<span id="sys-{c.id}" class="sr-only">{t('shop.cat.system_reason')}</span>{/if}
 							</span>
 						</li>
 					{/each}
 				</ul>
+				<p class="flex items-start gap-2 text-xs text-muted" title={t('shop.cat.system_reason')}><Lock size={12} class="mt-0.5 shrink-0" aria-hidden="true" /> {t('shop.cat.system_help')}</p>
 			{:else}
 				<p class="flex items-center gap-2 text-sm text-muted"><Tags size={16} /> {t('shop.cat.empty')}</p>
 			{/if}

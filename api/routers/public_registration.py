@@ -92,7 +92,7 @@ def get_page(request):
         early = {"discount_type": p.early_bird_discount_type, "discount_amount": p.early_bird_discount_amount, "deadline": p.early_bird_deadline} if p.early_bird_discount_type and p.early_bird_deadline else None
         products.append(
             {
-                "id": p.pk, "name": p.name, "description": p.description, "season_id": p.season_id, "season_name": p.season.name, "early_bird": early,
+                "id": p.pk, "name": p.name, "description": p.description, "season_id": p.season_id, "season_name": p.season.name, "early_bird": early, "entry_kind": pricing.entry_kind(p),
                 "variants": [{"id": v.pk, "name": v.name, "price": v.effective_price} for v in p.variants.all() if v.is_active],
                 "registrant_discount_scope": p.registrant_discount_scope,
                 "registrant_tiers": [{"min_registrants": t.min_registrants, "discount_type": t.discount_type, "discount_amount": t.discount_amount} for t in p.registrant_tiers.all()],
@@ -115,6 +115,8 @@ def preview(request, payload: PreviewIn):
     for i, e in enumerate(payload.entries):
         if e.variant_id not in variants:
             raise Invalid("Choose what to register for.", {f"entries.{i}.variant_id": ["Choose what to register for."]})
+        if e.kind in ("player", "volunteer") and not pricing.fits_kind(variants[e.variant_id].product, e.kind):
+            raise Invalid("Choose what to register for.", {f"entries.{i}.variant_id": [pricing.kind_error(e.kind)]})
         chosen.append(variants[e.variant_id])
     priced = pricing.price_entries(chosen)
     early = priced.early_bird_total_discount

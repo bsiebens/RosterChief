@@ -17,8 +17,9 @@ export const shopOn = (me: Me, flag: 'can_manage_shop_products' | 'can_manage_sh
 export type ProductType = 'merchandise' | 'membership' | 'event_fee';
 export const PRODUCT_TYPES: ProductType[] = ['merchandise', 'membership', 'event_fee'];
 
-export type Category = { id: string; name: string; product_count: number };
-export type CategoryRef = { id: string; name: string };
+/** `system_key` is "player" / "volunteer" for the two fixed system categories (they cannot be renamed or deleted), else null. */
+export type Category = { id: string; name: string; product_count: number; system_key: 'player' | 'volunteer' | null; is_system: boolean };
+export type CategoryRef = { id: string; name: string; system_key?: 'player' | 'volunteer' | null };
 
 export type Variant = {
 	id: string;

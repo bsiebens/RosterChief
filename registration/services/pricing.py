@@ -66,15 +66,34 @@ def offerable_products():
     return (
         Product.objects.filter(product_type=Product.ProductType.MEMBERSHIP, is_active=True, is_public=True, season__isnull=False, season__end_date__gte=today)
         .filter(Exists(has_variant))
-        .select_related("season")
+        .select_related("season", "category")
         .prefetch_related("variants", "registrant_tiers")
         .order_by("season__start_date", "name")
     )
 
 
+def entry_kind(product: Product) -> str | None:
+    """The registration option a product is for: ``"player"`` / ``"volunteer"`` when it is in one of the fixed system categories, else ``None``
+    (offered for both)."""
+    return product.category.system_key if product.category_id and product.category is not None else None
+
+
+def fits_kind(product: Product, kind: str) -> bool:
+    """A product in the Player / Volunteer category is offered only for that kind; any other product is offered for both."""
+    key = entry_kind(product)
+    return key is None or key == kind
+
+
+KIND_LABELS = {"player": "a player", "volunteer": "a volunteer"}
+
+
+def kind_error(kind: str) -> str:
+    return f"This option is not available for {KIND_LABELS.get(kind, 'this kind of registration')}."
+
+
 def variants_by_id(ids) -> dict:
     """The chosen variants (only offerable ones), keyed by id."""
-    found = ProductVariant.objects.filter(pk__in=list(ids), is_active=True, product__in=offerable_products()).select_related("product", "product__season").prefetch_related("product__registrant_tiers")
+    found = ProductVariant.objects.filter(pk__in=list(ids), is_active=True, product__in=offerable_products()).select_related("product", "product__season", "product__category").prefetch_related("product__registrant_tiers")
     return {v.pk: v for v in found}
 
 

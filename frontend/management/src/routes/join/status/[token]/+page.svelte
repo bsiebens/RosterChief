@@ -92,7 +92,7 @@
 		<section class="card card-body gap-4" aria-labelledby="p-{p.member_id}">
 			<div>
 				<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
-				<p class="text-sm text-muted">{p.description}{#if p.requested_team} · {t('regs.team', { team: p.requested_team })}{/if} · {t(`regs.kind.${p.entry_kind}`)}</p>
+				<p class="text-sm text-muted">{p.description}{#if p.requested_team} · {t('regs.team', { team: p.requested_team })}{/if} · {t(`reg.kind.${p.entry_kind}`)}</p>
 				<p class="mt-1 text-xs"><span class="badge badge-sm {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span></p>
 			</div>
 

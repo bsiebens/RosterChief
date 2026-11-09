@@ -44,6 +44,8 @@ class ProductOffer(Schema):
     description: str
     season_id: uuid.UUID
     season_name: str
+    #: "player" / "volunteer" when the product is in that system category (offered only for that kind), null when it is offered for both.
+    entry_kind: str | None = None
     variants: list[VariantOffer]
     early_bird: EarlyBirdOffer | None = None
     registrant_discount_scope: str

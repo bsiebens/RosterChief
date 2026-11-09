@@ -12,12 +12,17 @@ Money = Annotated[Decimal, PlainSerializer(lambda d: f"{d:.2f}", return_type=str
 class CategoryRef(Schema):
     id: uuid.UUID
     name: str
+    #: "player" / "volunteer" for the two fixed system categories, else null.
+    system_key: str | None = None
 
 
 class CategoryOut(Schema):
     id: uuid.UUID
     name: str
     product_count: int
+    system_key: str | None = None
+    #: True for Player and Volunteer: they can't be renamed or deleted.
+    is_system: bool = False
 
 
 class CategoryIn(Schema):

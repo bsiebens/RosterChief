@@ -8,6 +8,8 @@ export type ProductOffer = {
 	description: string;
 	season_id: string;
 	season_name: string;
+	/** "player" / "volunteer": offered only for that kind of registration (a system product category); null: offered for both. */
+	entry_kind: 'player' | 'volunteer' | null;
 	variants: VariantOffer[];
 	early_bird: { discount_type: string; discount_amount: string; deadline: string } | null;
 	registrant_discount_scope: string;

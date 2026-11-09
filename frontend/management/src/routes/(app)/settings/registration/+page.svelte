@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { Check, Copy, Save, TriangleAlert } from '@lucide/svelte';
+	import { Check, Copy, ExternalLink, Save, TriangleAlert } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -82,16 +82,17 @@
 				</div>
 
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
-					<section class="card card-body gap-3">
-						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('regset.card.link')}</h2>
-						<p class="text-xs text-muted">{t('regset.link_help')}</p>
-						<div class="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
-							<code class="min-w-0 flex-1 truncate font-mono text-xs select-all">{data.joinUrl}</code>
-							<button class="btn btn-outline btn-xs btn-square" type="button" onclick={copy} aria-label={t('regset.copy')}>{#if copied}<Check size={13} />{:else}<Copy size={13} />{/if}</button>
-						</div>
-						<div class="flex items-center gap-2 text-xs text-muted">
+					<section class="card card-body gap-2">
+						<div class="flex items-center justify-between gap-2">
+							<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('regset.card.link')}</h2>
 							{#if s.is_open && data.offerable}<span class="badge badge-sm badge-success">{t('regset.status_open')}</span>
 							{:else}<span class="badge badge-sm badge-warning gap-1"><TriangleAlert size={10} aria-hidden="true" /> {t('regset.status_closed')}</span>{/if}
+						</div>
+						<p class="text-xs text-muted">{t('regset.link_help')}</p>
+						<div class="flex items-center gap-2">
+							<input class="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs" readonly value={data.joinUrl} aria-label={t('regset.card.link')} onfocus={(e) => e.currentTarget.select()} />
+							<button class="btn btn-outline btn-sm gap-1" type="button" onclick={copy}>{#if copied}<Check size={14} /> {t('forms.send.copied')}{:else}<Copy size={14} /> {t('forms.send.copy')}{/if}</button>
+							<a class="btn btn-outline btn-sm gap-1" href={data.joinUrl} target="_blank" rel="noopener"><ExternalLink size={14} aria-hidden="true" /> {t('regset.open_link')}</a>
 						</div>
 						{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('forms.unsaved')}</p>{/if}
 						<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>

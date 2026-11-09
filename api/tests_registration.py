@@ -17,7 +17,7 @@ from members.services import onboarding
 from news.tests import NewsClubMixin
 from registration.models import RegistrationBatch
 from registration.services import config, pricing
-from shop.models import DiscountType, Product, ProductRegistrantDiscountTier, ProductVariant
+from shop.models import DiscountType, Product, ProductCategory, ProductRegistrantDiscountTier, ProductVariant
 from teams.models import Position, TeamMembership
 
 BASE = "/api/v1"
@@ -138,6 +138,44 @@ class JoinPageTests(RegistrationMixin, TestCase):
         self.assertEqual((r.json()["total"], r.json()["lines"][0]["discount"]), ("180.00", "10.00"))
         self.assertEqual(RegistrationBatch.objects.count(), 0)  # nothing saved
         self.assertEqual(self.public("post", "/preview", {"entries": [self.entry(variant_id="00000000-0000-0000-0000-000000000000")]}).status_code, 422)
+
+
+class SystemCategoryTests(RegistrationMixin, TestCase):
+    """A membership product in the Player / Volunteer system category is offered only for that kind; any other product for both."""
+
+    def setUp(self):
+        super().setUp()
+        self.player_cat = ProductCategory.objects.get(system_key="player")
+        self.volunteer_cat = ProductCategory.objects.get(system_key="volunteer")
+        self.product.category = self.player_cat
+        self.product.save()
+        self.free.category = self.volunteer_cat
+        self.free.save()
+        self.either = Product.objects.create(name="Family pass", price=Decimal("5.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        self.either_variant = ProductVariant.objects.create(product=self.either, name="Family pass")
+
+    def test_page_says_which_kind_each_product_is_for(self):
+        kinds = {p["name"]: p["entry_kind"] for p in self.public("get", "").json()["products"]}
+        self.assertEqual(kinds, {"Player membership": "player", "Volunteer": "volunteer", "Family pass": None})
+
+    def test_submit_checks_the_option_against_the_kind(self):
+        r = self.register([self.entry(kind="volunteer")])  # a volunteer cannot take the player option
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("entries.0.variant_id", r.json()["errors"])
+        r = self.register([self.entry(kind="player", variant_id=str(self.free_variant.pk))])
+        self.assertIn("entries.0.variant_id", r.json()["errors"])
+        self.assertEqual(RegistrationBatch.objects.count(), 0)
+
+    def test_matching_and_uncategorised_options_are_accepted(self):
+        batch = self.batch(entries=[self.entry("A", kind="player"), self.entry("B", kind="volunteer", variant_id=str(self.free_variant.pk)), self.entry("C", kind="volunteer", variant_id=str(self.either_variant.pk))])
+        self.assertEqual(batch.details.count(), 3)
+        self.assertEqual(self.register([self.entry("D", kind="player", variant_id=str(self.either_variant.pk))]).status_code, 201)  # no system category: both kinds
+
+    def test_preview_checks_the_option_against_the_kind(self):
+        r = self.public("post", "/preview", {"entries": [self.entry(kind="volunteer")]})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("entries.0.variant_id", r.json()["errors"])
+        self.assertEqual(self.public("post", "/preview", {"entries": [self.entry(kind="player")]}).status_code, 200)
 
 
 class SubmitTests(RegistrationMixin, TestCase):

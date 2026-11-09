@@ -1,5 +1,7 @@
 export default {
 	en: {
+		'reg.f.offer_none_player': "No player membership is offered yet.",
+		'reg.f.offer_none_volunteer': "No volunteer membership is offered yet.",
 		'reg.kicker': "Registration",
 		'reg.title': "Join the club",
 		'reg.footer': "Your details go to the club.",
@@ -104,6 +106,8 @@ export default {
 		'regs.keep_link': "Keep this page’s link: it is the only way to come back to your registration."
 	},
 	nl: {
+		'reg.f.offer_none_player': "Er wordt nog geen lidmaatschap voor spelers aangeboden.",
+		'reg.f.offer_none_volunteer': "Er wordt nog geen lidmaatschap voor vrijwilligers aangeboden.",
 		'reg.kicker': "Inschrijving",
 		'reg.title': "Word lid",
 		'reg.footer': "Je gegevens gaan naar de club.",
@@ -208,6 +212,8 @@ export default {
 		'regs.keep_link': "Bewaar de link van deze pagina: het is de enige manier om terug te keren naar je inschrijving."
 	},
 	fr: {
+		'reg.f.offer_none_player': "Aucune adhésion de joueur n’est encore proposée.",
+		'reg.f.offer_none_volunteer': "Aucune adhésion de bénévole n’est encore proposée.",
 		'reg.kicker': "Inscription",
 		'reg.title': "Rejoindre le club",
 		'reg.footer': "Vos données sont transmises au club.",

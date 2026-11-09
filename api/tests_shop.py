@@ -103,9 +103,23 @@ class ShopApiTests(ShopClubMixin, TestCase):
         self.assertEqual(self.as_("products", "post", "/categories", {"name": "merch"}).status_code, 422)
         self.assertEqual(self.as_("products", "patch", f"/categories/{cid}", {"name": "Gear"}).json()["name"], "Gear")
         pid = self.as_("products", "post", "/products", {"name": "Cap", "price": "9.50", "category_id": cid}).json()["id"]
-        self.assertEqual(self.as_("orders", "get", "/categories").json()["results"][0]["product_count"], 1)
+        self.assertEqual(next(c for c in self.as_("orders", "get", "/categories").json()["results"] if c["id"] == cid)["product_count"], 1)
         self.assertEqual(self.as_("products", "delete", f"/categories/{cid}").status_code, 204)
         self.assertIsNone(self.as_("products", "get", f"/products/{pid}").json()["category"])
+
+    def test_player_and_volunteer_are_fixed_system_categories(self):
+        rows = self.as_("products", "get", "/categories").json()["results"]
+        self.assertEqual([(c["name"], c["system_key"], c["is_system"]) for c in rows[:2]], [("Player", "player", True), ("Volunteer", "volunteer", True)])  # listed first
+        self.assertTrue(all(not c["is_system"] for c in rows[2:]))
+        player = rows[0]
+        r = self.as_("products", "patch", f"/categories/{player['id']}", {"name": "Players"})
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "system_category"))
+        r = self.as_("products", "delete", f"/categories/{player['id']}")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "system_category"))
+        self.assertEqual(self.as_("products", "post", "/categories", {"name": "player"}).status_code, 422)  # the name is taken
+        # A product can be put in one; the product payload says so.
+        r = self.as_("products", "post", "/products", {"name": "Season fee", "price": "10", "category_id": player["id"]})
+        self.assertEqual(r.json()["category"]["system_key"], "player")
 
     def test_product_crud_money_strings_and_filters(self):
         r = self.as_("products", "post", "/products", {"name": "Jersey", "price": "40.5", "variants": [{"name": "S"}, {"name": "M", "price": "42.00"}]})

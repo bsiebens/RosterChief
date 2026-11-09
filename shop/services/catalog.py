@@ -4,7 +4,7 @@ import os
 import uuid
 
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, F
 
 from formbuilder.services.management import Conflict
 from members.services import access
@@ -28,7 +28,8 @@ def _check_price(price, field="price"):
 
 
 def categories():
-    return ProductCategory.objects.annotate(product_count=Count("products"))
+    """The fixed Player and Volunteer categories first, then the club's own by name."""
+    return ProductCategory.objects.annotate(product_count=Count("products")).order_by(F("system_key").asc(nulls_last=True), "name")
 
 
 def _category_name(name, exclude=None):
@@ -47,6 +48,8 @@ def create_category(actor, name) -> ProductCategory:
 
 def update_category(actor, category, name) -> ProductCategory:
     access.require_manage_shop_products(actor)
+    if category.is_system:
+        raise Invalid("The Player and Volunteer categories are fixed and cannot be renamed.", {"name": ["This is a system category and cannot be renamed."]}, code="system_category")
     category.name = _category_name(name, category)
     category.save()
     return category
@@ -54,6 +57,8 @@ def update_category(actor, category, name) -> ProductCategory:
 
 def delete_category(actor, category) -> None:
     access.require_manage_shop_products(actor)
+    if category.is_system:
+        raise Conflict("The Player and Volunteer categories are fixed and cannot be deleted.", "system_category")
     category.delete()
 
 

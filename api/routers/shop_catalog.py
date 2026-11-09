@@ -50,7 +50,7 @@ def _item(p, levels) -> dict:
     else:
         in_stock = levels.get((p.pk, None), 0) > 0
     return {
-        "id": p.pk, "name": p.name, "slug": p.slug, "category": {"id": p.category.pk, "name": p.category.name} if p.category else None,
+        "id": p.pk, "name": p.name, "slug": p.slug, "category": {"id": p.category.pk, "name": p.category.name, "system_key": p.category.system_key} if p.category else None,
         "description": p.description, "image_url": p.main_image.image.url if p.main_image else None, "price": p.price, "product_type": p.product_type,
         "is_active": p.is_active, "is_public": p.is_public, "personalization_enabled": p.personalization_enabled,
         "inventory_managed": p.inventory_managed, "variant_count": len(variants), "in_stock": in_stock, "created": p.created,
@@ -108,7 +108,7 @@ def _category(category_id):
 
 
 def _cat_out(c) -> dict:
-    return {"id": c.pk, "name": c.name, "product_count": c.product_count}
+    return {"id": c.pk, "name": c.name, "product_count": c.product_count, "system_key": c.system_key, "is_system": c.is_system}
 
 
 # --- categories ---------------------------------------------------------------------------------------------------

@@ -25,9 +25,10 @@
 			<label class="label" for="{uid}-cat"><span class="label-text">{t('shop.product.f.category')}</span></label>
 			<select id="{uid}-cat" class="select select-bordered w-full" value={v.category_id ?? ''} onchange={(e) => (v.category_id = e.currentTarget.value || null)}>
 				<option value="">{t('shop.product.no_category')}</option>
-				{#each categories as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+				{#each categories as c (c.id)}<option value={c.id}>{c.name}{c.is_system ? ` (${t('shop.cat.system_short')})` : ''}</option>{/each}
 			</select>
-			{#if fields.category_id}<span class="mt-1 block text-xs text-error">{fields.category_id}</span>{/if}
+			{#if fields.category_id}<span class="mt-1 block text-xs text-error">{fields.category_id}</span>
+			{:else if v.product_type === 'membership'}<span class="label-text-alt mt-1 block">{t('shop.cat.membership_hint')}</span>{/if}
 		</div>
 		<div class="form-control w-full">
 			<label class="label" for="{uid}-type"><span class="label-text">{t('shop.product.f.type')}</span></label>

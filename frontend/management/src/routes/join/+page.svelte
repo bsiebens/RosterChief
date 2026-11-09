@@ -12,15 +12,25 @@
 	let { data } = $props();
 	const cfg = $derived(data.config);
 
-	// The only offer? Then it is already chosen for everyone.
-	const options = $derived(cfg.products.flatMap((p) => p.variants.map((v) => ({ id: v.id, product: p.name, label: v.name === p.name ? p.name : v.name, price: v.price }))));
-	const grouped = $derived(cfg.products.map((p) => ({ product: p, variants: p.variants })));
-	// svelte-ignore state_referenced_locally
-	const firstVariant = options.length === 1 ? options[0].id : '';
+	// What each kind of registration may choose from: products in the Player / Volunteer category only for that kind, the rest for both.
+	const productsFor = (kind: string) => cfg.products.filter((p) => !p.entry_kind || p.entry_kind === kind);
+	const groupedFor = (kind: string) => productsFor(kind).map((p) => ({ product: p, variants: p.variants }));
+	const variantsFor = (kind: string) => productsFor(kind).flatMap((p) => p.variants);
+	/** Keep the chosen option valid for the person's kind: drop an incompatible choice, and pick the only option when there is just one. */
+	function reconcile(e: EntryDraft) {
+		const options = variantsFor(e.kind);
+		if (e.variant_id && !options.some((v) => v.id === e.variant_id)) e.variant_id = '';
+		if (!e.variant_id && options.length === 1) e.variant_id = options[0].id;
+	}
+	const fresh = (patch: Partial<EntryDraft> = {}): EntryDraft => {
+		const e = { ...blankEntry(''), ...patch };
+		reconcile(e);
+		return e;
+	};
 
 	let contact = $state({ first_name: '', last_name: '', email: '', phone: '' });
 	// svelte-ignore state_referenced_locally
-	let entries = $state<EntryDraft[]>([{ ...blankEntry(firstVariant), who: 'self' }]);
+	let entries = $state<EntryDraft[]>([fresh({ who: 'self' })]);
 	let website = $state('');
 	let accepted = $state(false);
 	let busy = $state(false);
@@ -55,7 +65,7 @@
 
 	function addPerson() {
 		if (entries.length >= cfg.max_entries) return;
-		entries = [...entries, blankEntry(firstVariant)];
+		entries = [...entries, fresh()];
 	}
 	const removePerson = (uid: number) => (entries = entries.filter((e) => e.uid !== uid));
 	// Only one person can be "myself"; a second one is a child.
@@ -217,21 +227,25 @@
 					<fieldset class="grid gap-2">
 						<legend class="label-text mb-1">{t('reg.kind.label')}</legend>
 						<div class="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="player" bind:group={e.kind} /> {t('reg.kind.player')}</label>
-							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="volunteer" bind:group={e.kind} /> {t('reg.kind.volunteer')}</label>
+							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="player" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('reg.kind.player')}</label>
+							<label class="flex items-center gap-2"><input type="radio" class="radio radio-sm" name="{fid}-kind" value="volunteer" bind:group={e.kind} onchange={() => reconcile(e)} /> {t('reg.kind.volunteer')}</label>
 						</div>
 					</fieldset>
 
 					<div class="form-control">
 						<label class="label" for="{fid}-offer"><span class="label-text">{t('reg.f.offer')}<span class="text-error" aria-hidden="true"> *</span></span></label>
-						<select id="{fid}-offer" class="select select-bordered w-full {eerr(i, 'variant_id') ? 'select-error' : ''}" bind:value={e.variant_id} aria-invalid={eerr(i, 'variant_id') ? 'true' : undefined}>
-							<option value="">{t('reg.f.offer_pick')}</option>
-							{#each grouped as g (g.product.id)}
-								<optgroup label={g.product.name}>
-									{#each g.variants as v (v.id)}<option value={v.id}>{v.name === g.product.name ? g.product.name : v.name} · {money(v.price)}</option>{/each}
-								</optgroup>
-							{/each}
-						</select>
+						{#if variantsFor(e.kind).length}
+							<select id="{fid}-offer" class="select select-bordered w-full {eerr(i, 'variant_id') ? 'select-error' : ''}" bind:value={e.variant_id} aria-invalid={eerr(i, 'variant_id') ? 'true' : undefined}>
+								<option value="">{t('reg.f.offer_pick')}</option>
+								{#each groupedFor(e.kind) as g (g.product.id)}
+									<optgroup label={g.product.name}>
+										{#each g.variants as v (v.id)}<option value={v.id}>{v.name === g.product.name ? g.product.name : v.name} · {money(v.price)}</option>{/each}
+									</optgroup>
+								{/each}
+							</select>
+						{:else}
+							<p id="{fid}-offer" class="rounded-lg border border-dashed border-line px-3 py-2 text-sm text-muted" role="status">{t(e.kind === 'volunteer' ? 'reg.f.offer_none_volunteer' : 'reg.f.offer_none_player')}</p>
+						{/if}
 						{#if eerr(i, 'variant_id')}<span class="mt-1 block text-xs text-error">{eerr(i, 'variant_id')}</span>{/if}
 					</div>
 
