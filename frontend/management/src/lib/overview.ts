@@ -1,6 +1,6 @@
 import type { ClubAttendance } from '#lib/attendance.ts';
 
-/** GET /api/v1/overview (see api/schemas_overview.py) plus the placeholder numbers for the parts that have no data yet. */
+/** GET /api/v1/overview (see api/schemas_overview.py). */
 export type Overview = {
 	season: { id: string; name: string } | null;
 	previous_season: { id: string; name: string } | null;
@@ -17,6 +17,3 @@ export type Overview = {
 	/** Club-wide turnout over the season's past events; null when the season has no past events yet. */
 	attendance: ClubAttendance | null;
 };
-
-/** Sample numbers until the shop exists. */
-export const mockShop = { orders: 18, revenue: '1240.50', outstanding: '185.00', unpaid: 3 };

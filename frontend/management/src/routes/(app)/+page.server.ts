@@ -3,6 +3,7 @@ import { api, apiPage } from '#lib/management-api.ts';
 import type { EventRow } from '#lib/events/types.ts';
 import type { NewsListItem } from '#lib/news.ts';
 import type { Overview } from '#lib/overview.ts';
+import type { ShopStats } from '#lib/shop-orders.ts';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
@@ -10,24 +11,29 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
 		// One club: no picker needed, go straight to its host (never to ourselves).
 		const only = locals.myClubs.length === 1 ? locals.myClubs[0] : null;
 		if (only && new URL(only.url).hostname !== url.hostname) redirect(303, `/go/${only.slug}`);
-		return { overview: null as Overview | null, noTypeCount: null as number | null, upcoming: [] as EventRow[], news: [] as NewsListItem[], newsPending: 0 };
+		return { overview: null as Overview | null, noTypeCount: null as number | null, upcoming: [] as EventRow[], news: [] as NewsListItem[], newsPending: 0, shop: null as ShopStats | null, shopClosed: false };
 	}
 	// A failure here (no permission, backend hiccup) just hides the part that needed it.
-	const { me } = (await parent()) as { me?: { can_manage_members: boolean; can_add_news?: boolean; can_publish_news?: boolean } };
+	const { me } = (await parent()) as { me?: { can_manage_members: boolean; can_add_news?: boolean; can_publish_news?: boolean; features?: string[]; can_manage_shop_products?: boolean; can_manage_shop_inventory?: boolean; can_manage_shop_orders?: boolean; can_manage_shop_discounts?: boolean; can_manage_shop_invoices?: boolean } };
+	// The shop numbers: only with the shop feature and some shop permission.
+	const shopOn = !!me?.features?.includes('shop') && !!(me.can_manage_shop_products || me.can_manage_shop_inventory || me.can_manage_shop_orders || me.can_manage_shop_discounts || me.can_manage_shop_invoices);
 	// The next events everyone in the app may see (the calendar API returns all of them), soonest first.
 	const today = new Date();
 	const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 	const horizon = new Date(today.getTime() + 60 * 86_400_000);
-	const [overview, noType, events, news, pending] = await Promise.all([
+	const [overview, noType, events, news, pending, shopStats, shopStatus] = await Promise.all([
 		api<Overview>('GET', '/overview', { f: fetch }),
 		// People holding no role (member, staff or guardian) in the current season: an issue for member managers.
 		me?.can_manage_members ? apiPage<unknown>('/members', { role: 'none', limit: 1 }, fetch) : Promise.resolve(null),
 		api<EventRow[]>('GET', '/events', { query: { from: iso(today), to: iso(horizon) }, f: fetch }),
 		// The latest live club news (everyone sees published items), and for publishers the review queue size.
 		me?.can_add_news ? api<{ results: NewsListItem[] }>('GET', '/news', { query: { live: true, limit: 5 }, f: fetch }) : Promise.resolve(null),
-		me?.can_publish_news ? api<{ count: number }>('GET', '/news', { query: { status: 'pending_review', limit: 1 }, f: fetch }) : Promise.resolve(null)
+		me?.can_publish_news ? api<{ count: number }>('GET', '/news', { query: { status: 'pending_review', limit: 1 }, f: fetch }) : Promise.resolve(null),
+		shopOn ? api<ShopStats>('GET', '/shop/stats', { f: fetch }) : Promise.resolve(null),
+		// Whether the shop is closed for members: an item for "needs attention" (public status endpoint, readable with any shop permission).
+		shopOn ? api<{ open: boolean; message: string }>('GET', '/public/shop/status', { f: fetch }) : Promise.resolve(null)
 	]);
 	const now = Date.now();
 	const upcoming = (events.ok ? (events.data ?? []) : []).filter((e) => !e.cancelled && new Date(e.end ?? e.start).getTime() >= now).slice(0, 12);
-	return { upcoming, news: news?.ok ? (news.data?.results ?? []) : [], newsPending: pending?.ok ? (pending.data?.count ?? 0) : 0, overview: overview.ok ? (overview.data ?? null) : null, noTypeCount: noType?.ok && noType.data ? noType.data.count : null };
+	return { shopClosed: !!shopStatus?.ok && shopStatus.data?.open === false, shop: shopStats?.ok ? (shopStats.data ?? null) : null, upcoming, news: news?.ok ? (news.data?.results ?? []) : [], newsPending: pending?.ok ? (pending.data?.count ?? 0) : 0, overview: overview.ok ? (overview.data ?? null) : null, noTypeCount: noType?.ok && noType.data ? noType.data.count : null };
 };

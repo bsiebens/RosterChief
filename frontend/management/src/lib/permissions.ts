@@ -1,7 +1,7 @@
 import type { Me } from '#lib/types.ts';
 
 /** What the signed-in user may do. The API enforces all of it; this only decides what to show. */
-type Who = Pick<Me, 'can_manage_members' | 'can_manage_settings' | 'can_manage_referees' | 'can_publish_news' | 'can_add_news' | 'can_manage_forms' | 'can_execute_evaluations' | 'managed_team_ids'> | null | undefined;
+type Who = Pick<Me, 'can_manage_members' | 'can_manage_settings' | 'can_manage_referees' | 'can_publish_news' | 'can_add_news' | 'can_manage_forms' | 'can_manage_shop_products' | 'can_manage_shop_inventory' | 'can_manage_shop_orders' | 'can_manage_shop_discounts' | 'can_manage_shop_invoices' | 'can_execute_evaluations' | 'managed_team_ids'> | null | undefined;
 
 export const canManageMembers = (me: Who) => !!me?.can_manage_members;
 /** Arrange referees and officials for home games and print their payment forms. */
@@ -21,3 +21,10 @@ export const canAddNews = (me: Who) => !!me?.can_add_news;
 export const canPublishNews = (me: Who) => !!me?.can_publish_news;
 /** Build forms, send them to members and read the responses. */
 export const canManageForms = (me: Who) => !!me?.can_manage_forms;
+/** Shop: products and categories, inventory, orders, discounts and vouchers, invoices (each its own permission). */
+export const canManageShopProducts = (me: Who) => !!me?.can_manage_shop_products;
+export const canManageShopInventory = (me: Who) => !!me?.can_manage_shop_inventory;
+export const canManageShopOrders = (me: Who) => !!me?.can_manage_shop_orders;
+export const canManageShopDiscounts = (me: Who) => !!me?.can_manage_shop_discounts;
+export const canManageShopInvoices = (me: Who) => !!me?.can_manage_shop_invoices;
+export const canManageShopAny = (me: Who) => canManageShopProducts(me) || canManageShopInventory(me) || canManageShopOrders(me) || canManageShopDiscounts(me) || canManageShopInvoices(me);

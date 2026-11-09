@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { CalendarDays, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, Users, Whistle } from '@lucide/svelte';
+import { CalendarDays, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -78,6 +78,25 @@ export const NAV: NavItem[] = [
 		children: [
 			{ href: '/forms', label: 'forms.nav.forms', match: (p) => p === '/forms' || (p.startsWith('/forms/') && !p.startsWith('/forms/sends')) },
 			{ href: '/forms/sends', label: 'forms.nav.sends', match: (p) => p.startsWith('/forms/sends') }
+		]
+	},
+	{
+		key: 'shop',
+		href: '/shop',
+		label: 'shop.nav',
+		icon: ShoppingBag,
+		match: (p) => p === '/shop' || p.startsWith('/shop/'),
+		visible: (me) => me.features.includes('shop') && (me.can_manage_shop_products || me.can_manage_shop_inventory || me.can_manage_shop_orders || me.can_manage_shop_discounts || me.can_manage_shop_invoices),
+		// Keep this order: products, inventory, orders, discounts, vouchers, invoices.
+		children: [
+			{ href: '/shop/products', label: 'shop.nav.products', match: (p) => p.startsWith('/shop/products'), visible: (me) => me.can_manage_shop_products },
+			{ href: '/shop/inventory', label: 'shop.nav.inventory', match: (p) => p.startsWith('/shop/inventory'), visible: (me) => me.can_manage_shop_inventory },
+			{ href: '/shop/orders', label: 'shop.nav.orders', match: (p) => p.startsWith('/shop/orders'), visible: (me) => me.can_manage_shop_orders },
+			{ href: '/shop/production', label: 'shop.nav.production', match: (p) => p.startsWith('/shop/production'), visible: (me) => me.can_manage_shop_orders },
+			{ href: '/shop/discounts', label: 'shop.nav.discounts', match: (p) => p.startsWith('/shop/discounts'), visible: (me) => me.can_manage_shop_discounts },
+			{ href: '/shop/vouchers', label: 'shop.nav.vouchers', match: (p) => p.startsWith('/shop/vouchers'), visible: (me) => me.can_manage_shop_discounts },
+			{ href: '/shop/invoices', label: 'shop.nav.invoices', match: (p) => p.startsWith('/shop/invoices'), visible: (me) => me.can_manage_shop_invoices },
+			{ href: '/shop/settings', label: 'shop.nav.settings', match: (p) => p.startsWith('/shop/settings'), visible: (me) => me.can_manage_shop_orders }
 		]
 	},
 	{

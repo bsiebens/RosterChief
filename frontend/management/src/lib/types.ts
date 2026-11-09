@@ -36,6 +36,12 @@ export type Me = {
 	can_add_news: boolean;
 	/** forms.manage_forms (or the Owner role): build forms, send them to members and read the responses. */
 	can_manage_forms: boolean;
+	/** Shop permissions (false without the `shop` feature): products, inventory, orders, discounts and vouchers, invoices. */
+	can_manage_shop_products: boolean;
+	can_manage_shop_inventory: boolean;
+	can_manage_shop_orders: boolean;
+	can_manage_shop_discounts: boolean;
+	can_manage_shop_invoices: boolean;
 	/** Teams where the user holds a management position this season: they may edit those teams. */
 	managed_team_ids: string[];
 	/** Groups the user administers: they may schedule events for them and manage their people. */

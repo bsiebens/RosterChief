@@ -18,8 +18,8 @@
 
 	const club = $derived(data.mode === 'club' ? data.branding : null);
 	const first = $derived(data.me?.first_name ?? '');
-	// The shop card needs the shop feature on the club and the shop.manage_shop permission.
-	const showShop = $derived(!!data.me?.features?.includes('shop') && !!data.me?.permissions?.includes('shop.manage_shop'));
+	// The shop card needs the shop feature on the club and any shop permission (the flags already include shop.manage_shop).
+	const showShop = $derived(!!data.me?.features?.includes('shop') && !!(data.me?.can_manage_shop_products || data.me?.can_manage_shop_inventory || data.me?.can_manage_shop_orders || data.me?.can_manage_shop_discounts || data.me?.can_manage_shop_invoices));
 
 	usePageHeader(() => ({ title: club ? club.name : t('home.picker.title'), badge: club && data.overview?.season ? seasonBadge : null }));
 </script>
@@ -38,7 +38,7 @@
 			<!-- Left: news, signups, fees + renewal. Right: needs attention (as tall as the news), then the fixtures down to the bottom of the renewal card. -->
 			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
 				<NewsCard items={data.news ?? []} pending={data.newsPending ?? 0} />
-				<NeedsAttention overview={o} noTypeCount={data.noTypeCount} />
+				<NeedsAttention overview={o} noTypeCount={data.noTypeCount} shopClosed={data.shopClosed} shopHref={data.me?.can_manage_shop_orders ? '/shop/settings' : '/shop'} />
 				<SignupsChart months={o.signups} />
 				<div class="xl:col-start-2 xl:row-span-2 xl:row-start-2 [&>*]:h-full"><UpcomingCard events={data.upcoming ?? []} /></div>
 				{#if o.fees}
@@ -48,7 +48,7 @@
 					</div>
 				{/if}
 			</div>
-			<SummaryCards cards={o.cards!} {showShop} />
+			<SummaryCards cards={o.cards!} {showShop} shop={data.shop ?? null} />
 		</div>
 	{:else}
 		<div class="card">
