@@ -52,6 +52,9 @@ class LineOut(Schema):
     membership_id: uuid.UUID
     entry_kind: str
     description: str
+    #: What was bought (``null`` if the product was deleted since): lines of one product share a per-registration discount.
+    product_id: uuid.UUID | None = None
+    product_name: str | None = None
     requested_team_id: uuid.UUID | None = None
     requested_team_name: str | None = None
     requested_position_name: str | None = None
@@ -59,28 +62,44 @@ class LineOut(Schema):
     #: reserved | unavailable | assigned | dropped | null (see invoicing.number_state)
     number_state: str | None = None
     base_price: Decimal
-    #: The registrant discount (tiers) already in ``price``.
+    #: This line's own discount (a per-person registrant tier), already in ``price``. A per-registration discount is NOT here: it is its own entry in
+    #: ``order_discounts`` (older registrations may still carry such a discount here).
     discount_amount: Decimal
     price_override: Decimal | None = None
     excluded: bool
-    #: What the line costs before the credits and the manual discount: the override, else base - discount; 0 when excluded. A credit line (negative
-    #: base price): its negative amount.
+    #: What the line shows as its price: the override, else base - ``discount_amount``; 0 when excluded. A credit line (negative base price): its
+    #: negative amount. Credits and the per-registration discount are not part of it.
     price: Decimal
     #: A line of a negative-priced product: it is not charged, it takes ``credit_total`` off the other lines.
     is_credit: bool = False
-    #: This line's share of the credits (already out of ``payable``).
+    #: Internal shares that keep each person's fee right (already out of ``payable``): of the credits, and of the product's per-registration discount.
+    #: Not shown on the line.
     credit_share: Decimal = Decimal("0.00")
-    #: What the person pays before the manual discount: ``price`` - ``credit_share``, never below 0 (0 for a credit line).
+    order_discount_share: Decimal = Decimal("0.00")
+    #: What the person's membership costs before the manual discount: ``price`` less both shares, never below 0 (0 for a credit line).
     payable: Decimal = Decimal("0.00")
     fee_amount: Decimal
     early_payment_deadline: datetime.date | None = None
     early_payment_discount: Decimal
 
 
+class OrderDiscountOut(Schema):
+    """A per-registration (multi-registrant) discount, shown as its own line: one per product that has one."""
+
+    product_id: uuid.UUID | None = None
+    name: str
+    #: Positive amount that comes off the registration.
+    amount: Decimal
+    people: int
+
+
 class RegistrationDetail(RegistrationItem):
     season_id: uuid.UUID
     lines: list[LineOut]
-    #: The lines less the credits, before the manual discount.
+    #: The separate per-registration discount lines (positive amounts), and their sum.
+    order_discounts: list[OrderDiscountOut] = []
+    order_discount_total: Decimal = Decimal("0.00")
+    #: What the registration costs before the manual discount: the person lines less the per-registration discounts and the credits (never below 0).
     subtotal: Decimal
     #: The credits of the registration (as a positive amount) and how much of that came off the other lines (the rest is unused).
     credit_total: Decimal = Decimal("0.00")
@@ -115,7 +134,7 @@ class ReviewIn(Schema):
 class ConfirmIn(Schema):
     #: Default: today + the settings' invoice due days.
     due_date: datetime.date | None = None
-    #: Email the invoice (PDF) to the contact.
+    #: Attach the invoice (PDF) to the confirmation mail. The contact is told the registration is confirmed either way.
     send: bool = True
 
 

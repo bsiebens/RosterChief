@@ -113,22 +113,38 @@ class PreviewLine(Schema):
     description: str
     #: Negative for a credit line (a negative-priced product).
     base_price: Decimal
+    #: This line's own discount (a per-person registrant tier). A per-registration discount is not here: see ``PreviewOut.order_discounts``.
     discount: Decimal
-    #: What this person pays (credits and registrant discount already out; 0 for a credit line). The prices add up to ``total``.
+    #: What the line shows as its price: ``base_price`` less its own ``discount``; a credit line: its negative amount. The per-registration discount and
+    #: the credits are separate lines, so the displayed prices do not add up to ``total`` on their own.
     price: Decimal
+    #: What this person's membership will cost (their fee): never below 0, 0 for a credit line. These add up to ``total``.
+    payable: Decimal = Decimal("0.00")
     is_credit: bool = False
-    #: This line's share of the registration's credits (already out of ``price``).
+    #: Internal shares behind ``payable``: of the credits and of the product's per-registration discount. Not meant to be shown on the line.
     credit_share: Decimal = Decimal("0.00")
+    order_discount_share: Decimal = Decimal("0.00")
     early_bird_discount: Decimal
     early_bird_deadline: datetime.date | None = None
+
+
+class OrderDiscount(Schema):
+    """A per-registration (multi-registrant) discount, shown as its own line: one per product that has one."""
+
+    description: str
+    #: Positive amount that comes off the registration.
+    amount: Decimal
+    people: int
 
 
 class PreviewOut(Schema):
     season: Ref
     lines: list[PreviewLine]
+    order_discounts: list[OrderDiscount] = []
+    order_discount_total: Decimal = Decimal("0.00")
     total: Decimal
     #: The credits (negative-priced products) in this registration, as a positive amount, and how much of it came off the other lines. Never more
-    #: than the others cost, so ``total`` is never below 0.
+    #: than the others cost, so ``total`` is never below 0; the unused part is ``credit_total - credit_applied``.
     credit_total: Decimal = Decimal("0.00")
     credit_applied: Decimal = Decimal("0.00")
     #: Total if everything with an early-bird discount is paid on time.
@@ -183,12 +199,34 @@ class PersonStatus(Schema):
     membership_status: str
     #: A line of a negative-priced product (a credit): not charged, it is taken off the registration's other people.
     is_credit: bool = False
-    #: A credit line: the amount it credits (positive); another person: the share of the credits already taken off their fee. Only once the invoice
-    #: is confirmed, like ``fee``.
+    #: A credit line: the amount it credits (positive); other people: always 0 (the credit is its own line, see ``StatusOut.invoice``). Only once the
+    #: invoice is confirmed, like ``fee``.
     credit: Decimal | None = None
     #: Only once the invoice is confirmed.
     fee: FeeOut | None = None
     checklist: list[ChecklistOut]
+
+
+class InvoiceLine(Schema):
+    #: person / order_discount / credit
+    kind: str
+    #: The person, or for ``order_discount`` the product it is for.
+    name: str
+    description: str = ""
+    #: Negative for a discount or credit.
+    amount: Decimal
+
+
+class InvoiceSummary(Schema):
+    """What the registration costs, once the invoice is confirmed: a line per person (own price), then a separate line per multi-registration discount,
+    then the credit lines, a manual discount and the total."""
+
+    lines: list[InvoiceLine]
+    manual_discount_amount: Decimal = Decimal("0.00")
+    manual_discount_note: str = ""
+    #: Credit that could not be used (more credit than there was to take it off); shown as a note.
+    credit_unused: Decimal = Decimal("0.00")
+    total: Decimal
 
 
 class StatusOut(Schema):
@@ -198,6 +236,8 @@ class StatusOut(Schema):
     submitted_at: datetime.datetime
     invoice_number: str | None = None
     invoice_due_date: datetime.date | None = None
+    #: Only once the invoice is confirmed.
+    invoice: InvoiceSummary | None = None
     people: list[PersonStatus]
     club: ClubBrand
 

@@ -33,7 +33,7 @@ td { padding: 2.5mm 2mm; border-bottom: 1px solid #ddd; vertical-align: top; }
 <table>
 <thead><tr><th>Person</th><th>Registration</th><th class="num">Amount</th></tr></thead>
 <tbody>
-{% for l in lines %}<tr{% if l.credit %} class="discount"{% endif %}><td>{{ l.name }}</td><td>{% if l.credit %}Credit: {% endif %}{{ l.description }}</td><td class="num">{{ l.amount }}</td></tr>{% endfor %}
+{% for l in lines %}<tr{% if l.negative %} class="discount"{% endif %}><td>{{ l.title }}</td><td>{{ l.sub }}</td><td class="num">{{ l.amount }}</td></tr>{% endfor %}
 {% if unused_credit %}<tr><td colspan="2">Credit that could not be used</td><td class="num">{{ unused_credit }}</td></tr>{% endif %}
 {% if discount %}<tr class="discount"><td colspan="2">Discount{% if discount_note %}: {{ discount_note }}{% endif %}</td><td class="num">-{{ discount }}</td></tr>{% endif %}
 <tr class="total"><td colspan="2">Total</td><td class="num">{{ total }}</td></tr>

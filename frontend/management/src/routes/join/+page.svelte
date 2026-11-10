@@ -97,6 +97,12 @@
 	const incomplete = $derived(entries.length - completeEntries.length);
 	/** The person a preview line is for (lines follow the complete entries of the request, not the form). */
 	const lineEntry = (index: number) => entries.find((e) => e.uid === previewUids[index]);
+	/** The name shown on a price line: the contact for "myself", else the typed name, else "Person n". */
+	const personName = (index: number) => {
+		const e = lineEntry(index);
+		const name = e?.who === 'self' ? `${contact.first_name} ${contact.last_name}`.trim() || t('reg.who.self') : `${e?.first_name ?? ''} ${e?.last_name ?? ''}`.trim();
+		return name || t('reg.person.n', { n: index + 1 });
+	};
 
 	function addPerson() {
 		if (entries.length >= cfg.max_entries) return;
@@ -346,19 +352,26 @@
 					{#if incomplete > 0}<p class="text-xs text-muted">{t('join.price.partial', { n: completeEntries.length, m: entries.length })}</p>{/if}
 					<div class="grid gap-3 transition-opacity {previewLoading ? 'opacity-50' : ''}">
 					<ul class="divide-y divide-rule text-sm">
-						{#each preview.lines as l (l.index)}
+						{#each preview.lines.filter((l) => !l.is_credit) as l (l.index)}
 							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
-								<span><span class="font-semibold text-ink">{lineEntry(l.index)?.who === 'self' ? `${contact.first_name} ${contact.last_name}`.trim() || t('reg.who.self') : `${lineEntry(l.index)?.first_name ?? ''} ${lineEntry(l.index)?.last_name ?? ''}`.trim() || t('reg.person.n', { n: l.index + 1 })}</span> <span class="text-muted">· {l.description}</span></span>
-								{#if l.is_credit}
-									<span class="font-mono text-ok-text"><span class="badge badge-sm badge-success mr-2">{t('join.price.credit')}</span>{money(l.base_price)}</span>
-									<span class="w-full text-xs text-muted">{t('join.price.credit_help')}</span>
-								{:else}
-									<span class="font-mono">
-										{#if Number(l.discount) > 0 || Number(l.credit_share) > 0}<span class="mr-2 text-muted line-through">{money(Number(l.base_price))}</span>{/if}{money(l.price)}
-									</span>
-									{#if Number(l.discount) > 0}<span class="w-full text-xs text-ok-text">{t('reg.price.discount', { amount: money(l.discount) })}</span>{/if}
-									{#if Number(l.credit_share) > 0}<span class="w-full text-xs text-ok-text">{t('join.price.credit_taken', { amount: money(l.credit_share) })}</span>{/if}
-								{/if}
+								<span class="font-semibold text-ink">{personName(l.index)}</span>
+								<span class="font-mono whitespace-nowrap">
+									{#if Number(l.discount) > 0}<span class="mr-2 text-muted line-through">{money(Number(l.base_price))}</span>{/if}{money(l.price)}
+								</span>
+								{#if Number(l.discount) > 0}<span class="w-full text-xs text-ok-text">{t('reg.price.discount', { amount: money(l.discount) })}</span>{/if}
+							</li>
+						{/each}
+						{#each preview.order_discounts as r (r.description)}
+							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+								<span><span class="font-semibold text-ink">{t('join.price.order_discount')}</span> <span class="text-xs text-muted">{t('join.price.order_discount_for', { product: r.description, n: r.people })}</span></span>
+								<span class="font-mono whitespace-nowrap text-ok-text">−{money(r.amount)}</span>
+							</li>
+						{/each}
+						{#each preview.lines.filter((l) => l.is_credit) as l (l.index)}
+							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+								<span class="font-semibold text-ink">{personName(l.index)}</span>
+								<span class="font-mono whitespace-nowrap text-ok-text"><span class="badge badge-sm badge-success mr-2">{t('join.price.credit')}</span>{money(l.base_price)}</span>
+								<span class="w-full text-xs text-muted">{t('join.price.credit_help')}</span>
 							</li>
 						{/each}
 					</ul>

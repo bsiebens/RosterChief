@@ -89,7 +89,9 @@ class PricingTests(RegistrationMixin, TestCase):
         ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("25.00"))
         three = self.prices(3)
         self.assertEqual(three.total, Decimal("275.00"))
-        self.assertEqual(sum(ln.discount for ln in three.lines), Decimal("25.00"))  # the rounding cents are not lost
+        self.assertEqual(sum(ln.order_discount for ln in three.lines), Decimal("25.00"))  # the rounding cents are not lost
+        self.assertEqual(sum(ln.discount for ln in three.lines), Decimal("0.00"))  # the people's own lines carry no per-registration discount
+        self.assertEqual([(row["amount"], row["people"]) for row in three.order_discounts], [(Decimal("25.00"), 3)])  # one separate line
 
     def test_early_bird_only_before_the_deadline(self):
         self.product.early_bird_discount_type, self.product.early_bird_discount_amount, self.product.early_bird_deadline = DiscountType.PERCENTAGE, Decimal("20"), TODAY + datetime.timedelta(days=5)
@@ -665,8 +667,8 @@ class TiersPerProductTests(RegistrationMixin, TestCase):
         ProductRegistrantDiscountTier.objects.filter(product=self.youth).delete()
         ProductRegistrantDiscountTier.objects.create(product=self.youth, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("30.00"))
         lines = self.prices(self.u_a, self.d1_variant, self.u_b)
-        self.assertEqual(sum(ln.discount for ln in lines if ln.product == self.youth), Decimal("30.00"))
-        self.assertEqual(sum(ln.discount for ln in lines if ln.product == self.d1), Decimal("0.00"))
+        self.assertEqual(sum(ln.order_discount for ln in lines if ln.product == self.youth), Decimal("30.00"))
+        self.assertEqual(sum(ln.order_discount for ln in lines if ln.product == self.d1), Decimal("0.00"))
 
     def test_the_preview_endpoint_follows_the_same_rule(self):
         def total(*variants):
@@ -800,7 +802,8 @@ class CreditTests(RegistrationMixin, TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         body = r.json()
         self.assertEqual((body["total"], body["credit_total"], body["credit_applied"]), ("80.00", "20.00", "20.00"))
-        self.assertEqual([(ln["base_price"], ln["price"], ln["is_credit"], ln["credit_share"]) for ln in body["lines"]], [("100.00", "80.00", False, "20.00"), ("-20.00", "0.00", True, "0.00")])
+        shown = [(ln["base_price"], ln["price"], ln["is_credit"], ln["credit_share"]) for ln in body["lines"]]
+        self.assertEqual(shown, [("100.00", "100.00", False, "20.00"), ("-20.00", "-20.00", True, "0.00")])  # a line shows its own price: the credit is its own line
 
     def batch_with_credit(self):
         return self.batch(entries=[self.entry(), {**self.entry("Vol"), "variant_id": None, "option_id": self.key}])
@@ -839,7 +842,7 @@ class CreditTests(RegistrationMixin, TestCase):
         self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
         people = {p["description"]: p for p in self.public("get", f"/status/{batch.status_token}").json()["people"]}
         self.assertEqual((people["Volunteer credit"]["is_credit"], people["Volunteer credit"]["credit"], people["Volunteer credit"]["fee"]["fee_amount"]), (True, "20.00", "0.00"))
-        self.assertEqual((people["Player membership"]["credit"], people["Player membership"]["fee"]["fee_amount"]), ("20.00", "80.00"))
+        self.assertEqual((people["Player membership"]["credit"], people["Player membership"]["fee"]["fee_amount"]), ("0.00", "80.00"))  # no credit note on a normal line; the fee still carries it
         mail.outbox.clear()
         self.assertTrue(self.staff("post", f"/registrations/{batch.pk}/resend-invoice").json()["sent"])
         self.assertIn("Credit: Volunteer credit", mail.outbox[0].body)
@@ -1023,3 +1026,123 @@ class NumberHoldTests(RegistrationMixin, TestCase):
         r = self.register(entries=[self.asking(3, first="Late")])
         self.assertEqual((r.status_code, list(r.json()["errors"])), (422, ["entries.0.requested_jersey_number"]))
         self.assertEqual(RegistrationBatch.objects.count(), 1)
+
+
+class LineStructureTests(RegistrationMixin, TestCase):
+    """A per-person tier stays on the line; a per-registration discount and the credits are their own lines. Same on the review, the status page and
+    the invoice; the memberships' fees still carry every share so no fee goes below 0."""
+
+    def setUp(self):
+        super().setUp()
+        self.product.registrant_discount_scope = Product.RegistrantDiscountScope.PER_ORDER
+        self.product.save()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("25.00"))
+
+    def two(self):
+        return self.batch(entries=[self.entry("One"), self.entry("Two")])
+
+    def test_per_person_tier_stays_on_the_lines(self):
+        self.product.registrant_discount_scope = Product.RegistrantDiscountScope.PER_PERSON
+        self.product.save()
+        priced = pricing.price_entries([pricing.as_option(self.variant), pricing.as_option(self.variant)])
+        self.assertEqual([(ln.discount, ln.order_discount) for ln in priced.lines], [(Decimal("25.00"), Decimal("0.00"))] * 2)
+        self.assertEqual(priced.order_discounts, [])
+        self.assertEqual(priced.total, Decimal("150.00"))
+
+    def test_a_per_registration_discount_is_one_separate_line(self):
+        priced = pricing.price_entries([pricing.as_option(self.variant), pricing.as_option(self.variant)])
+        self.assertEqual([(ln.discount, ln.own_price) for ln in priced.lines], [(Decimal("0.00"), Decimal("100.00"))] * 2)  # the people's lines are their own price
+        self.assertEqual([(row["amount"], row["people"]) for row in priced.order_discounts], [(Decimal("25.00"), 2)])
+        self.assertEqual(priced.total, Decimal("175.00"))  # the same total as before the restructure
+        self.assertEqual(sum(ln.price for ln in priced.lines), Decimal("175.00"))  # the fees still carry the shares
+
+    def test_the_review_payload_has_separate_order_discount_lines(self):
+        batch = self.two()
+        detail = self.staff("get", f"/registrations/{batch.pk}").json()
+        self.assertEqual([(ln["base_price"], ln["discount_amount"], ln["price"]) for ln in detail["lines"]], [("100.00", "0.00", "100.00")] * 2)
+        self.assertEqual([(row["name"], row["amount"], row["people"]) for row in detail["order_discounts"]], [("Player membership", "25.00", 2)])
+        self.assertEqual((detail["order_discount_total"], detail["subtotal"], detail["total"]), ("25.00", "175.00", "175.00"))
+        self.assertEqual(sorted(ln["fee_amount"] for ln in detail["lines"]), ["87.50", "87.50"])  # each membership carries its share
+        self.assertEqual(sorted(ln["order_discount_share"] for ln in detail["lines"]), ["12.50", "12.50"])
+        # leaving one person out takes their share of the discount away with them
+        one = detail["lines"][0]["id"]
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": one, "excluded": True}]}).json()
+        self.assertEqual(([row["amount"] for row in r["order_discounts"]], r["total"]), (["12.50"], "87.50"))
+
+    def test_the_status_page_and_the_invoice_use_the_same_lines(self):
+        batch = self.two()
+        self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False})
+        summary = self.public("get", f"/status/{batch.status_token}").json()["invoice"]
+        self.assertEqual([(ln["kind"], ln["amount"]) for ln in summary["lines"]], [("person", "100.00"), ("person", "100.00"), ("order_discount", "-25.00")])
+        self.assertEqual(summary["total"], "175.00")
+        from registration.services import notifications
+
+        lines = notifications.invoice_lines(batch, {"order_discount": "Multi-registration discount", "credit": "Credit"})
+        self.assertEqual([ln["kind"] for ln in lines], ["person", "person", "order_discount"])
+        self.assertEqual((lines[2]["title"], lines[2]["negative"]), ("Multi-registration discount", True))
+        self.assertTrue(lines[2]["amount"].startswith("-"))
+        # the PDF template and the email render the separate line
+        from django.template.loader import render_to_string
+
+        context = notifications.invoice_context(batch, notifications._club(), {"order_discount": "Multi-registration discount", "credit": "Credit"})
+        html = render_to_string("registration/invoice_pdf.html", {**context, "logo_data_uri": None, "issued": batch.confirmed_at, "contact": batch.contact})
+        self.assertIn("Multi-registration discount", html)
+
+    def test_credit_lines_stay_their_own_line_on_the_invoice(self):
+        credit = Product.objects.create(name="Volunteer credit", price=Decimal("-20.00"), product_type=Product.ProductType.MEMBERSHIP, season=self.season)
+        key = f"product:{credit.pk}"
+        batch = self.batch(entries=[self.entry("One"), self.entry("Two"), {**self.entry("Vol"), "variant_id": None, "option_id": key}])
+        self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False})
+        summary = self.public("get", f"/status/{batch.status_token}").json()["invoice"]
+        self.assertEqual([ln["kind"] for ln in summary["lines"]], ["person", "person", "order_discount", "credit"])
+        self.assertEqual((summary["lines"][3]["amount"], summary["total"]), ("-20.00", "155.00"))
+
+
+class ConfirmMailTests(RegistrationMixin, TestCase):
+    """Confirming a registration always tells the contact (one status mail); ``send`` only decides whether the invoice PDF is attached."""
+
+    def confirm(self, batch, **body):
+        mail.outbox.clear()
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.staff("post", f"/registrations/{batch.pk}/confirm", body)
+
+    def test_confirm_with_send_mails_the_status_update_with_the_invoice(self):
+        batch = self.batch()
+        r = self.confirm(batch, send=True)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.to, ["pat@join.test"])
+        self.assertIn(r.json()["invoice_number"], sent.subject)
+        self.assertIn(f"/join/status/{batch.status_token}", sent.body)
+        batch.refresh_from_db()
+        self.assertIsNotNone(batch.invoice_sent_at)
+
+    def test_confirm_without_send_still_mails_a_plain_confirmation(self):
+        batch = self.batch()
+        r = self.confirm(batch, send=False)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(mail.outbox), 1)
+        sent = mail.outbox[0]
+        self.assertEqual(sent.to, ["pat@join.test"])
+        self.assertIn("confirmed", sent.subject.lower())
+        self.assertIn(r.json()["invoice_number"], sent.body)
+        self.assertIn(f"/join/status/{batch.status_token}", sent.body)
+        self.assertEqual(sent.attachments, [])  # no invoice attached
+        batch.refresh_from_db()
+        self.assertIsNone(batch.invoice_sent_at)
+
+    def test_a_repeated_confirm_sends_nothing_more(self):
+        batch = self.batch()
+        self.assertEqual(self.confirm(batch, send=False).status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(self.confirm(batch, send=True).status_code, 422)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_mail_problem_never_fails_the_confirm(self):
+        batch = self.batch()
+        with mock.patch("registration.services.notifications._send", side_effect=RuntimeError("smtp down")):
+            r = self.confirm(batch, send=False)
+        self.assertEqual(r.status_code, 200, r.content)
+        batch.refresh_from_db()
+        self.assertTrue(batch.invoice_number)

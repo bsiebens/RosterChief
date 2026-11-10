@@ -34,26 +34,58 @@
 	});
 	const dirty = $derived(JSON.stringify(d) !== JSON.stringify(draftOf(item)));
 
-	/** The line while editing, before the credits: the override, else base minus the registrant discount; nothing when excluded. A credit line (negative
-	 * base price) is its negative amount: it is never overridden. */
-	const lineBefore = (id: string) => {
+	/** A number from the API, 0 when the field is missing or not a number (an older payload never turns the totals into NaN). */
+	const num = (v: unknown) => {
+		const n = Number(v ?? 0);
+		return Number.isFinite(n) ? n : 0;
+	};
+	/** The line while editing, on its own: the override, else base minus its own discount; nothing when excluded. A credit line (negative base price) is
+	 * its negative amount: it is never overridden. The per-registration discount and the credits are separate lines (below). */
+	const lineOwn = (id: string) => {
 		const l = item.lines.find((x) => x.id === id)!;
 		const e = d.lines[id];
 		if (e.excluded) return 0;
 		if (l.is_credit) return Number(l.base_price);
 		return e.override !== '' ? Number(e.override) : Math.max(0, Number(l.base_price) - Number(l.discount_amount));
 	};
+	/** A line's share of its product's per-registration discount: nothing for a credit, a left-out or a line with its own price. */
+	const orderShare = (id: string) => {
+		const l = item.lines.find((x) => x.id === id)!;
+		const e = d.lines[id];
+		if (e.excluded || l.is_credit || e.override !== '') return 0;
+		return Math.min(num(l.order_discount_share), lineOwn(id));
+	};
+	/** The separate multi-registration discount lines while editing, one per product (positive amounts). */
+	const orderLines = $derived.by(() => {
+		const found = new Map<string, { key: string; name: string; amount: number; people: number }>();
+		for (const l of item.lines) {
+			const share = orderShare(l.id);
+			if (!(share >= 0.005)) continue; // a row only exists when the product has a per-registration discount to show
+			const key = l.product_id ?? l.product_name ?? l.description;
+			const row = found.get(key) ?? { key, name: l.product_name ?? l.description, amount: 0, people: 0 };
+			row.amount = Math.round((row.amount + share) * 100) / 100;
+			row.people += 1;
+			found.set(key, row);
+		}
+		return [...found.values()];
+	});
+	const orderTotal = $derived(orderLines.reduce((s, r) => s + r.amount, 0));
+	const beforeCredit = (id: string) => (item.lines.find((x) => x.id === id)!.is_credit ? 0 : lineOwn(id) - orderShare(id));
 	/** The credits (as a positive amount) and how much of that the other lines can take (never more than they cost). */
-	const creditTotal = $derived(item.lines.filter((l) => l.is_credit).reduce((s, l) => s - lineBefore(l.id), 0));
-	const costs = $derived(item.lines.filter((l) => !l.is_credit).reduce((s, l) => s + lineBefore(l.id), 0));
+	const creditTotal = $derived(item.lines.filter((l) => l.is_credit).reduce((s, l) => s - lineOwn(l.id), 0));
+	const costs = $derived(item.lines.filter((l) => !l.is_credit).reduce((s, l) => s + beforeCredit(l.id), 0));
 	const creditApplied = $derived(Math.min(creditTotal, costs));
 	/** A line's share of the credit (in proportion to what it costs; the server settles the cents). */
-	const creditShare = (id: string) => (costs > 0 ? Math.round(((creditApplied * lineBefore(id)) / costs) * 100) / 100 : 0);
-	/** What the person pays before the manual discount: nothing for a credit line. */
-	const linePrice = (id: string) => (item.lines.find((x) => x.id === id)!.is_credit ? 0 : Math.max(0, lineBefore(id) - creditShare(id)));
-	const subtotal = $derived(item.lines.reduce((s, l) => s + linePrice(l.id), 0));
+	const creditShare = (id: string) => (costs > 0 ? Math.round(((creditApplied * beforeCredit(id)) / costs) * 100) / 100 : 0);
+	/** What the person's membership costs before the manual discount: nothing for a credit line. */
+	const linePayable = (id: string) => (item.lines.find((x) => x.id === id)!.is_credit ? 0 : Math.max(0, beforeCredit(id) - creditShare(id)));
+	const subtotal = $derived(item.lines.reduce((s, l) => s + linePayable(l.id), 0));
 	const manual = $derived(Math.min(Math.max(0, Number(d.discount) || 0), subtotal));
 	const total = $derived(subtotal - manual);
+	/** The lines in the order they are shown: people (own price), then the multi-registration discount lines, then the credit lines. */
+	const personLines = $derived(item.lines.filter((l) => !l.is_credit));
+	const creditLines = $derived(item.lines.filter((l) => l.is_credit));
+	const shownOrder = $derived(editable ? orderLines.map((r) => ({ key: r.key, name: r.name, amount: r.amount, people: r.people })) : item.order_discounts.map((r) => ({ key: r.product_id ?? r.name, name: r.name, amount: Number(r.amount), people: r.people })));
 
 	const payload = $derived(
 		JSON.stringify({
@@ -110,6 +142,49 @@
 	{:else if l.number_state === 'assigned'}<span class="badge badge-xs badge-outline ml-1.5">{t('reg.num.assigned')}</span>{/if}
 {/snippet}
 
+{#snippet lineRow(l: RegistrationLine)}
+	{@const e = d.lines[l.id]}
+	<tr class={e.excluded ? 'opacity-60' : ''}>
+		<td>
+			<a class="link font-semibold" href="/members/{l.member.id}">{l.member.name}</a>
+			<p class="text-xs text-muted">{l.description} · {t(`reg.kind.${l.entry_kind}`)}</p>
+		</td>
+		<td class="text-sm">
+			{#if l.entry_kind === 'player'}
+				<div class="grid gap-1.5">
+					{#if editable}
+						<select class="select select-bordered select-sm w-44 max-w-full" aria-label={t('reg.line.team_named', { name: l.member.name })} bind:value={e.team}>
+							<option value="">{t('reg.line.no_team')}</option>
+							{#each data.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+						</select>
+					{:else}
+						<span class="font-semibold text-ink">{l.requested_team_name ?? '–'}</span>
+					{/if}
+					{#if l.requested_position_name || l.requested_jersey_number !== null}
+						<dl class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+							{#if l.requested_position_name}<div class="flex items-center gap-1.5"><dt class="text-muted">{t('reg.line.position')}</dt><dd class="font-semibold text-ink">{l.requested_position_name}</dd></div>{/if}
+							{#if l.requested_jersey_number !== null}<div class="flex items-center gap-1.5"><dt class="text-muted">{t('reg.line.number')}</dt><dd class="font-mono font-semibold text-ink">#{l.requested_jersey_number}</dd>{@render numberBadge(l)}</div>{/if}
+						</dl>
+					{/if}
+				</div>
+			{:else}<span class="text-muted">–</span>{/if}
+		</td>
+		<td class="text-right font-mono text-xs whitespace-nowrap tabular-nums {l.is_credit ? 'text-ok-text' : ''}">{money(l.base_price)}</td>
+		<td class="text-right font-mono text-xs whitespace-nowrap tabular-nums">{Number(l.discount_amount) ? `−${money(l.discount_amount)}` : '–'}</td>
+		<td class="text-right">
+			<input class="input input-bordered input-sm w-28 text-right font-mono" type="number" step="0.01" min="0" inputmode="decimal" aria-label={t('reg.line.override_named', { name: l.member.name })} placeholder="–" bind:value={e.override} disabled={!editable || e.excluded || l.is_credit} />
+		</td>
+		<td class="text-center"><input type="checkbox" class="checkbox checkbox-sm" aria-label={t('reg.line.exclude_named', { name: l.member.name })} bind:checked={e.excluded} disabled={!editable} /></td>
+		<td class="text-right font-mono text-xs font-semibold whitespace-nowrap tabular-nums">
+			{#if l.is_credit}
+				<span class="badge badge-sm badge-success mr-1">{t('regr.credit')}</span><span class="text-ok-text">{money(editable ? lineOwn(l.id) : l.price)}</span>
+			{:else}
+				{money(editable ? lineOwn(l.id) : l.price)}
+			{/if}
+		</td>
+	</tr>
+{/snippet}
+
 <svelte:head><title>{pageTitle(t('reg.detail.title'))}</title></svelte:head>
 
 <div class="grid gap-4">
@@ -143,39 +218,20 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each item.lines as l (l.id)}
-									{@const e = d.lines[l.id]}
-									<tr class={e.excluded ? 'opacity-60' : ''}>
-										<td>
-											<a class="link font-semibold" href="/members/{l.member.id}">{l.member.name}</a>
-											<p class="text-xs text-muted">{l.description} · {t(`reg.kind.${l.entry_kind}`)}</p>
+								{#each personLines as l (l.id)}
+									{@render lineRow(l)}
+								{/each}
+								{#each shownOrder as r (r.key)}
+									<tr>
+										<td colspan="6">
+											<span class="font-semibold text-ink">{t('reg.line.order_discount')}</span>
+											<p class="text-xs text-muted">{t('reg.line.order_discount_for', { product: r.name, n: r.people })}</p>
 										</td>
-										<td class="text-sm">
-											{#if editable && l.entry_kind === 'player'}
-												<select class="select select-bordered select-sm w-44 max-w-full" aria-label={t('reg.line.team_named', { name: l.member.name })} bind:value={e.team}>
-													<option value="">{t('reg.line.no_team')}</option>
-													{#each data.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
-												</select>
-												{#if l.requested_position_name || l.requested_jersey_number !== null}<p class="mt-1 text-xs text-muted">{[l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}{@render numberBadge(l)}</p>{/if}
-											{:else if l.requested_team_name || l.requested_position_name || l.requested_jersey_number !== null}
-												{[l.requested_team_name, l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}{@render numberBadge(l)}
-											{:else}<span class="text-muted">–</span>{/if}
-										</td>
-										<td class="text-right font-mono text-sm {l.is_credit ? 'text-ok-text' : ''}">{money(l.base_price)}</td>
-										<td class="text-right font-mono text-sm">{Number(l.discount_amount) ? `−${money(l.discount_amount)}` : '–'}</td>
-										<td class="text-right">
-											<input class="input input-bordered input-sm w-28 text-right font-mono" type="number" step="0.01" min="0" inputmode="decimal" aria-label={t('reg.line.override_named', { name: l.member.name })} placeholder="–" bind:value={e.override} disabled={!editable || e.excluded || l.is_credit} />
-										</td>
-										<td class="text-center"><input type="checkbox" class="checkbox checkbox-sm" aria-label={t('reg.line.exclude_named', { name: l.member.name })} bind:checked={e.excluded} disabled={!editable} /></td>
-										<td class="text-right font-mono text-sm font-semibold">
-											{#if l.is_credit}
-												<span class="badge badge-sm badge-success mr-1">{t('regr.credit')}</span><span class="text-ok-text">{money(editable ? lineBefore(l.id) : l.price)}</span>
-											{:else}
-												{money(editable ? linePrice(l.id) : l.payable)}
-												{#if (editable ? creditShare(l.id) : Number(l.credit_share)) > 0}<span class="block text-xs font-normal text-ok-text">{t('regr.credit_taken', { amount: money(editable ? creditShare(l.id) : l.credit_share) })}</span>{/if}
-											{/if}
-										</td>
+										<td class="text-right font-mono text-xs font-semibold whitespace-nowrap text-ok-text tabular-nums">−{money(r.amount)}</td>
 									</tr>
+								{/each}
+								{#each creditLines as l (l.id)}
+									{@render lineRow(l)}
 								{/each}
 							</tbody>
 						</table>
@@ -202,16 +258,18 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-label={t('reg.card.summary')}>
 			<section class="card card-body gap-3">
-				<div class="flex flex-wrap items-center gap-2">
+				<div class="flex items-center justify-between gap-2">
+					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('reg.card.registration_details')}</h2>
 					<span class="badge badge-sm {statusBadge(item.status)}">{t(`reg.status.${item.status}`)}</span>
-					{#if item.invoice_number}<span class="font-mono text-xs text-muted">{item.invoice_number}</span>{/if}
 				</div>
 				<dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+					{#if item.invoice_number}<dt class="text-muted">{t('reg.sum.invoice')}</dt><dd class="text-right font-mono text-xs">{item.invoice_number}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.contact')}</dt><dd class="text-right">{item.contact?.name ?? '–'}</dd>
 					{#if item.contact?.email}<dt class="text-muted">{t('reg.sum.email')}</dt><dd class="truncate text-right">{item.contact.email}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.season')}</dt><dd class="text-right">{item.season_name}</dd>
 					<dt class="text-muted">{t('reg.sum.submitted')}</dt><dd class="text-right">{formatDay(item.submitted_at)}</dd>
 					{#if item.invoice_due_date}<dt class="text-muted">{t('reg.sum.due')}</dt><dd class="text-right">{formatDay(item.invoice_due_date)}</dd>{/if}
+					{#if (editable ? orderTotal : Number(item.order_discount_total)) > 0}<dt class="text-muted">{t('reg.sum.order_discount')}</dt><dd class="text-right font-mono text-ok-text">−{money(editable ? orderTotal : item.order_discount_total)}</dd>{/if}
 					{#if (editable ? creditTotal : Number(item.credit_total)) > 0}<dt class="text-muted">{t('regr.sum.credit')}</dt><dd class="text-right font-mono text-ok-text">−{money(editable ? creditApplied : item.credit_applied)}</dd>{/if}
 					{#if (editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied)) > 0}<dt class="text-xs text-muted">{t('regr.sum.credit_unused')}</dt><dd class="text-right font-mono text-xs text-muted">{money(editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied))}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.subtotal')}</dt><dd class="text-right font-mono">{money(editable ? subtotal : item.subtotal)}</dd>

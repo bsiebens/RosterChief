@@ -91,8 +91,12 @@ class RegistrationDetails(UUIDModel):
     base_price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
     #: The registrant discount (tiers) already taken off ``base_price``; the line's price is ``base_price - discount_amount``.
     discount_amount = models.DecimalField(_("discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
-    #: This line's share of the registration's credits (negative-priced products), already out of what the person pays.
+    #: This line's share of the registration's credits (negative-priced products), already out of what the person pays. Internal: it is not shown on
+    #: the line (the credit is its own line), it only keeps each person's fee right.
     credit_share = models.DecimalField(_("credit share"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    #: This line's share of a *per registration* multi-registrant discount (a product tier with scope "per order"), already out of what the person
+    #: pays. Internal like ``credit_share``: the discount is shown as its own line per product. Older registrations spread it over ``discount_amount``.
+    order_discount_share = models.DecimalField(_("registration discount share"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
     #: Staff's override of the line price in the billing review (``None`` = the computed price).
     price_override = models.DecimalField(_("price override"), max_digits=10, decimal_places=2, null=True, blank=True)
     excluded = models.BooleanField(_("excluded"), default=False, help_text=_("Left out of the invoice in the billing review."))
@@ -113,8 +117,8 @@ class RegistrationDetails(UUIDModel):
 
     @property
     def price(self) -> Decimal:
-        """What this line costs before the credits and the manual discount: the override, else base - discount; nothing when excluded. For a credit line:
-        its negative amount (never overridden)."""
+        """What this line costs on its own: the override, else base - its own discount (a per-person registrant tier); nothing when excluded. For a credit
+        line: its negative amount (never overridden). The per-registration discount and the credits are separate lines, not part of this."""
         if self.excluded:
             return Decimal("0.00")
         if self.is_credit:
@@ -124,6 +128,20 @@ class RegistrationDetails(UUIDModel):
         return max(self.base_price - self.discount_amount, Decimal("0.00"))
 
     @property
+    def order_share(self) -> Decimal:
+        """The part of the per-registration discount that comes off this line: nothing for a credit line, an excluded line or a line staff gave their own
+        price (that price replaces everything)."""
+        if self.excluded or self.is_credit or self.price_override is not None:
+            return Decimal("0.00")
+        return min(self.order_discount_share, self.price)
+
+    @property
+    def before_credit(self) -> Decimal:
+        """What the line costs after the per-registration discount and before the credits (0 for a credit line)."""
+        return Decimal("0.00") if self.is_credit else self.price - self.order_share
+
+    @property
     def payable(self) -> Decimal:
-        """What the person pays before the manual discount: the price less this line's credit share, never below 0 (0 for a credit line)."""
-        return Decimal("0.00") if self.is_credit else max(self.price - self.credit_share, Decimal("0.00"))
+        """What the person pays before the manual discount: the line less its shares of the per-registration discount and of the credits, never below 0
+        (0 for a credit line). This is what the membership's fee is made of."""
+        return Decimal("0.00") if self.is_credit else max(self.before_credit - self.credit_share, Decimal("0.00"))

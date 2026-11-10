@@ -157,9 +157,13 @@ def preview(request, payload: PreviewIn):
     return {
         "season": {"id": priced.season.pk, "name": priced.season.name},
         "lines": [
-            {"index": i, "description": ln.option.full_name, "base_price": ln.base, "discount": ln.discount, "price": ln.price, "is_credit": ln.is_credit, "credit_share": ln.credit_share, "early_bird_discount": ln.early_bird_discount, "early_bird_deadline": ln.early_bird_deadline}
+            {
+                "index": i, "description": ln.option.full_name, "base_price": ln.base, "discount": ln.discount, "price": ln.own_price, "payable": ln.price, "is_credit": ln.is_credit,
+                "credit_share": ln.credit_share, "order_discount_share": ln.order_discount, "early_bird_discount": ln.early_bird_discount, "early_bird_deadline": ln.early_bird_deadline,
+            }
             for i, ln in enumerate(priced.lines)
         ],
+        "order_discounts": [{"description": row["product"].name, "amount": row["amount"], "people": row["people"]} for row in priced.order_discounts], "order_discount_total": priced.order_discount_total,
         "total": priced.total, "credit_total": priced.credit_total, "credit_applied": priced.credit_applied, "total_if_early": priced.total - early, "early_bird_discount": early,
     }  # fmt: skip
 

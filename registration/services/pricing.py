@@ -4,8 +4,9 @@ Ported from the old ``registration.services.pricing``. Nothing here writes: ``pr
 
 * The season comes from the products (every chosen product must be for the same season), never from today's date.
 * A registrant tier (``ProductRegistrantDiscountTier``) applies when at least ``min_registrants`` people are registered for **that product** at once
-  (across all its variants; people on other products don't count): the highest tier reached wins; ``per_person`` takes it off every line of that
-  product, ``per_order`` takes a fixed amount off once (spread over that product's lines).
+  (across all its variants; people on other products don't count): the highest tier reached wins. ``per_person`` takes it off every line of that
+  product (``Line.discount``, shown on the line). ``per_order`` takes it off once for the product: shown as ONE separate "multi-registration discount"
+  line per product (``Pricing.order_discounts``); each person's fee still carries its share (``Line.order_discount``) so no fee goes below 0.
 * A person registers for an *option*: one active variant of a membership product, or the product itself ("as is") when it has no variants.
 * A negative price (membership products only) is a **credit**: a line with a negative base is not charged itself (its person's fee is 0) and takes
   nothing from tiers or early-bird. The credits of the whole registration are added up and spread in proportion over its positive lines (the cents
@@ -74,7 +75,10 @@ def as_option(value) -> Option:
 class Line:
     option: Option
     base: Decimal
+    #: The registrant discount of this line alone (a per-person tier): shown on the line.
     discount: Decimal = Decimal("0.00")
+    #: This line's share of the product's per-registration discount (shown as a separate line, not on this one).
+    order_discount: Decimal = Decimal("0.00")
     #: This line's share of the registration's credits (positive lines only).
     credit_share: Decimal = Decimal("0.00")
     early_bird_discount: Decimal = Decimal("0.00")
@@ -94,13 +98,19 @@ class Line:
 
     @property
     def before_credit(self) -> Decimal:
-        """What the line costs after the registrant discount and before the credits (a credit line: its negative amount)."""
+        """What the line costs after its discounts and before the credits (a credit line: its negative amount)."""
+        return self.base if self.is_credit else max(self.base - self.discount - self.order_discount, Decimal("0.00"))
+
+    @property
+    def own_price(self) -> Decimal:
+        """What the line shows as its price: the base less its own discount; a credit line: its negative amount. The per-registration discount and the
+        credits are separate lines."""
         return self.base if self.is_credit else max(self.base - self.discount, Decimal("0.00"))
 
     @property
     def price(self) -> Decimal:
-        """What this person's membership costs: never below 0, and 0 for a credit line."""
-        return Decimal("0.00") if self.is_credit else max(self.base - self.discount - self.credit_share, Decimal("0.00"))
+        """What this person's membership costs (their fee): never below 0, and 0 for a credit line."""
+        return Decimal("0.00") if self.is_credit else max(self.before_credit - self.credit_share, Decimal("0.00"))
 
 
 @dataclass
@@ -111,6 +121,21 @@ class Pricing:
     @property
     def total(self) -> Decimal:
         return sum((line.price for line in self.lines), Decimal("0.00"))
+
+    @property
+    def order_discounts(self) -> list[dict]:
+        """The per-registration discounts, one per product that has one: ``{"product", "amount", "people"}`` (amount positive)."""
+        found: dict = {}
+        for line in self.lines:
+            if line.order_discount > 0:
+                row = found.setdefault(line.product.pk, {"product": line.product, "amount": Decimal("0.00"), "people": 0})
+                row["amount"] += line.order_discount
+                row["people"] += 1
+        return list(found.values())
+
+    @property
+    def order_discount_total(self) -> Decimal:
+        return sum((row["amount"] for row in self.order_discounts), Decimal("0.00"))
 
     @property
     def credit_total(self) -> Decimal:
@@ -224,15 +249,20 @@ def price_entries(options: list, *, today: datetime.date | None = None) -> Prici
             continue
         tier = _tier_for(product, len(lines))  # the people registered on THIS product (all its variants), not the whole form
         if tier is not None:
-            if product.registrant_discount_scope == Product.RegistrantDiscountScope.PER_ORDER and tier.discount_type == DiscountType.FIXED_AMOUNT:
+            per_order = product.registrant_discount_scope == Product.RegistrantDiscountScope.PER_ORDER
+            if per_order and tier.discount_type == DiscountType.FIXED_AMOUNT:
                 total = min(_q(tier.discount_amount), sum((ln.base for ln in lines), Decimal("0.00")))
                 share = (total / len(lines)).quantize(CENT, rounding=ROUND_HALF_UP)
                 for ln in lines:
-                    ln.discount = min(share, ln.base)
-                lines[0].discount = min(lines[0].base, lines[0].discount + (total - sum((ln.discount for ln in lines), Decimal("0.00"))))  # the cents that rounding left over
+                    ln.order_discount = min(share, ln.base)
+                lines[0].order_discount = min(lines[0].base, lines[0].order_discount + (total - sum((ln.order_discount for ln in lines), Decimal("0.00"))))  # the cents that rounding left over
             else:
                 for ln in lines:
-                    ln.discount = _q(discount_amount_for(ln.base, SimpleNamespace(discount_type=tier.discount_type, discount_amount=tier.discount_amount)))
+                    amount = _q(discount_amount_for(ln.base, SimpleNamespace(discount_type=tier.discount_type, discount_amount=tier.discount_amount)))
+                    if per_order:
+                        ln.order_discount = amount  # taken off once for the product: shown as its own line
+                    else:
+                        ln.discount = amount
     spread_credits(pricing.lines)
     for ln in pricing.lines:
         product = ln.product

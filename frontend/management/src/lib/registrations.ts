@@ -19,6 +19,9 @@ export type RegistrationLine = {
 	membership_id: string;
 	entry_kind: 'player' | 'volunteer' | string;
 	description: string;
+	/** What was bought: lines of one product share a per-registration discount. */
+	product_id: string | null;
+	product_name: string | null;
 	requested_team_id: string | null;
 	requested_team_name: string | null;
 	requested_position_name: string | null;
@@ -26,25 +29,32 @@ export type RegistrationLine = {
 	/** reserved (held while the registration waits) | unavailable (cannot be given any more) | assigned | dropped (taken before the team was placed) | null */
 	number_state?: 'reserved' | 'unavailable' | 'assigned' | 'dropped' | null;
 	base_price: string;
+	/** This line's own discount (a per-person tier); the per-registration discount is its own entry in `order_discounts`. */
 	discount_amount: string;
 	price_override: string | null;
 	excluded: boolean;
-	/** Before the credits and the manual discount; a credit line (negative base price): its negative amount. */
+	/** What the line shows: the override, else base minus its own discount; a credit line (negative base price): its negative amount. */
 	price: string;
 	/** A line of a negative-priced product: not charged, it takes money off the other lines. */
 	is_credit: boolean;
+	/** Internal shares (of the credits and of the product's per-registration discount) that keep each fee right; not shown on the line. */
 	credit_share: string;
-	/** What the person pays before the manual discount (price less the credit share, never below 0). */
+	order_discount_share: string;
+	/** What the person's membership costs before the manual discount (price less both shares, never below 0). */
 	payable: string;
 	fee_amount: string;
 	early_payment_deadline: string | null;
 	early_payment_discount: string;
 };
+export type OrderDiscount = { product_id: string | null; name: string; amount: string; people: number };
 export type RegistrationDetail = RegistrationItem & {
 	/** Right after confirming: ids of the lines whose requested number could not be given. */
 	numbers_dropped?: string[];
 	season_id: string;
 	lines: RegistrationLine[];
+	/** The separate multi-registration discount lines (positive amounts). */
+	order_discounts: OrderDiscount[];
+	order_discount_total: string;
 	subtotal: string;
 	credit_total: string;
 	credit_applied: string;

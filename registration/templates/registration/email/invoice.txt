@@ -2,7 +2,7 @@
 
 {{ t.intro }}
 
-{% for l in lines %}- {{ l.name }} ({% if l.credit %}{{ t.credit }}: {% endif %}{{ l.description }}): {{ l.amount }}
+{% for l in lines %}- {{ l.title }} ({{ l.sub }}): {{ l.amount }}
 {% endfor %}{% if unused_credit %}- {{ t.credit_unused }}: {{ unused_credit }}
 {% endif %}{% if discount %}- {{ t.discount }}{% if discount_note %} ({{ discount_note }}){% endif %}: -{{ discount }}
 {% endif %}{{ t.total }}: {{ total }}

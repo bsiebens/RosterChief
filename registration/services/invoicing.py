@@ -3,7 +3,7 @@
 Until staff confirm a batch its memberships are hidden from the Sign-ups queue (``awaiting_membership_ids``). In the review staff can edit a line's
 price, leave a line out and give a manual discount with a note; ``recompute`` writes the result back onto each membership's ``fee_amount``
 (idempotent: always derived from the lines, never from earlier deltas). Confirming numbers the invoice, sets its due date, places the chosen teams
-and emails the invoice (PDF) to the contact. Everything here needs ``members.manage_members``.
+and emails the contact (the status update, with the invoice PDF attached unless ``send`` is false). Everything here needs ``members.manage_members``.
 """
 
 import datetime
@@ -62,12 +62,27 @@ def credits(batch: RegistrationBatch) -> tuple[Decimal, Decimal]:
     return sum((-d.price for d in details if d.is_credit), Decimal("0.00")), sum((d.credit_share for d in details), Decimal("0.00"))
 
 
+def order_discounts(batch: RegistrationBatch) -> list[dict]:
+    """The per-registration (multi-registrant) discounts of the registration, one per product that has one: ``{"product_id", "name", "amount",
+    "people"}`` with ``amount`` positive. Lines staff left out or gave their own price count nothing (see ``RegistrationDetails.order_share``)."""
+    found: dict = {}
+    for d in batch.details.select_related("product"):
+        share = d.order_share
+        if share <= 0:
+            continue
+        key = d.product_id or d.description
+        row = found.setdefault(key, {"product_id": d.product_id, "name": d.product.name if d.product_id else d.description, "amount": Decimal("0.00"), "people": 0})
+        row["amount"] += share
+        row["people"] += 1
+    return list(found.values())
+
+
 def _spread_credits(details) -> None:
     """Recompute every line's credit share from the current prices (after staff edited or excluded lines) and save the changed ones."""
     rows = []
     for d in details:
-        price = d.price
-        rows.append(SimpleNamespace(is_credit=d.is_credit and not d.excluded, base=price, before_credit=price, credit_share=Decimal("0.00")))
+        price = d.before_credit
+        rows.append(SimpleNamespace(is_credit=d.is_credit and not d.excluded, base=d.price if d.is_credit else price, before_credit=price, credit_share=Decimal("0.00")))
     pricing.spread_credits(rows)
     for d, row in zip(details, rows, strict=True):
         if d.credit_share != row.credit_share:
@@ -209,8 +224,8 @@ def number_state(d: RegistrationDetails) -> str | None:
 
 @transaction.atomic
 def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date | None = None, send: bool = True) -> RegistrationBatch:
-    """Number the invoice, set its due date, roster the requested teams and (unless ``send`` is false) email the invoice. After this the
-    memberships show up in the Sign-ups queue and the review can no longer be edited."""
+    """Number the invoice, set its due date, roster the requested teams and email the contact that the registration is confirmed (with the invoice PDF
+    attached unless ``send`` is false). After this the memberships show up in the Sign-ups queue and the review can no longer be edited."""
     require_admin(actor)
     _editable(batch)
     today = timezone.localdate()
@@ -222,10 +237,10 @@ def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date 
     batch.numbers_dropped = _place_requested_teams(actor, batch)  # read by the API response
     for d in batch.details.select_related("member", "membership"):
         audit.record(actor, "registration.confirmed", member=d.member, target=batch, changes={"invoice_number": {"from": None, "to": batch.invoice_number}}, target_label=batch.invoice_number)
-    if send:
-        from registration.services import notifications
+    from registration.services import notifications
 
-        transaction.on_commit(lambda: notifications.send_invoice(batch.pk))
+    # The registrant always hears that the registration is confirmed (one mail); ``send`` only decides whether the invoice PDF is attached to it.
+    transaction.on_commit(lambda: notifications.send_confirmed(batch.pk, with_invoice=send))
     return batch
 
 

@@ -1,4 +1,5 @@
-"""The two emails of a registration: the confirmation (status link, no money) and the invoice (with the PDF). Club-branded, in the registrant's
+"""The emails of a registration: the confirmation (status link, no money) when it comes in, and the status update when staff confirm it (the invoice
+lines, the due date and the status link; with the PDF attached when the invoice is sent along). Club-branded, in the registrant's
 language, sent through ``rosterchief.mail.send_message`` so the platform's email pause holds them back. A mail problem is logged and never
 fails the registration. No account is created and no notification preferences apply: the contact has no login."""
 
@@ -37,6 +38,10 @@ TEXTS = {
             "discount": "Discount",
             "credit": "Credit",
             "credit_unused": "Credit that could not be used",
+            "order_discount": "Multi-registration discount",
+            "subject_confirmed": "{club}: your registration is confirmed",
+            "heading_confirmed": "Your registration is confirmed",
+            "intro_confirmed": "Your registration for {season} is confirmed. Your invoice number is {number}; the invoice itself follows separately.",
             "total": "Total",
             "due": "Please pay before {due}.",
             "early": "Pay on or before {deadline} and {person} pays {fee} instead.",
@@ -63,6 +68,10 @@ TEXTS = {
             "discount": "Korting",
             "credit": "Tegoed",
             "credit_unused": "Tegoed dat niet gebruikt kon worden",
+            "order_discount": "Korting voor meerdere inschrijvingen",
+            "subject_confirmed": "{club}: je inschrijving is bevestigd",
+            "heading_confirmed": "Je inschrijving is bevestigd",
+            "intro_confirmed": "Je inschrijving voor {season} is bevestigd. Je factuurnummer is {number}; de factuur zelf volgt apart.",
             "total": "Totaal",
             "due": "Gelieve te betalen voor {due}.",
             "early": "Betaal op of voor {deadline} en {person} betaalt {fee} in plaats daarvan.",
@@ -89,6 +98,10 @@ TEXTS = {
             "discount": "Remise",
             "credit": "Crédit",
             "credit_unused": "Crédit non utilisé",
+            "order_discount": "Remise inscriptions multiples",
+            "subject_confirmed": "{club} : votre inscription est confirmée",
+            "heading_confirmed": "Votre inscription est confirmée",
+            "intro_confirmed": "Votre inscription pour {season} est confirmée. Votre numéro de facture est {number} ; la facture elle-même suit séparément.",
             "total": "Total",
             "due": "Merci de payer avant le {due}.",
             "early": "Payez au plus tard le {deadline} et {person} paie {fee} au lieu de cela.",
@@ -165,9 +178,19 @@ def send_confirmation(batch_id) -> bool:
         return False
 
 
-def invoice_context(batch: RegistrationBatch, club) -> dict:
+def invoice_lines(batch: RegistrationBatch, labels: dict) -> list[dict]:
+    """The lines of the invoice (PDF and email): one per person with their own price (and own discount), then one "multi-registration discount" line per
+    product that has one, then the credit lines (negative-priced products). ``title`` / ``sub`` are what the line shows, ``amount`` is formatted and
+    negative for a discount or credit."""
     details = [d for d in batch.details.select_related("member") if not d.excluded]
-    lines = [{"name": str(d.member), "description": d.description, "amount": f"-{money(-d.price)}" if d.is_credit else money(d.price), "credit": d.is_credit} for d in details]
+    lines = [{"kind": "person", "title": str(d.member), "sub": d.description, "amount": money(d.price), "negative": False} for d in details if not d.is_credit]
+    lines += [{"kind": "order_discount", "title": labels["order_discount"], "sub": row["name"], "amount": f"-{money(row['amount'])}", "negative": True} for row in invoicing.order_discounts(batch)]
+    lines += [{"kind": "credit", "title": str(d.member), "sub": f"{labels['credit']}: {d.description}", "amount": f"-{money(-d.price)}", "negative": True} for d in details if d.is_credit]
+    return lines
+
+
+def invoice_context(batch: RegistrationBatch, club, labels: dict | None = None) -> dict:
+    labels = labels or {"order_discount": TEXTS["en"]["invoice"]["order_discount"], "credit": TEXTS["en"]["invoice"]["credit"]}
     credit_total, credit_applied = invoicing.credits(batch)
     unused_credit = credit_total - credit_applied
     early = [
@@ -176,7 +199,7 @@ def invoice_context(batch: RegistrationBatch, club) -> dict:
         if d.membership.early_payment_deadline and d.membership.early_payment_discount
     ]
     return {
-        "club": club, "batch": batch, "lines": lines, "unused_credit": money(unused_credit) if unused_credit > 0 else "",
+        "club": club, "batch": batch, "lines": invoice_lines(batch, labels), "unused_credit": money(unused_credit) if unused_credit > 0 else "",
         "discount": money(batch.manual_discount_amount) if batch.manual_discount_amount else "", "discount_note": batch.manual_discount_note,
         "total": money(invoicing.total(batch)), "early": early, "payment_instructions": config.get_settings().payment_instructions,
     }  # fmt: skip
@@ -195,14 +218,27 @@ def render_invoice_pdf(batch: RegistrationBatch) -> bytes:
 
 
 def send_invoice(batch_id) -> bool:
+    """(Re)send the invoice mail with the PDF attached (the "resend invoice" action)."""
+    return _send_confirmed(batch_id, attach=True)
+
+
+def send_confirmed(batch_id, *, with_invoice: bool) -> bool:
+    """The status update mail when staff confirm a registration: the registration is confirmed, the invoice number and due date, the lines and the
+    status link. ``with_invoice`` attaches the invoice PDF to this same mail; otherwise it is a plain confirmation (the invoice follows separately)."""
+    return _send_confirmed(batch_id, attach=with_invoice)
+
+
+def _send_confirmed(batch_id, *, attach: bool) -> bool:
     try:
         batch = RegistrationBatch.objects.select_related("contact", "season").get(pk=batch_id)
         club = _club()
         if club is None or batch.contact is None or not batch.contact.email or not batch.invoice_number:
             return False
-        base = invoice_context(batch, club)
         t = _t(batch, "invoice", club, due=batch.invoice_due_date.strftime("%d/%m/%Y") if batch.invoice_due_date else "")
+        base = invoice_context(batch, club, {"order_discount": t["order_discount"], "credit": t["credit"]})
         t["early_lines"] = [t["early"].format(person=e["name"], deadline=e["deadline"].strftime("%d/%m/%Y"), fee=e["fee"]) for e in base["early"]]
+        if not attach:
+            t["subject"], t["heading"], t["intro"] = t["subject_confirmed"], t["heading_confirmed"], t["intro_confirmed"]
         ctx = {
             **branding(club, _logo_url(club)),
             "lang": _lang(batch),
@@ -216,15 +252,17 @@ def send_invoice(batch_id) -> bool:
             "how_to_pay": base["payment_instructions"],
             "status_url": status_url(club, batch.status_token),
         }
-        try:
-            attachment = (f"{batch.invoice_number}.pdf", render_invoice_pdf(batch), "application/pdf")
-        except PDFUnavailable:
-            attachment = None
+        attachment = None
+        if attach:
+            try:
+                attachment = (f"{batch.invoice_number}.pdf", render_invoice_pdf(batch), "application/pdf")
+            except PDFUnavailable:
+                attachment = None
         sent = _send(t["subject"], render_to_string("registration/email/invoice.txt", ctx), render_to_string("registration/email/invoice.html", ctx), batch.contact.email, attachment)
-        if sent:
+        if sent and attach:
             batch.invoice_sent_at = timezone.now()
             batch.save(update_fields=["invoice_sent_at", "modified"])
         return sent
     except Exception:
-        log.exception("Could not send the registration invoice for %s", batch_id)
+        log.exception("Could not send the registration %s mail for %s", "invoice" if attach else "confirmed", batch_id)
         return False

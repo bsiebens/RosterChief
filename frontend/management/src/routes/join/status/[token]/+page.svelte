@@ -109,12 +109,40 @@
 		</dl>
 	</section>
 
+	{#if reg.invoice}
+		<section class="card card-body gap-3" aria-labelledby="inv-sum">
+			<h2 id="inv-sum" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{t('regs.invoice.title')}</h2>
+			<ul class="divide-y divide-rule text-sm">
+				{#each reg.invoice.lines as l, i (i)}
+					<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+						<span>
+							<span class="font-semibold text-ink">{l.kind === 'order_discount' ? t('join.price.order_discount') : l.name}</span>
+							<span class="text-xs text-muted">{l.kind === 'order_discount' ? t('join.price.order_discount_product', { product: l.name }) : l.kind === 'credit' ? `${t('join.price.credit')}: ${l.description}` : l.description}</span>
+						</span>
+						<span class="font-mono whitespace-nowrap {Number(l.amount) < 0 ? 'text-ok-text' : ''}">{Number(l.amount) < 0 ? '−' : ''}{money(Math.abs(Number(l.amount)))}</span>
+					</li>
+				{/each}
+				{#if Number(reg.invoice.manual_discount_amount) > 0}
+					<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+						<span><span class="font-semibold text-ink">{t('regs.invoice.discount')}</span>{#if reg.invoice.manual_discount_note} <span class="text-xs text-muted">{reg.invoice.manual_discount_note}</span>{/if}</span>
+						<span class="font-mono whitespace-nowrap text-ok-text">−{money(reg.invoice.manual_discount_amount)}</span>
+					</li>
+				{/if}
+			</ul>
+			{#if Number(reg.invoice.credit_unused) > 0}<p class="text-xs text-muted">{t('join.price.credit_unused', { amount: money(reg.invoice.credit_unused) })}</p>{/if}
+			<div class="flex items-baseline justify-between gap-4 border-t border-rule pt-3">
+				<span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('reg.price.total')}</span>
+				<span class="font-display text-2xl font-extrabold text-ink">{money(reg.invoice.total)}</span>
+			</div>
+		</section>
+	{/if}
+
 	{#each reg.people as p (p.member_id)}
 		<section class="card card-body gap-4" aria-labelledby="p-{p.member_id}">
 			<div>
 				<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
 				<p class="text-sm text-muted">{[p.description, p.requested_team ? t('regs.team', { team: p.requested_team }) : '', t(`join.kind.${p.entry_kind}`)].filter(Boolean).join(' · ')}</p>
-				{#if p.credit && Number(p.credit) > 0}<p class="text-xs text-ok-text">{p.is_credit ? t('join.price.credit_given', { amount: money(p.credit) }) : t('join.price.credit_taken', { amount: money(p.credit) })}</p>{/if}
+				{#if p.is_credit && p.credit && Number(p.credit) > 0}<p class="text-xs text-ok-text">{t('join.price.credit_given', { amount: money(p.credit) })}</p>{/if}
 				<p class="mt-1 text-xs"><span class="badge badge-sm {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span></p>
 			</div>
 

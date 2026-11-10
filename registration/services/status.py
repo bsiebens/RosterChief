@@ -1,6 +1,8 @@
 """The registrant's no-login status page, reached by the batch's secret token: what was registered, the fee (once the invoice is confirmed),
 the checklist, and uploading the documents that are asked for. Ported from the old ``RegistrationStatusView``."""
 
+from decimal import Decimal
+
 from django.core.files import File
 from django.db import transaction
 
@@ -9,6 +11,7 @@ from members.services import memberships as fees
 from members.services import onboarding
 from members.services.errors import Invalid
 from registration.models import RegistrationBatch, RegistrationDetails
+from registration.services import invoicing
 
 UPLOAD_NOTE = "Uploaded by the registrant via the status page."
 ANSWER_NOTE = "Answered by the registrant via the status page."
@@ -53,6 +56,22 @@ def _checklist_row(i: onboarding.ChecklistItem) -> dict:
     }  # fmt: skip
 
 
+def invoice_summary(batch: RegistrationBatch) -> dict | None:
+    """The fee summary of a confirmed registration: person lines (own price), separate multi-registration discount lines, credit lines, the manual
+    discount and the total (see ``notifications.invoice_lines`` for the same structure on the invoice)."""
+    if not batch.confirmed_at:
+        return None
+    details = [d for d in batch.details.select_related("member") if not d.excluded]
+    lines = [{"kind": "person", "name": str(d.member), "description": d.description, "amount": d.price} for d in details if not d.is_credit]
+    lines += [{"kind": "order_discount", "name": row["name"], "description": "", "amount": -row["amount"]} for row in invoicing.order_discounts(batch)]
+    lines += [{"kind": "credit", "name": str(d.member), "description": d.description, "amount": d.price} for d in details if d.is_credit]
+    credit_total, credit_applied = invoicing.credits(batch)
+    return {
+        "lines": lines, "manual_discount_amount": batch.manual_discount_amount, "manual_discount_note": batch.manual_discount_note, "credit_unused": max(credit_total - credit_applied, 0),
+        "total": invoicing.total(batch),
+    }  # fmt: skip
+
+
 def status_data(batch: RegistrationBatch) -> dict:
     people = []
     for d in batch.details.select_related("member", "membership", "requested_team", "requested_position"):
@@ -60,11 +79,11 @@ def status_data(batch: RegistrationBatch) -> dict:
         people.append(
             {
                 "member_id": d.member_id, "name": str(d.member), "entry_kind": d.entry_kind, "description": d.description, "requested_team": d.requested_team.name if d.requested_team else None,
-                "membership_status": d.membership.status, "is_credit": d.is_credit, "credit": (-d.price if d.is_credit else d.credit_share) if batch.confirmed_at else None, "fee": _fee(batch, d.membership),
+                "membership_status": d.membership.status, "is_credit": d.is_credit, "credit": (-d.price if d.is_credit else Decimal("0.00")) if batch.confirmed_at else None, "fee": _fee(batch, d.membership),
                 "checklist": [_checklist_row(i) for i in items],
             }
         )  # fmt: skip
-    return {"status": batch.status, "season_name": batch.season.name, "submitted_at": batch.submitted_at, "invoice_number": batch.invoice_number, "invoice_due_date": batch.invoice_due_date, "people": people}
+    return {"status": batch.status, "season_name": batch.season.name, "submitted_at": batch.submitted_at, "invoice_number": batch.invoice_number, "invoice_due_date": batch.invoice_due_date, "invoice": invoice_summary(batch), "people": people}
 
 
 @transaction.atomic

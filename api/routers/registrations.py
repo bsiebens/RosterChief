@@ -3,6 +3,7 @@ confirm the invoice, cancel, resend emails); ``/registration/settings``. Everyth
 finance permission exists in v2). Rules live in ``registration.services``."""
 
 import uuid
+from decimal import Decimal
 
 from django.db.models import Q
 from django.http import HttpResponse
@@ -43,21 +44,26 @@ def _item(b: RegistrationBatch) -> dict:
 
 def _detail(b: RegistrationBatch, numbers_dropped=()) -> dict:
     lines = []
-    for d in b.details.select_related("member", "membership", "requested_team", "requested_team__pool", "requested_position", "resulting_team_membership", "batch"):
+    for d in b.details.select_related("member", "membership", "product", "requested_team", "requested_team__pool", "requested_position", "resulting_team_membership", "batch"):
         m = d.membership
         lines.append(
             {
                 "id": d.pk, "member": _person(d.member), "membership_id": m.pk, "entry_kind": d.entry_kind, "description": d.description,
+                "product_id": d.product_id, "product_name": d.product.name if d.product_id else None,
                 "requested_team_id": d.requested_team_id, "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_name": d.requested_position.name if d.requested_position else None,
                 "requested_jersey_number": d.requested_jersey_number, "number_state": invoicing.number_state(d),
                 "base_price": d.base_price, "discount_amount": d.discount_amount, "price_override": d.price_override,
-                "excluded": d.excluded, "price": d.price, "is_credit": d.is_credit, "credit_share": d.credit_share, "payable": d.payable, "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
+                "excluded": d.excluded, "price": d.price, "is_credit": d.is_credit, "credit_share": d.credit_share, "order_discount_share": d.order_discount_share, "payable": d.payable,
+                "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
             }
         )  # fmt: skip
     credit_total, credit_applied = invoicing.credits(b)
+    order = invoicing.order_discounts(b)
     return {
-        **_item(b), "season_id": b.season_id, "lines": lines, "subtotal": invoicing.subtotal(b), "credit_total": credit_total, "credit_applied": credit_applied, "manual_discount_amount": b.manual_discount_amount, "manual_discount_note": b.manual_discount_note,
-        "invoice_due_date": b.invoice_due_date, "invoice_sent_at": b.invoice_sent_at, "confirmation_sent_at": b.confirmation_sent_at, "cancelled_at": b.cancelled_at, "status_path": f"/join/status/{b.status_token}", "numbers_dropped": list(numbers_dropped),
+        **_item(b), "season_id": b.season_id, "lines": lines, "order_discounts": order, "order_discount_total": sum((row["amount"] for row in order), Decimal("0.00")), "subtotal": invoicing.subtotal(b),
+        "credit_total": credit_total, "credit_applied": credit_applied, "manual_discount_amount": b.manual_discount_amount, "manual_discount_note": b.manual_discount_note,
+        "invoice_due_date": b.invoice_due_date, "invoice_sent_at": b.invoice_sent_at, "confirmation_sent_at": b.confirmation_sent_at, "cancelled_at": b.cancelled_at,
+        "status_path": f"/join/status/{b.status_token}", "numbers_dropped": list(numbers_dropped),
     }  # fmt: skip
 
 
@@ -96,8 +102,8 @@ def review(request, batch_id: uuid.UUID, payload: ReviewIn):
 
 @router.post("/{batch_id}/confirm", response=RegistrationDetail, summary="Confirm the invoice (admin)", operation_id="confirm_registration")
 def confirm(request, batch_id: uuid.UUID, payload: ConfirmIn):
-    """Numbers the invoice (``REG-<year>-0001``), sets the due date, rosters the requested teams, emails the invoice (PDF) when ``send``. From now on
-    the people show up in the Sign-ups queue."""
+    """Numbers the invoice (``REG-<year>-0001``), sets the due date, rosters the requested teams and emails the contact that the registration is
+    confirmed (one status mail; the invoice PDF is attached to it when ``send``). From now on the people show up in the Sign-ups queue."""
     _gate(request)
     batch = invoicing.confirm_invoice(request.user, _batch(batch_id), due_date=payload.due_date, send=payload.send)
     return _detail(_batch(batch.pk), getattr(batch, "numbers_dropped", ()))

@@ -194,7 +194,8 @@ def submit_registration(club, *, contact: dict, entries: list[dict], language: s
         audit.record(None, "membership.created", member=member, target=membership, changes=audit.snapshot(membership, fees.LOGGED_FIELDS), target_label=f"{priced.season} - {member}")
         RegistrationDetails.objects.create(
             batch=batch, membership=membership, member=member, entry_kind=entry["kind"], requested_team=entry["team"], requested_position=entry["position"],
-            requested_jersey_number=entry.get("requested_jersey_number"), product=line.product, product_variant=line.variant, description=line.option.full_name, base_price=line.base, discount_amount=line.discount, credit_share=line.credit_share,
+            requested_jersey_number=entry.get("requested_jersey_number"), product=line.product, product_variant=line.variant, description=line.option.full_name,
+            base_price=line.base, discount_amount=line.discount, order_discount_share=line.order_discount, credit_share=line.credit_share,
         )  # fmt: skip
     from registration.services import notifications
 
