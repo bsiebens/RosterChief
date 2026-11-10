@@ -140,10 +140,12 @@
 	{#each reg.people as p (p.member_id)}
 		<section class="card card-body gap-4" aria-labelledby="p-{p.member_id}">
 			<div>
-				<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
+				<div class="flex items-start justify-between gap-3">
+					<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
+					<span class="badge badge-sm shrink-0 {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span>
+				</div>
 				<p class="text-sm text-muted">{[p.description, p.requested_team ? t('regs.team', { team: p.requested_team }) : '', t(`join.kind.${p.entry_kind}`)].filter(Boolean).join(' · ')}</p>
 				{#if p.is_credit && p.credit && Number(p.credit) > 0}<p class="text-xs text-ok-text">{t('join.price.credit_given', { amount: money(p.credit) })}</p>{/if}
-				<p class="mt-1 text-xs"><span class="badge badge-sm {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span></p>
 			</div>
 
 			{#if p.fee}
