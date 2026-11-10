@@ -147,12 +147,12 @@
 								<td class="text-sm">{r.teams.length ? r.teams.map((x) => x.name).join(', ') : '–'}</td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
+										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((target = r), (placeOpen = true))}><Shirt size={13} /> {t('signups.place')}</button>
+										{#if r.registration}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askLink(r)}><Link2 size={13} /> {t('signups.link')}</button>{/if}
 										<form method="POST" action="?/approve" use:enhance={run()}>
 											<input type="hidden" name="id" value={r.membership_id} />
 											<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy || !r.clean} title={r.clean ? '' : t('signups.approve_blocked')}><Check size={13} /> {t('signups.approve')}</button>
 										</form>
-										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((target = r), (placeOpen = true))}><Shirt size={13} /> {t('signups.place')}</button>
-										{#if r.registration}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => askLink(r)}><Link2 size={13} /> {t('signups.link')}</button>{/if}
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('signups.cancel_named', { name: r.member.name })} onclick={() => ((target = r), (cancelOpen = true))}><Ban size={13} /></button>
 									</div>
 								</td>
