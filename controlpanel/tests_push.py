@@ -802,3 +802,18 @@ class SandboxBannerSwitchTests(UserApiBase):
         body = self.get("/switches").json()["push_sandbox"]
         self.assertTrue(body["is_active"])
         self.assertIsNotNone(body["expires_at"])
+
+
+class InvoicingBannerSwitchTests(UserApiBase):
+    """The platform-wide banner reads whether automatic club invoicing is off from /switches."""
+
+    def test_switches_report_manual_invoicing(self):
+        self.assertEqual(self.get("/switches").json()["manual_invoicing"], {"is_active": False, "pending_count": 0})  # automatic by default
+        from billing.models import BillingSettings
+
+        settings = BillingSettings.current()
+        settings.auto_invoicing = False
+        settings.save()
+        body = self.get("/switches").json()["manual_invoicing"]
+        self.assertTrue(body["is_active"])
+        self.assertIsInstance(body["pending_count"], int)

@@ -1,7 +1,7 @@
 <script lang="ts">
     import {page} from '$app/state';
     import {goto} from '$app/navigation';
-    import {CircleUser, FlaskConical, KeyRound, LogOut, MailX, ShieldCheck, Wrench} from '@lucide/svelte';
+    import {CircleUser, FileWarning, FlaskConical, KeyRound, LogOut, MailX, ShieldCheck, Wrench} from '@lucide/svelte';
     import {auth} from '#lib/api.ts';
     import {NAV} from '#lib/nav.ts';
     import JobStatus from '#lib/components/JobStatus.svelte';
@@ -104,6 +104,18 @@
                         Notifications, reminders and invoices are not sending. Password reset and other account email still work.
                     </div>
                     <a class="btn btn-error shrink-0" href="/features">Resume email</a>
+                </div>
+            {/if}
+
+            {#if data.switches?.manual_invoicing?.is_active}
+                <div class="flex items-center gap-3 rounded border border-danger-border bg-danger-bg px-4 py-3 text-sm text-club-dark" role="alert" data-testid="invoicing-banner">
+                    <FileWarning size={18} class="shrink-0" aria-hidden="true" />
+                    <div class="min-w-0 flex-1">
+                        <span class="font-display font-extrabold tracking-[.04em] uppercase">Automatic invoicing is off.</span>
+                        Clubs are not invoiced automatically: open each period and create its invoice yourself.
+                        {#if data.switches.manual_invoicing.pending_count}<strong>{data.switches.manual_invoicing.pending_count} club{data.switches.manual_invoicing.pending_count === 1 ? '' : 's'} need{data.switches.manual_invoicing.pending_count === 1 ? 's' : ''} an invoice.</strong>{/if}
+                    </div>
+                    <a class="btn btn-error shrink-0" href="/billing/cycles">Open invoicing list</a>
                 </div>
             {/if}
 

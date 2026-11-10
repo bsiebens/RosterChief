@@ -23,12 +23,6 @@
 	<p class="mt-1.5 font-mono text-[11px] text-muted">RosterChief invoicing its clubs, in cycles. Amounts in EUR; plan prices exclude VAT.</p>
 </div>
 
-{#if s && s.auto_invoicing === false}
-	<Alert kind="warning" title="Automatic invoicing is off">
-		{s.invoices_needed ?? 0} club{s.invoices_needed === 1 ? '' : 's'} need{s.invoices_needed === 1 ? 's' : ''} an invoice. Nothing is opened or invoiced by the daily job: open each period and create its invoice yourself. <a class="link font-semibold" href="/billing/cycles">Open the list</a>.
-	</Alert>
-{/if}
-
 {#if s}
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
 		<Kpi label="owed" value={money(s.owed)} sub="incl. VAT, across all clubs" tone={Number(s.owed) ? 'warn' : 'none'} />

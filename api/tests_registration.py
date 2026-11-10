@@ -919,3 +919,107 @@ class ProductTeamTests(RegistrationMixin, TestCase):
         r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "requested_team_id": str(self.team.pk)}]})
         self.assertEqual(r.status_code, 422)
         self.assertIn("lines.0.requested_team_id", r.json()["errors"])
+
+
+class NumberHoldTests(RegistrationMixin, TestCase):
+    """A requested number is held while the registration waits for review: nobody else is offered or accepted for it."""
+
+    def setUp(self):
+        super().setUp()
+        self.pool = NumberPool.objects.create(name="Juniors", min_number=1, max_number=5, min_age_gap_years=5)
+        self.team.pool = self.pool
+        self.team.save()
+        self.other_team.pool = self.pool
+        self.other_team.save()
+
+    def asking(self, number, team=None, **extra):
+        return self.entry(requested_team_id=str((team or self.team).pk), requested_jersey_number=number, **extra)
+
+    def free_numbers(self, team=None, **params):
+        query = "&".join(f"{k}={v}" for k, v in {"team_id": (team or self.team).pk, "variant_id": self.variant.pk, **params}.items())
+        return self.public("get", f"/numbers?{query}").json()["numbers"]
+
+    def test_a_pending_registration_holds_its_number(self):
+        self.batch(entries=[self.asking(3)])
+        self.assertEqual(self.free_numbers(date_of_birth="2015-05-05"), [1, 2, 4, 5])
+        r = self.register(entries=[self.asking(3, first="Second")])
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("just taken by another registration", r.json()["errors"]["entries.0.requested_jersey_number"][0])
+        self.assertEqual(RegistrationBatch.objects.count(), 1)
+        self.assertEqual(self.register(entries=[self.asking(4, first="Second")]).status_code, 201)
+
+    def test_the_hold_counts_pool_wide_and_respects_the_age_gap(self):
+        self.batch(entries=[self.asking(3, date_of_birth="2000-01-01")])
+        self.assertNotIn(3, self.free_numbers(self.team, date_of_birth="2001-01-01"))  # too close in age
+        self.assertEqual(self.register(entries=[self.asking(3, team=self.other_team, date_of_birth="2001-01-01")]).status_code, 422)
+        self.assertIn(3, self.free_numbers(self.other_team, date_of_birth="2015-01-01"))  # a big age gap on another team of the pool may share
+        self.assertEqual(self.register(entries=[self.asking(3, team=self.other_team, date_of_birth="2015-01-01")]).status_code, 201)
+        self.assertNotIn(3, self.free_numbers(self.team, date_of_birth="2015-01-01"))  # same team: never shared
+        self.assertNotIn(3, self.free_numbers(self.team))  # unknown date of birth: a held number is never free
+
+    def test_cancelling_releases_the_number(self):
+        batch = self.batch(entries=[self.asking(3)])
+        self.assertNotIn(3, self.free_numbers())
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/cancel").status_code, 200)
+        self.assertIn(3, self.free_numbers())
+        self.assertEqual(self.register(entries=[self.asking(3, first="Second")]).status_code, 201)
+
+    def test_excluding_a_line_or_being_a_volunteer_holds_nothing(self):
+        batch = self.batch(entries=[self.asking(3), self.asking(4, first="Vol", kind="volunteer", variant_id=str(self.free_variant.pk))])
+        self.assertEqual(self.free_numbers(date_of_birth="2015-05-05"), [1, 2, 4, 5])  # the volunteer's number is not held
+        line = batch.details.get(entry_kind="player")
+        self.assertEqual(self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "excluded": True}]}).status_code, 200)
+        self.assertIn(3, self.free_numbers())
+
+    def test_staff_moving_the_team_moves_the_hold(self):
+        loose = type(self.team).objects.create(name="No pool", short_name="NP")
+        batch = self.batch(entries=[self.asking(3)])
+        line = batch.details.get()
+        self.assertNotIn(3, self.free_numbers())
+        self.assertEqual(self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "requested_team_id": str(loose.pk)}]}).status_code, 200)
+        self.assertIn(3, self.free_numbers())  # no longer held in the pool
+        self.assertEqual(self.public("get", f"/numbers?team_id={loose.pk}&variant_id={self.variant.pk}").json()["taken"], [3])  # held on the team without a pool
+
+    def test_confirming_hands_the_number_to_the_roster_and_reports_a_dropped_one(self):
+        batch = self.batch(entries=[self.asking(3), self.asking(4, first="Two")])
+        review = self.staff("get", f"/registrations/{batch.pk}").json()
+        self.assertEqual({line["requested_jersey_number"]: line["number_state"] for line in review["lines"]}, {3: "reserved", 4: "reserved"})
+        # a roster member takes 4 meanwhile (staff edit elsewhere): the review says it can no longer be given
+        TeamMembership.objects.create(team=self.team, member=Member.objects.create(first_name="Late", last_name="Holder"), season=self.season, jersey_number=4)
+        review = self.staff("get", f"/registrations/{batch.pk}").json()
+        self.assertEqual({line["requested_jersey_number"]: line["number_state"] for line in review["lines"]}, {3: "reserved", 4: "unavailable"})
+        done = self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).json()
+        self.assertEqual({line["requested_jersey_number"]: line["number_state"] for line in done["lines"]}, {3: "assigned", 4: "dropped"})
+        dropped = batch.details.get(requested_jersey_number=4)
+        self.assertEqual(done["numbers_dropped"], [str(dropped.pk)])
+        self.assertNotIn(3, self.free_numbers(date_of_birth="2015-05-05"))  # a roster spot holds it now, not the registration
+        self.assertEqual(TeamMembership.objects.filter(member__registration_details__batch=batch, jersey_number=3).count(), 1)
+
+    def test_the_overview_shows_numbers_held_by_registrations(self):
+        batch = self.batch(entries=[self.asking(3)])
+        overview = self.staff("get", f"/teams/numbers/overview?season={self.season.pk}").json()
+        pool = next(p for p in overview if p["pool"] and p["pool"]["name"] == "Juniors")
+        row = next(n for n in pool["numbers"] if n["number"] == 3)
+        self.assertEqual(row["status"], "held")
+        self.assertEqual([(h["first_name"], h["pending"]) for h in row["holders"]], [("Kid", True)])
+        self.assertEqual(next(n for n in pool["numbers"] if n["number"] == 2)["status"], "free")
+        self.staff("post", f"/registrations/{batch.pk}/cancel")
+        pool = next(p for p in self.staff("get", f"/teams/numbers/overview?season={self.season.pk}").json() if p["pool"])
+        self.assertEqual(next(n for n in pool["numbers"] if n["number"] == 3)["status"], "free")
+
+    def test_submitting_takes_the_pool_lock_before_checking(self):
+        """Two submissions for one number are serialised per pool: the pool row is locked first, so the second sees the first's hold."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from registration.services import holds
+
+        with mock.patch.object(holds, "lock", wraps=holds.lock) as lock, CaptureQueriesContext(connection) as queries:
+            self.assertEqual(self.register(entries=[self.asking(3)]).status_code, 201)
+        lock.assert_called_once()
+        self.assertEqual([t.pk for t in lock.call_args.args[0]], [self.team.pk])
+        self.assertTrue(any("FOR UPDATE" in q["sql"] and "teams_numberpool" in q["sql"] for q in queries.captured_queries))
+        # the loser of a race (its check runs after the winner committed) gets the keyed error and nothing is saved
+        r = self.register(entries=[self.asking(3, first="Late")])
+        self.assertEqual((r.status_code, list(r.json()["errors"])), (422, ["entries.0.requested_jersey_number"]))
+        self.assertEqual(RegistrationBatch.objects.count(), 1)

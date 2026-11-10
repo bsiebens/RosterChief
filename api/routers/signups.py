@@ -11,6 +11,7 @@ from events.models import Season
 from members.models import ClubMembership
 from members.services import access, signups
 from members.services.errors import Invalid
+from registration.services import invoicing
 from teams.models import Team
 
 router = Router()
@@ -43,7 +44,7 @@ def _registration(d) -> dict | None:
     return {
         "registration_id": d.batch_id, "entry_kind": d.entry_kind, "invoice_number": d.batch.invoice_number, "contact_name": str(contact) if contact else None, "contact_email": contact.email if contact else None,
         "requested_team_id": d.requested_team_id, "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_id": d.requested_position_id,
-        "requested_position_name": d.requested_position.name if d.requested_position else None, "requested_jersey_number": d.requested_jersey_number, "product": d.description,
+        "requested_position_name": d.requested_position.name if d.requested_position else None, "requested_jersey_number": d.requested_jersey_number, "number_state": invoicing.number_state(d), "product": d.description,
     }  # fmt: skip
 
 

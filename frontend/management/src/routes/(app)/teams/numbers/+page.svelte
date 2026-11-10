@@ -49,7 +49,7 @@
 		return qs ? `?${qs}` : '?';
 	};
 	const filtered = $derived(!!data.filters.season || !!data.filters.pool);
-	const holderText = (h: { first_name: string; last_name: string; team_name: string }) => `${`${h.first_name} ${h.last_name}`.trim()} (${h.team_name})`;
+	const holderText = (h: { first_name: string; last_name: string; team_name: string; pending?: boolean }) => `${`${h.first_name} ${h.last_name}`.trim()} (${h.team_name}${h.pending ? `, ${t('teams.num.held_short')}` : ''})`;
 
 	usePageHeader(() => ({ title: t('teams.numbers.title'), context: t('teams.numbers.context') }));
 </script>

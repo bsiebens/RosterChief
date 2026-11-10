@@ -29,7 +29,7 @@ export const actions: Actions = {
 		const f = await request.formData();
 		const due = String(f.get('due_date') ?? '').trim();
 		const res = await api<RegistrationDetail>('POST', `/registrations/${params.id}/confirm`, { body: { due_date: due || null, send: f.get('send') === 'on' }, f: fetch });
-		return res.ok ? { done: 'confirm' } : failed('confirm', res);
+		return res.ok ? { done: 'confirm', dropped: res.data?.numbers_dropped?.length ?? 0 } : failed('confirm', res);
 	},
 	cancel: async ({ params, fetch }) => {
 		const res = await api<RegistrationDetail>('POST', `/registrations/${params.id}/cancel`, { f: fetch });

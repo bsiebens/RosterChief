@@ -10,7 +10,6 @@ is never captain and alternate captain at once (the one just set wins). Several 
 
 import uuid
 
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q
 from django.db.models.deletion import ProtectedError, RestrictedError
@@ -547,6 +546,23 @@ def _pool_out(p) -> dict:
     return {"id": p.pk, "name": p.name, "min_number": p.min_number, "max_number": p.max_number, "min_age_gap_years": p.min_age_gap_years}
 
 
+def _pending_holds(season, pool=None) -> dict[int, list]:
+    """Numbers held by registrations that still wait for the billing review, as unsaved roster spots (``{number: [spots]}``)."""
+    if season is None:
+        return {}
+    from registration.services import holds
+
+    return {n: [holds._probe(line) for line in lines] for n, lines in holds.pending_by_number(season, pool=pool).items()}
+
+
+def _number_row(n, holders, pending, res, pool, actor) -> dict:
+    """One number of the overview. Held by pending registrations only (nobody on a roster, no reservation) it reads ``held``."""
+    status = numbers.status_for([*holders, *pending], res, pool)
+    if pending and not holders and res is None and status in ("taken", "shared"):
+        status = "held"
+    return {"number": n, "status": status, "holders": [*(_holder(m) for m in holders), *({**_holder(m), "pending": True} for m in pending)], "reservation": numbers.reservation_info(res, actor) if res else None}
+
+
 def numbers_overview(actor, season, pool_id=None) -> list[dict]:
     pools = NumberPool.objects.order_by("name")
     if pool_id is not None:
@@ -558,18 +574,12 @@ def numbers_overview(actor, season, pool_id=None) -> list[dict]:
         for m in memberships:
             by_number.setdefault(m.jersey_number, []).append(m)
         reservations = {r.number: r for r in NumberReservation.objects.filter(pool=pool).select_related("reserved_by")}
-        wanted = sorted(set(range(pool.min_number, pool.max_number + 1)) | set(by_number) | set(reservations))
+        pending = _pending_holds(season, pool=pool)
+        wanted = sorted(set(range(pool.min_number, pool.max_number + 1)) | set(by_number) | set(reservations) | set(pending))
         rows = []
         for n in wanted:
             holders, res = by_number.get(n, []), reservations.get(n)
-            rows.append(
-                {
-                    "number": n,
-                    "status": numbers.status_for(holders, res, pool),
-                    "holders": [_holder(m) for m in holders],
-                    "reservation": numbers.reservation_info(res, actor) if res else None,
-                }
-            )
+            rows.append(_number_row(n, holders, pending.get(n, []), res, pool, actor))
         out.append({"pool": _pool_out(pool), "teams": [{"id": t.pk, "name": t.name} for t in pool.teams.all()], "numbers": rows})
     if pool_id is None:
         loose = list(Team.objects.filter(pool__isnull=True))
@@ -578,7 +588,8 @@ def numbers_overview(actor, season, pool_id=None) -> list[dict]:
         for m in memberships:
             by_number.setdefault(m.jersey_number, []).append(m)
         if loose:
-            rows = [{"number": n, "status": numbers.status_for(h, None, None), "holders": [_holder(m) for m in h], "reservation": None} for n, h in sorted(by_number.items())]
+            pending = _pending_holds(season, pool=None)
+            rows = [_number_row(n, by_number.get(n, []), pending.get(n, []), None, None, actor) for n in sorted(set(by_number) | set(pending))]
             out.append({"pool": None, "teams": [{"id": t.pk, "name": t.name} for t in loose], "numbers": rows})
     return out
 
@@ -591,6 +602,10 @@ def team_numbers(actor, team, season) -> dict:
     if season is not None and pool is not None:
         for m in numbers.memberships_for(season, pool=pool).exclude(team=team).order_by("member__last_name", "member__first_name"):
             taken.setdefault(str(m.jersey_number), []).append(_holder(m))
+        for n, spots in _pending_holds(season, pool=pool).items():  # held by registrations waiting for review (read-only, flagged pending)
+            for m in spots:
+                if m.team_id != team.pk:
+                    taken.setdefault(str(n), []).append({**_holder(m), "pending": True})
         reserved = {str(r.number): r.note for r in NumberReservation.objects.filter(pool=pool)}
     free = []
     if pool is not None:

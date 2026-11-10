@@ -1,5 +1,6 @@
 export default {
 	en: {
+		'signups.number_dropped': "Number #{n} was taken before the team was placed: no number given.",
 		'signups.nav': "Sign-ups",
 		'signups.badge': "{n} sign-ups waiting",
 		'signups.title': "Sign-ups",
@@ -56,6 +57,7 @@ export default {
 		'signups.cancel_confirm': "Cancel sign-up"
 	},
 	nl: {
+		'signups.number_dropped': "Nummer #{n} was bezet voor het team geplaatst werd: geen nummer toegekend.",
 		'signups.nav': "Inschrijvingen",
 		'signups.badge': "{n} inschrijvingen wachten",
 		'signups.title': "Inschrijvingen",
@@ -112,6 +114,7 @@ export default {
 		'signups.cancel_confirm': "Inschrijving annuleren"
 	},
 	fr: {
+		'signups.number_dropped': "Le numéro #{n} a été pris avant le placement : aucun numéro attribué.",
 		'signups.nav': "Inscriptions",
 		'signups.badge': "{n} inscriptions en attente",
 		'signups.title': "Inscriptions",

@@ -31,6 +31,8 @@ class SignupRegistration(Schema):
     requested_position_id: uuid.UUID | None = None
     requested_position_name: str | None = None
     requested_jersey_number: int | None = None
+    #: assigned | dropped (the number was taken before the team was placed) | reserved | unavailable | null
+    number_state: str | None = None
     product: str = ""
 
 

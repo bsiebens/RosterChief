@@ -41,22 +41,23 @@ def _item(b: RegistrationBatch) -> dict:
     }  # fmt: skip
 
 
-def _detail(b: RegistrationBatch) -> dict:
+def _detail(b: RegistrationBatch, numbers_dropped=()) -> dict:
     lines = []
-    for d in b.details.select_related("member", "membership", "requested_team", "requested_position"):
+    for d in b.details.select_related("member", "membership", "requested_team", "requested_team__pool", "requested_position", "resulting_team_membership", "batch"):
         m = d.membership
         lines.append(
             {
                 "id": d.pk, "member": _person(d.member), "membership_id": m.pk, "entry_kind": d.entry_kind, "description": d.description,
                 "requested_team_id": d.requested_team_id, "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_name": d.requested_position.name if d.requested_position else None,
-                "requested_jersey_number": d.requested_jersey_number, "base_price": d.base_price, "discount_amount": d.discount_amount, "price_override": d.price_override,
+                "requested_jersey_number": d.requested_jersey_number, "number_state": invoicing.number_state(d),
+                "base_price": d.base_price, "discount_amount": d.discount_amount, "price_override": d.price_override,
                 "excluded": d.excluded, "price": d.price, "is_credit": d.is_credit, "credit_share": d.credit_share, "payable": d.payable, "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
             }
         )  # fmt: skip
     credit_total, credit_applied = invoicing.credits(b)
     return {
         **_item(b), "season_id": b.season_id, "lines": lines, "subtotal": invoicing.subtotal(b), "credit_total": credit_total, "credit_applied": credit_applied, "manual_discount_amount": b.manual_discount_amount, "manual_discount_note": b.manual_discount_note,
-        "invoice_due_date": b.invoice_due_date, "invoice_sent_at": b.invoice_sent_at, "confirmation_sent_at": b.confirmation_sent_at, "cancelled_at": b.cancelled_at, "status_path": f"/join/status/{b.status_token}",
+        "invoice_due_date": b.invoice_due_date, "invoice_sent_at": b.invoice_sent_at, "confirmation_sent_at": b.confirmation_sent_at, "cancelled_at": b.cancelled_at, "status_path": f"/join/status/{b.status_token}", "numbers_dropped": list(numbers_dropped),
     }  # fmt: skip
 
 
@@ -99,7 +100,7 @@ def confirm(request, batch_id: uuid.UUID, payload: ConfirmIn):
     the people show up in the Sign-ups queue."""
     _gate(request)
     batch = invoicing.confirm_invoice(request.user, _batch(batch_id), due_date=payload.due_date, send=payload.send)
-    return _detail(_batch(batch.pk))
+    return _detail(_batch(batch.pk), getattr(batch, "numbers_dropped", ()))
 
 
 @router.post("/{batch_id}/cancel", response=RegistrationDetail, summary="Cancel the registration (admin)", operation_id="cancel_registration")

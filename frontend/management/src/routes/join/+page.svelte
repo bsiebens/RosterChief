@@ -46,6 +46,8 @@
 	let accepted = $state(false);
 	let busy = $state(false);
 	let errors = $state<Record<string, string>>({});
+	// Bumped when the server refused a jersey number (another registration just took it): every number list is fetched again.
+	let numbersEpoch = $state(0);
 	let formError = $state('');
 	let closedNow = $state(false);
 	let preview = $state<Preview | null>(null);
@@ -153,6 +155,7 @@
 		else if (res.status === 0) formError = t('reg.err.network');
 		else if (Object.keys(res.fields).length) {
 			errors = res.fields;
+			if (Object.keys(res.fields).some((k) => k.endsWith('requested_jersey_number'))) numbersEpoch++;
 			formError = t('reg.err.fix');
 		} else formError = res.message || t('reg.err.generic');
 		queueMicrotask(() => document.getElementById('reg-errors')?.focus());
@@ -317,7 +320,7 @@
 									{#each cfg.positions as pos (pos.id)}<option value={pos.id}>{pos.name}</option>{/each}
 								</select>
 							</div>
-							<JerseyNumberField id="{fid}-jersey" teamId={e.requested_team_id} dob={e.date_of_birth} variantId={e.variant_id} exclude={othersOn(e)} bind:value={e.requested_jersey_number} error={eerr(i, 'requested_jersey_number')} />
+							<JerseyNumberField refresh={numbersEpoch} id="{fid}-jersey" teamId={e.requested_team_id} dob={e.date_of_birth} variantId={e.variant_id} exclude={othersOn(e)} bind:value={e.requested_jersey_number} error={eerr(i, 'requested_jersey_number')} />
 						</div>
 						<p class="-mt-2 text-xs text-muted">{t('reg.f.team_help')}</p>
 					{/if}

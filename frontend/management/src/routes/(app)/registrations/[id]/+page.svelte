@@ -10,7 +10,7 @@
 	import { formatDay } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { invoicePdfHref, statusBadge, type RegistrationDetail, type ReviewIn } from '#lib/registrations.ts';
+	import { invoicePdfHref, statusBadge, type RegistrationDetail, type RegistrationLine, type ReviewIn } from '#lib/registrations.ts';
 	import { money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
@@ -103,11 +103,19 @@
 	<a class="btn btn-outline gap-2" href="/registrations"><ArrowLeft size={16} /> {t('reg.back')}</a>
 {/snippet}
 
+{#snippet numberBadge(l: RegistrationLine)}
+	{#if l.number_state === 'reserved'}<span class="badge badge-xs badge-success ml-1.5" title={t('reg.num.reserved_help')}>{t('reg.num.reserved')}</span>
+	{:else if l.number_state === 'unavailable'}<span class="badge badge-xs badge-warning ml-1.5" title={t('reg.num.unavailable_help')}>{t('reg.num.unavailable')}</span>
+	{:else if l.number_state === 'dropped'}<span class="badge badge-xs badge-warning ml-1.5" title={t('reg.num.dropped_help')}>{t('reg.num.dropped')}</span>
+	{:else if l.number_state === 'assigned'}<span class="badge badge-xs badge-outline ml-1.5">{t('reg.num.assigned')}</span>{/if}
+{/snippet}
+
 <svelte:head><title>{pageTitle(t('reg.detail.title'))}</title></svelte:head>
 
 <div class="grid gap-4">
 	{#if done === 'save'}<Alert kind="success">{t('reg.saved')}</Alert>{/if}
 	{#if done === 'confirm'}<Alert kind="success">{t('reg.confirmed_ok')}</Alert>{/if}
+	{#if done === 'confirm' && form && 'dropped' in form && Number(form.dropped) > 0}<Alert kind="warning" title={t('reg.num.dropped_title')}>{t('reg.num.dropped_note', { n: Number(form.dropped) })}</Alert>{/if}
 	{#if done === 'cancel'}<Alert kind="success">{t('reg.cancelled_ok')}</Alert>{/if}
 	{#if done === 'resendConfirmation' || done === 'resendInvoice'}<Alert kind={sentOk ? 'success' : 'warning'}>{sentOk ? t('reg.sent_ok') : t('reg.sent_failed')}</Alert>{/if}
 	{#if failure}<Alert kind="error" title={t('reg.action_failed')}>{failure}</Alert>{/if}
@@ -148,9 +156,9 @@
 													<option value="">{t('reg.line.no_team')}</option>
 													{#each data.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
 												</select>
-												{#if l.requested_position_name || l.requested_jersey_number !== null}<p class="mt-1 text-xs text-muted">{[l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</p>{/if}
+												{#if l.requested_position_name || l.requested_jersey_number !== null}<p class="mt-1 text-xs text-muted">{[l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}{@render numberBadge(l)}</p>{/if}
 											{:else if l.requested_team_name || l.requested_position_name || l.requested_jersey_number !== null}
-												{[l.requested_team_name, l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}
+												{[l.requested_team_name, l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}{@render numberBadge(l)}
 											{:else}<span class="text-muted">–</span>{/if}
 										</td>
 										<td class="text-right font-mono text-sm {l.is_credit ? 'text-ok-text' : ''}">{money(l.base_price)}</td>

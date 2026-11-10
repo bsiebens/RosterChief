@@ -28,6 +28,7 @@ export type SignupRegistration = {
 	requested_position_id: string | null;
 	requested_position_name: string | null;
 	requested_jersey_number: number | null;
+	number_state?: 'reserved' | 'unavailable' | 'assigned' | 'dropped' | null;
 	product: string;
 };
 export type Duplicate = { member_id: string; name: string; email: string; date_of_birth: string | null; same_email: boolean; has_membership: boolean };

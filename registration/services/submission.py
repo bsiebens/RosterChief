@@ -21,13 +21,14 @@ from members.services import memberships as fees
 from members.services.errors import Invalid
 from members.services.members import _clean
 from registration.models import RegistrationBatch, RegistrationDetails
-from registration.services import config, pricing
+from registration.services import config, holds, pricing
 from teams.models import Position, Team, TeamMembership
 from teams.services import numbers
 
 log = logging.getLogger(__name__)
 
 MAX_ENTRIES = 12
+HELD_MESSAGE = "Number {number} was just taken by another registration. Choose another number."
 LANGS = ("en", "nl", "fr")
 
 
@@ -115,7 +116,11 @@ def validate(contact: dict, entries: list[dict]) -> list[dict]:
 
 def _check_jerseys(entries: list[dict], errors: dict) -> None:
     """A requested number must be free for that team: inside its pool's range, not reserved, not held by someone who may not share it (age gap rule
-    on the registrant's date of birth) and not asked for by someone earlier in the same registration. Nothing about who holds a number is told."""
+    on the registrant's date of birth), not held by another registration that is still waiting for review (``holds``) and not asked for by someone
+    earlier in the same registration. Nothing about who holds a number is told.
+
+    Runs inside the submit transaction: the pools involved are locked first, so a competing submission that is already in the middle of saving makes
+    this one wait and then see its hold (the second person gets the error, never both a number)."""
     wanted = [(i, e) for i, e in enumerate(entries) if e.get("requested_jersey_number") is not None and e.get("team") is not None and e["kind"] == RegistrationDetails.EntryKind.PLAYER]
     if not wanted or any(f"entries.{i}.variant_id" in errors for i, _e in wanted):
         return
@@ -123,6 +128,8 @@ def _check_jerseys(entries: list[dict], errors: dict) -> None:
         season = pricing.resolve_season([e["option"] for e in entries if e.get("option") is not None])
     except Invalid:
         return  # the pricing step reports a mix of seasons
+    holds.lock([e["team"] for _i, e in wanted])
+    held: dict = {}
     earlier: list[tuple[object, TeamMembership]] = []
     for i, e in wanted:
         team, number = e["team"], e["requested_jersey_number"]
@@ -133,6 +140,11 @@ def _check_jerseys(entries: list[dict], errors: dict) -> None:
         message = numbers.range_message(number, team)
         if message is None and not numbers.number_available(number, season, team, dob, extra):
             message = f"Number {number} is not available for {team.name}. Choose another number."
+        if message is None:
+            if team.pk not in held:
+                held[team.pk] = holds.holders(season, team)
+            if not numbers.number_available(number, season, team, dob, [*extra, *held[team.pk]]):
+                message = HELD_MESSAGE.format(number=number)
         if message is not None:
             errors[key] = [message]
         else:

@@ -5,7 +5,7 @@ from ninja import Router
 from controlpanel import audit
 from controlpanel.models import EmailSuppression, Maintenance
 
-from ..schemas import EmailSuppressionIn, MaintenanceIn, MaintenanceState, PushSandboxState, SwitchesOut, SwitchState
+from ..schemas import EmailSuppressionIn, MaintenanceIn, MaintenanceState, ManualInvoicingState, PushSandboxState, SwitchesOut, SwitchState
 
 router = Router(tags=["switches"])
 
@@ -15,11 +15,18 @@ def _state(row, cls=SwitchState, **extra):
 
 
 def _all() -> SwitchesOut:
+    from billing.services import invoicing_mode
     from notifications import sandbox
 
     m, e = Maintenance.current(), EmailSuppression.current()
     state = sandbox.get_state()
-    return SwitchesOut(maintenance=_state(m, MaintenanceState, message=m.message), email_suppression=_state(e), push_sandbox=PushSandboxState(is_active=state["effective"], expires_at=state["expires_at"]))
+    manual = not invoicing_mode.auto_invoicing_enabled()
+    return SwitchesOut(
+        maintenance=_state(m, MaintenanceState, message=m.message),
+        email_suppression=_state(e),
+        push_sandbox=PushSandboxState(is_active=state["effective"], expires_at=state["expires_at"]),
+        manual_invoicing=ManualInvoicingState(is_active=manual, pending_count=invoicing_mode.pending_count() if manual else 0),
+    )
 
 
 @router.get("/switches", response=SwitchesOut, summary="Maintenance mode and the email pause")

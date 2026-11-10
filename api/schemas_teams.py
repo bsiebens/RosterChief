@@ -149,6 +149,8 @@ class HolderOut(Schema):
     date_of_birth: datetime.date | None = None
     team_id: UUID
     team_name: str
+    #: True for a number held by a registration that still waits for the billing review (not a roster spot yet).
+    pending: bool = False
 
 
 class PoolOut(Schema):
@@ -168,7 +170,7 @@ class ReservationOut(Schema):
 
 class NumberOut(Schema):
     number: int
-    status: str  # free | taken | shared | reserved | conflict
+    status: str  # free | taken | shared | reserved | conflict | held (by a registration waiting for review)
     holders: list[HolderOut]
     reservation: ReservationOut | None = None
 

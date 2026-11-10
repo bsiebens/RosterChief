@@ -102,7 +102,7 @@ def _read_xlsx(data: bytes) -> list[list]:
 
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    except Exception as e:  # noqa: BLE001  (a corrupt or non-xlsx file raises many things)
+    except Exception as e:
         raise FileError("This is not a valid Excel file.") from e
     sheet = wb.worksheets[0] if wb.worksheets else None
     return [list(r) for r in sheet.iter_rows(values_only=True)] if sheet is not None else []
@@ -135,7 +135,7 @@ def parse_file(upload) -> list[dict]:
         raise FileError(f"A file can hold at most {MAX_ROWS} rows.")
     rows = []
     for i, raw in enumerate(body, start=2):
-        row = {c: "" for c in COLUMNS}
+        row = dict.fromkeys(COLUMNS, "")
         for col, value in zip(columns, raw, strict=False):
             if col and not row[col]:
                 row[col] = _cell(value)
@@ -207,7 +207,7 @@ def _clean_row(row: dict, *, season, actor, teams: dict) -> tuple[dict, dict]:
         if v[f]:
             try:
                 v[f] = _phone(v[f])
-            except Exception:  # noqa: BLE001  (phonenumbers raises its own exception type)
+            except Exception:
                 err(f, "Not a valid phone number (include the country code for non-Belgian numbers).")
     if v["language"]:
         code = v["language"].lower()[:2]
@@ -262,9 +262,9 @@ def validate_rows(actor, rows: list[dict], season) -> list[dict]:
             email = values["email"].lower()
             dob = datetime.date.fromisoformat(values["date_of_birth"]) if values["date_of_birth"] else None
             key = (values["first_name"].lower(), values["last_name"].lower(), dob)
-            if email and email in emails or dob and key in names:
+            if (email and email in emails) or (dob and key in names):
                 result.update(status="duplicate", note="Already a member.")
-            elif email and email in seen_emails or dob and key in seen_names:
+            elif (email and email in seen_emails) or (dob and key in seen_names):
                 result.update(status="duplicate", note="Appears earlier in this file.")
             else:
                 result["status"] = "new"

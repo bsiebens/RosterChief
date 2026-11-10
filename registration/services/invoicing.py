@@ -161,10 +161,12 @@ def _next_number(today: datetime.date) -> str:
     return f"{prefix}{max(taken, default=0) + 1:04d}"
 
 
-def _place_requested_teams(actor, batch: RegistrationBatch) -> None:
-    """Best effort: roster everybody on the team they asked for. A jersey number that is taken or out of range is dropped, not an error."""
+def _place_requested_teams(actor, batch: RegistrationBatch) -> list:
+    """Best effort: roster everybody on the team they asked for. A jersey number that is taken or out of range is dropped, not an error: the ids of
+    the lines whose number was dropped are returned so the review can say so."""
     from teams.services import teams as team_services
 
+    dropped = []
     for d in batch.details.select_related("member", "requested_team", "requested_position"):
         team = d.requested_team
         if team is None or d.excluded or TeamMembership.objects.filter(team=team, season=batch.season, member=d.member).exists():
@@ -173,11 +175,36 @@ def _place_requested_teams(actor, batch: RegistrationBatch) -> None:
         try:
             team_services._check_number(team, batch.season, d.member, number)
         except Invalid:
+            if number is not None:
+                dropped.append(d.pk)
             number = None
         spot = TeamMembership.objects.create(team=team, member=d.member, season=batch.season, position=d.requested_position, jersey_number=number)
         d.resulting_team_membership = spot
         d.save(update_fields=["resulting_team_membership", "modified"])
         audit.record(actor, "team.roster_added", member=d.member, target=spot, target_label=f"{d.member} - {team.name}")
+    return dropped
+
+
+def number_state(d: RegistrationDetails) -> str | None:
+    """What the requested jersey number of a line stands for, for the staff review: ``reserved`` (held for this registration while it waits),
+    ``unavailable`` (it cannot be given any more: taken, reserved or out of range), ``assigned`` / ``dropped`` once the registration is confirmed,
+    ``None`` when no number is involved (no number, volunteer, excluded line, cancelled registration)."""
+    from registration.services import holds
+    from teams.services import numbers
+
+    number, batch = d.requested_jersey_number, d.batch
+    if number is None or d.entry_kind != d.EntryKind.PLAYER or d.excluded or batch.cancelled_at:
+        return None
+    if batch.confirmed_at:
+        spot = d.resulting_team_membership
+        if spot is None:
+            return None
+        return "assigned" if spot.jersey_number == number else "dropped"
+    team = d.requested_team
+    if team is None:
+        return None
+    others = [h for h in holds.holders(batch.season, team) if h.member_id != d.member_id]
+    return "reserved" if numbers.number_available(number, batch.season, team, d.member.date_of_birth, others) else "unavailable"
 
 
 @transaction.atomic
@@ -192,7 +219,7 @@ def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date 
     batch.invoice_due_date = due_date or today + datetime.timedelta(days=config.get_settings().invoice_due_days)
     batch.confirmed_at = timezone.now()
     batch.save(update_fields=["invoice_number", "invoice_due_date", "confirmed_at", "modified"])
-    _place_requested_teams(actor, batch)
+    batch.numbers_dropped = _place_requested_teams(actor, batch)  # read by the API response
     for d in batch.details.select_related("member", "membership"):
         audit.record(actor, "registration.confirmed", member=d.member, target=batch, changes={"invoice_number": {"from": None, "to": batch.invoice_number}}, target_label=batch.invoice_number)
     if send:

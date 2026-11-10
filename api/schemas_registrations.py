@@ -56,6 +56,8 @@ class LineOut(Schema):
     requested_team_name: str | None = None
     requested_position_name: str | None = None
     requested_jersey_number: int | None = None
+    #: reserved | unavailable | assigned | dropped | null (see invoicing.number_state)
+    number_state: str | None = None
     base_price: Decimal
     #: The registrant discount (tiers) already in ``price``.
     discount_amount: Decimal
@@ -91,6 +93,8 @@ class RegistrationDetail(RegistrationItem):
     cancelled_at: datetime.datetime | None = None
     #: Where the registrant's status page lives (for staff to copy / resend).
     status_path: str
+    #: Right after confirming: the ids of the lines whose requested number could not be given (taken meanwhile); empty otherwise.
+    numbers_dropped: list[uuid.UUID] = []
 
 
 class LineEdit(Schema):

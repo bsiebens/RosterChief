@@ -23,6 +23,8 @@ export type RegistrationLine = {
 	requested_team_name: string | null;
 	requested_position_name: string | null;
 	requested_jersey_number: number | null;
+	/** reserved (held while the registration waits) | unavailable (cannot be given any more) | assigned | dropped (taken before the team was placed) | null */
+	number_state?: 'reserved' | 'unavailable' | 'assigned' | 'dropped' | null;
 	base_price: string;
 	discount_amount: string;
 	price_override: string | null;
@@ -39,6 +41,8 @@ export type RegistrationLine = {
 	early_payment_discount: string;
 };
 export type RegistrationDetail = RegistrationItem & {
+	/** Right after confirming: ids of the lines whose requested number could not be given. */
+	numbers_dropped?: string[];
 	season_id: string;
 	lines: RegistrationLine[];
 	subtotal: string;

@@ -128,6 +128,7 @@
 										{#if r.registration.requested_team_name || r.registration.requested_position_name || r.registration.requested_jersey_number !== null}
 											<p class="text-xs text-muted">{t('signups.wants')} {[r.registration.requested_team_name, r.registration.requested_position_name, r.registration.requested_jersey_number !== null ? `#${r.registration.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</p>
 										{/if}
+										{#if r.registration.number_state === 'dropped'}<p class="mt-0.5 text-xs font-semibold text-warn-text">{t('signups.number_dropped', { n: r.registration.requested_jersey_number ?? '' })}</p>{/if}
 									{/if}
 								</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{r.signed_up_at ? formatDate(r.signed_up_at) : '–'}</td>

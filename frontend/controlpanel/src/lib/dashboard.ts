@@ -95,4 +95,4 @@ export type PeriodicJob = {
 };
 
 export type SwitchState = { is_active: boolean; started_at: string | null; started_by_email: string | null };
-export type Switches = { maintenance: SwitchState & { message: string }; email_suppression: SwitchState; push_sandbox?: { is_active: boolean; expires_at: string | null } };
+export type Switches = { maintenance: SwitchState & { message: string }; email_suppression: SwitchState; push_sandbox?: { is_active: boolean; expires_at: string | null }; manual_invoicing?: { is_active: boolean; pending_count: number } };

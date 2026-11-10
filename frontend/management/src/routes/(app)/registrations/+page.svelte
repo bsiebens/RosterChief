@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { Inbox } from '@lucide/svelte';
+	import { Inbox, Pencil } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -55,7 +55,7 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('reg.col.contact')}</th><th>{t('reg.col.season')}</th><th class="text-right">{t('reg.col.people')}</th><th class="text-right">{t('reg.col.total')}</th><th>{t('reg.col.invoice')}</th><th>{t('reg.col.submitted')}</th></tr>
+						<tr><th>{t('reg.col.contact')}</th><th>{t('reg.col.season')}</th><th class="text-right">{t('reg.col.people')}</th><th class="text-right">{t('reg.col.total')}</th><th>{t('reg.col.invoice')}</th><th>{t('reg.col.submitted')}</th><th><span class="sr-only">{t('reg.col.actions')}</span></th></tr>
 					</thead>
 					<tbody>
 						{#each data.rows as r (r.id)}
@@ -72,6 +72,7 @@
 								<td class="text-right font-mono text-sm">{money(r.total)}</td>
 								<td class="font-mono text-xs">{r.invoice_number ?? '–'}</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{formatDay(r.submitted_at)}</td>
+								<td class="text-right whitespace-nowrap"><a class="btn btn-outline btn-xs gap-1" href={registrationHref(r.id)} aria-label={t('reg.edit_named', { name: r.contact?.name ?? t('reg.no_contact') })}><Pencil size={13} /> {t('common.edit')}</a></td>
 							</tr>
 						{/each}
 					</tbody>

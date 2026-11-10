@@ -7,9 +7,8 @@ from django.db.models import Q
 from events.models import Season
 from members.services import audit
 from members.services.access import can_manage_any_team, require_settings
-from members.services.errors import NotAllowed
-from members.services.errors import Invalid
-from teams.models import NumberPool, NumberReservation, OfficialProfile, Position, RefereeProfile, StaffAssignment, Team, TeamMembership
+from members.services.errors import Invalid, NotAllowed
+from teams.models import NumberPool, NumberReservation, OfficialProfile, Position, RefereeProfile, Team, TeamMembership
 
 
 def _invalid(errors: dict, message="Please correct the highlighted fields."):
@@ -71,7 +70,7 @@ def _position_state(p):
 def create_position(actor, **values):
     require_settings(actor)
     position = Position()
-    _apply_position(position, {**{f: None for f in POSITION_FIELDS}, **values})
+    _apply_position(position, {**dict.fromkeys(POSITION_FIELDS), **values})
     position.save()
     audit.record(actor, "club.position_created", target=position, changes=audit.snapshot(position, POSITION_FIELDS))
     return position
@@ -200,7 +199,7 @@ def _set_teams(pool, teams):
 def create_pool(actor, *, team_ids=None, **values):
     require_settings(actor)
     pool = NumberPool()
-    teams = _apply_pool(pool, {**{f: None for f in POOL_FIELDS}, **values}, team_ids or [])
+    teams = _apply_pool(pool, {**dict.fromkeys(POOL_FIELDS), **values}, team_ids or [])
     pool.save()
     _set_teams(pool, teams)
     state = _pool_state(pool)

@@ -443,10 +443,18 @@ class PushSandboxState(Schema):
     expires_at: datetime | None = None
 
 
+class ManualInvoicingState(Schema):
+    """``is_active`` is true while automatic club invoicing is OFF (the banner shows then); ``pending_count`` = clubs that need an invoice now."""
+
+    is_active: bool
+    pending_count: int = 0
+
+
 class SwitchesOut(Schema):
     maintenance: MaintenanceState
     email_suppression: SwitchState
     push_sandbox: PushSandboxState
+    manual_invoicing: ManualInvoicingState
 
 
 class MaintenanceIn(Schema):

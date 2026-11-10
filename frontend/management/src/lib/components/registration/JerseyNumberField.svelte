@@ -8,14 +8,14 @@
 	 * numbers the other people in this form picked on the same team). For a team without a pool it is a number box checked against the numbers its roster
 	 * holds. The server checks again on submit. The list is fetched when the team, date of birth, option or `exclude` change (debounced, stale answers dropped).
 	 */
-	let { id, teamId, dob = '', variantId = '', exclude = [], value = $bindable(''), error = '' }: { id: string; teamId: string; dob?: string; variantId?: string; exclude?: number[]; value?: string; error?: string } = $props();
+	let { id, teamId, dob = '', variantId = '', exclude = [], value = $bindable(''), error = '', refresh = 0 }: { id: string; teamId: string; dob?: string; variantId?: string; exclude?: number[]; value?: string; error?: string; refresh?: number } = $props();
 
 	let info = $state<NumbersInfo | null>(null);
 	let loading = $state(false);
 	let failed = $state(false);
 	let cleared = $state<number | null>(null);
 	let lastTeam = '';
-	const key = $derived(JSON.stringify([teamId, dob, variantId, exclude]));
+	const key = $derived(JSON.stringify([teamId, dob, variantId, exclude, refresh])); // `refresh` is bumped when the server refused a number (someone else just took it)
 
 	$effect(() => {
 		key; // re-run when anything the list depends on changes

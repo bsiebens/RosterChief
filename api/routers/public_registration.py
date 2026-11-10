@@ -15,7 +15,7 @@ from ninja.errors import HttpError
 
 from api.schemas_public_registration import AnswerIn, NumbersOut, PreviewIn, PreviewOut, PublicRegistrationOut, RegistrationIn, StatusOut, SubmittedOut
 from members.services.errors import Invalid
-from registration.services import config, pricing, status, submission
+from registration.services import config, holds, pricing, status, submission
 from teams.models import Position, Team
 from teams.services import numbers as team_numbers
 
@@ -135,7 +135,7 @@ def get_numbers(request, team_id: uuid.UUID, date_of_birth: datetime.date | None
     if season is None:
         raise Invalid("Choose what to register for first.", {"variant_id": ["Choose what to register for first."]}, code="no_season")
     picked = [int(n) for n in exclude.split(",")[:60] if n.strip().isdigit()]
-    return team_numbers.available_numbers(team, season, date_of_birth, taken_in_batch=picked)
+    return team_numbers.available_numbers(team, season, date_of_birth, taken_in_batch=picked, batch=holds.holders(season, team))  # numbers held by registrations waiting for review count too
 
 
 @router.post("/preview", auth=None, response=PreviewOut, summary="The price of a registration, nothing is saved", operation_id="public_registration_preview")

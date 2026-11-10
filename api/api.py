@@ -28,15 +28,14 @@ from .routers import notifications_inbox as notifications_router
 from .routers import officiating_levels as officiating_levels_router
 from .routers import overview as overview_router
 from .routers import public_forms as public_forms_router
-from .routers import public_registration as public_registration_router
 from .routers import public_news as public_news_router
+from .routers import public_registration as public_registration_router
 from .routers import public_stats as public_stats_router
 from .routers import referees as referees_router
 from .routers import registrations as registrations_router
 from .routers import requirements as requirements_router
 from .routers import roles as roles_router
 from .routers import shop_catalog as shop_catalog_router
-from .routers import signups as signups_router
 from .routers import shop_delivery as shop_delivery_router
 from .routers import shop_discounts as shop_discounts_router
 from .routers import shop_inventory as shop_inventory_router
@@ -45,6 +44,7 @@ from .routers import shop_orders as shop_orders_router
 from .routers import shop_payments as shop_payments_router
 from .routers import shop_pickup as shop_pickup_router
 from .routers import shop_production as shop_production_router
+from .routers import signups as signups_router
 from .routers import team_settings as team_settings_router
 from .routers import teams as teams_router
 from .schemas import BrandingOut, MeOut, MyClubOut

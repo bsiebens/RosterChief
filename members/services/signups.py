@@ -41,7 +41,7 @@ def pending(season: Season | None):
     if season is None:
         return ClubMembership.objects.none()
     qs = ClubMembership.objects.filter(season=season, status=Status.PENDING).exclude(pk__in=awaiting_membership_ids())
-    qs = qs.select_related("member", "season", "registration_details__batch__contact", "registration_details__requested_team", "registration_details__requested_position")
+    qs = qs.select_related("member", "season", "registration_details__batch__contact", "registration_details__requested_team", "registration_details__requested_position", "registration_details__resulting_team_membership")
     return qs.order_by("-signed_up_at", "member__last_name", "member__first_name")
 
 

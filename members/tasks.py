@@ -17,7 +17,6 @@ PROGRESS_EVERY = 10
 def run_member_import(job_id: str) -> str:
     """Create the members of an ``ImportJob`` (queued from the club's schema, so it runs in that schema). Progress is
     written to the job every few rows, the per-row results when done, and the person who started it gets an inbox note."""
-    from club.models import Club
     from members.services import importing
     from notifications import inbox
 
@@ -35,7 +34,7 @@ def run_member_import(job_id: str) -> str:
     try:
         club = _club(schema)
         result = importing.commit(job.created_by, club, job.rows, job.season_id, progress=progress)
-    except Exception as e:  # noqa: BLE001  (a failed import must leave a readable trace on the job, not just in the worker log)
+    except Exception as e:
         log.exception("Member import %s failed", job_id)
         message = str(e) or e.__class__.__name__
         ImportJob.objects.filter(pk=job.pk).update(status=ImportJob.Status.FAILED, error=message[:2000], rows=[], finished_at=timezone.now())
@@ -66,7 +65,7 @@ def _tell(job, *, title, body, kind):
         return
     try:
         inbox.notify(job.created_by, _club(connection.schema_name), title=title, body=body, kind=kind, href="/members", push=True, category="admin")
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Import notification failed")
 
 
