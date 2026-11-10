@@ -116,6 +116,36 @@ def recompute(actor, batch: RegistrationBatch) -> None:
 
 
 @transaction.atomic
+def reprice(actor, batch: RegistrationBatch, *, today: datetime.date | None = None) -> bool:
+    """Price a registration that is still waiting for review again with the CURRENT pricing rules (tiers counted per product, per-registration
+    discounts and credits as their own shares) and write the result onto its lines and memberships. Staff overrides and left-out lines stay as
+    they are; the manual discount is kept. Confirmed or cancelled registrations are never touched (they were invoiced). Returns whether anything changed."""
+    if batch.confirmed_at or batch.cancelled_at:
+        return False
+    details = list(batch.details.select_related("membership", "product", "product_variant"))
+    options = [pricing.Option(product=d.product, variant=d.product_variant) for d in details if d.product_id]
+    if len(options) != len(details) or not details:
+        return False  # a line without a product cannot be priced again
+    priced = pricing.price_entries(options, today=today or timezone.localtime(batch.created).date())
+    changed = False
+    for d, line in zip(details, priced.lines, strict=True):
+        values = {"base_price": line.base, "discount_amount": line.discount, "order_discount_share": line.order_discount, "credit_share": line.credit_share}
+        if any(getattr(d, k) != v for k, v in values.items()):
+            for k, v in values.items():
+                setattr(d, k, v)
+            d.save(update_fields=[*values, "modified"])
+            changed = True
+        m = d.membership
+        early = (line.early_bird_deadline if line.early_bird_discount else None, line.early_bird_discount)
+        if (m.early_payment_deadline, m.early_payment_discount) != early:
+            m.early_payment_deadline, m.early_payment_discount = early
+            m.save(update_fields=["early_payment_deadline", "early_payment_discount", "modified"])
+            changed = True
+    recompute(actor, batch)
+    return changed
+
+
+@transaction.atomic
 def update_review(actor, batch: RegistrationBatch, *, lines=None, manual_discount_amount=None, manual_discount_note=None) -> RegistrationBatch:
     """Edit the review: ``lines`` = ``[{id, price (a number, or null to go back to the computed price), excluded}]`` (only the keys present change)."""
     require_admin(actor)

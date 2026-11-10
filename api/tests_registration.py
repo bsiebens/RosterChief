@@ -1056,6 +1056,34 @@ class LineStructureTests(RegistrationMixin, TestCase):
         self.assertEqual(priced.total, Decimal("175.00"))  # the same total as before the restructure
         self.assertEqual(sum(ln.price for ln in priced.lines), Decimal("175.00"))  # the fees still carry the shares
 
+    def test_repricing_fixes_a_registration_made_under_older_rules(self):
+        from registration.services import invoicing
+
+        batch = self.two()
+        for d in batch.details.all():  # what an older submission stored: the per-registration discount spread over the lines
+            d.discount_amount, d.order_discount_share = Decimal("12.50"), Decimal("0.00")
+            d.save()
+        self.assertTrue(invoicing.reprice(None, batch))
+        details = list(batch.details.select_related("membership"))
+        self.assertEqual([(d.discount_amount, d.order_discount_share) for d in details], [(Decimal("0.00"), Decimal("12.50"))] * 2)
+        self.assertEqual([d.membership.fee_amount for d in details], [Decimal("87.50")] * 2)
+        self.assertFalse(invoicing.reprice(None, batch))  # nothing left to fix
+
+    def test_repricing_never_touches_a_confirmed_registration(self):
+        from django.utils import timezone
+
+        from registration.services import invoicing
+
+        batch = self.two()
+        batch.confirmed_at = timezone.now()
+        batch.save()
+        d = batch.details.first()
+        d.discount_amount = Decimal("12.50")
+        d.save()
+        self.assertFalse(invoicing.reprice(None, batch))
+        d.refresh_from_db()
+        self.assertEqual(d.discount_amount, Decimal("12.50"))
+
     def test_the_review_payload_has_separate_order_discount_lines(self):
         batch = self.two()
         detail = self.staff("get", f"/registrations/{batch.pk}").json()
