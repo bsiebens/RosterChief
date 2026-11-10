@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { CircleCheck, CircleQuestionMark, Clock, FileCheck2, FileClock, FileWarning, FileX2, Save, Upload, UserCheck, XCircle } from '@lucide/svelte';
+	import { CircleCheck, CircleQuestionMark, Clock, Download, FileCheck2, FileClock, FileWarning, FileX2, Save, Upload, UserCheck, XCircle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import PublicShell from '#lib/components/registration/PublicShell.svelte';
 	import AnswerInput from '#lib/components/requirements/AnswerInput.svelte';
+	import { page } from '$app/state';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
 	import type { ChecklistItem, PersonStatus, RegistrationStatus } from '#lib/registration-public.ts';
@@ -85,6 +86,17 @@
 	const shown = (item: ChecklistItem) => answerText(item, item.answer, t('common.yes'), t('common.no'), day);
 
 	const headline = $derived({ awaiting: { icon: Clock, tone: 'text-warn-text' }, confirmed: { icon: CircleCheck, tone: 'text-ok-text' }, cancelled: { icon: XCircle, tone: 'text-danger' } }[reg.status]);
+	/** The pill on a person's card: where their membership really stands. Once staff confirmed the registration nothing waits for approval any more;
+	 * what is left is the payment, the open documents / questions, and the club activating the membership. */
+	function pill(p: PersonStatus): { label: string; cls: string } {
+		if (reg.status === 'cancelled' || p.membership_status === 'cancelled') return { label: t('regs.membership.cancelled'), cls: 'badge-error' };
+		if (p.membership_status === 'active') return { label: t('regs.membership.active'), cls: 'badge-success' };
+		if (p.membership_status === 'lapsed') return { label: t('regs.membership.lapsed'), cls: 'badge-warning' };
+		if (reg.status === 'awaiting') return { label: t('regs.pill.review'), cls: 'badge-warning' };
+		if (p.fee && Number(p.fee.amount_due) > 0 && !['paid', 'waived'].includes(p.fee.fee_status)) return { label: t('regs.pill.payment'), cls: 'badge-warning' };
+		if (p.checklist.some((c) => c.display === 'missing' || c.display === 'expired')) return { label: t('regs.pill.documents'), cls: 'badge-warning' };
+		return { label: t('regs.pill.activation'), cls: 'badge-info' };
+	}
 </script>
 
 <svelte:head>
@@ -96,10 +108,13 @@
 	<section class="card card-body gap-2" aria-live="polite">
 		<div class="flex items-start gap-3">
 			<headline.icon size={26} class="mt-0.5 shrink-0 {headline.tone}" aria-hidden="true" />
-			<div>
+			<div class="min-w-0 flex-1">
 				<p class="font-display text-xl font-bold text-ink">{t(`regs.status.${reg.status}.title`)}</p>
 				<p class="text-muted">{t(`regs.status.${reg.status}.body`)}</p>
 			</div>
+			{#if reg.status === 'confirmed' && reg.invoice_number}
+				<a class="btn btn-outline btn-sm shrink-0 gap-1" href="/api/v1/public/registration/status/{encodeURIComponent(page.params.token ?? '')}/invoice.pdf" target="_blank" rel="noopener"><Download size={14} aria-hidden="true" /> {t('regs.invoice.download')}</a>
+			{/if}
 		</div>
 		<dl class="mt-2 flex flex-wrap gap-x-8 gap-y-2 text-sm">
 			<div><dt class="text-xs text-muted">{t('regs.season')}</dt><dd class="font-semibold text-ink">{reg.season_name}</dd></div>
@@ -142,7 +157,7 @@
 			<div>
 				<div class="flex items-start justify-between gap-3">
 					<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
-					<span class="badge badge-sm shrink-0 {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span>
+					<span class="badge badge-sm shrink-0 {pill(p).cls}">{pill(p).label}</span>
 				</div>
 				<p class="text-sm text-muted">{[p.description, p.requested_team ? t('regs.team', { team: p.requested_team }) : '', t(`join.kind.${p.entry_kind}`)].filter(Boolean).join(' · ')}</p>
 				{#if p.is_credit && p.credit && Number(p.credit) > 0}<p class="text-xs text-ok-text">{t('join.price.credit_given', { amount: money(p.credit) })}</p>{/if}

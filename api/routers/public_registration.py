@@ -199,6 +199,28 @@ def get_status(request, token: str):
     return {**status.status_data(batch), "club": _brand(request.tenant)}
 
 
+@router.get("/status/{token}/invoice.pdf", auth=None, summary="The registrant's invoice as PDF", operation_id="public_registration_invoice_pdf")
+def get_invoice_pdf(request, token: str):
+    """Possession of the token is the credential. 404 until staff have confirmed the registration (and for a cancelled one); 503 without PDF support."""
+    from registration.services import notifications
+    from shop.services.invoices import PDFUnavailable
+
+    _club_only(request)
+    if (limited := _throttled(request, "status")) is not None:
+        return limited
+    batch = _batch(request, token)
+    if not batch.confirmed_at or batch.cancelled_at or not batch.invoice_number:
+        raise HttpError(404, "Not found.")
+    try:
+        pdf = notifications.render_invoice_pdf(batch)
+    except PDFUnavailable:
+        raise HttpError(503, "PDF rendering is not available on this server.") from None
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{batch.invoice_number}.pdf"'
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
 @router.post("/status/{token}/documents/{requirement_id}", auth=None, response={201: StatusOut}, summary="Upload a document for a checklist item", operation_id="public_registration_upload")
 def upload(request, token: str, requirement_id: str, document: File[UploadedFile], member_id: Form[str] = ""):
     """Multipart: ``document`` (a file) and ``member_id`` (who it is for; optional when the registration has one person). 422 codes: ``already_resolved``,

@@ -388,6 +388,16 @@ class StatusPageTests(RegistrationMixin, TestCase):
         self.assertTrue(items["Medical certificate"]["can_upload"])
         self.assertFalse(items["Read the rules"]["can_upload"])
 
+    def test_the_invoice_pdf_needs_the_token_and_a_confirmed_registration(self):
+        batch = self.batch()
+        self.assertEqual(self.public("get", "/status/not-a-token/invoice.pdf").status_code, 404)
+        self.assertEqual(self.public("get", f"/status/{batch.status_token}/invoice.pdf").status_code, 404)  # nothing to download before the review is confirmed
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
+        r = self.public("get", f"/status/{batch.status_token}/invoice.pdf")
+        self.assertIn(r.status_code, (200, 503))  # 503 when the server has no PDF support
+        if r.status_code == 200:
+            self.assertEqual((r["Content-Type"], r.content[:4]), ("application/pdf", b"%PDF"))
+
     def test_fee_and_early_bird_after_confirmation(self):
         self.product.early_bird_discount_type, self.product.early_bird_discount_amount, self.product.early_bird_deadline = DiscountType.FIXED_AMOUNT, Decimal("10"), TODAY + datetime.timedelta(days=2)
         self.product.save()
