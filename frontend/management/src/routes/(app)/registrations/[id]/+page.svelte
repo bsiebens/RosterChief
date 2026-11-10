@@ -98,6 +98,17 @@
 	let busy = $state(false);
 	let leaving = $state(false);
 	let confirmOpen = $state(false);
+	/** Today plus the default number of days from the registration settings, as the date field wants it (local date). */
+	const defaultDue = () => {
+		const x = new Date();
+		x.setDate(x.getDate() + data.dueDays);
+		return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+	};
+	// svelte-ignore state_referenced_locally
+	let dueDate = $state(data.item.invoice_due_date ?? defaultDue());
+	$effect(() => {
+		if (confirmOpen) dueDate = item.invoice_due_date ?? defaultDue();
+	});
 	let cancelOpen = $state(false);
 	const run = (close?: () => void) => () => {
 		busy = true;
@@ -301,8 +312,8 @@
 		<p class="text-sm text-muted">{t('reg.confirm_body', { total: money(total) })}</p>
 		<div class="form-control">
 			<label class="label" for="{formId}-due"><span class="label-text">{t('reg.confirm_due')}</span></label>
-			<input id="{formId}-due" class="input input-bordered w-full" type="date" name="due_date" value={item.invoice_due_date ?? ''} />
-			<span class="label-text-alt mt-1 block">{t('reg.confirm_due_help')}</span>
+			<input id="{formId}-due" class="input input-bordered w-full" type="date" name="due_date" bind:value={dueDate} />
+			<span class="label-text-alt mt-1 block">{t('reg.confirm_due_help', { days: data.dueDays })}</span>
 		</div>
 		<label class="flex items-start gap-3 text-sm"><input type="checkbox" name="send" class="checkbox checkbox-sm mt-0.5" checked /> <span>{t('reg.confirm_send')}</span></label>
 		<div class="modal-action mt-2 flex justify-end gap-2">

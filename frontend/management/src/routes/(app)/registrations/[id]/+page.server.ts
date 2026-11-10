@@ -6,9 +6,9 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 	const { me } = await parent();
 	if (!me.can_manage_members) redirect(303, '/');
-	const [res, teams] = await Promise.all([api<RegistrationDetail>('GET', `/registrations/${params.id}`, { f: fetch }), api<{ id: string; name: string }[]>('GET', '/teams', { f: fetch })]);
+	const [res, teams, settings] = await Promise.all([api<RegistrationDetail>('GET', `/registrations/${params.id}`, { f: fetch }), api<{ id: string; name: string }[]>('GET', '/teams', { f: fetch }), api<{ invoice_due_days: number }>('GET', '/registration/settings', { f: fetch })]);
 	if (!res.ok) error(res.status >= 400 && res.status < 600 ? res.status : 500, res.message);
-	return { item: res.data!, origin: url.origin, teams: (teams.data ?? []).map((x) => ({ id: x.id, name: x.name })) };
+	return { item: res.data!, origin: url.origin, dueDays: settings.data?.invoice_due_days ?? 30, teams: (teams.data ?? []).map((x) => ({ id: x.id, name: x.name })) };
 };
 
 const failed = (op: string, res: ApiCall<unknown>) => fail(res.status >= 400 && res.status < 600 ? res.status : 500, { op, code: res.code ?? '', status: res.status, fields: res.fields, message: res.fields.__all__ || res.message || '' });
