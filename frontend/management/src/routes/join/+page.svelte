@@ -295,21 +295,21 @@
 
 					{#if e.kind === 'player'}
 						<div class="grid gap-4 sm:grid-cols-3">
-							{#if e.team_fixed}
-								<div class="form-control">
-									<span class="label"><span class="label-text">{t('reg.f.team')}</span></span>
-									<p id="{fid}-team" class="flex min-h-12 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-ink"><Lock size={14} class="shrink-0 text-muted" aria-hidden="true" /> {teamName(e.requested_team_id)}</p>
-									<span class="label-text-alt mt-1 block">{t('join.team.fixed_help')}</span>
-								</div>
-							{:else}
-								<div class="form-control">
-									<label class="label" for="{fid}-team"><span class="label-text">{t('reg.f.team')}</span></label>
-									<select id="{fid}-team" class="select select-bordered w-full" bind:value={e.requested_team_id}>
+							<!-- The same control in both states (a disabled select when the option fixes the team), so nothing jumps when a product is chosen. -->
+							<div class="form-control">
+								<label class="label" for="{fid}-team"><span class="label-text inline-flex items-center gap-1">{#if e.team_fixed}<Lock size={12} aria-hidden="true" />{/if}{t('reg.f.team')}</span></label>
+								{#if e.team_fixed}
+									<select id="{fid}-team" class="select select-bordered w-full" disabled aria-describedby="{fid}-team-help">
+										<option>{teamName(e.requested_team_id)}</option>
+									</select>
+								{:else}
+									<select id="{fid}-team" class="select select-bordered w-full" bind:value={e.requested_team_id} aria-describedby="{fid}-team-help">
 										<option value="">{t('reg.f.no_preference')}</option>
 										{#each cfg.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
 									</select>
-								</div>
-							{/if}
+								{/if}
+								<span id="{fid}-team-help" class="label-text-alt mt-1 block min-h-4">{e.team_fixed ? t('join.team.fixed_help') : ''}</span>
+							</div>
 							<div class="form-control">
 								<label class="label" for="{fid}-pos"><span class="label-text">{t('reg.f.position')}</span></label>
 								<select id="{fid}-pos" class="select select-bordered w-full" bind:value={e.requested_position_id}>

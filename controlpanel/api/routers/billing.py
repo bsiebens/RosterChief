@@ -16,11 +16,11 @@ from ninja import Query, Router, Schema
 from ninja.pagination import paginate
 
 from billing.models import BillingSettings, ClubBilling, ClubCreditEntry, CreditNote, CreditNoteSequence, Due, DuePayment, Invoice, InvoiceSequence, PlanPrice
+from billing.services import BillingError, invoicing_mode, numbering
 from billing.services import credit as credit_svc
 from billing.services import credit_notes as credit_notes_svc
 from billing.services import dues as dues_svc
 from billing.services import invoices as invoices_svc
-from billing.services import numbering
 from billing.services import plan_change as plan_change_svc
 from billing.services import reissue as reissue_svc
 from club.models import Club
@@ -32,8 +32,10 @@ from ..errors import ApiError
 from ..idempotency import idempotent
 from ..schemas import (
     BillingPlanOut,
+    AutoInvoicingIn,
     BillingSettingsIn,
     ClubBillingOut,
+    ClubRef,
     CreditEntryOut,
     CreditLedgerOut,
     CreditNoteOut,
@@ -42,6 +44,8 @@ from ..schemas import (
     InvoiceIssueIn,
     InvoiceOut,
     InvoiceVoidIn,
+    InvoicingNeedOut,
+    InvoicingOut,
     IssuerSettingsIO,
     NumberingKindOut,
     NumberingPreviewIn,
@@ -183,14 +187,16 @@ def subscribe(request, club_id: UUID, payload: SubscribeBillingIn):
 @idempotent
 def open_period(request, club_id: UUID, payload: OpenPeriodIn):
     club = _club(club_id)
+    if not payload.invoice and club.is_archived:
+        raise ApiError(422, "validation_error", "Restore the club first: an archived club is reactivated together with its invoice.", {"invoice": ["Not possible for an archived club."]})
     try:
         if club.is_archived:
             due = dues_svc.reactivate(club, start=payload.start, actor=request.user, invoice_number=payload.invoice_number)
         else:
-            due = dues_svc.open_period(club, start=payload.start, actor=request.user, invoice_number=payload.invoice_number)
+            due = dues_svc.open_period(club, start=payload.start, actor=request.user, invoice_number=payload.invoice_number, invoice=payload.invoice)
     except ValueError as exc:
         raise _number_error(exc, "invoice_number") from None
-    audit.record(request.user, "billing.period_opened", club=club, target=due, data=_custom_number_data(due) or None)
+    audit.record(request.user, "billing.period_opened", club=club, target=due, data=(_custom_number_data(due) or {}) | ({} if payload.invoice else {"without_invoice": True}) or None)
     return 201, DueOut.of(_due(due.pk), with_payments=True)
 
 
@@ -254,6 +260,8 @@ def summary(request):
         "in_grace_count": dues_svc.dues_in_grace().count(),
         "invoices_to_send": sum(1 for inv in _unsent_invoices()),
         "clubs_unbilled": Club.objects.exclude(schema_name="public").filter(archived_at__isnull=True, billing__isnull=True).count(),
+        "auto_invoicing": invoicing_mode.auto_invoicing_enabled(),
+        "invoices_needed": invoicing_mode.pending_count(),
     }
 
 
@@ -316,10 +324,18 @@ def issue_invoice(request, due_id: UUID, payload: InvoiceIssueIn | None = None):
     existing = due.invoice
     if existing:
         return InvoiceOut.of(existing)
+    number = payload.number if payload else None
+    if not invoicing_mode.auto_invoicing_enabled() and not (number or "").strip():
+        # automatic invoicing is off: invoices are numbered by hand (the numbering may be shared with another platform)
+        raise ApiError(422, "validation_error", "Enter the invoice number: automatic invoicing is off, so numbers are typed by hand.", {"number": ["Required while automatic invoicing is off."]})
     try:
-        invoice = invoices_svc.issue_invoice(due, number=payload.number if payload else None)
+        invoice = dues_svc.issue_period_invoice(due, number=number)
     except ValueError as exc:
         raise _number_error(exc) from None
+    except BillingError as exc:
+        if "already in use" in str(exc):
+            raise ApiError(422, "duplicate_number", str(exc), {"number": [str(exc)]}) from None
+        raise
     audit.record(request.user, "billing.invoice_issued", club=due.club, target=due, data={"number": invoice.number, "custom_number": invoice.custom_number})
     return InvoiceOut.of(invoice)
 
@@ -505,6 +521,24 @@ def cycles(request):
     return [CycleOut.of(r, day) for r in dues_svc.upcoming_renewals(day)]
 
 
+@router.get("/billing/invoicing", response=InvoicingOut, summary="Automatic invoicing on/off and the clubs that need an invoice made by hand (window opened, or opening within ahead_days)")
+def invoicing(request, ahead_days: int = Query(0, ge=0, le=60)):
+    day = dues_svc.today()
+    rows = invoicing_mode.needs_invoice(day, ahead_days)
+    return InvoicingOut(
+        auto_invoicing=invoicing_mode.auto_invoicing_enabled(),
+        pending_count=invoicing_mode.pending_count(day),
+        ahead_days=ahead_days,
+        items=[
+            InvoicingNeedOut(
+                kind=r["kind"], club=ClubRef(id=r["club"].pk, name=r["club"].name, slug=r["club"].slug), plan=PlanRef(id=r["plan"].pk, code=r["plan"].code, name=r["plan"].name),
+                period_start=r["period_start"], opens_on=r["opens_on"], days=r["days"], amount=r["amount"], due_id=r["due"].pk if r["due"] else None,
+            )
+            for r in rows
+        ],
+    )
+
+
 class UnbilledClubOut(Schema):
     id: UUID
     name: str
@@ -569,10 +603,22 @@ def numbering_preview(request, payload: NumberingPreviewIn):
     )
 
 
+@router.put("/billing/settings/auto-invoicing", response=IssuerSettingsIO, auth=superuser_auth, summary="Switch automatic invoicing on or off (superuser). Off: the daily job opens and invoices nothing and platform admins are warned; periods and invoices are made by hand")
+def put_auto_invoicing(request, payload: AutoInvoicingIn):
+    row = BillingSettings.current()
+    if row.auto_invoicing != payload.enabled:
+        row.auto_invoicing = payload.enabled
+        row.save(update_fields=["auto_invoicing", "modified"])
+        audit.record(request.user, "billing.auto_invoicing_on" if payload.enabled else "billing.auto_invoicing_off", target=row)
+    return IssuerSettingsIO.of(row)
+
+
 @router.put("/billing/settings", response=IssuerSettingsIO, auth=superuser_auth, summary="Replace the issuer details and VAT rate (superuser). Only affects invoices issued afterwards")
 def put_settings(request, payload: IssuerSettingsIO):
     jumps = {"invoice": payload.invoice_next_sequence, "credit_note": payload.credit_note_next_sequence}
     data = {k: (v.strip() if isinstance(v, str) else v) for k, v in payload.dict(exclude=set(OUTPUT_ONLY)).items()}
+    if data.get("auto_invoicing") is None:
+        data.pop("auto_invoicing", None)  # omitted: leave the switch alone
     errors: dict[str, list[str]] = {}
     data["iban"] = re.sub(r"\s+", "", data["iban"]).upper()
     data["bic"] = re.sub(r"\s+", "", data["bic"]).upper()
@@ -632,4 +678,6 @@ def put_settings(request, payload: IssuerSettingsIO):
     after = {k: v for k, v in IssuerSettingsIO.of(row).dict().items() if k not in OUTPUT_ONLY}
     changed = {k: [str(before[k]), str(after[k])] for k in after if before[k] != after[k]} | changed_jumps
     audit.record(request.user, "billing.issuer_settings_updated", target=row, data={"changed": changed})
+    if "auto_invoicing" in changed:
+        audit.record(request.user, "billing.auto_invoicing_on" if row.auto_invoicing else "billing.auto_invoicing_off", target=row)
     return IssuerSettingsIO.of(row)

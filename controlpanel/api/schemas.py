@@ -669,6 +669,8 @@ class IssuerSettingsIO(Schema):
     payment_terms: str = ""
     vat_rate: Decimal = Decimal("21.00")  # percent, 0 = no VAT
     archive_after_days: int = 30  # unpaid clubs are downgraded first, then archived this many days later (0-365)
+    # Automatic invoicing (BillingSettings.auto_invoicing). GET always returns it; on PUT, omitted/null = leave unchanged (so an older client cannot switch it back on by accident).
+    auto_invoicing: bool | None = None
     # Automatic numbering (see billing.services.numbering). Optional on PUT: omitted = the current/default value.
     invoice_number_pattern: str = "INV-{YYYY}-{NNNNN}"
     credit_note_number_pattern: str = "CN-{YYYY}-{NNNNN}"
@@ -716,6 +718,7 @@ class IssuerSettingsIO(Schema):
             payment_terms=row.payment_terms,
             vat_rate=row.vat_rate,
             archive_after_days=row.archive_after_days,
+            auto_invoicing=row.auto_invoicing,
         )
 
 
@@ -1097,6 +1100,7 @@ class PlanChangeOut(PlanChangePreviewOut):
 class OpenPeriodIn(Schema):
     start: date | None = None
     invoice_number: str | None = None  # custom number for the new period's invoice; omit for automatic
+    invoice: bool = True  # false: open the period only, create the invoice afterwards (POST /billing/dues/{id}/invoice); cannot be combined with invoice_number
 
 
 class BillingSettingsIn(Schema):
@@ -1206,3 +1210,27 @@ class HomeLocationOut(Schema):
     country_name: str
     latitude: float | None = None
     longitude: float | None = None
+
+
+class InvoicingNeedOut(Schema):
+    """A club that needs an invoice made by hand (see billing.services.invoicing_mode.needs_invoice)."""
+
+    kind: str  # open: the next period is not opened yet | invoice: the period exists but has no invoice
+    club: ClubRef
+    plan: PlanRef
+    period_start: date
+    opens_on: date  # when the club's invoicing window opened (period start minus the plan's renewal lead)
+    days: int  # negative: the window opened that many days ago
+    amount: str | None = None  # total incl. VAT of the period, when it can be quoted
+    due_id: UUID | None = None  # the period, for kind=invoice
+
+
+class InvoicingOut(Schema):
+    auto_invoicing: bool
+    pending_count: int  # clubs whose window has opened and that still need an invoice
+    ahead_days: int
+    items: list[InvoicingNeedOut]
+
+
+class AutoInvoicingIn(Schema):
+    enabled: bool

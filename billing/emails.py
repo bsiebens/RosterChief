@@ -19,6 +19,12 @@ TEXTS = {
         "notice_heading": "New invoice issued",
         "notice_intro": "Invoice {number} was issued for {club}.",
         "reminder_heading": "{title}",
+        "alert_subject": "Invoicing needed: {count} club(s) entered their invoicing window",
+        "alert_heading": "Invoices have to be created manually",
+        "alert_intro": "Automatic invoicing is off, so an invoice has to be created manually for these {count} club(s) that entered their invoicing window: open the period and create the invoice in the control panel.",
+        "digest_subject": "Weekly invoicing overview: {count} club(s) need an invoice",
+        "digest_heading": "Clubs that need an invoice",
+        "digest_intro": "Automatic invoicing is off. These {count} club(s) are inside their invoicing window or enter it within the next 7 days.",
     },
 }
 

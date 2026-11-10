@@ -50,6 +50,11 @@ class BillingSettings(UUIDModel):
     vat_rate = models.DecimalField(_("VAT rate (%)"), max_digits=5, decimal_places=2, default=Decimal("21.00"), validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("100"))])
     invoice_number_pattern = models.CharField(_("invoice number pattern"), max_length=40, default="INV-{YYYY}-{NNNNN}", help_text=_("Placeholders {YYYY} {YY} {MM} and one sequence such as {NNNNN}; see billing.services.numbering."))
     credit_note_number_pattern = models.CharField(_("credit note number pattern"), max_length=40, default="CN-{YYYY}-{NNNNN}")
+    auto_invoicing = models.BooleanField(
+        _("automatic invoicing"),
+        default=True,
+        help_text=_("On: the daily job opens each club's next period and issues its invoice with the next automatic number. Off: nothing is opened or invoiced automatically; platform admins are warned (weekly digest and a first alert per club and period) and open the period and create the invoice, with a typed number, by hand."),
+    )
 
     class Meta:
         verbose_name = _("billing settings")
@@ -425,3 +430,20 @@ class ClubCreditEntry(UUIDModel):
 
     def __str__(self) -> str:
         return f"{self.club} {self.amount:+} ({self.kind})"
+
+
+class InvoicingAlert(UUIDModel):
+    """A "this club needs an invoice" alert that was sent while automatic invoicing is off. One row per club and next period start, so the
+    daily check mails each club's alert once (the weekly digest is not recorded)."""
+
+    club = models.ForeignKey("club.Club", verbose_name=_("club"), on_delete=models.CASCADE, related_name="invoicing_alerts")
+    period_start = models.DateField(_("period start"))
+    sent_at = models.DateTimeField(_("sent at"), default=timezone.now)
+
+    class Meta:
+        verbose_name = _("invoicing alert")
+        verbose_name_plural = _("invoicing alerts")
+        constraints = [models.UniqueConstraint(fields=["club", "period_start"], name="unique_invoicing_alert_per_club_period")]
+
+    def __str__(self) -> str:
+        return f"{self.club} {self.period_start}"

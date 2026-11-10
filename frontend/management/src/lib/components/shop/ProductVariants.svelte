@@ -110,7 +110,7 @@
 </div>
 
 {#snippet editor()}
-	<div class="grid items-start gap-3 {teams.length ? 'md:grid-cols-[1fr_12rem_12rem_auto]' : 'md:grid-cols-[1fr_12rem_auto]'}">
+	<div class="grid items-end gap-3 {teams.length ? 'md:grid-cols-[1fr_12rem_12rem_auto]' : 'md:grid-cols-[1fr_12rem_auto]'}">
 		<Field label={t('shop.variant.f.name')} bind:value={draft.name} error={fieldErr.name} maxlength={255} />
 		<Field label={t('shop.variant.f.price')} type="number" step="0.01" min={membership ? undefined : '0'} bind:value={draft.price} error={fieldErr.price} placeholder={money(price)} />
 		{#if teams.length}
@@ -123,7 +123,7 @@
 				{#if fieldErr.team_id}<span class="mt-1 block text-xs text-error">{fieldErr.team_id}</span>{/if}
 			</div>
 		{/if}
-		<div class="flex gap-1 md:mt-9">
+		<div class="flex gap-1">
 			<button class="btn btn-primary btn-square" type="button" aria-label={t('common.save')} disabled={busy} onclick={save}><Check size={16} /></button>
 			<button class="btn btn-ghost btn-square" type="button" aria-label={t('common.cancel')} onclick={() => (editing = null)}><X size={16} /></button>
 		</div>

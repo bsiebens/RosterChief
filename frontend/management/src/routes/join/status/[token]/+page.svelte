@@ -113,7 +113,7 @@
 		<section class="card card-body gap-4" aria-labelledby="p-{p.member_id}">
 			<div>
 				<h2 id="p-{p.member_id}" class="font-display text-lg font-extrabold tracking-wide text-ink uppercase">{p.name}</h2>
-				<p class="text-sm text-muted">{p.description}{#if p.requested_team} · {t('regs.team', { team: p.requested_team })}{/if} · {t(`join.kind.${p.entry_kind}`)}</p>
+				<p class="text-sm text-muted">{[p.description, p.requested_team ? t('regs.team', { team: p.requested_team }) : '', t(`join.kind.${p.entry_kind}`)].filter(Boolean).join(' · ')}</p>
 				{#if p.credit && Number(p.credit) > 0}<p class="text-xs text-ok-text">{p.is_credit ? t('join.price.credit_given', { amount: money(p.credit) }) : t('join.price.credit_taken', { amount: money(p.credit) })}</p>{/if}
 				<p class="mt-1 text-xs"><span class="badge badge-sm {p.membership_status === 'active' ? 'badge-success' : p.membership_status === 'cancelled' ? 'badge-error' : 'badge-warning'}">{t(`regs.membership.${p.membership_status}`)}</span></p>
 			</div>
@@ -144,10 +144,10 @@
 					<p class="text-sm text-muted">{t('regs.checklist.none')}</p>
 				{:else}
 					<ul class="grid gap-3 sm:grid-cols-2">
-						{#each p.checklist as item (item.requirement_id)}
+						{#each p.checklist as item, idx (item.requirement_id)}
 							{@const l = look[item.display]}
 							{@const k = key(p, item)}
-							<li class="grid gap-2 rounded-lg border border-line p-3.5">
+							<li class="grid gap-2 rounded-lg border border-line p-3.5 {p.checklist.length % 2 === 1 && idx === p.checklist.length - 1 ? 'sm:col-span-2' : ''}">
 								<div class="flex items-start gap-3">
 									{#if item.kind === 'question' && item.display === 'missing'}<CircleQuestionMark size={22} class="mt-0.5 shrink-0 {l.tint}" aria-hidden="true" />{:else}<l.icon size={22} class="mt-0.5 shrink-0 {l.tint}" aria-hidden="true" />{/if}
 									<div class="min-w-0 flex-1">

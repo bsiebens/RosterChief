@@ -107,7 +107,7 @@ def quote_period(club, plan: Plan, start: datetime.date, *, is_trial: bool = Fal
 
 @transaction.atomic
 def open_period(
-    club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None, invoice_number: str | None = None
+    club, *, start: datetime.date | None = None, plan: Plan | None = None, is_trial: bool = False, period_end: datetime.date | None = None, actor=None, credit_reference: str | None = None, credit_note=None, invoice_number: str | None = None, invoice: bool = True
 ) -> Due:
     """Open (and invoice) the billing period beginning ``start``.
 
@@ -123,8 +123,13 @@ def open_period(
     ``invoice_number`` gives the period's invoice a custom number instead of the next automatic one (only the manual
     actions pass it; the unattended renewal never does). It is validated first, so a bad number changes nothing:
     ``ValueError`` = invalid format (422), ``BillingError`` = already in use.
+
+    ``invoice=False`` opens the period only: no invoice is issued (so no number is taken and no credit is applied yet). The
+    invoice is created afterwards with ``issue_period_invoice`` (the manual flow while automatic invoicing is off).
     """
     custom = clean_number(invoice_number) if invoice_number is not None else None
+    if not invoice and custom is not None:
+        raise ValueError("A period opened without an invoice cannot take an invoice number yet: create the invoice afterwards.")
     billing = ClubBilling.objects.filter(club=club).first()
     if billing is None:
         raise BillingError("This club is not being billed yet. Subscribe it to a plan first.")
@@ -154,13 +159,33 @@ def open_period(
     if due.total == 0:
         due.status, due.paid_at = Due.PAID, timezone.now()  # a free or trial period never trips downgrading or archiving
         due.save(update_fields=["status", "paid_at", "modified"])
-    issue_invoice(due, number=custom)
+    if invoice:
+        issue_invoice(due, number=custom)
+        if due.total > 0:
+            from .credit import apply_credit
+
+            if apply_credit(due, reference=credit_reference, credit_note=credit_note) > 0:
+                due.refresh_from_db()
+    return due
+
+
+@transaction.atomic
+def issue_period_invoice(due: Due, *, number: str | None = None, credit_reference: str | None = None):
+    """Create the invoice of a period that was opened without one, then apply any credit the club holds, like ``open_period`` does.
+
+    Idempotent: a period that already has an invoice returns it. ``number`` is a custom number (validated first; ``ValueError`` = format,
+    ``BillingError`` = already in use) and never touches the automatic counter.
+    """
+    existing = due.invoice
+    if existing:
+        return existing
+    invoice = issue_invoice(due, number=number)
     if due.total > 0:
         from .credit import apply_credit
 
-        if apply_credit(due, reference=credit_reference, credit_note=credit_note) > 0:
+        if apply_credit(due, reference=credit_reference) > 0:
             due.refresh_from_db()
-    return due
+    return invoice
 
 
 @transaction.atomic

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { refreshAll } from '$app/navigation';
-	import type { Cycle } from '#lib/billing.ts';
+	import type { Cycle, InvoicingNeed } from '#lib/billing.ts';
 	import Alert from '#lib/components/Alert.svelte';
+	import CreateInvoiceDialog from '#lib/components/billing/cycles/CreateInvoiceDialog.svelte';
 	import CycleTable from '#lib/components/billing/cycles/CycleTable.svelte';
+	import NeedsInvoiceList from '#lib/components/billing/cycles/NeedsInvoiceList.svelte';
 	import OpenPeriodDialog from '#lib/components/billing/cycles/OpenPeriodDialog.svelte';
 	import StartBillingDialog from '#lib/components/billing/cycles/StartBillingDialog.svelte';
 	import UnbilledList from '#lib/components/billing/cycles/UnbilledList.svelte';
@@ -14,6 +16,14 @@
 	let opening = $state<Cycle | null>(null);
 	let starting = $state<Unbilled | null>(null);
 	let notice = $state('');
+	let invoicing = $state<InvoicingNeed | null>(null);
+	const manual = $derived(data.invoicing?.auto_invoicing === false);
+	const autoInvoicing = $derived(!manual);
+	// The cycle row of a club that needs its next period opened (the dialog works on cycles).
+	const openNeed = (n: InvoicingNeed) => {
+		const c = data.cycles.find((x) => x.club.id === n.club.id);
+		if (c) opening = c;
+	};
 
 	function done(message: string) {
 		notice = message;
@@ -30,6 +40,22 @@
 
 {#if notice}<Alert kind="success">{notice}</Alert>{/if}
 
+{#if manual}
+	<section class="flex flex-col gap-3" aria-labelledby="needs-h">
+		<div>
+			<h2 id="needs-h" class="font-display text-lg leading-none font-extrabold tracking-[.06em] text-ink uppercase">Needs an invoice</h2>
+			<p class="mt-1.5 font-mono text-[11px] text-muted">
+				Automatic invoicing is off · <span class={data.invoicing?.pending_count ? 'text-warn-text' : ''}>{data.invoicing?.pending_count ?? 0} club{data.invoicing?.pending_count === 1 ? '' : 's'} inside the invoicing window</span> · including those entering it within 7 days
+			</p>
+		</div>
+		{#if !data.invoicing?.items.length}
+			<div class="card"><p class="p-6 text-center text-sm text-muted">No club needs an invoice right now.</p></div>
+		{:else}
+			<NeedsInvoiceList items={data.invoicing.items} {canAct} onopen={openNeed} oninvoice={(n) => (invoicing = n)} />
+		{/if}
+	</section>
+{/if}
+
 <section class="flex flex-col gap-3" aria-labelledby="renewals-h">
 	<div>
 		<h2 id="renewals-h" class="font-display text-lg leading-none font-extrabold tracking-[.06em] text-ink uppercase">Upcoming renewals</h2>
@@ -42,7 +68,7 @@
 	{:else if !data.cycles.length}
 		<div class="card"><p class="p-6 text-center text-sm text-muted">No clubs are billed yet. Start billing for a club below.</p></div>
 	{:else}
-		<CycleTable cycles={data.cycles} {canAct} onopen={(c) => (opening = c)} />
+		<CycleTable cycles={data.cycles} {canAct} {autoInvoicing} onopen={(c) => (opening = c)} />
 	{/if}
 </section>
 
@@ -60,5 +86,6 @@
 	{/if}
 </section>
 
-<OpenPeriodDialog bind:cycle={opening} nextNumber={data.nextNumber} ondone={done} />
+<OpenPeriodDialog bind:cycle={opening} nextNumber={data.nextNumber} {autoInvoicing} ondone={done} />
+<CreateInvoiceDialog bind:target={invoicing} ondone={done} />
 <StartBillingDialog bind:target={starting} plans={data.plans} archiveAfterDays={data.archiveAfterDays} nextNumber={data.nextNumber} ondone={done} />

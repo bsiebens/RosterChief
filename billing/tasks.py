@@ -8,6 +8,7 @@ from celery import shared_task
 from controlpanel import audit
 
 from .services import dues as dues_svc
+from .services import invoicing_mode
 from .services import reminders as reminders_svc
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,10 @@ def _finish(label: str, done: list[str], failures: list[str]) -> str:
 
 @shared_task(name="billing.renew_subscriptions")
 def renew_subscriptions(dry_run: bool = False) -> str:
-    """Open (and invoice) the next period for clubs whose renewal lead time has been reached."""
+    """Open (and invoice) the next period for clubs whose renewal lead time has been reached. Does nothing while automatic invoicing is off
+    (``BillingSettings.auto_invoicing``): then the periods are opened and invoiced by hand and the admins are warned instead."""
+    if not invoicing_mode.auto_invoicing_enabled():
+        return "renew_subscriptions: skipped, automatic invoicing is off"
     done, failures = [], []
     for billing in dues_svc.subscriptions_due_for_renewal():
         club = billing.club
@@ -101,3 +105,19 @@ def archive_overdue_clubs(dry_run: bool = False) -> str:
             log.exception("archiving failed for %s", club.slug)
             failures.append(f"{club.slug}: {e}")
     return _finish("archive_overdue_clubs", done, failures)
+
+
+@shared_task(name="billing.send_invoicing_digest")
+def send_invoicing_digest() -> str:
+    """Weekly overview of the clubs that need an invoice (only while automatic invoicing is off)."""
+    if invoicing_mode.auto_invoicing_enabled():
+        return "send_invoicing_digest: skipped, automatic invoicing is on"
+    return f"send_invoicing_digest: {invoicing_mode.send_digest()} club(s) listed"
+
+
+@shared_task(name="billing.send_invoicing_alerts")
+def send_invoicing_alerts() -> str:
+    """Daily: mail the clubs that entered their invoicing window today (once per club and period; only while automatic invoicing is off)."""
+    if invoicing_mode.auto_invoicing_enabled():
+        return "send_invoicing_alerts: skipped, automatic invoicing is on"
+    return f"send_invoicing_alerts: {invoicing_mode.send_window_alerts()} club(s) alerted"

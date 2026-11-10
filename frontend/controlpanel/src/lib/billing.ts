@@ -161,7 +161,11 @@ export type Cycle = {
 	downgraded_at: string | null;
 };
 
-export type BillingSummary = { owed: string; overdue_count: number; in_grace_count: number; invoices_to_send: number; clubs_unbilled: number };
+export type BillingSummary = { owed: string; overdue_count: number; in_grace_count: number; invoices_to_send: number; clubs_unbilled: number; auto_invoicing?: boolean; invoices_needed?: number };
+
+/** A club that needs an invoice made by hand while automatic invoicing is off (`open`: the next period is not opened yet; `invoice`: the period exists without an invoice). */
+export type InvoicingNeed = { kind: 'open' | 'invoice'; club: ClubRef; plan: PlanRef; period_start: string; opens_on: string; days: number; amount: string | null; due_id: string | null };
+export type InvoicingOverview = { auto_invoicing: boolean; pending_count: number; ahead_days: number; items: InvoicingNeed[] };
 
 export type IssuerSettings = {
 	legal_name: string;
@@ -178,6 +182,8 @@ export type IssuerSettings = {
 	payment_terms: string;
 	vat_rate: string;
 	archive_after_days: number;
+	/** Read it from a GET; the switch itself is changed with PUT /billing/settings/auto-invoicing. */
+	auto_invoicing?: boolean | null;
 	invoice_number_pattern: string;
 	credit_note_number_pattern: string;
 	/** Always null in a GET; send a positive integer on PUT only to move the counter forward. */

@@ -6,7 +6,7 @@
 	import Modal from '#lib/components/Modal.svelte';
 	import { day, newKey } from './fmt.ts';
 
-	let { cycle = $bindable(null), nextNumber = null, ondone }: { cycle: Cycle | null; nextNumber?: string | null; ondone: (message: string) => void } = $props();
+	let { cycle = $bindable(null), nextNumber = null, autoInvoicing = true, ondone }: { cycle: Cycle | null; nextNumber?: string | null; autoInvoicing?: boolean; ondone: (message: string) => void } = $props();
 
 	let open = $state(false);
 	let busy = $state(false);
@@ -29,7 +29,7 @@
 		if (!cycle) return;
 		busy = true;
 		error = '';
-		const r = await platform('POST', `/clubs/${cycle.club.id}/billing/periods`, { start: cycle.next_period_start, invoice_number: invoiceNumber }, fetch, { 'Idempotency-Key': key });
+		const r = await platform('POST', `/clubs/${cycle.club.id}/billing/periods`, autoInvoicing ? { start: cycle.next_period_start, invoice_number: invoiceNumber } : { start: cycle.next_period_start, invoice: false }, fetch, { 'Idempotency-Key': key });
 		busy = false;
 		numberError = r.fields.invoice_number ?? (!r.ok && r.status === 409 && invoiceNumber ? (r.message ?? '') : '');
 		if (!r.ok) {
@@ -39,24 +39,31 @@
 		const name = cycle.club.name;
 		const start = cycle.next_period_start;
 		cycle = null;
-		ondone(`Opened the period starting ${day(start)} for ${name} and invoiced it.`);
+		ondone(autoInvoicing ? `Opened the period starting ${day(start)} for ${name} and invoiced it.` : `Opened the period starting ${day(start)} for ${name} without an invoice. Create its invoice next, with the number you type.`);
 	}
 </script>
 
-<Modal bind:open title="Open next period" onclose={() => (cycle = null)}>
+<Modal bind:open title={autoInvoicing ? 'Open next period' : 'Open next period (no invoice)'} onclose={() => (cycle = null)}>
 	{#if cycle}
 		<div class="flex flex-col gap-4">
 			{#if error}<Alert kind="error">{error}</Alert>{/if}
-			<p class="text-sm">
-				Open and invoice the next period for <strong>{cycle.club.name}</strong> on <strong>{cycle.plan.name}</strong>, starting <strong class="font-mono">{day(cycle.next_period_start)}</strong>.
-			</p>
-			<p class="text-xs text-muted">
-				The invoice is created with the plan price and VAT rate valid on that start date. {#if cycle.trial_ends_at}The club is on a free trial until {day(cycle.trial_ends_at)}; the first paid period normally opens by itself before it ends.{/if} It is not emailed automatically.
-			</p>
-			<InvoiceNumberField bind:value={invoiceNumber} nextAutomatic={nextNumber} error={numberError} disabled={busy} />
+			{#if autoInvoicing}
+				<p class="text-sm">
+					Open and invoice the next period for <strong>{cycle.club.name}</strong> on <strong>{cycle.plan.name}</strong>, starting <strong class="font-mono">{day(cycle.next_period_start)}</strong>.
+				</p>
+				<p class="text-xs text-muted">
+					The invoice is created with the plan price and VAT rate valid on that start date. {#if cycle.trial_ends_at}The club is on a free trial until {day(cycle.trial_ends_at)}; the first paid period normally opens by itself before it ends.{/if} It is not emailed automatically.
+				</p>
+				<InvoiceNumberField bind:value={invoiceNumber} nextAutomatic={nextNumber} error={numberError} disabled={busy} />
+			{:else}
+				<p class="text-sm">
+					Open the next period for <strong>{cycle.club.name}</strong> on <strong>{cycle.plan.name}</strong>, starting <strong class="font-mono">{day(cycle.next_period_start)}</strong>, <strong>without an invoice</strong>.
+				</p>
+				<p class="text-xs text-muted">Automatic invoicing is off, so no invoice and no number are created now. The period then shows under “Needs an invoice”, where you create the invoice with the number you type. The price and VAT rate valid on the start date are used.</p>
+			{/if}
 			<div class="modal-action mt-0">
 				<button class="btn btn-ghost btn-sm" onclick={() => (open = false)} disabled={busy}>Cancel</button>
-				<button class="btn btn-primary btn-sm" onclick={confirm} disabled={busy}>{busy ? 'Opening…' : 'Open and invoice'}</button>
+				<button class="btn btn-primary btn-sm" onclick={confirm} disabled={busy}>{busy ? 'Opening…' : autoInvoicing ? 'Open and invoice' : 'Open period'}</button>
 			</div>
 		</div>
 	{/if}

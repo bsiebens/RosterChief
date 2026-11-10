@@ -94,7 +94,7 @@
 						</select>
 					</div>
 					<Field label={t('shop.reg.early_amount')} type="number" step="0.01" min="0" inputmode="decimal" bind:value={tier.discount_amount} error={tierErr(i, 'discount_amount')} />
-					<button class="btn btn-outline btn-error btn-square mb-0.5" type="button" aria-label={t('shop.reg.tier_remove', { n: tier.min_registrants })} onclick={() => (v.registrant_tiers = v.registrant_tiers.filter((_, k) => k !== i))}><Trash2 size={16} /></button>
+					<button class="btn btn-outline btn-error btn-square" type="button" aria-label={t('shop.reg.tier_remove', { n: tier.min_registrants })} onclick={() => (v.registrant_tiers = v.registrant_tiers.filter((_, k) => k !== i))}><Trash2 size={16} /></button>
 				</li>
 			{/each}
 		</ul>

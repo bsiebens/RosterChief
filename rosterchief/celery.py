@@ -21,6 +21,8 @@ app.autodiscover_tasks()
 # these defaults and to reset an entry to them.
 app.conf.beat_schedule = {
     "billing-renew-subscriptions": {"task": "billing.renew_subscriptions", "schedule": crontab(hour=4, minute=0)},
+    "billing-invoicing-alerts": {"task": "billing.send_invoicing_alerts", "schedule": crontab(hour=4, minute=30)},
+    "billing-invoicing-digest": {"task": "billing.send_invoicing_digest", "schedule": crontab(hour=6, minute=30, day_of_week=1)},
     "billing-send-reminders": {"task": "billing.send_billing_reminders", "schedule": crontab(hour=5, minute=0)},
     "billing-downgrade-overdue": {"task": "billing.downgrade_overdue_clubs", "schedule": crontab(hour=5, minute=30)},
     "controlpanel-hello-world": {"task": "controlpanel.hello_world", "schedule": crontab()},  # every minute; dummy, to see the job log work

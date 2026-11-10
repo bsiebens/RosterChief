@@ -3,13 +3,13 @@
 	import type { Cycle } from '#lib/billing.ts';
 	import { day, relative } from './fmt.ts';
 
-	let { cycles, canAct, onopen }: { cycles: Cycle[]; canAct: boolean; onopen: (c: Cycle) => void } = $props();
+	let { cycles, canAct, onopen, autoInvoicing = true }: { cycles: Cycle[]; canAct: boolean; onopen: (c: Cycle) => void; autoInvoicing?: boolean } = $props();
 
 	function status(c: Cycle): { label: string; tone: string; note?: string } {
 		if (c.downgraded_at) return { label: 'Downgraded', tone: 'badge-warning', note: `on the free plan since ${day(c.downgraded_at.slice(0, 10))} — unpaid` };
 		if (c.lapsed) return { label: 'Lapsed', tone: 'badge-error', note: 'period ended, next period opens automatically' };
 		if (c.opened) return { label: 'Opened', tone: 'badge-success', note: 'next period already invoiced' };
-		if (c.invoice_due_now) return { label: 'Invoice due now', tone: 'badge-warning', note: 'opens with the next scheduled run, or open it now' };
+		if (c.invoice_due_now) return autoInvoicing ? { label: 'Invoice due now', tone: 'badge-warning', note: 'opens with the next scheduled run, or open it now' } : { label: 'Needs invoice', tone: 'badge-warning', note: 'automatic invoicing is off: open the period and invoice it by hand' };
 		return { label: 'Upcoming', tone: '' };
 	}
 </script>
@@ -50,7 +50,7 @@
 						<div class="flex items-center justify-end gap-2">
 							{#if canAct}
 								<button class="btn btn-outline btn-sm" disabled={c.opened} onclick={() => onopen(c)} title={c.opened ? 'The next period is already open' : undefined}>
-									<FastForward size={13} aria-hidden="true" /> Open next period now<span class="sr-only"> for {c.club.name}</span>
+									<FastForward size={13} aria-hidden="true" /> {autoInvoicing ? 'Open next period now' : 'Open period (no invoice)'}<span class="sr-only"> for {c.club.name}</span>
 								</button>
 							{/if}
 							<a class="btn btn-outline btn-sm btn-square" href="/clubs/{c.club.id}" aria-label="Open club {c.club.name}" title="Open club"><ExternalLink size={13} aria-hidden="true" /></a>
