@@ -224,7 +224,7 @@
 								{#each shownOrder as r (r.key)}
 									<tr>
 										<td colspan="6">
-											<span class="font-semibold text-ink">{t('reg.line.order_discount')}{#if r.percent} ({Number(r.percent)}%){/if}</span>
+											<span class="font-semibold text-ink">{t('reg.line.order_discount')}{#if r.percent}{' '}({Number(r.percent)}%){/if}</span>
 											<p class="text-xs text-muted">{t('reg.line.order_discount_for', { product: r.name, n: r.people })}</p>
 										</td>
 										<td class="text-right font-mono text-xs font-semibold whitespace-nowrap text-ok-text tabular-nums">−{money(r.amount)}</td>

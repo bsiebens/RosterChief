@@ -363,7 +363,7 @@
 						{/each}
 						{#each preview.order_discounts as r (r.description)}
 							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
-								<span><span class="font-semibold text-ink">{t('join.price.order_discount')}{#if r.percent} ({Number(r.percent)}%){/if}</span> <span class="text-xs text-muted">{t('join.price.order_discount_for', { product: r.description, n: r.people })}</span></span>
+								<span><span class="font-semibold text-ink">{t('join.price.order_discount')}{#if r.percent}{' '}({Number(r.percent)}%){/if}</span> <span class="text-xs text-muted">{t('join.price.order_discount_for', { product: r.description, n: r.people })}</span></span>
 								<span class="font-mono whitespace-nowrap text-ok-text">−{money(r.amount)}</span>
 							</li>
 						{/each}
