@@ -163,7 +163,7 @@ def preview(request, payload: PreviewIn):
             }
             for i, ln in enumerate(priced.lines)
         ],
-        "order_discounts": [{"description": row["product"].name, "amount": row["amount"], "people": row["people"]} for row in priced.order_discounts], "order_discount_total": priced.order_discount_total,
+        "order_discounts": [{"description": row["product"].name, "amount": row["amount"], "people": row["people"], "percent": row["percent"]} for row in priced.order_discounts], "order_discount_total": priced.order_discount_total,
         "total": priced.total, "credit_total": priced.credit_total, "credit_applied": priced.credit_applied, "total_if_early": priced.total - early, "early_bird_discount": early,
     }  # fmt: skip
 

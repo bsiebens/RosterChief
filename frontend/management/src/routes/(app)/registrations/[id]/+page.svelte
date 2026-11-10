@@ -57,12 +57,12 @@
 	};
 	/** The separate multi-registration discount lines while editing, one per product (positive amounts). */
 	const orderLines = $derived.by(() => {
-		const found = new Map<string, { key: string; name: string; amount: number; people: number }>();
+		const found = new Map<string, { key: string; name: string; amount: number; people: number; percent: string | null }>();
 		for (const l of item.lines) {
 			const share = orderShare(l.id);
 			if (!(share >= 0.005)) continue; // a row only exists when the product has a per-registration discount to show
 			const key = l.product_id ?? l.product_name ?? l.description;
-			const row = found.get(key) ?? { key, name: l.product_name ?? l.description, amount: 0, people: 0 };
+			const row = found.get(key) ?? { key, name: l.product_name ?? l.description, amount: 0, people: 0, percent: item.order_discounts.find((r) => r.product_id === l.product_id)?.percent ?? null };
 			row.amount = Math.round((row.amount + share) * 100) / 100;
 			row.people += 1;
 			found.set(key, row);
@@ -85,7 +85,7 @@
 	/** The lines in the order they are shown: people (own price), then the multi-registration discount lines, then the credit lines. */
 	const personLines = $derived(item.lines.filter((l) => !l.is_credit));
 	const creditLines = $derived(item.lines.filter((l) => l.is_credit));
-	const shownOrder = $derived(editable ? orderLines.map((r) => ({ key: r.key, name: r.name, amount: r.amount, people: r.people })) : item.order_discounts.map((r) => ({ key: r.product_id ?? r.name, name: r.name, amount: Number(r.amount), people: r.people })));
+	const shownOrder = $derived(editable ? orderLines.map((r) => ({ key: r.key, name: r.name, amount: r.amount, people: r.people, percent: r.percent })) : item.order_discounts.map((r) => ({ key: r.product_id ?? r.name, name: r.name, amount: Number(r.amount), people: r.people, percent: r.percent ?? null })));
 
 	const payload = $derived(
 		JSON.stringify({
@@ -224,7 +224,7 @@
 								{#each shownOrder as r (r.key)}
 									<tr>
 										<td colspan="6">
-											<span class="font-semibold text-ink">{t('reg.line.order_discount')}</span>
+											<span class="font-semibold text-ink">{t('reg.line.order_discount')}{#if r.percent} ({Number(r.percent)}%){/if}</span>
 											<p class="text-xs text-muted">{t('reg.line.order_discount_for', { product: r.name, n: r.people })}</p>
 										</td>
 										<td class="text-right font-mono text-xs font-semibold whitespace-nowrap text-ok-text tabular-nums">−{money(r.amount)}</td>

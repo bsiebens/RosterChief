@@ -135,6 +135,8 @@ class OrderDiscount(Schema):
     #: Positive amount that comes off the registration.
     amount: Decimal
     people: int
+    #: The tier's percentage when it is a percentage discount (e.g. 5), else null (a fixed amount).
+    percent: Decimal | None = None
 
 
 class PreviewOut(Schema):
@@ -215,6 +217,8 @@ class InvoiceLine(Schema):
     description: str = ""
     #: Negative for a discount or credit.
     amount: Decimal
+    #: For ``order_discount`` with a percentage tier: the percentage (e.g. 5).
+    percent: Decimal | None = None
 
 
 class InvoiceSummary(Schema):

@@ -184,7 +184,9 @@ def invoice_lines(batch: RegistrationBatch, labels: dict) -> list[dict]:
     negative for a discount or credit."""
     details = [d for d in batch.details.select_related("member") if not d.excluded]
     lines = [{"kind": "person", "title": str(d.member), "sub": d.description, "amount": money(d.price), "negative": False} for d in details if not d.is_credit]
-    lines += [{"kind": "order_discount", "title": labels["order_discount"], "sub": row["name"], "amount": f"-{money(row['amount'])}", "negative": True} for row in invoicing.order_discounts(batch)]
+    for row in invoicing.order_discounts(batch):
+        percent = f" ({row['percent']:f}%)" if row.get("percent") is not None else ""
+        lines.append({"kind": "order_discount", "title": labels["order_discount"] + percent, "sub": row["name"], "amount": f"-{money(row['amount'])}", "negative": True})
     lines += [{"kind": "credit", "title": str(d.member), "sub": f"{labels['credit']}: {d.description}", "amount": f"-{money(-d.price)}", "negative": True} for d in details if d.is_credit]
     return lines
 

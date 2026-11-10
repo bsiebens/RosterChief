@@ -116,7 +116,7 @@
 				{#each reg.invoice.lines as l, i (i)}
 					<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
 						<span>
-							<span class="font-semibold text-ink">{l.kind === 'order_discount' ? t('join.price.order_discount') : l.name}</span>
+							<span class="font-semibold text-ink">{l.kind === 'order_discount' ? t('join.price.order_discount') + (l.percent ? ` (${Number(l.percent)}%)` : '') : l.name}</span>
 							<span class="text-xs text-muted">{l.kind === 'order_discount' ? t('join.price.order_discount_product', { product: l.name }) : l.kind === 'credit' ? `${t('join.price.credit')}: ${l.description}` : l.description}</span>
 						</span>
 						<span class="font-mono whitespace-nowrap {Number(l.amount) < 0 ? 'text-ok-text' : ''}">{Number(l.amount) < 0 ? '−' : ''}{money(Math.abs(Number(l.amount)))}</span>

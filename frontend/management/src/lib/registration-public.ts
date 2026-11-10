@@ -22,7 +22,7 @@ export type PublicRegistration = { club: ClubBrand; is_open: boolean; intro_text
 export type NumbersInfo = { pool: { name: string; min: number; max: number } | null; numbers: number[] | null; taken: number[] };
 
 export type PreviewLine = { index: number; description: string; base_price: string; discount: string; price: string; is_credit: boolean; payable: string; credit_share: string; order_discount_share: string; early_bird_discount: string; early_bird_deadline: string | null };
-export type OrderDiscount = { description: string; amount: string; people: number };
+export type OrderDiscount = { description: string; amount: string; people: number; percent?: string | null };
 export type Preview = { season: Ref; lines: PreviewLine[]; order_discounts: OrderDiscount[]; order_discount_total: string; total: string; credit_total: string; credit_applied: string; total_if_early: string; early_bird_discount: string };
 
 /** A checklist item is a document (`can_upload` says a file is wanted) or a question (`can_answer`: it can be answered, or the registrant's own answer changed). */
@@ -46,7 +46,7 @@ export type ChecklistItem = {
 };
 export type Fee = { fee_amount: string; amount_paid: string; amount_due: string; remaining_balance: string; fee_status: string; early_bird: { deadline: string; discount: string; fee_if_paid_in_time: string; applies: boolean } | null };
 export type PersonStatus = { member_id: string; name: string; entry_kind: string; description: string; is_credit: boolean; credit: string | null; requested_team: string | null; membership_status: string; fee: Fee | null; checklist: ChecklistItem[] };
-export type InvoiceLine = { kind: 'person' | 'order_discount' | 'credit' | string; name: string; description: string; amount: string };
+export type InvoiceLine = { kind: 'person' | 'order_discount' | 'credit' | string; name: string; description: string; amount: string; percent?: string | null };
 export type InvoiceSummary = { lines: InvoiceLine[]; manual_discount_amount: string; manual_discount_note: string; credit_unused: string; total: string };
 export type RegistrationStatus = { status: 'awaiting' | 'confirmed' | 'cancelled'; season_name: string; submitted_at: string; invoice_number: string | null; invoice_due_date: string | null; /** Only once the invoice is confirmed: a line per person, separate multi-registration discount and credit lines, a manual discount and the total. */ invoice: InvoiceSummary | null; people: PersonStatus[]; club: ClubBrand };
 

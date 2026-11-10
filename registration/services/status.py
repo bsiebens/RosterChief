@@ -63,7 +63,7 @@ def invoice_summary(batch: RegistrationBatch) -> dict | None:
         return None
     details = [d for d in batch.details.select_related("member") if not d.excluded]
     lines = [{"kind": "person", "name": str(d.member), "description": d.description, "amount": d.price} for d in details if not d.is_credit]
-    lines += [{"kind": "order_discount", "name": row["name"], "description": "", "amount": -row["amount"]} for row in invoicing.order_discounts(batch)]
+    lines += [{"kind": "order_discount", "name": row["name"], "description": "", "amount": -row["amount"], "percent": row["percent"]} for row in invoicing.order_discounts(batch)]
     lines += [{"kind": "credit", "name": str(d.member), "description": d.description, "amount": d.price} for d in details if d.is_credit]
     credit_total, credit_applied = invoicing.credits(batch)
     return {

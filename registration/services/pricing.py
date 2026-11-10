@@ -131,6 +131,8 @@ class Pricing:
                 row = found.setdefault(line.product.pk, {"product": line.product, "amount": Decimal("0.00"), "people": 0})
                 row["amount"] += line.order_discount
                 row["people"] += 1
+        for pk, row in found.items():
+            row["percent"] = tier_percent(row["product"], sum(1 for line in self.lines if line.product.pk == pk))
         return list(found.values())
 
     @property
@@ -227,6 +229,14 @@ def resolve_season(options):
     if len(seasons) > 1:
         raise Invalid("Everything in one registration must be for the same season.", {"entries": ["Choose products for one season."]})
     return next(iter(seasons.values()))
+
+
+def tier_percent(product: Product, registrants: int):
+    """The percentage of the registrant tier that applies for ``registrants`` people on ``product`` (``None`` when there is none or it is a fixed amount)."""
+    tier = _tier_for(product, registrants)
+    if tier is not None and tier.discount_type == DiscountType.PERCENTAGE:
+        return Decimal(format(tier.discount_amount.normalize(), "f"))  # 5.00 -> 5, 12.50 -> 12.5
+    return None
 
 
 def _tier_for(product: Product, registrants: int):

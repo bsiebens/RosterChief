@@ -91,6 +91,8 @@ class OrderDiscountOut(Schema):
     #: Positive amount that comes off the registration.
     amount: Decimal
     people: int
+    #: The tier's percentage when it is a percentage discount (e.g. 5), else null (a fixed amount).
+    percent: Decimal | None = None
 
 
 class RegistrationDetail(RegistrationItem):

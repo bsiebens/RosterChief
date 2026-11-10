@@ -74,6 +74,13 @@ def order_discounts(batch: RegistrationBatch) -> list[dict]:
         row = found.setdefault(key, {"product_id": d.product_id, "name": d.product.name if d.product_id else d.description, "amount": Decimal("0.00"), "people": 0})
         row["amount"] += share
         row["people"] += 1
+    people = {}
+    for d in batch.details.select_related("product"):
+        if d.product_id and not d.excluded and not d.is_credit:
+            people[d.product_id] = people.get(d.product_id, 0) + 1
+    for row in found.values():
+        product = next((d.product for d in batch.details.select_related("product") if d.product_id == row["product_id"]), None) if row["product_id"] else None
+        row["percent"] = pricing.tier_percent(product, people.get(row["product_id"], row["people"])) if product is not None else None
     return list(found.values())
 
 

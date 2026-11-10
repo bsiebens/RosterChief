@@ -46,7 +46,7 @@ export type RegistrationLine = {
 	early_payment_deadline: string | null;
 	early_payment_discount: string;
 };
-export type OrderDiscount = { product_id: string | null; name: string; amount: string; people: number };
+export type OrderDiscount = { product_id: string | null; name: string; amount: string; people: number; percent?: string | null };
 export type RegistrationDetail = RegistrationItem & {
 	/** Right after confirming: ids of the lines whose requested number could not be given. */
 	numbers_dropped?: string[];

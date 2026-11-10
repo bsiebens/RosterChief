@@ -1056,6 +1056,19 @@ class LineStructureTests(RegistrationMixin, TestCase):
         self.assertEqual(priced.total, Decimal("175.00"))  # the same total as before the restructure
         self.assertEqual(sum(ln.price for ln in priced.lines), Decimal("175.00"))  # the fees still carry the shares
 
+    def test_a_percentage_tier_shows_its_percentage(self):
+        ProductRegistrantDiscountTier.objects.all().delete()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type=DiscountType.PERCENTAGE, discount_amount=Decimal("5.00"))
+        priced = pricing.price_entries([pricing.as_option(self.variant), pricing.as_option(self.variant)])
+        self.assertEqual([row["percent"] for row in priced.order_discounts], [Decimal("5")])
+        batch = self.two()
+        detail = self.staff("get", f"/registrations/{batch.pk}").json()
+        self.assertEqual([row["percent"] for row in detail["order_discounts"]], ["5"])
+        # a fixed amount has no percentage
+        ProductRegistrantDiscountTier.objects.all().delete()
+        ProductRegistrantDiscountTier.objects.create(product=self.product, min_registrants=2, discount_type=DiscountType.FIXED_AMOUNT, discount_amount=Decimal("25.00"))
+        self.assertEqual([row["percent"] for row in pricing.price_entries([pricing.as_option(self.variant), pricing.as_option(self.variant)]).order_discounts], [None])
+
     def test_repricing_fixes_a_registration_made_under_older_rules(self):
         from registration.services import invoicing
 
