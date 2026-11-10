@@ -92,8 +92,11 @@ def validate(contact: dict, entries: list[dict]) -> list[dict]:
             errors[f"{where}.variant_id"] = ["Choose what to register for."]
         elif kind in RegistrationDetails.EntryKind.values and not pricing.fits_kind(option.product, kind):
             errors[f"{where}.variant_id"] = [pricing.kind_error(kind)]
+        fixed = option.team if option is not None and kind == RegistrationDetails.EntryKind.PLAYER else None
         team = teams.get(entry.get("requested_team_id")) if entry.get("requested_team_id") else None
-        if entry.get("requested_team_id") and team is None:
+        if fixed is not None:
+            team = fixed  # the option decides the team: whatever the form sent is ignored (staff can change it while reviewing)
+        elif entry.get("requested_team_id") and team is None:
             errors[f"{where}.requested_team_id"] = ["Unknown team."]
         position = positions.get(entry.get("requested_position_id")) if entry.get("requested_position_id") else None
         if entry.get("requested_position_id") and position is None:

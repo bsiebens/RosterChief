@@ -44,6 +44,9 @@ class VariantOut(Schema):
     ordering: int
     stock: int | None
     in_stock: bool
+    #: Membership products: the team registrants for this option are placed in (``None``: the product's team, if any).
+    team_id: uuid.UUID | None = None
+    team_name: str | None = None
 
 
 class VariantIn(Schema):
@@ -51,6 +54,7 @@ class VariantIn(Schema):
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
     is_active: bool = True
     ordering: int | None = Field(None, ge=0)
+    team_id: uuid.UUID | None = None
 
 
 class VariantPatch(Schema):
@@ -58,11 +62,14 @@ class VariantPatch(Schema):
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
     is_active: bool | None = None
     ordering: int | None = Field(None, ge=0)
+    #: ``null`` removes the variant's own team.
+    team_id: uuid.UUID | None = None
 
 
 class VariantRowIn(Schema):
     name: str = Field(max_length=255)
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
+    team_id: uuid.UUID | None = None
 
 
 class ProductItem(Schema):
@@ -117,6 +124,9 @@ class ProductDetail(ProductItem):
     early_bird_deadline: datetime.date | None = None
     registrant_discount_scope: str = "per_person"
     registrant_tiers: list[RegistrantTier] = []
+    #: The team registrants for this product are placed in (membership products, not Volunteer).
+    team_id: uuid.UUID | None = None
+    team_name: str | None = None
     variants: list[VariantOut]
     order_line_count: int
     #: The gallery in display order (exactly one ``is_main`` when there is a picture) and the product's files (e.g. a size guide).
@@ -157,6 +167,7 @@ class ProductIn(Schema):
     early_bird_deadline: datetime.date | None = None
     registrant_discount_scope: str = "per_person"
     registrant_tiers: list[RegistrantTier] = []
+    team_id: uuid.UUID | None = None
     variants: list[VariantRowIn] = []
 
 
@@ -176,3 +187,5 @@ class ProductPatch(Schema):
     early_bird_deadline: datetime.date | None = None
     registrant_discount_scope: str | None = None
     registrant_tiers: list[RegistrantTier] | None = None
+    #: ``null`` removes the team.
+    team_id: uuid.UUID | None = None

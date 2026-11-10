@@ -133,6 +133,9 @@ class Product(UUIDModel):
     early_bird_discount_amount = models.DecimalField(_("early-bird discount"), max_digits=10, decimal_places=2, default=0)
     early_bird_deadline = models.DateField(_("early-bird deadline"), null=True, blank=True)
     registrant_discount_scope = models.CharField(_("registrant discount scope"), max_length=20, choices=RegistrantDiscountScope.choices, default=RegistrantDiscountScope.PER_PERSON)
+    #: Membership products in the Player category only: registrants for this product are placed in this team (a variant's own team wins). On the
+    #: public join page the team is fixed to it; staff can change it while reviewing the registration.
+    team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("team"))
     #: Bought in bulk and counted (InventoryMovement) instead of made to order: orders draw down stock and skip production.
     inventory_managed = models.BooleanField(_("inventory managed?"), default=False)
 
@@ -228,6 +231,8 @@ class ProductVariant(UUIDModel):
     price = models.DecimalField(_("price"), max_digits=10, decimal_places=2, blank=True, null=True, help_text=_("Leave blank to use the product's own price."))
     is_active = models.BooleanField(_("is active?"), default=True)
     ordering = models.PositiveSmallIntegerField(_("ordering"), default=0)
+    #: Overrides the product's team for registrations (same rules as ``Product.team``).
+    team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("team"))
 
     class Meta:
         verbose_name = _("product variant")

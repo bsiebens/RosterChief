@@ -20,7 +20,7 @@ from members.services.access import require_admin
 from members.services.errors import Invalid
 from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import config, pricing
-from teams.models import TeamMembership
+from teams.models import Team, TeamMembership
 
 CENT = Decimal("0.01")
 
@@ -123,7 +123,17 @@ def update_review(actor, batch: RegistrationBatch, *, lines=None, manual_discoun
             d.price_override = fees.money(price) if price is not None else None
         if row.get("excluded") is not None:
             d.excluded = bool(row["excluded"])
-        d.save(update_fields=["price_override", "excluded", "modified"])
+        if "requested_team_id" in row.keys():
+            team_id = row["requested_team_id"]
+            team = Team.objects.filter(pk=team_id).first() if team_id is not None else None
+            if team_id is not None and team is None:
+                errors[f"lines.{i}.requested_team_id"] = ["Unknown team."]
+                continue
+            if team is not None and d.entry_kind != d.EntryKind.PLAYER:
+                errors[f"lines.{i}.requested_team_id"] = ["Only players are placed in a team."]
+                continue
+            d.requested_team = team
+        d.save(update_fields=["price_override", "excluded", "requested_team", "modified"])
     if manual_discount_amount is not None:
         try:
             amount = fees.money(manual_discount_amount)

@@ -37,6 +37,7 @@ def _variant(v, levels=None) -> dict:
     return {
         "id": v.pk, "product_id": p.pk, "name": v.name, "price": v.price, "effective_price": v.effective_price, "is_active": v.is_active,
         "ordering": v.ordering, "stock": stock, "in_stock": stock > 0 if stock is not None else True,
+        "team_id": v.team_id, "team_name": v.team.name if v.team_id else None,
     }  # fmt: skip
 
 
@@ -62,6 +63,7 @@ def _detail(product_id) -> dict:
     levels = _levels([p])
     return {
         **_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count(),
+        "team_id": p.team_id, "team_name": p.team.name if p.team_id else None,
         "season_id": p.season_id, "season_name": p.season.name if p.season else None, "early_bird_discount_type": p.early_bird_discount_type,
         "early_bird_discount_amount": p.early_bird_discount_amount, "early_bird_deadline": p.early_bird_deadline, "registrant_discount_scope": p.registrant_discount_scope,
         "registrant_tiers": [{"min_registrants": t.min_registrants, "discount_type": t.discount_type, "discount_amount": t.discount_amount} for t in p.registrant_tiers.all()],
@@ -78,7 +80,7 @@ def _get_product(product_id) -> Product:
 
 
 def _get_variant(product_id, variant_id) -> ProductVariant:
-    v = ProductVariant.objects.select_related("product").filter(pk=variant_id, product_id=product_id).first()
+    v = ProductVariant.objects.select_related("product", "team").filter(pk=variant_id, product_id=product_id).first()
     if v is None:
         raise HttpError(404, "Not found.")
     return v
@@ -94,6 +96,18 @@ def _season(season_id):
     if season is None:
         raise Invalid("Unknown season.", {"season_id": ["Unknown season."]})
     return season
+
+
+def _team(team_id):
+    if team_id is None:
+        return None
+    from members.services.errors import Invalid
+    from teams.models import Team
+
+    team = Team.objects.filter(pk=team_id).first()
+    if team is None:
+        raise Invalid("Unknown team.", {"team_id": ["Unknown team."]})
+    return team
 
 
 def _category(category_id):
@@ -181,6 +195,8 @@ def create_product(request, payload: ProductIn):
     data = payload.dict()
     category = _category(data.pop("category_id"))
     data["season"] = _season(data.pop("season_id"))
+    data["team"] = _team(data.pop("team_id"))
+    data["variants"] = [{**{k: x for k, x in row.items() if k != "team_id"}, "team": _team(row.get("team_id"))} for row in data.get("variants", [])]
     product = svc.create_product(request.user, category=category, **data)
     return 201, _detail(product.pk)
 
@@ -199,7 +215,9 @@ def update_product(request, product_id: uuid.UUID, payload: ProductPatch):
         data["category"] = _category(data.pop("category_id"))
     if "season_id" in data:
         data["season"] = _season(data.pop("season_id"))
-    data = {k: v for k, v in data.items() if v is not None or k in ("category", "season", "early_bird_deadline")}
+    if "team_id" in data:
+        data["team"] = _team(data.pop("team_id"))
+    data = {k: v for k, v in data.items() if v is not None or k in ("category", "season", "early_bird_deadline", "team")}
     svc.update_product(request.user, _get_product(product_id), **data)
     return _detail(product_id)
 
@@ -278,14 +296,18 @@ def delete_attachment(request, product_id: uuid.UUID, attachment_id: uuid.UUID):
 @router.post("/products/{product_id}/variants", response={201: VariantOut}, summary="Add a variant", operation_id="create_shop_variant")
 def create_variant(request, product_id: uuid.UUID, payload: VariantIn):
     _write(request)
-    v = svc.create_variant(request.user, _get_product(product_id), **{k: x for k, x in payload.dict().items() if not (k == "ordering" and x is None)})
+    data = {k: x for k, x in payload.dict().items() if not (k == "ordering" and x is None) and k != "team_id"}
+    v = svc.create_variant(request.user, _get_product(product_id), team=_team(payload.team_id), **data)
     return 201, _variant(v)
 
 
 @router.patch("/products/{product_id}/variants/{variant_id}", response=VariantOut, summary="Edit a variant", operation_id="update_shop_variant")
 def update_variant(request, product_id: uuid.UUID, variant_id: uuid.UUID, payload: VariantPatch):
     _write(request)
-    data = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None or k == "price"}
+    data = payload.dict(exclude_unset=True)
+    if "team_id" in data:
+        data["team"] = _team(data.pop("team_id"))
+    data = {k: v for k, v in data.items() if v is not None or k in ("price", "team")}
     return _variant(svc.update_variant(request.user, _get_variant(product_id, variant_id), **data))
 
 

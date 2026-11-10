@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import type { Requirement, RequirementListItem } from '#lib/requirements.ts';
+import { parseOptionLines, type Requirement, type RequirementListItem } from '#lib/requirements.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ fetch, parent }) => {
@@ -22,10 +22,21 @@ export const actions: Actions = {
 	save: async ({ request, fetch }) => {
 		const f = await request.formData();
 		const id = String(f.get('id') ?? '');
+		const kind = f.get('kind') === 'question' ? 'question' : 'document';
+		const questionType = kind === 'question' ? String(f.get('question_type') ?? '') : '';
+		const decimal = (v: FormDataEntryValue | null) => {
+			const s = String(v ?? '').trim().replace(',', '.');
+			return s === '' ? null : s;
+		};
 		const body = {
 			name: String(f.get('name') ?? '').trim(),
 			description: String(f.get('description') ?? '').trim(),
-			requires_document: f.get('requires_document') === 'on',
+			kind,
+			question_type: questionType,
+			options: kind === 'question' && (questionType === 'choice' || questionType === 'multichoice') ? parseOptionLines(String(f.get('options') ?? '')) : null,
+			min_value: questionType === 'number' ? decimal(f.get('min_value')) : null,
+			max_value: questionType === 'number' ? decimal(f.get('max_value')) : null,
+			requires_document: kind === 'document' && f.get('requires_document') === 'on',
 			valid_for_months: whole(f.get('valid_for_months')),
 			reminder_days_before: whole(f.get('reminder_days_before')) ?? 30,
 			blocked_event_kinds: f.getAll('blocked_event_kinds').map(String),

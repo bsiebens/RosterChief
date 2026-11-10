@@ -31,6 +31,9 @@ export type Variant = {
 	ordering: number;
 	stock: number | null;
 	in_stock: boolean;
+	/** Membership products: the team registrants for this option are placed in (null: the product's team). */
+	team_id?: string | null;
+	team_name?: string | null;
 };
 export type ProductItem = {
 	id: string;
@@ -53,7 +56,7 @@ export type ProductImageItem = { id: string; url: string; is_main: boolean; orde
 export type ProductAttachmentItem = { id: string; title: string; name: string; url: string; size: number; content_type: string; created: string };
 /** Registration pricing of a membership product (the API sends nothing useful for other types). */
 export type RegistrantTier = { min_registrants: number; discount_type: 'percentage' | 'fixed_amount'; discount_amount: string };
-export type RegistrationPricing = { season_id: string | null; season_name: string | null; early_bird_discount_type: '' | 'percentage' | 'fixed_amount'; early_bird_discount_amount: string; early_bird_deadline: string | null; registrant_discount_scope: 'per_person' | 'per_order'; registrant_tiers: RegistrantTier[] };
+export type RegistrationPricing = { season_id: string | null; season_name: string | null; early_bird_discount_type: '' | 'percentage' | 'fixed_amount'; early_bird_discount_amount: string; early_bird_deadline: string | null; registrant_discount_scope: 'per_person' | 'per_order'; registrant_tiers: RegistrantTier[]; team_id: string | null; team_name: string | null };
 export type ProductDetail = ProductItem & Partial<RegistrationPricing> & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[] };
 export type ProductIn = {
 	name: string;
@@ -72,6 +75,8 @@ export type ProductIn = {
 	early_bird_deadline: string | null;
 	registrant_discount_scope: 'per_person' | 'per_order';
 	registrant_tiers: RegistrantTier[];
+	/** Membership products outside the Volunteer category: where registrants are placed (staff can change it in the review). */
+	team_id: string | null;
 };
 export const emptyProduct = (): ProductIn => ({
 	name: '',
@@ -88,7 +93,8 @@ export const emptyProduct = (): ProductIn => ({
 	early_bird_discount_amount: '',
 	early_bird_deadline: null,
 	registrant_discount_scope: 'per_person',
-	registrant_tiers: []
+	registrant_tiers: [],
+	team_id: null
 });
 export const productInOf = (p: ProductDetail): ProductIn => ({
 	name: p.name,
@@ -105,7 +111,8 @@ export const productInOf = (p: ProductDetail): ProductIn => ({
 	early_bird_discount_amount: p.early_bird_discount_type ? String(Number(p.early_bird_discount_amount ?? 0)) : '',
 	early_bird_deadline: p.early_bird_deadline ?? null,
 	registrant_discount_scope: p.registrant_discount_scope ?? 'per_person',
-	registrant_tiers: (p.registrant_tiers ?? []).map((x) => ({ ...x, discount_amount: String(Number(x.discount_amount)) }))
+	registrant_tiers: (p.registrant_tiers ?? []).map((x) => ({ ...x, discount_amount: String(Number(x.discount_amount)) })),
+	team_id: p.team_id ?? null
 });
 
 /** What goes to the API: the registration pricing only for membership products (anything else is sent cleared, so a type change drops it). */
@@ -117,9 +124,9 @@ export const productPayload = (v: ProductIn) => {
 			early_bird_deadline: v.early_bird_discount_type ? v.early_bird_deadline || null : null
 		};
 	}
-	return { ...v, season_id: null, early_bird_discount_type: '', early_bird_discount_amount: '0', early_bird_deadline: null, registrant_discount_scope: 'per_person', registrant_tiers: [] as RegistrantTier[] };
+	return { ...v, team_id: null, season_id: null, early_bird_discount_type: '', early_bird_discount_amount: '0', early_bird_deadline: null, registrant_discount_scope: 'per_person', registrant_tiers: [] as RegistrantTier[] };
 };
-export type VariantIn = { name: string; price: string | null; is_active?: boolean };
+export type VariantIn = { name: string; price: string | null; is_active?: boolean; team_id?: string | null };
 
 export type StockRow = { product_id: string; product_name: string; variant_id: string | null; variant_name: string | null; on_hand: number; committed: number; available: number; category_id?: string | null; category_name?: string | null };
 export type CountResult = { applied: number; unchanged: number; total_difference: number; lines: { product_id: string; variant_id: string | null; name: string; previous: number; counted: number; difference: number }[] };

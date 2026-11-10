@@ -13,7 +13,7 @@ from django_tenants.utils import get_public_schema_name
 from ninja import File, Form, Router, UploadedFile
 from ninja.errors import HttpError
 
-from api.schemas_public_registration import NumbersOut, PreviewIn, PreviewOut, PublicRegistrationOut, RegistrationIn, StatusOut, SubmittedOut
+from api.schemas_public_registration import AnswerIn, NumbersOut, PreviewIn, PreviewOut, PublicRegistrationOut, RegistrationIn, StatusOut, SubmittedOut
 from members.services.errors import Invalid
 from registration.services import config, pricing, status, submission
 from teams.models import Position, Team
@@ -22,7 +22,7 @@ from teams.services import numbers as team_numbers
 router = Router()
 
 WINDOW = 600
-LIMITS = {"preview": 60, "submit": 10, "status": 120, "upload": 20, "numbers": 240}
+LIMITS = {"preview": 60, "submit": 10, "status": 120, "upload": 20, "answer": 60, "numbers": 240}
 PER_EMAIL = 5
 EMAIL_WINDOW = 3600
 
@@ -96,7 +96,10 @@ def get_page(request):
         products.append(
             {
                 "id": p.pk, "name": p.name, "description": p.description, "season_id": p.season_id, "season_name": p.season.name, "early_bird": early, "entry_kind": pricing.entry_kind(p),
-                "variants": [{"id": o.variant.pk if o.variant else p.pk, "option_id": o.key, "name": o.label, "price": o.effective_price} for o in pricing.options_of(p)],
+                "variants": [
+                    {"id": o.variant.pk if o.variant else p.pk, "option_id": o.key, "name": o.label, "price": o.effective_price, "team_id": o.team.pk if o.team else None, "team_name": o.team.name if o.team else None}
+                    for o in pricing.options_of(p)
+                ],
                 "registrant_discount_scope": p.registrant_discount_scope,
                 "registrant_tiers": [{"min_registrants": t.min_registrants, "discount_type": t.discount_type, "discount_amount": t.discount_amount} for t in p.registrant_tiers.all()],
             }
@@ -124,6 +127,8 @@ def get_numbers(request, team_id: uuid.UUID, date_of_birth: datetime.date | None
     if key:
         found = pricing.options_by_key([key])
         season = found[key].product.season if key in found else None
+        if key in found and found[key].team is not None:
+            team = Team.objects.select_related("pool").get(pk=found[key].team.pk)  # a registration team is fixed: its numbers, whatever team was asked for
     else:
         seasons = {p.season_id: p.season for p in pricing.offerable_products()}
         season = next(iter(seasons.values())) if len(seasons) == 1 else None
@@ -206,4 +211,24 @@ def upload(request, token: str, requirement_id: str, document: File[UploadedFile
     except ValueError:
         raise HttpError(404, "Not found.") from None
     status.upload_document(batch, req_id, person, document)
+    return 201, {**status.status_data(batch), "club": _brand(request.tenant)}
+
+
+@router.post("/status/{token}/answers/{requirement_id}", auth=None, response={201: StatusOut}, summary="Answer a question on the checklist", operation_id="public_registration_answer")
+def answer(request, token: str, requirement_id: str, payload: AnswerIn):
+    """JSON ``{answer, member_id}``: ``member_id`` is optional when the registration has one person. The registrant may answer an open question and
+    change their own answer later; an answer staff entered, or an item staff marked not needed, is closed (``already_resolved``). 422 codes:
+    ``already_resolved``, ``not_a_question``, ``unknown_person``, ``unknown_requirement``, ``cancelled``; an invalid answer is keyed ``answer``."""
+    import uuid
+
+    _club_only(request)
+    if (limited := _throttled(request, "answer")) is not None:
+        return limited
+    batch = _batch(request, token)
+    try:
+        req_id = uuid.UUID(requirement_id)
+        person = uuid.UUID(payload.member_id) if payload.member_id else None
+    except ValueError:
+        raise HttpError(404, "Not found.") from None
+    status.answer_question(batch, req_id, person, payload.answer)
     return 201, {**status.status_data(batch), "club": _brand(request.tenant)}

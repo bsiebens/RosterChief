@@ -36,6 +36,12 @@ TEXTS = {
         "expired_body": "{who}: “{name}” was geldig tot {date}. Bezorg de club een nieuw exemplaar.",
         "missing_title": "Document ontbreekt: {name}",
         "missing_body": "{who}: de club heeft “{name}” nog niet ontvangen.",
+        "q_expiring_title": "Antwoord verloopt binnenkort: {name}",
+        "q_expiring_body": "{who}: je antwoord op “{name}” is geldig tot {date}. Bevestig of pas het tijdig aan.",
+        "q_expired_title": "Antwoord verlopen: {name}",
+        "q_expired_body": "{who}: je antwoord op “{name}” was geldig tot {date}. Beantwoord de vraag opnieuw.",
+        "q_missing_title": "Vraag niet beantwoord: {name}",
+        "q_missing_body": "{who}: de club wacht nog op je antwoord op “{name}”.",
         "self": "Jij",
     },
     "en": {
@@ -45,6 +51,12 @@ TEXTS = {
         "expired_body": "{who}: “{name}” was valid until {date}. Please give the club a new one.",
         "missing_title": "Document missing: {name}",
         "missing_body": "{who}: the club has not received “{name}” yet.",
+        "q_expiring_title": "Answer expires soon: {name}",
+        "q_expiring_body": "{who}: your answer to “{name}” is valid until {date}. Please confirm or update it in time.",
+        "q_expired_title": "Answer expired: {name}",
+        "q_expired_body": "{who}: your answer to “{name}” was valid until {date}. Please answer the question again.",
+        "q_missing_title": "Question not answered: {name}",
+        "q_missing_body": "{who}: the club is still waiting for your answer to “{name}”.",
         "self": "You",
     },
     "fr": {
@@ -54,6 +66,12 @@ TEXTS = {
         "expired_body": "{who} : « {name} » était valable jusqu’au {date}. Merci d’en remettre un nouveau.",
         "missing_title": "Document manquant : {name}",
         "missing_body": "{who} : le club n’a pas encore reçu « {name} ».",
+        "q_expiring_title": "Réponse bientôt expirée : {name}",
+        "q_expiring_body": "{who} : votre réponse à « {name} » est valable jusqu’au {date}. Merci de la confirmer ou de la mettre à jour à temps.",
+        "q_expired_title": "Réponse expirée : {name}",
+        "q_expired_body": "{who} : votre réponse à « {name} » était valable jusqu’au {date}. Merci de répondre à nouveau.",
+        "q_missing_title": "Question sans réponse : {name}",
+        "q_missing_body": "{who} : le club attend encore votre réponse à « {name} ».",
         "self": "Vous",
     },
 }
@@ -89,7 +107,8 @@ def _deliver(member, requirement, kind: str, valid_until, club) -> int:
         texts = TEXTS[_lang(languages.get(user.pk))]
         who = texts["self"] if child is None else child.first_name
         fmt = {"name": requirement.name, "who": who, "date": f"{valid_until:%d/%m/%Y}" if valid_until else ""}
-        inbox.notify(user, club, title=texts[f"{kind}_title"].format(**fmt), body=texts[f"{kind}_body"].format(**fmt), kind=inbox.Kind.WARNING, href=f"/members/{member.pk}?tab=documents", push=True, category=CATEGORY)
+        prefix = "q_" if requirement.kind == requirement.Kind.QUESTION else ""  # "answer" instead of "provide"
+        inbox.notify(user, club, title=texts[f"{prefix}{kind}_title"].format(**fmt), body=texts[f"{prefix}{kind}_body"].format(**fmt), kind=inbox.Kind.WARNING, href=f"/members/{member.pk}?tab=documents", push=True, category=CATEGORY)
         told += 1
     return told
 

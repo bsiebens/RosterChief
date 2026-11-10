@@ -19,9 +19,9 @@
 	const editable = $derived(item.status === 'awaiting');
 	const formId = $props.id();
 
-	type Draft = { lines: Record<string, { override: string; excluded: boolean }>; discount: string; note: string };
+	type Draft = { lines: Record<string, { override: string; excluded: boolean; team: string }>; discount: string; note: string };
 	const draftOf = (r: RegistrationDetail): Draft => ({
-		lines: Object.fromEntries(r.lines.map((l) => [l.id, { override: l.price_override === null ? '' : String(Number(l.price_override)), excluded: l.excluded }])),
+		lines: Object.fromEntries(r.lines.map((l) => [l.id, { override: l.price_override === null ? '' : String(Number(l.price_override)), excluded: l.excluded, team: l.requested_team_id ?? '' }])),
 		discount: Number(r.manual_discount_amount) ? String(Number(r.manual_discount_amount)) : '',
 		note: r.manual_discount_note
 	});
@@ -57,7 +57,7 @@
 
 	const payload = $derived(
 		JSON.stringify({
-			lines: item.lines.map((l) => ({ id: l.id, price: d.lines[l.id].override === '' ? null : Number(d.lines[l.id].override), excluded: d.lines[l.id].excluded })),
+			lines: item.lines.map((l) => ({ id: l.id, price: d.lines[l.id].override === '' ? null : Number(d.lines[l.id].override), excluded: d.lines[l.id].excluded, ...(l.entry_kind === 'player' ? { requested_team_id: d.lines[l.id].team || null } : {}) })),
 			manual_discount_amount: Number(d.discount) || 0,
 			manual_discount_note: d.note.trim()
 		} satisfies ReviewIn)
@@ -143,7 +143,13 @@
 											<p class="text-xs text-muted">{l.description} · {t(`reg.kind.${l.entry_kind}`)}</p>
 										</td>
 										<td class="text-sm">
-											{#if l.requested_team_name || l.requested_position_name || l.requested_jersey_number !== null}
+											{#if editable && l.entry_kind === 'player'}
+												<select class="select select-bordered select-sm w-44 max-w-full" aria-label={t('reg.line.team_named', { name: l.member.name })} bind:value={e.team}>
+													<option value="">{t('reg.line.no_team')}</option>
+													{#each data.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+												</select>
+												{#if l.requested_position_name || l.requested_jersey_number !== null}<p class="mt-1 text-xs text-muted">{[l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}</p>{/if}
+											{:else if l.requested_team_name || l.requested_position_name || l.requested_jersey_number !== null}
 												{[l.requested_team_name, l.requested_position_name, l.requested_jersey_number !== null ? `#${l.requested_jersey_number}` : ''].filter(Boolean).join(' · ')}
 											{:else}<span class="text-muted">–</span>{/if}
 										</td>

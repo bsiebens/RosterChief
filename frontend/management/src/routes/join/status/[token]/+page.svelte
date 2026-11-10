@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { CircleCheck, Clock, FileCheck2, FileClock, FileWarning, FileX2, Upload, UserCheck, XCircle } from '@lucide/svelte';
+	import { CircleCheck, CircleQuestionMark, Clock, FileCheck2, FileClock, FileWarning, FileX2, Save, Upload, UserCheck, XCircle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import PublicShell from '#lib/components/registration/PublicShell.svelte';
+	import AnswerInput from '#lib/components/requirements/AnswerInput.svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { api } from '#lib/management-api.ts';
 	import type { ChecklistItem, PersonStatus, RegistrationStatus } from '#lib/registration-public.ts';
+	import { answerFromForm, answerText } from '#lib/requirements.ts';
 	import { money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
@@ -33,6 +35,7 @@
 	const errorFor = (code: string | undefined, status: number, message?: string) => {
 		if (status === 429 || code === 'rate_limited') return t('reg.err.rate_limited');
 		if (status === 0) return t('reg.err.network');
+		if (code === 'not_a_question') return t('regs.answer.not_a_question');
 		if (code === 'already_resolved' || code === 'not_required' || code === 'cancelled' || code === 'unknown_person' || code === 'unknown_requirement') return t(`regs.upload.${code}`);
 		return message || t('regs.upload.failed');
 	};
@@ -62,6 +65,24 @@
 		}
 		errors[k] = errorFor(res.code, res.status, res.fields.document || res.message);
 	}
+
+	async function saveAnswer(e: SubmitEvent, p: PersonStatus, item: ChecklistItem) {
+		e.preventDefault();
+		const k = key(p, item);
+		errors[k] = '';
+		done = '';
+		busy = k;
+		const answer = answerFromForm(item.question_type, new FormData(e.currentTarget as HTMLFormElement).getAll('answer').map(String));
+		const res = await api<RegistrationStatus>('POST', `/public/registration/status/${encodeURIComponent(data.token)}/answers/${item.requirement_id}`, { body: { answer, member_id: p.member_id } });
+		busy = '';
+		if (res.ok && res.data) {
+			reg = res.data;
+			done = k;
+			return;
+		}
+		errors[k] = errorFor(res.code, res.status, res.fields.answer || res.message);
+	}
+	const shown = (item: ChecklistItem) => answerText(item, item.answer, t('common.yes'), t('common.no'), day);
 
 	const headline = $derived({ awaiting: { icon: Clock, tone: 'text-warn-text' }, confirmed: { icon: CircleCheck, tone: 'text-ok-text' }, cancelled: { icon: XCircle, tone: 'text-danger' } }[reg.status]);
 </script>
@@ -128,7 +149,7 @@
 							{@const k = key(p, item)}
 							<li class="grid gap-2 rounded-lg border border-line p-3.5">
 								<div class="flex items-start gap-3">
-									<l.icon size={22} class="mt-0.5 shrink-0 {l.tint}" aria-hidden="true" />
+									{#if item.kind === 'question' && item.display === 'missing'}<CircleQuestionMark size={22} class="mt-0.5 shrink-0 {l.tint}" aria-hidden="true" />{:else}<l.icon size={22} class="mt-0.5 shrink-0 {l.tint}" aria-hidden="true" />{/if}
 									<div class="min-w-0 flex-1">
 										<p class="font-semibold text-ink">{item.name}</p>
 										{#if item.description}<p class="text-xs text-muted">{item.description}</p>{/if}
@@ -147,7 +168,21 @@
 										{#if errors[k]}<p class="text-xs text-error" role="alert">{errors[k]}</p>{/if}
 									</form>
 								{/if}
-								{#if done === k}<p class="text-xs font-semibold text-ok-text" role="status">{t('regs.upload.done')}</p>{/if}
+								{#if item.kind === 'question'}
+									{#if item.can_answer}
+										<form class="grid gap-2" onsubmit={(e) => saveAnswer(e, p, item)}>
+											<label class="label-text" for="a-{k}" id="a-{k}-l">{t('regs.answer.label')}</label>
+											{#key item.answer}<AnswerInput question={item} value={item.answer} id="a-{k}" labelledby="a-{k}-l" invalid={!!errors[k]} />{/key}
+											<div class="flex flex-wrap items-center justify-end gap-2">
+												<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy === k}><Save size={13} aria-hidden="true" /> {busy === k ? t('regs.upload.sending') : item.display === 'missing' || item.display === 'expired' ? t('regs.answer.save') : t('regs.answer.update')}</button>
+											</div>
+											{#if errors[k]}<p class="text-xs text-error" role="alert">{errors[k]}</p>{/if}
+										</form>
+									{:else if item.answer !== null && item.answer !== undefined && item.answer !== ''}
+										<p class="rounded-md bg-surface px-3 py-2 text-sm text-ink"><span class="block text-xs text-muted">{t('regs.answer.yours')}</span>{shown(item)}</p>
+									{/if}
+								{/if}
+								{#if done === k}<p class="text-xs font-semibold text-ok-text" role="status">{item.kind === 'question' ? t('regs.answer.done') : t('regs.upload.done')}</p>{/if}
 							</li>
 						{/each}
 					</ul>

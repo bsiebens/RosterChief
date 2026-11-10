@@ -1,5 +1,10 @@
 export default {
 	en: {
+		"shop.reg.team": "Team",
+		"shop.reg.no_team": "No team (registrants choose)",
+		"shop.reg.team_help": "Registrants for this option are placed in this team; staff can change it during review.",
+		"shop.variant.f.team": "Team",
+		"shop.variant.same_team": "Same as the product",
 		"shop.nav": "Shop",
 		"shop.nav.products": "Products",
 		"shop.nav.inventory": "Inventory",
@@ -343,6 +348,11 @@ export default {
 		"shop.vch.use_removed": "Use removed; the amount is back on the voucher."
 	},
 	nl: {
+		"shop.reg.team": "Team",
+		"shop.reg.no_team": "Geen team (de inschrijver kiest)",
+		"shop.reg.team_help": "Wie zich voor deze optie inschrijft komt in dit team; beheerders kunnen het tijdens de controle aanpassen.",
+		"shop.variant.f.team": "Team",
+		"shop.variant.same_team": "Zoals het product",
 		"shop.nav": "Winkel",
 		"shop.nav.products": "Producten",
 		"shop.nav.inventory": "Voorraad",
@@ -686,6 +696,11 @@ export default {
 		"shop.vch.use_removed": "Gebruik verwijderd; het bedrag staat weer op de bon."
 	},
 	fr: {
+		"shop.reg.team": "Équipe",
+		"shop.reg.no_team": "Pas d’équipe (la personne choisit)",
+		"shop.reg.team_help": "Les inscrits à cette option sont placés dans cette équipe ; le staff peut la modifier pendant la vérification.",
+		"shop.variant.f.team": "Équipe",
+		"shop.variant.same_team": "Comme le produit",
 		"shop.nav": "Boutique",
 		"shop.nav.products": "Produits",
 		"shop.nav.inventory": "Stock",

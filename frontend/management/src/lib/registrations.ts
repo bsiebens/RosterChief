@@ -19,6 +19,7 @@ export type RegistrationLine = {
 	membership_id: string;
 	entry_kind: 'player' | 'volunteer' | string;
 	description: string;
+	requested_team_id: string | null;
 	requested_team_name: string | null;
 	requested_position_name: string | null;
 	requested_jersey_number: number | null;
@@ -52,7 +53,7 @@ export type RegistrationDetail = RegistrationItem & {
 	status_path: string;
 };
 /** What PATCH /registrations/{id} takes: a number overrides a line's price, `null` goes back to the computed one. */
-export type ReviewIn = { lines: { id: string; price: number | null; excluded: boolean }[]; manual_discount_amount: number; manual_discount_note: string };
+export type ReviewIn = { lines: { id: string; price: number | null; excluded: boolean; /** Players only: where they are placed when the invoice is confirmed (null: no team). */ requested_team_id?: string | null }[]; manual_discount_amount: number; manual_discount_note: string };
 export type RegistrationSettings = { is_open: boolean; intro_text: string; terms_text: string; payment_instructions: string; invoice_due_days: number };
 
 export const REGISTRATION_TABS = ['awaiting', 'confirmed', 'cancelled', 'all'] as const;

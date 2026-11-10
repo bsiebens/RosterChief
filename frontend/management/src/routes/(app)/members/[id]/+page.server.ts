@@ -8,6 +8,7 @@ import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
 import type { FamilyDetail, GuardianContact, MemberDetail, Season, ShellMe } from '#lib/members/detail-types.ts';
 import type { Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
 import type { ChecklistItem, EvaluationOut } from '#lib/evaluations.ts';
+import { answerFromForm } from '#lib/requirements.ts';
 import type { Checklist } from '#lib/requirements.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -85,6 +86,13 @@ export const actions: Actions = {
 		const file = f.get('document');
 		if (file instanceof File && file.size > 0) out.set('document', file);
 		return docResult('complete', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/complete`, { form: out, f: fetch }));
+	},
+	answerRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		const type = String(f.get('question_type') ?? '');
+		const until = String(f.get('valid_until') ?? '').trim();
+		const body = { answer: answerFromForm(type, f.getAll('answer').map(String)), note: String(f.get('note') ?? '').trim(), valid_until: until || null };
+		return docResult('answer', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/answer`, { body, f: fetch }));
 	},
 	bypassRequirement: async ({ request, fetch }) => {
 		const f = await request.formData();

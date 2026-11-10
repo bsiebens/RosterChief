@@ -12,6 +12,12 @@
 	let { data, form } = $props();
 	// svelte-ignore state_referenced_locally
 	let v = $state<ProductIn>($state.snapshot(data.initial));
+	// A variant can name its own team on membership products outside the Volunteer category.
+	const teamsForVariants = $derived(v.product_type === 'membership' && data.categories.find((c) => c.id === v.category_id)?.system_key !== 'volunteer' ? data.teams : []);
+	// Switching to a product that has no registration team (not a membership, or the Volunteer category) drops the variant teams too.
+	$effect(() => {
+		if (!teamsForVariants.length) for (const row of variants) if (row.team_id) row.team_id = null;
+	});
 	let variants = $state<VariantIn[]>([]);
 	let tried = $state(false);
 	let busy = $state(false);
@@ -50,14 +56,14 @@
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
-				<ProductFields bind:v categories={data.categories} seasons={data.seasons} {fields} {tried} />
+				<ProductFields bind:v categories={data.categories} seasons={data.seasons} teams={data.teams} {fields} {tried} />
 			</section>
 			<section class="card card-body gap-3">
 				<header class="grid gap-0.5">
 					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc')}</p>
 				</header>
-				<ProductVariantsEditor bind:variants membership={v.product_type === 'membership'} />
+				<ProductVariantsEditor bind:variants membership={v.product_type === 'membership'} teams={teamsForVariants} />
 			</section>
 		</div>
 		<section class="card card-body gap-3 xl:sticky xl:top-20">

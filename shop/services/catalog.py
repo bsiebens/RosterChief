@@ -15,8 +15,18 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 IMAGE_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}
 PRODUCT_FIELDS = (
     "name", "category", "description", "price", "product_type", "is_active", "is_public", "personalization_enabled", "inventory_managed",
-    "season", "early_bird_discount_type", "early_bird_discount_amount", "early_bird_deadline", "registrant_discount_scope",
+    "season", "early_bird_discount_type", "early_bird_discount_amount", "early_bird_deadline", "registrant_discount_scope", "team",
 )  # fmt: skip
+
+TEAM_ERROR = "A team can only be linked to a membership product that is not in the Volunteer category."
+
+
+def team_allowed(product) -> bool:
+    """A registration team makes sense for membership products that are not in the (fixed) Volunteer category; players are the ones placed in a team."""
+    if product.product_type != Product.ProductType.MEMBERSHIP:
+        return False
+    category = product.category if product.category_id else None
+    return category is None or category.system_key != "volunteer"
 
 
 def _check_price(price, field="price", *, allow_negative=False):
@@ -67,11 +77,13 @@ def delete_category(actor, category) -> None:
 
 
 def products_queryset():
-    return Product.objects.select_related("category", "season").prefetch_related("variants", "images", "attachments", "registrant_tiers")
+    return Product.objects.select_related("category", "season", "team").prefetch_related("variants__team", "images", "attachments", "registrant_tiers")
 
 
 def _validate_product(product):
     membership = product.product_type == Product.ProductType.MEMBERSHIP
+    if product.team_id and not team_allowed(product):
+        raise Invalid(TEAM_ERROR, {"team_id": [TEAM_ERROR]})
     _check_price(product.price, allow_negative=membership)
     if not membership and product.pk and product.variants.filter(price__lt=0).exists():
         raise Invalid("Remove the negative variant prices first.", {"product_type": ["A variant of this product has a negative price, which only membership products can have."]})
@@ -138,6 +150,11 @@ def update_product(actor, product, **fields) -> Product:
     for k, v in fields.items():
         if k in PRODUCT_FIELDS:
             setattr(product, k, v)
+    if not team_allowed(product):
+        # Switching the product to a type / category the team does not apply to drops the links quietly; asking for one explicitly is refused below.
+        if "team" not in fields:
+            product.team = None
+        product.variants.filter(team__isnull=False).update(team=None)
     if not product.name.strip():
         raise Invalid("A name is required.", {"name": ["Required."]})
     _validate_product(product)
@@ -331,14 +348,16 @@ def delete_attachment(actor, product, attachment_id) -> None:
 # --- variants -----------------------------------------------------------------------------------------------------
 
 
-def _add_variant(product, *, name, price=None, is_active=True, ordering=0) -> ProductVariant:
+def _add_variant(product, *, name, price=None, is_active=True, ordering=0, team=None) -> ProductVariant:
     name = (name or "").strip()
     if not name:
         raise Invalid("A name is required.", {"name": ["Required."]})
+    if team is not None and not team_allowed(product):
+        raise Invalid(TEAM_ERROR, {"team_id": [TEAM_ERROR]})
     _check_price(price, allow_negative=product.product_type == Product.ProductType.MEMBERSHIP)
     if product.variants.filter(name__iexact=name).exists():
         raise Invalid("That option already exists.", {"name": ["Already exists."]})
-    return ProductVariant.objects.create(product=product, name=name, price=price, is_active=is_active, ordering=ordering)
+    return ProductVariant.objects.create(product=product, name=name, price=price, is_active=is_active, ordering=ordering, team=team)
 
 
 def create_variant(actor, product, **fields) -> ProductVariant:
@@ -358,6 +377,8 @@ def update_variant(actor, variant, **fields) -> ProductVariant:
         fields["name"] = name
     if "price" in fields:
         _check_price(fields["price"], allow_negative=variant.product.product_type == Product.ProductType.MEMBERSHIP)
+    if fields.get("team") is not None and not team_allowed(variant.product):
+        raise Invalid(TEAM_ERROR, {"team_id": [TEAM_ERROR]})
     for k, v in fields.items():
         setattr(variant, k, v)
     variant.save()

@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CircleAlert, CircleCheck, Clock, Download, FileText, FileX, Plus, RotateCcw, Settings2, UserCheck } from '@lucide/svelte';
+	import { CircleAlert, CircleCheck, CircleQuestionMark, Clock, Download, FileText, FileX, Pencil, Plus, RotateCcw, Settings2, UserCheck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import AnswerInput from '#lib/components/requirements/AnswerInput.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
-	import { documentHref, type Checklist, type ChecklistItem, type DocDisplay } from '#lib/requirements.ts';
+	import { answerText, documentHref, type Checklist, type ChecklistItem, type DocDisplay } from '#lib/requirements.ts';
 
 	/**
-	 * A member's documents for one season, from the requirements the club defined. Everyone who may see the member sees the status;
+	 * A member's documents and questions for one season, from the requirements the club defined (a question shows its answer; staff can answer it). Everyone who may see the member sees the status;
 	 * marking received (with a file and an expiry date), "not needed", reopening and downloading need `members.manage_members`.
 	 * `form` is the page's action result, for the errors of the dialogs.
 	 */
@@ -23,7 +24,16 @@
 		expired: { badge: 'badge-error', tint: 'text-danger', icon: CircleAlert },
 		missing: { badge: 'badge-ghost', tint: 'text-muted', icon: FileX }
 	};
+	const isQuestion = (i: ChecklistItem) => i.requirement.kind === 'question';
+	const shownAnswer = (i: ChecklistItem) => answerText(i.requirement, i.answer, t('common.yes'), t('common.no'), formatDate);
 	const detail = (i: ChecklistItem) => {
+		if (isQuestion(i) && i.display !== 'bypassed') {
+			if (i.display === 'missing') return t('req.doc.q.missing');
+			const base = shownAnswer(i);
+			if (i.display === 'expired') return `${base} · ${t('req.doc.d.expired', { date: formatDate(i.valid_until ?? '') })}`;
+			if (i.display === 'expiring_soon') return `${base} · ${t('req.doc.d.expiring_soon', { date: formatDate(i.valid_until ?? ''), n: i.days_left ?? 0 })}`;
+			return base;
+		}
 		if (i.display === 'expired') return t('req.doc.d.expired', { date: formatDate(i.valid_until ?? '') });
 		if (i.display === 'expiring_soon') return t('req.doc.d.expiring_soon', { date: formatDate(i.valid_until ?? ''), n: i.days_left ?? 0 });
 		if (i.display === 'complete') return i.valid_until ? t('req.doc.d.valid_until', { date: formatDate(i.valid_until) }) : t('req.doc.d.complete', { date: formatDate(i.completed_at ?? '') });
@@ -35,6 +45,8 @@
 	let completeOpen = $state(false);
 	let bypassFor = $state<ChecklistItem | null>(null);
 	let bypassOpen = $state(false);
+	let answerFor = $state<ChecklistItem | null>(null);
+	let answerOpen = $state(false);
 	let busy = $state(false);
 	const mine = $derived(form && 'docAction' in form);
 	const errText = $derived(mine && 'docError' in form && form.docError ? String(form.docError) : '');
@@ -66,7 +78,7 @@
 	</div>
 
 	{#if saved}<Alert kind="success">{t('req.doc.saved')}</Alert>{/if}
-	{#if errText && !completeOpen && !bypassOpen}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
+	{#if errText && !completeOpen && !bypassOpen && !answerOpen}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
 
 	{#if !membership}
 		<p class="mt-3 text-sm text-muted">{t('req.doc.no_membership')}</p>
@@ -79,16 +91,19 @@
 				<li class="rounded-lg border border-line p-3.5">
 					<div class="flex flex-wrap items-center gap-x-4 gap-y-3">
 						<div class="flex min-w-0 flex-1 basis-48 items-center gap-3">
-							<span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface {l.tint}"><l.icon size={20} /></span>
+							<span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-surface {l.tint}">
+								{#if isQuestion(i) && i.display === 'missing'}<CircleQuestionMark size={20} />{:else}<l.icon size={20} />{/if}
+							</span>
 							<div class="min-w-0 flex-1">
 								<p class="truncate font-semibold text-ink" title={i.requirement.description}>{i.requirement.name}</p>
-								<p class="truncate text-xs text-muted">{detail(i)}</p>
+								<p class="truncate text-xs text-muted" title={isQuestion(i) ? detail(i) : undefined}>{detail(i)}</p>
 							</div>
 						</div>
 						{#if i.display === 'complete' || i.display === 'bypassed'}
 							<!-- Done: the status pill replaces the action buttons; a file can still be opened and a mistake reopened through quiet icon buttons. -->
 							<div class="ml-auto flex items-center gap-1.5">
 								{#if canManage && i.has_document}<a class="btn btn-ghost btn-xs btn-square" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener" aria-label={t('req.doc.download')} title={t('req.doc.download')}><Download size={14} /></a>{/if}
+								{#if canManage && isQuestion(i) && i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.q.edit')} title={t('req.doc.q.edit')} onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={14} /></button>{/if}
 								{#if canManage}
 									<form method="POST" action="?tab=documents&/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
 										<input type="hidden" name="membership_id" value={membership.id} />
@@ -109,7 +124,11 @@
 									</form>
 								{/if}
 								{#if i.display === 'missing' || i.display === 'expired'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('req.doc.bypass')}</button>{/if}
-								<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.receive')}</button>
+								{#if isQuestion(i)}
+									<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.q.answer')}</button>
+								{:else}
+									<button class="btn btn-primary btn-xs gap-1" type="button" onclick={() => ((completeFor = i), (completeOpen = true))}><Plus size={13} /> {i.display === 'expiring_soon' ? t('req.doc.renew') : t('req.doc.receive')}</button>
+								{/if}
 							</div>
 						{:else}
 							<span class="ml-auto badge badge-sm {l.badge}">{t(`req.doc.status.${i.display}`)}</span>
@@ -150,6 +169,40 @@
 				<button class="btn btn-primary" type="submit" disabled={busy}>{t('req.doc.save')}</button>
 			</div>
 		</form>
+	</Modal>
+
+	<Modal bind:open={answerOpen} title={t('req.doc.q.title', { name: answerFor?.requirement.name ?? '' })}>
+		{#key answerFor?.requirement.id}
+			<form method="POST" action="?tab=documents&/answerRequirement" class="grid gap-3" use:enhance={submit(() => (answerOpen = false))}>
+				<input type="hidden" name="membership_id" value={membership.id} />
+				<input type="hidden" name="requirement_id" value={answerFor?.requirement.id ?? ''} />
+				<input type="hidden" name="question_type" value={answerFor?.requirement.question_type ?? ''} />
+				{#if errText && !fieldErr('answer') && !fieldErr('valid_until')}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
+				{#if answerFor?.requirement.description}<p class="text-sm text-muted">{answerFor.requirement.description}</p>{/if}
+				{#if answerFor}
+					<div class="form-control">
+						<label class="label" for="doc-answer" id="doc-answer-label"><span class="label-text">{t('req.doc.q.your_answer')}</span></label>
+						<AnswerInput question={answerFor.requirement} value={answerFor.answer} id="doc-answer" labelledby="doc-answer-label" invalid={!!fieldErr('answer')} />
+						{#if fieldErr('answer')}<span class="mt-1 block text-xs text-error">{fieldErr('answer')}</span>{/if}
+					</div>
+				{/if}
+				<div class="form-control">
+					<label class="label" for="doc-q-until"><span class="label-text">{t('req.doc.valid_until')}</span></label>
+					<input id="doc-q-until" name="valid_until" type="date" class="input input-bordered w-full {fieldErr('valid_until') ? 'input-error' : ''}" />
+					<span class="label-text-alt mt-1 block">{answerFor?.requirement.valid_for_months ? t('req.doc.valid_until_default', { n: answerFor.requirement.valid_for_months }) : t('req.doc.valid_until_help')}</span>
+					{#if fieldErr('valid_until')}<span class="mt-1 block text-xs text-error">{fieldErr('valid_until')}</span>{/if}
+				</div>
+				<div class="form-control">
+					<label class="label" for="doc-q-note"><span class="label-text">{t('req.doc.note')}</span></label>
+					<textarea id="doc-q-note" name="note" class="textarea textarea-bordered w-full" rows="2"></textarea>
+					<span class="label-text-alt mt-1 block">{t('req.doc.q.note_help')}</span>
+				</div>
+				<div class="modal-action mt-2 flex justify-end gap-2">
+					<button class="btn btn-outline" type="button" onclick={() => (answerOpen = false)}>{t('common.cancel')}</button>
+					<button class="btn btn-primary" type="submit" disabled={busy}>{t('req.doc.save')}</button>
+				</div>
+			</form>
+		{/key}
 	</Modal>
 
 	<Modal bind:open={bypassOpen} title={t('req.doc.bypass_title', { name: bypassFor?.requirement.name ?? '' })}>

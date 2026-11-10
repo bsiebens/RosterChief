@@ -1,14 +1,25 @@
 import datetime
-from typing import Literal
+from decimal import Decimal
+from typing import Any, Literal
 from uuid import UUID
 
 from ninja import Field, Schema
+
+Kind = Literal["document", "question"]
+QuestionType = Literal["text", "textarea", "number", "date", "choice", "multichoice", "yes_no"]
 
 
 class RequirementOut(Schema):
     id: UUID
     name: str
     description: str
+    #: ``document`` (received, optionally with a file) or ``question`` (answered with a value)
+    kind: Kind = "document"
+    #: Questions only: the type of answer, the choices (strings or ``{value, label}``) and a number's range.
+    question_type: str = ""
+    options: list[Any] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
     requires_document: bool
     blocked_event_kinds: list[str]
     is_active: bool
@@ -24,6 +35,11 @@ class RequirementListItem(RequirementOut):
 class RequirementIn(Schema):
     name: str
     description: str = ""
+    kind: Kind = "document"
+    question_type: QuestionType | Literal[""] = ""
+    options: list[Any] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
     requires_document: bool = False
     blocked_event_kinds: list[str] = Field(default_factory=list)
     is_active: bool = True
@@ -34,6 +50,11 @@ class RequirementIn(Schema):
 class RequirementPatch(Schema):
     name: str | None = None
     description: str | None = None
+    kind: Kind | None = None
+    question_type: QuestionType | Literal[""] | None = None
+    options: list[Any] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
     requires_document: bool | None = None
     blocked_event_kinds: list[str] | None = None
     is_active: bool | None = None
@@ -51,6 +72,8 @@ class ItemOut(Schema):
     completed_at: datetime.datetime | None = None
     completed_by: str | None = None
     has_document: bool = False
+    #: A question's current answer (text, a number as a string, an ISO date, a list, a boolean), null while open.
+    answer: Any = None
     valid_until: datetime.date | None = None
     days_left: int | None = None
 
@@ -98,3 +121,11 @@ class ChecklistOut(Schema):
 
 class BypassIn(Schema):
     note: str
+
+
+class AnswerIn(Schema):
+    """The answer in the question's own shape (a string, a number, an ISO date, a list of option values or a boolean)."""
+
+    answer: Any = None
+    note: str = ""
+    valid_until: datetime.date | None = None

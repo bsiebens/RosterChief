@@ -1,4 +1,4 @@
-"""Documentation requirements (``/requirements``): what a club asks of its members (a medical certificate, a photo ...), each
+"""Requirements (``/requirements``): what a club asks of its members -- documents (a medical certificate, a photo ...) or questions (extra information) -- each
 member's checklist per season, and the actions on it. Managing requirements and completing / bypassing / reopening / downloading
 needs ``members.manage_members`` (403, the download answers 404 instead); reading a member's checklist needs the right to see
 that member. Rules live in ``members.services.onboarding``; the daily reminders in ``members.services.requirement_reminders``."""
@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404
 from ninja import File, Form, Router, UploadedFile
 
 from api.auth import AUTHENTICATORS
-from api.schemas_requirements import BypassIn, ChecklistOut, ItemOut, RequirementIn, RequirementListItem, RequirementOut, RequirementPatch
+from api.schemas_requirements import AnswerIn, BypassIn, ChecklistOut, ItemOut, RequirementIn, RequirementListItem, RequirementOut, RequirementPatch
 from events.models import Season
 from members.models import ClubMembership, Member, MemberRequirementStatus, OnboardingRequirement
 from members.services import access, onboarding
@@ -99,6 +99,15 @@ def complete(request, membership_id: UUID, requirement_id: UUID, note: Form[str]
     requirement's validity from today). Completing again updates the item. A requirement that needs a document and has none is 422."""
     membership, requirement = _membership(membership_id), _requirement(requirement_id)
     onboarding.mark_complete(request.user, membership, requirement, document=document, note=note, valid_until=valid_until)
+    return _item(membership, requirement)
+
+
+@router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/answer", response=ItemOut, summary="Answer a question for this person", operation_id="answer_requirement")
+def answer(request, membership_id: UUID, requirement_id: UUID, payload: AnswerIn):
+    """For a requirement of kind ``question``: ``answer`` is validated for its type (a number within the range, a choice among the options ...)
+    and completes the item; answering again replaces the answer. 422 keyed ``answer``; 422 ``not_a_question`` for a document."""
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.answer(request.user, membership, requirement, payload.answer, note=payload.note.strip(), valid_until=payload.valid_until)
     return _item(membership, requirement)
 
 

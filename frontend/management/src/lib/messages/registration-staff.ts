@@ -1,6 +1,8 @@
 /** Strings for the staff side of registration: the registrations review, its settings and the extra sign-up queue pieces. */
 export default {
 	en: {
+		'reg.line.team_named': "Team for {name}",
+		'reg.line.no_team': "No team",
 		'regr.credit': "Credit",
 		'regr.credit_taken': "Credit: -{amount}",
 		'regr.sum.credit': "Credit",
@@ -134,6 +136,8 @@ export default {
 		'signups.err.already_member': "This person already has a membership this season, so the sign-up cannot be merged into them.",
 	},
 	nl: {
+		'reg.line.team_named': "Team voor {name}",
+		'reg.line.no_team': "Geen team",
 		'regr.credit': "Tegoed",
 		'regr.credit_taken': "Tegoed: -{amount}",
 		'regr.sum.credit': "Tegoed",
@@ -267,6 +271,8 @@ export default {
 		'signups.err.already_member': "Deze persoon heeft dit seizoen al een lidmaatschap, dus de aanmelding kan er niet in samengevoegd worden.",
 	},
 	fr: {
+		'reg.line.team_named': "Équipe de {name}",
+		'reg.line.no_team': "Pas d’équipe",
 		'regr.credit': "Crédit",
 		'regr.credit_taken': "Crédit : -{amount}",
 		'regr.sum.credit': "Crédit",

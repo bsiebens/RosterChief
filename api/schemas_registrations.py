@@ -52,6 +52,7 @@ class LineOut(Schema):
     membership_id: uuid.UUID
     entry_kind: str
     description: str
+    requested_team_id: uuid.UUID | None = None
     requested_team_name: str | None = None
     requested_position_name: str | None = None
     requested_jersey_number: int | None = None
@@ -97,6 +98,8 @@ class LineEdit(Schema):
     #: A number overrides the computed price; ``null`` goes back to it.
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
     excluded: bool | None = None
+    #: The team this person is placed in when the invoice is confirmed (a player; ``null`` for none). Only the keys present change.
+    requested_team_id: uuid.UUID | None = None
 
 
 class ReviewIn(Schema):

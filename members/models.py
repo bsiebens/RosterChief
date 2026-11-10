@@ -2,6 +2,7 @@ import hashlib
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.core.validators import MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Exists, OuterRef, Q
@@ -461,8 +462,28 @@ class OnboardingRequirement(UUIDModel):
     checklist starts each season, matching how membership itself is season-scoped).
     """
 
+    class Kind(models.TextChoices):
+        DOCUMENT = "document", _("Document")
+        QUESTION = "question", _("Question")
+
+    class QuestionType(models.TextChoices):
+        TEXT = "text", _("Short text")
+        TEXTAREA = "textarea", _("Long text")
+        NUMBER = "number", _("Number")
+        DATE = "date", _("Date")
+        CHOICE = "choice", _("Single choice")
+        MULTICHOICE = "multichoice", _("Multiple choice")
+        YES_NO = "yes_no", _("Yes / no")
+
     name = models.CharField(_("name"), max_length=100, unique=True)
     description = models.TextField(_("description"), blank=True, help_text=_("Shown to staff on the member's checklist."))
+    #: A document (the default: something received, optionally with a file) or a question (extra information, answered with a value).
+    kind = models.CharField(_("kind"), max_length=10, choices=Kind.choices, default=Kind.DOCUMENT)
+    #: Questions only: what kind of answer is expected, its choices (a list of strings or ``{"value", "label"}`` objects) and, for a number, its range.
+    question_type = models.CharField(_("question type"), max_length=12, choices=QuestionType.choices, blank=True)
+    options = models.JSONField(_("options"), null=True, blank=True)
+    min_value = models.DecimalField(_("minimum value"), max_digits=15, decimal_places=4, null=True, blank=True)
+    max_value = models.DecimalField(_("maximum value"), max_digits=15, decimal_places=4, null=True, blank=True)
     requires_document = models.BooleanField(_("requires a document"), default=False, help_text=_("Staff can attach a file (e.g. the certificate itself) when marking this complete."))
     blocked_event_kinds = models.JSONField(_("blocks selection for"), default=list, blank=True, help_text=_("Event kinds a member can't be invited to or selected for while this is open. Empty means purely informational."))
     is_active = models.BooleanField(_("active"), default=True, help_text=_("Inactive requirements no longer apply to new memberships, but existing statuses are kept."))
@@ -501,6 +522,8 @@ class MemberRequirementStatus(UUIDModel):
     completed_at = models.DateTimeField(_("completed at"), null=True, blank=True)
     completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("completed by"))
     document = models.FileField(_("document"), storage=get_private_storage, upload_to=onboarding_document_path, blank=True, help_text=_("Stored privately -- readable only through this member's own page, never a direct link."))
+    #: A question's answer, cleaned for its type (text, a number as a string, an ISO date, a list for a multiple choice, a boolean for yes/no). Null for documents and while open.
+    answer = models.JSONField(_("answer"), null=True, blank=True, encoder=DjangoJSONEncoder)
     note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
     #: The last day the completed item is valid (from the requirement's ``valid_for_months`` unless staff set it). Blank = no expiry.
     valid_until = models.DateField(_("valid until"), null=True, blank=True)

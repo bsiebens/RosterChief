@@ -22,7 +22,17 @@
 		const options = variantsFor(e.kind);
 		if (e.variant_id && !options.some((v) => v.option_id === e.variant_id)) e.variant_id = '';
 		if (!e.variant_id && options.length === 1) e.variant_id = options[0].option_id;
+		// An option with a team fixes it (players only): the registrant sees it but can't change it. Leaving such an option gives the choice back.
+		const fixed = e.kind === 'player' ? (options.find((v) => v.option_id === e.variant_id)?.team_id ?? null) : null;
+		if (fixed) {
+			e.requested_team_id = fixed;
+			e.team_fixed = true;
+		} else if (e.team_fixed) {
+			e.requested_team_id = '';
+			e.team_fixed = false;
+		}
 	}
+	const teamName = (id: string) => cfg.teams.find((x) => x.id === id)?.name ?? variantsFor('player').find((v) => v.team_id === id)?.team_name ?? '';
 	const fresh = (patch: Partial<EntryDraft> = {}): EntryDraft => {
 		const e = { ...blankEntry(''), ...patch };
 		reconcile(e);
@@ -45,24 +55,46 @@
 	const eerr = (i: number, name: string) => errors[`entries.${i}.${name}`] ?? '';
 	const when = (iso: string) => new Intl.DateTimeFormat(getLang(), { dateStyle: 'long' }).format(new Date(iso));
 
-	// Live price: whenever every person has chosen what to register for, ask for the price (debounced; nothing is saved).
+	// Live price of the people that are complete (they have chosen what to register for). Adding a person who is not complete yet changes nothing: the
+	// price box keeps showing the others. While a new price loads the old one stays, dimmed, so it never looks final.
+	const completeEntries = $derived(entries.filter((e) => e.variant_id));
+	const previewKey = $derived(JSON.stringify(completeEntries.map(entryBody)));
+	let previewUids = $state<number[]>([]);
+	let previewLoading = $state(false);
+	let lastKey = '';
 	let seq = 0;
 	$effect(() => {
-		const ready = entries.length > 0 && entries.every((e) => e.variant_id);
-		const body = JSON.stringify({ entries: entries.map(entryBody) });
-		if (!ready) {
+		const key = previewKey;
+		const uids = completeEntries.map((e) => e.uid);
+		if (!uids.length) {
+			seq++;
 			preview = null;
+			previewError = '';
+			previewLoading = false;
+			lastKey = '';
 			return;
 		}
+		if (key === lastKey) {
+			seq++; // back to what is shown: drop a pending request
+			previewLoading = false;
+			return;
+		}
+		previewLoading = true;
 		const mine = ++seq;
 		const timer = setTimeout(async () => {
-			const res = await api<Preview>('POST', '/public/registration/preview', { body: JSON.parse(body) });
+			const res = await api<Preview>('POST', '/public/registration/preview', { body: { entries: JSON.parse(key) } });
 			if (mine !== seq) return;
+			previewLoading = false;
 			previewError = res.ok ? '' : res.status === 429 ? t('reg.err.rate_limited') : t('reg.err.preview');
 			preview = res.ok ? (res.data ?? null) : null;
+			previewUids = uids;
+			lastKey = res.ok ? key : '';
 		}, 400);
 		return () => clearTimeout(timer);
 	});
+	const incomplete = $derived(entries.length - completeEntries.length);
+	/** The person a preview line is for (lines follow the complete entries of the request, not the form). */
+	const lineEntry = (index: number) => entries.find((e) => e.uid === previewUids[index]);
 
 	function addPerson() {
 		if (entries.length >= cfg.max_entries) return;
@@ -243,7 +275,7 @@
 					<div class="form-control">
 						<label class="label" for="{fid}-offer"><span class="label-text">{t('reg.f.offer')}<span class="text-error" aria-hidden="true"> *</span></span></label>
 						{#if variantsFor(e.kind).length}
-							<select id="{fid}-offer" class="select select-bordered w-full {eerr(i, 'variant_id') ? 'select-error' : ''}" bind:value={e.variant_id} aria-invalid={eerr(i, 'variant_id') ? 'true' : undefined}>
+							<select id="{fid}-offer" class="select select-bordered w-full {eerr(i, 'variant_id') ? 'select-error' : ''}" bind:value={e.variant_id} onchange={() => reconcile(e)} aria-invalid={eerr(i, 'variant_id') ? 'true' : undefined}>
 								<option value="">{t('reg.f.offer_pick')}</option>
 								{#each groupedFor(e.kind) as g (g.product.id)}
 									{#if g.variants.length === 1 && g.variants[0].name === g.product.name}
@@ -263,13 +295,21 @@
 
 					{#if e.kind === 'player'}
 						<div class="grid gap-4 sm:grid-cols-3">
-							<div class="form-control">
-								<label class="label" for="{fid}-team"><span class="label-text">{t('reg.f.team')}</span></label>
-								<select id="{fid}-team" class="select select-bordered w-full" bind:value={e.requested_team_id}>
-									<option value="">{t('reg.f.no_preference')}</option>
-									{#each cfg.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
-								</select>
-							</div>
+							{#if e.team_fixed}
+								<div class="form-control">
+									<span class="label"><span class="label-text">{t('reg.f.team')}</span></span>
+									<p id="{fid}-team" class="flex min-h-12 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-ink"><Lock size={14} class="shrink-0 text-muted" aria-hidden="true" /> {teamName(e.requested_team_id)}</p>
+									<span class="label-text-alt mt-1 block">{t('join.team.fixed_help')}</span>
+								</div>
+							{:else}
+								<div class="form-control">
+									<label class="label" for="{fid}-team"><span class="label-text">{t('reg.f.team')}</span></label>
+									<select id="{fid}-team" class="select select-bordered w-full" bind:value={e.requested_team_id}>
+										<option value="">{t('reg.f.no_preference')}</option>
+										{#each cfg.teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+									</select>
+								</div>
+							{/if}
 							<div class="form-control">
 								<label class="label" for="{fid}-pos"><span class="label-text">{t('reg.f.position')}</span></label>
 								<select id="{fid}-pos" class="select select-bordered w-full" bind:value={e.requested_position_id}>
@@ -290,17 +330,22 @@
 				<button type="button" class="btn btn-outline w-full gap-2 sm:w-auto sm:self-start" onclick={addPerson}><Plus size={16} aria-hidden="true" /> {t('reg.person.add')}</button>
 			{/if}
 
-			<section class="card card-body gap-3" aria-labelledby="reg-price" aria-live="polite">
-				<h2 id="reg-price" class="font-display text-base font-bold text-ink">{t('reg.price.title')}</h2>
+			<section class="card card-body gap-3" aria-labelledby="reg-price" aria-live="polite" aria-busy={previewLoading}>
+				<div class="flex items-baseline justify-between gap-3">
+					<h2 id="reg-price" class="font-display text-base font-bold text-ink">{t('reg.price.title')}</h2>
+					{#if previewLoading}<span class="text-xs text-muted">{t('join.price.updating')}</span>{/if}
+				</div>
 				{#if previewError}
 					<p class="flex items-center gap-2 text-sm text-error"><CircleAlert size={16} aria-hidden="true" /> {previewError}</p>
 				{:else if !preview}
 					<p class="text-sm text-muted">{t('reg.price.pick')}</p>
 				{:else}
+					{#if incomplete > 0}<p class="text-xs text-muted">{t('join.price.partial', { n: completeEntries.length, m: entries.length })}</p>{/if}
+					<div class="grid gap-3 transition-opacity {previewLoading ? 'opacity-50' : ''}">
 					<ul class="divide-y divide-rule text-sm">
 						{#each preview.lines as l (l.index)}
 							<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
-								<span><span class="font-semibold text-ink">{entries[l.index]?.who === 'self' ? `${contact.first_name} ${contact.last_name}`.trim() || t('reg.who.self') : `${entries[l.index]?.first_name ?? ''} ${entries[l.index]?.last_name ?? ''}`.trim() || t('reg.person.n', { n: l.index + 1 })}</span> <span class="text-muted">· {l.description}</span></span>
+								<span><span class="font-semibold text-ink">{lineEntry(l.index)?.who === 'self' ? `${contact.first_name} ${contact.last_name}`.trim() || t('reg.who.self') : `${lineEntry(l.index)?.first_name ?? ''} ${lineEntry(l.index)?.last_name ?? ''}`.trim() || t('reg.person.n', { n: l.index + 1 })}</span> <span class="text-muted">· {l.description}</span></span>
 								{#if l.is_credit}
 									<span class="font-mono text-ok-text"><span class="badge badge-sm badge-success mr-2">{t('join.price.credit')}</span>{money(l.base_price)}</span>
 									<span class="w-full text-xs text-muted">{t('join.price.credit_help')}</span>
@@ -325,6 +370,7 @@
 						{@const deadline = preview.lines.find((l) => l.early_bird_deadline)?.early_bird_deadline}
 						<p class="rounded-md bg-ok-bg px-4 py-3 text-sm leading-relaxed text-ok-text"><span>{t('reg.price.early', { amount: money(preview.early_bird_discount), total: money(preview.total_if_early) })}</span>{#if deadline}<span class="ml-1.5 font-semibold">{t('reg.price.early_by', { date: when(deadline) })}</span>{/if}</p>
 					{/if}
+					</div>
 					<p class="text-xs text-muted">{t('reg.price.note')}</p>
 				{/if}
 			</section>

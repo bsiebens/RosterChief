@@ -6,9 +6,9 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 	const { me } = await parent();
 	if (!shopOn(me, 'can_manage_shop_products')) redirect(303, '/');
-	const [item, cats, seasons] = await Promise.all([api<ProductDetail>('GET', `/shop/products/${params.id}`, { f: fetch }), api<PagedList<Category> | Category[]>('GET', '/shop/categories', { f: fetch }), api<{ id: string; name: string }[]>('GET', '/memberships/seasons', { f: fetch })]);
+	const [item, cats, seasons, teams] = await Promise.all([api<ProductDetail>('GET', `/shop/products/${params.id}`, { f: fetch }), api<PagedList<Category> | Category[]>('GET', '/shop/categories', { f: fetch }), api<{ id: string; name: string }[]>('GET', '/memberships/seasons', { f: fetch }), api<{ id: string; name: string }[]>('GET', '/teams', { f: fetch })]);
 	if (!item.ok) error(item.status >= 400 && item.status < 600 ? item.status : 500, item.message);
-	return { item: item.data!, categories: asList(cats.data).results, seasons: seasons.data ?? [], created: url.searchParams.get('created') === '1' };
+	return { item: item.data!, categories: asList(cats.data).results, seasons: seasons.data ?? [], teams: (teams.data ?? []).map((x) => ({ id: x.id, name: x.name })), created: url.searchParams.get('created') === '1' };
 };
 
 export const actions: Actions = {

@@ -490,6 +490,46 @@ class ProductPricingFieldsTests(RegistrationMixin, TestCase):
         plain = self.staff("post", "/shop/products", {"name": "Cap", "price": "5.00"}).json()
         self.assertEqual((plain["season_id"], plain["registrant_tiers"], plain["registrant_discount_scope"]), (None, [], "per_person"))
 
+    # --- a team on membership products and variants ---------------------------------------------------------------------------------
+
+    def test_team_on_product_and_variant_through_the_api(self):
+        payload = {**self.membership_payload(early_bird_discount_type="", early_bird_deadline=None, registrant_tiers=[]), "team_id": str(self.team.pk)}
+        body = self.staff("post", "/shop/products", {**payload, "variants": [{"name": "U14", "team_id": str(self.other_team.pk)}, {"name": "U12"}]}).json()
+        self.assertEqual((body["team_id"], body["team_name"]), (str(self.team.pk), self.team.name))
+        teams = {v["name"]: v["team_name"] for v in body["variants"]}
+        self.assertEqual(teams, {"U14": self.other_team.name, "U12": None})
+        variant = next(v for v in body["variants"] if v["name"] == "U12")
+        r = self.staff("patch", f"/shop/products/{body['id']}/variants/{variant['id']}", {"team_id": str(self.other_team.pk)})
+        self.assertEqual((r.status_code, r.json()["team_id"]), (200, str(self.other_team.pk)))
+        r = self.staff("patch", f"/shop/products/{body['id']}/variants/{variant['id']}", {"team_id": None})
+        self.assertIsNone(r.json()["team_id"])
+        added = self.staff("post", f"/shop/products/{body['id']}/variants", {"name": "U16", "team_id": str(self.other_team.pk)})
+        self.assertEqual((added.status_code, added.json()["team_id"]), (201, str(self.other_team.pk)))
+        cleared = self.staff("patch", f"/shop/products/{body['id']}", {"team_id": None}).json()
+        self.assertIsNone(cleared["team_id"])
+        self.assertEqual(self.staff("patch", f"/shop/products/{body['id']}", {"team_id": "00000000-0000-0000-0000-000000000000"}).status_code, 422)
+
+    def test_a_team_is_refused_for_volunteer_and_other_products(self):
+        volunteer = ProductCategory.objects.get(system_key="volunteer")
+        player = ProductCategory.objects.get(system_key="player")
+        plain = self.membership_payload(early_bird_discount_type="", early_bird_deadline=None, registrant_tiers=[])
+        r = self.staff("post", "/shop/products", {**plain, "category_id": str(volunteer.pk), "team_id": str(self.team.pk)})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("team_id", r.json()["errors"])
+        merch = self.staff("post", "/shop/products", {"name": "Cap", "price": "5.00", "team_id": str(self.team.pk)})
+        self.assertEqual(merch.status_code, 422)
+        plain = self.membership_payload(early_bird_discount_type="", early_bird_deadline=None, registrant_tiers=[])
+        ok = self.staff("post", "/shop/products", {**plain, "category_id": str(player.pk), "team_id": str(self.team.pk), "variants": [{"name": "U12", "team_id": str(self.team.pk)}]}).json()
+        self.assertEqual(ok["team_id"], str(self.team.pk))
+        v = ok["variants"][0]
+        # asking for a variant team on a volunteer product is refused too
+        vol = self.staff("post", "/shop/products", {**plain, "category_id": str(volunteer.pk)}).json()
+        self.assertEqual(self.staff("post", f"/shop/products/{vol['id']}/variants", {"name": "X", "team_id": str(self.team.pk)}).status_code, 422)
+        # switching the category to Volunteer (or the type away from membership) drops the links quietly
+        moved = self.staff("patch", f"/shop/products/{ok['id']}", {"category_id": str(volunteer.pk)}).json()
+        self.assertEqual((moved["team_id"], moved["variants"][0]["team_id"]), (None, None))
+        self.assertEqual(v["team_id"], str(self.team.pk))
+
 
 class JerseyNumberTests(RegistrationMixin, TestCase):
     def setUp(self):
@@ -804,3 +844,78 @@ class CreditTests(RegistrationMixin, TestCase):
         self.assertTrue(self.staff("post", f"/registrations/{batch.pk}/resend-invoice").json()["sent"])
         self.assertIn("Credit: Volunteer credit", mail.outbox[0].body)
         self.assertIn("-", mail.outbox[0].body.split("Credit: Volunteer credit")[1].split("\n")[0])
+
+
+class ProductTeamTests(RegistrationMixin, TestCase):
+    """A membership option can carry a team: it is fixed on the join page (and on submit), staff change it while reviewing."""
+
+    def setUp(self):
+        super().setUp()
+        self.pool = NumberPool.objects.create(name="Juniors", min_number=1, max_number=5, min_age_gap_years=5)
+        self.team.pool = self.pool
+        self.team.save()
+        self.product.team = self.team
+        self.product.save()
+        self.u14 = ProductVariant.objects.create(product=self.product, name="U14", team=self.other_team)
+
+    def option(self, name):
+        products = self.public("get", "").json()["products"]
+        return next(o for p in products for o in p["variants"] if o["name"] == name)
+
+    def test_the_page_says_which_team_an_option_is_for(self):
+        self.assertEqual((self.option("Player membership")["team_id"], self.option("Player membership")["team_name"]), (str(self.team.pk), self.team.name))  # the product's team
+        self.assertEqual(self.option("U14")["team_name"], self.other_team.name)  # a variant's own team wins
+        self.assertIsNone(self.option("Volunteer")["team_id"])  # no team: the registrant may ask for one
+
+    def test_the_team_is_fixed_whatever_the_form_sends(self):
+        batch = self.batch(entries=[self.entry(requested_team_id=str(self.other_team.pk))])  # the product's team is self.team
+        self.assertEqual(batch.details.get().requested_team, self.team)
+        batch = self.batch(entries=[self.entry("Two", variant_id=str(self.u14.pk))])  # nothing sent: the variant's team
+        self.assertEqual(batch.details.get().requested_team, self.other_team)
+        batch = self.batch(entries=[self.entry("Three", variant_id=str(self.free_variant.pk), requested_team_id=str(self.other_team.pk))])  # no fixed team: the request stands
+        self.assertEqual(batch.details.get().requested_team, self.other_team)
+        self.assertEqual(self.register([self.entry("Four", variant_id=str(self.free_variant.pk), requested_team_id="00000000-0000-0000-0000-000000000000")]).status_code, 422)  # unknown team still refused when free
+        self.assertEqual(self.register([self.entry("Five", requested_team_id="00000000-0000-0000-0000-000000000000")]).status_code, 201)  # but ignored when fixed
+
+    def test_the_jersey_number_is_checked_for_the_fixed_team(self):
+        r = self.register([self.entry(requested_team_id=str(self.other_team.pk), requested_jersey_number=30)])  # 30 is outside the fixed team's pool (1 to 5)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("entries.0.requested_jersey_number", r.json()["errors"])
+        self.assertEqual(self.register([self.entry(requested_team_id=str(self.other_team.pk), requested_jersey_number=3)]).status_code, 201)
+
+    def test_the_numbers_endpoint_uses_the_fixed_team(self):
+        r = self.public("get", f"/numbers?team_id={self.other_team.pk}&option_id=variant:{self.variant.pk}&date_of_birth=2015-05-05")  # asked for another team, the option's team wins
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()["pool"]["name"], r.json()["numbers"]), ("Juniors", [1, 2, 3, 4, 5]))
+
+    def test_volunteers_are_not_placed_in_a_team(self):
+        self.product.category = ProductCategory.objects.get(system_key="volunteer")
+        self.product.team = None
+        self.product.save()
+        batch = self.batch(entries=[self.entry(kind="volunteer", variant_id=str(self.variant.pk))])
+        self.assertEqual(batch.details.get().requested_team, None)
+
+    def test_staff_can_change_the_team_while_reviewing(self):
+        batch = self.batch(entries=[self.entry()])
+        line = batch.details.get()
+        self.assertEqual(self.staff("get", f"/registrations/{batch.pk}").json()["lines"][0]["requested_team_id"], str(self.team.pk))
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "requested_team_id": str(self.other_team.pk)}]})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["lines"][0]["requested_team_name"], self.other_team.name)
+        unknown = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "requested_team_id": "00000000-0000-0000-0000-000000000000"}]})
+        self.assertEqual(unknown.status_code, 422)
+        self.assertEqual(self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "excluded": False}]}).json()["lines"][0]["requested_team_name"], self.other_team.name)  # other edits keep it
+        self.assertEqual(self.staff("post", f"/registrations/{batch.pk}/confirm", {"send": False}).status_code, 200)
+        self.assertTrue(TeamMembership.objects.filter(member=line.member, team=self.other_team, season=self.season).exists())  # placed where staff said
+        cleared_batch = self.batch(entries=[self.entry("Two")])
+        two = cleared_batch.details.get()
+        self.assertIsNone(self.staff("patch", f"/registrations/{cleared_batch.pk}", {"lines": [{"id": str(two.pk), "requested_team_id": None}]}).json()["lines"][0]["requested_team_id"])
+
+    def test_staff_cannot_put_a_volunteer_in_a_team(self):
+        self.free.category = ProductCategory.objects.get(system_key="volunteer")
+        self.free.save()
+        batch = self.batch(entries=[self.entry(kind="volunteer", variant_id=str(self.free_variant.pk))])
+        line = batch.details.get()
+        r = self.staff("patch", f"/registrations/{batch.pk}", {"lines": [{"id": str(line.pk), "requested_team_id": str(self.team.pk)}]})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("lines.0.requested_team_id", r.json()["errors"])

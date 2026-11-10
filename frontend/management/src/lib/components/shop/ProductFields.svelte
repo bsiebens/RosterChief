@@ -5,11 +5,13 @@
 	import { PRODUCT_TYPES, type Category, type ProductIn } from '#lib/shop.ts';
 
 	/** Name, category, price, type, description and the switches of a product (add page and editor). */
-	let { v = $bindable(), categories, seasons = [], fields = {}, tried = false }: { v: ProductIn; categories: Category[]; seasons?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
+	let { v = $bindable(), categories, seasons = [], teams = [], fields = {}, tried = false }: { v: ProductIn; categories: Category[]; seasons?: { id: string; name: string }[]; teams?: { id: string; name: string }[]; fields?: Record<string, string>; tried?: boolean } = $props();
 	const uid = $props.id();
 	const nameErr = $derived(fields.name || (tried && !v.name.trim() ? t('shop.product.err.name') : ''));
 	// Only membership products may be negative: that is a credit on a registration (e.g. for volunteers).
 	const membership = $derived(v.product_type === 'membership');
+	// Volunteers are not placed in a team: the Volunteer category has no registration team.
+	const volunteer = $derived(categories.find((c) => c.id === v.category_id)?.system_key === 'volunteer');
 	const priceErr = $derived(fields.price || (tried && (v.price === '' || (!membership && Number(v.price) < 0)) ? t('shop.product.err.price') : ''));
 	const flags = $derived([
 		{ k: 'is_active' as const, label: t('shop.product.f.is_active'), help: t('shop.product.f.is_active_help') },
@@ -55,5 +57,5 @@
 			</label>
 		{/each}
 	</div>
-	{#if v.product_type === 'membership'}<ProductRegistrationFields bind:v {seasons} {fields} />{/if}
+	{#if v.product_type === 'membership'}<ProductRegistrationFields bind:v {seasons} {teams} {volunteer} {fields} />{/if}
 </div>

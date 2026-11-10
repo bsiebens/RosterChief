@@ -58,6 +58,13 @@ class Option:
         """What the join page shows: the variant's name, or the product name for a product without variants."""
         return self.variant.name if self.variant is not None else self.product.name
 
+    @property
+    def team(self):
+        """The team a registrant for this option is placed in: the variant's own team, else the product's, else ``None`` (they may ask for one)."""
+        if self.variant is not None and self.variant.team_id:
+            return self.variant.team
+        return self.product.team if self.product.team_id else None
+
 
 def as_option(value) -> Option:
     return value if isinstance(value, Option) else Option(product=value.product, variant=value)
@@ -128,8 +135,8 @@ def offerable_products():
     return (
         Product.objects.filter(product_type=Product.ProductType.MEMBERSHIP, is_active=True, is_public=True, season__isnull=False, season__end_date__gte=today)
         .filter(Exists(has_active) | ~Exists(has_any))
-        .select_related("season", "category")
-        .prefetch_related("variants", "registrant_tiers")
+        .select_related("season", "category", "team")
+        .prefetch_related("variants__team", "registrant_tiers")
         .order_by("season__start_date", "name")
     )
 
@@ -184,7 +191,7 @@ def options_by_key(keys) -> dict:
 
 def variants_by_id(ids) -> dict:
     """The chosen variants (only offerable ones), keyed by id."""
-    found = ProductVariant.objects.filter(pk__in=list(ids), is_active=True, product__in=offerable_products()).select_related("product", "product__season", "product__category").prefetch_related("product__registrant_tiers")
+    found = ProductVariant.objects.filter(pk__in=list(ids), is_active=True, product__in=offerable_products()).select_related("product", "product__season", "product__category", "product__team", "team").prefetch_related("product__registrant_tiers")
     return {v.pk: v for v in found}
 
 

@@ -9,7 +9,7 @@
 	 * and a discount for registering several people at once (tiers by number of registrants, per person or once per order).
 	 * `fields` are the API's errors, keyed like `registrant_tiers.0.min_registrants`.
 	 */
-	let { v = $bindable(), seasons, fields = {} }: { v: ProductIn; seasons: { id: string; name: string }[]; fields?: Record<string, string> } = $props();
+	let { v = $bindable(), seasons, teams = [], volunteer = false, fields = {} }: { v: ProductIn; seasons: { id: string; name: string }[]; teams?: { id: string; name: string }[]; volunteer?: boolean; fields?: Record<string, string> } = $props();
 	const uid = $props.id();
 	const tierErr = (i: number, name: string) => fields[`registrant_tiers.${i}.${name}`] ?? '';
 	function addTier() {
@@ -19,6 +19,10 @@
 		v.registrant_tiers = [...v.registrant_tiers, { min_registrants: n, discount_type: 'percentage', discount_amount: '' }];
 	}
 	const earlyOn = $derived(!!v.early_bird_discount_type);
+	// A product moved to the Volunteer category keeps no team (the server would refuse it).
+	$effect(() => {
+		if (volunteer && v.team_id) v.team_id = null;
+	});
 </script>
 
 <section class="grid gap-4 rounded-lg border border-line p-4" aria-labelledby="{uid}-h">
@@ -35,6 +39,17 @@
 		</select>
 		<span class="label-text-alt mt-1 block {fields.season_id ? 'text-error' : ''}">{fields.season_id || t('shop.reg.season_help')}</span>
 	</div>
+
+	{#if !volunteer && teams.length}
+		<div class="form-control w-full">
+			<label class="label" for="{uid}-team"><span class="label-text">{t('shop.reg.team')}</span></label>
+			<select id="{uid}-team" class="select select-bordered w-full" value={v.team_id ?? ''} onchange={(e) => (v.team_id = e.currentTarget.value || null)}>
+				<option value="">{t('shop.reg.no_team')}</option>
+				{#each teams as team (team.id)}<option value={team.id}>{team.name}</option>{/each}
+			</select>
+			<span class="label-text-alt mt-1 block {fields.team_id ? 'text-error' : ''}">{fields.team_id || t('shop.reg.team_help')}</span>
+		</div>
+	{/if}
 
 	<div class="grid gap-3">
 		<h4 class="text-sm font-semibold text-ink">{t('shop.reg.early_title')}</h4>

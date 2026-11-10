@@ -1,6 +1,7 @@
 import datetime
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from ninja import Field, Schema
 
@@ -27,6 +28,10 @@ class VariantOffer(Schema):
     name: str
     #: The variant's own price, else the product's.
     price: Decimal
+    #: The team registrants for this option are placed in (the variant's, else the product's); ``null``: the registrant may ask for a team. When set the
+    #: team is fixed: the server uses it whatever the form sends.
+    team_id: uuid.UUID | None = None
+    team_name: str | None = None
 
 
 class EarlyBirdOffer(Schema):
@@ -149,6 +154,8 @@ class ChecklistOut(Schema):
     requirement_id: uuid.UUID
     name: str
     description: str
+    #: document / question
+    kind: str = "document"
     requires_document: bool
     #: open / complete / bypassed
     state: str
@@ -157,6 +164,14 @@ class ChecklistOut(Schema):
     valid_until: datetime.date | None = None
     has_document: bool
     can_upload: bool
+    #: Questions: the type (text / textarea / number / date / choice / multichoice / yes_no), the choices (strings or ``{value, label}``), a number's range,
+    #: the current answer and whether the registrant may (still) answer or change it.
+    question_type: str = ""
+    options: list[Any] | None = None
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
+    answer: Any = None
+    can_answer: bool = False
 
 
 class PersonStatus(Schema):
@@ -200,3 +215,11 @@ class NumbersOut(Schema):
     pool: NumberPoolOut | None = None
     numbers: list[int] | None = None
     taken: list[int]
+
+
+class AnswerIn(Schema):
+    """The registrant's answer to a question, in the question's own shape (string, number, ISO date, list of option values or boolean);
+    ``member_id`` says who it is for (optional when the registration has one person)."""
+
+    answer: Any = None
+    member_id: str = ""

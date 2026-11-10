@@ -22,6 +22,8 @@
 
 	// svelte-ignore state_referenced_locally
 	let v = $state<ProductIn>(productInOf(data.item));
+	// A variant can name its own team on membership products outside the Volunteer category.
+	const teamsForVariants = $derived(v.product_type === 'membership' && data.categories.find((c) => c.id === v.category_id)?.system_key !== 'volunteer' ? data.teams : []);
 	// svelte-ignore state_referenced_locally
 	let variants = $state(data.item.variants);
 	// svelte-ignore state_referenced_locally
@@ -114,7 +116,7 @@
 				<input type="hidden" name="payload" value={JSON.stringify(productPayload(v))} />
 				<section class="card card-body gap-3" aria-labelledby="{formId}-details">
 					<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
-					<ProductFields bind:v categories={data.categories} seasons={data.seasons} fields={errs} {tried} />
+					<ProductFields bind:v categories={data.categories} seasons={data.seasons} teams={data.teams} fields={errs} {tried} />
 				</section>
 			</form>
 			<section class="card card-body gap-3" aria-labelledby="{formId}-variants">
@@ -122,7 +124,7 @@
 					<h2 id="{formId}-variants" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc_saved')}</p>
 				</header>
-				<ProductVariants productId={item.id} bind:variants price={item.price} inventoryManaged={item.inventory_managed} membership={v.product_type === 'membership'} />
+				<ProductVariants productId={item.id} bind:variants price={item.price} inventoryManaged={item.inventory_managed} membership={v.product_type === 'membership'} teams={teamsForVariants} />
 			</section>
 		</div>
 

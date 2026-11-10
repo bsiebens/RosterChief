@@ -48,7 +48,7 @@ def _detail(b: RegistrationBatch) -> dict:
         lines.append(
             {
                 "id": d.pk, "member": _person(d.member), "membership_id": m.pk, "entry_kind": d.entry_kind, "description": d.description,
-                "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_name": d.requested_position.name if d.requested_position else None,
+                "requested_team_id": d.requested_team_id, "requested_team_name": d.requested_team.name if d.requested_team else None, "requested_position_name": d.requested_position.name if d.requested_position else None,
                 "requested_jersey_number": d.requested_jersey_number, "base_price": d.base_price, "discount_amount": d.discount_amount, "price_override": d.price_override,
                 "excluded": d.excluded, "price": d.price, "is_credit": d.is_credit, "credit_share": d.credit_share, "payable": d.payable, "fee_amount": m.fee_amount, "early_payment_deadline": m.early_payment_deadline, "early_payment_discount": m.early_payment_discount,
             }

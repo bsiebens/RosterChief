@@ -2,7 +2,7 @@
 export type ClubBrand = { name: string; logo_url: string | null };
 export type Ref = { id: string; name: string };
 /** One thing to register for: a variant, or the product itself (as is) when it has no variants. `option_id` is what the form sends back. */
-export type VariantOffer = { id: string; option_id: string; name: string; price: string };
+export type VariantOffer = { id: string; option_id: string; name: string; price: string; /** The team registrants for this option are placed in (fixed: the registrant cannot change it); null: they may ask for a team. */ team_id: string | null; team_name: string | null };
 export type ProductOffer = {
 	id: string;
 	name: string;
@@ -24,7 +24,25 @@ export type NumbersInfo = { pool: { name: string; min: number; max: number } | n
 export type PreviewLine = { index: number; description: string; base_price: string; discount: string; price: string; is_credit: boolean; credit_share: string; early_bird_discount: string; early_bird_deadline: string | null };
 export type Preview = { season: Ref; lines: PreviewLine[]; total: string; credit_total: string; credit_applied: string; total_if_early: string; early_bird_discount: string };
 
-export type ChecklistItem = { requirement_id: string; name: string; description: string; requires_document: boolean; state: string; display: 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed'; valid_until: string | null; has_document: boolean; can_upload: boolean };
+/** A checklist item is a document (`can_upload` says a file is wanted) or a question (`can_answer`: it can be answered, or the registrant's own answer changed). */
+export type ChecklistItem = {
+	requirement_id: string;
+	name: string;
+	description: string;
+	kind: 'document' | 'question';
+	requires_document: boolean;
+	state: string;
+	display: 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+	valid_until: string | null;
+	has_document: boolean;
+	can_upload: boolean;
+	question_type: string;
+	options: (string | { value: string; label: string })[] | null;
+	min_value: string | null;
+	max_value: string | null;
+	answer: unknown;
+	can_answer: boolean;
+};
 export type Fee = { fee_amount: string; amount_paid: string; amount_due: string; remaining_balance: string; fee_status: string; early_bird: { deadline: string; discount: string; fee_if_paid_in_time: string; applies: boolean } | null };
 export type PersonStatus = { member_id: string; name: string; entry_kind: string; description: string; is_credit: boolean; credit: string | null; requested_team: string | null; membership_status: string; fee: Fee | null; checklist: ChecklistItem[] };
 export type RegistrationStatus = { status: 'awaiting' | 'confirmed' | 'cancelled'; season_name: string; submitted_at: string; invoice_number: string | null; invoice_due_date: string | null; people: PersonStatus[]; club: ClubBrand };
@@ -39,12 +57,14 @@ export type EntryDraft = {
 	kind: 'player' | 'volunteer';
 	variant_id: string;
 	requested_team_id: string;
+	/** The chosen option fixes the team (`requested_team_id` is then set from it and can't be changed by the registrant). */
+	team_fixed: boolean;
 	requested_position_id: string;
 	requested_jersey_number: string;
 	photo_public_consent: boolean;
 };
 let counter = 0;
-export const blankEntry = (variant = ''): EntryDraft => ({ uid: ++counter, who: 'child', first_name: '', last_name: '', date_of_birth: '', email: '', kind: 'player', variant_id: variant, requested_team_id: '', requested_position_id: '', requested_jersey_number: '', photo_public_consent: false });
+export const blankEntry = (variant = ''): EntryDraft => ({ uid: ++counter, who: 'child', first_name: '', last_name: '', date_of_birth: '', email: '', kind: 'player', variant_id: variant, requested_team_id: '', team_fixed: false, requested_position_id: '', requested_jersey_number: '', photo_public_consent: false });
 
 /** An entry as POST /public/registration (and /preview) takes it. */
 export const entryBody = (e: EntryDraft) => ({
