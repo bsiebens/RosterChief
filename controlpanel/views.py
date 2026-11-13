@@ -2,20 +2,26 @@ import json
 import logging
 import threading
 from contextlib import contextmanager
+from uuid import UUID
 
+from django import forms
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connections, transaction
 from django.db.models import Count, Max
-from django.http import Http404, HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from django.utils.formats import date_format
 from django.utils.http import urlencode
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
+from django.views.decorators.cache import never_cache
 from django.views.generic import CreateView, DetailView, FormView, ListView, TemplateView, UpdateView, View
 from waffle import get_waffle_flag_model, get_waffle_switch_model
 
@@ -39,7 +45,7 @@ from features.models import EmailSuppression, JobToggle, Maintenance
 from .forms import ClubAdminForm, ClubForm, CompetitionForm, DuePaymentForm, FlagForm, HomeLocationForm, MaintenanceForm, OpenPeriodForm, PlanForm, PlanPriceForm, PlatformAdminForm, RefereeTypeForm, SportForm, SubscriptionForm, TrialForm
 from .messages import notify
 from .mixins import PlatformStaffRequiredMixin, PlatformSuperuserRequiredMixin, RedirectOnInvalidMixin
-from .services import user_debug
+from .services import club_backup, user_debug
 from .services.accounts import UnverifiedEmailError
 from .services.admins import grant_club_admin, revoke_club_admin
 from .services.club_deletion import ClubDeletionBlocked, delete_club, deletion_impact
@@ -473,6 +479,55 @@ class ClubDetailView(PlatformStaffRequiredMixin, DetailView):
             trial_form=TrialForm(),
             **kwargs,
         )
+
+
+@method_decorator(never_cache, name="dispatch")
+class ClubBackupView(PlatformSuperuserRequiredMixin, TemplateView):
+    template_name = "controlpanel/club_backup.html"
+
+    def get_context_data(self, **kwargs):
+        club = get_object_or_404(Club, pk=self.kwargs["pk"])
+        candidates, has_admin = club_backup.owner_candidates(club.pk)
+        automatic_owner = has_admin and len(candidates) == 1
+        form = forms.Form(self.request.POST if self.request.method == "POST" else None)
+        form.fields["owner"] = forms.TypedChoiceField(
+            label=_("Restore owner"),
+            coerce=UUID,
+            choices=[(str(member.user_id), f"{member.get_full_name()} ({member.user.email})") for member in candidates],
+            initial=str(candidates[0].user_id) if automatic_owner else None,
+            widget=forms.HiddenInput if automatic_owner else forms.Select(attrs={"class": "select select-bordered w-full"}),
+        )
+        if not automatic_owner:
+            form.fields["owner"].choices = [("", _("Choose a login")), *form.fields["owner"].choices]
+        return super().get_context_data(
+            nav="clubs", club=club, form=form, candidates=candidates, has_admin=has_admin,
+            automatic_owner=automatic_owner, **kwargs,
+        )
+
+    def post(self, request, *args, **kwargs):
+        context = self.get_context_data()
+        club, form = context["club"], context["form"]
+        if not form.is_valid():
+            return self.render_to_response(context, status=422)
+        try:
+            slug, archive = club_backup.export_club(club.pk, owner_id=form.cleaned_data["owner"])
+        except club_backup.BackupError as error:
+            form.add_error(None, str(error))
+            return self.render_to_response(context, status=422)
+
+        try:
+            LogEntry.objects.create(
+                user_id=request.user.pk,
+                content_type=ContentType.objects.get_for_model(Club),
+                object_id=str(club.pk),
+                object_repr=slug[:200],
+                action_flag=CHANGE,
+                change_message="Downloaded club backup (format version 1).",
+            )
+            return FileResponse(archive, as_attachment=True, filename=f"{slug}-rosterchief-v1.zip", content_type="application/zip")
+        except BaseException:
+            archive.close()
+            raise
 
 
 class ClubArchiveView(PlatformStaffRequiredMixin, View):

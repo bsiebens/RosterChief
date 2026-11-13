@@ -16,6 +16,9 @@
 {% endblock breadcrumb %}
 
 {% block actions %}
+    {% if request.user.is_superuser %}
+        <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_backup' club.pk %}">{% lucide "download" size=14 %} Download club backup</a>
+    {% endif %}
     <a class="btn btn-outline gap-2" href="{% url 'controlpanel:club_update' club.pk %}">{% lucide "pencil" size=14 %} Edit</a>
     <a class="btn btn-primary gap-2" href="https://{{ club.slug }}.rosterchief.app" target="_blank" rel="noopener">{% lucide "external-link" size=14 %} Open</a>
     {% if club.is_archived %}
