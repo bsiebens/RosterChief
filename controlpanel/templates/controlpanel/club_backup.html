@@ -1,0 +1,41 @@
+{% extends "controlpanel/base.html" %}
+{% load i18n lucide %}
+
+{% block panel_title %}{% translate "Download club backup" %}{% endblock panel_title %}
+
+{% block breadcrumb %}
+    <a class="hover:text-ink" href="{% url 'controlpanel:club_list' %}">clubs</a>
+    <span>/</span>
+    <a class="hover:text-ink" href="{% url 'controlpanel:club_detail' club.pk %}">{{ club.slug }}</a>
+    <span>/</span>
+    <span class="text-ink">backup</span>
+{% endblock breadcrumb %}
+
+{% block panel %}
+    <div class="card max-w-xl space-y-4 p-5">
+        <h1 class="font-display text-xl font-bold text-ink">{% blocktranslate with name=club.name %}Download backup for {{ name }}{% endblocktranslate %}</h1>
+        {% if candidates %}
+            <form method="post" class="space-y-4">
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                {{ form.owner.errors }}
+                {% if automatic_owner %}
+                    {{ form.owner }}
+                    <p>{% blocktranslate with email=candidates.0.user.email %}{{ email }} will own the club after restore.{% endblocktranslate %}</p>
+                {% else %}
+                    {% if not has_admin %}
+                        <p>{% translate "This club has no active admin. Choose an active club login to own the club after restore." %}</p>
+                    {% endif %}
+                    <div>
+                        {{ form.owner.label_tag }}
+                        {{ form.owner }}
+                    </div>
+                {% endif %}
+                <button type="submit" class="btn btn-primary gap-2">{% lucide "download" size=14 %} {% translate "Download club backup" %}</button>
+            </form>
+        {% else %}
+            <p class="alert alert-warning">{% translate "This club needs an active club login before it can be backed up." %}</p>
+        {% endif %}
+        <a class="btn btn-outline" href="{% url 'controlpanel:club_detail' club.pk %}">{% translate "Back to club" %}</a>
+    </div>
+{% endblock panel %}
