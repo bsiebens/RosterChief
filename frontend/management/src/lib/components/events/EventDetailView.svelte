@@ -242,8 +242,8 @@
 
     {#if data.coachView}{@render mobileTop()}{/if}
 
-    <!-- From tablet width the hero card is the Overview's; the other tabs get the slim bar below, as in the approved design. -->
-    <section class="card border-l-4 {style.bar} {data.tab === 'overview' ? (data.coachView ? 'hidden md:block' : '') : data.coachView ? 'hidden' : 'md:hidden'}">
+    <!-- The hero card with the date, place and teams stays on top of every tab. -->
+    <section class="card border-l-4 {style.bar} {data.coachView ? 'hidden md:block' : ''}">
         <div class="grid gap-4 p-6 lg:grid-cols-[1fr_auto]">
             <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -332,7 +332,6 @@
                    class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {data.tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
             {/each}
         </div>
-        <span class="ml-auto hidden min-w-0 truncate py-3 font-mono text-xs text-muted xl:block">{whereWhen}</span>
     </nav>
 
     {#if phone && shownTab === 'overview'}
