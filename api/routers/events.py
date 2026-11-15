@@ -769,6 +769,13 @@ def set_answers_bulk(request, event_id: uuid.UUID, payload: BulkAnswerIn):
     return {"results": results}
 
 
+@router.post("/{event_id}/attendance/remind", response=RemindOut, summary="Remind everyone who has not answered yet (attendance manager)", operation_id="remind_event_attendance")
+def remind_attendance(request, event_id: uuid.UUID):
+    event = _event(event_id)
+    _require_attendance(request, event)
+    return {"reminded": attendance_svc.remind_unanswered(request.user, event)}
+
+
 @router.put("/{event_id}/attendance/{member_id}", response=AttendanceRowOut, summary="Set a member's answer / coach note (attendance manager)", operation_id="set_event_answer")
 def set_answer(request, event_id: uuid.UUID, member_id: uuid.UUID, payload: AnswerIn):
     """``status``: present / absent / maybe / no_response (reset). ``coach_note``: omitted or null keeps it, "" clears it;
@@ -780,13 +787,6 @@ def set_answer(request, event_id: uuid.UUID, member_id: uuid.UUID, payload: Answ
         attendance = _attendance_for(event, member)
         attendance = attendance_svc.set_answer_as_coach(request.user, attendance, payload.status, coach_note=payload.coach_note, notify=payload.notify)
     return _one_row(event, attendance)
-
-
-@router.post("/{event_id}/attendance/remind", response=RemindOut, summary="Remind everyone who has not answered yet (attendance manager)", operation_id="remind_event_attendance")
-def remind_attendance(request, event_id: uuid.UUID):
-    event = _event(event_id)
-    _require_attendance(request, event)
-    return {"reminded": attendance_svc.remind_unanswered(request.user, event)}
 
 
 @router.put("/{event_id}/attendance/{member_id}/check-in", response=AttendanceRowOut, summary="Record whether a member showed up (attendance manager)", operation_id="set_event_check_in")

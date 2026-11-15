@@ -416,6 +416,26 @@ class EventsApiTests(TestCase):
         self.assertEqual((r.json()["status"], r.json()["coach_note"]), ("maybe", "Knee"))
         self.assertEqual(self.call("put", f"/events/{e.pk}/attendance/{self.p1.pk}", self.head.user, {}).status_code, 422)  # neither
 
+    def test_remind_nudges_those_without_an_answer(self):
+        e = self.event(teams=[self.team_a])
+        self.call("put", f"/events/{e.pk}/attendance/{self.p1.pk}", self.head.user, {"status": "present"})
+        r = self.call("post", f"/events/{e.pk}/attendance/remind", self.head.user)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json(), {"reminded": Attendance.objects.filter(event=e, status="no_response").count()})
+        self.assertGreater(r.json()["reminded"], 0)
+        self.assertEqual(self.call("post", f"/events/{e.pk}/attendance/remind", self.bcoach.user).status_code, 403)
+
+    def test_coach_home_counts_and_rights(self):
+        e = self.event(teams=[self.team_a])
+        self.call("put", f"/events/{e.pk}/attendance/{self.p1.pk}", self.head.user, {"status": "maybe"})
+        r = Client().get("/api/v1/portal/coach", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=login_session(self.head.user))
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        row = next(x for x in body["events"] if x["id"] == str(e.pk))
+        self.assertEqual((row["maybe"], row["has_game_sheet"]), (1, False))
+        self.assertEqual(row["invited"], Attendance.objects.filter(event=e).count())
+        self.assertTrue(body["can_create_events"])
+
     def test_attendance_history_and_answer_name(self):
         e = self.event(teams=[self.team_a])
         url = f"/events/{e.pk}/attendance/{self.p1.pk}"
