@@ -12,14 +12,14 @@ export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 		api<ChecklistDetail>('GET', `/evaluations/checklists/${params.id}`, { f: fetch }),
 		api<{ count: number; results: Ref[] }>('GET', `/evaluations/checklists/${params.id}/players`, { query: { since }, f: fetch }),
 		api<Meeting>('GET', `/evaluations/checklists/${params.id}/meeting`, { f: fetch }),
-		api<{ count: number }>('GET', `/evaluations/checklists/${params.id}/release`, { f: fetch })
+		api<{ count: number; total: number }>('GET', `/evaluations/checklists/${params.id}/release`, { f: fetch })
 	]);
 	if (!checklist.ok) error(checklist.status >= 400 && checklist.status < 600 ? checklist.status : 500, checklist.message);
 	const list = players.data?.results ?? [];
 	const asked = url.searchParams.get('player');
 	const selected = list.find((p) => p.id === asked)?.id ?? list[0]?.id ?? '';
 	const review = selected ? await api<Review>('GET', `/evaluations/checklists/${params.id}/players/${selected}`, { f: fetch }) : null;
-	return { checklist: checklist.data!, players: list, since, selected, review: review?.ok ? review.data! : null, meeting: meeting.data ?? { active: null, latest: null, outcomes: [] }, unreleased: release.ok ? (release.data?.count ?? 0) : 0, shared: url.searchParams.get('shared') ?? '' };
+	return { checklist: checklist.data!, players: list, since, selected, review: review?.ok ? review.data! : null, meeting: meeting.data ?? { active: null, latest: null, outcomes: [] }, unreleased: release.ok ? (release.data?.count ?? 0) : 0, seasonTotal: release.ok ? (release.data?.total ?? 0) : 0, shared: url.searchParams.get('shared') ?? '' };
 };
 
 const httpStatus = (s: number) => (s >= 400 && s < 600 ? s : 500);

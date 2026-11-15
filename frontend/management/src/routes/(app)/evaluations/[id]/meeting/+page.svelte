@@ -75,10 +75,10 @@
 	</section>
 
 	{#if data.shared}<Alert kind="success">{t('eval.release.done', { n: Number(data.shared) })}</Alert>{/if}
-	{#if !active && data.unreleased > 0}
+	{#if data.seasonTotal > 0}
 		<section class="card card-body gap-3" aria-labelledby="release-title">
 			<h2 id="release-title" class="card-title"><Send size={16} aria-hidden="true" /> {t('eval.release.title')}</h2>
-			<p class="text-sm text-muted">{t('eval.release.help', { n: data.unreleased })}</p>
+			<p class="text-sm text-muted">{data.unreleased > 0 ? t('eval.release.help', { n: data.unreleased }) : t('eval.release.all_shared')}</p>
 			<form class="flex flex-wrap items-end gap-2" method="GET" action="/evaluations/{data.checklist.id}/release">
 				<label class="grid gap-1 text-sm">{t('eval.release.start_with')}
 					<select class="select select-bordered select-sm" name="level">
@@ -156,7 +156,7 @@
 										{:else}
 											<ul class="grid gap-1.5">
 												{#each q.entries as e (e.evaluation_id)}
-													<li class="flex gap-3 text-sm"><span class="w-24 shrink-0 font-mono text-xs text-muted">{day(e.at)}</span><span>{answerShown({ field_type: q.field.field_type, options: q.field.options, value: e.value }, t('common.yes'), t('common.no'))}</span></li>
+													<li class="flex items-baseline gap-3 text-sm leading-snug"><span class="w-24 shrink-0 font-mono text-xs leading-snug text-muted">{day(e.at)}</span><span class="min-w-0 flex-1">{answerShown({ field_type: q.field.field_type, options: q.field.options, value: e.value }, t('common.yes'), t('common.no'))}</span></li>
 												{/each}
 											</ul>
 										{/if}

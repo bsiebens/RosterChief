@@ -232,7 +232,8 @@ def release(request, evaluation_id: uuid.UUID, payload: ReleaseIn):
 @router.get("/checklists/{checklist_id}/release", summary="How many private evaluations of this season are waiting to be shared", operation_id="evaluation_release_count")
 def release_count(request, checklist_id: uuid.UUID, season_id: uuid.UUID | None = None):
     _execute(request)
-    return {"count": len(svc.unreleased(_checklist(checklist_id), _season(season_id)))}
+    checklist, season = _checklist(checklist_id), _season(season_id)
+    return {"count": len(svc.unreleased(checklist, season)), "total": len(svc.season_evaluations(checklist, season))}
 
 
 @router.get("/checklists/{checklist_id}/release/preview", response=ReleasePreviewOut, summary="Every evaluation of the season with what the family would see", operation_id="evaluation_release_preview")

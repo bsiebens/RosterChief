@@ -182,7 +182,7 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         c = self.checklist()
         e1 = self.evaluate(c, self.cara, {"skating": "4", "remarks": "private"}, public_note="Well done").json()
         e2 = self.evaluate(c, self.ann, {"skating": "3"}).json()
-        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 2})
+        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 2, "total": 2})
         preview = self.call("get", f"/evaluations/checklists/{c['id']}/release/preview", self.owner).json()  # the owner did not write them
         self.assertEqual(len(preview["results"]), 2)
         shown = {a["label"]: a["visible"] for a in preview["results"][0]["answers"] + preview["results"][1]["answers"]}
@@ -198,7 +198,7 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 1)
         self.call("put", f"/evaluations/checklists/{c['id']}/release", self.owner, {"items": [{"evaluation_id": e1["id"], "release": "notes"}]})
         self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 1)  # no second ping
-        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 1})
+        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 1, "total": 2})
 
     def test_evaluate_validation(self):
         c = self.checklist()
