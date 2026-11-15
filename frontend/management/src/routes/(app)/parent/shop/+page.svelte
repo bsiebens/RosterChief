@@ -22,18 +22,39 @@
 	));
 
 	type Draft = { variant: string; beneficiary: string; quantity: number; name: string; number: string };
-	let drafts = $state<Record<string, Draft>>({});
-	const draftFor = (product: ShopProduct): Draft => drafts[product.id] ?? {
+	const defaultDraft = (product: ShopProduct): Draft => ({
 		variant: product.variants.length === 1 && product.variants[0].in_stock ? product.variants[0].id : '',
 		beneficiary: '', quantity: 1, name: '', number: ''
-	};
-	const changeDraft = (product: ShopProduct, values: Partial<Draft>) => (drafts[product.id] = { ...draftFor(product), ...values });
+	});
+	// A product with nothing to choose goes straight into the cart; otherwise "Choose" opens its options in a dialog.
+	const needsOptions = (product: ShopProduct) => product.variants.length > 1 || (product.variants.length === 1 && !product.variants[0].in_stock) || product.personalization_enabled || catalog.people.length > 1;
+	let busy = $state(false);
+	let choosing = $state<ShopProduct | null>(null);
+	let draft = $state<Draft>({ variant: '', beneficiary: '', quantity: 1, name: '', number: '' });
+	let optionsDialog = $state<HTMLDialogElement>();
+	const chosenVariant = $derived(choosing?.variants.find((item) => item.id === draft.variant));
+	const canAdd = $derived(!!choosing && !busy && choosing.in_stock && (!choosing.variants.length || !!chosenVariant?.in_stock) && Number.isInteger(draft.quantity) && draft.quantity >= 1 && draft.quantity <= 999);
+	function choose(product: ShopProduct) {
+		if (!needsOptions(product)) {
+			addLine(product, defaultDraft(product));
+			return;
+		}
+		choosing = product;
+		draft = defaultDraft(product);
+		optionsDialog?.showModal();
+	}
+	// The soonest order-by date over what is on sale, shown as the strip on top.
+	const nextWindow = $derived(
+		catalog.products
+			.map((item) => item.next_ordering_window)
+			.filter((item): item is NonNullable<typeof item> => !!item)
+			.sort((a, b) => a.deadline.localeCompare(b.deadline))[0] ?? null
+	);
 
 	let cart = $state<CartLine[]>([]);
 	let discount = $state('');
 	let checkoutId = $state('');
 	let restored = $state(false);
-	let busy = $state(false);
 	let loadingOrders = $state(false);
 	let placed = $state<ShopReceipt[]>([]);
 	const latest = $derived(placed[0] ?? null);
@@ -83,29 +104,32 @@
 		cartError = '';
 	}
 
-	function add(product: ShopProduct) {
+	function addLine(product: ShopProduct, choice: Draft) {
 		if (cart.length >= 100) {
 			cartError = t('portal.shop.cart_full');
 			return;
 		}
-		const draft = draftFor(product);
-		const variant = product.variants.find((item) => item.id === draft.variant);
-		if (!product.in_stock || (product.variants.length && !variant?.in_stock) || !Number.isInteger(draft.quantity) || draft.quantity < 1 || draft.quantity > 999) return;
+		const variant = product.variants.find((item) => item.id === choice.variant);
+		if (!product.in_stock || (product.variants.length && !variant?.in_stock) || !Number.isInteger(choice.quantity) || choice.quantity < 1 || choice.quantity > 999) return;
 		updateCart([...cart, {
 			id: crypto.randomUUID(),
 			name: product.name,
 			variant: variant?.name ?? '',
 			product_id: product.id,
 			variant_id: variant?.id ?? null,
-			beneficiary_id: draft.beneficiary || null,
-			quantity: draft.quantity,
+			beneficiary_id: choice.beneficiary || null,
+			quantity: choice.quantity,
 			unit_price: variant?.effective_price ?? product.price,
 			ordering_deadline: product.next_ordering_window?.deadline ?? null,
 			estimated_delivery: product.next_ordering_window?.estimated_delivery ?? null,
-			personalization_name: draft.name.trim(),
-			personalization_number: draft.number.trim()
+			personalization_name: choice.name.trim(),
+			personalization_number: choice.number.trim()
 		}]);
-		changeDraft(product, { quantity: 1, name: '', number: '' });
+	}
+	function addChosen() {
+		if (!choosing || !canAdd) return;
+		addLine(choosing, draft);
+		optionsDialog?.close();
 	}
 
 	function currentLine(line: CartLine) {
@@ -181,88 +205,52 @@
 	{/if}
 	{#if latest}<Alert kind="success">{t('portal.shop.placed', { number: latest.number })}</Alert>{/if}
 
-	<div class="grid items-start gap-5 md:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)] xl:grid-cols-[minmax(0,2fr)_minmax(19rem,1fr)]">
+	<div class="grid items-start gap-5 md:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)] xl:grid-cols-[minmax(0,1fr)_22rem]">
 		<div class="grid min-w-0 gap-5">
 			{#if catalog.open}
-				<section class="card card-body gap-4">
-					<h2 class="card-title"><ShoppingBag size={16} aria-hidden="true" /> {t('portal.shop.products')}</h2>
-					<div class="grid gap-2">
-						<label class="relative">
-							<Search size={16} aria-hidden="true" class="pointer-events-none absolute top-3.5 left-3 text-muted" />
-							<input class="input input-bordered w-full pl-9" type="search" placeholder={t('portal.shop.search')} aria-label={t('portal.shop.search')} bind:value={q} />
-						</label>
-					</div>
+				{#if nextWindow}
+					<p class="flex items-center gap-2 rounded-box border border-info-border bg-info-bg px-4 py-2.5 text-sm text-info-text"><Clock size={16} class="shrink-0" aria-hidden="true" /><span>{t('shop.window.summary', { deadline: calendarDay(nextWindow.deadline), estimated_delivery: calendarDay(nextWindow.estimated_delivery) })}</span></p>
+				{/if}
+				<div class="flex flex-wrap items-center gap-2">
 					{#if categories.length}
 						<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('portal.shop.all_categories')}>
 							<button type="button" class="btn btn-sm {category === '' ? '' : 'btn-outline'}" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
 							{#each categories as name (name)}<button type="button" class="btn btn-sm {category === name ? '' : 'btn-outline'}" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
 						</div>
 					{/if}
-					<div class="grid items-start gap-4 sm:max-md:grid-cols-2 lg:grid-cols-2">
-						{#each products as product (product.id)}
-							{@const draft = draftFor(product)}
-							{@const variant = product.variants.find((item) => item.id === draft.variant)}
-							<article class="grid gap-3 overflow-hidden rounded-box border border-line">
-								{#if product.image_url}
-									<img class="aspect-video w-full object-cover" src={product.image_url} alt="" loading="lazy" />
-								{:else}
-									<div class="grid aspect-[3/1] place-items-center bg-surface text-muted"><Package size={28} aria-hidden="true" /></div>
-								{/if}
-								<div class="grid gap-2 px-3 pb-3">
-									<div class="flex flex-wrap items-baseline justify-between gap-2">
-										<h3 class="font-semibold">{product.name}</h3>
-										<span class="font-display text-xl font-extrabold text-ink tabular-nums">{money(variant?.effective_price ?? product.price)}</span>
-									</div>
-									{#if product.description}<p class="whitespace-pre-line text-sm text-muted">{product.description}</p>{/if}
-									{#if product.next_ordering_window}
-										<p class="flex items-center gap-2 rounded-box border border-info-border bg-info-bg px-3 py-1.5 text-xs font-medium text-info-text"><Clock size={14} class="shrink-0" aria-hidden="true" />{t('shop.window.summary', { deadline: calendarDay(product.next_ordering_window.deadline), estimated_delivery: calendarDay(product.next_ordering_window.estimated_delivery) })}</p>
-									{/if}
-									{#each product.files as file (file.url)}
-										<a href={file.url} class="link text-sm" target="_blank" rel="noopener">{file.title}</a>
-									{/each}
+					<label class="relative ml-auto w-full sm:w-64">
+						<Search size={14} aria-hidden="true" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim" />
+						<input class="input w-full pl-9" type="search" placeholder={t('portal.shop.search')} aria-label={t('portal.shop.search')} bind:value={q} />
+					</label>
+				</div>
+				<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+					{#each products as product (product.id)}
+						<article class="card flex flex-col overflow-hidden">
+							{#if product.image_url}
+								<img class="aspect-4/3 w-full object-cover" src={product.image_url} alt="" loading="lazy" />
+							{:else}
+								<div class="grid aspect-4/3 place-items-center bg-subhead text-dim"><Package size={32} aria-hidden="true" /></div>
+							{/if}
+							<div class="flex flex-1 flex-col justify-between gap-3 p-3.5">
+								<div class="grid gap-1">
+									<h3 class="font-semibold text-ink">{product.name}</h3>
+									{#if product.description}<p class="line-clamp-2 text-xs whitespace-pre-line text-muted">{product.description}</p>{/if}
+									{#if product.variants.length > 1}<p class="text-xs text-muted">{t('portal.shop.options_n', { n: product.variants.length })}</p>{/if}
+								</div>
+								<div class="flex items-center gap-2">
+									<span class="font-display text-xl font-extrabold text-ink tabular-nums">{money(product.price)}</span>
 									{#if product.in_stock}
-										{#if product.variants.length}
-											<label class="grid gap-1 text-sm">{t('portal.shop.option')}
-												<select class="select select-bordered w-full" value={draft.variant} onchange={(e) => changeDraft(product, { variant: e.currentTarget.value })}>
-													<option value="" disabled>{t('portal.shop.option')}</option>
-													{#each product.variants as item (item.id)}
-														<option value={item.id} disabled={!item.in_stock}>{item.name} · {money(item.effective_price)}{!item.in_stock ? ` · ${t('shop.out_of_stock')}` : ''}</option>
-													{/each}
-												</select>
-											</label>
-										{/if}
-										{#if catalog.people.length > 1}
-											<label class="grid gap-1 text-sm">{t('portal.shop.recipient')}
-												<select class="select select-bordered w-full" value={draft.beneficiary} onchange={(e) => changeDraft(product, { beneficiary: e.currentTarget.value })}>
-													<option value="">{buyerName(catalog.viewer_id)}</option>
-													{#each catalog.people.filter((item) => item.id !== catalog.viewer_id) as person (person.id)}<option value={person.id}>{person.name}</option>{/each}
-												</select>
-											</label>
-										{/if}
-										{#if product.personalization_enabled}
-											<label class="grid gap-1 text-sm">{t('shop.orders.line.pers_name')}
-												<input class="input input-bordered w-full" maxlength="100" value={draft.name} oninput={(e) => changeDraft(product, { name: e.currentTarget.value })} />
-											</label>
-											<label class="grid gap-1 text-sm">{t('shop.orders.line.pers_number')}
-												<input class="input input-bordered w-full" maxlength="20" value={draft.number} oninput={(e) => changeDraft(product, { number: e.currentTarget.value })} />
-											</label>
-										{/if}
-										<div class="flex flex-wrap gap-2">
-											<input class="input input-bordered w-20" aria-label={t('portal.shop.quantity_for', { name: product.name })} type="number" min="1" max="999" step="1" value={draft.quantity} oninput={(e) => changeDraft(product, { quantity: e.currentTarget.valueAsNumber })} />
-											<button class="btn btn-primary grow" type="button" disabled={busy || (product.variants.length > 0 && !variant?.in_stock) || !Number.isInteger(draft.quantity) || draft.quantity < 1 || draft.quantity > 999} onclick={() => add(product)}>
-												{t('portal.shop.add')}
-											</button>
-										</div>
+										<button class="btn btn-primary btn-sm ml-auto" type="button" disabled={busy} onclick={() => choose(product)}>{needsOptions(product) ? t('portal.shop.choose') : t('portal.shop.add')}</button>
 									{:else}
-										<span class="badge badge-outline">{t('shop.out_of_stock')}</span>
+										<span class="badge badge-outline ml-auto">{t('shop.out_of_stock')}</span>
 									{/if}
 								</div>
-							</article>
-						{:else}
-							<p class="text-sm text-muted">{t('portal.shop.no_products')}</p>
-						{/each}
-					</div>
-				</section>
+							</div>
+						</article>
+					{:else}
+						<p class="text-sm text-muted sm:col-span-2 xl:col-span-3">{t('portal.shop.no_products')}</p>
+					{/each}
+				</div>
 			{/if}
 
 			<section class="card card-body scroll-mt-44 gap-3 xl:scroll-mt-20" id="orders">
@@ -306,7 +294,7 @@
 		</div>
 
 		{#if catalog.open || cart.length}
-			<section class="card card-body scroll-mt-44 gap-3 xl:scroll-mt-20" id="cart" aria-live="polite">
+			<section class="card card-body scroll-mt-44 gap-3 xl:sticky xl:top-20 xl:scroll-mt-20" id="cart" aria-live="polite">
 				<h2 class="card-title"><ShoppingCart size={16} aria-hidden="true" /> {t('portal.shop.cart')}</h2>
 				{#if cartError}<Alert kind="error">{cartError}</Alert>{/if}
 				{#if cart.length}
@@ -352,3 +340,48 @@
 		{/if}
 	</div>
 </div>
+
+<dialog bind:this={optionsDialog} class="portal-modal" aria-label={choosing?.name ?? t('portal.shop.options')} onclose={() => (choosing = null)} onclick={(e) => { if (e.target === optionsDialog) optionsDialog?.close(); }}>
+	{#if choosing}
+		{@const product = choosing}
+		<form class="grid gap-4 p-5" onsubmit={(e) => { e.preventDefault(); addChosen(); }}>
+			<div class="flex items-start gap-3">
+				{#if product.image_url}<img class="size-16 shrink-0 rounded object-cover" src={product.image_url} alt="" />{:else}<div class="grid size-16 shrink-0 place-items-center rounded bg-subhead text-dim"><Package size={24} aria-hidden="true" /></div>{/if}
+				<div class="min-w-0 flex-1"><h2 class="font-display text-xl font-extrabold text-ink uppercase">{product.name}</h2>{#if product.description}<p class="line-clamp-3 text-sm whitespace-pre-line text-muted">{product.description}</p>{/if}</div>
+				<b class="font-display text-xl text-ink tabular-nums">{money(chosenVariant?.effective_price ?? product.price)}</b>
+			</div>
+			{#if product.variants.length}
+				<label class="grid gap-1 text-sm font-semibold">{t('portal.shop.option')}
+					<select class="select w-full font-normal" bind:value={draft.variant} required>
+						<option value="" disabled>{t('portal.shop.option')}</option>
+						{#each product.variants as item (item.id)}<option value={item.id} disabled={!item.in_stock}>{item.name} · {money(item.effective_price)}{!item.in_stock ? ` · ${t('shop.out_of_stock')}` : ''}</option>{/each}
+					</select>
+				</label>
+			{/if}
+			{#if catalog.people.length > 1}
+				<label class="grid gap-1 text-sm font-semibold">{t('portal.shop.recipient')}
+					<select class="select w-full font-normal" bind:value={draft.beneficiary}>
+						<option value="">{buyerName(catalog.viewer_id)}</option>
+						{#each catalog.people.filter((item) => item.id !== catalog.viewer_id) as person (person.id)}<option value={person.id}>{person.name}</option>{/each}
+					</select>
+				</label>
+			{/if}
+			{#if product.personalization_enabled}
+				<div class="grid gap-3 sm:grid-cols-2">
+					<label class="grid gap-1 text-sm font-semibold">{t('shop.orders.line.pers_name')}<input class="input w-full font-normal" maxlength="100" bind:value={draft.name} /></label>
+					<label class="grid gap-1 text-sm font-semibold">{t('shop.orders.line.pers_number')}<input class="input w-full font-normal" maxlength="20" bind:value={draft.number} /></label>
+				</div>
+			{/if}
+			{#if product.next_ordering_window}
+				<p class="flex items-center gap-2 rounded-box border border-info-border bg-info-bg px-3 py-2 text-xs text-info-text"><Clock size={14} class="shrink-0" aria-hidden="true" />{t('shop.window.summary', { deadline: calendarDay(product.next_ordering_window.deadline), estimated_delivery: calendarDay(product.next_ordering_window.estimated_delivery) })}</p>
+			{/if}
+			{#each product.files as file (file.url)}<a href={file.url} class="link text-sm" target="_blank" rel="noopener">{file.title}</a>{/each}
+			<div class="flex items-center gap-3 border-t border-line pt-4">
+				<label class="flex items-center gap-2 text-sm font-semibold">{t('portal.shop.quantity')}<input class="input w-20 font-normal" type="number" min="1" max="999" step="1" bind:value={draft.quantity} /></label>
+				<span class="flex-1"></span>
+				<button class="btn btn-outline" type="button" onclick={() => optionsDialog?.close()}>{t('common.cancel')}</button>
+				<button class="btn btn-primary" type="submit" disabled={!canAdd}>{t('portal.shop.add')}</button>
+			</div>
+		</form>
+	{/if}
+</dialog>
