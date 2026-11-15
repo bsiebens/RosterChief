@@ -14,6 +14,7 @@
 	import InstallPush from '#lib/components/InstallPush.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
+	import ReplyRow from '#lib/components/portal/ReplyRow.svelte';
 	import EventHero from '#lib/components/portal/EventHero.svelte';
 	import MonthPicker from '#lib/components/portal/MonthPicker.svelte';
 	import News from '#lib/components/portal/News.svelte';
@@ -22,9 +23,7 @@
 	let { data } = $props();
 	let selected = $state('');
 	let busy = $state('');
-	let notes = $state<Record<string, string>>({});
 	let errors = $state<Record<string, string>>({});
-	let replyOpen = $state('');
 	let month = $state(new Date());
 	let pickedDay = $state('');
 	let monthOpen = $state(false);
@@ -32,9 +31,11 @@
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const crewOnly = $derived(tab === 'calendar' && page.url.searchParams.get('crew') === '1');
 	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments' };
-	const title = $derived(t(labels[tab] ?? labels.home));
 	const people = $derived(data.home.people);
 	const viewer = $derived(people.find((person) => person.id === data.home.viewer));
+	const hour = new Date().getHours();
+	const greeting = $derived(t(hour < 12 ? 'portal.greeting_morning' : hour < 18 ? 'portal.greeting_afternoon' : 'portal.greeting_evening', { name: viewer?.first_name || viewer?.name || '' }));
+	const title = $derived(tab === 'home' ? greeting : t(labels[tab] ?? labels.home));
 	const events = $derived(data.home.events.filter((event) => !selected || event.member_id === selected));
 	const memberName = (id: string) => people.find((person) => person.id === id)?.name ?? '';
 	const crest = $derived(data.branding?.logo_url);
@@ -103,27 +104,31 @@
 	});
 	const offerKey = (offer: OfficiatingOpportunity) => `${offer.event_id}-${offer.role}-${offer.member_id}`;
 
+	const profiles = $derived(new Map((data.profile ?? []).map((person) => [person.id, person])));
+	const teamsOf = (id: string) => (profiles.get(id)?.teams ?? []).map((team) => `${team.name}${team.jersey_number !== null ? ` · #${team.jersey_number}` : ''}`).join(', ');
+	const firstName = (id: string) => people.find((person) => person.id === id)?.first_name || memberName(id);
 	const filteredFees = $derived(data.home.fees.filter((fee) => !selected || fee.member_id === selected));
 	const openFees = $derived(filteredFees.filter((fee) => Number(fee.balance) > 0));
 	const filteredForms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
+	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length));
+	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length);
 	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : '/parent?tab=calendar');
 	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
 
-	usePageHeader(() => ({ title }));
+	usePageHeader(() => ({ title, context: tab === 'home' ? formatLongDay(new Date()) : undefined, actions: tab === 'home' && people.length > 1 ? headerPeople : undefined }));
 
-	async function reply(event: PortalEvent, status: string) {
-		if (busy) return;
+	async function reply(event: PortalEvent, status: string, note: string): Promise<boolean> {
+		if (busy) return false;
 		busy = event.id;
 		errors[event.id] = '';
 		try {
-			const result = await api<PortalEvent>('POST', `/portal/attendance/${event.id}`, { body: { status, note: notes[event.id] ?? event.note } });
+			const result = await api<PortalEvent>('POST', `/portal/attendance/${event.id}`, { body: { status, note } });
 			if (result.ok) {
 				await invalidateAll();
-				delete notes[event.id];
-				replyOpen = '';
-			} else {
-				errors[event.id] = result.code === 'late_installment' ? t('portal.late') : (result.fields.note ?? result.message ?? t('common.error.generic'));
+				return true;
 			}
+			errors[event.id] = result.code === 'late_installment' ? t('portal.late') : (result.fields.note ?? result.message ?? t('common.error.generic'));
+			return false;
 		} finally {
 			busy = '';
 		}
@@ -150,39 +155,8 @@
 	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
 {/snippet}
 
-{#snippet rsvp(event: PortalEvent, quick = false)}
-	<div class="grid gap-2 py-1.5">
-		<div class="flex flex-wrap items-center justify-between gap-2">
-			<div class="min-w-0 flex-1">
-				<p class="text-sm font-semibold">{memberName(event.member_id)}</p>
-				{#if quick && canReply(event) && !going(event) && event.deadline}<p class="text-xs text-muted">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>{/if}
-			</div>
-			{#if event.cancelled || !canReply(event) || going(event)}
-				<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
-			{/if}
-			{#if canReply(event)}
-				<div class="flex flex-wrap gap-1.5">
-					{#if !going(event)}
-						<button type="button" class="btn btn-sm btn-primary min-h-11" disabled={!!busy} onclick={() => reply(event, 'present')}>{t('portal.going')}</button>
-						{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11" disabled={!!busy} onclick={() => reply(event, 'maybe')}>{t('portal.maybe')}</button>{/if}
-					{/if}
-					<button type="button" class="btn btn-sm btn-outline min-h-11" disabled={!!busy} aria-expanded={replyOpen === event.id} onclick={() => (replyOpen = replyOpen === event.id ? '' : event.id)}>{t(going(event) ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
-				</div>
-			{/if}
-		</div>
-		{#if canReply(event) && replyOpen === event.id}
-			<form class="grid gap-2 rounded-box border border-line bg-subhead p-3" onsubmit={(e) => { e.preventDefault(); void reply(event, event.status === 'selected' ? 'dropout' : 'absent'); }}>
-				<label class="grid gap-1 text-sm">{t('portal.reason')}
-					<textarea class="textarea textarea-bordered w-full text-ink" rows="2" maxlength="2000" value={notes[event.id] ?? event.note} oninput={(e) => (notes[event.id] = e.currentTarget.value)}></textarea>
-				</label>
-				<div class="flex flex-wrap justify-end gap-2">
-					<button class="btn btn-sm btn-outline min-h-11" type="button" onclick={() => (replyOpen = '')}>{t('common.cancel')}</button>
-					<button class="btn btn-sm btn-primary min-h-11" type="submit" disabled={!!busy}>{t('common.save')}</button>
-				</div>
-			</form>
-		{/if}
-		{#if errors[event.id]}<p class="text-sm text-error" role="alert">{errors[event.id]}</p>{/if}
-	</div>
+{#snippet rsvp(event: PortalEvent, quick = false, dark = false)}
+	<ReplyRow {event} name={memberName(event.member_id)} photo={people.find((person) => person.id === event.member_id)?.photo_url} canReply={canReply(event)} {quick} {dark} busy={busy === event.id} error={errors[event.id] ?? ''} onreply={(status, note) => reply(event, status, note)} />
 {/snippet}
 
 {#snippet officiating(offer: OfficiatingOpportunity)}
@@ -236,6 +210,106 @@
 			{/each}
 		</div>
 	</section>
+{/snippet}
+
+{#snippet headerPeople()}
+	<div class="hidden xl:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
+{/snippet}
+
+{#snippet week()}
+	{#if upcomingWeek.length}
+		<section class="card card-body" aria-label={t('portal.next_seven_days')}>
+			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_seven_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{t('portal.calendar')} →</a></h2>
+			<div class="divide-y divide-rule">
+				{#each upcomingWeek as event (event.event_id)}
+					<a class="flex items-center gap-3 py-2.5 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+						<PortalEventDate start={event.start} />
+						<span class="size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>
+						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{event.title}</span><span class="block text-xs text-muted">{formatTime(event.start)}{event.location ? ' · ' + event.location : ''}</span></span>
+						<span class="flex flex-wrap justify-end gap-1">
+							{#each events.filter((row) => row.event_id === event.event_id) as row (row.id)}
+								<span class="badge badge-sm border {statusStyle(row.status)}">{people.length > 1 ? `${firstName(row.member_id)} · ` : ''}{t(statusLabelKey(row.status))}</span>
+							{/each}
+						</span>
+						<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
+					</a>
+				{/each}
+			</div>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet attention()}
+	<section class="card card-body">
+		<h2 class="card-title"><ClipboardList size={16} aria-hidden="true" />{t('portal.attention')}<span class="badge badge-sm badge-error ml-auto">{attentionCount}</span></h2>
+		<div class="divide-y divide-rule">
+			{#each officiatingInvites.slice(0, 4) as offer (offerKey(offer))}
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(offer.event_id)} data-sveltekit-reset="false">
+					<Whistle size={16} class="shrink-0" aria-hidden="true" />
+					<span class="min-w-0 flex-1"><span class="block font-semibold">{offer.title}</span><span class="block text-xs text-muted">{t(`portal.crew_${offer.role}`)} · {memberName(offer.member_id)} · {formatDateTime(offer.start)}</span></span>
+					<span class="badge badge-outline">{t('portal.crew_invited')}</span>
+				</a>
+			{/each}
+			{#each needsReply.slice(0, 4) as event (event.id)}
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+					<span class="min-w-0 flex-1"><span class="block font-semibold">{event.title}</span><span class="block text-xs text-muted">{formatDateTime(event.start)} · {memberName(event.member_id)}</span></span>
+					<span class="badge badge-warn">{t('portal.reply')}</span>
+				</a>
+			{/each}
+			{#if officiatingInvites.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar&crew=1">{t('portal.crew_title')}</a>{/if}
+			{#if needsReply.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar">{t('portal.calendar')}</a>{/if}
+			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
+					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
+					<span class="badge badge-outline">{t('portal.forms')}</span>
+				</a>
+			{/each}
+			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
+					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
+					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
+				</a>
+			{/each}
+		</div>
+	</section>
+{/snippet}
+
+{#snippet family()}
+	{#if people.length > 1}
+		<section class="card card-body">
+			<h2 class="card-title"><UsersRound size={16} aria-hidden="true" />{t('portal.family')}<a class="link ml-auto text-sm font-semibold" href="/parent/profile">{t('portal.profile')} →</a></h2>
+			<ul class="grid gap-3">
+				{#each people.filter((person) => person.id !== data.home.viewer) as person (person.id)}
+					{@const open = data.home.fees.filter((fee) => fee.member_id === person.id).reduce((sum, fee) => sum + Number(fee.balance), 0)}
+					<li class="flex items-center gap-3">
+						<ClubCrest name={person.name} logoUrl={person.photo_url} size={36} />
+						<span class="min-w-0 flex-1"><span class="block truncate font-semibold text-ink">{person.name}</span>{#if teamsOf(person.id)}<span class="block truncate text-xs text-muted">{teamsOf(person.id)}</span>{/if}</span>
+						{#if data.home.fees.some((fee) => fee.member_id === person.id)}
+							<span class="badge badge-sm {open > 0 ? 'badge-warn' : 'badge-success'}">{open > 0 ? t('portal.fee_open', { amount: money(open) }) : t('portal.fee_paid')}</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+{/snippet}
+
+{#snippet sponsors()}
+	{#if data.home.sponsors?.length}
+		<section class="grid min-w-0 gap-2">
+			<h2 class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.partners')}</h2>
+			<ul class="grid grid-cols-3 gap-2" aria-label={t('sponsors.title')}>
+				{#each data.home.sponsors.slice(0, 6) as sponsor (sponsor.id)}
+					<li class="card h-14 overflow-hidden">
+						{#snippet logo()}
+							{#if sponsor.logo_url}<img class="max-h-full max-w-full object-contain" src={sponsor.logo_url} alt={sponsor.name} loading="lazy" />{:else}<span class="text-xs font-semibold text-muted">{sponsor.name}</span>{/if}
+						{/snippet}
+						{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer">{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 {/snippet}
 
 {#if tab !== 'home'}
@@ -323,91 +397,40 @@
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
 	</div>
-	{@render peoplePicker()}
-	<div class="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-		<div class="grid min-w-0 gap-4">
+	<div class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
+		<div class="grid min-w-0 content-start gap-4">
+			<div class="xl:hidden">{@render peoplePicker()}</div>
 			<section class="grid min-w-0 gap-3" aria-label={t('portal.next_up')}>
 				{#each nextEvents as rows (rows[0].event_id)}
 					{@const event = rows[0]}
 					<article class="card overflow-hidden">
-						<h2 class="card-title px-4 py-3"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_up')}</h2>
-						<a class="block" href={eventLink(event.event_id)} data-sveltekit-reset="false"><EventHero {event} {background} {crest} /></a>
-						<div class="divide-y divide-rule px-4 py-2">
-							{#each rows as row (row.id)}{@render rsvp(row, true)}{/each}
+						<div class="grid xl:grid-cols-[1.1fr_1fr]">
+							<a class="block" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
+							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-bg px-4 py-3 text-white xl:border-t-0 xl:border-l xl:px-5">
+								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
+								<div class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-1">
+									{#each rows as row (row.id)}{@render rsvp(row, true, true)}{/each}
+								</div>
+								<a class="inline-flex min-h-11 items-center text-sm font-semibold text-white hover:underline" href={eventLink(event.event_id)} data-sveltekit-reset="false">{t('portal.event_details')} →</a>
+							</div>
 						</div>
 					</article>
 				{:else}
 					<div class="card card-body flex-row items-center gap-3"><CircleCheck size={20} class="text-ok" aria-hidden="true" /><p class="text-sm text-muted">{t('portal.no_events')}</p></div>
 				{/each}
 			</section>
-			{#if upcomingWeek.length}
-				<section class="card card-body">
-					<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_seven_days')}</h2>
-					<div class="divide-y divide-rule">
-						{#each upcomingWeek as event (event.event_id)}
-							<a class="flex items-center gap-3 py-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-								<PortalEventDate start={event.start} />
-								<span class="min-w-0 flex-1"><span class="block font-semibold">{event.title}</span><span class="block text-xs text-muted">{formatTime(event.start)}{event.location ? ' · ' + event.location : ''}</span></span>
-								<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
-							</a>
-						{/each}
-					</div>
-				</section>
-			{/if}
-		</div>
-		<div class="grid min-w-0 gap-4">
-			{#if needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length}
-				<section class="card card-body">
-					<h2 class="card-title"><ClipboardList size={16} aria-hidden="true" />{t('portal.attention')}</h2>
-					<div class="divide-y divide-rule">
-						{#each officiatingInvites.slice(0, 4) as offer (offerKey(offer))}
-							<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(offer.event_id)} data-sveltekit-reset="false">
-								<Whistle size={16} class="shrink-0" aria-hidden="true" />
-								<span class="min-w-0 flex-1"><span class="block font-semibold">{offer.title}</span><span class="block text-xs text-muted">{t(`portal.crew_${offer.role}`)} · {memberName(offer.member_id)} · {formatDateTime(offer.start)}</span></span>
-								<span class="badge badge-outline">{t('portal.crew_invited')}</span>
-							</a>
-						{/each}
-
-						{#each needsReply.slice(0, 4) as event (event.id)}
-							<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-								<span class="min-w-0 flex-1"><span class="block font-semibold">{event.title}</span><span class="block text-xs text-muted">{formatDateTime(event.start)} · {memberName(event.member_id)}</span></span>
-								<span class="badge badge-warn">{t('portal.reply')}</span>
-							</a>
-						{/each}
-						{#if officiatingInvites.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar&crew=1">{t('portal.crew_title')}</a>{/if}
-						{#if needsReply.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar">{t('portal.calendar')}</a>{/if}
-						{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-							<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
-								<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
-								<span class="badge badge-outline">{t('portal.forms')}</span>
-							</a>
-						{/each}
-						{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
-							<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
-								<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
-								<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
-							</a>
-						{/each}
-					</div>
-				</section>
-			{/if}
+			<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+				{#if hasAttention}<div class="xl:hidden">{@render attention()}</div>{/if}
+				{@render week()}
+			</div>
 			<section><News articles={data.home.news} home /></section>
-			{#if data.home.sponsors?.length}
-				<section class="grid min-w-0 gap-2">
-					<h2 class="card-title"><Handshake size={16} aria-hidden="true" />{t('sponsors.title')}</h2>
-					<ul class="flex max-w-full snap-x gap-2 overflow-x-auto pb-1" aria-label={t('sponsors.title')}>
-						{#each data.home.sponsors as sponsor (sponsor.id)}
-							<li class="card h-14 w-28 shrink-0 snap-start overflow-hidden">
-								{#snippet logo()}
-									{#if sponsor.logo_url}<img class="max-h-full max-w-full object-contain" src={sponsor.logo_url} alt={sponsor.name} loading="lazy" />{:else}<span class="text-xs font-semibold text-muted">{sponsor.name}</span>{/if}
-								{/snippet}
-								{#if sponsor.url && /^https?:\/\//i.test(sponsor.url)}<a class="grid size-full place-items-center p-2 hover:bg-subhead" href={sponsor.url} target="_blank" rel="noopener noreferrer">{@render logo()}</a>{:else}<div class="grid size-full place-items-center p-2">{@render logo()}</div>{/if}
-							</li>
-						{/each}
-					</ul>
-				</section>
-			{/if}
+			<div class="xl:hidden">{@render sponsors()}</div>
 		</div>
+		<aside class="hidden min-w-0 content-start gap-4 xl:grid">
+			{#if hasAttention}{@render attention()}{/if}
+			{@render family()}
+			{@render sponsors()}
+		</aside>
 	</div>
 {/if}
 
