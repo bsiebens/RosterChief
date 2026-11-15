@@ -1452,4 +1452,8 @@ textarea[name="note"] {
 
     .portal-ui :is(.input, .select, .textarea, .modal-box, .btn-outline) { background-color: var(--portal-panel); }
     .portal-ui .btn-outline:hover { background-color: var(--color-subhead); }
+    /* The plain button is the page's ink (light in the dark scheme) with white text: swap the text to the dark panel colour. */
+    .portal-ui .btn:not(.btn-primary, .btn-success, .btn-warning, .btn-error, .btn-ghost, .btn-outline) { color: var(--color-white); }
+    .portal-ui :is(.badge-outline, .badge-ghost) { background-color: var(--portal-panel); }
+    .portal-ui .badge-neutral { color: var(--color-white); }
 }
