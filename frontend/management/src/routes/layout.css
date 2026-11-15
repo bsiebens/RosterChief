@@ -873,11 +873,72 @@
         accent-color: var(--color-club);
     }
 
+    /* A real switch: track and knob, green when on. */
     .toggle {
+        appearance: none;
+        position: relative;
+        flex: none;
         width: 2.5rem;
         height: 1.375rem;
         border-radius: 999px;
-        accent-color: var(--color-ok);
+        background: var(--color-stroke);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    .toggle::after {
+        content: "";
+        position: absolute;
+        top: 0.1875rem;
+        left: 0.1875rem;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 999px;
+        background: #fff;
+        transition: transform 0.15s;
+    }
+    .toggle:checked {
+        background: var(--color-ok);
+    }
+    .toggle:checked::after {
+        transform: translateX(1.125rem);
+    }
+    .toggle:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .toggle:focus-visible {
+        outline: 2px solid var(--color-club);
+        outline-offset: 2px;
+    }
+    .toggle-sm {
+        width: 2rem;
+        height: 1.125rem;
+    }
+    .toggle-sm::after {
+        top: 0.15625rem;
+        left: 0.15625rem;
+        width: 0.8125rem;
+        height: 0.8125rem;
+    }
+    .toggle-sm:checked::after {
+        transform: translateX(0.875rem);
+    }
+
+    /* Header strip of a card: icon, heading, optional trailing items. */
+    .card-h {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.875rem 1.25rem;
+        border-bottom: 1px solid var(--color-line);
+        color: var(--color-ink);
+    }
+    .card-h h2 {
+        font-family: var(--font-display);
+        font-weight: 800;
+        font-size: 0.9375rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
     }
 
     .form-control {
