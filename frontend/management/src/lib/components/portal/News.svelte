@@ -42,9 +42,9 @@
 	{#if selected}
 		{@const lead = photo(selected)}
 		{#if lead}<img class="aspect-video max-h-96 w-full object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" />{/if}
-		<article class="mx-auto grid max-w-2xl gap-4 px-6 py-6">
+		<article class="mx-auto grid max-w-2xl gap-4 px-4 py-5 sm:px-6 sm:py-6">
 			<p class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{(selected.teams ?? []).join(', ') || t('portal.news')}{#if selected.published_at} · {formatDay(selected.published_at)}{/if}</p>
-			<h2 class="font-display text-4xl leading-none font-extrabold text-ink uppercase">{translation(selected).title}</h2>
+			<h2 class="font-display text-3xl leading-none font-extrabold text-ink uppercase sm:text-4xl">{translation(selected).title}</h2>
 			<div class="prose max-w-none text-base leading-relaxed">{@html translation(selected).body}</div>
 			{#each selected.photos.filter((image) => image !== lead) as image (image.url)}
 				<img class="w-full rounded-box object-cover" src={mediaPath(image.url)} style:object-position={image.object_position} alt="" loading="lazy" />
@@ -56,7 +56,8 @@
 {#if selected && !desktop}
 	<a class="btn btn-outline mb-3 justify-self-start gap-2" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
 	<div class="card overflow-hidden">{@render articleView()}</div>
-{:else if home}
+{:else}
+{#if home}
 	<div class="mb-2 flex items-center justify-between gap-2">
 		<h2 class="card-title"><Newspaper size={16} aria-hidden="true" />{t('portal.news')}</h2>
 		<a class="link-more" href={path + '?tab=news'}>{t('overview.news.view_all')} →</a>
@@ -108,6 +109,7 @@
 	</div>
 {:else}
 	<p class="card card-body text-sm text-muted">{t('portal.no_news')}</p>
+{/if}
 {/if}
 {#if selected && desktop}
 <Sheet wide open={true} title={translation(selected).title} onclose={() => void goto(closeHref, { replaceState: true })}>
