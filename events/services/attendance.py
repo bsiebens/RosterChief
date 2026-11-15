@@ -153,6 +153,33 @@ def _without_blocked(events: list, season_of: dict, desired: dict) -> dict:
     return {event.pk: desired[event.pk] - blocked[(event.kind, season_of[event.pk])] for event in events}
 
 
+def audience_check(events: list, member_ids: Iterable) -> dict:
+    """Why each of ``member_ids`` is, or is not, invited to each of ``events``, in a fixed number of queries however many events or people there
+    are: ``{event.pk: {"invited": {member ids}, "requirements": {member id: [open requirement names]}, "excluded": {member ids}}}``.
+    ``invited`` is the effective audience (as ``effective_members``); ``requirements`` are people who would be invited but are left out by an open
+    requirement (as ``blocked_members``); ``excluded`` those the event explicitly leaves out."""
+    from members.services import onboarding
+
+    events, member_ids = list(events), set(member_ids)
+    if not events or not member_ids:
+        return {}
+    resolve = _season_resolver()
+    wanted = _desired_member_ids(events, member_ids, keep_blocked=True)
+    groups: dict[tuple, set] = defaultdict(set)
+    for event in events:
+        groups[(event.kind, resolve(event))] |= wanted[event.pk]
+    reasons = onboarding.blocking_reasons(groups)
+    excluded = defaultdict(set)
+    for event_id, member_id in Event.excluded_members.through.objects.filter(event_id__in=[e.pk for e in events], member_id__in=member_ids).values_list("event_id", "member_id"):
+        excluded[event_id].add(member_id)
+    result = {}
+    for event in events:
+        blocked = reasons[(event.kind, resolve(event))]
+        mine = {member_id: names for member_id, names in blocked.items() if member_id in wanted[event.pk]}
+        result[event.pk] = {"invited": wanted[event.pk] - set(mine), "requirements": mine, "excluded": excluded[event.pk]}
+    return result
+
+
 def blocked_members(event) -> dict:
     """``{member id: [names of the open requirements]}``: people who would be invited to ``event`` but are left out because of those requirements."""
     from members.services import onboarding

@@ -23,7 +23,7 @@ from formbuilder.services.submission import submit_form
 from members.models import ClubMembership, Member
 from members.services import access, memberships
 from news.services import member_news
-from registration.models import RegistrationBatch
+from registration.models import RegistrationBatch, RegistrationSettings
 from registration.services import installments, notifications
 from shop.services.invoices import PDFUnavailable
 from sponsoring.models import Sponsor
@@ -81,28 +81,36 @@ def _attendance(row, blocked=None):
     return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail}
 
 
-def _blocker(row, now, invited, reasons):
-    """Why this person cannot sign up for the event right now, so the app says so instead of offering buttons that fail.
-    Returns ``(code, detail)`` or None. ``not_invited`` carries the reason: an open requirement that blocks this kind of event
-    (``requirements``, with their names), an explicit exclusion (``excluded``) or no longer being in the event's team or group
-    (``not_in_audience``). ``late_installment`` (an overdue registration instalment) still lets them decline."""
-    event = row.event
-    if event.cancelled or event.start <= now:
-        return None
-    if event.pk not in invited:
-        invited[event.pk] = set(attendance.effective_members(event).values_list("pk", flat=True))
-    if row.member_id not in invited[event.pk]:
-        if event.pk not in reasons:
-            reasons[event.pk] = attendance.blocked_members(event)
-        requirements = reasons[event.pk].get(row.member_id) or []
-        if requirements:
-            return "not_invited", {"reason": "requirements", "requirements": [str(name) for name in requirements]}
-        if event.excluded_members.filter(pk=row.member_id).exists():
-            return "not_invited", {"reason": "excluded", "requirements": []}
-        return "not_invited", {"reason": "not_in_audience", "requirements": []}
-    if row.status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED) and attendance.registration_payment_blocked(event, row.member, today=timezone.localdate(now)):
-        return "late_installment", None
-    return None
+def _blockers(rows, now):
+    """``{attendance id: (code, detail)}`` for the rows a person cannot answer right now, so the app says why instead of offering buttons that fail.
+    ``not_invited`` carries the reason: an open requirement that blocks this kind of event (``requirements``, with their names), an explicit
+    exclusion (``excluded``) or no longer being in the event's team or group (``not_in_audience``). ``late_installment`` (an overdue registration
+    instalment) still lets them decline. A fixed number of queries however many events there are."""
+    open_rows = [row for row in rows if not row.event.cancelled and row.event.start > now]
+    if not open_rows:
+        return {}
+    events = list({row.event_id: row.event for row in open_rows}.values())
+    audience = attendance.audience_check(events, {row.member_id for row in open_rows})
+    policy = RegistrationSettings.objects.first()
+    today = timezone.localdate(now)
+    overdue = {}  # (member, season) -> bool: the instalment schedule does not depend on the event, only the policy by kind does
+    result = {}
+    for row in open_rows:
+        event, who = row.event, audience[row.event_id]
+        if row.member_id not in who["invited"]:
+            if who["requirements"].get(row.member_id):
+                result[row.pk] = ("not_invited", {"reason": "requirements", "requirements": [str(name) for name in who["requirements"][row.member_id]]})
+            elif row.member_id in who["excluded"]:
+                result[row.pk] = ("not_invited", {"reason": "excluded", "requirements": []})
+            else:
+                result[row.pk] = ("not_invited", {"reason": "not_in_audience", "requirements": []})
+        elif row.status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED) and policy is not None and event.kind in policy.installment_block_kinds:
+            key = (row.member_id, event.season_id)
+            if key not in overdue:
+                overdue[key] = attendance.registration_payment_blocked(event, row.member, today=today)
+            if overdue[key]:
+                result[row.pk] = ("late_installment", None)
+    return result
 
 
 def _home_branding(request, today):
@@ -124,12 +132,12 @@ def portal_home(request):
     now = timezone.now()
     team_ids = TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values("team_id")
     news = member_news().filter(Q(teams__isnull=True) | Q(teams__in=team_ids)).distinct().prefetch_related("teams", "photos")[:12]
-    invited, reasons = {}, {}
-    events = (
+    events = list(
         Attendance.objects.filter(member_id__in=people, event__start__range=(now - timedelta(days=90), now + timedelta(days=90)))
-        .select_related("event__location", "event__opponent")
+        .select_related("event__location", "event__opponent", "member")
         .order_by("event__start", "member_id", "id")
     )
+    blockers = _blockers(events, now)
     fees = ClubMembership.objects.filter(member_id__in=people).select_related("season", "registration_details__batch").prefetch_related("payments")
     invoices = RegistrationBatch.objects.filter(contact=viewer, confirmed_at__isnull=False, cancelled_at__isnull=True, invoice_number__isnull=False)
     sends = list(
@@ -143,7 +151,7 @@ def portal_home(request):
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": request.features.has("shop"),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
-        "events": [_attendance(row, _blocker(row, now, invited, reasons)) for row in events],
+        "events": [_attendance(row, blockers.get(row.pk)) for row in events],
         "officiating": [
             {
                 **_event_display(offer.event), "role": offer.kind, "member_id": offer.member_id,

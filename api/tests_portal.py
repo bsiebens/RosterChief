@@ -149,3 +149,23 @@ class PortalProfileTests(ParentPortalTests):
         [row] = self.call("get", "/portal/home", token).json()["events"]
         self.assertEqual(row["blocked_detail"]["reason"], "excluded")
         self.assertEqual(self.call("post", f"/portal/attendance/{row['id']}", token, {"status": "present"}).status_code, 403)
+
+
+    def test_home_does_a_fixed_number_of_lookups_however_many_events_there_are(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        token = self.token()
+
+        def count():
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(self.call("get", "/portal/home", token).status_code, 200)
+            return len(queries)
+
+        before = count()
+        with schema_context(self.club.schema_name):
+            for day in range(2, 12):
+                event = Event.objects.create(title=f"Training {day}", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=day))
+                event.invited_members.add(self.child)
+        after = count()
+        self.assertLessEqual(after - before, 2, f"{before} lookups with 1 event, {after} with 11")
