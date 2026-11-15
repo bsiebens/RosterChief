@@ -169,3 +169,37 @@ class PortalProfileTests(ParentPortalTests):
                 event.invited_members.add(self.child)
         after = count()
         self.assertLessEqual(after - before, 2, f"{before} lookups with 1 event, {after} with 11")
+
+    def test_event_extras_for_the_family_lineup_tasks_attachments_and_claiming(self):
+        from django.core.files.base import ContentFile
+
+        from events.models import EventAttachment, EventTask, Lineup, LineupSelection
+        from teams.models import Team
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            team = Team.objects.create(name="U14")
+            lineup = Lineup.objects.create(event=event, team=team, published_at=timezone.now())
+            LineupSelection.objects.create(lineup=lineup, member=self.child)
+            task = EventTask.objects.create(event=event, title="Timekeeper", needed_quantity=1)
+            attachment = EventAttachment(event=event, name="info.pdf", size=3)
+            attachment.file.save("info.pdf", ContentFile(b"abc"), save=True)
+        extras = self.call("get", f"/portal/me/../events/{event.pk}", token)
+        self.assertEqual(extras.status_code, 404)  # not under /me
+        extras = self.call("get", f"/portal/events/{event.pk}", token).json()
+        self.assertEqual([p["mine"] for p in extras["lineup"]["players"]], [True])
+        self.assertEqual([t["title"] for t in extras["tasks"]], ["Timekeeper"])
+        self.assertEqual(extras["attachments"][0]["name"], "info.pdf")
+        # open on Home until someone takes it
+        self.assertEqual([t["title"] for t in self.call("get", "/portal/home", token).json()["tasks"]], ["Timekeeper"])
+        claimed = self.call("post", f"/portal/events/{event.pk}/tasks/{task.pk}/claim", token)
+        self.assertEqual((claimed.status_code, claimed.json()["claimed_by_me"]), (200, True))
+        self.assertEqual(self.call("get", "/portal/home", token).json()["tasks"], [])
+        self.assertEqual(self.call("delete", f"/portal/events/{event.pk}/tasks/{task.pk}/claim", token).json()["claimed_by_me"], False)
+        download = Client().get(f"/api/v1/portal/events/{event.pk}/attachments/{attachment.pk}/download", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=token)
+        self.assertEqual((download.status_code, b"".join(download.streaming_content)), (200, b"abc"))
+        # an event the family has nothing to do with stays invisible
+        with schema_context(self.club.schema_name):
+            stranger = Event.objects.create(title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=3))
+        self.assertEqual(self.call("get", f"/portal/events/{stranger.pk}", token).status_code, 404)

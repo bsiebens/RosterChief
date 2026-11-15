@@ -59,10 +59,10 @@
 		return [...next.values()];
 	});
 	const needsReply = $derived(events.filter((event) => ['no_response', 'maybe'].includes(event.status) && canReply(event) && !nextEvents.some((rows) => rows.some((row) => row.id === event.id))));
-	const upcomingWeek = $derived.by(() => {
+	const upcomingTwoWeeks = $derived.by(() => {
 		const now = new Date();
 		const end = new Date(now);
-		end.setDate(end.getDate() + 7);
+		end.setDate(end.getDate() + 14);
 		const seen = new Set(nextEvents.map(([event]) => event.event_id));
 		return events.filter((event) => {
 			const start = new Date(event.start);
@@ -232,11 +232,11 @@
 {/snippet}
 
 {#snippet week()}
-	{#if upcomingWeek.length}
-		<section class="card card-body" aria-label={t('portal.next_seven_days')}>
-			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_seven_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
+	{#if upcomingTwoWeeks.length}
+		<section class="card card-body" aria-label={t('portal.next_fourteen_days')}>
+			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
-				{#each upcomingWeek as event (event.event_id)}
+				{#each upcomingTwoWeeks as event (event.event_id)}
 					<a class="flex items-center gap-3 py-2.5 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
 						<PortalEventDate start={event.start} />
 						<span class="size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>

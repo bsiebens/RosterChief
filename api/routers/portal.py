@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from django.db.models import Count, Q
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name
 from ninja import Field, Router, Schema
@@ -14,14 +14,17 @@ from ninja.errors import HttpError
 from api.auth import CookieAuth, TokenAuth
 from api.routers.public_forms import _field as form_field
 from api.routers.public_news import public_news_item
-from events.models import Attendance, Event, Season
+from events.models import Attendance, Event, EventAttachment, EventTask, Lineup, LineupSelection, Season
+from events.services import attachments as attachment_svc
 from events.services import attendance, officiating_invitations, referees
+from events.services import tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
 from formbuilder.models import FormSend
 from formbuilder.services import audience
 from formbuilder.services.submission import submit_form
 from members.models import ClubMembership, Member
 from members.services import access, memberships
+from members.services.errors import Invalid
 from news.services import member_news
 from registration.models import RegistrationBatch, RegistrationSettings
 from registration.services import installments, notifications
@@ -152,6 +155,7 @@ def portal_home(request):
         "shop_enabled": request.features.has("shop"),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
         "events": [_attendance(row, blockers.get(row.pk)) for row in events],
+        "tasks": _open_tasks(viewer, people, events, now),
         "officiating": [
             {
                 **_event_display(offer.event), "role": offer.kind, "member_id": offer.member_id,
@@ -247,6 +251,113 @@ def portal_submit_form(request, send_id: UUID, member_id: UUID):
     viewer, member, send = _form_for(request, send_id, member_id)
     submit_form(send, member, request.POST, files=request.FILES, submitted_by=viewer)
     return 201, {"submitted": True}
+
+
+def _task_out(task, me_id):
+    claims = list(task.claims.all())
+    return {
+        "id": task.pk, "title": task.title, "description": task.description, "needed": task.needed_quantity, "claimed": len(claims),
+        "open_slots": max(task.needed_quantity - len(claims), 0), "claimed_by_me": any(claim.member_id == me_id for claim in claims),
+        "claimed_by": [task_svc.claim_label_for(claim.member) for claim in claims],
+    }
+
+
+def _open_tasks(viewer, people, rows, now):
+    """Tasks of the upcoming events the family is invited to that still need someone and that this person has not taken: shown on Home so they can be claimed."""
+    events = {row.event_id: row.event for row in rows if row.event.start > now and not row.event.cancelled and row.event.start < now + timedelta(days=60)}
+    if not events:
+        return []
+    tasks = EventTask.objects.filter(event_id__in=events).prefetch_related("claims").order_by("event__start", "created")
+    out = []
+    for task in tasks:
+        claims = list(task.claims.all())
+        if len(claims) >= task.needed_quantity or any(claim.member_id == viewer.pk for claim in claims):
+            continue
+        event = events[task.event_id]
+        out.append({"id": task.pk, "event_id": event.pk, "event_title": event.title, "start": event.start, "title": task.title, "open_slots": task.needed_quantity - len(claims)})
+    return out
+
+
+def _visible_event(request, event_id):
+    """The event if this person or one of their children has an answer or an officiating invitation on it, plus whether they are in its audience."""
+    viewer = _viewer(request)
+    event = Event.objects.select_related("location", "opponent").filter(pk=event_id).first()
+    if event is None:
+        raise HttpError(404, "Not found.")
+    people = _people(viewer)
+    in_audience = Attendance.objects.filter(event=event, member_id__in=people).exists()
+    if not in_audience and not any(offer.event_id == event.pk for offer in officiating_invitations.opportunities(people, now=timezone.now())):
+        raise HttpError(404, "Not found.")
+    return viewer, people, event, in_audience
+
+
+@router.get("/events/{event_id}", summary="What the family can see of one event: the published line-up, the tasks and the attachments")
+def event_extras(request, event_id: UUID):
+    viewer, people, event, in_audience = _visible_event(request, event_id)
+    if not in_audience:
+        return {"lineup": None, "tasks": [], "attachments": []}
+    lineup = Lineup.objects.filter(event=event, published_at__isnull=False).select_related("team").first()
+    lineup_out = None
+    if lineup is not None:
+        selected = list(LineupSelection.objects.filter(lineup=lineup).select_related("member"))
+        numbers = {row.member_id: row.jersey_number for row in TeamMembership.objects.filter(team=lineup.team, season=attendance.resolve_season(event), member_id__in=[sel.member_id for sel in selected])}
+        counts = {"going": 0, "out": 0, "waiting": 0}
+        for status in Attendance.objects.filter(event=event).values_list("status", flat=True):
+            key = "going" if status in ("present", "selected") else "out" if status in ("absent", "excused", "not_selected") else "waiting"
+            counts[key] += 1
+        lineup_out = {
+            "players": sorted(
+                ({"id": sel.member_id, "name": sel.member.last_name or sel.member.first_name, "number": numbers.get(sel.member_id), "mine": sel.member_id in people} for sel in selected),
+                key=lambda player: (player["number"] is None, player["number"] or 0, player["name"]),
+            ),
+            **counts,
+        }
+    tasks = [_task_out(task, viewer.pk) for task in task_svc.list_tasks(request.user, event)]
+    files = [{"id": a.pk, "name": a.name, "size": a.size, "download_url": f"/api/v1/portal/events/{event.pk}/attachments/{a.pk}/download"} for a in attachment_svc.list_attachments(request.user, event)]
+    return {"lineup": lineup_out, "tasks": tasks, "attachments": files}
+
+
+def _task_of(request, event_id, task_id):
+    viewer, people, event, in_audience = _visible_event(request, event_id)
+    task = EventTask.objects.filter(pk=task_id, event=event).first()
+    if task is None or not in_audience:
+        raise HttpError(404, "Not found.")
+    return viewer, task
+
+
+@router.post("/events/{event_id}/tasks/{task_id}/claim", summary="Take a slot of a task")
+def claim_task(request, event_id: UUID, task_id: UUID):
+    viewer, task = _task_of(request, event_id, task_id)
+    try:
+        task_svc.claim_task(request.user, task, viewer)
+    except Invalid as error:
+        raise HttpError(422, str(error)) from error
+    task = EventTask.objects.prefetch_related("claims__member").get(pk=task.pk)
+    return _task_out(task, viewer.pk)
+
+
+@router.delete("/events/{event_id}/tasks/{task_id}/claim", summary="Give a slot back")
+def unclaim_task(request, event_id: UUID, task_id: UUID):
+    viewer, task = _task_of(request, event_id, task_id)
+    task_svc.unclaim_member(request.user, task, viewer)
+    task = EventTask.objects.prefetch_related("claims__member").get(pk=task.pk)
+    return _task_out(task, viewer.pk)
+
+
+@router.get("/events/{event_id}/attachments/{attachment_id}/download", summary="Download a file of an event")
+def download_attachment(request, event_id: UUID, attachment_id: UUID):
+    _viewer_, _people_, event, in_audience = _visible_event(request, event_id)
+    attachment = EventAttachment.objects.filter(pk=attachment_id, event=event).select_related("event").first()
+    if attachment is None or not in_audience:
+        raise HttpError(404, "Not found.")
+    try:
+        handle = attachment_svc.open_attachment(attachment, actor=request.user)
+    except FileNotFoundError:
+        raise HttpError(404, "The file is gone.") from None
+    response = FileResponse(handle, as_attachment=True, filename=attachment.name, content_type=attachment_svc.DOWNLOAD_CONTENT_TYPE)
+    for header, value in attachment_svc.DOWNLOAD_HEADERS.items():
+        response[header] = value
+    return response
 
 
 @router.get("/coach")
