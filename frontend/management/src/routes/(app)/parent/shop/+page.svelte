@@ -353,14 +353,14 @@
 <dialog bind:this={optionsDialog} class="portal-modal" aria-label={choosing?.name ?? t('portal.shop.options')} onclose={() => (choosing = null)} onclick={(e) => { if (e.target === optionsDialog) optionsDialog?.close(); }}>
 	{#if choosing}
 		{@const product = choosing}
-		<form class="grid gap-4 p-5" onsubmit={(e) => { e.preventDefault(); addChosen(); }}>
+		<form class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5" onsubmit={(e) => { e.preventDefault(); addChosen(); }}>
 			<div class="flex items-start gap-3">
 				{#if product.image_url}<img class="size-16 shrink-0 rounded object-cover" src={product.image_url} alt="" />{:else}<div class="grid size-16 shrink-0 place-items-center rounded bg-subhead text-dim"><Package size={24} aria-hidden="true" /></div>{/if}
 				<div class="min-w-0 flex-1"><h2 class="font-display text-xl font-extrabold text-ink uppercase">{product.name}</h2>{#if product.description}<p class="line-clamp-3 text-sm whitespace-pre-line text-muted">{product.description}</p>{/if}</div>
-				<b class="font-display text-xl text-ink tabular-nums">{money(chosenVariant?.effective_price ?? product.price)}</b>
+				<b class="shrink-0 font-display text-xl text-ink tabular-nums">{money(chosenVariant?.effective_price ?? product.price)}</b>
 			</div>
 			{#if product.variants.length}
-				<label class="grid gap-1 text-sm font-semibold">{t('portal.shop.option')}
+				<label class="grid min-w-0 gap-1 text-sm font-semibold">{t('portal.shop.option')}
 					<select class="select w-full font-normal" bind:value={draft.variant} required>
 						<option value="" disabled>{t('portal.shop.option')}</option>
 						{#each product.variants as item (item.id)}<option value={item.id} disabled={!item.in_stock}>{item.name} · {money(item.effective_price)}{!item.in_stock ? ` · ${t('shop.out_of_stock')}` : ''}</option>{/each}
@@ -368,7 +368,7 @@
 				</label>
 			{/if}
 			{#if catalog.people.length > 1}
-				<label class="grid gap-1 text-sm font-semibold">{t('portal.shop.recipient')}
+				<label class="grid min-w-0 gap-1 text-sm font-semibold">{t('portal.shop.recipient')}
 					<select class="select w-full font-normal" bind:value={draft.beneficiary}>
 						<option value="">{buyerName(catalog.viewer_id)}</option>
 						{#each catalog.people.filter((item) => item.id !== catalog.viewer_id) as person (person.id)}<option value={person.id}>{person.name}</option>{/each}
@@ -385,11 +385,11 @@
 				<p class="flex items-center gap-2 rounded-box border border-info-border bg-info-bg px-3 py-2 text-xs text-info-text"><Clock size={14} class="shrink-0" aria-hidden="true" />{t('shop.window.summary', { deadline: calendarDay(product.next_ordering_window.deadline), estimated_delivery: calendarDay(product.next_ordering_window.estimated_delivery) })}</p>
 			{/if}
 			{#each product.files as file (file.url)}<a href={file.url} class="flex w-fit items-center gap-1.5 text-xs text-muted hover:text-ink" target="_blank" rel="noopener"><Paperclip size={13} aria-hidden="true" />{file.title}</a>{/each}
-			<div class="flex items-center gap-3 border-t border-line pt-4">
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-3 border-t border-line pt-4">
 				<label class="flex items-center gap-2 text-sm font-semibold">{t('portal.shop.quantity')}<input class="input w-20 font-normal" type="number" min="1" max="999" step="1" bind:value={draft.quantity} /></label>
-				<span class="flex-1"></span>
-				<button class="btn btn-outline" type="button" onclick={() => optionsDialog?.close()}>{t('common.cancel')}</button>
-				<button class="btn btn-primary" type="submit" disabled={!canAdd}>{t('portal.shop.add')}</button>
+				<span class="hidden flex-1 sm:block"></span>
+				<button class="btn btn-outline max-sm:flex-1" type="button" onclick={() => optionsDialog?.close()}>{t('common.cancel')}</button>
+				<button class="btn btn-primary max-sm:flex-1" type="submit" disabled={!canAdd}>{t('portal.shop.add')}</button>
 			</div>
 		</form>
 	{/if}

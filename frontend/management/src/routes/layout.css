@@ -1400,6 +1400,7 @@ textarea[name="note"] {
     max-width: 42rem;
     max-height: min(92dvh, 60rem);
     overflow: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
     border: 1px solid var(--color-edge);
     border-radius: var(--radius-box) var(--radius-box) 0 0;
