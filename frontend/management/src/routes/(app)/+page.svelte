@@ -40,7 +40,7 @@
 		{@const o = data.overview}
 		<div class="grid gap-4">
 			<KpiBar overview={o} />
-			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] xl:items-start">
+			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] xl:items-stretch">
 				<div class="grid min-w-0 gap-4">
 					<NeedsAttention overview={o} noTypeCount={data.noTypeCount} shopClosed={data.shopClosed} registrationClosed={data.registrationClosed} shopHref={data.me?.can_manage_shop_orders ? '/shop/settings' : '/shop'} />
 					<SignupsChart months={o.signups} />
@@ -51,7 +51,7 @@
 						</div>
 					{/if}
 				</div>
-				<div class="grid min-w-0 gap-4">
+				<div class="grid min-w-0 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
 					<UpcomingCard events={data.upcoming ?? []} />
 					<NewsCard items={data.news ?? []} pending={data.newsPending ?? 0} />
 				</div>
