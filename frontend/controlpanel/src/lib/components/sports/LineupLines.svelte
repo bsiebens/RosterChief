@@ -23,6 +23,8 @@
 		[list[i], list[j]] = [list[j], list[i]];
 	}
 	const addGroup = () => groups.push({ key: '', label: '', slots: [{ key: '', label: '' }] });
+	// The preset is an ice hockey layout: only offered for an ice hockey sport.
+	const isIceHockey = $derived(/ice[\s_-]*hockey|ijshockey|hockey[\s_-]*sur[\s_-]*glace/i.test(`${sport.name} ${sport.slug}`));
 	const preset = () => {
 		groups = copy(HOCKEY_PRESET);
 		saved = false;
@@ -84,7 +86,7 @@
 
 		<div class="flex flex-wrap items-center gap-2">
 			<button type="button" class="btn btn-outline btn-sm gap-1" onclick={addGroup}><Plus size={13} aria-hidden="true" /> Add group</button>
-			<button type="button" class="btn btn-outline btn-sm" onclick={preset}>Use the ice hockey preset</button>
+			{#if isIceHockey}<button type="button" class="btn btn-outline btn-sm" onclick={preset}>Use the ice hockey preset</button>{/if}
 			<button type="button" class="btn btn-primary btn-sm ml-auto" disabled={busy || !dirty} onclick={save}>Save</button>
 		</div>
 	</div>

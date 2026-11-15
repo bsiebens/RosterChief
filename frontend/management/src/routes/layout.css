@@ -1393,7 +1393,9 @@ textarea[name="note"] {
     color: var(--portal-hero-content);
 }
 
-.portal-ui .portal-sheet {
+:root { --portal-panel: #ffffff; } /* the sheets and dialogs also open inside the manage app, which is not a .portal-ui page */
+
+.portal-sheet {
     inset: auto 0 0;
     margin: 0 auto;
     width: 100%;
@@ -1409,7 +1411,7 @@ textarea[name="note"] {
     padding-bottom: env(safe-area-inset-bottom);
 }
 
-.portal-ui .portal-modal {
+.portal-modal {
     margin: auto;
     width: min(44rem, calc(100% - 2rem));
     max-height: min(90dvh, 60rem);
@@ -1428,8 +1430,8 @@ textarea[name="note"] {
 
 @media (min-width: 48rem) {
     /* From tablet width the sheet is a drawer on the right, as in the approved design. */
-    .portal-ui .portal-sheet { inset: 0 0 0 auto; margin: 0; width: min(30rem, 100%); max-width: none; height: 100dvh; max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
-    .portal-ui .portal-sheet.wide { width: min(46rem, 100%); }
+    .portal-sheet { inset: 0 0 0 auto; margin: 0; width: min(30rem, 100%); max-width: none; height: 100dvh; max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
+    .portal-sheet.wide { width: min(46rem, 100%); }
 }
 
 @media (prefers-color-scheme: dark) {
