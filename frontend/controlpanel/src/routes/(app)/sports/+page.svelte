@@ -6,6 +6,7 @@
 	import Competitions from '#lib/components/sports/Competitions.svelte';
 	import RefereeKind from '#lib/components/sports/RefereeKind.svelte';
 	import SportDialogs from '#lib/components/sports/SportDialogs.svelte';
+	import LineupLines from '#lib/components/sports/LineupLines.svelte';
 	import SportList from '#lib/components/sports/SportList.svelte';
 	import { NO_SPORT, sportInUse } from '#lib/sports.ts';
 
@@ -60,6 +61,8 @@
 				<Kpi label="Competitions" value={sport.competition_count} />
 				<Kpi label="Referee types" value={sport.referee_type_count} />
 			</div>
+
+			{#key sport.id}<LineupLines {sport} onchange={refresh} />{/key}
 
 			<div class="card">
 				<div class="card-body gap-4">

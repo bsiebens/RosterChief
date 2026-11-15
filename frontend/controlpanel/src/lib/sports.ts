@@ -1,4 +1,25 @@
-export type Sport = { id: string; name: string; slug: string; club_count: number; competition_count: number; referee_type_count: number };
+export type LineupSlot = { key: string; label: string };
+export type LineupGroup = { key: string; label: string; slots: LineupSlot[] };
+export type Sport = {
+	id: string;
+	name: string;
+	slug: string;
+	club_count: number;
+	competition_count: number;
+	referee_type_count: number;
+	lineup_slots_enabled: boolean;
+	lineup_template: LineupGroup[];
+};
+
+/** A sensible ice hockey template: two goalies and four lines of five. */
+export const HOCKEY_PRESET: LineupGroup[] = [
+	{ key: 'goalies', label: 'Goalies', slots: [{ key: 'g1', label: 'G1' }, { key: 'g2', label: 'G2' }] },
+	...[1, 2, 3, 4].map((n) => ({
+		key: `line${n}`,
+		label: `Line ${n}`,
+		slots: ['LW', 'C', 'RW', 'LD', 'RD'].map((l) => ({ key: l.toLowerCase(), label: l }))
+	}))
+];
 export type RefereeKind = 'referee' | 'official';
 export type RefereeType = { id: string; sport_id: string; kind: RefereeKind; name: string; ordering: number };
 export type Competition = { id: string; name: string; module: string; sport_id: string | null; sport_name: string | null; feature_code: string | null };
