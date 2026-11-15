@@ -84,6 +84,25 @@ def _attendance(row, blocked=None):
     return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail}
 
 
+def _requirement_rows(people, rows, now):
+    """Answers that do not exist because an open requirement keeps someone out of an event they belong to.
+
+    The invite sync leaves such people without an attendance row, so the app would never mention the event for them. Here they get a row
+    anyway (``not_invited`` with the names of the requirements), for each coming event of the next 90 days whose audience they are in,
+    so every card of an event lists the whole family and the person sees what to fix. A fixed number of queries."""
+    have = {(row.event_id, row.member_id) for row in rows}
+    events = list(Event.objects.filter(start__gt=now, start__lt=now + timedelta(days=90), cancelled=False).select_related("location", "opponent"))
+    audience = attendance.audience_check(events, set(people))
+    out = []
+    for event in events:
+        for member_id, names in audience.get(event.pk, {}).get("requirements", {}).items():
+            if (event.pk, member_id) in have or not names:
+                continue
+            out.append({**_event_display(event), "id": f"requirement-{event.pk}-{member_id}", "member_id": member_id, "status": "no_response", "note": "",
+                        "blocked": "not_invited", "blocked_detail": {"reason": "requirements", "requirements": [str(name) for name in names]}})
+    return out
+
+
 def _blockers(rows, now):
     """``{attendance id: (code, detail)}`` for the rows a person cannot answer right now, so the app says why instead of offering buttons that fail.
     ``not_invited`` carries the reason: an open requirement that blocks this kind of event (``requirements``, with their names), an explicit
@@ -154,7 +173,10 @@ def portal_home(request):
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": request.features.has("shop"),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
-        "events": [_attendance(row, blockers.get(row.pk)) for row in events],
+        "events": sorted(
+            [_attendance(row, blockers.get(row.pk)) for row in events] + _requirement_rows(people, events, now),
+            key=lambda row: (row["start"], str(row["member_id"])),
+        ),
         "tasks": _open_tasks(viewer, people, events, now),
         "officiating": [
             {

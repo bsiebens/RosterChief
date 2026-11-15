@@ -16,7 +16,7 @@
 					href="?tab={s}"
 					aria-current={active === s ? 'step' : undefined}
 					class="flex h-full items-start gap-3 rounded-lg border p-3 transition-colors {active === s ? 'border-ink bg-surface' : 'border-line hover:border-ink'}">
-					<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-display text-sm font-extrabold {i < idx ? 'bg-success text-white' : active === s ? 'bg-ink text-white' : 'border border-line text-muted'}">
+					<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-display text-sm font-extrabold {i < idx ? 'border border-ink bg-white text-ink' : active === s ? 'bg-ink text-white' : 'border border-line text-muted'}">
 						{#if i < idx}<Check size={16} aria-hidden="true" />{:else}{i + 1}{/if}
 					</span>
 					<span class="min-w-0">

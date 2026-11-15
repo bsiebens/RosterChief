@@ -70,7 +70,10 @@
 						<SearchSelect {items} bind:value={l.item} label={t('shop.col.product')} placeholder={t('shop.inv.pick_product')} error={lineErr(l) && !l.item ? lineErr(l) : undefined} />
 					</div>
 					<Field label={t('shop.inv.quantity')} type="number" min="1" step="1" bind:value={l.qty} error={l.item ? lineErr(l) : ''} />
-					<button class="btn btn-ghost btn-square md:mt-9" type="button" aria-label={t('common.delete')} disabled={lines.length === 1} onclick={() => (lines = lines.filter((x) => x.key !== l.key))}><X size={16} /></button>
+					<div class="form-control">
+						<span class="label" aria-hidden="true"><span class="label-text invisible">&nbsp;</span></span>
+						<button class="btn btn-ghost btn-square" type="button" aria-label={t('common.delete')} disabled={lines.length === 1} onclick={() => (lines = lines.filter((x) => x.key !== l.key))}><X size={16} /></button>
+					</div>
 				</div>
 			{/each}
 			<div><button class="btn btn-outline btn-sm gap-2" type="button" onclick={() => lines.push({ key: seq++, item: '', qty: '' })}><Plus size={14} /> {t('shop.inv.add_line')}</button></div>

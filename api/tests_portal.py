@@ -245,3 +245,18 @@ class PortalProfileTests(ParentPortalTests):
             stranger = Event.objects.create(title="Other", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=3))
         self.assertEqual(self.call("put", f"/portal/events/{stranger.pk}/follow", token).status_code, 404)
         self.assertEqual(self.call("get", f"/portal/events/{stranger.pk}/game", token).status_code, 404)
+
+    def test_a_person_held_back_by_a_requirement_still_gets_their_row_on_the_event(self):
+        from events.models import Season
+        from members.models import ClubMembership, OnboardingRequirement
+
+        token = self.token()
+        today = datetime.date.today()
+        with schema_context(self.club.schema_name):
+            season = Season.objects.create(start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
+            ClubMembership.objects.create(member=self.child, season=season, status=ClubMembership.StatusChoices.ACTIVE)
+            OnboardingRequirement.objects.create(name="Medical certificate", blocked_event_kinds=["training"])
+            Attendance.objects.filter(event=self.child_reply.event, member=self.child).delete()  # what the invite sync does to a blocked person
+        [row] = [r for r in self.call("get", "/portal/home", token).json()["events"] if r["member_id"] == str(self.child.pk)]
+        self.assertEqual((row["blocked"], row["blocked_detail"]["reason"], row["blocked_detail"]["requirements"]), ("not_invited", "requirements", ["Medical certificate"]))
+        self.assertTrue(row["id"].startswith("requirement-"))
