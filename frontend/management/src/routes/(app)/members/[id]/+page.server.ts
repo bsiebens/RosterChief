@@ -106,6 +106,12 @@ export const actions: Actions = {
 		if (!res.ok) return fail(res.status || 500, { evaluationError: res.message || 'failed' });
 		return { evaluationDeleted: true };
 	},
+	releaseEvaluation: async ({ request, fetch }) => {
+		const form = await request.formData();
+		const res = await api('PUT', `/evaluations/${String(form.get('evaluation_id') ?? '')}/release`, { body: { release: String(form.get('release') ?? ''), public_note: String(form.get('public_note') ?? '') }, f: fetch });
+		if (!res.ok) return fail(res.status || 500, { evaluationError: res.message || 'failed' });
+		return { evaluationReleased: true };
+	},
 	addMembership: async ({ params, request, fetch }) => {
 		const form = await request.formData();
 		const s = (k: string) => String(form.get(k) ?? '').trim();

@@ -11,7 +11,7 @@ export type ChecklistDetail = ChecklistItem & { fields: FieldOut[] };
 export type ChecklistIn = { name: string; description: string; is_active: boolean };
 
 export type Answer = { field_id: string; key: string; label: string; field_type: FieldOut['field_type']; section: string; order: number; is_active: boolean; options: FieldOut['options']; value: unknown };
-export type EvaluationOut = { id: string; checklist: Ref; season: Ref; player: Ref; evaluator: Ref | null; submitted_at: string; answers: Answer[] };
+export type EvaluationOut = { id: string; checklist: Ref; season: Ref; player: Ref; evaluator: Ref | null; submitted_at: string; answers: Answer[]; public_note?: string; release?: '' | 'notes' | 'full'; released_at?: string | null };
 
 export type StatRow = { field: FieldOut; kind: 'numeric' | 'distribution' | 'text'; response_count: number; average: number | null; minimum: number | null; maximum: number | null; distribution: [string, number][]; recent_answers: string[] };
 export type Stats = { season: Ref | null; evaluation_count: number; rows: StatRow[] };

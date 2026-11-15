@@ -6,7 +6,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { api } from '#lib/management-api.ts';
-	import type { CalendarEntry, EventExtras, FollowState, SubmittedForm, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
+	import type { CalendarEntry, EventExtras, FollowState, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
 	import { day, money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
@@ -151,7 +151,6 @@
 		if (result.ok && result.data && extras) extras = { ...extras, follow: result.data };
 		await invalidateAll();
 	}
-	const submittedForms = $derived((data.home?.submitted_forms ?? []).filter((form) => !selected || form.member_id === selected));
 	const totalOpen = $derived(filteredFees.reduce((sum, fee) => sum + Number(fee.balance), 0));
 	const totalPaid = $derived(filteredFees.reduce((sum, fee) => sum + Number(fee.paid), 0));
 	const nextDue = $derived(
@@ -160,13 +159,9 @@
 			.filter((next): next is NonNullable<typeof next> => !!next)
 			.sort((a, b) => a.due_date.localeCompare(b.due_date))[0] ?? null
 	);
-	let submission = $state<SubmittedForm | null>(null);
-	async function openSubmission(id: string) {
-		const result = await api<SubmittedForm>('GET', `/portal/forms/submissions/${id}`);
-		if (result.ok && result.data) submission = result.data;
-	}
 	// From tablet width the Me tab is the profile page with the notification settings beside it; on a phone it stays the short list of links.
 	$effect(() => {
+		if (tab === 'forms') void goto('/parent/forms', { replaceState: true });
 		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/parent/profile', { replaceState: true });
 	});
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
@@ -252,36 +247,6 @@
 	<OfficiatingRow {offer} name={memberName(offer.member_id)} photo={people.find((person) => person.id === offer.member_id)?.photo_url} busy={!!busy} error={errors[offerKey(offer)] ?? ''} onreply={(available) => officiate(offer, available)} />
 {/snippet}
 
-{#snippet formsList()}
-	<section class="card" aria-labelledby="forms-title">
-		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="forms-title">{t('portal.forms_open')}</h2>{#if filteredForms.length}<span class="badge badge-sm badge-error ml-auto">{t('portal.forms_to_fill', { n: filteredForms.length })}</span>{/if}</div>
-		<div class="divide-y divide-rule">
-			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-				<div class="flex min-h-16 items-center gap-3 px-5 py-3">
-					<ClubCrest name={memberName(form.member_id)} logoUrl={people.find((person) => person.id === form.member_id)?.photo_url} size={36} />
-					<span class="min-w-0 flex-1"><b class="block text-ink">{form.title}</b><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span>
-					<a class="btn btn-primary btn-sm" href="/parent/forms/{form.id}/{form.member_id}">{t('portal.form_fill')}</a>
-				</div>
-			{:else}
-				<p class="flex items-center gap-2 px-5 py-4 text-sm text-muted"><CircleCheck size={16} class="text-ok" aria-hidden="true" />{t('portal.no_forms')}</p>
-			{/each}
-		</div>
-	</section>
-	<section class="card" aria-labelledby="submitted-title">
-		<div class="card-h"><CircleCheck size={17} aria-hidden="true" /><h2 id="submitted-title">{t('portal.forms_submitted')}</h2></div>
-		<div class="divide-y divide-rule">
-			{#each submittedForms as form (form.id)}
-				<button type="button" class="flex min-h-14 w-full items-center gap-3 px-5 py-2 text-left hover:bg-subhead" onclick={() => openSubmission(form.id)}>
-					<span class="size-2 shrink-0 rounded-full bg-ok"></span>
-					<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)} · {t('portal.submitted_on', { date: formatDateTime(form.submitted_at) })}</span></span>
-					<span class="link text-sm font-semibold">{t('portal.view_answers')}</span>
-				</button>
-			{:else}
-				<p class="px-5 py-4 text-sm text-muted">{t('portal.forms_none_submitted')}</p>
-			{/each}
-		</div>
-	</section>
-{/snippet}
 
 {#snippet payments()}
 	<div class="grid gap-3 md:grid-cols-3">
@@ -418,7 +383,7 @@
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(offer.event_id)} data-sveltekit-reset="false">
 					<Whistle size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{offer.title}</span><span class="block text-xs text-muted">{t(`portal.crew_${offer.role}`)} · {memberName(offer.member_id)} · {formatDateTime(offer.start)}</span></span>
-					<span class="badge badge-outline">{t('portal.crew_invited')}</span>
+					<span class="badge badge-warn">{t('portal.crew_invited')}</span>
 				</a>
 			{/each}
 			{#each needsReply.slice(0, 4) as event (event.id)}
@@ -433,7 +398,7 @@
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
-					<span class="badge badge-outline">{t('portal.forms')}</span>
+					<span class="badge badge-warn">{t('portal.forms')}</span>
 				</a>
 			{/each}
 			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
@@ -570,7 +535,6 @@
 		<div class="grid gap-4">
 			<section class="card divide-y divide-rule overflow-hidden">
 				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent?tab=payments"><Wallet size={17} aria-hidden="true" />{t('portal.payments')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
-				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent?tab=forms"><ClipboardList size={17} aria-hidden="true" />{t('portal.forms')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
 				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/account/security"><KeyRound size={17} aria-hidden="true" />{t('shell.menu.security')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
 			</section>
 			<InstallPush />
@@ -584,25 +548,6 @@
 			{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
 		</div>
 	</div>
-{:else if tab === 'forms'}
-	{@render peoplePicker()}
-	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-2">
-		<div class="grid min-w-0 content-start gap-4">{@render formsList()}</div>
-	</div>
-	<Sheet open={!!submission} title={submission?.title ?? t('portal.forms')} onclose={() => (submission = null)}>
-		{#if submission}
-			<div class="grid gap-3 p-4 pt-0">
-				<h2 class="font-display text-xl font-extrabold text-ink uppercase">{submission.title}</h2>
-				<p class="text-xs text-muted">{memberName(submission.member_id)} · {t('portal.submitted_on', { date: formatDateTime(submission.submitted_at) })}</p>
-				<dl class="divide-y divide-rule rounded-box border border-line">
-					{#each submission.answers as answer, i (i)}
-						<div class="grid gap-0.5 px-4 py-2.5"><dt class="text-xs text-muted">{answer.label}</dt><dd class="font-semibold text-ink">{Array.isArray(answer.value) ? answer.value.join(', ') : answer.value === true ? t('common.yes') : answer.value === false ? t('common.no') : (answer.value ?? '–')}</dd></div>
-					{/each}
-				</dl>
-			</div>
-		{/if}
-	</Sheet>
-
 {:else}
 	<div class="flex flex-wrap items-baseline justify-between gap-2 md:hidden">
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
@@ -618,12 +563,12 @@
 					<article class="card overflow-hidden">
 						<div class="grid xl:grid-cols-[1.1fr_1fr]">
 							<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
-							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-white xl:border-t-0 xl:border-l xl:px-5">
+							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-sidebar-fg xl:border-t-0 xl:border-l xl:px-5">
 								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
 								<div class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-1">
 									{#each rows as row (row.id)}{@render rsvp(row, true, true)}{/each}
 								</div>
-								<a class="inline-flex min-h-11 items-center text-sm font-semibold text-white hover:underline" href={eventLink(event.event_id)} data-sveltekit-reset="false">{t('portal.event_details')} →</a>
+								<a class="inline-flex min-h-11 items-center text-sm font-semibold text-sidebar-fg hover:underline" href={eventLink(event.event_id)} data-sveltekit-reset="false">{t('portal.event_details')} →</a>
 							</div>
 						</div>
 					</article>

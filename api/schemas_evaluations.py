@@ -48,6 +48,8 @@ class EvaluateIn(Schema):
     season_id: uuid.UUID | None = None
     #: {criterion key: value}; a multichoice value is a list, a checkbox a boolean.
     answers: dict[str, Any] = {}
+    #: Written for the player and their family; shown only when the evaluation is released.
+    public_note: str = ""
 
 
 class AnswerOut(Schema):
@@ -70,6 +72,15 @@ class EvaluationOut(Schema):
     evaluator: MemberRef | None = None
     submitted_at: datetime.datetime
     answers: list[AnswerOut]
+    public_note: str = ""
+    #: "" (private), "notes" or "full".
+    release: str = ""
+    released_at: datetime.datetime | None = None
+
+
+class ReleaseIn(Schema):
+    release: str
+    public_note: str | None = None
 
 
 class PlayerEvaluationsOut(Schema):

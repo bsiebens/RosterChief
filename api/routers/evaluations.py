@@ -27,6 +27,7 @@ from api.schemas_evaluations import (
     OutcomeOut,
     PlayerEvaluationsOut,
     PlayerListOut,
+    ReleaseIn,
     ReviewOut,
     SeasonOut,
     StatsOut,
@@ -111,7 +112,7 @@ def _named(obj) -> dict:
 
 
 def _field(f) -> dict:
-    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options, "min_value": f.min_value, "max_value": f.max_value}
+    return {"id": f.pk, "key": f.key, "label": f.label, "field_type": f.field_type, "required": f.required, "help_text": f.help_text, "section": f.section, "order": f.order, "is_active": f.is_active, "options": f.options, "min_value": f.min_value, "max_value": f.max_value, "visible_to_family": f.visible_to_family}
 
 
 def _checklist_item(c) -> dict:
@@ -127,6 +128,7 @@ def _evaluation(e) -> dict:
     answers = sorted(e.submission.answers.all(), key=lambda a: a.field.order)
     return {
         "id": e.pk, "checklist": _named(e.checklist), "season": _named(e.season), "player": _ref(e.player), "evaluator": _ref(e.submission.submitted_by), "submitted_at": e.submission.submitted_at,
+        "public_note": e.public_note, "release": e.release, "released_at": e.released_at,
         "answers": [
             {"field_id": a.field_id, "key": a.field.key, "label": a.field.label, "field_type": a.field.field_type, "section": a.field.section, "order": a.field.order, "is_active": a.field.is_active, "options": a.field.options, "value": a.value}
             for a in answers
@@ -204,7 +206,7 @@ def evaluate(request, checklist_id: uuid.UUID, payload: EvaluateIn):
     _execute(request)
     checklist = _checklist(checklist_id)
     player = _player(request, payload.player_id)
-    evaluation = svc.submit_evaluation(request.user, checklist, player, _season(payload.season_id), payload.answers)
+    evaluation = svc.submit_evaluation(request.user, checklist, player, _season(payload.season_id), payload.answers, payload.public_note)
     return 201, _evaluation(svc.evaluations_queryset().get(pk=evaluation.pk))
 
 
@@ -213,6 +215,16 @@ def player_evaluations(request, player_id: uuid.UUID):
     _execute(request)
     rows = list(svc.player_evaluations(_player(request, player_id)))
     return {"count": len(rows), "results": [_evaluation(e) for e in rows]}
+
+
+@router.put("/{evaluation_id}/release", response=EvaluationOut, summary="Share an evaluation with the player: not at all, the public note only, or the note and every score", operation_id="release_player_evaluation")
+def release(request, evaluation_id: uuid.UUID, payload: ReleaseIn):
+    _execute(request)
+    evaluation = svc.evaluations_queryset().filter(pk=evaluation_id).first()
+    if evaluation is None:
+        raise HttpError(404, "Not found.")
+    svc.release_evaluation(request.user, evaluation, payload.release, payload.public_note)
+    return _evaluation(svc.evaluations_queryset().get(pk=evaluation_id))
 
 
 @router.delete("/{evaluation_id}", response={204: None}, summary="Delete an evaluation (its evaluator, or a checklist manager)", operation_id="delete_player_evaluation")

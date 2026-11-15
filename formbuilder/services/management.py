@@ -184,6 +184,8 @@ def apply_fields(form: Form, items: list[dict]) -> Form:
             "label": label, "field_type": field_type, "required": bool(item.get("required", True)), "help_text": item.get("help_text") or "",
             "section": (item.get("section") or "").strip(), "is_active": bool(item.get("is_active", True)), "options": options,
             "min_value": low, "max_value": high,
+            # Unset keeps what the field had; a new field shows its answer to the family unless it is free text (remarks stay with the staff).
+            "visible_to_family": bool(item["visible_to_family"]) if item.get("visible_to_family") is not None else (current.visible_to_family if current else field_type not in (Field.FieldType.TEXT, Field.FieldType.TEXTAREA)),
         }  # fmt: skip
         prepared.append((current, values, key))
     if errors:

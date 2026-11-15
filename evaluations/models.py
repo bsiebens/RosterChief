@@ -50,6 +50,18 @@ class PlayerEvaluation(UUIDModel):
     #: CASCADE: without its submission (the evaluator's answers) there is nothing left to show.
     submission = models.OneToOneField("formbuilder.Submission", on_delete=models.CASCADE, related_name="player_evaluation", verbose_name=_("submission"))
 
+    class Release(models.TextChoices):
+        NONE = "", _("Not shared")
+        NOTES = "notes", _("Notes only")
+        FULL = "full", _("Notes and details")
+
+    #: Written for the player and their family. Shown only once the evaluation is released.
+    public_note = models.TextField(_("public note"), blank=True)
+    #: What the player and their family may see. Evaluations stay private until someone releases them on purpose.
+    release = models.CharField(_("shared with the player"), max_length=8, choices=Release.choices, blank=True, default=Release.NONE)
+    released_at = models.DateTimeField(_("released at"), null=True, blank=True)
+    released_by = models.ForeignKey(Member, on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("released by"))
+
     class Meta:
         verbose_name = _("player evaluation")
         verbose_name_plural = _("player evaluations")

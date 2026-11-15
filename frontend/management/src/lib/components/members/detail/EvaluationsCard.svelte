@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { TrendingUp, ClipboardCheck, Star, Trash2 } from '@lucide/svelte';
+	import { TrendingUp, ClipboardCheck, Eye, Star, Trash2 } from '@lucide/svelte';
 	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
 	import { answerShown, evaluateHref, fmt, num, overall, type ChecklistItem, type EvaluationOut } from '#lib/evaluations.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -103,6 +103,25 @@
 						{#each e.answers.filter((a) => a.field_type === 'textarea' || a.field_type === 'text') as a (a.field_id)}
 							<p class="mt-2 rounded-lg bg-surface p-3 text-sm text-slate"><span class="mb-0.5 block text-xs font-semibold text-muted">{a.label}</span>{String(a.value)}</p>
 						{/each}
+						{#if mayDelete(e)}
+							<form class="mt-3 grid gap-2 rounded-lg border border-line p-3" method="POST" action="?/releaseEvaluation" use:enhance>
+								<input type="hidden" name="evaluation_id" value={e.id} />
+								<p class="flex items-center gap-1.5 text-xs font-semibold text-muted"><Eye size={13} aria-hidden="true" />{t('eval.share.title')}</p>
+								<label class="grid gap-1 text-sm">{t('eval.public_note')}<textarea class="textarea textarea-bordered w-full" name="public_note" rows="2" maxlength="2000">{e.public_note ?? ''}</textarea></label>
+								<div class="flex flex-wrap items-end gap-2">
+									<label class="grid gap-1 text-sm">{t('eval.share.level')}
+										<select class="select select-bordered select-sm" name="release">
+											<option value="" selected={!e.release}>{t('eval.share.none')}</option>
+											<option value="notes" selected={e.release === 'notes'}>{t('eval.share.notes')}</option>
+											<option value="full" selected={e.release === 'full'}>{t('eval.share.full')}</option>
+										</select>
+									</label>
+									<button class="btn btn-outline btn-sm" type="submit">{t('common.save')}</button>
+									{#if e.release}<span class="badge badge-sm badge-success">{t(e.release === 'full' ? 'eval.share.full' : 'eval.share.notes')}</span>{/if}
+								</div>
+								<p class="text-xs text-muted">{t('eval.share.help')}</p>
+							</form>
+						{/if}
 					</li>
 				{/each}
 			</ol>

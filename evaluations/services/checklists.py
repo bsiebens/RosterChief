@@ -10,6 +10,7 @@ audience and response window, which don't apply here. Its ``validate_answers`` i
 """
 
 from django.db import transaction
+from django.utils import timezone
 from django.db.models import Count, Q
 
 from evaluations.models import EvaluationChecklist, PlayerEvaluation
@@ -113,7 +114,7 @@ def _shadow_send(form: Form) -> FormSend:
 
 
 @transaction.atomic
-def submit_evaluation(actor, checklist: EvaluationChecklist, player: Member, season: Season | None, data: dict) -> PlayerEvaluation:
+def submit_evaluation(actor, checklist: EvaluationChecklist, player: Member, season: Season | None, data: dict, public_note: str = "") -> PlayerEvaluation:
     """Validate ``data`` ({criterion key: value}) against the checklist and store the evaluation. Needs
     ``evaluations.execute_evaluations``."""
     access.require_execute_evaluations(actor)
@@ -130,7 +131,7 @@ def submit_evaluation(actor, checklist: EvaluationChecklist, player: Member, sea
         raise Invalid("Score at least one criterion.", {"__all__": ["Score at least one criterion."]})
     submission = Submission.objects.create(send=_shadow_send(checklist.form), member=player, submitted_by=Member.objects.filter(user=actor).first())
     Answer.objects.bulk_create([Answer(submission=submission, field=field, value=value) for field, value in cleaned])
-    return PlayerEvaluation.objects.create(checklist=checklist, player=player, season=season, submission=submission)
+    return PlayerEvaluation.objects.create(checklist=checklist, player=player, season=season, submission=submission, public_note=(public_note or "").strip())
 
 
 @transaction.atomic
@@ -141,6 +142,26 @@ def delete_evaluation(actor, evaluation: PlayerEvaluation) -> None:
     if not ((given_by is not None and given_by.user_id == actor.pk) or access.can_manage_evaluations(actor)):
         raise NotAllowed("You may only delete your own evaluations.")
     evaluation.submission.delete()  # cascades to the evaluation
+
+
+@transaction.atomic
+def release_evaluation(actor, evaluation: PlayerEvaluation, release: str, public_note: str | None = None) -> PlayerEvaluation:
+    """Decide what the player and their family see of an evaluation: nothing, the public note only, or the note and every score.
+    The evaluator who gave it or a checklist manager may do this; the public note can be rewritten at any time."""
+    access.require_execute_evaluations(actor)
+    given_by = evaluation.submission.submitted_by
+    if not ((given_by is not None and given_by.user_id == actor.pk) or access.can_manage_evaluations(actor)):
+        raise NotAllowed("You may only share your own evaluations.")
+    if release not in PlayerEvaluation.Release.values:
+        raise Invalid("Unknown release level.", {"release": ["Choose nothing, notes or details."]})
+    if public_note is not None:
+        evaluation.public_note = public_note.strip()
+    if release != evaluation.release:
+        evaluation.release = release
+        evaluation.released_at = timezone.now() if release else None
+        evaluation.released_by = Member.objects.filter(user=actor).first() if release else None
+    evaluation.save(update_fields=["public_note", "release", "released_at", "released_by", "modified"])
+    return evaluation
 
 
 def player_evaluations(player: Member):

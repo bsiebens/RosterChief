@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { ClipboardList, UserRound, Wallet, Bell } from '@lucide/svelte';
+	import { UserRound, Wallet, Bell } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { activePortalKey, ME_PAGES, portalItems, type PortalMode } from '#lib/portal-nav.ts';
 
@@ -21,7 +21,6 @@
 			<a class="nav-subitem {active === 'profile' ? 'active' : ''}" href="/parent/profile"><UserRound size={14} aria-hidden="true" /> {t('portal.profile')}</a>
 			<a class="nav-subitem {active === 'notifications' ? 'active' : ''}" href="/parent/notifications"><Bell size={14} aria-hidden="true" /> {t('portal.notifications')}</a>
 			<a class="nav-subitem {active === 'payments' ? 'active' : ''}" href="/parent?tab=payments"><Wallet size={14} aria-hidden="true" /> {t('portal.payments')}</a>
-			<a class="nav-subitem {active === 'forms' ? 'active' : ''}" href="/parent?tab=forms"><ClipboardList size={14} aria-hidden="true" /> {t('portal.forms')}</a>
 		{/if}
 	{/each}
 </nav>

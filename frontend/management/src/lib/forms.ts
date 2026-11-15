@@ -21,6 +21,8 @@ export type FieldOut = {
 	order: number;
 	is_active: boolean;
 	options: OptionOut[] | null;
+	/** Evaluation criteria: shown to the player's family when an evaluation is shared in full. */
+	visible_to_family?: boolean;
 	/** Number fields: the lowest / highest answer allowed (the API sends decimals as strings). */
 	min_value?: string | number | null;
 	max_value?: string | number | null;
@@ -134,6 +136,7 @@ export type FieldDraft = {
 	help_text: string;
 	section: string;
 	is_active: boolean;
+	visible_to_family: boolean;
 	options: OptionDraft[];
 	/** Number fields: what was typed in the range boxes ('' = no limit). */
 	min: string;
@@ -145,7 +148,7 @@ const uid = () => `d${++counter}`;
 
 export const optionOf = (o: OptionOut): OptionDraft => (typeof o === 'string' ? { uid: uid(), value: o, label: o, stored: true } : { uid: uid(), value: o.value, label: o.label, stored: true });
 export const blankOption = (): OptionDraft => ({ uid: uid(), value: '', label: '', stored: false });
-export const blankField = (): FieldDraft => ({ uid: uid(), label: '', field_type: 'text', required: false, help_text: '', section: '', is_active: true, options: [], min: '', max: '' });
+export const blankField = (): FieldDraft => ({ uid: uid(), label: '', field_type: 'text', required: false, help_text: '', section: '', is_active: true, visible_to_family: false, options: [], min: '', max: '' });
 /** A stored limit as it is typed: no limit is empty, "1.0000" is 1. */
 const limitText = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : String(Number(v)));
 const limitOf = (text: string) => (text.trim() !== '' && Number.isFinite(Number(text.replace(',', '.'))) ? Number(text.replace(',', '.')) : null);
@@ -160,6 +163,7 @@ export const toDraft = (f: FieldOut): FieldDraft => ({
 	help_text: f.help_text,
 	section: f.section,
 	is_active: f.is_active,
+	visible_to_family: !!f.visible_to_family,
 	options: (f.options ?? []).map(optionOf),
 	min: limitText(f.min_value),
 	max: limitText(f.max_value)
@@ -185,6 +189,7 @@ export function draftToIn(d: FieldDraft): FieldIn {
 		help_text: d.help_text.trim(),
 		section: d.section.trim(),
 		is_active: d.is_active,
+		visible_to_family: d.visible_to_family,
 		options,
 		min_value: d.field_type === 'number' ? limitOf(d.min) : null,
 		max_value: d.field_type === 'number' ? limitOf(d.max) : null

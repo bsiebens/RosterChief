@@ -9,7 +9,7 @@
 	 * ordering never needs a pointer. Removing a stored field only drops it from the list: the server deletes it, or keeps
 	 * it as deactivated when it already has answers. `errors` are keyed `fields.<index>.<name>` as the API reports them.
 	 */
-	let { fields = $bindable(), disabled = false, errors = {}, tried = false, types = FIELD_TYPES }: { fields: FieldDraft[]; disabled?: boolean; errors?: Record<string, string>; tried?: boolean; types?: FieldType[] } = $props();
+	let { fields = $bindable(), disabled = false, errors = {}, tried = false, types = FIELD_TYPES, family = false }: { family?: boolean; fields: FieldDraft[]; disabled?: boolean; errors?: Record<string, string>; tried?: boolean; types?: FieldType[] } = $props();
 	const base = $props.id();
 
 	const err = (i: number, name: string) => errors[`fields.${i}.${name}`] ?? errors[`${i}.${name}`] ?? '';
@@ -36,6 +36,7 @@
 	}
 	function setType(f: FieldDraft, type: FieldDraft['field_type']) {
 		f.field_type = type;
+		if (family && !f.id) f.visible_to_family = type !== 'text' && type !== 'textarea';
 		if (hasOptions(type) && !f.options.length) f.options = [blankOption(), blankOption()];
 	}
 	async function moveOption(f: FieldDraft, i: number, d: -1 | 1) {
@@ -133,6 +134,13 @@
 						<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.required} />
 						{t('forms.field.required')}
 					</label>
+					{#if family}
+						<label class="mt-2 flex w-fit cursor-pointer items-center gap-2 text-sm">
+							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.visible_to_family} />
+							{t('eval.field.family')}
+						</label>
+						<p class="text-xs text-muted">{t('eval.field.family_help')}</p>
+					{/if}
 
 					{#if hasOptions(f.field_type)}
 						<div class="mt-4 grid gap-2 border-t border-rule pt-3" role="group" aria-labelledby="{base}-{f.uid}-opts">

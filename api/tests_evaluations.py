@@ -157,6 +157,25 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         self.assertEqual(self.call("get", "/form-sends").json()["count"], 0)
         self.assertFalse(FormSend.objects.filter(is_active=True).exists())
 
+    def test_release_controls_what_the_player_sees(self):
+        c = self.checklist()
+        body = self.evaluate(c, self.cara, {"skating": "4.5", "remarks": "Fast"}, public_note="Great season").json()
+        self.assertEqual((body["release"], body["public_note"]), ("", "Great season"))
+        shared = lambda: self.call("get", "/portal/evaluations", self.cara_user).json()  # noqa: E731
+        self.assertEqual(shared(), [])  # private until someone releases it
+        # Only the evaluator or a checklist manager may release; Cara cannot, another evaluator-less user cannot.
+        self.assertEqual(self.call("put", f"/evaluations/{body['id']}/release", self.cara_user, {"release": "full"}).status_code, 403)
+        self.assertEqual(self.call("put", f"/evaluations/{body['id']}/release", self.bob_user, {"release": "bogus"}).status_code, 422)
+        r = self.call("put", f"/evaluations/{body['id']}/release", self.bob_user, {"release": "notes", "public_note": "Great season, keep going"})
+        self.assertEqual((r.status_code, r.json()["release"]), (200, "notes"), r.content)
+        row = shared()[0]
+        self.assertEqual((row["release"], row["public_note"], row["answers"]), ("notes", "Great season, keep going", []))
+        self.call("put", f"/evaluations/{body['id']}/release", self.bob_user, {"release": "full"})
+        self.assertEqual({a["label"] for a in shared()[0]["answers"]}, {"Skating"})  # free-text remarks stay with the staff unless marked visible
+        self.call("put", f"/evaluations/{body['id']}/release", self.bob_user, {"release": ""})
+        self.assertEqual(shared(), [])
+        self.assertEqual(self.call("get", "/portal/evaluations", self.ann_user).json(), [])  # never to someone else
+
     def test_evaluate_validation(self):
         c = self.checklist()
         r = self.evaluate(c, self.cara, {"shooting": 3})  # the required "skating" is missing

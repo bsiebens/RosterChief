@@ -140,7 +140,7 @@
 							<p class="text-xs text-muted">{t('eval.card.criteria_desc')}</p>
 						</header>
 						{#if item.evaluation_count}<Alert kind="info">{t('eval.criteria.has_evaluations', { n: item.evaluation_count })}</Alert>{/if}
-						<FieldBuilder bind:fields errors={errs} {tried} {types} />
+						<FieldBuilder bind:fields errors={errs} {tried} {types} family />
 					</section>
 				</form>
 			</div>

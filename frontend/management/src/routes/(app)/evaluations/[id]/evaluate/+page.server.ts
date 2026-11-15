@@ -30,7 +30,7 @@ export const actions: Actions = {
 			const values = f.getAll(key).map(String).filter((x) => x !== '');
 			if (values.length) answers[key.slice(2)] = values.length > 1 ? values : values[0];
 		}
-		const body = { player_id: playerId, season_id: String(f.get('season_id') ?? '') || null, answers };
+		const body = { player_id: playerId, season_id: String(f.get('season_id') ?? '') || null, answers, public_note: String(f.get('public_note') ?? '') };
 		const res = await api<EvaluationOut>('POST', `/evaluations/checklists/${params.id}/evaluations`, { body, f: fetch });
 		if (!res.ok) return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { fields: res.fields, message: res.fields.__all__ || res.message || '', playerId });
 		// Came from a member's page: back to it. From the checklist: stay, ready for the next player.

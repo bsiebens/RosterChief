@@ -110,6 +110,8 @@ class Field(UUIDModel):
     max_value = models.DecimalField(_("maximum value"), max_digits=15, decimal_places=4, null=True, blank=True)
     #: Choice definitions: a list of plain strings, or of ``{"value": ..., "label": ...}`` objects.
     options = models.JSONField(_("options"), blank=True, null=True)
+    #: Evaluation criteria only: whether this answer appears when an evaluation is shared in full with the player and their family.
+    visible_to_family = models.BooleanField(_("visible to the family?"), default=False)
 
     class Meta:
         verbose_name = _("field")

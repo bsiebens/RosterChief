@@ -1,4 +1,4 @@
-import { CalendarDays, House, Newspaper, ShoppingBag, UserRound, Users } from '@lucide/svelte';
+import { CalendarDays, ClipboardList, House, Newspaper, ShoppingBag, UserRound, Users } from '@lucide/svelte';
 
 export type PortalMode = 'parent' | 'coach';
 export type PortalItem = { key: string; href: string; label: string; icon: typeof House };
@@ -11,6 +11,7 @@ export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[
 				{ key: 'calendar', href: '/parent?tab=calendar', label: 'shell.nav.calendar', icon: CalendarDays },
 				{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
 				...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
+				{ key: 'forms', href: '/parent/forms', label: 'portal.forms', icon: ClipboardList },
 				{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
 			]
 		: [
@@ -24,7 +25,7 @@ export function portalItems(mode: PortalMode, shopEnabled: boolean): PortalItem[
 /** Which entry the current location belongs to. */
 export function activePortalKey(url: { pathname: string; hash: string; searchParams: { get(name: string): string | null } }): string {
 	const { pathname, hash, searchParams } = url;
-	if (pathname.startsWith('/parent/forms/')) return 'forms';
+	if (pathname.startsWith('/parent/forms')) return 'forms';
 	if (pathname.startsWith('/parent/profile')) return 'profile';
 	if (pathname.startsWith('/parent/notifications')) return 'notifications';
 	if (pathname.startsWith('/parent/shop')) return 'shop';
@@ -34,4 +35,4 @@ export function activePortalKey(url: { pathname: string; hash: string; searchPar
 }
 
 /** The Me entry stays selected on its sub pages. */
-export const ME_PAGES = ['me', 'forms', 'payments', 'profile', 'notifications'];
+export const ME_PAGES = ['me', 'payments', 'profile', 'notifications'];

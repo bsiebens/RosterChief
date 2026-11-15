@@ -166,3 +166,15 @@ export type MembershipRow = {
 };
 export type PortalVoucher = { id: string; number: string; member_id: string | null; amount: string; available: string; expiry_date: string; expired: boolean };
 export type PortalOverview = { memberships: MembershipRow[]; vouchers: PortalVoucher[]; forms: { id: string; title: string; member_id: string; closes_at: string | null }[] };
+
+/** An evaluation the club has shared with the family: `notes` carries only the public note, `full` adds every score and answer. */
+export type SharedEvaluation = {
+	id: string;
+	member_id: string;
+	checklist: string;
+	season: string;
+	released_at: string | null;
+	release: 'notes' | 'full';
+	public_note: string;
+	answers: { label: string; field_type: string; section: string; options: unknown; value: unknown }[];
+};

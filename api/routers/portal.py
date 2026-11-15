@@ -215,6 +215,29 @@ def portal_home(request):
     }
 
 
+@router.get("/evaluations", summary="Evaluations the club has shared with this family (never anything that was not released)")
+def shared_evaluations(request):
+    """Only released evaluations. ``notes`` shows the public note alone; ``full`` adds every score and answer."""
+    viewer = _viewer(request)
+    if not request.features.has("evaluations"):
+        return []
+    from evaluations.models import PlayerEvaluation
+    from evaluations.services.checklists import evaluations_queryset
+
+    rows = evaluations_queryset().filter(player_id__in=_people(viewer)).exclude(release="").order_by("-released_at")
+    return [
+        {
+            "id": e.pk, "member_id": e.player_id, "checklist": e.checklist.name, "season": e.season.name, "released_at": e.released_at,
+            "release": e.release, "public_note": e.public_note,
+            "answers": [
+                {"label": a.field.label, "field_type": a.field.field_type, "section": a.field.section, "options": a.field.options, "value": a.value}
+                for a in sorted(e.submission.answers.all(), key=lambda a: a.field.order) if a.field.visible_to_family
+            ] if e.release == PlayerEvaluation.Release.FULL else [],
+        }
+        for e in rows
+    ]
+
+
 @router.get("/forms/submissions/{submission_id}", summary="The answers of a form this family filled in")
 def submitted_form(request, submission_id: UUID):
     viewer = _viewer(request)

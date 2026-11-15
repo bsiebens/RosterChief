@@ -33,6 +33,7 @@ class FieldOut(Schema):
     options: list[str | OptionObj] | None = None
     min_value: Decimal | None = None
     max_value: Decimal | None = None
+    visible_to_family: bool = False
 
 
 class FieldIn(Schema):
@@ -47,6 +48,7 @@ class FieldIn(Schema):
     options: list[str | OptionObj] | None = None
     min_value: Decimal | None = None
     max_value: Decimal | None = None
+    visible_to_family: bool | None = None
 
 
 class FieldsIn(Schema):

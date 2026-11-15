@@ -73,6 +73,7 @@
 			</div>
 			{#if checklist.fields.some((f) => f.required && f.is_active)}<p class="text-xs text-muted">{t('eval.fill.required_hint')}</p>{/if}
 			<CriteriaFields fields={checklist.fields} errors={errs} />
+			<label class="grid gap-1 text-sm font-semibold">{t('eval.public_note')}<textarea class="textarea textarea-bordered w-full font-normal" name="public_note" rows="3" maxlength="2000"></textarea><span class="text-xs font-normal text-muted">{t('eval.public_note_help')}</span></label>
 			{#if errs.__all__ || errs.checklist_id}<p class="text-sm text-error">{errs.__all__ || errs.checklist_id}</p>{/if}
 					</section>
 				</div>
