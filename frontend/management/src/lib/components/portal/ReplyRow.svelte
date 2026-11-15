@@ -25,6 +25,11 @@
 	let note = $state('');
 	const going = $derived(event.status === 'present' || event.status === 'selected');
 	const noInvite = $derived(event.blocked === 'not_invited');
+	const noInviteWhy = $derived.by(() => {
+		const detail = event.blocked_detail;
+		if (detail?.reason === 'requirements' && detail.requirements.length) return t('portal.not_invited_requirements', { list: detail.requirements.join(', ') });
+		return t(detail?.reason === 'excluded' ? 'portal.not_invited_excluded' : detail?.reason === 'not_in_audience' ? 'portal.not_invited_audience' : 'portal.not_invited');
+	});
 	const lateInstalment = $derived(event.blocked === 'late_installment' && !going);
 	const settled = $derived(event.cancelled || !canReply || going);
 
@@ -38,13 +43,12 @@
 		<ClubCrest {name} logoUrl={photo} size={32} bg={dark ? 'var(--color-club)' : undefined} />
 		<div class="min-w-0 flex-1">
 			<p class="truncate text-sm font-semibold {dark ? 'text-white' : 'text-ink'}">{name}</p>
-			{#if canReply && !going && event.deadline}<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>
+			{#if noInvite}<p class="text-xs leading-snug {dark ? 'text-on-dark' : 'text-muted'}">{noInviteWhy}</p>
+			{:else if canReply && !going && event.deadline}<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>
 			{:else if event.status === 'selected'}<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('events.status.selected')}</p>{/if}
 		</div>
 		<div class="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
-			{#if noInvite}
-				<span class="badge badge-sm border {dark ? 'border-sidebar-chip bg-transparent text-white' : 'badge-outline'}">{t('portal.not_invited')}</span>
-			{:else}
+				{#if !noInvite}
 				{#if settled}
 					<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
 				{/if}

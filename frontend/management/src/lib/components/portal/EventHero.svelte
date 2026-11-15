@@ -2,10 +2,11 @@
 	import { Clock, MapPin } from '@lucide/svelte';
 	import { formatDay, formatTime, kindLabelKey, kindStyle } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import EventBackdrop from './EventBackdrop.svelte';
 
 	let { event, background = null, crest = null }: {
-		event: { title: string; kind: string; start: string; location: string; opponent_logo?: string | null; is_home?: boolean };
+		event: { title: string; kind: string; start: string; location: string; opponent?: string; opponent_logo?: string | null; is_home?: boolean };
 		background?: string | null;
 		crest?: string | null;
 	} = $props();
@@ -14,7 +15,8 @@
 <div class="portal-event-banner relative isolate flex grow min-h-40 flex-col xl:min-h-60 items-start justify-end gap-1.5 overflow-hidden px-4 py-3">
 	<EventBackdrop src={background} />
 	{#if crest}<img class="pointer-events-none absolute -z-10 size-36 object-contain opacity-25 {event.is_home ? '-left-7' : '-right-7'}" src={crest} alt="" />{/if}
-	{#if event.opponent_logo}<img class="pointer-events-none absolute -z-10 size-36 object-contain opacity-25 {event.is_home ? '-right-7' : '-left-7'}" src={event.opponent_logo} alt="" />{/if}
+	{#if event.opponent_logo}<img class="pointer-events-none absolute -z-10 size-36 object-contain opacity-25 {event.is_home ? '-right-7' : '-left-7'}" src={event.opponent_logo} alt="" />
+	{:else if event.opponent}<span class="pointer-events-none absolute -z-10 opacity-25 {event.is_home ? '-right-7' : '-left-7'}" aria-hidden="true"><ClubCrest name={event.opponent} size={144} /></span>{/if}
 	<span class="badge badge-sm border {kindStyle(event.kind).chip}">{t(kindLabelKey(event.kind))} · {formatDay(event.start)}</span>
 	<span class="font-display text-2xl leading-none font-extrabold wrap-break-word uppercase sm:text-3xl">{event.title}</span>
 	<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

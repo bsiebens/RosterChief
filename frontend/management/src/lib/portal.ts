@@ -7,6 +7,8 @@ export type PortalEventDisplay = {
 	gathering: string | null;
 	deadline: string | null;
 	location: string;
+	/** The other team's name, for the initials crest when it has no logo. */
+	opponent?: string;
 	opponent_logo: string | null;
 	is_home: boolean;
 	score_for: number | null;
@@ -21,6 +23,8 @@ export type PortalEvent = PortalEventDisplay & {
 	note: string;
 	/** Why this person cannot sign up right now, so the app says so instead of offering buttons: not invited any more, or an overdue instalment (they can still decline). */
 	blocked?: 'not_invited' | 'late_installment' | null;
+	/** For not_invited: an open requirement blocks this kind of event (with its names), an exclusion, or the person left the event's team or group. */
+	blocked_detail?: { reason: 'requirements' | 'excluded' | 'not_in_audience'; requirements: string[] } | null;
 };
 
 export type OfficiatingOpportunity = PortalEventDisplay & {

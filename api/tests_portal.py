@@ -142,4 +142,10 @@ class PortalProfileTests(ParentPortalTests):
             Attendance.objects.get_or_create(event=event, member=self.child)  # a stale row, as left behind by an audience change
         [row] = self.call("get", "/portal/home", token).json()["events"]
         self.assertEqual(row["blocked"], "not_invited")
+        self.assertEqual(row["blocked_detail"]["reason"], "not_in_audience")
+        with schema_context(self.club.schema_name):
+            event.excluded_members.add(self.child)
+            Attendance.objects.get_or_create(event=event, member=self.child)
+        [row] = self.call("get", "/portal/home", token).json()["events"]
+        self.assertEqual(row["blocked_detail"]["reason"], "excluded")
         self.assertEqual(self.call("post", f"/portal/attendance/{row['id']}", token, {"status": "present"}).status_code, 403)

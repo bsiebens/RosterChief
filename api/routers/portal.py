@@ -67,6 +67,7 @@ def _event_display(event):
         "gathering": event.gathering,
         "deadline": event.deadline,
         "location": event.location.name if event.location else "",
+        "opponent": event.opponent.name if event.opponent else "",
         "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None,
         "is_home": event.is_home_game,
         "score_for": event.score_for,
@@ -76,21 +77,31 @@ def _event_display(event):
 
 
 def _attendance(row, blocked=None):
-    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": blocked}
+    code, detail = blocked if blocked else (None, None)
+    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": code, "blocked_detail": detail}
 
 
-def _blocker(row, now, invited):
-    """Why this person cannot sign up for the event right now, so the app can say so instead of offering buttons that fail:
-    ``not_invited`` (no longer in the audience) or ``late_installment`` (an overdue registration instalment; they can still decline)."""
+def _blocker(row, now, invited, reasons):
+    """Why this person cannot sign up for the event right now, so the app says so instead of offering buttons that fail.
+    Returns ``(code, detail)`` or None. ``not_invited`` carries the reason: an open requirement that blocks this kind of event
+    (``requirements``, with their names), an explicit exclusion (``excluded``) or no longer being in the event's team or group
+    (``not_in_audience``). ``late_installment`` (an overdue registration instalment) still lets them decline."""
     event = row.event
     if event.cancelled or event.start <= now:
         return None
     if event.pk not in invited:
         invited[event.pk] = set(attendance.effective_members(event).values_list("pk", flat=True))
     if row.member_id not in invited[event.pk]:
-        return "not_invited"
+        if event.pk not in reasons:
+            reasons[event.pk] = attendance.blocked_members(event)
+        requirements = reasons[event.pk].get(row.member_id) or []
+        if requirements:
+            return "not_invited", {"reason": "requirements", "requirements": [str(name) for name in requirements]}
+        if event.excluded_members.filter(pk=row.member_id).exists():
+            return "not_invited", {"reason": "excluded", "requirements": []}
+        return "not_invited", {"reason": "not_in_audience", "requirements": []}
     if row.status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED) and attendance.registration_payment_blocked(event, row.member, today=timezone.localdate(now)):
-        return "late_installment"
+        return "late_installment", None
     return None
 
 
@@ -113,7 +124,7 @@ def portal_home(request):
     now = timezone.now()
     team_ids = TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values("team_id")
     news = member_news().filter(Q(teams__isnull=True) | Q(teams__in=team_ids)).distinct().prefetch_related("teams", "photos")[:12]
-    invited = {}
+    invited, reasons = {}, {}
     events = (
         Attendance.objects.filter(member_id__in=people, event__start__range=(now - timedelta(days=90), now + timedelta(days=90)))
         .select_related("event__location", "event__opponent")
@@ -132,7 +143,7 @@ def portal_home(request):
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": request.features.has("shop"),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
-        "events": [_attendance(row, _blocker(row, now, invited)) for row in events],
+        "events": [_attendance(row, _blocker(row, now, invited, reasons)) for row in events],
         "officiating": [
             {
                 **_event_display(offer.event), "role": offer.kind, "member_id": offer.member_id,
