@@ -23,7 +23,10 @@
 
 	let open = $state(false);
 	let note = $state('');
-	const going = $derived(event.status === 'present' || event.status === 'selected');
+	// The answer given shows at once and stays until the refreshed data is in, so the old state never flashes back.
+	let pending = $state<string | null>(null);
+	const shown = $derived(pending ?? event.status);
+	const going = $derived(shown === 'present' || shown === 'selected');
 	const noInvite = $derived(event.blocked === 'not_invited');
 	const noInviteWhy = $derived.by(() => {
 		const detail = event.blocked_detail;
@@ -34,7 +37,10 @@
 	const settled = $derived(event.cancelled || !canReply || going);
 
 	async function answer(status: string, reason?: string) {
-		if (await onreply(status, reason ?? event.note)) open = false;
+		pending = status;
+		const ok = await onreply(status, reason ?? event.note);
+		pending = null;
+		if (ok) open = false;
 	}
 </script>
 
@@ -50,7 +56,7 @@
 		<div class="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
 				{#if !noInvite}
 				{#if settled}
-					<span class="badge badge-sm border md:h-8 md:px-3 {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
+					<span class="badge badge-sm border md:h-8 md:px-3 {event.cancelled ? 'badge-error' : statusStyle(shown)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(shown))}</span>
 				{/if}
 				{#if canReply && !lateInstalment}
 					{#if !going}
