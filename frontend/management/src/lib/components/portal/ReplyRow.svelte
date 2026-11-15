@@ -95,9 +95,9 @@
 				<p class="flex items-center gap-2 font-display text-base font-extrabold uppercase {dark ? 'text-sidebar-fg' : 'text-ink'}"><MessageSquareText size={16} class="shrink-0" aria-hidden="true" />{t('portal.reason_title')}</p>
 				<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('portal.reason_help')}</p>
 			</div>
-			<div class="flex flex-wrap gap-1.5">
+			<div class="grid grid-cols-4 gap-1.5">
 				{#each REASONS as key (key)}
-					<button type="button" class="portal-person compact text" aria-pressed={note === t(key)} onclick={() => (note = note === t(key) ? '' : t(key))}>{t(key)}</button>
+					<button type="button" class="portal-person compact text min-w-0 justify-center !px-1" aria-pressed={note === t(key)} onclick={() => (note = note === t(key) ? '' : t(key))}>{t(key)}</button>
 				{/each}
 			</div>
 			<textarea id="reason-{event.id}" class="textarea textarea-bordered w-full text-ink {reasonError ? 'border-danger! ring-2 ring-danger/40' : ''}" rows="3" maxlength="2000" aria-label={t('portal.reason')} aria-invalid={reasonError ? 'true' : undefined} aria-describedby={reasonError ? `reason-err-${event.id}` : undefined} bind:value={note} oninput={() => (localError = '')} placeholder={event.note || t('portal.reason_placeholder')}></textarea>
