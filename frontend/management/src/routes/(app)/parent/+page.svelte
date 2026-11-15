@@ -383,7 +383,7 @@
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(offer.event_id)} data-sveltekit-reset="false">
 					<Whistle size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{offer.title}</span><span class="block text-xs text-muted">{t(`portal.crew_${offer.role}`)} · {memberName(offer.member_id)} · {formatDateTime(offer.start)}</span></span>
-					<span class="badge badge-warn">{t('portal.crew_invited')}</span>
+					<span class="badge badge-warn">{t('portal.reply')}</span>
 				</a>
 			{/each}
 			{#each needsReply.slice(0, 4) as event (event.id)}
