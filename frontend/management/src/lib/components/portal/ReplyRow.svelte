@@ -50,7 +50,7 @@
 		<div class="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
 				{#if !noInvite}
 				{#if settled}
-					<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
+					<span class="badge badge-sm border md:h-8 md:px-3 {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
 				{/if}
 				{#if canReply && !lateInstalment}
 					{#if !going}

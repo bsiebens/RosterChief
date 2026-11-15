@@ -52,6 +52,8 @@ export type ParentHome = {
 	events: PortalEvent[];
 	officiating: OfficiatingOpportunity[];
 	news: PortalArticle[];
+	/** Tasks of the family's coming events that still need someone and that this person has not taken. */
+	tasks?: OpenTask[];
 	sponsors: { id: string; name: string; url: string | null; logo_url: string | null }[];
 	fees: { member_id: string; season: string; paid: string; balance: string; next_installment: { due_date: string; remaining: string; late: boolean } | null }[];
 	invoices: { id: string; number: string; due: string | null }[];
@@ -92,3 +94,11 @@ export type NotificationSettings = {
 	email_mode: 'always' | 'unless_app';
 	quiet_hours: { enabled: boolean; start: string; end: string; timezone: string } | null;
 };
+
+export type PortalTask = { id: string; title: string; description: string; needed: number; claimed: number; open_slots: number; claimed_by_me: boolean; claimed_by: string[] };
+export type EventExtras = {
+	lineup: { players: { id: string; name: string; number: number | null; mine: boolean }[]; going: number; out: number; waiting: number } | null;
+	tasks: PortalTask[];
+	attachments: { id: string; name: string; size: number; download_url: string }[];
+};
+export type OpenTask = { id: string; event_id: string; event_title: string; start: string; title: string; open_slots: number };

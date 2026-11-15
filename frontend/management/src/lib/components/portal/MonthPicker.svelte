@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-	import { formatMonth } from '#lib/events/types.ts';
+	import { formatMonth, kindStyle } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 
-	let { month = $bindable(), selected = $bindable(), events }: { month: Date; selected: string; events: Set<string> } = $props();
+	let { month = $bindable(), selected = $bindable(), events }: { month: Date; selected: string; events: Map<string, string[]> } = $props();
 	const dayKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 	const days = $derived.by(() => {
 		const year = month.getFullYear(), index = month.getMonth();
@@ -32,7 +32,11 @@
 				aria-label={new Intl.DateTimeFormat(getLang(), { dateStyle: 'full' }).format(date)}
 				aria-pressed={selected === key} onclick={() => { selected = selected === key ? '' : key; if (date.getMonth() !== month.getMonth()) month = new Date(date.getFullYear(), date.getMonth(), 1); }}>
 				{date.getDate()}
-				{#if events.has(key)}<span class="absolute bottom-1 size-1 rounded-full {selected === key ? 'bg-current' : 'bg-club'}"></span>{/if}
+				{#if events.has(key)}
+					<span class="absolute bottom-1 flex gap-0.5">
+						{#each (events.get(key) ?? []).slice(0, 3) as kind (kind)}<span class="size-1.5 rounded-full {selected === key ? 'bg-current' : kindStyle(kind).dot}"></span>{/each}
+					</span>
+				{/if}
 			</button>
 		{/each}
 	</div>

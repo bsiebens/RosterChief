@@ -268,7 +268,7 @@ export const statusLabelKey = (status: string) => `events.status.${status}`;
 export const KIND_STYLE: Record<EventKind, { dot: string; chip: string; bar: string }> = {
 	training: { dot: 'bg-ice', chip: 'bg-info-bg text-info-text border-info-border', bar: 'border-l-ice' },
 	game: { dot: 'bg-club', chip: 'bg-club text-club-content border-club', bar: 'border-l-club' },
-	tournament: { dot: 'bg-club-dark', chip: 'bg-club-dark text-club-content border-club-dark', bar: 'border-l-club-dark' },
+	tournament: { dot: 'bg-warn', chip: 'bg-warn-bg text-warn-text border-warn-border', bar: 'border-l-warn' },
 	meeting: { dot: 'bg-primary', chip: 'bg-primary text-primary-content border-primary', bar: 'border-l-primary' },
 	social: { dot: 'bg-ok', chip: 'bg-ok-bg text-ok-text border-ok-border', bar: 'border-l-ok' },
 	other: { dot: 'bg-dim', chip: 'bg-subhead text-slate border-line', bar: 'border-l-dim' }
