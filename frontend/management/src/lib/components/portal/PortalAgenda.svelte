@@ -45,7 +45,7 @@
 				{#each group.entries as entry (entry.event.event_id)}
 					{@const event = entry.event}
 					<div class="relative grid items-center gap-x-4 gap-y-1 border-l-4 py-2 pr-4 pl-3 hover:bg-subhead {cols} {kindStyle(event.kind).bar} {event.cancelled ? 'opacity-60' : ''}">
-						<span class="font-mono text-xs whitespace-nowrap text-muted">{formatTime(event.start)}{#if event.end} – {formatTime(event.end)}{/if}</span>
+						<span class="font-mono text-xs whitespace-nowrap text-muted">{formatTime(event.start)}{#if event.end} – {formatTime(event.end)}{/if}{#if event.gathering}<span class="block text-[10px]">{t('portal.meet_time', { time: formatTime(event.gathering) })}</span>{/if}</span>
 						<div class="flex min-w-0 items-center gap-3">
 							<a class="min-w-0 flex-1 after:absolute after:inset-0 hover:text-brand focus:outline-none" href={href(event.event_id)} data-sveltekit-reset="false">
 								<span class="block truncate font-semibold text-ink {event.cancelled ? 'line-through' : ''}">{event.title}</span>

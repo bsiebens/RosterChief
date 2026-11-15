@@ -24,9 +24,12 @@
 		const items = entries
 			.filter((entry) => key(new Date(entry.event.start)) === key(day))
 			.map((entry) => {
-				const s = new Date(entry.event.start).getTime();
-				const e = entry.event.end ? new Date(entry.event.end).getTime() : s + 3_600_000;
-				const from = Math.round((s - dayStart) / 60000);
+				const startsAt = new Date(entry.event.start).getTime();
+				// The block begins when people have to be there; the real start is written in it.
+				const gathering = entry.event.gathering ? new Date(entry.event.gathering).getTime() : null;
+				const s = gathering !== null && gathering < startsAt ? gathering : startsAt;
+				const e = entry.event.end ? new Date(entry.event.end).getTime() : startsAt + 3_600_000;
+				const from = Math.max(Math.round((s - dayStart) / 60000), 0);
 				return { entry, from, to: Math.max(Math.round((Math.min(e, dayStart + 86_400_000) - dayStart) / 60000), from + 30) };
 			})
 			.sort((a, b) => a.from - b.from || b.to - a.to);
@@ -79,8 +82,8 @@
 						data-sveltekit-reset="false"
 						class="absolute overflow-hidden rounded border border-l-4 border-line bg-white px-1.5 py-1 text-xs shadow-sm hover:z-10 hover:shadow-md focus:z-10 {kindStyle(event.kind).bar} {event.cancelled ? 'bg-subhead opacity-70' : ''}"
 						style="top: {seg.top}px; height: {seg.height - 2}px; left: calc({(seg.lane / seg.lanes) * 100}% + 2px); width: calc({100 / seg.lanes}% - 4px)"
-						title="{formatTime(event.start)} {event.title}">
-						<span class="flex items-center justify-between gap-1 font-mono text-[10px] text-muted"><span>{formatTime(event.start)}</span>{#if event.score_for != null && event.score_against != null}<b class="font-display text-sm text-ink">{event.score_for}–{event.score_against}</b>{/if}</span>
+						title="{event.gathering ? formatTime(event.gathering) + ' → ' : ''}{formatTime(event.start)} {event.title}">
+						<span class="flex items-center justify-between gap-1 font-mono text-[10px] text-muted"><span>{event.gathering ? `${t('portal.meet_time', { time: formatTime(event.gathering) })} · ${t('portal.start_time', { time: formatTime(event.start) })}` : formatTime(event.start)}</span>{#if event.score_for != null && event.score_against != null}<b class="font-display text-sm text-ink">{event.score_for}–{event.score_against}</b>{/if}</span>
 						<span class="block truncate font-semibold text-ink {event.cancelled ? 'line-through' : ''}">{event.title}</span>
 						{#if seg.height > 70}
 							<span class="mt-0.5 flex flex-wrap gap-1">

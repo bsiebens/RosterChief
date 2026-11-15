@@ -101,6 +101,8 @@ export type EventExtras = {
 	/** The game as the competition's page captured it (played games only): lineup and timeline by period. */
 	game: GameSheet | null;
 	tasks: PortalTask[];
+	/** Only for games: whether the person follows it, directly or through a team. */
+	follow?: FollowState | null;
 	attachments: { id: string; name: string; size: number; download_url: string }[];
 };
 export type OpenTask = { id: string; event_id: string; event_title: string; start: string; title: string; open_slots: number };
@@ -120,3 +122,7 @@ export type GameSheet = {
 
 /** One event of the member calendar with what the family answered to it and any request to referee or officiate. */
 export type CalendarEntry = { event: PortalEventDisplay; attendance: PortalEvent[]; officiating: OfficiatingOpportunity[] };
+
+/** A game the person follows (directly or through a team), for the cards on top of Home. */
+export type FollowedGame = PortalEventDisplay & { status: 'live' | 'scheduled' | 'final'; teams: string; via: string[] };
+export type FollowState = { directly: boolean; via_team: boolean };

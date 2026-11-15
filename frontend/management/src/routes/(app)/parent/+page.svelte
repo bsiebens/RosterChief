@@ -6,7 +6,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { api } from '#lib/management-api.ts';
-	import type { CalendarEntry, EventExtras, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
+	import type { CalendarEntry, EventExtras, FollowState, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
 	import { day, money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
@@ -20,6 +20,7 @@
 	import News from '#lib/components/portal/News.svelte';
 	import SampleBadge from '#lib/components/SampleBadge.svelte';
 	import OfficiatingRow from '#lib/components/portal/OfficiatingRow.svelte';
+	import FollowedGames from '#lib/components/portal/FollowedGames.svelte';
 	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
@@ -58,18 +59,26 @@
 	const background = $derived(data.home.event_background);
 	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || !event.deadline || Date.parse(event.deadline) >= Date.now());
 	const going = (event: PortalEvent) => event.status === 'present' || event.status === 'selected';
+	/**
+	 * The cards on top of Home: one per coming event that someone still has to answer for (or is going to), soonest first. A card lists everyone
+	 * in the family who is linked to that event, whatever they answered; a person counts for a card at most once, so each family member appears
+	 * on their own next event. Someone who cannot sign up yet (an open requirement) still gets their next card, with the reason: an incentive to fix it.
+	 */
 	const nextEvents = $derived.by(() => {
-		const next = new Map<string, PortalEvent[]>();
-		const included = new Set<string>();
-		for (const event of events) {
-			if (included.has(event.member_id) || Date.parse(event.start) <= Date.now() || event.cancelled) continue;
-			if (!going(event) && !['no_response', 'maybe'].includes(event.status)) continue;
-			included.add(event.member_id);
-			const rows = next.get(event.event_id) ?? [];
-			rows.push(event);
-			next.set(event.event_id, rows);
+		const byEvent = new Map<string, PortalEvent[]>();
+		for (const row of events) {
+			if (Date.parse(row.start) <= Date.now() || row.cancelled) continue;
+			byEvent.set(row.event_id, [...(byEvent.get(row.event_id) ?? []), row]);
 		}
-		return [...next.values()];
+		const shown = new Set<string>();
+		const cards: PortalEvent[][] = [];
+		for (const rows of byEvent.values()) {
+			const wanting = rows.filter((row) => !shown.has(row.member_id) && (going(row) || ['no_response', 'maybe'].includes(row.status)));
+			if (!wanting.length) continue;
+			cards.push(rows);
+			for (const row of wanting) shown.add(row.member_id);
+		}
+		return cards;
 	});
 	const needsReply = $derived(events.filter((event) => ['no_response', 'maybe'].includes(event.status) && canReply(event) && !nextEvents.some((rows) => rows.some((row) => row.id === event.id))));
 	const upcomingTwoWeeks = $derived.by(() => {
@@ -136,6 +145,11 @@
 	const openFees = $derived(filteredFees.filter((fee) => Number(fee.balance) > 0));
 	const filteredForms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
 	const calendarLabel = $derived(people.length > 1 ? t('portal.calendar') : t('shell.nav.calendar'));
+	async function toggleFollow(eventId: string, on: boolean) {
+		const result = await api<FollowState>(on ? 'PUT' : 'DELETE', `/portal/events/${eventId}/follow`);
+		if (result.ok && result.data && extras) extras = { ...extras, follow: result.data };
+		await invalidateAll();
+	}
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length || openTasks.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length + openTasks.length);
@@ -289,7 +303,7 @@
 			{#if tile}<PortalEventDate start={event.start} compact />{:else}<span class="w-12 shrink-0 font-mono text-xs text-muted">{formatTime(event.start)}</span>{/if}
 			<a class="min-w-0 flex-1 after:absolute after:inset-0 hover:text-brand focus:outline-none" href={eventLink(event.event_id)} data-sveltekit-reset="false">
 				<span class="block font-semibold text-ink">{event.title}</span>
-				<span class="block truncate text-xs text-muted">{tile ? formatTime(event.start) : ''}{tile && event.location ? ' · ' : ''}{event.location}</span>
+				<span class="block truncate text-xs text-muted">{#if event.gathering}{t('portal.meet_time', { time: formatTime(event.gathering) })} · {t('portal.start_time', { time: formatTime(event.start) })}{:else}{tile ? formatTime(event.start) : ''}{/if}{(event.gathering || tile) && event.location ? ' · ' : ''}{event.location}</span>
 			</a>
 			{@render scoreMark(entry)}
 		</div>
@@ -506,6 +520,7 @@
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
 	</div>
+	<FollowedGames games={data.followed ?? []} crest={data.branding?.logo_url} clubName={data.branding?.name ?? ''} />
 	<div class="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] xl:items-start xl:gap-5">
 		<div class="grid min-w-0 content-start gap-4">
 			<div class="xl:hidden">{@render peoplePicker()}</div>
@@ -563,6 +578,14 @@
 				{/if}
 				{#if event.score_for != null && event.score_against != null}<p class="font-display text-2xl font-extrabold">{event.score_for}–{event.score_against}</p>{/if}
 			</div>
+			{#if event.kind === 'game' && extras?.follow}
+				<div class="flex items-center gap-3 rounded-box border border-line px-4 py-2.5">
+					<span class="min-w-0 flex-1 text-sm"><b class="text-ink">{extras.follow.directly ? t('portal.following_game') : extras.follow.via_team ? t('portal.following_team') : t('portal.follow_game')}</b><span class="block text-xs text-muted">{t('portal.follow_help')}</span></span>
+					{#if !extras.follow.via_team || extras.follow.directly}
+						<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {extras.follow.directly ? 'btn-outline' : 'btn-primary'}" disabled={!!busy} onclick={() => toggleFollow(event.event_id, !extras?.follow?.directly)}>{extras.follow.directly ? t('portal.unfollow') : t('portal.follow_game')}</button>
+					{/if}
+				</div>
+			{/if}
 			{#if audience}
 				<section class="card card-body">
 					<h2 class="card-title"><UserRound size={16} aria-hidden="true" />{t('portal.reply')}</h2>
