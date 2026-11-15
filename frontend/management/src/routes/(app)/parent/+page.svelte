@@ -33,8 +33,9 @@
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const crewOnly = $derived(tab === 'calendar' && page.url.searchParams.get('crew') === '1');
 	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments' };
-	const people = $derived(data.home.people);
-	const viewer = $derived(people.find((person) => person.id === data.home.viewer));
+	// `data.home` is briefly gone while the app navigates away (to the manage app, say): the header code below still runs then, so these reads must not throw.
+	const people = $derived(data.home?.people ?? []);
+	const viewer = $derived(people.find((person) => person.id === data.home?.viewer));
 	const hour = new Date().getHours();
 	const greeting = $derived(t(hour < 12 ? 'portal.greeting_morning' : hour < 18 ? 'portal.greeting_afternoon' : 'portal.greeting_evening', { name: viewer?.first_name || viewer?.name || '' }));
 	const title = $derived(tab === 'home' ? greeting : t(labels[tab] ?? labels.home));
@@ -227,7 +228,7 @@
 {/snippet}
 
 {#snippet headerPeople()}
-	<div class="hidden xl:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} compact /></div>
+	<div class="hidden xl:block"><PersonFilter {people} bind:selected viewer={data.home?.viewer} compact /></div>
 {/snippet}
 
 {#snippet week()}
