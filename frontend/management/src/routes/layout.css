@@ -1317,6 +1317,16 @@ textarea[name="note"] {
 
 .portal-coach .portal-mode-label { color: inherit; }
 
+/* On a phone the coach pages carry their title (and the add button) in a dark band under the masthead, as in the approved design. */
+@media (max-width: 47.99rem) {
+    .portal-coach .portal-topbar {
+        background-color: var(--portal-hero);
+        color: var(--portal-hero-content);
+        border-color: var(--color-sidebar-hairline);
+    }
+    .portal-coach .portal-topbar :is(.text-ink, .text-muted) { color: inherit; }
+}
+
 .portal-event-banner {
     background: var(--portal-hero);
     color: var(--portal-hero-content);

@@ -42,8 +42,8 @@
 {/snippet}
 
 <div class="grid min-w-0 gap-4">
-	{#if data.available && person}<StatsShare {person} banner />{/if}
 	<PersonFilter people={data.people} bind:selected={who} all={false} viewer={data.people.find((p) => p.is_self)?.id ?? ''} />
+	{#if data.available && person}<StatsShare {person} banner />{/if}
 	{#if empty}
 		<div class="card card-body items-center gap-2 py-10 text-center"><ChartColumn size={28} class="text-dim" aria-hidden="true" /><p class="font-display text-lg font-bold text-ink">{t('publicstats.empty')}</p></div>
 	{/if}
