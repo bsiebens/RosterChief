@@ -44,17 +44,17 @@
 			<div class="divide-y divide-rule">
 				{#each group.entries as entry (entry.event.event_id)}
 					{@const event = entry.event}
-					<div class="grid items-center gap-x-4 gap-y-1 px-4 py-2.5 {cols} {event.cancelled ? 'opacity-60' : ''}">
+					<div class="relative grid items-center gap-x-4 gap-y-1 border-l-4 py-2 pr-4 pl-3 hover:bg-subhead {cols} {kindStyle(event.kind).bar} {event.cancelled ? 'opacity-60' : ''}">
 						<span class="font-mono text-xs whitespace-nowrap text-muted">{formatTime(event.start)}{#if event.end} – {formatTime(event.end)}{/if}</span>
 						<div class="flex min-w-0 items-center gap-3">
-							<a class="min-w-0 flex-1 hover:text-brand" href={href(event.event_id)} data-sveltekit-reset="false">
-								<span class="flex items-center gap-2 font-semibold text-ink {event.cancelled ? 'line-through' : ''}"><span class="size-2.5 shrink-0 rounded-full {kindStyle(event.kind).dot}" aria-hidden="true"></span><span class="truncate">{event.title}</span></span>
+							<a class="min-w-0 flex-1 after:absolute after:inset-0 hover:text-brand focus:outline-none" href={href(event.event_id)} data-sveltekit-reset="false">
+								<span class="block truncate font-semibold text-ink {event.cancelled ? 'line-through' : ''}">{event.title}</span>
 								<span class="mt-0.5 flex flex-wrap items-center gap-1.5"><span class="badge badge-xs border {kindStyle(event.kind).chip}">{t(kindLabelKey(event.kind))}</span>{#if event.cancelled}<span class="badge badge-xs badge-error">{t('portal.cancelled')}</span>{/if}</span>
 							</a>
 							{@render score(entry)}
 						</div>
 						<span class="flex min-w-0 items-center gap-1 text-sm text-slate">{#if event.location}<MapPin size={12} class="shrink-0 text-dim" aria-hidden="true" /><span class="truncate">{event.location}</span>{:else}–{/if}</span>
-						<div class="min-w-0 divide-y divide-rule">{@render replies(entry)}</div>
+						<div class="pointer-events-none relative z-[1] min-w-0 divide-y divide-rule [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_form]:pointer-events-auto">{@render replies(entry)}</div>
 					</div>
 				{/each}
 			</div>

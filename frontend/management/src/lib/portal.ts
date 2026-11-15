@@ -112,6 +112,7 @@ export type GameSheet = {
 	theirs_label: string;
 	score: string;
 	final: boolean;
+	updated_at: string | null;
 	period_scores: { label: string; score: string }[];
 	periods: { label: string; title: string; score: string; rows: GameSheetRow[] }[];
 	lineup: { ours_label: string; theirs_label: string; ours: GameSheetPlayer[]; theirs: GameSheetPlayer[] } | null;

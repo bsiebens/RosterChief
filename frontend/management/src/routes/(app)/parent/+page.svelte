@@ -284,20 +284,17 @@
 
 {#snippet eventRow(entry: CalendarEntry, tile = true)}
 	{@const event = entry.event}
-	<div class="grid gap-x-4 gap-y-1 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] md:items-center">
+	<div class="relative grid gap-x-4 gap-y-1 border-l-4 py-2 pr-3 pl-3 hover:bg-subhead md:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] md:items-center {kindStyle(event.kind).bar}">
 		<div class="flex min-w-0 items-center gap-3">
-			{#if tile}<PortalEventDate start={event.start} />{:else}<span class="w-12 shrink-0 pt-2.5 font-mono text-xs text-muted">{formatTime(event.start)}</span>{/if}
-			<a class="flex min-h-10 min-w-0 flex-1 items-start gap-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-				<span class="size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>
-				<span class="min-w-0 flex-1">
-					<span class="block font-semibold text-ink">{event.title}</span>
-					<span class="block truncate text-xs text-muted">{tile ? formatTime(event.start) : ''}{tile && event.location ? ' · ' : ''}{event.location}</span>
-				</span>
-				{#if !(event.score_for != null && event.score_against != null)}<ChevronRight size={16} class="mt-1 shrink-0 text-muted md:hidden" aria-hidden="true" />{/if}
+			{#if tile}<PortalEventDate start={event.start} compact />{:else}<span class="w-12 shrink-0 font-mono text-xs text-muted">{formatTime(event.start)}</span>{/if}
+			<a class="min-w-0 flex-1 after:absolute after:inset-0 hover:text-brand focus:outline-none" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+				<span class="block font-semibold text-ink">{event.title}</span>
+				<span class="block truncate text-xs text-muted">{tile ? formatTime(event.start) : ''}{tile && event.location ? ' · ' : ''}{event.location}</span>
 			</a>
 			{@render scoreMark(entry)}
 		</div>
-		<div class="min-w-0 divide-y divide-rule pl-[3.75rem] md:pl-0">{@render replyStack(entry)}</div>
+		<!-- The card as a whole opens the event; the answers sit above that click area and stay clickable. -->
+		<div class="pointer-events-none relative z-[1] min-w-0 divide-y divide-rule pl-[3.75rem] md:pl-0 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_form]:pointer-events-auto">{@render replyStack(entry)}</div>
 	</div>
 {/snippet}
 
@@ -311,9 +308,8 @@
 			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_fourteen_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
 				{#each upcomingTwoWeeks as event (event.event_id)}
-					<a class="flex items-center gap-3 py-2.5 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-						<PortalEventDate start={event.start} />
-						<span class="size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>
+					<a class="flex items-center gap-3 border-l-4 py-2 pr-1 pl-3 hover:bg-subhead {kindStyle(event.kind).bar}" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+						<PortalEventDate start={event.start} compact />
 						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{event.title}</span><span class="block text-xs text-muted">{formatTime(event.start)}{event.location ? ' · ' + event.location : ''}</span></span>
 						<span class="flex flex-wrap justify-end gap-1">
 							{#each events.filter((row) => row.event_id === event.event_id) as row (row.id)}
@@ -588,12 +584,13 @@
 					{#if game.lineup?.ours.length}
 						<div class="flex flex-wrap gap-1.5">
 							{#each game.lineup.ours as player (`${player.number}-${player.name}`)}
-								<span class="badge border {player.member_id && mine.has(player.member_id) ? 'border-club text-club-dark' : 'badge-outline'}">{player.number !== null ? `#${player.number} ` : ''}{player.name}{#if player.goals || player.assists} · {player.goals ?? 0}+{player.assists ?? 0}{/if}</span>
+								<span class="badge gap-1.5 border {player.member_id && mine.has(player.member_id) ? 'border-club text-club-dark' : 'badge-outline'}">{player.number !== null ? `#${player.number} ` : ''}{player.name}{#if player.goals}<b class="text-ink">{player.goals} G</b>{/if}{#if player.assists}<b class="text-ink">{player.assists} A</b>{/if}</span>
 							{/each}
 						</div>
+						<p class="text-xs text-muted">{t('portal.stat_legend')}</p>
 					{/if}
 				</section>
-				<GameTimelineDialog {game} title={event.title} bind:open={timelineOpen} />
+				<GameTimelineDialog {game} title={event.title} {crest} bind:open={timelineOpen} />
 			{:else if audience && extras?.lineup}
 				<section class="card card-body">
 					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup')}</h2>

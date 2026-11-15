@@ -332,6 +332,7 @@ def _game_sheet(event):
     out = game_timeline.display_timeline(timeline, event)
     out["lineup"] = _game_lineup(event, timeline, out)
     out["final"] = timeline.finalized_at is not None
+    out["updated_at"] = timeline.changed_at
     return json.loads(json.dumps(out, default=str))  # lazy translations -> plain strings
 
 
