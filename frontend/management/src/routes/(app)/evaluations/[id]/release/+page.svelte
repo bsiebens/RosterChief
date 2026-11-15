@@ -56,8 +56,8 @@
 					</select>
 				</label>
 			</div>
-			<div class="grid gap-4 lg:grid-cols-2">
-				<label class="grid gap-1 text-sm font-semibold">{t('eval.public_note')}
+			<div class="grid items-start gap-4 lg:grid-cols-2">
+				<label class="grid content-start gap-1 text-sm font-semibold">{t('eval.public_note')}
 					<textarea class="textarea textarea-bordered w-full font-normal" rows="4" maxlength="2000" bind:value={choice.note}></textarea>
 				</label>
 				<div class="rounded-box border border-line bg-subhead p-4">
