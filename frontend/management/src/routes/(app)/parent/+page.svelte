@@ -12,6 +12,7 @@
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import InstallPush from '#lib/components/InstallPush.svelte';
+	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import PortalEventDate from '#lib/components/PortalEventDate.svelte';
 	import EventHero from '#lib/components/portal/EventHero.svelte';
 	import MonthPicker from '#lib/components/portal/MonthPicker.svelte';
@@ -146,21 +147,7 @@
 <svelte:head><title>{pageTitle(title)}</title></svelte:head>
 
 {#snippet peoplePicker()}
-	{#if people.length > 1}
-		<div class="flex max-w-full gap-2 overflow-x-auto pb-1" role="group" aria-label={t('portal.person')}>
-			<button class="portal-person" type="button" aria-pressed={!selected} onclick={() => (selected = '')}>
-				<span class="grid size-7 place-items-center rounded-full {!selected ? 'bg-[#fff] text-club' : 'bg-club text-club-content'}"><UsersRound size={14} aria-hidden="true" /></span>{t('portal.all')}
-			</button>
-			{#each people as person (person.id)}
-				<button class="portal-person" type="button" aria-pressed={selected === person.id} onclick={() => (selected = person.id)}>
-					<ClubCrest name={person.name} logoUrl={person.photo_url} size={27}
-						bg={selected === person.id ? '#fff' : undefined}
-						fg={selected === person.id ? 'var(--color-club)' : undefined}
-					/>{person.id === data.home.viewer ? t('portal.me') : person.first_name || person.name}
-				</button>
-			{/each}
-		</div>
-	{/if}
+	<PersonFilter {people} bind:selected viewer={data.home.viewer} />
 {/snippet}
 
 {#snippet rsvp(event: PortalEvent, quick = false)}
@@ -252,7 +239,7 @@
 {/snippet}
 
 {#if tab !== 'home'}
-	<div class="flex items-center justify-between gap-2 xl:hidden">
+	<div class="flex items-center justify-between gap-2 md:hidden">
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 		{#if tab === 'calendar' && !crewOnly}
 			<button type="button" class="btn btn-outline gap-2 md:hidden" aria-expanded={monthOpen} onclick={() => (monthOpen = !monthOpen)}>
@@ -332,7 +319,7 @@
 	{@render peoplePicker()}
 	{#if tab === 'forms'}{@render formsList()}{:else}{@render payments()}{/if}
 {:else}
-	<div class="flex flex-wrap items-baseline justify-between gap-2 xl:hidden">
+	<div class="flex flex-wrap items-baseline justify-between gap-2 md:hidden">
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 		<p class="text-sm text-muted">{formatLongDay(new Date())}</p>
 	</div>

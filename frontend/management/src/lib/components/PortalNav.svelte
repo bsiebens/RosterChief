@@ -1,34 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Bell, CalendarDays, ClipboardList, House, Newspaper, ShoppingBag, UserRound, Users, Wallet } from '@lucide/svelte';
+	import { ClipboardList, UserRound, Wallet, Bell } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { activePortalKey, ME_PAGES, portalItems, type PortalMode } from '#lib/portal-nav.ts';
 
-	let { mode, compact = false, shopEnabled = false }: { mode: 'parent' | 'coach'; compact?: boolean; shopEnabled?: boolean } = $props();
-	const items = $derived(mode === 'parent'
-		? [
-			{ key: 'home', href: '/parent', label: 'portal.home', icon: House },
-			{ key: 'calendar', href: '/parent?tab=calendar', label: 'shell.nav.calendar', icon: CalendarDays },
-			{ key: 'news', href: '/parent?tab=news', label: 'shell.nav.news', icon: Newspaper },
-			...(shopEnabled ? [{ key: 'shop', href: '/parent/shop', label: 'shop.nav', icon: ShoppingBag }] : []),
-			{ key: 'me', href: '/parent?tab=me', label: 'portal.me', icon: UserRound }
-		]
-		: [
-			{ key: 'home', href: '/coach', label: 'portal.today', icon: House },
-			{ key: 'calendar', href: '/coach?tab=calendar', label: 'shell.nav.events', icon: CalendarDays },
-			{ key: 'teams', href: '/coach?tab=teams', label: 'portal.squad', icon: Users },
-			{ key: 'news', href: '/coach?tab=news', label: 'shell.nav.news', icon: Newspaper }
-		]);
-	const active = $derived.by(() => {
-		const { pathname, hash, searchParams } = page.url;
-		if (pathname.startsWith('/parent/forms/')) return 'forms';
-		if (pathname.startsWith('/parent/profile')) return 'profile';
-		if (pathname.startsWith('/parent/notifications')) return 'notifications';
-		if (pathname.startsWith('/parent/shop')) return 'shop';
-		if (pathname.startsWith('/coach/teams/')) return 'teams';
-		if (pathname !== '/parent' && pathname !== '/coach') return 'calendar';
-		return searchParams.get('tab') || hash.slice(1) || 'home';
-	});
-	const meActive = $derived(['me', 'forms', 'payments', 'profile', 'notifications'].includes(active));
+	let { mode, compact = false, shopEnabled = false }: { mode: PortalMode; compact?: boolean; shopEnabled?: boolean } = $props();
+	const items = $derived(portalItems(mode, shopEnabled));
+	const active = $derived(activePortalKey(page.url));
+	const meActive = $derived(ME_PAGES.includes(active));
 </script>
 
 <nav class={compact ? 'portal-tabs grid auto-cols-fr grid-flow-col' : 'flex flex-col gap-0.5 px-2.5'} aria-label={t('shell.nav.label')}>

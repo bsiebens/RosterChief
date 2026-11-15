@@ -1,12 +1,13 @@
 import { redirect } from '@sveltejs/kit';
 import { api, apiPage } from '#lib/management-api.ts';
+import { APP_COOKIE } from '#lib/landing.ts';
 import type { EventRow } from '#lib/events/types.ts';
 import type { NewsListItem } from '#lib/news.ts';
 import type { Overview } from '#lib/overview.ts';
 import type { ShopStats } from '#lib/shop-orders.ts';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
+export const load: PageServerLoad = async ({ locals, url, fetch, parent, cookies }) => {
 	if (locals.mode === 'platform') {
 		// One club: no picker needed, go straight to its host (never to ourselves).
 		const only = locals.myClubs.length === 1 ? locals.myClubs[0] : null;
@@ -14,7 +15,11 @@ export const load: PageServerLoad = async ({ locals, url, fetch, parent }) => {
 		return { overview: null as Overview | null, noTypeCount: null as number | null, upcoming: [] as EventRow[], news: [] as NewsListItem[], newsPending: 0, shop: null as ShopStats | null, shopClosed: false, registrationClosed: false };
 	}
 	// A failure here (no permission, backend hiccup) just hides the part that needed it.
-	const { me } = (await parent()) as { me?: { can_manage_members: boolean; can_add_news?: boolean; can_publish_news?: boolean; features?: string[]; can_manage_shop_products?: boolean; can_manage_shop_inventory?: boolean; can_manage_shop_orders?: boolean; can_manage_shop_discounts?: boolean; can_manage_shop_invoices?: boolean } };
+	const { me } = (await parent()) as { me?: { member_id?: string | null; has_member_portal_role?: boolean; can_manage_members: boolean; can_add_news?: boolean; can_publish_news?: boolean; features?: string[]; can_manage_shop_products?: boolean; can_manage_shop_inventory?: boolean; can_manage_shop_orders?: boolean; can_manage_shop_discounts?: boolean; can_manage_shop_invoices?: boolean } };
+	// Landing: someone with both sides opens the app they used last; on a phone (right after signing in) staff open the coach view.
+	const lastApp = cookies.get(APP_COOKIE);
+	if (me?.has_member_portal_role && lastApp === 'member') redirect(303, '/parent');
+	if (url.searchParams.get('landing') === 'phone' && me?.member_id) redirect(303, '/coach');
 	// The shop numbers: only with the shop feature and some shop permission.
 	const shopOn = !!me?.features?.includes('shop') && !!(me.can_manage_shop_products || me.can_manage_shop_inventory || me.can_manage_shop_orders || me.can_manage_shop_discounts || me.can_manage_shop_invoices);
 	// The next events everyone in the app may see (the calendar API returns all of them), soonest first.

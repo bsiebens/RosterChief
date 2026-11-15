@@ -1,19 +1,20 @@
 <script lang="ts">
 	import { Check, ChevronsUpDown, LayoutDashboard, UsersRound } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { rememberApp } from '#lib/landing.ts';
 
 	/**
 	 * Which side of the club the person is on: the member side or management. A trigger styled like the account menu, with a
 	 * popover listing both. `tone="sidebar"` sits on the dark sidebar, `tone="light"` on the white/club-coloured mobile masthead.
-	 * Management is the full back office on a desktop, the compact coach view on a phone or tablet.
+	 * Management is the full back office from tablet width up, the compact coach view on a phone.
 	 */
-	let { member, tone = 'sidebar' }: { member: boolean; tone?: 'sidebar' | 'light' } = $props();
+	let { member, tone = 'sidebar', compact = false }: { member: boolean; tone?: 'sidebar' | 'light'; compact?: boolean } = $props();
 
 	let menu: HTMLDetailsElement | undefined = $state();
 	let desktop = $state(false);
 	const close = () => menu && (menu.open = false);
 	$effect(() => {
-		const query = matchMedia('(min-width: 80rem) and (pointer: fine)');
+		const query = matchMedia('(min-width: 48rem)');
 		desktop = query.matches;
 		const update = () => (desktop = query.matches);
 		query.addEventListener('change', update);
@@ -29,18 +30,20 @@
 
 <svelte:window onclick={(e) => menu?.open && !menu.contains(e.target as Node) && close()} onkeydown={(e) => e.key === 'Escape' && close()} />
 
-<details class="app-switcher relative {tone}" bind:this={menu}>
-	<summary class="app-switcher-trigger" aria-label={t('portal.views')}>
+<details class="app-switcher relative {tone}" class:compact bind:this={menu}>
+	<summary class="app-switcher-trigger" aria-label={compact ? `${t('portal.views')}: ${current.label}` : t('portal.views')}>
 		<span class="app-switcher-tile"><current.icon size={16} aria-hidden="true" /></span>
-		<span class="min-w-0 flex-1">
-			<span class="app-switcher-eyebrow">{t('portal.views')}</span>
-			<span class="app-switcher-name">{current.label}</span>
-		</span>
-		<ChevronsUpDown size={15} class="shrink-0 opacity-60" aria-hidden="true" />
+		{#if !compact}
+			<span class="min-w-0 flex-1">
+				<span class="app-switcher-eyebrow">{t('portal.views')}</span>
+				<span class="app-switcher-name">{current.label}</span>
+			</span>
+			<ChevronsUpDown size={15} class="shrink-0 opacity-60" aria-hidden="true" />
+		{/if}
 	</summary>
 	<div class="app-switcher-menu" role="menu">
 		{#each options as option (option.key)}
-			<a class="app-switcher-option" href={option.href} role="menuitem" aria-current={option.current ? 'true' : undefined} onclick={close}>
+			<a class="app-switcher-option" href={option.href} role="menuitem" aria-current={option.current ? 'true' : undefined} onclick={() => { rememberApp(option.key === 'member' ? 'member' : 'manage'); close(); }}>
 				<span class="app-switcher-tile"><option.icon size={16} aria-hidden="true" /></span>
 				<span class="min-w-0 flex-1">
 					<span class="block text-[13px] font-semibold">{option.label}</span>
@@ -110,6 +113,10 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
+	.app-switcher.compact { width: 3.25rem; }
+	.app-switcher.compact .app-switcher-trigger { justify-content: center; padding: 0.375rem; }
+	.app-switcher.compact .app-switcher-menu { top: auto; bottom: 0; left: calc(100% + 0.5rem); right: auto; min-width: 15rem; }
 
 	.app-switcher-menu {
 		position: absolute;

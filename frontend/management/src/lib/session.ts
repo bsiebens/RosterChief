@@ -1,3 +1,4 @@
+import { isPhone } from '#lib/landing.ts';
 import { goto, invalidateAll } from '$app/navigation';
 import { auth } from './api.ts';
 import type { Lang } from './i18n.svelte.ts';
@@ -23,5 +24,6 @@ export function afterSignIn(next: string, mode: string) {
 		window.location.assign(next);
 		return Promise.resolve();
 	}
-	return goto(next, { refreshAll: true });
+	// On a phone the home page of staff is the coach view: `/` hands it on (see routes/(app)/+page.server.ts).
+	return goto(next === '/' && isPhone() ? '/?landing=phone' : next, { refreshAll: true });
 }

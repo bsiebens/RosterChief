@@ -79,7 +79,7 @@
     --color-row-warn: #fffdf6; /* row needing attention */
     --color-subhead: #f8f9fa; /* table header fill */
 
-    --radius-box: 0.25rem; /* control panel is square by intent -- 4px, not the usual rounded-xl */
+    --radius-box: 0.625rem; /* cards, buttons, chips: 10px, the same corners as the bell button in the approved design */
 }
 
 /* --- fonts: self-hosted, same latin/latin-ext split as assets/app.css and the same
@@ -502,7 +502,7 @@
         border-color: var(--color-ink);
     }
 
-    /* Cards -- square by intent (4px radius), hairline border, no shadow. */
+    /* Cards -- 10px radius, hairline border, no shadow. */
     .card {
         background: #fff;
         border: 1px solid var(--color-edge);
@@ -1083,12 +1083,12 @@
         display: flex;
         align-items: center;
         gap: 0.625rem;
-        height: 2.5rem;
+        height: 2.375rem;
         padding-inline: 0.75rem;
         border-radius: 0.5rem;
         font-family: var(--font-display);
         font-weight: 700;
-        font-size: 1rem;
+        font-size: 0.9375rem;
         letter-spacing: 0.04em;
         text-transform: uppercase;
         color: var(--color-sidebar-fg-dim);
@@ -1099,6 +1099,31 @@
     }
 
     .nav-item.active {
+        background: var(--color-club);
+        color: var(--color-club-content);
+    }
+
+    /* Tablet icon rail of the member and coach apps (lib/components/PortalRail.svelte). */
+    .rail-item {
+        display: flex;
+        min-height: 3.5rem;
+        width: 4.25rem;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.2rem;
+        border-radius: var(--radius-box);
+        color: var(--color-sidebar-fg-dim);
+        font: 700 0.75rem/1.1 var(--font-display);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .rail-item:hover {
+        color: var(--color-sidebar-fg);
+    }
+
+    .rail-item.active {
         background: var(--color-club);
         color: var(--color-club-content);
     }
@@ -1243,6 +1268,7 @@ textarea[name="note"] {
 
 .portal-person {
     display: inline-flex;
+    text-decoration: none;
     min-height: 2.75rem;
     flex: none;
     align-items: center;

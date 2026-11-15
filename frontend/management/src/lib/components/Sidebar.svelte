@@ -47,7 +47,7 @@
 
 <svelte:window onclick={(e) => menu?.open && !menu.contains(e.target as Node) && close()} onkeydown={(e) => e.key === 'Escape' && close()} />
 
-<aside class="flex w-[236px] shrink-0 flex-col overflow-y-auto bg-sidebar-bg {compact ? 'max-h-[65dvh] py-2' : 'sticky top-0 h-dvh py-5'}">
+<aside class="flex w-[220px] shrink-0 flex-col overflow-y-auto bg-sidebar-bg {compact ? 'max-h-[65dvh] py-2' : 'sticky top-0 h-dvh py-5'}">
 	{#if !compact}
 		<a class="flex items-center gap-2.5 px-[18px] pb-4" href={home}>
 			<ClubCrest name={branding.name} logoUrl={branding.logo_url} size={30} />

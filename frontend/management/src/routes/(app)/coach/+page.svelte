@@ -51,7 +51,7 @@
 	</section>
 {/snippet}
 
-<div class="flex flex-wrap items-baseline justify-between gap-2 xl:hidden">
+<div class="flex flex-wrap items-baseline justify-between gap-2 md:hidden">
 	<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 	{#if tab === 'home'}<p class="text-sm text-muted">{formatLongDay(new Date())}</p>{/if}
 </div>
