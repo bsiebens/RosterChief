@@ -43,19 +43,19 @@
 		</div>
 		<div class="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
 			{#if noInvite}
-				<span class="badge badge-sm badge-outline {dark ? 'border-sidebar-chip text-white' : ''}">{t('portal.not_invited')}</span>
+				<span class="badge badge-sm border {dark ? 'border-sidebar-chip bg-transparent text-white' : 'badge-outline'}">{t('portal.not_invited')}</span>
 			{:else}
 				{#if settled}
 					<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
 				{/if}
 				{#if canReply && !lateInstalment}
 					{#if !going}
-						<button type="button" class="btn btn-sm btn-primary min-h-11" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
-						{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11" disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
+						<button type="button" class="btn btn-sm btn-primary min-h-11 md:h-8 md:min-h-0" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
+						{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0" disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
 					{/if}
 				{/if}
 				{#if canReply}
-					<button type="button" class="btn btn-sm btn-outline min-h-11 {dark ? 'border-sidebar-chip bg-transparent text-white hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+					<button type="button" class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0 {dark ? 'border-sidebar-chip bg-transparent text-white hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
 				{/if}
 			{/if}
 		</div>
@@ -67,8 +67,8 @@
 				<textarea class="textarea textarea-bordered w-full text-ink" rows="2" maxlength="2000" bind:value={note} placeholder={event.note}></textarea>
 			</label>
 			<div class="flex flex-wrap justify-end gap-2">
-				<button class="btn btn-sm btn-outline min-h-11 {dark ? 'border-sidebar-chip bg-transparent text-white' : ''}" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-				<button class="btn btn-sm btn-primary min-h-11" type="submit" disabled={busy}>{t('common.save')}</button>
+				<button class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0 {dark ? 'border-sidebar-chip bg-transparent text-white' : ''}" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
+				<button class="btn btn-sm btn-primary min-h-11 md:h-8 md:min-h-0" type="submit" disabled={busy}>{t('common.save')}</button>
 			</div>
 		</form>
 	{/if}

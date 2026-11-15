@@ -433,7 +433,7 @@
 					<article class="card overflow-hidden">
 						<div class="grid xl:grid-cols-[1.1fr_1fr]">
 							<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
-							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-bg px-4 py-3 text-white xl:border-t-0 xl:border-l xl:px-5">
+							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-white xl:border-t-0 xl:border-l xl:px-5">
 								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
 								<div class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-1">
 									{#each rows as row (row.id)}{@render rsvp(row, true, true)}{/each}
