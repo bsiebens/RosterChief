@@ -80,13 +80,17 @@
 {:else}
 	<p class="card card-body text-sm text-muted">{t('portal.no_news')}</p>
 {/if}
-<Sheet open={!!selected} title={selected ? translation(selected).title : t('portal.news')} onclose={() => void goto(home ? path : path + '?tab=news', { reset: false, replace: true })}>
+<Sheet wide open={!!selected} title={selected ? translation(selected).title : t('portal.news')} onclose={() => void goto(home ? path : path + '?tab=news', { reset: false, replace: true })}>
 	{#if selected}
 		{@const lead = photo(selected)}
-		{#if lead}<img class="aspect-video w-full object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" />{/if}
-		<article class="grid gap-3 p-4">
-			<h2 class="font-display text-2xl font-extrabold text-ink uppercase">{translation(selected).title}</h2>
-			<div class="prose max-w-none text-sm">{@html translation(selected).body}</div>
+		{#if lead}<img class="aspect-video max-h-96 w-full object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" />{/if}
+		<article class="mx-auto grid max-w-2xl gap-4 px-6 py-6">
+			<p class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{(selected.teams ?? []).join(', ') || t('portal.news')}{#if selected.published_at} · {formatDay(selected.published_at)}{/if}</p>
+			<h2 class="font-display text-4xl leading-none font-extrabold text-ink uppercase">{translation(selected).title}</h2>
+			<div class="prose max-w-none text-base leading-relaxed">{@html translation(selected).body}</div>
+			{#each selected.photos.filter((image) => image !== lead) as image (image.url)}
+				<img class="w-full rounded-box object-cover" src={mediaPath(image.url)} style:object-position={image.object_position} alt="" loading="lazy" />
+			{/each}
 		</article>
 	{/if}
 </Sheet>

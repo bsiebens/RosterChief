@@ -1417,6 +1417,7 @@ textarea[name="note"] {
 @media (min-width: 48rem) {
     /* From tablet width the sheet is a drawer on the right, as in the approved design. */
     .portal-ui .portal-sheet { inset: 0 0 0 auto; margin: 0; width: min(30rem, 100%); max-width: none; height: 100dvh; max-height: none; border-width: 0 0 0 1px; border-radius: 0; }
+    .portal-ui .portal-sheet.wide { width: min(46rem, 100%); }
 }
 
 @media (prefers-color-scheme: dark) {
