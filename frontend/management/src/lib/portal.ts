@@ -57,6 +57,10 @@ export type ParentHome = {
 	sponsors: { id: string; name: string; url: string | null; logo_url: string | null }[];
 	fees: { member_id: string; season: string; paid: string; balance: string; next_installment: { due_date: string; remaining: string; late: boolean } | null }[];
 	invoices: { id: string; number: string; due: string | null }[];
+	/** How the club wants fees paid (its own text), the latest payments received and the forms already sent in. */
+	payment_instructions?: string;
+	payments?: { id: string; member_id: string; season: string; amount: string; method: string; paid_at: string }[];
+	submitted_forms?: { id: string; title: string; member_id: string; submitted_at: string }[];
 	forms: { id: string; title: string; member_id: string; opens_at: string | null; closes_at: string | null }[];
 };
 
@@ -126,3 +130,5 @@ export type CalendarEntry = { event: PortalEventDisplay; attendance: PortalEvent
 /** A game the person follows (directly or through a team), for the cards on top of Home. */
 export type FollowedGame = PortalEventDisplay & { status: 'live' | 'scheduled' | 'final'; teams: string; via: string[] };
 export type FollowState = { directly: boolean; via_team: boolean };
+
+export type SubmittedForm = { title: string; member_id: string; submitted_at: string; answers: { label: string; value: unknown }[] };

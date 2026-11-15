@@ -260,3 +260,24 @@ class PortalProfileTests(ParentPortalTests):
         [row] = [r for r in self.call("get", "/portal/home", token).json()["events"] if r["member_id"] == str(self.child.pk)]
         self.assertEqual((row["blocked"], row["blocked_detail"]["reason"], row["blocked_detail"]["requirements"]), ("not_invited", "requirements", ["Medical certificate"]))
         self.assertTrue(row["id"].startswith("requirement-"))
+
+
+    def test_payment_help_history_and_submitted_forms_are_given(self):
+        from formbuilder.models import Answer, Field, Form, FormSend, Submission
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            form = Form.objects.create(title="Medical information")
+            field = Field.objects.create(form=form, label="Allergies", field_type="text")
+            send = FormSend.objects.create(form=form)
+            submission = Submission.objects.create(send=send, member=self.child, submitted_by=self.viewer)
+            Answer.objects.create(submission=submission, field=field, value="Peanuts")
+        home = self.call("get", "/portal/home", token).json()
+        self.assertEqual([f["title"] for f in home["submitted_forms"]], ["Medical information"])
+        self.assertIn("payments", home)
+        self.assertIn("payment_instructions", home)
+        answers = self.call("get", f"/portal/forms/submissions/{submission.pk}", token).json()["answers"]
+        self.assertEqual(answers, [{"label": "Allergies", "value": "Peanuts"}])
+        with schema_context(self.club.schema_name):
+            other = Submission.objects.create(send=send, member=self.other)
+        self.assertEqual(self.call("get", f"/portal/forms/submissions/{other.pk}", token).status_code, 404)

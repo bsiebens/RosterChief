@@ -19,7 +19,7 @@ from events.services import attachments as attachment_svc
 from events.services import attendance, officiating_invitations, referees
 from events.services import follows, tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
-from formbuilder.models import FormSend
+from formbuilder.models import FormSend, Submission
 from formbuilder.services import audience
 from formbuilder.services.submission import submit_form
 from members.models import ClubMembership, Member
@@ -198,10 +198,35 @@ def portal_home(request):
             for fee in fees
         ],
         "invoices": [{"id": invoice.pk, "number": invoice.invoice_number, "due": invoice.invoice_due_date} for invoice in invoices],
+        "payment_instructions": request.tenant.payment_instructions or "",
+        "payments": sorted(
+            ({"id": payment.pk, "member_id": fee.member_id, "season": fee.season.name, "amount": str(payment.amount), "method": payment.method, "paid_at": payment.paid_at} for fee in fees for payment in fee.payments.all()),
+            key=lambda payment: payment["paid_at"], reverse=True,
+        )[:20],
+        "submitted_forms": [
+            {"id": sub.pk, "title": sub.send.form.title, "member_id": sub.member_id, "submitted_at": sub.submitted_at}
+            for sub in Submission.objects.filter(member_id__in=people).select_related("send__form").order_by("-submitted_at")[:20]
+        ],
         "forms": [
             {"id": send.pk, "title": send.form.title, "member_id": member_id, "opens_at": send.opens_at, "closes_at": send.closes_at}
             for send in sends
             for member_id in people.keys() & recipients[send.pk]
+        ],
+    }
+
+
+@router.get("/forms/submissions/{submission_id}", summary="The answers of a form this family filled in")
+def submitted_form(request, submission_id: UUID):
+    viewer = _viewer(request)
+    submission = Submission.objects.filter(pk=submission_id, member_id__in=_people(viewer)).select_related("send__form").first()
+    if submission is None:
+        raise HttpError(404, "Not found.")
+    answers = submission.answers.select_related("field").order_by("field__order", "created")
+    return {
+        "title": submission.send.form.title, "member_id": submission.member_id, "submitted_at": submission.submitted_at,
+        "answers": [
+            {"label": answer.field.label, "value": (answer.value or {}).get("name") if answer.field.field_type == "file" and isinstance(answer.value, dict) else answer.value}
+            for answer in answers
         ],
     }
 
