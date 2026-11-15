@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowLeft, Bell, CalendarDays, HandHelping, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, Bell, CalendarDays, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, statusLabelKey, statusStyle } from '#lib/events/types.ts';
@@ -338,7 +338,7 @@
 		<div class="divide-y divide-rule">
 			{#each openTasks.slice(0, 4) as task (task.id)}
 				<div class="flex min-h-11 items-center gap-2 py-2">
-					<HandHelping size={18} class="shrink-0 text-muted" aria-hidden="true" />
+					<ListChecks size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<a class="min-w-0 flex-1 hover:text-brand" href={eventLink(task.event_id)} data-sveltekit-reset="false"><span class="block font-semibold">{task.title}</span><span class="block truncate text-xs text-muted">{task.event_title} · {formatDateTime(task.start)}</span></a>
 					<button type="button" class="btn btn-sm btn-primary shrink-0 min-h-11 md:h-8 md:min-h-0" disabled={!!busy} onclick={() => claim(task.event_id, task.id, true)}>{t('portal.duty_volunteer')}</button>
 				</div>
@@ -612,7 +612,7 @@
 			{/if}
 			{#if audience && extras?.tasks.length}
 				<section class="card card-body">
-					<h2 class="card-title"><HandHelping size={16} aria-hidden="true" />{t('portal.duties')}</h2>
+					<h2 class="card-title"><ListChecks size={16} aria-hidden="true" />{t('portal.duties')}</h2>
 					<div class="divide-y divide-rule">
 						{#each extras.tasks as task (task.id)}
 							<div class="grid gap-1 py-2">
