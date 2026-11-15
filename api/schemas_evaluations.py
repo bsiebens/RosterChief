@@ -83,6 +83,40 @@ class ReleaseIn(Schema):
     public_note: str | None = None
 
 
+class ReleaseItemIn(Schema):
+    evaluation_id: uuid.UUID
+    release: str
+    public_note: str | None = None
+
+
+class ReleaseItemsIn(Schema):
+    items: list[ReleaseItemIn]
+
+
+class ReleaseAnswerOut(Schema):
+    label: str
+    field_type: str
+    options: list[Any] | None = None
+    value: Any = None
+    visible: bool
+
+
+class ReleaseRowOut(Schema):
+    id: uuid.UUID
+    player: MemberRef
+    evaluator: MemberRef | None = None
+    submitted_at: datetime.datetime
+    release: str
+    public_note: str
+    answers: list[ReleaseAnswerOut]
+
+
+class ReleasePreviewOut(Schema):
+    checklist: NamedRef
+    season: NamedRef | None = None
+    results: list[ReleaseRowOut]
+
+
 class PlayerEvaluationsOut(Schema):
     count: int
     results: list[EvaluationOut]

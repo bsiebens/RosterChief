@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ params, url, fetch, parent }) => {
 	const asked = url.searchParams.get('player');
 	const selected = list.find((p) => p.id === asked)?.id ?? list[0]?.id ?? '';
 	const review = selected ? await api<Review>('GET', `/evaluations/checklists/${params.id}/players/${selected}`, { f: fetch }) : null;
-	return { checklist: checklist.data!, players: list, since, selected, review: review?.ok ? review.data! : null, meeting: meeting.data ?? { active: null, latest: null, outcomes: [] }, unreleased: release.ok ? (release.data?.count ?? 0) : 0 };
+	return { checklist: checklist.data!, players: list, since, selected, review: review?.ok ? review.data! : null, meeting: meeting.data ?? { active: null, latest: null, outcomes: [] }, unreleased: release.ok ? (release.data?.count ?? 0) : 0, shared: url.searchParams.get('shared') ?? '' };
 };
 
 const httpStatus = (s: number) => (s >= 400 && s < 600 ? s : 500);
@@ -33,11 +33,6 @@ export const actions: Actions = {
 	end: async ({ request, fetch }) => {
 		const res = await api('POST', `/evaluations/sessions/${String((await request.formData()).get('session_id') ?? '')}/end`, { f: fetch });
 		return res.ok ? { done: 'end' } : failed('end', res);
-	},
-	release: async ({ request, params, fetch }) => {
-		const level = String((await request.formData()).get('release') ?? '');
-		const res = await api<{ count: number }>('POST', `/evaluations/checklists/${params.id}/release`, { body: { release: level }, f: fetch });
-		return res.ok ? { done: 'release', shared: res.data?.count ?? 0 } : failed('release', res);
 	},
 	note: async ({ request, params, fetch }) => {
 		const f = await request.formData();

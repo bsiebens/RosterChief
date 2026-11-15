@@ -144,14 +144,8 @@ def delete_evaluation(actor, evaluation: PlayerEvaluation) -> None:
     evaluation.submission.delete()  # cascades to the evaluation
 
 
-@transaction.atomic
-def release_evaluation(actor, evaluation: PlayerEvaluation, release: str, public_note: str | None = None) -> PlayerEvaluation:
-    """Decide what the player and their family see of an evaluation: nothing, the public note only, or the note and every score.
-    The evaluator who gave it or a checklist manager may do this; the public note can be rewritten at any time."""
-    access.require_execute_evaluations(actor)
-    given_by = evaluation.submission.submitted_by
-    if not ((given_by is not None and given_by.user_id == actor.pk) or access.can_manage_evaluations(actor)):
-        raise NotAllowed("You may only share your own evaluations.")
+def _set_release(actor, evaluation: PlayerEvaluation, release: str, public_note: str | None) -> bool:
+    """Store the level and note on ``evaluation``; True when it just went from private to shared."""
     if release not in PlayerEvaluation.Release.values:
         raise Invalid("Unknown release level.", {"release": ["Choose nothing, notes or details."]})
     if public_note is not None:
@@ -162,9 +156,38 @@ def release_evaluation(actor, evaluation: PlayerEvaluation, release: str, public
         evaluation.released_at = timezone.now() if release else None
         evaluation.released_by = Member.objects.filter(user=actor).first() if release else None
     evaluation.save(update_fields=["public_note", "release", "released_at", "released_by", "modified"])
-    if shared_now:
+    return shared_now
+
+
+@transaction.atomic
+def release_evaluation(actor, evaluation: PlayerEvaluation, release: str, public_note: str | None = None) -> PlayerEvaluation:
+    """Decide what the player and their family see of an evaluation: nothing, the public note only, or the note and every visible score.
+    The evaluator who gave it or a checklist manager may do this; the public note can be rewritten at any time."""
+    access.require_execute_evaluations(actor)
+    given_by = evaluation.submission.submitted_by
+    if not ((given_by is not None and given_by.user_id == actor.pk) or access.can_manage_evaluations(actor)):
+        raise NotAllowed("You may only share your own evaluations.")
+    if _set_release(actor, evaluation, release, public_note):
         tell_family(actor, evaluation)
     return evaluation
+
+
+@transaction.atomic
+def apply_release(actor, checklist: EvaluationChecklist, items: list[dict]) -> int:
+    """Set the level and public note of several evaluations of ``checklist`` at once (the end of an evaluation meeting, where whoever
+    wrote them no longer matters: the group has checked them). Each player and their family are told once. Returns how many are now shared."""
+    access.require_execute_evaluations(actor)
+    rows = {e.pk: e for e in evaluations_queryset().filter(checklist=checklist, pk__in=[i["evaluation_id"] for i in items])}
+    told, shared = set(), 0
+    for item in items:
+        evaluation = rows.get(item["evaluation_id"])
+        if evaluation is None:
+            raise Invalid("Unknown evaluation.", {"items": ["Unknown evaluation."]})
+        if _set_release(actor, evaluation, item.get("release", ""), item.get("public_note")) and evaluation.player_id not in told:
+            told.add(evaluation.player_id)
+            tell_family(actor, evaluation)
+        shared += bool(evaluation.release)
+    return shared
 
 
 def tell_family(actor, evaluation: PlayerEvaluation) -> None:
@@ -187,35 +210,18 @@ def tell_family(actor, evaluation: PlayerEvaluation) -> None:
         logging.getLogger(__name__).exception("evaluations.notify_failed")
 
 
-def unreleased(actor, checklist: EvaluationChecklist, season: Season | None = None):
-    """The private evaluations of ``checklist`` in ``season`` (the current one by default) that ``actor`` may share."""
+def season_evaluations(checklist: EvaluationChecklist, season: Season | None = None) -> list[PlayerEvaluation]:
+    """Every evaluation of ``checklist`` in ``season`` (the current one by default), by player."""
     season = season or Season.get_current()
-    rows = evaluations_queryset().filter(checklist=checklist, release="")
+    rows = evaluations_queryset().filter(checklist=checklist)
     if season is not None:
         rows = rows.filter(season=season)
-    if access.can_manage_evaluations(actor):
-        return list(rows)
-    return [e for e in rows if e.submission.submitted_by is not None and e.submission.submitted_by.user_id == actor.pk]
+    return sorted(rows, key=lambda e: (e.player.last_name.lower(), e.player.first_name.lower(), e.submission.submitted_at))
 
 
-@transaction.atomic
-def release_many(actor, checklist: EvaluationChecklist, release: str, season: Season | None = None) -> int:
-    """Share every private evaluation of the checklist (this season) the actor may share, at one level. Each player and their family
-    are told once, however many evaluations they got. Returns how many were shared."""
-    access.require_execute_evaluations(actor)
-    if release not in (PlayerEvaluation.Release.NOTES, PlayerEvaluation.Release.FULL):
-        raise Invalid("Unknown release level.", {"release": ["Choose notes or details."]})
-    rows = unreleased(actor, checklist, season)
-    by = Member.objects.filter(user=actor).first()
-    now = timezone.now()
-    told = set()
-    for evaluation in rows:
-        evaluation.release, evaluation.released_at, evaluation.released_by = release, now, by
-        evaluation.save(update_fields=["release", "released_at", "released_by", "modified"])
-        if evaluation.player_id not in told:
-            told.add(evaluation.player_id)
-            tell_family(actor, evaluation)
-    return len(rows)
+def unreleased(checklist: EvaluationChecklist, season: Season | None = None) -> list[PlayerEvaluation]:
+    """The private evaluations of this season. Whoever wrote them: at the end of a meeting they have been checked together."""
+    return [e for e in season_evaluations(checklist, season) if not e.release]
 
 
 def player_evaluations(player: Member):

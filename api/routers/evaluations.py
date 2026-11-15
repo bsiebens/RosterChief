@@ -28,6 +28,8 @@ from api.schemas_evaluations import (
     PlayerEvaluationsOut,
     PlayerListOut,
     ReleaseIn,
+    ReleaseItemsIn,
+    ReleasePreviewOut,
     ReviewOut,
     SeasonOut,
     StatsOut,
@@ -227,16 +229,31 @@ def release(request, evaluation_id: uuid.UUID, payload: ReleaseIn):
     return _evaluation(svc.evaluations_queryset().get(pk=evaluation_id))
 
 
-@router.get("/checklists/{checklist_id}/release", summary="How many private evaluations of this season the caller could share now", operation_id="evaluation_release_count")
+@router.get("/checklists/{checklist_id}/release", summary="How many private evaluations of this season are waiting to be shared", operation_id="evaluation_release_count")
 def release_count(request, checklist_id: uuid.UUID, season_id: uuid.UUID | None = None):
     _execute(request)
-    return {"count": len(svc.unreleased(request.user, _checklist(checklist_id), _season(season_id)))}
+    return {"count": len(svc.unreleased(_checklist(checklist_id), _season(season_id)))}
 
 
-@router.post("/checklists/{checklist_id}/release", summary="Share every private evaluation of this season at one level (notes or details); families are told", operation_id="release_checklist_evaluations")
-def release_all(request, checklist_id: uuid.UUID, payload: ReleaseIn, season_id: uuid.UUID | None = None):
+@router.get("/checklists/{checklist_id}/release/preview", response=ReleasePreviewOut, summary="Every evaluation of the season with what the family would see", operation_id="evaluation_release_preview")
+def release_preview(request, checklist_id: uuid.UUID, season_id: uuid.UUID | None = None):
+    """``visible`` marks the answers a full release would show (the criterion is ticked "visible to the family")."""
     _execute(request)
-    return {"count": svc.release_many(request.user, _checklist(checklist_id), payload.release, _season(season_id))}
+    checklist, season = _checklist(checklist_id), _season(season_id) or Season.get_current()
+    rows = []
+    for e in svc.season_evaluations(checklist, season):
+        answers = sorted(e.submission.answers.all(), key=lambda a: a.field.order)
+        rows.append({
+            "id": e.pk, "player": _ref(e.player), "evaluator": _ref(e.submission.submitted_by), "submitted_at": e.submission.submitted_at, "release": e.release, "public_note": e.public_note,
+            "answers": [{"label": a.field.label, "field_type": a.field.field_type, "options": a.field.options, "value": a.value, "visible": a.field.visible_to_family} for a in answers],
+        })  # fmt: skip
+    return {"checklist": _named(checklist), "season": _named(season) if season else None, "results": rows}
+
+
+@router.put("/checklists/{checklist_id}/release", summary="Set what each listed evaluation shares (nothing, notes or details) and its public note; families are told", operation_id="release_checklist_evaluations")
+def release_checklist(request, checklist_id: uuid.UUID, payload: ReleaseItemsIn):
+    _execute(request)
+    return {"count": svc.apply_release(request.user, _checklist(checklist_id), [i.dict() for i in payload.items])}
 
 
 @router.delete("/{evaluation_id}", response={204: None}, summary="Delete an evaluation (its evaluator, or a checklist manager)", operation_id="delete_player_evaluation")

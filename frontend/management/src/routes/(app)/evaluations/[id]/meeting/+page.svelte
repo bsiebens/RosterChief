@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, ArrowRight, ChartLine, Check, ClipboardCheck, FileDown, ListChecks, NotebookPen, Play, Send, Square, Trash2 } from '@lucide/svelte';
+	import { ArrowLeft, ArrowRight, ChartLine, Check, ClipboardCheck, FileDown, ListChecks, NotebookPen, Eye, Play, Send, Square, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import AttendancePanel from '#lib/components/evaluations/AttendancePanel.svelte';
 	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
@@ -74,19 +74,19 @@
 		{/if}
 	</section>
 
-	{#if form && 'shared' in form}<Alert kind="success">{t('eval.release.done', { n: form.shared ?? 0 })}</Alert>{/if}
+	{#if data.shared}<Alert kind="success">{t('eval.release.done', { n: Number(data.shared) })}</Alert>{/if}
 	{#if !active && data.unreleased > 0}
 		<section class="card card-body gap-3" aria-labelledby="release-title">
 			<h2 id="release-title" class="card-title"><Send size={16} aria-hidden="true" /> {t('eval.release.title')}</h2>
 			<p class="text-sm text-muted">{t('eval.release.help', { n: data.unreleased })}</p>
-			<form class="flex flex-wrap items-end gap-2" method="POST" action="?/release" use:enhance={submit}>
-				<label class="grid gap-1 text-sm">{t('eval.share.level')}
-					<select class="select select-bordered select-sm" name="release">
+			<form class="flex flex-wrap items-end gap-2" method="GET" action="/evaluations/{data.checklist.id}/release">
+				<label class="grid gap-1 text-sm">{t('eval.release.start_with')}
+					<select class="select select-bordered select-sm" name="level">
 						<option value="notes">{t('eval.share.notes')}</option>
 						<option value="full">{t('eval.share.full')}</option>
 					</select>
 				</label>
-				<button class="btn btn-primary btn-sm gap-1" type="submit" disabled={busy}><Send size={14} /> {t('eval.release.go', { n: data.unreleased })}</button>
+				<button class="btn btn-primary btn-sm gap-1" type="submit"><Eye size={14} /> {t('eval.release.preview')}</button>
 			</form>
 			<p class="text-xs text-muted">{t('eval.release.families')}</p>
 		</section>

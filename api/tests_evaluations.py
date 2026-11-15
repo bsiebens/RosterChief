@@ -176,24 +176,29 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         self.assertEqual(shared(), [])
         self.assertEqual(self.call("get", "/portal/evaluations", self.ann_user).json(), [])  # never to someone else
 
-    def test_bulk_release_and_family_notification(self):
+    def test_release_preview_and_apply(self):
         from notifications.models import InboxNotification
 
         c = self.checklist()
-        self.evaluate(c, self.cara, {"skating": "4"}, public_note="Well done")
-        self.evaluate(c, self.ann, {"skating": "3"})
+        e1 = self.evaluate(c, self.cara, {"skating": "4", "remarks": "private"}, public_note="Well done").json()
+        e2 = self.evaluate(c, self.ann, {"skating": "3"}).json()
         self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 2})
-        self.assertEqual(self.call("post", f"/evaluations/checklists/{c['id']}/release", self.bob_user, {"release": ""}).status_code, 422)
-        r = self.call("post", f"/evaluations/checklists/{c['id']}/release", self.bob_user, {"release": "notes"})
-        self.assertEqual((r.status_code, r.json()), (200, {"count": 2}), r.content)
-        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 0})
-        self.assertEqual(len(self.call("get", "/portal/evaluations", self.cara_user).json()), 1)
+        preview = self.call("get", f"/evaluations/checklists/{c['id']}/release/preview", self.owner).json()  # the owner did not write them
+        self.assertEqual(len(preview["results"]), 2)
+        shown = {a["label"]: a["visible"] for a in preview["results"][0]["answers"] + preview["results"][1]["answers"]}
+        self.assertTrue(shown["Skating"])
+        self.assertFalse(shown["Remarks"])
+        bad = self.call("put", f"/evaluations/checklists/{c['id']}/release", self.owner, {"items": [{"evaluation_id": e1["id"], "release": "bogus"}]})
+        self.assertEqual(bad.status_code, 422)
+        items = [{"evaluation_id": e1["id"], "release": "full", "public_note": "Great season"}, {"evaluation_id": e2["id"], "release": ""}]
+        r = self.call("put", f"/evaluations/checklists/{c['id']}/release", self.owner, {"items": items})  # did not write either
+        self.assertEqual((r.status_code, r.json()), (200, {"count": 1}), r.content)
+        row = self.call("get", "/portal/evaluations", self.cara_user).json()
+        self.assertEqual((len(row), row[0]["public_note"], [a["label"] for a in row[0]["answers"]]), (1, "Great season", ["Skating"]))
         self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 1)
-        # Sharing one by hand tells the family too, once.
-        again = self.evaluate(c, self.cara, {"skating": "5"}).json()
-        self.call("put", f"/evaluations/{again['id']}/release", self.bob_user, {"release": "full"})
-        self.call("put", f"/evaluations/{again['id']}/release", self.bob_user, {"release": "notes"})
-        self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 2)
+        self.call("put", f"/evaluations/checklists/{c['id']}/release", self.owner, {"items": [{"evaluation_id": e1["id"], "release": "notes"}]})
+        self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 1)  # no second ping
+        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 1})
 
     def test_evaluate_validation(self):
         c = self.checklist()

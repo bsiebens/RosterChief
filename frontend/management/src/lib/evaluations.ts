@@ -57,3 +57,15 @@ export function overall(e: EvaluationOut): number | null {
 }
 
 export type Point = { id: string; label: string; value: number };
+
+/** The release preview: every evaluation of the season with its answers; `visible` marks what a full release shows to the family. */
+export type ReleaseRow = {
+	id: string;
+	player: Ref;
+	evaluator: Ref | null;
+	submitted_at: string;
+	release: '' | 'notes' | 'full';
+	public_note: string;
+	answers: { label: string; field_type: string; options: unknown; value: unknown; visible: boolean }[];
+};
+export type ReleasePreview = { checklist: Ref; season: Ref | null; results: ReleaseRow[] };
