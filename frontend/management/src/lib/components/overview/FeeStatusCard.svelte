@@ -19,8 +19,9 @@
 	);
 </script>
 
-<div class="card card-body">
-	<h2 class="card-title flex items-center gap-2"><Wallet size={16} class="shrink-0" aria-hidden="true" /> {t('overview.fees.title')}</h2>
+<div class="card h-full">
+	<div class="card-h"><Wallet size={17} class="shrink-0" aria-hidden="true" /><h2>{t('overview.fees.title')}</h2></div>
+	<div class="p-5">
 	{#if !total}
 		<p class="text-sm text-muted">{t('overview.fees.empty')}</p>
 	{:else}
@@ -65,4 +66,5 @@
 			</ul>
 		</div>
 	{/if}
+	</div>
 </div>

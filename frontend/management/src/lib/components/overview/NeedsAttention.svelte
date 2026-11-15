@@ -23,18 +23,16 @@
 </script>
 
 <div class="card h-full">
-	<header class="card-body">
-		<h2 class="card-title min-h-7"><TriangleAlert size={16} class="shrink-0" aria-hidden="true" /> {t('overview.attention.title')}</h2>
-	</header>
+	<div class="card-h"><TriangleAlert size={17} class="shrink-0" aria-hidden="true" /><h2>{t('overview.attention.title')}</h2></div>
 	{#if !items.length}
-		<p class="flex items-center gap-2 px-6 py-5 text-sm text-muted"><CircleCheck size={16} aria-hidden="true" /> {t('overview.attention.none')}</p>
+		<p class="flex items-center gap-2 px-5 py-5 text-sm text-muted"><CircleCheck size={16} aria-hidden="true" /> {t('overview.attention.none')}</p>
 	{:else}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<!-- From a fourth issue on the list scrolls instead of growing (three rows are about 13.5rem). -->
-		<ul class="divide-y divide-line px-6 {items.length > 3 ? 'max-h-[13.5rem] overflow-y-auto' : ''}" tabindex={items.length > 3 ? 0 : undefined} aria-label={items.length > 3 ? t('overview.attention.title') : undefined}>
+		<ul class="divide-y divide-line px-5 {items.length > 3 ? 'max-h-[13.5rem] overflow-y-auto' : ''}" tabindex={items.length > 3 ? 0 : undefined} aria-label={items.length > 3 ? t('overview.attention.title') : undefined}>
 			{#each items as i (i.key)}
 				<li>
-					<a class="flex items-center gap-4 py-4 hover:bg-surface" href={i.href}>
+					<a class="flex items-center gap-4 py-3 hover:bg-surface" href={i.href}>
 						<span class="h-10 w-1 shrink-0 rounded-full {i.tint}"></span>
 						<span class="min-w-0 flex-1">
 							<span class="block font-semibold {i.key === 'shop_closed' || i.key === 'registration_closed' ? 'text-danger' : 'text-ink'}">{i.title}</span>

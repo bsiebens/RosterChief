@@ -7,8 +7,9 @@
 	const diff = $derived(renewal && renewal.previous_rate !== null ? renewal.rate - renewal.previous_rate : null);
 </script>
 
-<div class="card card-body">
-	<h2 class="card-title flex items-center gap-2"><RefreshCw size={16} class="shrink-0" aria-hidden="true" /> {t('overview.renewal.title')}</h2>
+<div class="card h-full">
+	<div class="card-h"><RefreshCw size={17} class="shrink-0" aria-hidden="true" /><h2>{t('overview.renewal.title')}</h2></div>
+	<div class="grid gap-2 p-5">
 	{#if !renewal}
 		<p class="text-sm text-muted">{t('overview.renewal.none')}</p>
 	{:else}
@@ -28,4 +29,5 @@
 		{/if}
 		<p class="text-sm text-muted">{t('overview.renewal.detail', { renewed: renewal.renewed, of: renewal.of, season: renewal.previous_season })}</p>
 	{/if}
+	</div>
 </div>

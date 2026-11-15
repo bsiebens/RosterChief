@@ -40,18 +40,21 @@
 		{@const o = data.overview}
 		<div class="grid gap-4">
 			<KpiBar overview={o} />
-			<!-- Left: news, signups, fees + renewal. Right: needs attention (as tall as the news), then the fixtures down to the bottom of the renewal card. -->
-			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-				<NewsCard items={data.news ?? []} pending={data.newsPending ?? 0} />
-				<NeedsAttention overview={o} noTypeCount={data.noTypeCount} shopClosed={data.shopClosed} registrationClosed={data.registrationClosed} shopHref={data.me?.can_manage_shop_orders ? '/shop/settings' : '/shop'} />
-				<SignupsChart months={o.signups} />
-				<div class="xl:col-start-2 xl:row-span-2 xl:row-start-2 [&>*]:h-full"><UpcomingCard events={data.upcoming ?? []} /></div>
-				{#if o.fees}
-					<div class="grid gap-4 md:grid-cols-2 xl:col-start-1 xl:row-start-3">
-						<FeeStatusCard fees={o.fees} />
-						<RenewalCard renewal={o.renewal} />
-					</div>
-				{/if}
+			<div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] xl:items-start">
+				<div class="grid min-w-0 gap-4">
+					<NeedsAttention overview={o} noTypeCount={data.noTypeCount} shopClosed={data.shopClosed} registrationClosed={data.registrationClosed} shopHref={data.me?.can_manage_shop_orders ? '/shop/settings' : '/shop'} />
+					<SignupsChart months={o.signups} />
+					{#if o.fees}
+						<div class="grid gap-4 md:grid-cols-2">
+							<FeeStatusCard fees={o.fees} />
+							<RenewalCard renewal={o.renewal} />
+						</div>
+					{/if}
+				</div>
+				<div class="grid min-w-0 gap-4">
+					<UpcomingCard events={data.upcoming ?? []} />
+					<NewsCard items={data.news ?? []} pending={data.newsPending ?? 0} />
+				</div>
 			</div>
 			<SummaryCards cards={o.cards!} {showShop} shop={data.shop ?? null} />
 		</div>

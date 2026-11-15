@@ -12,11 +12,9 @@
 	};
 </script>
 
-<div class="card card-body @container h-full min-w-0 gap-2">
-	<div class="flex items-center justify-between gap-2">
-		<h2 class="card-title flex items-center gap-2"><Newspaper size={16} class="shrink-0" aria-hidden="true" /> {t('overview.news.title')}</h2>
-		<a class="btn btn-outline btn-sm" href="/news">{t('overview.news.view_all')}</a>
-	</div>
+<div class="card @container min-w-0">
+	<div class="card-h"><Newspaper size={17} class="shrink-0" aria-hidden="true" /><h2>{t('overview.news.title')}</h2><a class="ml-auto text-sm font-semibold text-club-dark hover:underline" href="/news">{t('overview.news.view_all')} →</a></div>
+	<div class="grid gap-2 px-5 py-3">
 	{#if pending > 0}
 		<a class="alert alert-warning py-2 text-sm" href="/news?tab=review">{t('overview.news.pending', { n: pending })}</a>
 	{/if}
@@ -36,4 +34,5 @@
 	{:else}
 		<p class="py-6 text-center text-sm text-muted">{t('overview.news.empty')}</p>
 	{/if}
+	</div>
 </div>

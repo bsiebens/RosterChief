@@ -26,8 +26,9 @@
 	const empty = $derived(months.every((m) => m.new + m.returning === 0));
 </script>
 
-<div class="card card-body">
-	<h2 class="card-title flex items-center gap-2"><UserRoundPlus size={16} class="shrink-0" aria-hidden="true" /> {t('overview.signups.title')}</h2>
+<div class="card">
+	<div class="card-h"><UserRoundPlus size={17} class="shrink-0" aria-hidden="true" /><h2>{t('overview.signups.title')}</h2></div>
+	<div class="grid gap-2 p-5">
 	<p class="text-sm text-muted">{t('overview.signups.sub')}</p>
 	{#if empty}
 		<p class="py-8 text-center text-sm text-muted">{t('overview.signups.empty')}</p>
@@ -73,4 +74,5 @@
 			<span class="inline-flex items-center gap-2"><span class="h-3 w-6 rounded-sm bg-club"></span>{t('overview.signups.returning')}</span>
 		</div>
 	{/if}
+	</div>
 </div>

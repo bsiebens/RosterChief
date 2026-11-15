@@ -74,7 +74,7 @@
 {:else}
 	<div class="-mx-7 -my-6 flex flex-col">
 		<!-- Filters: which games count (same bar as the calendar: friendlies and competition left, the scope switch right). -->
-		<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5" role="search" aria-label={t('analytics.scope')}>
+		<div class="flex flex-wrap items-center gap-3 border-b border-line bg-(--portal-panel) px-7 py-2.5" role="search" aria-label={t('analytics.scope')}>
 			<label class="flex cursor-pointer items-center gap-1.5 text-sm text-slate">
 				<input type="checkbox" class="checkbox" checked={data.friendlies} onchange={(e) => filter({ friendlies: e.currentTarget.checked ? null : '0' })} />
 				{t('analytics.friendlies')}
@@ -89,7 +89,7 @@
 			<div class="flex-1"></div>
 			<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('analytics.scope')}>
 				{#each SCOPES as scope (scope)}
-					<button type="button" class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.scope === scope ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}" aria-pressed={data.scope === scope} onclick={() => setScope(scope)}>{t(`analytics.scope.${scope}`)}</button>
+					<button type="button" class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {data.scope === scope ? 'border border-ink bg-ink text-sidebar-fg' : 'border border-line text-muted hover:text-ink'}" aria-pressed={data.scope === scope} onclick={() => setScope(scope)}>{t(`analytics.scope.${scope}`)}</button>
 				{/each}
 			</div>
 		</div>
@@ -146,7 +146,7 @@
 			{/if}
 
 			<!-- Hero: record and points, goals, the running goal difference. -->
-			<section class="card grid gap-6 border-ink bg-ink p-6 text-white lg:grid-cols-[1fr_1.1fr_1.4fr] lg:gap-0">
+			<section class="card grid gap-6 border-(--portal-hero) bg-(--portal-hero) p-6 text-(--portal-hero-content) lg:grid-cols-[1fr_1.1fr_1.4fr] lg:gap-0">
 				<div class="flex flex-col justify-between gap-6 lg:pr-8">
 					<div>
 						<p class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{a.games === 1 ? t('analytics.record_one') : t('analytics.record', { n: a.games })}</p>
@@ -157,7 +157,7 @@
 						<p class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{t('analytics.form')}</p>
 						<div class="mt-2 flex gap-2">
 							{#each a.form as game, i (`${game.event.id}-${i}`)}
-								<a href={eventHref(game.event.id)} class="flex size-10 items-center justify-center rounded-lg font-display text-xl font-extrabold {game.result === 'W' ? 'bg-ok text-white' : game.result === 'L' ? 'bg-club text-club-content' : 'bg-steel text-on-dark'}" title="{game.event.opponent ?? game.event.title} · {shortDate(game.event.start)} · {game.event.score_for}–{game.event.score_against}">{resultLabel(game.result)}</a>
+								<a href={eventHref(game.event.id)} class="flex size-10 items-center justify-center rounded-lg font-display text-xl font-extrabold {game.result === 'W' ? 'bg-ok text-(--portal-hero-content)' : game.result === 'L' ? 'bg-club text-club-content' : 'bg-steel text-on-dark'}" title="{game.event.opponent ?? game.event.title} · {shortDate(game.event.start)} · {game.event.score_for}–{game.event.score_against}">{resultLabel(game.result)}</a>
 							{/each}
 						</div>
 					</div>
@@ -167,11 +167,11 @@
 						<p class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{t('analytics.goals_fa')}</p>
 						<p class="mt-2 flex items-baseline gap-3 font-display text-7xl leading-none font-extrabold">
 							<span>{a.goals_for}</span><span class="text-3xl font-medium text-on-dark-faint">/</span><span class="text-club">{a.goals_against}</span>
-							<span class="ml-auto text-3xl {a.goal_difference < 0 ? 'text-club' : 'text-white'}" title={t('analytics.difference')}>{signed(a.goal_difference)}</span>
+							<span class="ml-auto text-3xl {a.goal_difference < 0 ? 'text-club' : 'text-(--portal-hero-content)'}" title={t('analytics.difference')}>{signed(a.goal_difference)}</span>
 						</p>
 						{#if a.goals_for + a.goals_against}
 							<div class="mt-3 flex gap-1.5" aria-hidden="true">
-								<span class="h-2 rounded-full bg-white" style="flex: {a.goals_for} 1 0"></span>
+								<span class="h-2 rounded-full bg-(--portal-hero-content)" style="flex: {a.goals_for} 1 0"></span>
 								<span class="h-2 rounded-full bg-club" style="flex: {a.goals_against} 1 0"></span>
 							</div>
 						{/if}
