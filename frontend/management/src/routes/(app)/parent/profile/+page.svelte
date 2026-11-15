@@ -3,6 +3,8 @@
 	import { Camera, Check, Shirt, Trash2, UserRound } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import NotificationSettings from '#lib/components/portal/NotificationSettings.svelte';
+	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -13,6 +15,8 @@
 	let { data } = $props();
 	usePageHeader(() => ({ title: t('portal.profile') }));
 
+	// svelte-ignore state_referenced_locally
+	let who = $state(data.people.find((person) => person.is_self)?.id ?? data.people[0]?.id ?? '');
 	let drafts = $state<Record<string, ProfilePerson>>({});
 	let busy = $state('');
 	let saved = $state('');
@@ -61,8 +65,9 @@
 
 <svelte:head><title>{pageTitle(t('portal.profile'))}</title></svelte:head>
 
-<div class="grid min-w-0 items-start gap-4 2xl:grid-cols-2">
-	{#each data.people as person (person.id)}
+<div class="mb-4"><PersonFilter people={data.people.map((person) => ({ id: person.id, name: person.name, first_name: person.first_name, photo_url: person.photo_url }))} bind:selected={who} viewer={data.people.find((person) => person.is_self)?.id} all={false} /></div>
+<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+	{#each data.people.filter((person) => person.id === who) as person (person.id)}
 		{@const d = draft(person)}
 		<form class="card overflow-hidden" onsubmit={(e) => { e.preventDefault(); void save(person); }}>
 			<div class="flex flex-wrap items-center gap-4 border-b border-line bg-subhead px-5 py-4">
@@ -105,4 +110,5 @@
 			</div>
 		</form>
 	{/each}
+	{#if data.settings}<div class="min-w-0"><NotificationSettings settings={data.settings} /></div>{/if}
 </div>

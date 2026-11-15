@@ -164,6 +164,10 @@
 		const result = await api<SubmittedForm>('GET', `/portal/forms/submissions/${id}`);
 		if (result.ok && result.data) submission = result.data;
 	}
+	// From tablet width the Me tab is the profile page with the notification settings beside it; on a phone it stays the short list of links.
+	$effect(() => {
+		if (tab === 'me' && typeof matchMedia === 'function' && matchMedia('(min-width: 48rem)').matches) void goto('/parent/profile', { replaceState: true });
+	});
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length || openTasks.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length + openTasks.length);

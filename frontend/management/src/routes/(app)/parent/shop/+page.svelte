@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Download, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
+	import { Clock, Download, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
@@ -186,18 +186,18 @@
 			{#if catalog.open}
 				<section class="card card-body gap-4">
 					<h2 class="card-title"><ShoppingBag size={16} aria-hidden="true" /> {t('portal.shop.products')}</h2>
-					<div class="grid gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+					<div class="grid gap-2">
 						<label class="relative">
 							<Search size={16} aria-hidden="true" class="pointer-events-none absolute top-3.5 left-3 text-muted" />
 							<input class="input input-bordered w-full pl-9" type="search" placeholder={t('portal.shop.search')} aria-label={t('portal.shop.search')} bind:value={q} />
 						</label>
-						{#if categories.length}
-							<select class="select select-bordered w-full" aria-label={t('portal.shop.all_categories')} bind:value={category}>
-								<option value="">{t('portal.shop.all_categories')}</option>
-								{#each categories as name (name)}<option value={name}>{name}</option>{/each}
-							</select>
-						{/if}
 					</div>
+					{#if categories.length}
+						<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('portal.shop.all_categories')}>
+							<button type="button" class="btn btn-sm {category === '' ? '' : 'btn-outline'}" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
+							{#each categories as name (name)}<button type="button" class="btn btn-sm {category === name ? '' : 'btn-outline'}" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
+						</div>
+					{/if}
 					<div class="grid items-start gap-4 sm:max-md:grid-cols-2 lg:grid-cols-2">
 						{#each products as product (product.id)}
 							{@const draft = draftFor(product)}
@@ -211,11 +211,11 @@
 								<div class="grid gap-2 px-3 pb-3">
 									<div class="flex flex-wrap items-baseline justify-between gap-2">
 										<h3 class="font-semibold">{product.name}</h3>
-										<span class="text-sm font-semibold tabular-nums">{money(variant?.effective_price ?? product.price)}</span>
+										<span class="font-display text-xl font-extrabold text-ink tabular-nums">{money(variant?.effective_price ?? product.price)}</span>
 									</div>
 									{#if product.description}<p class="whitespace-pre-line text-sm text-muted">{product.description}</p>{/if}
 									{#if product.next_ordering_window}
-										<p class="text-xs font-medium text-muted">{t('shop.window.summary', { deadline: calendarDay(product.next_ordering_window.deadline), estimated_delivery: calendarDay(product.next_ordering_window.estimated_delivery) })}</p>
+										<p class="flex items-center gap-2 rounded-box border border-info-border bg-info-bg px-3 py-1.5 text-xs font-medium text-info-text"><Clock size={14} class="shrink-0" aria-hidden="true" />{t('shop.window.summary', { deadline: calendarDay(product.next_ordering_window.deadline), estimated_delivery: calendarDay(product.next_ordering_window.estimated_delivery) })}</p>
 									{/if}
 									{#each product.files as file (file.url)}
 										<a href={file.url} class="link text-sm" target="_blank" rel="noopener">{file.title}</a>
