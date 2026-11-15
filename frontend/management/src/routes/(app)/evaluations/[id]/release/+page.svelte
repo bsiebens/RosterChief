@@ -43,18 +43,17 @@
 	{#each data.preview.results as row (row.id)}
 		{@const choice = choices[row.id]}
 		<section class="card card-body gap-3" aria-label={row.player.name}>
-			<div class="flex flex-wrap items-start justify-between gap-3">
-				<div>
-					<h2 class="font-display text-lg font-extrabold text-ink uppercase">{row.player.name}</h2>
-					<p class="text-xs text-muted">{stamp(row.submitted_at)}{row.evaluator ? ` · ${t('profile.eval.by', { name: row.evaluator.name })}` : ''}</p>
+			<div>
+				<h2 class="font-display text-lg font-extrabold text-ink uppercase">{row.player.name}</h2>
+				<p class="text-xs text-muted">{stamp(row.submitted_at)}{row.evaluator ? ` · ${t('profile.eval.by', { name: row.evaluator.name })}` : ''}</p>
+			</div>
+			<div class="grid gap-1.5">
+				<p class="text-sm font-semibold text-ink" id="lvl-{row.id}">{t('eval.share.level')}</p>
+				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-labelledby="lvl-{row.id}">
+					{#each [['', 'eval.share.none'], ['notes', 'eval.share.notes'], ['full', 'eval.share.full']] as [value, label] (value)}
+						<button type="button" role="radio" aria-checked={choice.release === value} class="btn btn-sm h-10 min-h-0 {choice.release === value ? 'btn-primary' : 'btn-outline'}" onclick={() => (choice.release = value as Choice['release'])}>{t(label)}</button>
+					{/each}
 				</div>
-				<label class="grid gap-1 text-sm">{t('eval.share.level')}
-					<select class="select select-bordered select-sm" bind:value={choice.release}>
-						<option value="">{t('eval.share.none')}</option>
-						<option value="notes">{t('eval.share.notes')}</option>
-						<option value="full">{t('eval.share.full')}</option>
-					</select>
-				</label>
 			</div>
 			<div class="grid items-start gap-4 lg:grid-cols-2">
 				<label class="grid content-start gap-1 text-sm font-semibold">{t('eval.public_note')}
