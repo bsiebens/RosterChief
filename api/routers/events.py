@@ -814,6 +814,10 @@ def _lineup_out(request, event, lineup=None) -> dict:
     if available and team is not None:
         rows = lineup_svc.selectable_members(lineup if lineup is not None else Lineup(event=event, team=team))
         show_picks = manager or (lineup is not None and lineup.published_at is not None)
+        notes, turnout = {}, {}
+        if manager:
+            notes = dict(Attendance.objects.filter(event=event).values_list("member_id", "note"))
+            turnout = attendance_svc.member_kind_turnout([r["member"].pk for r in rows], attendance_svc.resolve_season(event))
         members = [
             {
                 "member": _ref(r["member"]),
@@ -823,6 +827,9 @@ def _lineup_out(request, event, lineup=None) -> dict:
                 "available": r["available"],
                 "on_roster": r["on_roster"],
                 "selected": r["selected"] and show_picks,
+                "note": notes.get(r["member"].pk, ""),
+                "games_rate": turnout.get(r["member"].pk, {}).get("games"),
+                "practices_rate": turnout.get(r["member"].pk, {}).get("practices"),
             }
             for r in rows
         ]

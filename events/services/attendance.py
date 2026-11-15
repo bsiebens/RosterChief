@@ -523,6 +523,23 @@ def player_attendance_rankings(team, season: Season | None = None, *, minimum_re
     return rankings
 
 
+def member_kind_turnout(member_ids, season: Season | None = None, *, minimum_responses: int = 3) -> dict:
+    """Turnout per member for games (games and tournaments) and for practices (trainings) over past events of ``season``:
+    ``{member_id: {"games": rate | None, "practices": rate | None}}``. A rate is ``None`` below ``minimum_responses``
+    present/absent answers (too little data to say anything)."""
+    season = _season(season)
+    result = {pk: {"games": None, "practices": None} for pk in member_ids}
+    if season is None or not result:
+        return result
+    groups = {"games": [Event.EventKind.GAME, Event.EventKind.TOURNAMENT], "practices": [Event.EventKind.TRAINING]}
+    for key, kinds in groups.items():
+        rows = _past(season, member_id__in=list(result), event__kind__in=kinds, event__cancelled=False, status__in=[Status.PRESENT, Status.ABSENT]).values("member_id").annotate(present=Count("id", filter=Q(status=Status.PRESENT)), responses=Count("id")).order_by()
+        for row in rows:
+            if row["responses"] >= minimum_responses:
+                result[row["member_id"]][key] = round(100 * row["present"] / row["responses"])
+    return result
+
+
 def players_who_missed_recent_practices(team, season: Season | None = None, *, count: int = 2):
     """Members absent or silent (not excused) on *every one* of ``team``'s ``count`` most recent past trainings in
     ``season``. Empty when the team has fewer than ``count`` past trainings (not enough history to call anyone out)."""

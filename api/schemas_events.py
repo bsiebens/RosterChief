@@ -346,6 +346,10 @@ class LineupMemberOut(Schema):
     available: bool
     on_roster: bool
     selected: bool
+    # Only for attendance managers: the player's own reason for this event and their season turnout (None: too little data).
+    note: str = ""
+    games_rate: int | None = None
+    practices_rate: int | None = None
 
 
 class LineupOut(Schema):

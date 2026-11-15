@@ -75,6 +75,9 @@ class RosterEntryOut(Schema):
     open_requirements: list[str] = []
     #: Turnout in percent on the team's past events this season (present / present + absent); None until the player has three answers.
     attendance_rate: int | None = None
+    #: The same for the team's games (games and tournaments) and practices; None below three answers.
+    games_rate: int | None = None
+    practices_rate: int | None = None
 
 
 class StaffEntryOut(Schema):
@@ -85,11 +88,14 @@ class StaffEntryOut(Schema):
     photo_url: str | None = None
     position_id: UUID
     position_name: str
+    #: This is the signed-in person's own entry (a team manager who isn't an administrator can't edit or remove it).
+    is_self: bool = False
 
 
 class TeamDetailOut(TeamBase):
     season_id: UUID | None = None
     photo_url: str | None = None  # the team photo of that season
+    can_manage: bool = False  # the signed-in person may edit this team's roster and staff
     analytics_available: bool = False  # game analytics exist for this club (hockey + the analytics feature): GET /teams/{id}/analytics
     roster: list[RosterEntryOut]
     staff: list[StaffEntryOut]

@@ -392,6 +392,39 @@ class TeamsApiTests(TestCase):
         for a in ("added", "updated", "removed"):
             self.assertEqual(len(self.audit(f"team.staff_{a}")), 1)
 
+    def test_team_staff_manage_their_own_team_only_and_not_themselves(self):
+        with schema_context(self.club.schema_name):
+            head = Position.objects.create(name="Head coach", short_name="HC", staff_position=True, management_position=True)
+            mine = StaffAssignment.objects.create(team=self.u12, member=self.coach, season=self.season, position=head)
+            other = StaffAssignment.objects.create(team=self.u16, member=self.kid, season=self.season, position=self.coach_pos)
+        u12, u16 = f"/{self.u12.pk}", f"/{self.u16.pk}"
+        detail = self.call("get", u12, self.coach_user).json()
+        self.assertTrue(detail["can_manage"])
+        self.assertEqual([s["is_self"] for s in detail["staff"]], [True])
+        self.assertFalse(self.call("get", u16, self.coach_user).json()["can_manage"])
+        # Roster: the coach manages U12 ...
+        r = self.call("post", f"{u12}/roster", self.coach_user, {"member_id": str(self.peer.pk), "jersey_number": 7})
+        self.assertEqual(r.status_code, 201, r.content)
+        mid = r.json()["id"]
+        self.assertEqual(self.call("patch", f"{u12}/roster/{mid}", self.coach_user, {"jersey_number": 8}).status_code, 200)
+        self.assertEqual(self.call("delete", f"{u12}/roster/{mid}", self.coach_user).status_code, 204)
+        # ... but not U16.
+        self.assertEqual(self.call("post", f"{u16}/roster", self.coach_user, {"member_id": str(self.peer.pk)}).status_code, 403)
+        self.assertEqual(self.call("patch", f"{u16}/staff/{other.pk}", self.coach_user, {"position_id": str(head.pk)}).status_code, 403)
+        self.assertEqual(self.call("delete", f"{u16}/staff/{other.pk}", self.coach_user).status_code, 403)
+        # Staff: add and edit others, never one's own entry.
+        r = self.call("post", f"{u12}/staff", self.coach_user, {"member_id": str(self.teen.pk), "position_id": str(self.coach_pos.pk)})
+        self.assertEqual(r.status_code, 201, r.content)
+        tid = r.json()["id"]
+        self.assertEqual(self.call("patch", f"{u12}/staff/{tid}", self.coach_user, {"position_id": str(head.pk)}).status_code, 200)
+        self.assertEqual(self.call("delete", f"{u12}/staff/{tid}", self.coach_user).status_code, 204)
+        self.assertEqual(self.call("patch", f"{u12}/staff/{mine.pk}", self.coach_user, {"position_id": str(self.coach_pos.pk)}).status_code, 403)
+        self.assertEqual(self.call("delete", f"{u12}/staff/{mine.pk}", self.coach_user).status_code, 403)
+        with schema_context(self.club.schema_name):
+            self.assertTrue(StaffAssignment.objects.filter(pk=mine.pk, position=head).exists())
+        # An administrator still can.
+        self.assertEqual(self.admin("delete", f"{u12}/staff/{mine.pk}").status_code, 204)
+
     # -- numbers --
 
     def test_overview_statuses(self):

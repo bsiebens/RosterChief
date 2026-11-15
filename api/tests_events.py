@@ -508,6 +508,20 @@ class EventsApiTests(TestCase):
 
     # -- line-up --
 
+    def test_lineup_members_carry_note_and_turnout_for_managers(self):
+        game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")
+        self.call("put", f"/events/{game.pk}/attendance/{self.p1.pk}", self.head.user, {"status": "absent", "coach_note": ""})
+        Attendance.objects.filter(event=game, member=self.p1).update(note="Sick")
+        # Three past games (present, present, absent) and one past practice for p1: games 67%, practices too little data.
+        for n, status in enumerate(("present", "present", "absent"), start=1):
+            past = self.event(days=-n, teams=[self.team_a], kind=Event.EventKind.GAME, title=f"Old game {n}")
+            Attendance.objects.update_or_create(event=past, member=self.p1, defaults={"status": status})
+        practice = self.event(days=-5, teams=[self.team_a], kind=Event.EventKind.TRAINING, title="Practice")
+        Attendance.objects.update_or_create(event=practice, member=self.p1, defaults={"status": "present"})
+        rows = {m["member"]["id"]: m for m in self.call("get", f"/events/{game.pk}/lineup", self.head.user).json()["members"]}
+        mine = rows[str(self.p1.pk)]
+        self.assertEqual((mine["note"], mine["games_rate"], mine["practices_rate"]), ("Sick", 67, None))
+
     def test_lineup_flow(self):
         game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")
         r = self.call("get", f"/events/{game.pk}/lineup", self.head.user)
