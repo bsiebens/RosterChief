@@ -78,7 +78,7 @@ Verify application behavior after rollback and archive the deployment checkpoint
 
 Open the club URL over HTTPS. Members can install it from **Me → App & notifications**. On iPhone and iPad, use Safari’s **Share → Add to Home Screen**, then open the installed app before enabling push.
 
-Set `DJANGO_VAPID_PUBLIC_KEY`, `DJANGO_VAPID_PRIVATE_KEY` and `DJANGO_VAPID_ADMIN_EMAIL` in `/etc/rosterchief/app.env` and restart the Django web and worker services. Use a stable VAPID key pair because existing browser subscriptions are tied to the public key. Enable Web push in **Control panel → Push**, then subscribe from the installed app and send a test notification to that user.
+Generate a key pair with `uv run python manage.py generate_vapid_keys --email you@example.com` (it prints the three lines and writes nothing). Set `DJANGO_VAPID_PUBLIC_KEY`, `DJANGO_VAPID_PRIVATE_KEY` and `DJANGO_VAPID_ADMIN_EMAIL` in `/etc/rosterchief/app.env` and restart the Django web and worker services. Use a stable VAPID key pair because existing browser subscriptions are tied to the public key. Enable Web push in **Control panel → Push**, then subscribe from the installed app and send a test notification to that user.
 
 Use the member's notification bell to distinguish a missing invitation from a push delivery problem. A future event created with **Tell the invited people** sends an in-app message to the invited members with an account and to the parents or guardians of invited children. The account creating the event is skipped, including its copies for children. Other linked guardians still receive their own copies.
 
