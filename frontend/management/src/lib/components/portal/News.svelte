@@ -18,7 +18,7 @@
 {#if home}
 	<div class="mb-2 flex items-center justify-between gap-2">
 		<h2 class="card-title"><Newspaper size={16} aria-hidden="true" />{t('portal.news')}</h2>
-		<a class="link text-sm font-semibold" href={path + '?tab=news'}>{t('overview.news.view_all')}</a>
+		<a class="link-more" href={path + '?tab=news'}>{t('overview.news.view_all')} →</a>
 	</div>
 {/if}
 {#if shown.length}

@@ -1283,6 +1283,21 @@ textarea[name="note"] {
     text-transform: uppercase;
 }
 
+.link-more {
+    display: inline-flex;
+    min-height: 2.25rem;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--color-club-dark);
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.link-more:hover { text-decoration: underline; }
+
 /* In the top bar the chips are as tall as the bell button next to them. */
 .portal-person.compact {
     min-height: 2.25rem;

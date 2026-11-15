@@ -271,8 +271,7 @@
 					<span class="badge badge-warn">{t('portal.reply')}</span>
 				</a>
 			{/each}
-			{#if officiatingInvites.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar&crew=1">{t('portal.crew_title')}</a>{/if}
-			{#if needsReply.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel}</a>{/if}
+			
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
@@ -288,6 +287,12 @@
 				</a>
 			{/each}
 		</div>
+		{#if officiatingInvites.length > 4 || needsReply.length > 4}
+			<div class="flex flex-wrap justify-end gap-x-4 border-t border-rule pt-1">
+				{#if officiatingInvites.length > 4}<a class="link-more" href="/parent?tab=calendar&crew=1">{t('portal.crew_title')} →</a>{/if}
+				{#if needsReply.length > 4}<a class="link-more" href="/parent?tab=calendar">{calendarLabel} →</a>{/if}
+			</div>
+		{/if}
 	</section>
 {/snippet}
 
