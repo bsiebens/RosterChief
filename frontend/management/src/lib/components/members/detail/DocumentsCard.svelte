@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CircleAlert, CircleCheck, CircleQuestionMark, Clock, Download, FileText, FileX, Pencil, Plus, RotateCcw, Settings2, UserCheck } from '@lucide/svelte';
+	import { CircleAlert, CircleCheck, CircleQuestionMark, Clock, Download, FileText, FileX, Hourglass, Pencil, Plus, RotateCcw, Settings2, UserCheck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import AnswerInput from '#lib/components/requirements/AnswerInput.svelte';
@@ -22,11 +22,13 @@
 		bypassed: { badge: 'badge-ghost', tint: 'text-muted', icon: UserCheck },
 		expiring_soon: { badge: 'badge-warning', tint: 'text-warn-text', icon: Clock },
 		expired: { badge: 'badge-error', tint: 'text-danger', icon: CircleAlert },
-		missing: { badge: 'badge-ghost', tint: 'text-muted', icon: FileX }
+		missing: { badge: 'badge-ghost', tint: 'text-muted', icon: FileX },
+		pending: { badge: 'badge-info', tint: 'text-info-text', icon: Hourglass }
 	};
 	const isQuestion = (i: ChecklistItem) => i.requirement.kind === 'question';
 	const shownAnswer = (i: ChecklistItem) => answerText(i.requirement, i.answer, t('common.yes'), t('common.no'), formatDate);
 	const detail = (i: ChecklistItem) => {
+		if (i.display === 'pending') return isQuestion(i) ? `${shownAnswer(i)} · ${t('req.doc.d.pending')}` : t('req.doc.d.pending');
 		if (isQuestion(i) && i.display !== 'bypassed') {
 			if (i.display === 'missing') return t('req.doc.q.missing');
 			const base = shownAnswer(i);
@@ -116,11 +118,18 @@
 						{:else if canManage}
 							<div class="ml-auto flex flex-wrap items-center justify-end gap-1.5">
 								{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('req.doc.download')}</a>{/if}
+								{#if i.display === 'pending'}
+									<form method="POST" action="{actionBase}/approveRequirement" use:enhance={submit(() => {})}>
+										<input type="hidden" name="membership_id" value={membership.id} />
+										<input type="hidden" name="requirement_id" value={i.requirement.id} />
+										<button class="btn btn-primary btn-xs gap-1" type="submit" disabled={busy}><CircleCheck size={13} /> {t('req.doc.approve')}</button>
+									</form>
+								{/if}
 								{#if i.display !== 'missing'}
 									<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
 										<input type="hidden" name="membership_id" value={membership.id} />
 										<input type="hidden" name="requirement_id" value={i.requirement.id} />
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t('req.doc.reopen')}</button>
+										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t(i.display === 'pending' ? 'req.doc.reject' : 'req.doc.reopen')}</button>
 									</form>
 								{/if}
 								{#if i.display === 'missing' || i.display === 'expired'}<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((bypassFor = i), (bypassOpen = true))}><UserCheck size={13} /> {t('req.doc.bypass')}</button>{/if}

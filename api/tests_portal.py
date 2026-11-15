@@ -297,18 +297,32 @@ class PortalProfileTests(ParentPortalTests):
         self.assertFalse(state["teams"][0]["followed"])
 
 
-    def test_overview_and_requirement_hand_in(self):
-        from members.models import ClubMembership, OnboardingRequirement
+    def test_requirement_hand_in_waits_for_review_then_locks(self):
         from events.models import Season
+        from members.models import ClubMembership, OnboardingRequirement
+        from members.services import onboarding
 
         token = self.token()
         with schema_context(self.club.schema_name):
             today = timezone.localdate()
             season = Season.objects.create(start_date=today - datetime.timedelta(days=30), end_date=today + datetime.timedelta(days=300))
-            ClubMembership.objects.create(member=self.child, season=season)
+            membership = ClubMembership.objects.create(member=self.child, season=season)
             requirement = OnboardingRequirement.objects.create(name="Allergies", kind=OnboardingRequirement.Kind.QUESTION, question_type=OnboardingRequirement.QuestionType.TEXT)
         data = self.call("get", "/portal/me/overview", token).json()
         self.assertEqual(data["memberships"][0]["requirements"][0]["state"], "missing")
-        response = Client().post(f"/api/v1/portal/me/requirements/{self.child.pk}/{requirement.pk}?answer=Peanuts", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host)
+        url = f"/api/v1/portal/me/requirements/{self.child.pk}/{requirement.pk}?answer="
+        response = Client().post(url + "Peanuts", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host)
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["memberships"][0]["requirements"][0]["answer"], "Peanuts")
+        item = response.json()["memberships"][0]["requirements"][0]
+        self.assertEqual((item["state"], item["answer"], item["locked"]), ("pending", "Peanuts", False))
+        with schema_context(self.club.schema_name):
+            self.assertEqual(len(onboarding.unresolved(membership)), 1)  # still open: it keeps blocking until approved
+        # while waiting, the member can still change it
+        self.assertEqual(Client().post(url + "Nuts", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host).status_code, 200)
+        with schema_context(self.club.schema_name):
+            onboarding.approve(self.club.owner, membership, requirement)
+            self.assertEqual(onboarding.unresolved(membership), [])
+        item = self.call("get", "/portal/me/overview", token).json()["memberships"][0]["requirements"][0]
+        self.assertEqual((item["state"], item["answer"], item["locked"]), ("complete", "Nuts", True))
+        # approved: no more changes from the member
+        self.assertEqual(Client().post(url + "Other", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host).status_code, 409)

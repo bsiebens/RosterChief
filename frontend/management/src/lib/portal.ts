@@ -144,9 +144,11 @@ export type RequirementItem = {
 	options: (string | { value: string; label: string })[] | null;
 	requires_document: boolean;
 	valid_for_months: number | null;
-	state: 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+	state: 'missing' | 'pending' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
 	valid_until: string | null;
 	answer: unknown;
+	locked: boolean;
+	submitted_at: string | null;
 	has_document: boolean;
 	completed_at: string | null;
 };

@@ -34,6 +34,10 @@ export const requirementActions: Actions = {
 		const f = await request.formData();
 		return docResult('bypass', await api('POST', `${target(f)}/bypass`, { body: { note: String(f.get('note') ?? '') }, f: fetch }));
 	},
+	approveRequirement: async ({ request, fetch }) => {
+		const f = await request.formData();
+		return docResult('approve', await api('POST', `${target(f)}/approve`, { f: fetch }));
+	},
 	reopenRequirement: async ({ request, fetch }) => {
 		const f = await request.formData();
 		return docResult('reopen', await api('POST', `${target(f)}/reopen`, { f: fetch }));

@@ -530,6 +530,9 @@ class MemberRequirementStatus(UUIDModel):
     note = models.TextField(_("note"), blank=True, help_text=_("Staff-only, e.g. how or when this was received."))
     #: The last day the completed item is valid (from the requirement's ``valid_for_months`` unless staff set it). Blank = no expiry.
     valid_until = models.DateField(_("valid until"), null=True, blank=True)
+    #: Handed in by the member or their guardian and waiting for staff: it does not count as complete (and keeps blocking) until approved.
+    is_pending_review = models.BooleanField(_("waiting for review"), default=False)
+    submitted_at = models.DateTimeField(_("submitted at"), null=True, blank=True)
     #: The last reminder sent about this item (``expiring`` / ``expired`` / ``missing``), so the daily sweep never repeats itself.
     last_reminder_at = models.DateTimeField(_("last reminder at"), null=True, blank=True)
     last_reminder_kind = models.CharField(_("last reminder kind"), max_length=20, blank=True)

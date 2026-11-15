@@ -66,8 +66,8 @@ class ItemOut(Schema):
     requirement: RequirementOut
     #: open / complete / bypassed (an expired completion is open again)
     state: Literal["open", "complete", "bypassed"]
-    #: missing / complete / expiring_soon / expired / bypassed
-    display: Literal["missing", "complete", "expiring_soon", "expired", "bypassed"]
+    #: missing / pending (handed in by the member, waiting for approval) / complete / expiring_soon / expired / bypassed
+    display: Literal["missing", "pending", "complete", "expiring_soon", "expired", "bypassed"]
     note: str = ""
     completed_at: datetime.datetime | None = None
     completed_by: str | None = None

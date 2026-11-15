@@ -22,11 +22,12 @@
 	const key = (row: MembershipRow, item: RequirementItem) => `${row.member_id}:${item.id}`;
 	const person = (id: string) => people.find((entry) => entry.id === id);
 	const day = (value: string) => formatDay(parseIsoDate(value) ?? value);
-	const needsAction = (item: RequirementItem) => ['missing', 'expired', 'expiring_soon'].includes(item.state);
+	const needsAction = (item: RequirementItem) => !item.locked;
 	const choices = (item: RequirementItem) => (item.options ?? []).map((option) => (typeof option === 'string' ? { value: option, label: option } : option));
 	const open = (row: MembershipRow) => row.requirements.filter((item) => item.state === 'missing' || item.state === 'expired').length;
+	const waiting = (row: MembershipRow) => row.requirements.filter((item) => item.state === 'pending').length;
 	const show = (answer: unknown) => (Array.isArray(answer) ? answer.join(', ') : answer === true ? t('common.yes') : answer === false ? t('common.no') : String(answer ?? ''));
-	const tone = (state: RequirementItem['state']) => (state === 'complete' || state === 'bypassed' ? 'badge-success' : state === 'expiring_soon' ? 'badge-warning' : 'badge-error');
+	const tone = (state: RequirementItem['state']) => (state === 'complete' || state === 'bypassed' ? 'badge-success' : state === 'pending' ? 'badge-info' : state === 'expiring_soon' ? 'badge-warning' : 'badge-error');
 
 	async function submit(row: MembershipRow, item: RequirementItem, file?: File | null) {
 		const id = key(row, item);
@@ -57,6 +58,7 @@
 				<div class="min-w-0 flex-1"><b class="block text-ink">{who?.name}</b><span class="text-xs text-muted">{row.season}</span></div>
 				{#if !row.requirements.length}<span class="badge badge-sm badge-success">{t('portal.req_none')}</span>
 				{:else if open(row)}<span class="badge badge-sm badge-error">{t('portal.req_open', { n: open(row) })}</span>
+				{:else if waiting(row)}<span class="badge badge-sm badge-info">{t('portal.req_waiting', { n: waiting(row) })}</span>
 				{:else}<span class="badge badge-sm badge-success"><CircleCheck size={12} aria-hidden="true" />{t('portal.req_done')}</span>{/if}
 			</div>
 			<ul class="divide-y divide-rule">
@@ -77,6 +79,8 @@
 						{#if item.valid_until}
 							<p class="flex items-center gap-1.5 text-xs {item.state === 'expired' ? 'font-semibold text-danger' : item.state === 'expiring_soon' ? 'font-semibold text-warn-text' : 'text-muted'}">{#if item.state !== 'complete'}<TriangleAlert size={13} aria-hidden="true" />{/if}{t(item.state === 'expired' ? 'portal.req_expired_on' : 'portal.req_valid_until', { date: day(item.valid_until) })}</p>
 						{/if}
+						{#if item.state === 'pending'}<p class="text-xs text-info-text">{t('portal.req_pending_help')}</p>{/if}
+						{#if item.locked && item.state !== 'bypassed'}<p class="text-xs text-muted">{t('portal.req_locked')}</p>{/if}
 						{#if needsAction(item)}
 							<form class="grid gap-2 rounded-box border border-line p-3" onsubmit={(e) => { e.preventDefault(); if (item.kind === 'question') void submit(row, item); }}>
 								{#if item.kind === 'question'}
@@ -91,7 +95,7 @@
 									{:else}
 										<input class="input w-full" type={item.question_type === 'number' ? 'number' : item.question_type === 'date' ? 'date' : 'text'} bind:value={values[id]} required />
 									{/if}
-									<button class="btn btn-primary btn-sm w-fit" type="submit" disabled={busy === id}>{t('portal.req_send')}</button>
+									<button class="btn btn-primary btn-sm w-fit" type="submit" disabled={busy === id}>{item.state === 'pending' ? t('portal.req_change') : t('portal.req_send')}</button>
 								{:else}
 									<label class="grid gap-1 text-sm font-semibold">{t('portal.req_file')}
 										<input class="input w-full font-normal" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" disabled={busy === id} onchange={(e) => { const file = e.currentTarget.files?.[0]; if (file) void submit(row, item, file); e.currentTarget.value = ''; }} />

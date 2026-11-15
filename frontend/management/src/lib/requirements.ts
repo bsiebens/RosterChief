@@ -30,7 +30,7 @@ export type Requirement = QuestionShape & {
 };
 export type RequirementListItem = Requirement & { usage_count: number };
 
-export type DocDisplay = 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+export type DocDisplay = 'missing' | 'pending' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
 export type ChecklistItem = {
 	requirement: Requirement;
 	/** An expired completion is `open` again. */

@@ -122,6 +122,14 @@ def bypass(request, membership_id: UUID, requirement_id: UUID, payload: BypassIn
     return _item(membership, requirement)
 
 
+@router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/approve", response=ItemOut, summary="Approve what the member handed in", operation_id="approve_requirement")
+def approve(request, membership_id: UUID, requirement_id: UUID):
+    """Accepts a member's submission (document or answer): it now counts as complete. 422 when nothing is waiting. To reject it, reopen it."""
+    membership, requirement = _membership(membership_id), _requirement(requirement_id)
+    onboarding.approve(request.user, membership, requirement)
+    return _item(membership, requirement)
+
+
 @router.post("/memberships/{uuid:membership_id}/{uuid:requirement_id}/reopen", response=ItemOut, summary="Undo a completion or bypass (removes the document)", operation_id="reopen_requirement")
 def reopen(request, membership_id: UUID, requirement_id: UUID):
     membership, requirement = _membership(membership_id), _requirement(requirement_id)

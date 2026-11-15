@@ -205,6 +205,7 @@ def _requirement_item(item):
         "valid_for_months": requirement.valid_for_months,
         "state": item.display, "valid_until": item.valid_until, "answer": item.answer,
         "has_document": bool(status and status.document), "completed_at": status.completed_at if status else None,
+        "submitted_at": status.submitted_at if status else None, "locked": item.display in ("complete", "expiring_soon", "bypassed"),
     }
 
 
@@ -249,7 +250,7 @@ def _current_membership(member):
     return ClubMembership.objects.filter(member=member, season__end_date__gte=timezone.localdate()).order_by("season__start_date").first()
 
 
-@router.post("/requirements/{member_id}/{requirement_id}", summary="Hand in a document or answer a question for an onboarding requirement")
+@router.post("/requirements/{member_id}/{requirement_id}", summary="Hand in a document or answer for an onboarding requirement; it waits for the club to approve it")
 def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None = None, valid_until: date | None = None, document: UploadedFile = File(None)):
     viewer = _viewer(request)
     member = _people(viewer).get(member_id)
@@ -265,9 +266,9 @@ def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None =
                     raw = json.loads(answer or "[]")
                 except ValueError:
                     raw = [part for part in (answer or "").split(",") if part]
-            onboarding.answer_as(request.user, membership, requirement, raw)
+            onboarding.submit_as(request.user, membership, requirement, raw=raw)
         else:
-            onboarding.provide_as(request.user, membership, requirement, document=document, valid_until=valid_until)
+            onboarding.submit_as(request.user, membership, requirement, document=document, valid_until=valid_until)
     except Invalid as error:
-        raise HttpError(422, str(error)) from None
+        raise HttpError(409 if getattr(error, "code", "") == "locked" else 422, str(error)) from None
     return {"memberships": _membership_rows(_people(viewer))}

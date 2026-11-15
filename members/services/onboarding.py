@@ -49,7 +49,7 @@ class ChecklistItem:
     requirement: OnboardingRequirement
     state: str  # "open" | "complete" | "bypassed"; an expired completion is "open"
     status: MemberRequirementStatus | None = None
-    #: missing / complete / expiring_soon / expired / bypassed
+    #: missing / pending / complete / expiring_soon / expired / bypassed
     display: str = "missing"
 
     @property
@@ -212,6 +212,8 @@ def item_for(requirement: OnboardingRequirement, status: MemberRequirementStatus
     today = today or timezone.localdate()
     if status and status.is_bypassed:
         return ChecklistItem(requirement, "bypassed", status, "bypassed")
+    if status and status.is_pending_review:
+        return ChecklistItem(requirement, "open", status, "pending")  # handed in, not approved yet: still open
     if status and status.is_complete:
         if status.valid_until is not None and status.valid_until < today:
             return ChecklistItem(requirement, "open", status, "expired")  # runs out: open again
@@ -315,6 +317,7 @@ def _resolve(actor, membership, requirement, action: str, *, complete: bool, doc
         status.valid_until = None  # not needed for this person: nothing to expire
         status.answer = None
     status.is_complete, status.is_bypassed = complete, not complete
+    status.is_pending_review = False
     status.completed_at = timezone.now()
     status.completed_by = actor
     status.last_reminder_at, status.last_reminder_kind = None, ""  # a fresh completion starts a fresh reminder cycle
@@ -351,11 +354,46 @@ def answer_as(actor, membership: ClubMembership, requirement: OnboardingRequirem
 
 
 @transaction.atomic
-def provide_as(actor, membership: ClubMembership, requirement: OnboardingRequirement, *, document: File | None, valid_until: datetime.date | None = None) -> MemberRequirementStatus:
-    """A member (or their guardian) hands in a document themselves: no staff permission check, the caller has verified who may act for the person."""
-    if requirement.kind != Kind.DOCUMENT:
-        raise Invalid("This requirement is answered, not uploaded.", code="use_answer")
-    return _resolve(actor, membership, requirement, "onboarding.completed", complete=True, document=document, note="", valid_until=valid_until)
+def submit_as(actor, membership: ClubMembership, requirement: OnboardingRequirement, *, document: File | None = None, raw: Any = _UNSET, valid_until: datetime.date | None = None) -> MemberRequirementStatus:
+    """A member (or their guardian) hands in a document or an answer. It waits for staff: the item stays open (and keeps blocking) until
+    ``approve``. Once approved or bypassed the member can no longer change it; only a missing, expired or still-pending item takes a submission."""
+    status = _status(membership, requirement)
+    item = item_for(requirement, status)
+    if item.display in ("complete", "expiring_soon", "bypassed"):
+        raise Invalid("This has been approved and can only be changed through the club.", code="locked")
+    today = timezone.localdate()
+    if requirement.kind == Kind.QUESTION:
+        if raw is _UNSET:
+            raise Invalid("Answer the question instead.", {"answer": ["Required."]}, code="use_answer")
+        status.answer = validate_answer(requirement, raw)
+    else:
+        if document is None and not status.document:
+            raise Invalid("This requirement needs a document.", {"document": ["Required."]})
+        if document is not None:
+            check_document(document)
+            if status.document:
+                status.document.delete(save=False)
+            status.document.save(getattr(document, "name", "document"), document, save=False)
+    if valid_until is not None and valid_until < today:
+        raise Invalid("The expiry date is in the past.", {"valid_until": ["Must be today or later."]})
+    status.valid_until = valid_until
+    status.is_complete = status.is_bypassed = False
+    status.is_pending_review = True
+    status.submitted_at = timezone.now()
+    status.save()
+    audit.record(actor, "onboarding.submitted", member=membership.member, target=status, changes={}, target_label=f"{requirement.name} ({membership.season})")
+    return status
+
+
+@transaction.atomic
+def approve(actor, membership: ClubMembership, requirement: OnboardingRequirement) -> MemberRequirementStatus:
+    """Staff accept a member's submission: it now counts as complete (with the expiry the member gave, else the requirement's own)."""
+    require_admin(actor)
+    status = MemberRequirementStatus.objects.filter(membership=membership, requirement=requirement, is_pending_review=True).first()
+    if status is None:
+        raise Invalid("Nothing is waiting for review.")
+    answer_value = status.answer if requirement.kind == Kind.QUESTION else _UNSET
+    return _resolve(actor, membership, requirement, "onboarding.approved", complete=True, document=None, note="", valid_until=status.valid_until, answer=answer_value)
 
 
 @transaction.atomic
@@ -370,13 +408,14 @@ def reopen(actor, membership: ClubMembership, requirement: OnboardingRequirement
     """Undo a completion/bypass. Deletes the attached document file."""
     require_admin(actor)
     status = MemberRequirementStatus.objects.filter(membership=membership, requirement=requirement).first()
-    if status is None or not (status.is_complete or status.is_bypassed):
+    if status is None or not (status.is_complete or status.is_bypassed or status.is_pending_review):
         raise Invalid("This requirement is not resolved.")
     before = {"is_complete": status.is_complete, "is_bypassed": status.is_bypassed, "document": status.document.name or "", "valid_until": str(status.valid_until or ""), "answer": status.answer}
     if status.document:
         status.document.delete(save=False)
     status.answer = None
-    status.is_complete = status.is_bypassed = False
+    status.is_complete = status.is_bypassed = status.is_pending_review = False
+    status.submitted_at = None
     status.completed_at, status.completed_by = None, None
     status.valid_until, status.last_reminder_at, status.last_reminder_kind = None, None, ""
     status.save()
