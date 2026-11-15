@@ -2,6 +2,7 @@
 	import { CalendarClock, Check, Megaphone, Plus, Save, Trash2, Users, X } from '@lucide/svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import LineupMeta from '#lib/components/events/LineupMeta.svelte';
+	import LineupLines from '#lib/components/events/LineupLines.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -15,20 +16,28 @@
 	let lineup = $state<Lineup>($state.snapshot(initial));
 	// svelte-ignore state_referenced_locally
 	let picked = $state<string[]>(initial.members.filter((m) => m.selected).map((m) => m.member.id));
+	/** Slot assignments (member id -> "<group>.<slot>") of the picked players; only used when the sport has lines. */
+	const slotsOf = (l: Lineup) => Object.fromEntries(l.members.filter((m) => m.selected && m.slot).map((m) => [m.member.id, m.slot as string]));
+	// svelte-ignore state_referenced_locally
+	let slots = $state<Record<string, string>>(slotsOf(initial));
 	$effect(() => {
 		lineup = $state.snapshot(initial);
 		picked = initial.members.filter((m) => m.selected).map((m) => m.member.id);
+		slots = slotsOf(initial);
 	});
+	const linesOn = $derived(!!lineup.slots_enabled && !!lineup.template?.length);
+	const savedSlots = $derived(slotsOf(lineup));
+	const slotsDirty = $derived(linesOn && (Object.keys(slots).some((id) => picked.includes(id) && slots[id] !== savedSlots[id]) || Object.keys(savedSlots).some((id) => picked.includes(id) && !slots[id])));
 
 	const manage = $derived(lineup.can_manage && !cancelled);
 	const saved = $derived(lineup.members.filter((m) => m.selected).map((m) => m.member.id));
-	const dirty = $derived(picked.length !== saved.length || picked.some((id) => !saved.includes(id)));
+	const dirty = $derived(picked.length !== saved.length || picked.some((id) => !saved.includes(id)) || slotsDirty);
 	let teamId = $state('');
 	let when = $state('');
 	let busy = $state(false);
 	let errorMsg = $state('');
 	let okMsg = $state('');
-	let view = $state<'players' | 'picked'>('players');
+	let view = $state<'players' | 'picked' | 'lines'>('players');
 	let query = $state('');
 	let onlyAvailable = $state(false);
 	const q = $derived(query.trim().toLocaleLowerCase());
@@ -44,7 +53,7 @@
 		scheduled: 'bg-info-bg text-info-text border-info-border',
 		published: 'bg-ok-bg text-ok-text border-ok-border'
 	};
-	const failText = (res: ApiCall<unknown>) => res.fields.__all__ || res.fields.when || res.fields.team_id || res.message || t('common.error.generic');
+	const failText = (res: ApiCall<unknown>) => res.fields.__all__ || res.fields.slots || res.fields.when || res.fields.team_id || res.message || t('common.error.generic');
 
 	/** Members grouped by position (roster order kept). */
 	function byPosition(members: LineupMember[]) {
@@ -63,7 +72,10 @@
 			.filter(([, members]) => members.length)
 	);
 	/** Takes one player out of the pick (saved with "Save draft" or "Publish"). */
-	const drop = (id: string) => (picked = picked.filter((x) => x !== id));
+	const drop = (id: string) => {
+		picked = picked.filter((x) => x !== id);
+		if (slots[id]) slots = Object.fromEntries(Object.entries(slots).filter(([k]) => k !== id));
+	};
 	const pickedMembers = $derived(lineup.members.filter((m) => picked.includes(m.member.id)));
 	/** The pick grouped by position (the same order as the Players card), jersey number within a position. */
 	const pickedGroups = $derived(
@@ -85,8 +97,15 @@
 	const apply = (l: Lineup) => {
 		lineup = l;
 		picked = l.members.filter((m) => m.selected).map((m) => m.member.id);
+		slots = slotsOf(l);
 	};
-	const save = () => call(() => api<Lineup>('PUT', `/events/${eventId}/lineup`, { body: { team_id: lineup.team?.id ?? (teamId || null), member_ids: picked } }), (l) => (apply(l), (okMsg = t('events.lineup.saved'))));
+	const save = () =>
+		call(
+			() =>
+				api<Lineup>('PUT', `/events/${eventId}/lineup`, {
+					body: { team_id: lineup.team?.id ?? (teamId || null), member_ids: picked, ...(linesOn ? { slots: Object.fromEntries(Object.entries(slots).filter(([id]) => picked.includes(id))) } : {}) }
+				}), (l) => (apply(l), (okMsg = t('events.lineup.saved')))
+		);
 	async function publish() {
 		if (dirty && !(await save())) return;
 		await call(
@@ -132,8 +151,8 @@
 
 {#snippet mobileEditor()}
 	<div class="grid min-w-0 gap-3">
-		<div class="grid grid-cols-2 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('events.tab.lineup')}>
-			{#each [['players', t('coach.lu_view_players')], ['picked', t('coach.lu_view_picked', { n: picked.length })]] as [key, label] (key)}
+		<div class="grid gap-1 rounded-box bg-subhead p-1 {linesOn ? 'grid-cols-3' : 'grid-cols-2'}" role="group" aria-label={t('events.tab.lineup')}>
+			{#each [['players', t('coach.lu_view_players')], ['picked', t('coach.lu_view_picked', { n: picked.length })], ...(linesOn ? [['lines', t('coach.lu_view_lines')]] : [])] as [key, label] (key)}
 				<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {view === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={view === key} onclick={() => (view = key as typeof view)}>{label}</button>
 			{/each}
 		</div>
@@ -177,6 +196,8 @@
 					<p class="px-4 py-6 text-center text-sm text-muted">{lineup.members.length ? t('portal.no_players') : t('events.lineup.no_players')}</p>
 				{/each}
 			</section>
+		{:else if view === 'lines' && linesOn}
+			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} />
 		{:else}
 			<section class="card overflow-hidden">
 				{#each pickedGroups as [position, members] (position)}
@@ -292,9 +313,17 @@
 						</div>
 						<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
 					</div>
+					{#if linesOn}
+						<div class="card card-body gap-2">
+							<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('coach.lu_view_lines')}</h3>
+							<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} />
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
+	{:else if lineup.status === 'published' && linesOn && lineup.members.some((m) => m.selected && m.slot)}
+		<LineupLines template={lineup.template ?? []} members={lineup.members.filter((m) => m.selected)} slots={savedSlots} />
 	{:else if lineup.status === 'published'}
 		<div class="card">
 			{#each byPosition(lineup.members.filter((m) => m.selected)) as [position, members] (position)}

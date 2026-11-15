@@ -208,7 +208,8 @@ export type BulkAnswerOut = { results: BulkResult[] };
 
 // -- line-up --
 
-export type LineupMember = { member: Ref; position: string; jersey_number: number | null; status: string; available: boolean; on_roster: boolean; selected: boolean; note?: string; games_rate?: number | null; practices_rate?: number | null };
+export type LineupMember = { member: Ref; position: string; jersey_number: number | null; status: string; available: boolean; on_roster: boolean; selected: boolean; slot?: string; note?: string; games_rate?: number | null; practices_rate?: number | null };
+export type LineupTemplateGroup = { key: string; label: string; slots: { key: string; label: string }[] };
 /** GET /events/{id}/lineup */
 export type Lineup = {
 	available: boolean;
@@ -219,6 +220,9 @@ export type Lineup = {
 	published_at: string | null;
 	scheduled_publish_at: string | null;
 	members: LineupMember[];
+	/** Set per sport by platform admins; slots are informational only (never used for statistics). */
+	slots_enabled?: boolean;
+	template?: LineupTemplateGroup[];
 };
 export type LineupPublishOut = { lineup: Lineup; newly_selected: string[]; dropped: string[] };
 
