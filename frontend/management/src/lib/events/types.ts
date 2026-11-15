@@ -208,7 +208,7 @@ export type BulkAnswerOut = { results: BulkResult[] };
 
 // -- line-up --
 
-export type LineupMember = { member: Ref; position: string; jersey_number: number | null; status: string; available: boolean; on_roster: boolean; selected: boolean };
+export type LineupMember = { member: Ref; position: string; jersey_number: number | null; status: string; available: boolean; on_roster: boolean; selected: boolean; note?: string; games_rate?: number | null; practices_rate?: number | null };
 /** GET /events/{id}/lineup */
 export type Lineup = {
 	available: boolean;

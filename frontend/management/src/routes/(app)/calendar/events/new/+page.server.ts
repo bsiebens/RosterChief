@@ -10,7 +10,7 @@ import type { Actions, PageServerLoad } from './$types';
  */
 export const load: PageServerLoad = async ({ url, fetch }) => {
 	const res = await api<EventOptions>('GET', '/events/options', { f: fetch });
-	if (!res.ok || !res.data?.can_create) redirect(303, '/calendar');
+	if (!res.ok || !res.data?.can_create) redirect(303, url.searchParams.get('view') === 'coach' ? '/coach' : '/calendar');
 	const options = res.data;
 	const q = (k: string) => url.searchParams.get(k) ?? '';
 	const date = /^\d{4}-\d{2}-\d{2}$/.test(q('date')) ? q('date') : '';
@@ -35,7 +35,7 @@ export const load: PageServerLoad = async ({ url, fetch }) => {
 };
 
 export const actions: Actions = {
-	save: async ({ request, fetch }) => {
+	save: async ({ request, url, fetch }) => {
 		const form = await request.formData();
 		let body: EventIn;
 		try {
@@ -48,6 +48,6 @@ export const actions: Actions = {
 			const status = res.status >= 400 && res.status < 600 ? res.status : 500;
 			return fail(status, { fields: res.fields, message: res.message ?? '', status: res.status });
 		}
-		redirect(303, `${eventHref(res.data!.id)}?created=1`);
+		redirect(303, `${eventHref(res.data!.id)}?created=1${url.searchParams.get('view') === 'coach' ? '&view=coach' : ''}`);
 	}
 };

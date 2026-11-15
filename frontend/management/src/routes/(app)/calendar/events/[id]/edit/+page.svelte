@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { page } from '$app/state';
 	import { ArrowLeft, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -11,7 +12,7 @@
 	import { eventHref, type EditScope } from '#lib/events/types.ts';
 
 	let { data, form } = $props();
-	const back = $derived(eventHref(data.id));
+	const back = $derived(`${eventHref(data.id)}${page.url.searchParams.get('view') === 'coach' ? '?view=coach' : ''}`);
 	let deleteOpen = $state(false);
 	let deleteScope = $state<EditScope>('this');
 	let busy = $state(false);
@@ -45,7 +46,7 @@
 <Modal bind:open={deleteOpen} title={t('eventform.delete_title')}>
 	<form
 		method="POST"
-		action="?/delete"
+		action={page.url.searchParams.get('view') === 'coach' ? '?/delete&view=coach' : '?/delete'}
 		class="grid gap-3"
 		use:enhance={() => {
 			busy = true;

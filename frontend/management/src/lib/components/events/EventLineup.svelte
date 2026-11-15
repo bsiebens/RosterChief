@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { CalendarClock, Megaphone, Save, Trash2, Users, X } from '@lucide/svelte';
+	import { CalendarClock, Check, Megaphone, Plus, Save, Trash2, Users, X } from '@lucide/svelte';
+	import LineupMeta from '#lib/components/events/LineupMeta.svelte';
+	import Avatar from '#lib/components/Avatar.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { api, type ApiCall } from '#lib/management-api.ts';
 	import { formatDateTime, statusLabelKey, statusStyle, toLocalInput, type Lineup, type LineupMember, type LineupPublishOut } from '#lib/events/types.ts';
 
 	/** The Line-up tab (games and tournaments): pick, save, publish or schedule; a read-only list for everyone else. */
-	let { eventId, initial, cancelled }: { eventId: string; initial: Lineup; cancelled: boolean } = $props();
+	let { eventId, initial, cancelled, mobile = false }: { eventId: string; initial: Lineup; cancelled: boolean; mobile?: boolean } = $props();
 
 	// svelte-ignore state_referenced_locally
 	let lineup = $state<Lineup>($state.snapshot(initial));
@@ -25,6 +27,15 @@
 	let busy = $state(false);
 	let errorMsg = $state('');
 	let okMsg = $state('');
+	let view = $state<'players' | 'picked'>('players');
+	let query = $state('');
+	let onlyAvailable = $state(false);
+	const q = $derived(query.trim().toLocaleLowerCase());
+	const isOut = (m: LineupMember) => ['absent', 'excused', 'dropout'].includes(m.status);
+	const toggle = (m: LineupMember) => {
+		if (picked.includes(m.member.id)) drop(m.member.id);
+		else if (m.available) picked = [...picked, m.member.id];
+	};
 
 	const STATUS_CHIP: Record<string, string> = {
 		none: 'bg-subhead text-muted border-line',
@@ -41,9 +52,15 @@
 			const k = m.position || t('events.lineup.no_position');
 			groups.set(k, [...(groups.get(k) ?? []), m]);
 		}
-		return [...groups.entries()];
+		// Players who are out go last in their position (the sort is stable: roster order is kept otherwise).
+		return [...groups.entries()].map(([k, list]) => [k, [...list].sort((a, b) => Number(b.available) - Number(a.available))] as [string, LineupMember[]]);
 	}
 	const groups = $derived(byPosition(lineup.members));
+	const shownGroups = $derived(
+		groups
+			.map(([position, members]) => [position, members.filter((m) => (!onlyAvailable || m.available) && (!q || m.member.name.toLocaleLowerCase().includes(q)))] as [string, LineupMember[]])
+			.filter(([, members]) => members.length)
+	);
 	/** Takes one player out of the pick (saved with "Save draft" or "Publish"). */
 	const drop = (id: string) => (picked = picked.filter((x) => x !== id));
 	const pickedMembers = $derived(lineup.members.filter((m) => picked.includes(m.member.id)));
@@ -89,9 +106,101 @@
 	const chooseTeam = () => teamId && call(() => api<Lineup>('PUT', `/events/${eventId}/lineup`, { body: { team_id: teamId, member_ids: [] } }), apply);
 </script>
 
-<div class="grid gap-4">
+{#snippet mobileEditor()}
+	<div class="grid min-w-0 gap-3">
+		<div class="grid grid-cols-2 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('events.tab.lineup')}>
+			{#each [['players', t('coach.lu_view_players')], ['picked', t('coach.lu_view_picked', { n: picked.length })]] as [key, label] (key)}
+				<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {view === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={view === key} onclick={() => (view = key as typeof view)}>{label}</button>
+			{/each}
+		</div>
+		{#if view === 'players'}
+			<section class="card overflow-hidden">
+				<div class="flex items-center gap-2 border-b border-line px-3.5 py-2">
+					<label class="sr-only" for="lu-search">{t('portal.search_players')}</label>
+					<input id="lu-search" type="search" class="input min-w-0 flex-1" placeholder={t('portal.search_players')} bind:value={query} />
+					<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={onlyAvailable} onclick={() => (onlyAvailable = !onlyAvailable)}>{t('coach.lu_available')}</button>
+				</div>
+				{#each shownGroups as [position, members] (position)}
+					<div>
+						<p class="bg-subhead px-3.5 py-1.5 font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{position}</p>
+						<ul class="divide-y divide-rule">
+							{#each members as m (m.member.id)}
+								{@const on = picked.includes(m.member.id)}
+								{@const locked = !m.available && !on}
+								<li>
+									<button type="button" class="flex min-h-16 w-full items-center gap-3 px-3.5 py-2 text-left {locked ? 'cursor-not-allowed bg-subhead/60 opacity-60' : ''} {on ? 'bg-club/10' : ''}" disabled={locked || busy} aria-pressed={on} aria-label={on ? t('events.lineup.drop_named', { name: m.member.name }) : t('coach.lu_add', { name: m.member.name })} onclick={() => toggle(m)}>
+										<Avatar first_name={m.member.name.split(' ')[0] ?? ''} last_name={m.member.name.split(' ').slice(1).join(' ')} size="size-9" text="text-xs" />
+										<span class="min-w-0 flex-1">
+											<span class="flex items-center gap-1.5">
+												<span class="w-6 shrink-0 text-right font-display font-extrabold text-ink">{m.jersey_number ?? ''}</span>
+												<span class="truncate text-sm font-semibold text-ink {isOut(m) ? 'line-through decoration-1' : ''}">{m.member.name}</span>
+												{#if !m.on_roster}<span class="badge badge-xs badge-outline shrink-0">{t('events.lineup.guest')}</span>{/if}
+											</span>
+											<span class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+												<span class="badge badge-xs border {statusStyle(m.status)}">{t(statusLabelKey(m.status))}</span>
+												<LineupMeta {m} class="min-w-0 flex-1" />
+											</span>
+										</span>
+										<span class="grid size-10 shrink-0 place-items-center rounded-lg border {on ? 'border-ok bg-ok text-[#fff]' : 'border-line bg-(--portal-panel) text-muted'}" aria-hidden="true">
+											{#if on}<Check size={18} />{:else if !locked}<Plus size={18} />{:else}<X size={16} />{/if}
+										</span>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{:else}
+					<p class="px-4 py-6 text-center text-sm text-muted">{lineup.members.length ? t('portal.no_players') : t('events.lineup.no_players')}</p>
+				{/each}
+			</section>
+		{:else}
+			<section class="card overflow-hidden">
+				{#each pickedGroups as [position, members] (position)}
+					<p class="bg-subhead px-3.5 py-1.5 font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{position}</p>
+					<ul class="divide-y divide-rule">
+						{#each members as m (m.member.id)}
+							<li class="flex min-h-14 items-center gap-3 px-3.5 py-2">
+								<span class="w-6 shrink-0 text-right font-display font-extrabold text-ink">{m.jersey_number ?? ''}</span>
+								<span class="min-w-0 flex-1"><span class="block truncate text-sm font-semibold text-ink">{m.member.name}</span><LineupMeta {m} /></span>
+								<button type="button" class="btn btn-outline btn-square min-h-11 shrink-0 text-muted" disabled={busy} aria-label={t('events.lineup.drop_named', { name: m.member.name })} onclick={() => drop(m.member.id)}><Trash2 size={17} aria-hidden="true" /></button>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="px-4 py-6 text-center text-sm text-muted">{t('events.lineup.none_picked')}</p>
+				{/each}
+			</section>
+			{#if !lineup.published_at}
+				<details class="card card-body gap-2" open={!!lineup.scheduled_publish_at}>
+					<summary class="flex min-h-10 cursor-pointer items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('events.lineup.schedule')}</summary>
+					{#if lineup.scheduled_publish_at}
+						<p class="mt-2 text-sm">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</p>
+						<button class="btn btn-outline min-h-11 gap-2 self-start" type="button" disabled={busy} onclick={unschedule}><X size={14} /> {t('events.lineup.unschedule')}</button>
+					{:else}
+						<form class="mt-2 grid gap-2" onsubmit={schedule}>
+							<label class="grid gap-1 text-sm font-semibold">{t('events.lineup.schedule_when')}
+								<input class="input w-full font-normal" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
+							</label>
+							<button class="btn btn-outline min-h-11" type="submit" disabled={busy || !when || !picked.length}>{t('events.lineup.schedule_button')}</button>
+						</form>
+					{/if}
+				</details>
+			{/if}
+		{/if}
+		<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
+		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 grid gap-1.5 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm">
+			{#if dirty}<p class="text-center text-xs font-semibold text-warn-text">{t('coach.lu_unsaved')} · {t('events.lineup.picked', { n: picked.length })}</p>{/if}
+			<div class="flex items-center gap-2">
+				<button class="btn btn-outline min-h-12 flex-1 gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={16} /> {t('events.lineup.save')}</button>
+				<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={publish}><Megaphone size={16} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
+			</div>
+		</div>
+	</div>
+{/snippet}
+
+<div class="grid min-w-0 gap-4">
 	<!-- Managers see the status on their Players card; everyone else gets it here. -->
-	<div class="flex flex-wrap items-center gap-3 {manage && lineup.team ? 'hidden' : ''}">
+	<div class="flex flex-wrap items-center gap-3 {manage && lineup.team && !mobile ? 'hidden' : ''}">
 		<span class="badge border {STATUS_CHIP[lineup.status] ?? STATUS_CHIP.none}">{t(`events.lineup.status.${lineup.status}`)}</span>
 		{#if lineup.published_at}<span class="font-mono text-xs text-muted">{t('events.lineup.published_at', { when: formatDateTime(lineup.published_at) })}</span>{/if}
 		{#if lineup.scheduled_publish_at && !lineup.published_at}<span class="font-mono text-xs text-info-text">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</span>{/if}
@@ -113,6 +222,8 @@
 					</div>
 				{/if}
 			</div>
+		{:else if mobile}
+			{@render mobileEditor()}
 		{:else}
 			<div class="grid gap-4 lg:grid-cols-2">
 				<div class="card">
@@ -136,7 +247,7 @@
 										<label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-paper {m.available ? '' : 'cursor-not-allowed opacity-50'}">
 											<input type="checkbox" class="checkbox" bind:group={picked} value={m.member.id} disabled={!m.available && !picked.includes(m.member.id)} />
 											<span class="w-7 text-right font-display font-extrabold text-ink">{m.jersey_number ?? ''}</span>
-											<span class="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{m.member.name}</span>
+											<span class="min-w-0 flex-1"><span class="block truncate text-sm font-semibold text-ink {isOut(m) ? 'line-through decoration-1' : ''}">{m.member.name}</span><LineupMeta {m} /></span>
 											{#if !m.on_roster}<span class="badge badge-xs badge-outline" title={t('events.lineup.not_on_roster')}>{t('events.lineup.guest')}</span>{/if}
 											<span class="badge badge-xs border {statusStyle(m.status)}">{t(statusLabelKey(m.status))}</span>
 										</label>

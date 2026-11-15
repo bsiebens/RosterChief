@@ -3,6 +3,7 @@
 	import { tick, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import {
 		ArrowLeft,
 		BusFront,
@@ -97,6 +98,8 @@
 	let scope = $state<EditScope>('this');
 	let scopeConfirmed = false;
 	const uid = $props.id();
+	// In the coach app on a phone the Save / Cancel buttons live in a bar above the tab bar and the form stays one column.
+	const coach = $derived(page.url.searchParams.get('view') === 'coach');
 
 	const KIND_ICONS: Record<string, typeof Users> = {
 		training: Dumbbell,
@@ -233,8 +236,8 @@
 
 <form
 	method="POST"
-	action="?/save"
-	class="grid gap-5"
+	action={coach ? '?/save&view=coach' : '?/save'}
+	class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5"
 	novalidate
 	bind:this={formEl}
 	use:enhance={({ formData, cancel }) => {
@@ -315,7 +318,7 @@
 		{/if}
 	</section>
 
-	<div class="grid gap-5 xl:grid-cols-3">
+	<div class="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-3">
 		<!-- Main column -->
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<!-- Details -->
@@ -438,7 +441,7 @@
 
 			<section class="card card-body gap-4 xl:sticky xl:top-20" aria-labelledby="{uid}-h-save">
 				{@render head(`${uid}-h-save`, t('eventform.card.save'), mode === 'create' ? t('eventform.card.save_desc_create') : t('eventform.card.save_desc_edit'), CircleCheck)}
-				<dl class="grid gap-2.5 rounded-lg border border-line bg-subhead p-3">
+				<dl class="grid gap-2.5 rounded-lg border border-line bg-subhead p-3 {coach ? 'max-md:hidden' : ''}">
 					{@render summaryRow(KIND_ICONS[v.kind] ?? CalendarDays, kindLabel(v.kind), generated ? shownTitle : v.title.trim() || (titleRequired ? '—' : suggestion || kindLabel(v.kind)))}
 					{@render summaryRow(Clock, t('eventform.sum.when'), summaryWhen)}
 					{@render summaryRow(Users, t('eventform.sum.who'), summaryWho)}
@@ -456,9 +459,9 @@
 				{#if fe('scope')}<span class="block text-xs text-error">{fe('scope')}</span>{/if}
 
 				<div class="grid gap-2">
-					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {busy ? t('eventform.saving') : mode === 'create' ? t('eventform.create') : t('eventform.save')}</button>
+					<button class="btn btn-primary w-full gap-2 {coach ? 'max-md:hidden' : ''}" type="submit" disabled={busy}><Save size={16} /> {busy ? t('eventform.saving') : mode === 'create' ? t('eventform.create') : t('eventform.save')}</button>
 					<div class="flex flex-wrap items-center gap-2">
-						<a class="btn btn-outline flex-1 gap-2" href={cancelHref}><ArrowLeft size={16} /> {t('common.cancel')}</a>
+						<a class="btn btn-outline flex-1 gap-2 {coach ? 'max-md:hidden' : ''}" href={cancelHref}><ArrowLeft size={16} /> {t('common.cancel')}</a>
 						{#if ondelete}
 							<button class="btn btn-outline btn-error flex-1 gap-2" type="button" onclick={ondelete}><Trash2 size={16} /> {t('common.delete')}</button>
 						{/if}
@@ -467,6 +470,13 @@
 			</section>
 		</div>
 	</div>
+
+	{#if coach}
+		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:hidden">
+			<a class="btn btn-outline min-h-12 flex-1 gap-2" href={cancelHref}><ArrowLeft size={16} aria-hidden="true" /> {t('common.cancel')}</a>
+			<button class="btn btn-primary min-h-12 flex-1 gap-2" type="submit" disabled={busy}><Save size={16} aria-hidden="true" /> {busy ? t('eventform.saving') : mode === 'create' ? t('eventform.create') : t('eventform.save')}</button>
+		</div>
+	{/if}
 
 	{#if series}
 		<Modal bind:open={scopeOpen} title={t('eventform.scope.title')}>
