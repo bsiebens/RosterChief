@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Clock, Download, Paperclip, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
+	import { ChevronDown, Clock, Download, Paperclip, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
@@ -252,43 +252,48 @@
 			{/if}
 
 			{#if view === 'orders'}
-			<section class="card card-body scroll-mt-44 gap-3 xl:scroll-mt-20" id="orders">
-				<h2 class="card-title"><ReceiptText size={16} aria-hidden="true" /> {t('portal.shop.orders')}</h2>
-				{#if orderError || !data.orders}<Alert kind="error">{orderError || t('common.error.generic')}</Alert>{/if}
-				{#each receipts as receipt (receipt.id)}
-					<details class="rounded-box border border-line" open={latest?.id === receipt.id}>
-						<summary class="cursor-pointer p-3">
-							<span class="inline-flex flex-wrap items-center gap-x-3 gap-y-1 align-middle">
-								<span class="font-semibold">{receipt.number}</span>
-								<span class="text-sm text-muted">{formatDay(receipt.created)}</span>
-								<span class="badge badge-outline badge-sm">{statusText(receipt.fulfillment_status)}</span>
-								<span class="badge badge-outline badge-sm">{t(`shop.orders.payment.${receipt.payment_status}`)}</span>
-							</span>
-						</summary>
-						<div class="grid gap-3 border-t border-line p-3 text-sm">
-							<ul class="grid gap-1">
-								{#each receipt.lines as line (line.id)}
-									<li class="flex justify-between gap-3"><span>{line.quantity} × {label(line)}</span><span class="tabular-nums">{money(line.amount)}</span></li>
-								{/each}
-								{#each receipt.discounts as discount}
-									<li class="flex justify-between gap-3"><span>{discount.description}</span><span class="tabular-nums">−{money(discount.amount)}</span></li>
-								{/each}
-							</ul>
-							<dl class="grid grid-cols-[1fr_auto] gap-1 border-t border-line pt-2">
-								<dt>{t('shop.orders.total')}</dt><dd class="font-semibold tabular-nums">{money(receipt.total)}</dd>
-								{#if Number(receipt.due) > 0 && receipt.fulfillment_status !== 'cancelled'}<dt>{t('shop.orders.due')}</dt><dd class="tabular-nums">{money(receipt.due)}</dd>{/if}
-							</dl>
-							{#if receipt.pickup_instructions}<p class="whitespace-pre-line">{receipt.pickup_instructions}</p>{/if}
-							{#if Number(receipt.due) > 0 && receipt.fulfillment_status !== 'cancelled' && catalog.payment_instructions}<p class="whitespace-pre-line">{catalog.payment_instructions}</p>{/if}
-							{#if receipt.invoice_number}
-								<a class="btn btn-outline btn-sm w-fit gap-2" href="/api/v1/portal/shop/orders/{receipt.id}/invoice.pdf"><Download size={14} aria-hidden="true" /> {t('portal.shop.invoice')}</a>
-							{/if}
-						</div>
-					</details>
-				{:else}
-					{#if data.orders}<p class="text-sm text-muted">{t('portal.shop.no_orders')}</p>{/if}
-				{/each}
-				{#if more}<button class="btn btn-outline w-fit" type="button" disabled={loadingOrders} onclick={loadOlder}>{t('portal.shop.more')}</button>{/if}
+			<section class="card scroll-mt-44 xl:scroll-mt-20" id="orders" aria-labelledby="orders-title">
+				<div class="card-h"><ReceiptText size={17} aria-hidden="true" /><h2 id="orders-title">{t('portal.shop.orders')}</h2></div>
+				{#if orderError || !data.orders}<div class="p-4"><Alert kind="error">{orderError || t('common.error.generic')}</Alert></div>{/if}
+				<div class="divide-y divide-rule">
+					{#each receipts as receipt (receipt.id)}
+						{@const cancelled = receipt.fulfillment_status === 'cancelled'}
+						<details class="group" open={latest?.id === receipt.id}>
+							<summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-subhead [&::-webkit-details-marker]:hidden">
+								<span class="min-w-0 flex-1">
+									<b class="block font-display text-lg leading-tight font-extrabold text-ink uppercase">{receipt.number}</b>
+									<span class="text-xs text-muted">{formatDay(receipt.created)} · {t('portal.shop.items', { n: receipt.lines.reduce((sum, line) => sum + line.quantity, 0) })}</span>
+								</span>
+								<span class="flex flex-wrap items-center gap-1.5">
+									<span class="badge {cancelled ? 'badge-error' : ['delivered', 'completed'].includes(receipt.fulfillment_status) ? 'badge-success' : receipt.fulfillment_status === 'ready_for_pickup' ? 'badge-warning' : 'badge-info'}">{statusText(receipt.fulfillment_status)}</span>
+									{#if !cancelled}<span class="badge {receipt.payment_status === 'paid' ? 'badge-success' : receipt.payment_status === 'refunded' ? 'badge-info' : 'badge-warning'}">{t(`shop.orders.payment.${receipt.payment_status}`)}</span>{/if}
+								</span>
+								<b class="min-w-20 text-right font-mono text-ink tabular-nums">{money(receipt.total)}</b>
+								<ChevronDown size={16} class="shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
+							</summary>
+							<div class="grid gap-4 border-t border-line bg-subhead px-5 py-4 text-sm">
+								<ul class="grid gap-1.5">
+									{#each receipt.lines as line (line.id)}
+										<li class="flex justify-between gap-3"><span class="text-ink">{line.quantity} × {label(line)}</span><span class="font-mono tabular-nums">{money(line.amount)}</span></li>
+									{/each}
+									{#each receipt.discounts as discount}
+										<li class="flex justify-between gap-3 text-ok-text"><span>{discount.description}</span><span class="font-mono tabular-nums">−{money(discount.amount)}</span></li>
+									{/each}
+								</ul>
+								<dl class="grid grid-cols-[1fr_auto] gap-1 border-t border-line pt-3">
+									<dt class="font-semibold text-ink">{t('shop.orders.total')}</dt><dd class="font-mono font-semibold text-ink tabular-nums">{money(receipt.total)}</dd>
+									{#if Number(receipt.due) > 0 && !cancelled}<dt class="text-warn-text">{t('shop.orders.due')}</dt><dd class="font-mono text-warn-text tabular-nums">{money(receipt.due)}</dd>{/if}
+								</dl>
+								{#if receipt.pickup_instructions}<p class="rounded-box border border-info-border bg-info-bg px-3 py-2 whitespace-pre-line text-info-text">{receipt.pickup_instructions}</p>{/if}
+								{#if Number(receipt.due) > 0 && !cancelled && catalog.payment_instructions}<p class="rounded-box border border-line bg-paper px-3 py-2 whitespace-pre-line">{catalog.payment_instructions}</p>{/if}
+								{#if receipt.invoice_number}<a class="btn btn-outline btn-sm w-fit gap-2" href="/api/v1/portal/shop/orders/{receipt.id}/invoice.pdf"><Download size={14} aria-hidden="true" /> {t('portal.shop.invoice')}</a>{/if}
+							</div>
+						</details>
+					{:else}
+						{#if data.orders}<p class="px-5 py-4 text-sm text-muted">{t('portal.shop.no_orders')}</p>{/if}
+					{/each}
+				</div>
+				{#if more}<div class="border-t border-line p-4"><button class="btn btn-outline" type="button" disabled={loadingOrders} onclick={loadOlder}>{t('portal.shop.more')}</button></div>{/if}
 			</section>
 			{/if}
 		</div>
