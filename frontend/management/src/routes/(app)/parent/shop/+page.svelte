@@ -212,8 +212,8 @@
 				<div class="flex flex-wrap items-center gap-2">
 					{#if categories.length}
 						<div class="flex flex-wrap gap-2" role="group" aria-label={t('portal.shop.all_categories')}>
-							<button type="button" class="portal-person compact" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
-							{#each categories as name (name)}<button type="button" class="portal-person compact" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
+							<button type="button" class="portal-person compact text" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
+							{#each categories as name (name)}<button type="button" class="portal-person compact text" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
 						</div>
 					{/if}
 					<label class="relative ml-auto w-full sm:w-64">

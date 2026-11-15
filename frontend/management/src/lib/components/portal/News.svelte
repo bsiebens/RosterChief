@@ -36,9 +36,9 @@
 {#if !home}
 	<div class="mb-4 flex flex-wrap items-center gap-2">
 		<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('portal.news_filter')}>
-			<button type="button" class="portal-person compact" aria-pressed={team === ''} onclick={() => (team = '')}>{t('portal.all')}</button>
-			{#each teamNames as name (name)}<button type="button" class="portal-person compact" aria-pressed={team === name} onclick={() => (team = name)}>{name}</button>{/each}
-			{#if hasClubNews}<button type="button" class="portal-person compact" aria-pressed={team === '__club'} onclick={() => (team = '__club')}>{t('portal.news_club')}</button>{/if}
+			<button type="button" class="portal-person compact text" aria-pressed={team === ''} onclick={() => (team = '')}>{t('portal.all')}</button>
+			{#each teamNames as name (name)}<button type="button" class="portal-person compact text" aria-pressed={team === name} onclick={() => (team = name)}>{name}</button>{/each}
+			{#if hasClubNews}<button type="button" class="portal-person compact text" aria-pressed={team === '__club'} onclick={() => (team = '__club')}>{t('portal.news_club')}</button>{/if}
 		</div>
 		<label class="relative ml-auto w-full sm:w-64"><span class="sr-only">{t('portal.news_search')}</span><Search size={14} class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim" aria-hidden="true" /><input class="input w-full pl-9" type="search" placeholder={t('portal.news_search')} bind:value={query} /></label>
 	</div>

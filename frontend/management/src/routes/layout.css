@@ -1365,6 +1365,11 @@ textarea[name="note"] {
     padding-block: 0.125rem;
 }
 
+.portal-person.text {
+    justify-content: center;
+    padding-inline: 0.875rem;
+}
+
 .portal-person[aria-pressed="true"] {
     border-color: var(--color-club);
     background: var(--color-club);
