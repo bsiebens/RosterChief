@@ -17,7 +17,7 @@ from api.routers.public_news import public_news_item
 from events.models import Attendance, Event, EventAttachment, EventTask, GameTimeline, Lineup, LineupSelection, Season
 from events.services import attachments as attachment_svc
 from events.services import attendance, officiating_invitations, referees
-from events.services import tasks as task_svc
+from events.services import follows, tasks as task_svc
 from events.services.attachments import ALLOWED_EXTENSIONS, MAX_ATTACHMENT_BYTES
 from formbuilder.models import FormSend
 from formbuilder.services import audience
@@ -295,7 +295,7 @@ def _visible_event(request, event_id):
 def event_extras(request, event_id: UUID):
     viewer, people, event, in_audience = _visible_event(request, event_id)
     if not in_audience:
-        return {"lineup": None, "game": None, "tasks": [], "attachments": []}
+        return {"lineup": None, "game": None, "tasks": [], "attachments": [], "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
     lineup = Lineup.objects.filter(event=event, published_at__isnull=False).select_related("team").first()
     lineup_out = None
     if lineup is not None:
@@ -315,7 +315,7 @@ def event_extras(request, event_id: UUID):
     game = _game_sheet(event)
     tasks = [_task_out(task, viewer.pk) for task in task_svc.list_tasks(request.user, event)]
     files = [{"id": a.pk, "name": a.name, "size": a.size, "download_url": f"/api/v1/portal/events/{event.pk}/attachments/{a.pk}/download"} for a in attachment_svc.list_attachments(request.user, event)]
-    return {"lineup": lineup_out, "game": game, "tasks": tasks, "attachments": files}
+    return {"lineup": lineup_out, "game": game, "tasks": tasks, "attachments": files, "follow": follows.follow_state(request.user, event) if event.kind == Event.EventKind.GAME else None}
 
 
 def _game_sheet(event):
@@ -334,6 +334,57 @@ def _game_sheet(event):
     out["final"] = timeline.finalized_at is not None
     out["updated_at"] = timeline.changed_at
     return json.loads(json.dumps(out, default=str))  # lazy translations -> plain strings
+
+
+def _game_card(event, via, now):
+    """A followed game for the small cards at the top of Home: who plays, where, the score so far and whether it is live."""
+    scored = event.score_for is not None and event.score_against is not None
+    return {
+        **_event_display(event), "status": "live" if event.is_live else "final" if scored and event.start <= now else "scheduled",
+        "teams": ", ".join(team.name for team in event.teams.all()), "via": via,
+    }
+
+
+@router.get("/followed", summary="The games this person follows that are live, coming up or just finished")
+def followed_games(request):
+    _viewer(request)
+    now = timezone.now()
+    return [_game_card(row["event"], row["via"], now) for row in follows.followed_games(request.user, now=now)]
+
+
+def _game_visible(request, event):
+    """Whoever follows the game (directly or through a team) or is invited to it may read its game sheet."""
+    state = follows.follow_state(request.user, event)
+    if state["directly"] or state["via_team"]:
+        return
+    _visible_event(request, event.pk)
+
+
+@router.get("/events/{event_id}/game", summary="The captured game sheet of a game the person follows or plays")
+def event_game(request, event_id: UUID):
+    _viewer(request)
+    event = Event.objects.select_related("location", "opponent").filter(pk=event_id, kind=Event.EventKind.GAME).first()
+    if event is None:
+        raise HttpError(404, "Not found.")
+    _game_visible(request, event)
+    return {"game": _game_sheet(event), "status": "live" if event.is_live else "scheduled"}
+
+
+@router.put("/events/{event_id}/follow", summary="Follow this game: it appears on top of Home and sends live pushes")
+def follow_event(request, event_id: UUID):
+    viewer, people, event, in_audience = _visible_event(request, event_id)
+    try:
+        follows.follow_event(request.user, event)
+    except Invalid as error:
+        raise HttpError(422, str(error)) from error
+    return follows.follow_state(request.user, event)
+
+
+@router.delete("/events/{event_id}/follow", summary="Stop following this game")
+def unfollow_event(request, event_id: UUID):
+    viewer, people, event, in_audience = _visible_event(request, event_id)
+    follows.unfollow_event(request.user, event)
+    return follows.follow_state(request.user, event)
 
 
 def _task_of(request, event_id, task_id):

@@ -245,6 +245,22 @@ class ClubBackupRestoreTests(TestCase):
             with sponsor.logo.open() as logo:
                 self.assertEqual(logo.read(), image.getvalue())
 
+    def test_corrupt_image_is_left_empty_with_a_warning_naming_the_record(self):
+        manifest = legacy_manifest()
+        now = manifest["exported_at"]
+        sponsor_id = str(uuid4())
+        asset = "media/broken-sponsor.png"
+        manifest["records"]["club.sponsor"] = [{"fields": {
+            "id": sponsor_id, "created": now, "modified": now, "name": "Broken sponsor", "logo": asset,
+            "url": "https://sponsor.example", "start_date": date(2026, 8, 1), "end_date": None, "logo_width": 4, "logo_height": 4,
+        }, "many": {}}]
+        media_root = self.enterContext(TemporaryDirectory())
+        self.enterContext(self.settings(MEDIA_ROOT=media_root))
+        restored, _, warnings = restore_club(archive_of(manifest, **{asset: b"not an image"}))
+        self.assertTrue(any("broken-sponsor.png" in w and "Broken sponsor" in w for w in warnings), warnings)
+        with schema_context(restored.schema_name):
+            self.assertFalse(Sponsor.objects.get(pk=sponsor_id).logo)
+
     def test_v2_round_trip_restores_relationships_media_and_club_roles(self):
         source = create_club("Source Club", self.owner)
         with TemporaryDirectory() as media_root, TemporaryDirectory() as private_root, self.settings(MEDIA_ROOT=media_root, PRIVATE_MEDIA_ROOT=private_root):

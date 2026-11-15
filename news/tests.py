@@ -238,8 +238,10 @@ class FeedTests(NewsClubMixin, TestCase):
         internal = self.news("Internal", visibility="internal")
         external = self.news("External", visibility="external")
         both = self.news("Both", visibility="both")
-        self.news("Scheduled", published_at=timezone.now() + datetime.timedelta(days=1))
-        self.news("Draft", status=News.Status.DRAFT)
+        tomorrow = timezone.now() + datetime.timedelta(days=1)
+        for visibility in ("internal", "external", "both"):  # not live until the publish date has passed, whoever it is meant for
+            self.news(f"Scheduled {visibility}", visibility=visibility, published_at=tomorrow)
+            self.news(f"Draft {visibility}", visibility=visibility, status=News.Status.DRAFT)
         self.assertEqual(set(svc.member_news()), {internal, both})
         self.assertEqual(set(svc.public_news()), {external, both})
         self.assertEqual(svc.localized_news(both, "en-GB")[2], "en")

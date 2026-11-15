@@ -580,9 +580,16 @@ def preview(upload):
         }
 
 
+class _CorruptImage(BackupError):
+    pass
+
+
 class _Restore:
     def __init__(self, archive):
         self.archive = archive
+        self.warnings = []
+        self.subject = "the club"
+        self.names = {}
         self.written = []
         self.ids = defaultdict(dict)
         self.expanded_files = 0
@@ -615,7 +622,7 @@ class _Restore:
                         extension = IMAGE_EXTENSIONS[image.format]
                         image.verify()
                 except (UnidentifiedImageError, Image.DecompressionBombError, OSError, KeyError) as error:
-                    raise BackupError(f"Unsupported or corrupt public image: {filename}") from error
+                    raise _CorruptImage(f"Unsupported or corrupt public image: {filename}") from error
             filename = f"{PurePosixPath(filename).stem[:80]}{extension}"
         else:
             filename = filename[-85:]
@@ -626,12 +633,28 @@ class _Restore:
         self.written.append((field.storage, stored))
         return stored
 
+    @staticmethod
+    def _subject(model, values, records):
+        name = str(model._meta.verbose_name)
+        parent = values.get("product_id") and next(
+            (row["fields"] for row in records.get("shop.product", ()) if str(row["fields"].get("id")) == str(values["product_id"])), None
+        )
+        return f"{name} '{_describe(parent or values, values.get('id'))}'"
+
     def fields(self, values, fields, club):
         result = {}
         for name, value in values.items():
             field = fields[name]
             if isinstance(field, models.FileField):
-                result[name] = self.save_file(value, field, club)
+                try:
+                    result[name] = self.save_file(value, field, club)
+                except _CorruptImage:
+                    filename = PurePosixPath(value).name
+                    if not field.blank:
+                        self.warnings.append(f"Skipped {self.subject}: the image {filename} could not be imported because it is corrupt or not a supported image. Add it manually.")
+                        raise
+                    self.warnings.append(f"The image {filename} of {self.subject} could not be imported because it is corrupt or not a supported image, so it was left empty. Add it manually.")
+                    result[name] = ""
             elif field.is_relation and value is not None:
                 mapped = self.ids[field.related_model]
                 result[name] = mapped[str(value)] if str(value) in mapped else field.target_field.to_python(value)
@@ -646,8 +669,13 @@ class _Restore:
             model = model_map[label]
             fields = _fields(model)
             for row in rows:
-                obj = model(**self.fields(row["fields"], fields, club))
+                self.subject = self._subject(model, row["fields"], records)
+                try:
+                    obj = model(**self.fields(row["fields"], fields, club))
+                except _CorruptImage:
+                    continue
                 obj.save_base(raw=True, force_insert=True)
+            self.subject = "the club"
         # Restore relation rows directly. M2M signals would re-evaluate each event's
         # partially restored audience and could discard its existing RSVP records.
         for label, rows in records.items():
@@ -862,6 +890,7 @@ def restore_club(upload, *, name="", slug="", on_restore=None, partial=False, ex
             if isinstance(error, (DatabaseError, clubs.AccountError)):
                 raise BackupError("The backup could not be restored. Check for account conflicts or records that violate the current schema.") from error
             raise
+        warnings = [*warnings, *restore.warnings]
         if club.logo and club.logo.name.lower().endswith(".svg"):
             warnings = [*warnings, "The club logo is an SVG. It is shown as the club crest, but browser and home-screen icons (favicon, app icon) cannot be made from an SVG, so browsers use the default icon. Upload a PNG, JPEG or WebP logo in the club settings to get them."]
         return club, new_accounts, warnings

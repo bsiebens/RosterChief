@@ -50,13 +50,13 @@
 		{#if error}<Alert kind="error">{error}</Alert>{/if}
 	</div>
 	<div class="overflow-x-auto">
-		<table class="table">
+		<table class="table w-full">
 			<thead><tr><th>When</th><th>What</th><th>Club</th><th>By</th><th>Reason</th></tr></thead>
 			<tbody>
 				{#each log as e (e.id)}
 					<tr>
 						<td class="font-mono text-[11px] whitespace-nowrap">{withZone(e.created)}</td>
-						<td class="min-w-40">
+						<td class="w-64 max-w-64 min-w-40 break-words">
 							<span class="badge">{label(e.action)}</span>
 							{#if e.plan_code}<span class="ml-1 font-mono text-[11px] text-muted">plan {e.plan_code}</span>{/if}
 							{#if e.feature_code}<span class="ml-1 font-mono text-[11px] text-muted">{e.feature_code}</span>{/if}
@@ -66,7 +66,7 @@
 						</td>
 						<td class="text-sm whitespace-nowrap">{#if e.club_id}<a class="link" href="/clubs/{e.club_id}">{clubName[e.club_id] ?? 'Club'}</a>{:else}<span class="text-muted">platform</span>{/if}</td>
 						<td class="text-xs whitespace-nowrap">{e.actor_email ?? 'system'}</td>
-						<td class="max-w-xl min-w-64 text-xs text-muted">{e.reason || '—'}</td>
+						<td class="max-w-md min-w-40 text-xs text-muted">{e.reason || '—'}</td>
 					</tr>
 				{:else}
 					<tr><td colspan="5" class="text-sm text-muted">{error ? 'The log could not be loaded.' : club ? 'No changes recorded for this club.' : 'No changes recorded yet.'}</td></tr>

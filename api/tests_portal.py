@@ -222,3 +222,26 @@ class PortalProfileTests(ParentPortalTests):
         game = self.call("get", f"/portal/events/{event.pk}", token).json()["game"]
         self.assertEqual(game["periods"][0]["rows"][0]["kind"], "Goal")
         self.assertEqual(game["lineup"]["ours"][0]["number"], 12)
+
+
+    def test_followed_games_card_data_and_following_from_the_app(self):
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            game = Event.objects.create(title="Game", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(hours=3), is_live=False)
+            game.invited_members.add(self.child)
+        self.assertEqual(self.call("get", "/portal/followed", token).json(), [])
+        followed = self.call("put", f"/portal/events/{game.pk}/follow", token)
+        self.assertEqual((followed.status_code, followed.json()["directly"]), (200, True))
+        [card] = self.call("get", "/portal/followed", token).json()
+        self.assertEqual((card["event_id"], card["status"]), (str(game.pk), "scheduled"))
+        with schema_context(self.club.schema_name):
+            Event.objects.filter(pk=game.pk).update(is_live=True, score_for=2, score_against=1)
+        [card] = self.call("get", "/portal/followed", token).json()
+        self.assertEqual((card["status"], card["score_for"], card["score_against"]), ("live", 2, 1))
+        self.assertEqual(self.call("get", f"/portal/events/{game.pk}/game", token).status_code, 200)
+        self.assertEqual(self.call("delete", f"/portal/events/{game.pk}/follow", token).json()["directly"], False)
+        # a game the family has nothing to do with cannot be followed or read from here
+        with schema_context(self.club.schema_name):
+            stranger = Event.objects.create(title="Other", kind=Event.EventKind.GAME, start=timezone.now() + datetime.timedelta(days=3))
+        self.assertEqual(self.call("put", f"/portal/events/{stranger.pk}/follow", token).status_code, 404)
+        self.assertEqual(self.call("get", f"/portal/events/{stranger.pk}/game", token).status_code, 404)
