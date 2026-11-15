@@ -40,14 +40,14 @@
 			{#if game.period_scores.length}
 				<div class="grid border-t border-sidebar-hairline text-center" style="grid-template-columns: repeat({game.period_scores.length}, minmax(0, 1fr))">
 					{#each game.period_scores as period, i (period.label)}
-						<div class="py-2 {i ? 'border-l border-sidebar-hairline' : ''}"><p class="font-mono text-[11px] text-sidebar-fg-dim">{period.label}</p><p class="font-display text-xl font-extrabold">{period.score.replace('–', '-')}</p></div>
+						<div class="py-2 {i ? 'border-l border-sidebar-hairline' : ''}"><p class="font-mono text-[11px] text-sidebar-fg-dim">{period.label}</p><p class="flex items-baseline justify-center gap-2 font-display text-xl font-extrabold">{#each period.score.split(/[–-]/) as part, n (n)}{#if n}<span class="text-sidebar-fg-faint" aria-hidden="true">–</span>{/if}<span>{part.trim()}</span>{/each}</p></div>
 					{/each}
 				</div>
 			{/if}
 		</div>
-		<div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-1 border-b border-line bg-white px-5 py-3 font-display">
-			<span><b class="text-xl text-ink">{count('goal', true)}</b> <span class="text-xs tracking-[.1em] text-muted uppercase">{t('portal.goals')}</span> <b class="text-xl text-muted">{count('goal', false)}</b></span>
-			<span><b class="text-xl text-ink">{count('penalty', true)}</b> <span class="text-xs tracking-[.1em] text-muted uppercase">{t('portal.penalties')}</span> <b class="text-xl text-muted">{count('penalty', false)}</b></span>
+		<div class="flex flex-wrap items-center justify-center gap-x-12 gap-y-1 border-b border-line bg-white px-5 py-3 font-display">
+			<span class="inline-flex items-baseline gap-3"><b class="text-xl text-ink">{count('goal', true)}</b><span class="text-xs tracking-[.1em] text-muted uppercase">{t('portal.goals')}</span><b class="text-xl text-muted">{count('goal', false)}</b></span>
+			<span class="inline-flex items-baseline gap-3"><b class="text-xl text-ink">{count('penalty', true)}</b><span class="text-xs tracking-[.1em] text-muted uppercase">{t('portal.penalties')}</span><b class="text-xl text-muted">{count('penalty', false)}</b></span>
 		</div>
 		<div class="grid gap-5 p-5">
 			{#each game.periods as period (period.label)}
