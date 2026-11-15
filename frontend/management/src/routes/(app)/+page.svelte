@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import { Building2, House, ArrowRight } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -15,6 +18,8 @@
 	import UpcomingCard from '#lib/components/overview/UpcomingCard.svelte';
 
 	let { data } = $props();
+	// The `landing` marker only tells the server this was an arrival: drop it from the address bar.
+	onMount(() => { if (page.url.searchParams.has('landing')) replaceState('/', page.state); });
 
 	const club = $derived(data.mode === 'club' ? data.branding : null);
 	const first = $derived(data.me?.first_name ?? '');

@@ -24,6 +24,6 @@ export function afterSignIn(next: string, mode: string) {
 		window.location.assign(next);
 		return Promise.resolve();
 	}
-	// On a phone the home page of staff is the coach view: `/` hands it on (see routes/(app)/+page.server.ts).
-	return goto(next === '/' && isPhone() ? '/?landing=phone' : next, { refreshAll: true });
+	// `landing` marks this as an arrival: `/` then opens the app they used last, and on a phone the coach view for staff (see routes/(app)/+page.server.ts).
+	return goto(next === '/' ? (isPhone() ? '/?landing=phone' : '/?landing=1') : next, { refreshAll: true });
 }
