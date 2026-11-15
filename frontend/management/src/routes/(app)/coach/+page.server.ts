@@ -6,7 +6,7 @@ import type { TeamDetail } from '#lib/teams/server.ts';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ fetch, url }) => {
-	const tab = url.searchParams.get('tab') || url.hash.slice(1) || 'home';
+	const tab = url.searchParams.get('tab') || 'home';
 	const result = await api<CoachHome>('GET', '/portal/coach', { f: fetch });
 	if (!result.ok || !result.data) error(result.status === 403 ? 403 : 502, result.message);
 	const coach = result.data;
