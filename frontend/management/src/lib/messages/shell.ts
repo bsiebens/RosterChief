@@ -8,7 +8,7 @@ export default {
 		'shell.role.staff': 'Staff',
 		'shell.menu.account': 'Account',
 		'shell.menu.password': 'Change password',
-		'shell.menu.security': 'Manage two-factor auth',
+		'shell.menu.security': 'Manage two-factor authentication',
 		'shell.menu.language': 'Language',
 		'shell.menu.logout': 'Log out',
 		'shell.hostError.not_found.title': 'Club not found',
