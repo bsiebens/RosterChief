@@ -351,6 +351,14 @@ def answer_as(actor, membership: ClubMembership, requirement: OnboardingRequirem
 
 
 @transaction.atomic
+def provide_as(actor, membership: ClubMembership, requirement: OnboardingRequirement, *, document: File | None, valid_until: datetime.date | None = None) -> MemberRequirementStatus:
+    """A member (or their guardian) hands in a document themselves: no staff permission check, the caller has verified who may act for the person."""
+    if requirement.kind != Kind.DOCUMENT:
+        raise Invalid("This requirement is answered, not uploaded.", code="use_answer")
+    return _resolve(actor, membership, requirement, "onboarding.completed", complete=True, document=document, note="", valid_until=valid_until)
+
+
+@transaction.atomic
 def bypass(actor, membership: ClubMembership, requirement: OnboardingRequirement, *, note: str = "") -> MemberRequirementStatus:
     """Mark as not needed for this person. Resolves the requirement just like completing it."""
     require_admin(actor)

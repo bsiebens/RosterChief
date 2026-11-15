@@ -897,7 +897,7 @@
         transition: transform 0.15s;
     }
     .toggle:checked {
-        background: var(--color-ok);
+        background: var(--color-club);
     }
     .toggle:checked::after {
         transform: translateX(1.125rem);

@@ -134,3 +134,33 @@ export type FollowState = { directly: boolean; via_team: boolean };
 export type SubmittedForm = { title: string; member_id: string; submitted_at: string; answers: { label: string; value: unknown }[] };
 
 export type TeamFollows = { teams: { id: string; name: string; mine: boolean; followed: boolean }[]; games: { event_id: string; title: string; start: string }[] };
+
+export type RequirementItem = {
+	id: string;
+	name: string;
+	description: string;
+	kind: 'document' | 'question';
+	question_type: string;
+	options: (string | { value: string; label: string })[] | null;
+	requires_document: boolean;
+	valid_for_months: number | null;
+	state: 'missing' | 'complete' | 'expiring_soon' | 'expired' | 'bypassed';
+	valid_until: string | null;
+	answer: unknown;
+	has_document: boolean;
+	completed_at: string | null;
+};
+export type MembershipRow = {
+	member_id: string;
+	season: string;
+	status: string;
+	fee_status: string;
+	fee: string;
+	paid: string;
+	balance: string;
+	invoice_id: string | null;
+	invoice_number: string | null;
+	requirements: RequirementItem[];
+};
+export type PortalVoucher = { id: string; number: string; member_id: string | null; amount: string; available: string; expiry_date: string; expired: boolean };
+export type PortalOverview = { memberships: MembershipRow[]; vouchers: PortalVoucher[]; forms: { id: string; title: string; member_id: string; closes_at: string | null }[] };

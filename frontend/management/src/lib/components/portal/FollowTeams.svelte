@@ -22,7 +22,7 @@
 		if (result.ok && result.data) {
 			follows = result.data;
 			status = 'saved';
-			timer = setTimeout(() => (status = 'idle'), 4000);
+			timer = setTimeout(() => (status = 'idle'), 2500);
 		} else {
 			status = 'error';
 		}
@@ -30,8 +30,9 @@
 	const toggleTeam = (id: string, on: boolean) => apply(on ? 'PUT' : 'DELETE', `/portal/me/follows/teams/${id}`);
 </script>
 
+<SaveStatus {status} />
 <section class="card" aria-labelledby="follow-title">
-	<div class="card-h"><Radio size={17} aria-hidden="true" /><h2 id="follow-title">{t('portal.follow_title')}</h2><span class="ml-auto"><SaveStatus {status} compact /></span></div>
+	<div class="card-h"><Radio size={17} aria-hidden="true" /><h2 id="follow-title">{t('portal.follow_title')}</h2></div>
 	<p class="px-5 pt-4 text-sm text-muted">{t('portal.follow_teams_help')}</p>
 	{#if status === 'error'}<div class="p-5 pb-0"><Alert kind="error">{t('portal.save_failed')}</Alert></div>{/if}
 	<ul class="divide-y divide-rule">

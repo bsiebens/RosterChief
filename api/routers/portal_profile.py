@@ -1,8 +1,10 @@
 """The member's own profile and notification settings: the signed-in person and the children they manage."""
 
+import json
 from datetime import date, time
 from uuid import UUID
 
+from django.db.models import Q
 from django.utils import timezone
 from ninja import File, Router, Schema, UploadedFile
 from ninja.errors import HttpError
@@ -10,7 +12,11 @@ from ninja.errors import HttpError
 from api.auth import CookieAuth, TokenAuth
 from api.routers.portal import _people, _viewer
 from events.models import Event
-from members.models import Member
+from formbuilder.models import FormSend
+from formbuilder.services import audience
+from members.models import ClubMembership, Member
+from members.services import memberships as membership_services, onboarding
+from shop.models import Voucher
 from members.services import members as member_services
 from members.services.errors import Invalid
 from events.models import EventFollow
@@ -189,3 +195,79 @@ def unfollow_game(request, event_id: UUID):
     if event is not None:
         follows.unfollow_event(request.user, event)
     return _follows(request, _people(viewer))
+
+
+def _requirement_item(item):
+    requirement, status = item.requirement, item.status
+    return {
+        "id": requirement.pk, "name": requirement.name, "description": requirement.description, "kind": requirement.kind,
+        "question_type": requirement.question_type, "options": requirement.options, "requires_document": requirement.requires_document,
+        "valid_for_months": requirement.valid_for_months,
+        "state": item.display, "valid_until": item.valid_until, "answer": item.answer,
+        "has_document": bool(status and status.document), "completed_at": status.completed_at if status else None,
+    }
+
+
+def _membership_rows(people):
+    rows = ClubMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).select_related("season", "registration_details__batch").prefetch_related("requirement_statuses", "payments").order_by("season__start_date")
+    out = []
+    for row in rows:
+        batch = getattr(getattr(row, "registration_details", None), "batch", None)
+        invoice = batch if batch is not None and batch.invoice_number and batch.confirmed_at and not batch.cancelled_at else None
+        out.append({
+            "member_id": row.member_id, "season": row.season.name, "status": row.status, "fee_status": row.fee_status,
+            "fee": str(row.fee_amount), "paid": str(row.amount_paid), "balance": str(membership_services.remaining_balance(row)),
+            "invoice_id": invoice.pk if invoice and invoice.contact_id and invoice.contact_id in people else None, "invoice_number": invoice.invoice_number if invoice else None,
+            "requirements": [_requirement_item(item) for item in onboarding.checklist_for(row)],
+        })
+    return out
+
+
+@router.get("/overview", summary="Membership, requirements and vouchers of me and the people I manage")
+def overview(request):
+    viewer = _viewer(request)
+    people = _people(viewer)
+    vouchers = Voucher.objects.filter(issued_to_id__in=people, is_active=True).order_by("expiry_date")
+    now = timezone.now()
+    sends = list(FormSend.objects.filter(is_active=True).filter(Q(closes_at__isnull=True) | Q(closes_at__gte=now)).select_related("form"))
+    recipients = audience.audience_ids_by_send(sends)
+    return {
+        "memberships": _membership_rows(people),
+        "forms": [
+            {"id": send.pk, "title": send.form.title, "member_id": member_id, "closes_at": send.closes_at}
+            for send in sends
+            for member_id in people.keys() & recipients[send.pk]
+        ],
+        "vouchers": [
+            {"id": v.pk, "number": v.number, "member_id": v.issued_to_id, "amount": str(v.amount), "available": str(v.available_amount), "expiry_date": v.expiry_date, "expired": v.is_expired}
+            for v in vouchers
+        ],
+    }
+
+
+def _current_membership(member):
+    return ClubMembership.objects.filter(member=member, season__end_date__gte=timezone.localdate()).order_by("season__start_date").first()
+
+
+@router.post("/requirements/{member_id}/{requirement_id}", summary="Hand in a document or answer a question for an onboarding requirement")
+def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None = None, valid_until: date | None = None, document: UploadedFile = File(None)):
+    viewer = _viewer(request)
+    member = _people(viewer).get(member_id)
+    requirement = onboarding.open_requirements().filter(pk=requirement_id).first()
+    membership = _current_membership(member) if member else None
+    if member is None or requirement is None or membership is None:
+        raise HttpError(404, "Not found.")
+    try:
+        if requirement.kind == onboarding.Kind.QUESTION:
+            raw = answer
+            if requirement.question_type == onboarding.QuestionType.MULTICHOICE:
+                try:
+                    raw = json.loads(answer or "[]")
+                except ValueError:
+                    raw = [part for part in (answer or "").split(",") if part]
+            onboarding.answer_as(request.user, membership, requirement, raw)
+        else:
+            onboarding.provide_as(request.user, membership, requirement, document=document, valid_until=valid_until)
+    except Invalid as error:
+        raise HttpError(422, str(error)) from None
+    return {"memberships": _membership_rows(_people(viewer))}

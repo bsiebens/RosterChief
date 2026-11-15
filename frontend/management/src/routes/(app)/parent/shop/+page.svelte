@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, Clock, Download, Paperclip, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
+	import { Truck, Wallet, ChevronDown, Clock, Download, Paperclip, Package, ReceiptText, Search, ShoppingBag, ShoppingCart, Trash2 } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
@@ -73,6 +73,7 @@
 	const buyerName = (id: string | null) => catalog.people.find((person) => person.id === id)?.name;
 	const productById = $derived(new Map(catalog.products.map((product) => [product.id, product])));
 	const label = (line: { name: string; variant: string }) => [line.name, line.variant].filter(Boolean).join(' · ');
+	const itemsText = (n: number) => t(n === 1 ? 'portal.shop.item_one' : 'portal.shop.items', { n });
 	const calendarDay = (value: string) => formatDay(parseIsoDate(value) ?? value);
 	const statusText = (status: string) => t(['in_production', 'completed'].includes(status) ? `portal.shop.${status}` : `shop.orders.fulfillment.${status}`);
 
@@ -262,7 +263,7 @@
 							<summary class="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-subhead [&::-webkit-details-marker]:hidden">
 								<span class="min-w-0 flex-1">
 									<b class="block font-display text-lg leading-tight font-extrabold text-ink uppercase">{receipt.number}</b>
-									<span class="text-xs text-muted">{formatDay(receipt.created)} · {t('portal.shop.items', { n: receipt.lines.reduce((sum, line) => sum + line.quantity, 0) })}</span>
+									<span class="text-xs text-muted">{formatDay(receipt.created)} · {itemsText(receipt.lines.reduce((sum, line) => sum + line.quantity, 0))}</span>
 								</span>
 								<span class="flex flex-wrap items-center gap-1.5">
 									<span class="badge {cancelled ? 'badge-error' : ['delivered', 'completed'].includes(receipt.fulfillment_status) ? 'badge-success' : receipt.fulfillment_status === 'ready_for_pickup' ? 'badge-warning' : 'badge-info'}">{statusText(receipt.fulfillment_status)}</span>
@@ -284,8 +285,8 @@
 									<dt class="font-semibold text-ink">{t('shop.orders.total')}</dt><dd class="font-mono font-semibold text-ink tabular-nums">{money(receipt.total)}</dd>
 									{#if Number(receipt.due) > 0 && !cancelled}<dt class="text-warn-text">{t('shop.orders.due')}</dt><dd class="font-mono text-warn-text tabular-nums">{money(receipt.due)}</dd>{/if}
 								</dl>
-								{#if receipt.pickup_instructions}<p class="rounded-box border border-info-border bg-info-bg px-3 py-2 whitespace-pre-line text-info-text">{receipt.pickup_instructions}</p>{/if}
-								{#if Number(receipt.due) > 0 && !cancelled && catalog.payment_instructions}<p class="rounded-box border border-line bg-paper px-3 py-2 whitespace-pre-line">{catalog.payment_instructions}</p>{/if}
+								{#if receipt.pickup_instructions}<div class="rounded-box border border-info-border bg-info-bg px-3 py-2 text-info-text"><p class="mb-1 flex items-center gap-1.5 font-mono text-[11px] tracking-[.14em] uppercase"><Truck size={13} aria-hidden="true" />{t('portal.shop.delivery')}</p><p class="whitespace-pre-line">{receipt.pickup_instructions}</p></div>{/if}
+								{#if Number(receipt.due) > 0 && !cancelled && catalog.payment_instructions}<div class="rounded-box border border-line bg-paper px-3 py-2"><p class="mb-1 flex items-center gap-1.5 font-mono text-[11px] tracking-[.14em] text-muted uppercase"><Wallet size={13} aria-hidden="true" />{t('portal.pay_how')}</p><p class="whitespace-pre-line">{catalog.payment_instructions}</p></div>{/if}
 								{#if receipt.invoice_number}<a class="btn btn-outline btn-sm w-fit gap-2" href="/api/v1/portal/shop/orders/{receipt.id}/invoice.pdf"><Download size={14} aria-hidden="true" /> {t('portal.shop.invoice')}</a>{/if}
 							</div>
 						</details>
@@ -300,7 +301,7 @@
 
 		{#if catalog.open || cart.length}
 			<section class="card scroll-mt-44 xl:sticky xl:top-20 xl:scroll-mt-20" id="cart" aria-live="polite">
-				<div class="card-h"><ShoppingBag size={17} aria-hidden="true" /><h2>{t('portal.shop.cart')}</h2>{#if cart.length}<span class="badge badge-sm badge-outline ml-auto">{t('portal.shop.items', { n: cart.reduce((sum, line) => sum + line.quantity, 0) })}</span>{/if}</div>
+				<div class="card-h"><ShoppingBag size={17} aria-hidden="true" /><h2>{t('portal.shop.cart')}</h2>{#if cart.length}<span class="badge badge-sm badge-outline ml-auto">{itemsText(cart.reduce((sum, line) => sum + line.quantity, 0))}</span>{/if}</div>
 				{#if cartError}<div class="p-4 pb-0"><Alert kind="error">{cartError}</Alert></div>{/if}
 				{#if cart.length}
 					<form onsubmit={checkout}>

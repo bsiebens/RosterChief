@@ -31,7 +31,7 @@
 		if (result.ok) {
 			status = 'saved';
 			await invalidateAll();
-			timer = setTimeout(() => (status = 'idle'), 4000);
+			timer = setTimeout(() => (status = 'idle'), 2500);
 		} else {
 			status = 'error';
 			error = result.message ?? t('common.error.generic');
@@ -47,8 +47,9 @@
 	] as const;
 </script>
 
-<div class="grid gap-4">
-	<SaveStatus {status} />
+<SaveStatus {status} />
+<div class="grid min-w-0 items-start gap-4 xl:grid-cols-2">
+	<div class="grid min-w-0 gap-4">
 	{#if error}<Alert kind="error">{error}</Alert>{/if}
 
 	<section class="card overflow-hidden" aria-labelledby="notif-title">
@@ -72,7 +73,9 @@
 			</div>
 		{/each}
 	</section>
+	</div>
 
+	<div class="grid min-w-0 gap-4">
 	<section class="card" aria-labelledby="email-title">
 		<div class="card-h"><Mail size={17} aria-hidden="true" /><h2 id="email-title">{t('portal.notif_email_when')}</h2></div>
 		<div class="grid gap-3 p-5">
@@ -94,4 +97,5 @@
 	</section>
 
 	<InstallPush />
+	</div>
 </div>

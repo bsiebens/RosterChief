@@ -5,7 +5,7 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import FollowTeams from '#lib/components/portal/FollowTeams.svelte';
 	import SaveStatus from '#lib/components/portal/SaveStatus.svelte';
-	import NotificationSettings from '#lib/components/portal/NotificationSettings.svelte';
+	import ProfileOverview from '#lib/components/portal/ProfileOverview.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -127,5 +127,5 @@
 			</div>
 		</form>
 	{/each}
-	<div class="grid min-w-0 gap-4">{#if data.settings}<NotificationSettings settings={data.settings} />{/if}{#if data.follows}<FollowTeams initial={data.follows} />{/if}</div>
+	<div class="grid min-w-0 gap-4">{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}{#if data.follows}<FollowTeams initial={data.follows} />{/if}</div>
 </div>

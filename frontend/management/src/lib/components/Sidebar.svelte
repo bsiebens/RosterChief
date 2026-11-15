@@ -53,7 +53,7 @@
 			<ClubCrest name={branding.name} logoUrl={branding.logo_url} size={30} />
 			<span class="min-w-0">
 				<span class="block truncate font-display text-[17px] leading-none font-extrabold tracking-[.06em] text-sidebar-fg uppercase">{branding.name}</span>
-				<span class="block font-mono text-[10px] text-sidebar-fg-dim">RosterChief{#if !me} &middot; {t('portal.parent')}{/if}</span>
+				<span class="block font-mono text-[10px] text-sidebar-fg-dim">RosterChief{#if __APP_VERSION__}&nbsp;v{__APP_VERSION__}{/if}{#if !me} &middot; {t('portal.parent')}{/if}</span>
 			</span>
 		</a>
 		{#if me?.has_member_portal_role}<div class="px-[18px] pb-4"><AppSwitcher member={portal === 'parent'} /></div>{/if}

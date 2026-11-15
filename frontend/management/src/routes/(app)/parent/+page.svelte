@@ -22,6 +22,7 @@
 	import OfficiatingRow from '#lib/components/portal/OfficiatingRow.svelte';
 	import FollowedGames from '#lib/components/portal/FollowedGames.svelte';
 	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
+	import RequirementsCard from '#lib/components/portal/RequirementsCard.svelte';
 	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
 	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
@@ -46,7 +47,7 @@
 	let weekStart = $state(mondayOf(new Date()));
 	const weekDays = $derived(Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i)));
 	const moveWeek = (step: number) => (weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7 * step));
-	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.payments_forms', payments: 'portal.payments_forms' };
+	const labels: Record<string, string> = { home: 'portal.home', calendar: 'shell.nav.calendar', news: 'shell.nav.news', me: 'portal.me', forms: 'portal.forms', payments: 'portal.payments' };
 	// `data.home` is briefly gone while the app navigates away (to the manage app, say): the header code below still runs then, so these reads must not throw.
 	const people = $derived(data.home?.people ?? []);
 	const viewer = $derived(people.find((person) => person.id === data.home?.viewer));
@@ -253,30 +254,32 @@
 
 {#snippet formsList()}
 	<section class="card" aria-labelledby="forms-title">
-		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="forms-title">{t('portal.forms')}</h2>{#if filteredForms.length}<span class="badge badge-sm badge-error ml-auto">{t('portal.forms_to_fill', { n: filteredForms.length })}</span>{/if}</div>
-		<p class="px-4 pt-3 pb-1 font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.forms_open')}</p>
+		<div class="card-h"><ClipboardList size={17} aria-hidden="true" /><h2 id="forms-title">{t('portal.forms_open')}</h2>{#if filteredForms.length}<span class="badge badge-sm badge-error ml-auto">{t('portal.forms_to_fill', { n: filteredForms.length })}</span>{/if}</div>
 		<div class="divide-y divide-rule">
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-				<a class="flex min-h-14 items-center justify-between gap-3 px-4 py-2 hover:bg-subhead" href="/parent/forms/{form.id}/{form.member_id}">
-					<span><span class="block font-semibold text-ink">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span>
-					<ChevronRight size={16} class="shrink-0 text-muted" aria-hidden="true" />
-				</a>
+				<div class="flex min-h-16 items-center gap-3 px-5 py-3">
+					<ClubCrest name={memberName(form.member_id)} logoUrl={people.find((person) => person.id === form.member_id)?.photo_url} size={36} />
+					<span class="min-w-0 flex-1"><b class="block text-ink">{form.title}</b><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span>
+					<a class="btn btn-primary btn-sm" href="/parent/forms/{form.id}/{form.member_id}">{t('portal.form_fill')}</a>
+				</div>
 			{:else}
-				<p class="px-4 py-3 text-sm text-muted">{t('portal.no_forms')}</p>
+				<p class="flex items-center gap-2 px-5 py-4 text-sm text-muted"><CircleCheck size={16} class="text-ok" aria-hidden="true" />{t('portal.no_forms')}</p>
 			{/each}
 		</div>
-		{#if submittedForms.length}
-			<p class="border-t border-line px-4 pt-3 pb-1 font-mono text-[11px] tracking-[.14em] text-muted uppercase">{t('portal.forms_submitted')}</p>
-			<div class="divide-y divide-rule">
-				{#each submittedForms as form (form.id)}
-					<button type="button" class="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left hover:bg-subhead" onclick={() => openSubmission(form.id)}>
-						<span class="size-2 shrink-0 rounded-full bg-ok"></span>
-						<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)} · {t('portal.submitted_on', { date: formatDateTime(form.submitted_at) })}</span></span>
-						<span class="link text-sm font-semibold">{t('portal.view_answers')}</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
+	</section>
+	<section class="card" aria-labelledby="submitted-title">
+		<div class="card-h"><CircleCheck size={17} aria-hidden="true" /><h2 id="submitted-title">{t('portal.forms_submitted')}</h2></div>
+		<div class="divide-y divide-rule">
+			{#each submittedForms as form (form.id)}
+				<button type="button" class="flex min-h-14 w-full items-center gap-3 px-5 py-2 text-left hover:bg-subhead" onclick={() => openSubmission(form.id)}>
+					<span class="size-2 shrink-0 rounded-full bg-ok"></span>
+					<span class="min-w-0 flex-1"><span class="block font-semibold text-ink">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)} · {t('portal.submitted_on', { date: formatDateTime(form.submitted_at) })}</span></span>
+					<span class="link text-sm font-semibold">{t('portal.view_answers')}</span>
+				</button>
+			{:else}
+				<p class="px-5 py-4 text-sm text-muted">{t('portal.forms_none_submitted')}</p>
+			{/each}
+		</div>
 	</section>
 {/snippet}
 
@@ -297,7 +300,7 @@
 					<ClubCrest name={memberName(fee.member_id)} logoUrl={people.find((person) => person.id === fee.member_id)?.photo_url} size={36} />
 					<div class="grid min-w-0 flex-1 gap-2">
 						<div class="flex items-center gap-2"><p class="min-w-0 flex-1 font-semibold text-ink">{memberName(fee.member_id)} · {fee.season}</p><span class="badge badge-sm {Number(fee.balance) > 0 ? 'badge-warn' : 'badge-success'}">{Number(fee.balance) > 0 ? t('portal.fee_open', { amount: money(fee.balance) }) : t('portal.fee_paid')}</span></div>
-						<div class="h-2 overflow-hidden rounded-full bg-subhead" role="progressbar" aria-valuenow={Math.round((paid / (total || 1)) * 100)} aria-valuemin="0" aria-valuemax="100"><div class="h-full rounded-full bg-ink" style="width: {Math.min(100, (paid / (total || 1)) * 100)}%"></div></div>
+						<div class="h-2 overflow-hidden rounded-full bg-subhead" role="progressbar" aria-valuenow={total > 0 ? Math.round((paid / total) * 100) : 100} aria-valuemin="0" aria-valuemax="100"><div class="h-full rounded-full bg-club" style="width: {total > 0 ? Math.min(100, (paid / total) * 100) : 100}%"></div></div>
 						<p class="text-xs text-muted">{t('portal.fee', { paid: money(fee.paid), balance: money(fee.balance) })}</p>
 						{#if fee.next_installment}<p class="text-xs {fee.next_installment.late ? 'font-semibold text-danger' : 'text-muted'}">{t(fee.next_installment.late ? 'portal.installment_late' : 'portal.installment_next', { date: day(fee.next_installment.due_date), amount: money(fee.next_installment.remaining) })}</p>{/if}
 					</div>
@@ -573,10 +576,17 @@
 			<InstallPush />
 		</div>
 	</div>
-{:else if tab === 'forms' || tab === 'payments'}
+{:else if tab === 'payments'}
 	{@render peoplePicker()}
 	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
 		<div class="grid min-w-0 content-start gap-4">{@render payments()}</div>
+		<div class="grid min-w-0 content-start gap-4">
+			{#if data.overview}<RequirementsCard memberships={data.overview.memberships.filter((row) => !selected || row.member_id === selected)} {people} />{/if}
+		</div>
+	</div>
+{:else if tab === 'forms'}
+	{@render peoplePicker()}
+	<div class="grid min-w-0 items-start gap-4 xl:grid-cols-2">
 		<div class="grid min-w-0 content-start gap-4">{@render formsList()}</div>
 	</div>
 	<Sheet open={!!submission} title={submission?.title ?? t('portal.forms')} onclose={() => (submission = null)}>

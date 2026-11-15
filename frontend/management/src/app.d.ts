@@ -3,6 +3,9 @@ import type { Lang } from '#lib/i18n.svelte.ts';
 import type { FixturePreview } from '#lib/fixtures.ts';
 
 declare global {
+	/** The RosterChief version (from pyproject.toml), filled in by Vite. */
+	const __APP_VERSION__: string;
+
 	namespace App {
 		interface Locals {
 			auth: AuthState;
