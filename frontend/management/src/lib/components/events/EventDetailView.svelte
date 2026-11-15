@@ -325,14 +325,14 @@
     </section>
 
     <div class="md:hidden {data.coachView ? 'hidden' : ''}"><TabBar {tabs} active={data.tab} label={t('events.tabs')}/></div>
-    <nav class="hidden flex-wrap items-center gap-x-4 gap-y-2 md:flex" aria-label={t('events.tabs')}>
-        <div class="flex flex-wrap gap-1">
+    <nav class="card hidden items-center gap-x-4 px-3 md:flex" aria-label={t('events.tabs')}>
+        <div class="flex min-w-0 flex-wrap">
             {#each tabs as item (item.key)}
                 <a href={tabHref(item.key)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={data.tab === item.key ? 'page' : undefined}
-                   class="btn btn-sm whitespace-nowrap font-display tracking-[.08em] uppercase {data.tab === item.key ? '' : 'btn-outline text-muted'}">{item.label}</a>
+                   class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {data.tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
             {/each}
         </div>
-        <span class="ml-auto min-w-0 font-mono text-xs text-muted">{whereWhen}</span>
+        <span class="ml-auto hidden min-w-0 truncate py-3 font-mono text-xs text-muted xl:block">{whereWhen}</span>
     </nav>
 
     {#if phone && shownTab === 'overview'}
