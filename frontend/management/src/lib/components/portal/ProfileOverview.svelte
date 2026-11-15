@@ -15,7 +15,8 @@
 	let clubs = $state<Club[]>([]);
 	onMount(async () => {
 		const result = await api<Club[]>('GET', '/my-clubs');
-		if (result.ok && result.data) clubs = result.data.filter((club) => club.host !== location.hostname);
+		// Only offered when the person belongs to more than one club; the one they are in is left out of the list.
+		if (result.ok && result.data && result.data.length > 1) clubs = result.data.filter((club) => club.host !== location.hostname);
 	});
 	const clubUrl = (club: Club) => `${location.protocol}//${club.host}${location.port ? ':' + location.port : ''}/`;
 	const name = (id: string | null) => people.find((person) => person.id === id)?.name ?? '';
