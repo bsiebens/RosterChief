@@ -37,9 +37,12 @@ export type RosterEntry = {
 	open_requirements?: string[];
 	/** Turnout in percent on the team's past events this season; null until the player has enough answers. */
 	attendance_rate?: number | null;
+	/** The same for the team's games and practices (null below three answers). */
+	games_rate?: number | null;
+	practices_rate?: number | null;
 };
-export type StaffEntry = { id: string; member_id: string; first_name: string; last_name: string; photo_url: string | null; position_id: string | null; position_name: string | null };
-export type TeamDetail = TeamRow & { season_id: string; photo_url?: string | null; analytics_available?: boolean; roster: RosterEntry[]; staff: StaffEntry[] };
+export type StaffEntry = { id: string; member_id: string; first_name: string; last_name: string; photo_url: string | null; position_id: string | null; position_name: string | null; is_self?: boolean };
+export type TeamDetail = TeamRow & { season_id: string; can_manage?: boolean; photo_url?: string | null; analytics_available?: boolean; roster: RosterEntry[]; staff: StaffEntry[] };
 export type EligibleReferee = { member_id: string; first_name: string; last_name: string; photo_url: string | null; level_name: string; valid_until: string | null };
 export type Position = { id: string; name: string; short_name: string; ordering: number; staff_position: boolean; management_position: boolean; in_use_count: number };
 

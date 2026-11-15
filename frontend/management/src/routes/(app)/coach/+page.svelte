@@ -45,7 +45,7 @@
 {#if tab === 'news'}
 	<CoachNews items={newsItems} articles={data.coach.news} />
 {:else if tab === 'teams'}
-	<CoachSquad team={roster} />
+	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}
 	<CoachEvents {events} />
 {:else}
