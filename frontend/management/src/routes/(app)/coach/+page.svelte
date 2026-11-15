@@ -43,6 +43,7 @@
 {/if}
 
 {#if tab === 'news'}
+	{#if data.coach.can_add_news}<a class="btn btn-primary mb-3 min-h-11 w-full gap-2 sm:w-auto" href="/coach/news/new"><Plus size={18} aria-hidden="true" />{t('coach.add_post')}</a>{/if}
 	<CoachNews items={newsItems} articles={data.coach.news} mine={page.url.searchParams.get('mine') === '1'} canFilter={data.coach.can_add_news} />
 {:else if tab === 'teams'}
 	<CoachSquad team={roster} positions={data.positions} />
