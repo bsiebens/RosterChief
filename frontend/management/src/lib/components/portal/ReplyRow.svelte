@@ -27,6 +27,7 @@
 	// The answer given shows at once and stays until the refreshed data is in, so the old state never flashes back.
 	let pending = $state<string | null>(null);
 	const shown = $derived(pending ?? event.status);
+	const answeredNo = $derived(['maybe', 'absent', 'excused', 'dropout'].includes(shown));
 	const going = $derived(shown === 'present' || shown === 'selected');
 	const noInvite = $derived(event.blocked === 'not_invited');
 	const noInviteWhy = $derived.by(() => {
@@ -78,12 +79,12 @@
 				{/if}
 				{#if canReply && !lateInstalment}
 					{#if !going}
-						<button type="button" class="btn btn-sm btn-primary min-h-11 md:h-8 md:min-h-0" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
-						{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0" disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
+						<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {answeredNo ? 'btn-outline' : 'btn-primary'}" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
+						{#if !quick}<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {shown === 'maybe' ? 'btn-warning' : 'btn-outline'}" aria-pressed={shown === 'maybe'} disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
 					{/if}
 				{/if}
 				{#if canReply}
-					<button type="button" class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0 {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+					<button type="button" class="btn btn-sm min-h-11 md:h-8 md:min-h-0 {['absent', 'excused', 'dropout'].includes(shown) ? '' : 'btn-outline'} {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
 				{/if}
 			{/if}
 		</div>

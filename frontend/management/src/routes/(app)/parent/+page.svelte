@@ -337,7 +337,7 @@
 
 {#snippet eventRow(entry: CalendarEntry, tile = true)}
 	{@const event = entry.event}
-	<div class="relative grid gap-x-4 gap-y-1 border-l-4 py-2 pr-3 pl-3 hover:bg-subhead md:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] md:items-center {kindStyle(event.kind).bar}">
+	<div class="@container"><div class="relative grid gap-x-4 gap-y-1 border-l-4 py-2 pr-3 pl-3 hover:bg-subhead @2xl:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] @2xl:items-center {kindStyle(event.kind).bar}">
 		<div class="flex min-w-0 items-center gap-3">
 			{#if tile}<PortalEventDate start={event.start} compact />{:else}<span class="w-12 shrink-0 font-mono text-xs text-muted">{formatTime(event.start)}</span>{/if}
 			<a class="min-w-0 flex-1 after:absolute after:inset-0 hover:text-brand focus:outline-none" href={eventLink(event.event_id)} data-sveltekit-reset="false">
@@ -347,8 +347,8 @@
 			{@render scoreMark(entry)}
 		</div>
 		<!-- The card as a whole opens the event; the answers sit above that click area and stay clickable. -->
-		<div class="pointer-events-none relative z-[1] min-w-0 divide-y divide-rule pl-[3.75rem] md:pl-0 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_form]:pointer-events-auto">{@render replyStack(entry)}</div>
-	</div>
+		<div class="pointer-events-none relative z-[1] min-w-0 divide-y divide-rule pl-[3.75rem] @2xl:pl-0 [&_a]:pointer-events-auto [&_button]:pointer-events-auto [&_form]:pointer-events-auto">{@render replyStack(entry)}</div>
+	</div></div>
 {/snippet}
 
 {#snippet headerPeople()}
