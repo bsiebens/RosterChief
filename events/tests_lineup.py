@@ -180,6 +180,21 @@ class LineupTests(TestCase):
         self.assertEqual(OutboxEntry.objects.count(), 1)
         self.assertEqual(AuditEntry.objects.filter(action="lineup.published").count(), 1)
 
+    def test_unpublish_returns_to_a_draft_and_withdraws(self):
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.cid.pk])
+        svc.publish_lineup(self.coach_user, self.lineup)
+        InboxNotification.objects.all().delete()
+        svc.unpublish_lineup(self.coach_user, self.lineup)
+        self.lineup.refresh_from_db()
+        self.assertIsNone(self.lineup.published_at)
+        self.assertEqual(svc.status(self.lineup), "draft")  # the picks stay
+        self.assertEqual([self.status(m) for m in (self.ann, self.cid, self.bob, self.out, self.dan)], [S.PRESENT, S.PRESENT, S.PRESENT, S.PRESENT, S.ABSENT])
+        self.assertEqual(self.inbox_titles(self.ann), ["The line-up for U16 vs Rivals was withdrawn"])
+        self.assertEqual(self.inbox_titles(self.bob), [])  # never told they were out, so nothing now
+        self.assertEqual(AuditEntry.objects.filter(action="lineup.unpublished").count(), 1)
+        svc.unpublish_lineup(self.coach_user, self.lineup)  # nothing to withdraw: quiet no-op
+        self.assertEqual(AuditEntry.objects.filter(action="lineup.unpublished").count(), 1)
+
     def test_publish_changes_only_tells_the_changed(self):
         svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk])
         svc.publish_lineup(self.coach_user, self.lineup)

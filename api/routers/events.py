@@ -886,6 +886,14 @@ def publish_lineup(request, event_id: uuid.UUID):
     return {"lineup": _lineup_out(request, event), "newly_selected": sorted(result["selected"], key=str), "dropped": sorted(result["dropped"], key=str)}
 
 
+@router.delete("/{event_id}/lineup/publish", response=LineupOut, summary="Withdraw a published line-up: back to a draft, the picks stay (attendance manager)", operation_id="unpublish_event_lineup")
+def unpublish_lineup(request, event_id: uuid.UUID):
+    event = _event(event_id)
+    _require_attendance(request, event)
+    lineup_svc.unpublish_lineup(request.user, _existing_lineup(event))
+    return _lineup_out(request, event)
+
+
 @router.post("/{event_id}/lineup/schedule", response=LineupOut, summary="Publish the line-up automatically later (attendance manager)", operation_id="schedule_event_lineup")
 def schedule_lineup(request, event_id: uuid.UUID, payload: LineupScheduleIn):
     event = _event(event_id)

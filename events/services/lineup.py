@@ -283,6 +283,32 @@ def _publish(actor, lineup, *, club=None) -> dict:
 
 
 @transaction.atomic
+def unpublish_lineup(actor, lineup) -> Lineup:
+    """Take a published line-up back to a draft: the picks stay, "selected" / "not selected" players are available (present) again, and the
+    people who had been told they were in are told it was withdrawn. A no-op for a line-up that is not published."""
+    require_lineup_manager(actor, lineup.event)
+    lineup = Lineup.objects.select_for_update().select_related("event").get(pk=lineup.pk)
+    if lineup.published_at is None:
+        return lineup
+    event = lineup.event
+    was_selected = set(Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.SELECTED).values_list("member_id", flat=True))
+    lineup.published_at = None
+    lineup.save(update_fields=["published_at"])
+    Attendance.objects.filter(event=event, status__in=[Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NOT_SELECTED]).update(status=Attendance.AttendanceStatus.PRESENT)
+    when = timezone.localtime(event.start).strftime("%d/%m/%Y %H:%M")
+    _notify_members(
+        Member.objects.filter(pk__in=was_selected).select_related("user"),
+        title=f"The line-up for {event.title} was withdrawn",
+        body=f"{event.title}, {when}. A new line-up will follow.",
+        kind=inbox.Kind.INFO,
+        href=_href(event),
+        category=Category.LINEUP,
+    )
+    audit.record(actor, "lineup.unpublished", target=lineup, changes={"was_selected": sorted(map(str, was_selected))})
+    return lineup
+
+
+@transaction.atomic
 def schedule_publish(actor, lineup, when) -> Lineup:
     """Publish ``lineup`` automatically at ``when`` (aware, in the future). Overwrites an earlier schedule."""
     require_lineup_manager(actor, lineup.event)

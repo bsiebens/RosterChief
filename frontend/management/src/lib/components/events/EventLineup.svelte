@@ -105,9 +105,13 @@
 	}
 	// Publishing asks what to do: now, or later at a chosen time (an already published line-up just publishes its changes).
 	let publishOpen = $state(false);
-	let mode = $state<'now' | 'later'>('now');
+	let mode = $state<'now' | 'later' | 'unpublish'>('now');
 	function openPublish() {
-		if (lineup.published_at) return void publish();
+		if (lineup.published_at) {
+			mode = 'now';
+			publishOpen = true;
+			return;
+		}
 		mode = lineup.scheduled_publish_at ? 'later' : 'now';
 		if (lineup.scheduled_publish_at) when = toLocalInput(lineup.scheduled_publish_at);
 		publishOpen = true;
@@ -115,6 +119,7 @@
 	async function confirmPublish(e: SubmitEvent) {
 		e.preventDefault();
 		if (mode === 'now') await publish();
+		else if (mode === 'unpublish') await call(() => api<Lineup>('DELETE', `/events/${eventId}/lineup/publish`), (l) => (apply(l), (okMsg = t('coach.lu_unpublished_msg'))));
 		else {
 			if (lineup.scheduled_publish_at && !(await unschedule())) return;
 			await schedule(e);
@@ -317,12 +322,19 @@
 		<div class="grid gap-2" role="radiogroup" aria-label={t('events.lineup.publish')}>
 			<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'now' ? 'border-club bg-club/10' : 'border-line'}">
 				<input type="radio" class="radio mt-0.5" name="publish-mode" value="now" bind:group={mode} />
-				<span><b class="block text-ink">{t('coach.lu_publish_now')}</b><span class="block text-xs text-muted">{t('coach.lu_publish_now_help')}</span></span>
+				<span><b class="block text-ink">{lineup.published_at ? t('events.lineup.publish_changes') : t('coach.lu_publish_now')}</b><span class="block text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('coach.lu_publish_now_help')}</span></span>
 			</label>
-			<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'later' ? 'border-club bg-club/10' : 'border-line'}">
-				<input type="radio" class="radio mt-0.5" name="publish-mode" value="later" bind:group={mode} />
-				<span class="min-w-0 flex-1"><b class="block text-ink">{t('coach.lu_publish_later')}</b><span class="block text-xs text-muted">{t('coach.lu_publish_later_help')}</span></span>
-			</label>
+			{#if lineup.published_at}
+				<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'unpublish' ? 'border-club bg-club/10' : 'border-line'}">
+					<input type="radio" class="radio mt-0.5" name="publish-mode" value="unpublish" bind:group={mode} />
+					<span class="min-w-0 flex-1"><b class="block text-ink">{t('coach.lu_unpublish')}</b><span class="block text-xs text-muted">{t('coach.lu_unpublish_help')}</span></span>
+				</label>
+			{:else}
+				<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'later' ? 'border-club bg-club/10' : 'border-line'}">
+					<input type="radio" class="radio mt-0.5" name="publish-mode" value="later" bind:group={mode} />
+					<span class="min-w-0 flex-1"><b class="block text-ink">{t('coach.lu_publish_later')}</b><span class="block text-xs text-muted">{t('coach.lu_publish_later_help')}</span></span>
+				</label>
+			{/if}
 		</div>
 		{#if mode === 'later'}
 			<label class="grid gap-1 text-sm font-semibold">{t('events.lineup.schedule_when')}
@@ -336,7 +348,7 @@
 		{#if errorMsg}<Alert kind="error">{errorMsg}</Alert>{/if}
 		<div class="flex flex-wrap justify-end gap-2">
 			<button type="button" class="btn btn-outline" onclick={() => (publishOpen = false)}>{t('common.cancel')}</button>
-			<button type="submit" class="btn btn-primary gap-2" disabled={busy || (mode === 'later' && !when) || (!picked.length)}><Megaphone size={15} aria-hidden="true" />{mode === 'now' ? t('coach.lu_publish_now') : t('events.lineup.schedule_button')}</button>
+			<button type="submit" class="btn btn-primary gap-2" disabled={busy || (mode === 'later' && !when) || (mode !== 'unpublish' && !picked.length)}><Megaphone size={15} aria-hidden="true" />{mode === 'unpublish' ? t('coach.lu_unpublish') : mode === 'now' ? (lineup.published_at ? t('events.lineup.publish_changes') : t('coach.lu_publish_now')) : t('events.lineup.schedule_button')}</button>
 		</div>
 	</form>
 </Sheet>
