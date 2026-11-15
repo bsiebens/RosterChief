@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import { api } from '#lib/management-api.ts';
-import type { NewsList } from '#lib/news.ts';
+import type { NewsDetail, NewsList } from '#lib/news.ts';
 import type { CoachHome } from '#lib/portal.ts';
 import { intOrNull, strOrNull, teamCall, text, type Position, type TeamDetail } from '#lib/teams/server.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -10,10 +10,16 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 	const result = await api<CoachHome>('GET', '/portal/coach', { f: fetch });
 	if (!result.ok || !result.data) error(result.status === 403 ? 403 : 502, result.message);
 	const coach = result.data;
+	// A link to one news item (a notification): a published one opens in the reading drawer, anything else (a draft or an item in review) in the mobile editor.
+	const article = url.searchParams.get('article');
+	if (tab === 'news' && article && !coach.news.some((item) => item.id === article)) {
+		const found = await api<NewsDetail>('GET', `/news/${article}`, { f: fetch });
+		if (found.ok && found.data) redirect(303, `/coach/news/${article}`);
+	}
 	// Only the tab being shown needs its extra data: the rosters of the coach's teams for Squad, the news list (drafts included) for News.
 	const [rosters, news, positions] = await Promise.all([
 		tab === 'teams' ? Promise.all(coach.teams.map((team) => api<TeamDetail>('GET', `/teams/${team.id}`, { f: fetch }))) : Promise.resolve([]),
-		tab === 'news' ? api<NewsList>('GET', '/news', { query: { limit: 30 }, f: fetch }) : Promise.resolve(null),
+		tab === 'news' ? api<NewsList>('GET', '/news', { query: { limit: 30, mine: url.searchParams.get('mine') === '1' }, f: fetch }) : Promise.resolve(null),
 		tab === 'teams' ? api<Position[]>('GET', '/team-positions', { f: fetch }) : Promise.resolve(null)
 	]);
 	return {

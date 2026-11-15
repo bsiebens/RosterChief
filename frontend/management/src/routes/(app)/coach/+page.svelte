@@ -32,7 +32,7 @@
 <svelte:head><title>{pageTitle(title)}</title></svelte:head>
 
 {#snippet addEvent()}<a class="btn btn-primary btn-square" href="/calendar/events/new?view=coach" aria-label={t('coach.add_event')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
-{#snippet addPost()}<a class="btn btn-primary btn-square" href="/news/new" aria-label={t('coach.add_post')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
+{#snippet addPost()}<a class="btn btn-primary btn-square" href="/coach/news/new" aria-label={t('coach.add_post')}><Plus size={18} aria-hidden="true" /></a>{/snippet}
 
 {#if teams.length > 1 && tab !== 'news'}
 	<div class="flex max-w-full gap-2 overflow-x-auto pb-1" role="group" aria-label={t('portal.teams')}>
@@ -43,7 +43,7 @@
 {/if}
 
 {#if tab === 'news'}
-	<CoachNews items={newsItems} articles={data.coach.news} />
+	<CoachNews items={newsItems} articles={data.coach.news} mine={page.url.searchParams.get('mine') === '1'} canFilter={data.coach.can_add_news} />
 {:else if tab === 'teams'}
 	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}

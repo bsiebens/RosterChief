@@ -150,3 +150,7 @@ export function renderMarkdown(src: string): string {
 	close();
 	return out.join('');
 }
+
+/** The coach app's status pill for an item: the i18n key and the badge tone (draft, in review, scheduled, published). */
+export const coachPill = (n: Pick<NewsListItem, 'status' | 'is_scheduled'>): [string, string] =>
+	({ draft: ['coach.draft', 'badge-warning'], pending_review: ['coach.in_review', 'badge-info'], scheduled: ['coach.scheduled', 'badge-info'], published: ['coach.published', 'badge-success'] } as Record<string, [string, string]>)[statusKey(n)];

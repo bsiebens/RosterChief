@@ -5,22 +5,25 @@
 	import { formatDay } from '#lib/events/types.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { mediaPath } from '#lib/media.ts';
-	import type { NewsListItem } from '#lib/news.ts';
+	import { coachPill, type NewsListItem } from '#lib/news.ts';
+	import Alert from '#lib/components/Alert.svelte';
 	import type { PortalArticle } from '#lib/portal.ts';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 
-	let { items, articles }: { items: NewsListItem[]; articles: PortalArticle[] } = $props();
+	let { items, articles, mine = false, canFilter = false }: { items: NewsListItem[]; articles: PortalArticle[]; mine?: boolean; canFilter?: boolean } = $props();
+	const notice = $derived(page.url.searchParams.get('notice'));
+	const notices = ['saved', 'submitted', 'published', 'scheduled', 'unpublished', 'sent_back', 'deleted'];
+	const chip = (own: boolean) => `/coach?tab=news${own ? '&mine=1' : ''}`;
 	const lead = $derived(items[0]);
 	const rest = $derived(items.slice(1));
 	const selected = $derived(articles.find((article) => article.id === page.url.searchParams.get('article')));
 	const translation = (article: PortalArticle) => article.translations[getLang() === 'nl' ? 'nl' : 'en'];
 	const photo = (article: PortalArticle) => article.photos.find((image) => image.is_main) ?? article.photos[0];
-	const STATUS: Record<string, [string, string]> = { published: ['coach.published', 'badge-success'], draft: ['coach.draft', 'badge-warning'], pending_review: ['coach.in_review', 'badge-info'] };
-	const pill = (item: NewsListItem): [string, string] => (item.status === 'published' && item.is_scheduled ? ['coach.scheduled', 'badge-info'] : (STATUS[item.status] ?? STATUS.draft));
+	const pill = coachPill;
 	const when = (item: NewsListItem) => formatDay(item.published_at ?? item.created);
 	const meta = (item: NewsListItem) => [when(item), (item.teams ?? []).map((team) => team.name).join(', ')].filter(Boolean).join(' · ');
 	// A published article opens in the reading drawer; a draft goes to the editor, which only its writer and publishers can open.
-	const href = (item: NewsListItem) => (item.status === 'published' && articles.some((article) => article.id === item.id) ? `/coach?tab=news&article=${item.id}` : item.can_edit ? `/news/${item.id}` : null);
+	const href = (item: NewsListItem) => (item.status === 'published' && articles.some((article) => article.id === item.id) ? `/coach?tab=news&article=${item.id}` : item.can_edit ? `/coach/news/${item.id}` : null);
 </script>
 
 {#snippet card(item: NewsListItem, big: boolean)}
@@ -39,6 +42,15 @@
 	</svelte:element>
 {/snippet}
 
+{#if notice && notices.includes(notice)}
+	<div class="mb-3 flex items-start gap-2"><div class="min-w-0 flex-1"><Alert kind="success">{t(`coach.news_notice_${notice}`)}</Alert></div><a class="btn btn-outline btn-square min-h-11" href="/coach?tab=news{mine ? '&mine=1' : ''}" data-sveltekit-replacestate aria-label={t('common.close')}>×</a></div>
+{/if}
+{#if canFilter}
+	<div class="mb-3 flex gap-2" role="group" aria-label={t('shell.nav.news')}>
+		<button type="button" class="portal-person compact text" aria-pressed={!mine} onclick={() => void goto(chip(false), { replaceState: true })}>{t('coach.news_all')}</button>
+		<button type="button" class="portal-person compact text" aria-pressed={mine} onclick={() => void goto(chip(true), { replaceState: true })}>{t('coach.news_mine')}</button>
+	</div>
+{/if}
 {#if items.length}
 	<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
 		{@render card(lead, true)}

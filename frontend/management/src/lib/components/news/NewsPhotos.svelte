@@ -10,7 +10,8 @@
 	 * Photo manager: upload (several at once), main photo, focal point picker, delete. Every action calls the API
 	 * straight from the browser and updates `photos`; the page does not reload.
 	 */
-	let { newsId, photos = $bindable(), canEdit }: { newsId: string; photos: NewsPhoto[]; canEdit: boolean } = $props();
+	let { newsId, photos = $bindable(), canEdit, touch = false }: { newsId: string; photos: NewsPhoto[]; canEdit: boolean; touch?: boolean } = $props();
+	const small = $derived(touch ? 'btn-sm min-h-10' : 'btn-xs');
 
 	let busy = $state(false);
 	let errorMsg = $state('');
@@ -108,7 +109,7 @@
 			<p class="text-xs text-muted">{t('news.card.photos_desc')}</p>
 		</div>
 		{#if canEdit}
-			<label class="btn btn-outline btn-sm cursor-pointer gap-2 {busy ? 'pointer-events-none opacity-60' : ''}">
+			<label class="btn btn-outline btn-sm {touch ? 'min-h-11' : ''} cursor-pointer gap-2 {busy ? 'pointer-events-none opacity-60' : ''}">
 				<ImagePlus size={14} aria-hidden="true" />
 				{busy ? t('news.photos.uploading') : t('news.photos.add')}
 				<input bind:this={input} type="file" accept="image/*" multiple class="sr-only" onchange={upload} disabled={busy} />
@@ -126,9 +127,9 @@
 					{#if p.is_main}<span class="badge badge-success badge-sm absolute top-1.5 left-1.5">{t('news.photos.main')}</span>{/if}
 					{#if canEdit}
 						<div class="mt-1.5 flex flex-wrap gap-1">
-							{#if !p.is_main}<button class="btn btn-outline btn-xs gap-1" type="button" disabled={busy} onclick={() => setMain(p)}><Star size={12} aria-hidden="true" /> {t('news.photos.set_main')}</button>{/if}
-							<button class="btn btn-outline btn-xs gap-1" type="button" disabled={busy} onclick={() => openFocal(p)}><Crosshair size={12} aria-hidden="true" /> {t('news.photos.focal')}</button>
-							<button class="btn btn-outline btn-error btn-xs gap-1" type="button" disabled={busy} onclick={() => ((deleting = p), (deleteOpen = true))}><Trash2 size={12} aria-hidden="true" /> {t('news.photos.delete')}</button>
+							{#if !p.is_main}<button class="btn btn-outline {small} gap-1" type="button" disabled={busy} onclick={() => setMain(p)}><Star size={12} aria-hidden="true" /> {t('news.photos.set_main')}</button>{/if}
+							<button class="btn btn-outline {small} gap-1" type="button" disabled={busy} onclick={() => openFocal(p)}><Crosshair size={12} aria-hidden="true" /> {t('news.photos.focal')}</button>
+							<button class="btn btn-outline btn-error {small} gap-1" type="button" disabled={busy} onclick={() => ((deleting = p), (deleteOpen = true))}><Trash2 size={12} aria-hidden="true" /> {t('news.photos.delete')}</button>
 						</div>
 					{/if}
 				</li>
