@@ -75,7 +75,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.created}<Alert kind="success">{t('shop.vch.created_n', { n: data.created })}</Alert>{/if}
 		{#if deleted || done === 'delete'}<Alert kind="success">{t('shop.vch.deleted')}</Alert>{/if}
 		{#if done === 'deactivate'}<Alert kind="success">{t('shop.vch.deactivated')}</Alert>{/if}
@@ -98,25 +98,25 @@
 		{:else}
 			<div class="card overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>{t('shop.vch.number')}</th><th>{t('shop.vch.holder')}</th><th class="text-right">{t('shop.vch.amount')}</th><th class="text-right">{t('shop.vch.remaining')}</th><th>{t('shop.vch.expiry')}</th><th>{t('shop.col.status')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
+					<thead><tr><th>{t('shop.vch.number')}</th><th class="hidden lg:table-cell">{t('shop.vch.holder')}</th><th class="hidden text-right lg:table-cell">{t('shop.vch.amount')}</th><th class="text-right">{t('shop.vch.remaining')}</th><th class="hidden xl:table-cell">{t('shop.vch.expiry')}</th><th>{t('shop.col.status')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each data.rows as v (v.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td class="whitespace-nowrap">
 									<a class="link font-mono font-semibold" href={voucherHref(v.id)}>{v.number}</a>
 									<button class="btn btn-ghost btn-xs btn-square ml-1" type="button" aria-label={t('shop.vch.copy_named', { number: v.number })} onclick={() => copy(v)}>{#if copied === v.id}<Check size={13} />{:else}<Copy size={13} />{/if}</button>
 								</td>
-								<td class="text-sm">{v.issued_to?.name ?? t('common.none')}</td>
-								<td class="text-right font-mono text-sm">{money(v.amount)}</td>
+								<td class="hidden text-sm lg:table-cell">{v.issued_to?.name ?? t('common.none')}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{money(v.amount)}</td>
 								<td class="text-right font-mono text-sm font-bold">{money(v.available_amount)}</td>
-								<td class="text-xs whitespace-nowrap text-muted">{day(v.expiry_date)}</td>
+								<td class="hidden text-xs whitespace-nowrap text-muted xl:table-cell">{day(v.expiry_date)}</td>
 								<td><span class="badge badge-sm {statusBadge(v.status)}">{t(`shop.status.${v.status}`)}</span></td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
 										<form method="POST" action="?/toggle" use:enhance>
 											<input type="hidden" name="id" value={v.id} />
 											<input type="hidden" name="activate" value={v.is_active ? '0' : '1'} />
-											<button class="btn btn-outline btn-xs gap-1" type="submit"><Power size={13} /> {v.is_active ? t('shop.deactivate') : t('shop.activate')}</button>
+											<button class="btn btn-outline btn-xs gap-1" type="submit"><Power size={13} /> <span class="sr-only xl:not-sr-only">{v.is_active ? t('shop.deactivate') : t('shop.activate')}</span></button>
 										</form>
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('shop.vch.delete_named', { number: v.number })} onclick={() => ((target = v), (delOpen = true))}><Trash2 size={13} /></button>
 									</div>

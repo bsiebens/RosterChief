@@ -18,7 +18,7 @@
 	const dueErr = $derived(form && 'fields' in form ? ((form.fields as Record<string, string>)?.due_date ?? '') : '');
 </script>
 
-<section class="card card-body gap-3" aria-labelledby="inv-h">
+<section class="card card-body card-hl gap-3" aria-labelledby="inv-h">
 	<h2 id="inv-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ReceiptText size={16} aria-hidden="true" /> {t('shop.orders.card.invoice')}</h2>
 	{#if failure && !open}<Alert kind="error">{failure}</Alert>{/if}
 	{#if order.invoice}

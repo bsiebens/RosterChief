@@ -31,7 +31,7 @@
 
 <div class="grid gap-5">
 	{#if summarised.length}
-		<section class="card card-body gap-4" aria-labelledby="{uid}-sum">
+		<section class="card card-body card-hl gap-4" aria-labelledby="{uid}-sum">
 			<h2 id="{uid}-sum" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('forms.resp.summary')}</h2>
 			<div class="grid gap-5 md:grid-cols-2">
 				{#each summarised as c (c.id)}
@@ -96,7 +96,7 @@
 		{/if}
 	</section>
 
-	<section class="card card-body gap-2" aria-labelledby="{uid}-nr">
+	<section class="card card-body card-hl gap-2" aria-labelledby="{uid}-nr">
 		<h2 id="{uid}-nr" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Clock size={16} class="shrink-0" aria-hidden="true" /> {t('forms.resp.not_responded', { n: report.not_responded.length })}</h2>
 		{#if report.not_responded.length}
 			<ul class="flex flex-wrap gap-1.5">

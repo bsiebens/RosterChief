@@ -86,7 +86,7 @@
 
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
-			<section class="card card-body" aria-labelledby="{uid}-aud">
+			<section class="card card-body card-hl" aria-labelledby="{uid}-aud">
 				<header class="mb-3 grid gap-0.5">
 					<h2 id="{uid}-aud" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('forms.send.card.audience')}</h2>
 					<p class="text-xs text-muted">{t('forms.send.card.audience_desc')}</p>
@@ -95,7 +95,7 @@
 				{#if tried && noAudience && !publicOn}<span class="mt-3 block text-xs text-warn-text">{t('forms.send.no_audience')}</span>{/if}
 			</section>
 
-			<section class="card card-body" aria-labelledby="{uid}-win">
+			<section class="card card-body card-hl" aria-labelledby="{uid}-win">
 				<header class="mb-3 grid gap-0.5">
 					<h2 id="{uid}-win" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('forms.send.card.window')}</h2>
 					<p class="text-xs text-muted">{t('forms.send.card.window_desc')}</p>
@@ -109,7 +109,7 @@
 		</div>
 
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
-			<section class="card card-body gap-3" aria-labelledby="{uid}-opt">
+			<section class="card card-body card-hl gap-3" aria-labelledby="{uid}-opt">
 				<h2 id="{uid}-opt" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {t('forms.send.card.options')}</h2>
 				<label class="flex items-start gap-3 rounded-lg border border-line p-3 {item.login_required ? 'opacity-60' : 'cursor-pointer'}">
 					<input type="checkbox" class="checkbox mt-0.5" bind:checked={isPublic} disabled={item.login_required} aria-describedby="{uid}-pub-help" />

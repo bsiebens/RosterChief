@@ -62,7 +62,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.received}<Alert kind="success">{t('shop.inv.received', { n: data.received })}</Alert>{/if}
 		{#if done === 'adjust'}<Alert kind="success">{form && 'unchanged' in form && form.unchanged ? t('shop.inv.adjust_unchanged') : t('shop.inv.adjusted')}</Alert>{/if}
 		{#if form && form.op === 'adjust' && !('done' in form) && !Object.keys(errs).length}<Alert kind="error" title={t('shop.action_failed')}>{form.message || t('common.error.generic')}</Alert>{/if}
@@ -76,17 +76,17 @@
 		{:else}
 			<div class="card overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>{t('shop.col.product')}</th><th class="text-right">{t('shop.inv.on_hand')}</th><th class="text-right">{t('shop.inv.committed')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
+					<thead><tr><th>{t('shop.col.product')}</th><th class="text-right">{t('shop.inv.on_hand')}</th><th class="hidden text-right md:table-cell">{t('shop.inv.committed')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each data.rows as r (r.product_id + (r.variant_id ?? ''))}
-							<tr class="hover:bg-surface {r.on_hand <= 0 ? 'bg-error/5' : ''}">
+							<tr class="hover:bg-paper {r.on_hand <= 0 ? 'bg-error/5' : ''}">
 								<td>
 									<a class="link font-semibold" href="/shop/products/{r.product_id}">{r.product_name}</a>{#if r.variant_name}<span class="ml-1.5 text-muted">- {r.variant_name}</span>{/if}
 									{#if r.on_hand <= 0}<span class="badge badge-sm badge-error ml-2">{t('shop.out_of_stock')}</span>{/if}
 								</td>
 								<td class="text-right font-mono text-sm font-bold {r.on_hand <= 0 ? 'text-error' : ''}">{r.on_hand}</td>
-								<td class="text-right font-mono text-sm text-muted">{r.committed}</td>
-								<td class="text-right"><button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('shop.inv.adjust_named', { name: stockLabel(r) })} onclick={() => ask(r)}><SlidersHorizontal size={13} /> {t('shop.inv.adjust')}</button></td>
+								<td class="hidden text-right font-mono text-sm text-muted md:table-cell">{r.committed}</td>
+								<td class="text-right"><button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('shop.inv.adjust_named', { name: stockLabel(r) })} onclick={() => ask(r)}><SlidersHorizontal size={13} /> <span class="sr-only md:not-sr-only">{t('shop.inv.adjust')}</span></button></td>
 							</tr>
 						{/each}
 					</tbody>

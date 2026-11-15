@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { Inbox, Pencil } from '@lucide/svelte';
+	import { Inbox, ChevronRight } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -43,7 +43,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.rows.length}
@@ -55,11 +55,11 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('reg.col.contact')}</th><th>{t('reg.col.season')}</th><th class="text-right">{t('reg.col.people')}</th><th class="text-right">{t('reg.col.total')}</th><th>{t('reg.col.invoice')}</th><th>{t('reg.col.submitted')}</th><th><span class="sr-only">{t('reg.col.actions')}</span></th></tr>
+						<tr><th>{t('reg.col.contact')}</th><th class="hidden lg:table-cell">{t('reg.col.season')}</th><th class="hidden text-right lg:table-cell">{t('reg.col.people')}</th><th class="text-right">{t('reg.col.total')}</th><th class="hidden xl:table-cell">{t('reg.col.invoice')}</th><th class="hidden md:table-cell">{t('reg.col.submitted')}</th><th><span class="sr-only">{t('reg.col.actions')}</span></th></tr>
 					</thead>
 					<tbody>
 						{#each data.rows as r (r.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td>
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<a class="link font-semibold" href={registrationHref(r.id)}>{r.contact?.name ?? t('reg.no_contact')}</a>
@@ -67,12 +67,12 @@
 									</div>
 									{#if r.contact?.email}<p class="text-xs text-muted">{r.contact.email}</p>{/if}
 								</td>
-								<td class="text-sm">{r.season_name}</td>
-								<td class="text-right font-mono text-sm">{r.people_count}</td>
+								<td class="hidden text-sm lg:table-cell">{r.season_name}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{r.people_count}</td>
 								<td class="text-right font-mono text-sm">{money(r.total)}</td>
-								<td class="font-mono text-xs">{r.invoice_number ?? '–'}</td>
-								<td class="font-mono text-xs whitespace-nowrap text-muted">{formatDay(r.submitted_at)}</td>
-								<td class="text-right whitespace-nowrap"><a class="btn btn-outline btn-xs gap-1" href={registrationHref(r.id)} aria-label={t('reg.edit_named', { name: r.contact?.name ?? t('reg.no_contact') })}><Pencil size={13} /> {t('common.edit')}</a></td>
+								<td class="hidden font-mono text-xs xl:table-cell">{r.invoice_number ?? '–'}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap text-muted md:table-cell">{formatDay(r.submitted_at)}</td>
+								<td class="text-right whitespace-nowrap"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={registrationHref(r.id)} aria-label={t('reg.edit_named', { name: r.contact?.name ?? t('reg.no_contact') })} title={t('common.edit')}><ChevronRight size={18} /></a></td>
 							</tr>
 						{/each}
 					</tbody>

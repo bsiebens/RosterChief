@@ -60,7 +60,7 @@
 	};
 </script>
 
-<section class="card card-body gap-4" aria-labelledby="adjust-h">
+<section class="card card-body card-hl gap-4" aria-labelledby="adjust-h">
 	<h2 id="adjust-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Tag size={16} aria-hidden="true" /> {t('shop.orders.card.adjust')}</h2>
 
 	<!-- Discount code and voucher side by side (stacked on narrow screens). -->

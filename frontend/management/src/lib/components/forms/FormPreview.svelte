@@ -15,7 +15,7 @@
 	const id = $props.id();
 </script>
 
-<div class="card card-body gap-5">
+<div class="card card-body card-hl gap-5">
 	<header class="grid gap-1">
 		<h2 class="flex items-center gap-2 font-display text-2xl font-extrabold tracking-wide text-ink uppercase"><ClipboardList size={20} class="shrink-0" aria-hidden="true" /> {title || t('forms.untitled')}</h2>
 		{#if description}<p class="text-sm whitespace-pre-line text-muted">{description}</p>{/if}

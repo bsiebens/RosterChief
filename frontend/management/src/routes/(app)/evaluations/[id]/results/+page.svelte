@@ -47,7 +47,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 	{#if data.error || !data.stats || !data.matrix}
 		<Alert kind="error">{t('common.error.generic')}</Alert>
 	{:else if !data.stats.evaluation_count}
@@ -59,7 +59,7 @@
 				{#if g.section}<h2 class="flex items-center gap-2 border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {g.section}</h2>{/if}
 				<div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
 			{#each g.items as { r } (r.field.id)}
-				<section class="card card-body gap-2 p-4">
+				<section class="card card-body card-hl gap-2 p-4">
 					<header>
 						<h2 class="flex items-center gap-2 font-semibold text-ink"><ChartBar size={16} class="shrink-0" aria-hidden="true" /> {r.field.label}</h2>
 						<p class="font-mono text-xs text-muted">{t('eval.results.responses', { n: r.response_count })}</p>
@@ -107,7 +107,7 @@
 				</thead>
 				<tbody>
 					{#each data.matrix.rows as r (r.player.id)}
-						<tr class="hover:bg-surface">
+						<tr class="hover:bg-paper">
 							<td class="font-semibold"><a class="link" href="{meetingHref(data.checklist.id, r.player.id)}">{r.player.name}</a></td>
 							{#each data.matrix.fields as f (f.id)}
 								{@const v = r.values[f.id]}

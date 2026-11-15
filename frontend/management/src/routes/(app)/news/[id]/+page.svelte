@@ -92,6 +92,12 @@
 	{#if done === 'save'}<Alert kind="success">{t('news.saved')}</Alert>{/if}
 	{#if errorText && !showFieldErrors}<Alert kind="error" title={t('news.action_failed')}>{errorText}</Alert>{/if}
 	{#if errorText && showFieldErrors}<Alert kind="error" title={t('news.save_failed')}>{errorText}</Alert>{/if}
+	{#if item.status === 'draft' && item.review_note}
+		<Alert kind="warning" title={t('news.review_note.title')}>
+			<p class="whitespace-pre-line">{item.review_note}</p>
+			{#if item.sent_back_at}<p class="mt-1 font-mono text-[11px] text-muted">{t('news.review_note.sent', { date: formatDateTime(item.sent_back_at) })}</p>{/if}
+		</Alert>
+	{/if}
 	{#if !canEdit}<Alert kind="info">{isPublished ? t('news.locked') : t('news.read_only')}</Alert>{/if}
 
 	<div class="grid items-start gap-5 xl:grid-cols-3">
@@ -123,8 +129,9 @@
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-wf">
-			<section class="card card-body gap-3">
-				<h2 id="{formId}-wf" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Workflow size={16} class="shrink-0" aria-hidden="true" /> {t('news.card.workflow')}</h2>
+			<section class="card">
+				<div class="card-h"><Workflow size={16} class="shrink-0" aria-hidden="true" /><h2 id="{formId}-wf">{t('news.card.workflow')}</h2></div>
+				<div class="grid gap-3 p-5">
 				<div class="flex flex-wrap items-center gap-2"><NewsStatusBadge {item} /><span class="font-mono text-xs text-dim">{t(`news.visibility.short.${item.visibility}`)}</span></div>
 				<p class="text-sm text-muted">{stateText}</p>
 				<div class="grid gap-1.5">
@@ -149,6 +156,12 @@
 					<button class="btn btn-primary w-full gap-2" type="submit" form={formId} formaction="?/workflow" name="op" value="submit-for-review" disabled={busy}><Send size={16} /> {t('news.submit')}</button>
 					<p class="text-xs text-muted">{t('news.submit_help')}</p>
 				{/if}
+				{#if item.can_publish && item.status === 'pending_review'}
+					<label class="grid gap-1">
+						<span class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('news.note.label')}</span>
+						<textarea class="textarea min-h-20 w-full" name="note" form={formId} rows="3" maxlength="500" placeholder={t('news.note.placeholder')}></textarea>
+					</label>
+				{/if}
 				{#if (item.can_publish && (item.status === 'published' || item.status === 'pending_review')) || item.can_delete}
 					<ActionList>
 						{#if item.can_publish && item.status === 'published'}
@@ -163,6 +176,7 @@
 					</ActionList>
 					{#if item.can_publish && item.status === 'pending_review'}<p class="text-xs text-muted">{t('news.send_back_help')}</p>{/if}
 				{/if}
+				</div>
 			</section>
 		</aside>
 	</div>

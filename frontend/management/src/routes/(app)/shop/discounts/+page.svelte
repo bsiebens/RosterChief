@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Pencil, Percent, Plus, Trash2 } from '@lucide/svelte';
+	import { Percent, Plus, Trash2, ChevronRight } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import DiscountCreateModal from '#lib/components/shop/DiscountCreateModal.svelte';
 	import DiscountValue from '#lib/components/shop/DiscountValue.svelte';
@@ -53,7 +53,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if deleted || done === 'delete'}<Alert kind="success">{t('shop.disc.deleted')}</Alert>{/if}
 		{#if done === 'deactivate'}<Alert kind="success">{t('shop.disc.deactivated')}</Alert>{/if}
 		{#if failure}<Alert kind="error" title={t('shop.action_failed')}>{failure}</Alert>{/if}
@@ -74,20 +74,20 @@
 		{:else}
 			<div class="card overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>{t('shop.disc.f.name')}</th><th>{t('shop.disc.f.code')}</th><th class="text-right">{t('shop.col.value')}</th><th>{t('shop.col.valid')}</th><th class="text-right">{t('shop.col.used')}</th><th>{t('shop.col.status')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
+					<thead><tr><th>{t('shop.disc.f.name')}</th><th class="hidden lg:table-cell">{t('shop.disc.f.code')}</th><th class="text-right">{t('shop.col.value')}</th><th class="hidden xl:table-cell">{t('shop.col.valid')}</th><th class="hidden text-right lg:table-cell">{t('shop.col.used')}</th><th>{t('shop.col.status')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each data.rows as d (d.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td><a class="link font-semibold" href={discountHref(d.id)}>{d.name}</a></td>
-								<td class="font-mono text-sm">{d.code}</td>
+								<td class="hidden font-mono text-sm lg:table-cell">{d.code}</td>
 								<td class="text-right text-sm"><DiscountValue {d} /></td>
-								<td class="text-xs whitespace-nowrap text-muted">{#if d.valid_from || d.valid_until}{d.valid_from ? day(d.valid_from) : '…'} – {d.valid_until ? day(d.valid_until) : '…'}{:else}{t('shop.disc.always')}{/if}</td>
-								<td class="text-right font-mono text-sm">{d.used_count}{d.max_uses ? ` / ${d.max_uses}` : ''}</td>
+								<td class="hidden text-xs whitespace-nowrap text-muted xl:table-cell">{#if d.valid_from || d.valid_until}{d.valid_from ? day(d.valid_from) : '…'} – {d.valid_until ? day(d.valid_until) : '…'}{:else}{t('shop.disc.always')}{/if}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{d.used_count}{d.max_uses ? ` / ${d.max_uses}` : ''}</td>
 								<td><span class="badge badge-sm {statusBadge(d.status)}">{t(`shop.status.${d.status}`)}</span></td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
-										<a class="btn btn-outline btn-xs gap-1" href={discountHref(d.id)} aria-label={t('shop.disc.edit_named', { name: d.name })}><Pencil size={13} /> {t('common.edit')}</a>
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('shop.disc.delete_named', { name: d.name })} onclick={() => ((target = d), (delOpen = true))}><Trash2 size={13} /></button>
+										<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={discountHref(d.id)} aria-label={t('shop.disc.edit_named', { name: d.name })} title={t('common.edit')}><ChevronRight size={18} /></a>
 									</div>
 								</td>
 							</tr>

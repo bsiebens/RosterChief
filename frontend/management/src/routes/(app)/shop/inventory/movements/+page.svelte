@@ -40,7 +40,7 @@
 			{#each MOVEMENT_REASONS as r (r)}<option value={r}>{t(`shop.mov.reason.${r}`)}</option>{/each}
 		</select>
 	</ListFilterBar>
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.rows.length}

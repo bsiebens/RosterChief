@@ -67,7 +67,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if done === 'handOver'}<Alert kind="success">{t('shop.delivery.handed_over', { number: doneNumber })}</Alert>{/if}
 		{#if done === 'markPaid'}<Alert kind="success">{t('shop.delivery.paid_done', { number: doneNumber })}</Alert>{/if}
 		{#if failure}<Alert kind="error" title={t('shop.action_failed')}>{failure}</Alert>{/if}

@@ -129,7 +129,7 @@
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{id}-side">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 id="{id}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Activity size={16} class="shrink-0" aria-hidden="true" /> {t('forms.sends.card.status')}</h2>
 				<div class="flex flex-wrap items-center gap-2"><SendStatusBadge status={s.status} /><span class="font-mono text-xs text-muted">{t('forms.sends.x_of_y', { x: s.response_count, y: s.audience_count })}</span></div>
 				{#if s.opens_at || s.closes_at}
@@ -155,7 +155,7 @@
 				</ActionList>
 			</section>
 
-			<section class="card card-body gap-2" aria-labelledby="{id}-pub">
+			<section class="card card-body card-hl gap-2" aria-labelledby="{id}-pub">
 				<h2 id="{id}-pub" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Link2 size={16} class="shrink-0" aria-hidden="true" /> {t('forms.send.public_link')}</h2>
 				{#if s.is_public && fullUrl}
 					<div class="flex items-center gap-2">

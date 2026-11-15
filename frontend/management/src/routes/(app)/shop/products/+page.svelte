@@ -2,7 +2,7 @@
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { FolderTree, Package, Pencil, Plus, Tags, Trash2, Lock } from '@lucide/svelte';
+	import { FolderTree, Package, Pencil, Plus, Tags, Trash2, Lock, ChevronRight } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -73,7 +73,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid items-start gap-5 px-7 py-5 xl:grid-cols-3">
+	<div class="grid items-start gap-5 px-6 py-4 xl:grid-cols-3">
 		<div class="grid gap-4 xl:col-span-2">
 			{#if deleted || done === 'delete'}<Alert kind="success">{t('shop.product.deleted')}</Alert>{/if}
 			{#if done === 'deactivate'}<Alert kind="success">{t('shop.product.deactivated')}</Alert>{/if}
@@ -99,10 +99,10 @@
 			{:else}
 				<div class="card overflow-x-auto">
 					<table class="table">
-						<thead><tr><th>{t('shop.col.product')}</th><th>{t('shop.product.f.category')}</th><th class="text-right">{t('shop.col.price')}</th><th>{t('shop.col.stock')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
+						<thead><tr><th>{t('shop.col.product')}</th><th class="hidden lg:table-cell">{t('shop.product.f.category')}</th><th class="text-right">{t('shop.col.price')}</th><th>{t('shop.col.stock')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th></tr></thead>
 						<tbody>
 							{#each data.rows as p (p.id)}
-								<tr class="hover:bg-surface">
+								<tr class="hover:bg-paper">
 									<td>
 										<div class="flex items-center gap-3">
 											{#if p.image_url}<img src={p.image_url} alt="" class="size-10 rounded-md border border-line object-cover" />{:else}<span class="flex size-10 items-center justify-center rounded-md border border-line text-dim"><Package size={16} /></span>{/if}
@@ -116,7 +116,7 @@
 											</div>
 										</div>
 									</td>
-									<td class="text-sm">{#if p.category?.system_key}<span class="inline-flex items-center gap-1" title={t('shop.cat.system_reason')}><Lock size={11} class="text-muted" aria-hidden="true" />{p.category.name}</span>{:else}{p.category?.name ?? t('common.none')}{/if}</td>
+									<td class="hidden text-sm lg:table-cell">{#if p.category?.system_key}<span class="inline-flex items-center gap-1" title={t('shop.cat.system_reason')}><Lock size={11} class="text-muted" aria-hidden="true" />{p.category.name}</span>{:else}{p.category?.name ?? t('common.none')}{/if}</td>
 									<td class="text-right font-mono text-sm whitespace-nowrap">{money(p.price)}</td>
 									<td>
 										{#if p.inventory_managed || p.ordering_closed}<span class="badge badge-sm {p.in_stock ? 'badge-success' : 'badge-error'}">{p.in_stock ? t('shop.in_stock') : t('shop.out_of_stock')}</span>{:else if !p.next_ordering_window}<span class="text-xs text-muted">{t('shop.not_tracked')}</span>{/if}
@@ -124,8 +124,8 @@
 									</td>
 									<td class="text-right whitespace-nowrap">
 										<div class="flex justify-end gap-1">
-											<a class="btn btn-outline btn-xs gap-1" href={productHref(p.id)} aria-label={t('shop.product.edit_named', { name: p.name })}><Pencil size={13} /> {t('common.edit')}</a>
 											<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('shop.product.delete_named', { name: p.name })} onclick={() => ((target = p), (delOpen = true))}><Trash2 size={13} /></button>
+											<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={productHref(p.id)} aria-label={t('shop.product.edit_named', { name: p.name })} title={t('common.edit')}><ChevronRight size={18} /></a>
 										</div>
 									</td>
 								</tr>

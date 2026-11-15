@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Image as ImageIcon, Newspaper, Pencil, Plus } from '@lucide/svelte';
+	import { ChevronRight, Image as ImageIcon, Newspaper, Plus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -67,7 +67,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if deleted}<Alert kind="success">{t('news.deleted')}</Alert>{/if}
 		{#if publisher && data.reviewCount && data.filters.tab !== 'review'}
 			<Alert kind="warning">
@@ -87,11 +87,11 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('news.col.post')}</th><th>{t('news.col.audience')}</th><th>{t('news.col.author')}</th><th>{t('news.col.date')}</th><th></th></tr>
+						<tr><th>{t('news.col.post')}</th><th class="hidden lg:table-cell">{t('news.col.audience')}</th><th class="hidden xl:table-cell">{t('news.col.author')}</th><th>{t('news.col.date')}</th><th></th></tr>
 					</thead>
 					<tbody>
 						{#each data.rows as n (n.id)}
-							<tr class="hover:bg-surface {n.status === 'pending_review' && publisher ? 'bg-warn-bg' : ''}">
+							<tr class="hover:bg-paper {n.status === 'pending_review' && publisher ? 'bg-warn-bg' : ''}">
 								<td>
 									<div class="flex items-center gap-3">
 										<span class="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-paper text-dim" aria-hidden="true">
@@ -103,17 +103,11 @@
 										</div>
 									</div>
 								</td>
-								<td class="text-sm text-muted">{audience(n.team_ids)}</td>
-								<td class="text-sm text-muted">{n.created_by?.name ?? t('common.none')}</td>
+								<td class="hidden text-sm text-muted lg:table-cell">{audience(n.team_ids)}</td>
+								<td class="hidden text-sm text-muted xl:table-cell">{n.created_by?.name ?? t('common.none')}</td>
 								<td class="font-mono text-xs whitespace-nowrap text-muted">{formatDateTime(n.status === 'published' && n.published_at ? n.published_at : n.created)}</td>
 								<td class="text-right whitespace-nowrap">
-									{#if n.can_edit}
-										<a class="btn btn-outline btn-xs gap-1" href={newsHref(n.id)} aria-label={n.status === 'pending_review' && publisher ? t('news.review_named', { title: n.title }) : t('news.edit_named', { title: n.title })}>
-											<Pencil size={13} /> {n.status === 'pending_review' && publisher ? t('news.review') : t('common.edit')}
-										</a>
-									{:else}
-										<a class="btn btn-outline btn-xs" href={newsHref(n.id)}>{t('news.open')}</a>
-									{/if}
+									<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={newsHref(n.id)} title={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review') : t('common.edit')) : t('news.open')} aria-label={n.can_edit ? (n.status === 'pending_review' && publisher ? t('news.review_named', { title: n.title }) : t('news.edit_named', { title: n.title })) : t('news.open')}><ChevronRight size={18} /></a>
 								</td>
 							</tr>
 						{/each}

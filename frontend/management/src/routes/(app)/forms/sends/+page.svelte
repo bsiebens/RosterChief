@@ -42,7 +42,7 @@
 			<FilterTabs tabs={tabList} active={data.filters.tab} label={t('forms.sends.tabs')} hrefFor={(key) => href({ tab: key })} onnavigate={navigate} />
 		{/snippet}
 	</ListFilterBar>
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if deleted}<Alert kind="success">{t('forms.sends.deleted')}</Alert>{/if}
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
@@ -55,21 +55,21 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('forms.sends.col.form')}</th><th>{t('forms.sends.col.audience')}</th><th>{t('forms.sends.col.window')}</th><th>{t('forms.sends.col.status')}</th><th class="text-right">{t('forms.sends.col.responded')}</th><th><span class="sr-only">{t('forms.col.actions')}</span></th></tr>
+						<tr><th>{t('forms.sends.col.form')}</th><th class="hidden lg:table-cell">{t('forms.sends.col.audience')}</th><th class="hidden xl:table-cell">{t('forms.sends.col.window')}</th><th>{t('forms.sends.col.status')}</th><th class="text-right">{t('forms.sends.col.responded')}</th><th><span class="sr-only">{t('forms.col.actions')}</span></th></tr>
 					</thead>
 					<tbody>
 						{#each data.rows as s (s.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td><a class="link font-semibold" href={sendHref(s.id)}>{s.form_title}</a></td>
-								<td class="text-sm text-muted">{s.audience_label}</td>
-								<td class="font-mono text-xs text-muted">
+								<td class="hidden text-sm text-muted lg:table-cell">{s.audience_label}</td>
+								<td class="hidden font-mono text-xs text-muted xl:table-cell">
 									{#if s.opens_at}<div>{t('forms.sends.from', { date: formatDateTime(s.opens_at) })}</div>{/if}
 									{#if s.closes_at}<div>{t('forms.sends.until', { date: formatDateTime(s.closes_at) })}</div>{/if}
 									{#if !s.opens_at && !s.closes_at}{t('common.none')}{/if}
 								</td>
 								<td><SendStatusBadge status={s.status} small /></td>
 								<td class="text-right font-mono text-sm whitespace-nowrap">{t('forms.sends.x_of_y', { x: s.response_count, y: s.audience_count })}</td>
-								<td class="text-right"><a class="btn btn-outline btn-xs gap-1" href={sendHref(s.id)} aria-label={t('forms.sends.open_named', { title: s.form_title })}><Eye size={13} /> {t('forms.sends.responses')}</a></td>
+								<td class="text-right"><a class="btn btn-outline btn-xs gap-1" href={sendHref(s.id)} aria-label={t('forms.sends.open_named', { title: s.form_title })}><Eye size={13} /> <span class="sr-only xl:not-sr-only">{t('forms.sends.responses')}</span></a></td>
 							</tr>
 						{/each}
 					</tbody>

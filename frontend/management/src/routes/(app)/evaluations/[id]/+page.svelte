@@ -116,7 +116,7 @@
 						};
 					}}>
 					<input type="hidden" name="payload" value={payload} />
-					<section class="card card-body gap-3" aria-labelledby="{formId}-details">
+					<section class="card card-body card-hl gap-3" aria-labelledby="{formId}-details">
 						<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.details')}</h2>
 						<div class="form-control">
 							<label class="label" for="{formId}-name"><span class="label-text">{t('eval.field.name')}</span></label>
@@ -134,7 +134,7 @@
 						</label>
 						<p class="-mt-1 text-xs text-muted">{t('eval.field.active_help')}</p>
 					</section>
-					<section class="card card-body gap-3" aria-labelledby="{formId}-fields">
+					<section class="card card-body card-hl gap-3" aria-labelledby="{formId}-fields">
 						<header class="grid gap-0.5">
 							<h2 id="{formId}-fields" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.criteria')}</h2>
 							<p class="text-xs text-muted">{t('eval.card.criteria_desc')}</p>
@@ -151,7 +151,7 @@
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-side">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 id="{formId}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 					<span class="badge badge-sm {item.is_active ? 'badge-success' : 'badge-warning'}">{item.is_active ? t('eval.active') : t('eval.inactive')}</span>

@@ -115,7 +115,7 @@
 				<VoucherFields bind:v fields={errs} {tried} holder={item.issued_to?.name ?? ''} />
 			</form>
 
-			<section class="card card-body gap-3" aria-labelledby="{formId}-hist">
+			<section class="card card-body card-hl gap-3" aria-labelledby="{formId}-hist">
 				<h2 id="{formId}-hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('shop.vch.history')}</h2>
 				{#if item.history.length}
 					<div class="overflow-x-auto">
@@ -149,7 +149,7 @@
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2">
 					<span class="font-mono text-lg font-bold">{item.number}</span>
@@ -172,7 +172,7 @@
 					<ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow>
 				</ActionList>
 			</section>
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Ticket size={16} class="shrink-0" aria-hidden="true" /> {t('shop.vch.use_title')}</h2>
 				<p class="text-xs text-muted">{t('shop.vch.use_help')}</p>
 				<form method="POST" action="?/consume" class="grid gap-3" use:enhance={() => { busy = true; return async ({ update, result }) => { await update({ reset: false }); busy = false; if (result.type === 'success') { useAmount = ''; useNote = ''; } }; }}>

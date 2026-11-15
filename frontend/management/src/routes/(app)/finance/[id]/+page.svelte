@@ -78,13 +78,13 @@
 	{#if !item.legacy_invoice_only}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('fin.card.people')}</h2>
 				<p class="text-xs text-muted">{t('fin.card.people_help')}</p>
 				<div class="overflow-x-auto">
 					<table class="table">
 						<thead>
-							<tr><th>{t('fin.person')}</th><th class="text-right">{t('fin.col.owed')}</th><th class="text-right">{t('fin.col.paid')}</th><th class="text-right">{t('fin.col.balance')}</th><th>{t('fin.col.status')}</th><th><span class="sr-only">{t('fin.col.actions')}</span></th></tr>
+							<tr><th>{t('fin.person')}</th><th class="hidden text-right lg:table-cell">{t('fin.col.owed')}</th><th class="hidden text-right lg:table-cell">{t('fin.col.paid')}</th><th class="text-right">{t('fin.col.balance')}</th><th>{t('fin.col.status')}</th><th><span class="sr-only">{t('fin.col.actions')}</span></th></tr>
 						</thead>
 						<tbody>
 							{#each lines as l (l.id)}
@@ -99,8 +99,8 @@
 											</p>
 										{/if}
 									</td>
-									<td class="text-right font-mono text-sm">{money(l.amount_due)}</td>
-									<td class="text-right font-mono text-sm">{money(l.amount_paid)}</td>
+									<td class="hidden text-right font-mono text-sm lg:table-cell">{money(l.amount_due)}</td>
+									<td class="hidden text-right font-mono text-sm lg:table-cell">{money(l.amount_paid)}</td>
 									<td class="text-right font-mono text-sm font-semibold">{money(l.balance)}</td>
 									<td><span class="badge badge-sm {l.fee_status === 'paid' ? 'badge-success' : l.fee_status === 'partially_paid' ? 'badge-info' : l.fee_status === 'waived' ? 'badge-ghost' : 'badge-neutral'}">{t(`fin.fee.${l.fee_status}`)}</span></td>
 									<td class="text-right whitespace-nowrap">
@@ -115,7 +115,7 @@
 
 			{#if item.installments.length}<InstallmentSchedule rows={item.installments} />{/if}
 
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Banknote size={16} aria-hidden="true" /> {t('fin.card.payments')}</h2>
 				{#if !item.payments.length}
 					<p class="text-sm text-muted">{t('fin.no_payments')}</p>
@@ -123,7 +123,7 @@
 					<div class="overflow-x-auto">
 						<table class="table">
 							<thead>
-								<tr><th>{t('fin.col.date')}</th><th>{t('fin.person')}</th><th class="text-right">{t('fin.dlg.amount')}</th><th>{t('fin.col.method')}</th><th>{t('fin.col.reference')}</th><th>{t('fin.col.by')}</th><th><span class="sr-only">{t('fin.col.actions')}</span></th></tr>
+								<tr><th>{t('fin.col.date')}</th><th>{t('fin.person')}</th><th class="text-right">{t('fin.dlg.amount')}</th><th>{t('fin.col.method')}</th><th class="hidden lg:table-cell">{t('fin.col.reference')}</th><th class="hidden xl:table-cell">{t('fin.col.by')}</th><th><span class="sr-only">{t('fin.col.actions')}</span></th></tr>
 							</thead>
 							<tbody>
 								{#each item.payments as p (p.id)}
@@ -132,8 +132,8 @@
 										<td class="text-sm">{p.member.name}</td>
 										<td class="text-right font-mono text-sm font-semibold">{money(p.amount)}</td>
 										<td class="text-sm">{t(`fin.method.${p.method}`)}{#if p.voucher_number}<p class="font-mono text-xs text-muted">{p.voucher_number}</p>{/if}</td>
-										<td class="text-xs text-muted">{p.reference || '–'}{#if p.note}<p>{p.note}</p>{/if}</td>
-										<td class="text-xs text-muted">{p.recorded_by ?? '–'}</td>
+										<td class="hidden text-xs text-muted lg:table-cell">{p.reference || '–'}{#if p.note}<p>{p.note}</p>{/if}</td>
+										<td class="hidden text-xs text-muted xl:table-cell">{p.recorded_by ?? '–'}</td>
 										<td class="text-right">
 											<button class="btn btn-outline btn-error btn-xs gap-1" type="button" onclick={() => { removing = p; removeOpen = true; }} aria-label={t('fin.delete_named', { amount: money(p.amount), name: p.member.name })}><Trash2 size={13} /> {t('fin.delete')}</button>
 										</td>

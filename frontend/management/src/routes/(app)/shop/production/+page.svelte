@@ -97,7 +97,7 @@
 						</thead>
 						<tbody>
 							{#each data.lines as l (l.id)}
-								<tr class="hover:bg-surface">
+								<tr class="hover:bg-paper">
 									<td><input type="checkbox" class="checkbox checkbox-sm" bind:group={selected} value={l.id} aria-label={lineLabel(l)} /></td>
 									<td><a class="link font-mono text-xs" href={orderHref(l.order.id)}>{l.order.number}</a></td>
 									<td class="text-sm">{l.purchaser.name}{#if l.beneficiary && l.beneficiary.id !== l.purchaser.id}<div class="text-xs text-muted">{t('shop.prod.for', { name: l.beneficiary.name })}</div>{/if}</td>
@@ -170,7 +170,7 @@
 			{/each}
 		</div>
 		{#if data.received.length}
-			<section class="card card-body gap-2" aria-labelledby="hist">
+			<section class="card card-body card-hl gap-2" aria-labelledby="hist">
 				<h2 id="hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('shop.prod.history')}</h2>
 				<div class="overflow-x-auto">
 					<table class="table table-sm">

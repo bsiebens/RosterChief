@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ClipboardList, Copy, Lock, Pencil, Plus, Send, Trash2 } from '@lucide/svelte';
+	import { ClipboardList, Copy, Lock, Plus, Send, Trash2, ChevronRight } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -74,7 +74,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if deleted}<Alert kind="success">{t('forms.deleted')}</Alert>{/if}
 		{#if done === 'delete'}<Alert kind="success">{t('forms.deleted')}</Alert>{/if}
 		{#if done === 'deactivate'}<Alert kind="success">{t('forms.deactivated')}</Alert>{/if}
@@ -101,11 +101,11 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('forms.col.form')}</th><th class="text-right">{t('forms.col.fields')}</th><th class="text-right">{t('forms.col.sends')}</th><th class="text-right">{t('forms.col.responses')}</th><th>{t('forms.col.created')}</th><th><span class="sr-only">{t('forms.col.actions')}</span></th></tr>
+						<tr><th>{t('forms.col.form')}</th><th class="hidden text-right lg:table-cell">{t('forms.col.fields')}</th><th class="hidden text-right lg:table-cell">{t('forms.col.sends')}</th><th class="text-right">{t('forms.col.responses')}</th><th class="hidden xl:table-cell">{t('forms.col.created')}</th><th><span class="sr-only">{t('forms.col.actions')}</span></th></tr>
 					</thead>
 					<tbody>
 						{#each data.rows as f (f.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td>
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<a class="link font-semibold" href={formHref(f.id)}>{f.title}</a>
@@ -113,16 +113,16 @@
 										{#if f.login_required}<span class="badge badge-sm gap-1"><Lock size={10} aria-hidden="true" /> {t('forms.login_required')}</span>{/if}
 									</div>
 								</td>
-								<td class="text-right font-mono text-sm">{f.field_count}</td>
-								<td class="text-right font-mono text-sm">{f.send_count}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{f.field_count}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{f.send_count}</td>
 								<td class="text-right font-mono text-sm">{f.response_count}</td>
-								<td class="font-mono text-xs whitespace-nowrap text-muted">{formatDay(f.created)}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{formatDay(f.created)}</td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
-										<a class="btn btn-outline btn-xs gap-1" href={formHref(f.id)} aria-label={t('forms.edit_named', { title: f.title })}><Pencil size={13} /> {t('common.edit')}</a>
-										{#if f.is_active}<a class="btn btn-outline btn-xs gap-1" href={sendFormHref(f.id)} aria-label={t('forms.send_named', { title: f.title })}><Send size={13} /> {t('forms.send')}</a>{/if}
+										{#if f.is_active}<a class="btn btn-outline btn-xs gap-1" href={sendFormHref(f.id)} aria-label={t('forms.send_named', { title: f.title })}><Send size={13} /> <span class="sr-only xl:not-sr-only">{t('forms.send')}</span></a>{/if}
 										<button class="btn btn-outline btn-xs btn-square" type="button" aria-label={t('forms.duplicate_named', { title: f.title })} onclick={() => askDuplicate(f)}><Copy size={13} /></button>
 										<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('forms.delete_named', { title: f.title })} onclick={() => askDelete(f)}><Trash2 size={13} /></button>
+										<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={formHref(f.id)} aria-label={t('forms.edit_named', { title: f.title })} title={t('common.edit')}><ChevronRight size={18} /></a>
 									</div>
 								</td>
 							</tr>

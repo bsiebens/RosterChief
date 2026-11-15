@@ -49,7 +49,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.rows.length}
@@ -59,19 +59,19 @@
 				<table class="table">
 					<thead>
 						<tr>
-							<th>{t('shop.invc.col.number')}</th><th>{t('shop.orders.col.order')}</th><th>{t('shop.orders.col.purchaser')}</th><th>{t('shop.invc.col.issued')}</th><th>{t('shop.invc.col.due')}</th>
-							<th class="text-right">{t('shop.orders.col.total')}</th><th class="text-right">{t('shop.orders.col.due')}</th><th>{t('shop.invc.col.state')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th>
+							<th>{t('shop.invc.col.number')}</th><th class="hidden lg:table-cell">{t('shop.orders.col.order')}</th><th>{t('shop.orders.col.purchaser')}</th><th class="hidden xl:table-cell">{t('shop.invc.col.issued')}</th><th class="hidden xl:table-cell">{t('shop.invc.col.due')}</th>
+							<th class="hidden text-right lg:table-cell">{t('shop.orders.col.total')}</th><th class="text-right">{t('shop.orders.col.due')}</th><th>{t('shop.invc.col.state')}</th><th><span class="sr-only">{t('shop.col.actions')}</span></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each data.rows as i (i.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td class="font-mono text-xs font-semibold">{i.number}</td>
-								<td>{#if data.canOrders}<a class="link font-mono text-xs" href={orderHref(i.order.id)}>{i.order.number}</a>{:else}<span class="font-mono text-xs">{i.order.number}</span>{/if}</td>
+								<td class="hidden lg:table-cell">{#if data.canOrders}<a class="link font-mono text-xs" href={orderHref(i.order.id)}>{i.order.number}</a>{:else}<span class="font-mono text-xs">{i.order.number}</span>{/if}</td>
 								<td class="font-semibold">{i.purchaser.name}</td>
-								<td class="font-mono text-xs whitespace-nowrap text-muted">{day(i.issued_at)}</td>
-								<td class="font-mono text-xs whitespace-nowrap {i.is_overdue ? 'font-semibold text-error' : 'text-muted'}">{i.due_date ? day(i.due_date) : '—'}</td>
-								<td class="text-right font-mono text-sm">{money(i.total)}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{day(i.issued_at)}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap xl:table-cell {i.is_overdue ? 'font-semibold text-error' : 'text-muted'}">{i.due_date ? day(i.due_date) : '—'}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{money(i.total)}</td>
 								<td class="text-right font-mono text-sm">{money(i.amount_due)}</td>
 								<td>
 									<span class="badge badge-sm {paymentBadge(i.payment_status)}">{t(`shop.orders.payment.${i.payment_status}`)}</span>

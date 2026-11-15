@@ -92,7 +92,7 @@
 			<input type="hidden" name="payload" value={JSON.stringify(v)} />
 			<DiscountFields bind:v fields={errs} {tried} />
 		</form>
-		<aside class="card card-body gap-3 xl:sticky xl:top-20">
+		<aside class="card card-body card-hl gap-3 xl:sticky xl:top-20">
 			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 			<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 				<span class="badge badge-sm {statusBadge(item.status)}">{t(`shop.status.${item.status}`)}</span>

@@ -1,7 +1,7 @@
 <script lang="ts">
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { CircleCheck, Factory, PackageCheck, Plus, ShoppingBag, TriangleAlert, Truck } from '@lucide/svelte';
+	import { CircleCheck, Factory, PackageCheck, Plus, ShoppingBag, TriangleAlert, Truck, ChevronRight } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -65,7 +65,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.stats}
 			<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 				<div class="card p-4"><div class="text-[13px] text-muted">{t('shop.orders.kpi.open')}</div><div class="font-mono text-2xl font-semibold text-ink">{data.stats.orders_open}</div></div>
@@ -106,21 +106,23 @@
 							<th>{t('shop.orders.col.order')}</th>
 							<th>{t('shop.orders.col.purchaser')}</th>
 							<th>{t('shop.orders.col.status')}</th>
-							<th class="text-right">{t('shop.orders.col.total')}</th>
+							<th class="hidden text-right lg:table-cell">{t('shop.orders.col.total')}</th>
 							<th class="text-right">{t('shop.orders.col.due')}</th>
-							<th>{t('shop.orders.col.placed')}</th>
+							<th class="hidden xl:table-cell">{t('shop.orders.col.placed')}</th>
+							<th><span class="sr-only">{t('shop.col.actions')}</span></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each data.rows as o (o.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td>{#if o.fulfillment_status !== 'cancelled'}<input type="checkbox" class="checkbox checkbox-sm" bind:group={selected} value={o.id} aria-label={o.number} />{/if}</td>
 								<td><a class="link font-mono text-xs font-semibold" href={orderHref(o.id)}>{o.number}</a><div class="text-xs text-muted">{t('shop.orders.lines_n', { n: o.line_count })}</div></td>
 								<td class="font-semibold">{o.purchaser.name}</td>
 								<td><OrderBadges payment={o.payment_status} fulfillment={o.fulfillment_status} production={o.production_status} readyToConfirm={highlight(o)} /></td>
-								<td class="text-right font-mono text-sm">{money(o.total)}</td>
+								<td class="hidden text-right font-mono text-sm lg:table-cell">{money(o.total)}</td>
 								<td class="text-right font-mono text-sm {Number(o.amount_due) > 0 && o.fulfillment_status !== 'cancelled' ? 'font-semibold text-warn-text' : 'text-muted'}">{o.fulfillment_status === 'cancelled' ? '' : money(o.amount_due)}</td>
-								<td class="font-mono text-xs whitespace-nowrap text-muted">{day(o.created)}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{day(o.created)}</td>
+								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href={orderHref(o.id)} aria-label={o.number} title={o.number}><ChevronRight size={18} /></a></td>
 							</tr>
 						{/each}
 					</tbody>

@@ -75,7 +75,7 @@
 		</ListFilterBar>
 	{/if}
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if done === 'confirm'}
 			<Alert kind="success">{t('shop.pickup.done', { n: doneCount })}{#if skipped > 0} {t('shop.pickup.skipped', { n: skipped })}{/if}</Alert>
 		{/if}
@@ -102,23 +102,23 @@
 									<th><input type="checkbox" class="checkbox checkbox-sm" checked={allOn} onchange={toggleAll} aria-label={t('shop.orders.select_all')} /></th>
 									<th>{t('shop.orders.col.order')}</th>
 									<th>{t('shop.orders.col.purchaser')}</th>
-									<th>{t('shop.pickup.col.items')}</th>
+									<th class="hidden lg:table-cell">{t('shop.pickup.col.items')}</th>
 									<th>{t('shop.orders.col.status')}</th>
-									<th>{t('shop.orders.col.placed')}</th>
+									<th class="hidden xl:table-cell">{t('shop.orders.col.placed')}</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each rows as o (o.id)}
-									<tr class="hover:bg-surface">
+									<tr class="hover:bg-paper">
 										<td><input type="checkbox" class="checkbox checkbox-sm" bind:group={selected} value={o.id} aria-label={o.number} /></td>
 										<td><a class="link font-mono text-xs font-semibold" href={orderHref(o.id)}>{o.number}</a></td>
 										<td class="font-semibold">{o.purchaser.name}{#if o.beneficiaries.length}<div class="text-xs font-normal text-muted">{t('shop.pickup.for', { names: o.beneficiaries.join(', ') })}</div>{/if}</td>
-										<td class="font-mono text-sm whitespace-nowrap">{t('shop.pickup.items', { lines: o.line_count, qty: o.quantity })}</td>
+										<td class="hidden font-mono text-sm whitespace-nowrap lg:table-cell">{t('shop.pickup.items', { lines: o.line_count, qty: o.quantity })}</td>
 										<td>
 											<span class="badge badge-sm {paymentBadge(o.payment_status)}">{t(`shop.orders.payment.${o.payment_status}`)}</span>
 											{#if Number(o.amount_due) > 0}<div class="font-mono text-xs font-semibold text-warn-text">{money(o.amount_due)}</div>{/if}
 										</td>
-										<td class="font-mono text-xs whitespace-nowrap text-muted">{day(o.created)}</td>
+										<td class="hidden font-mono text-xs whitespace-nowrap text-muted xl:table-cell">{day(o.created)}</td>
 									</tr>
 								{:else}
 									<tr><td colspan="6" class="py-6 text-center text-muted">{t('shop.orders.empty_filtered')}</td></tr>
@@ -129,7 +129,7 @@
 				</section>
 
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
-					<section class="card card-body gap-3">
+					<section class="card card-body card-hl gap-3">
 						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Bell size={16} class="shrink-0" aria-hidden="true" /> {t('shop.pickup.card.notify')}</h2>
 						<div class="form-control w-full">
 							<label class="label" for="{formId}-pickup"><span class="label-text">{t('shop.orders.pickup_instructions')}</span></label>

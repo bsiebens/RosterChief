@@ -158,11 +158,11 @@
 
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><UserRound size={16} aria-hidden="true" />{t('shop.orders.card.purchaser')}</h2>
 				<EntityPicker kind="member" name="purchaser_id_picker" label={t('shop.orders.col.purchaser')} bind:value={purchaser} error={errs.purchaser_id ?? (tried && !purchaser ? t('shop.orders.new.purchaser_required') : undefined)} />
 			</section>
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<header class="grid gap-0.5">
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" />{t('shop.orders.card.lines')}</h2>
 					<p class="text-xs text-muted">{t('shop.orders.new.lines_help')}</p>
@@ -170,14 +170,14 @@
 				{#if tried && (!valid.length || valid.length !== lines.length)}<p class="text-xs text-error">{t('shop.orders.new.lines_required')}</p>{/if}
 				<OrderLinesEditor products={data.products} bind:lines preview={preview?.lines ?? null} estimate={!preview} errors={errs} />
 			</section>
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><NotebookPen size={16} aria-hidden="true" />{t('shop.orders.notes')}</h2>
 				<textarea class="textarea textarea-bordered w-full" rows="3" bind:value={notes} aria-label={t('shop.orders.notes')}></textarea>
 			</section>
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Tag size={16} aria-hidden="true" />{t('shop.orders.new.discount')}</h2>
 				<Field label={t('shop.orders.new.discount_code')} name="discount_code_input" bind:value={discountCode} error={discountErr || errs.discount_code} autocomplete="off" />
 				{#if preview?.discount}<p class="flex items-center gap-1.5 text-sm text-success"><Check size={14} aria-hidden="true" /> {preview.discount.description}: −{money(preview.discount.amount)}</p>{/if}
@@ -198,7 +198,7 @@
 				{/each}
 			</section>
 
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" />{t('shop.orders.new.summary')}</h2>
 				<dl class="grid gap-1.5 text-sm">
 					{#each valid as line, i (line.key)}

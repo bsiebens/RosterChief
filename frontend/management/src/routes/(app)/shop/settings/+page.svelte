@@ -117,7 +117,7 @@
 					<span id="{formId}-closed-help" class="label-text-alt mt-1 block {errs.closed_message ? 'text-error' : ''}">{errs.closed_message || t('shop.set.closed_message_help')}</span>
 				</div>
 			</section>
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><CreditCard size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.payments')}</h2>
 				<p class="text-xs text-muted">{t('shop.set.payments_help')}</p>
 				<div class="grid items-start gap-3 md:grid-cols-2">
@@ -148,7 +148,7 @@
 					{/if}
 				{/if}
 			</section>
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><PackageCheck size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.pickup')}</h2>
 				<div class="form-control w-full">
 					<label class="label" for="{formId}-pickup"><span class="label-text">{t('shop.set.pickup_label')}</span></label>
@@ -162,7 +162,7 @@
 				</div>
 			</section>
 			<ShopNumbering rows={s.numbering} placeholders={s.numbering_placeholders} errors={errs} canEditInvoice={s.can_edit_invoice_numbering} bind:changes={numberingChanges} />
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ReceiptText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.invoices')}</h2>
 				<div class="grid gap-3 md:grid-cols-2">
 					<Field label={t('shop.set.due_days')} type="number" min="0" max="365" bind:value={dueDays} error={errs.invoice_due_days} help={t('shop.set.due_days_help')} />
@@ -171,13 +171,13 @@
 		</form>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
-			<section class="card card-body gap-3">
+			<section class="card card-body card-hl gap-3">
 				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('shop.unsaved')}</p>{/if}
 				<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
 			</section>
 			{#if info}
-				<section class="card card-body gap-2">
+				<section class="card card-body card-hl gap-2">
 					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Webhook size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.webhook')}</h2>
 					<p class="text-xs text-muted">{t('shop.set.webhook_help')}</p>
 					<input class="input input-bordered input-sm w-full font-mono text-xs" readonly value={webhook(info.key)} aria-label={t('shop.set.webhook')} onfocus={(e) => e.currentTarget.select()} />

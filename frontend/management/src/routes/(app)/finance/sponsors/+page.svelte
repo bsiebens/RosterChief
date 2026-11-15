@@ -81,7 +81,7 @@
 		{/snippet}
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.loadFailed}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !visible.length}
@@ -92,10 +92,10 @@
 		{:else}
 			<div class="card overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>{t('sponsors.name')}</th><th>{t('sponsors.status')}</th><th>{t('sponsors.start')}</th><th>{t('sponsors.end')}</th><th><span class="sr-only">{t('sponsors.actions')}</span></th></tr></thead>
+					<thead><tr><th>{t('sponsors.name')}</th><th>{t('sponsors.status')}</th><th class="hidden lg:table-cell">{t('sponsors.start')}</th><th class="hidden lg:table-cell">{t('sponsors.end')}</th><th><span class="sr-only">{t('sponsors.actions')}</span></th></tr></thead>
 					<tbody>
 						{#each visible as sponsor (sponsor.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td>
 									<div class="flex min-w-36 items-center gap-3">
 										{#if sponsor.logo_url}<img class="size-10 shrink-0 rounded object-contain" src={sponsor.logo_url} alt="" width="40" height="40" loading="lazy" />{/if}
@@ -108,12 +108,12 @@
 									</div>
 								</td>
 								<td><span class="badge badge-sm {badge[sponsor.status]}">{t(`sponsors.${sponsor.status}`)}</span></td>
-								<td class="font-mono text-xs whitespace-nowrap">{formatDay(sponsor.start_date)}</td>
-								<td class="font-mono text-xs whitespace-nowrap">{sponsor.end_date ? formatDay(sponsor.end_date) : '—'}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{formatDay(sponsor.start_date)}</td>
+								<td class="hidden font-mono text-xs whitespace-nowrap lg:table-cell">{sponsor.end_date ? formatDay(sponsor.end_date) : '—'}</td>
 								<td>
 									<div class="flex justify-end gap-2 whitespace-nowrap">
-										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)}><Pencil size={13} aria-hidden="true" /> {t('common.edit')}</button>
-										<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)}><Trash2 size={13} aria-hidden="true" /> {t('common.delete')}</button>
+										<button class="btn btn-outline btn-xs gap-1" type="button" aria-label={t('sponsors.edit_named', { name: sponsor.name })} onclick={() => edit(sponsor)}><Pencil size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.edit')}</span></button>
+										<button class="btn btn-outline btn-error btn-xs gap-1" type="button" aria-label={t('sponsors.delete_named', { name: sponsor.name })} onclick={() => remove(sponsor)}><Trash2 size={13} aria-hidden="true" /> <span class="sr-only xl:not-sr-only">{t('common.delete')}</span></button>
 									</div>
 								</td>
 							</tr>

@@ -219,7 +219,7 @@
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<form id={formId} method="POST" action="?/save" class="grid gap-5" use:enhance={run()}>
 				<input type="hidden" name="payload" value={payload} />
-				<section class="card card-body gap-3">
+				<section class="card card-body card-hl gap-3">
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('reg.card.lines')}</h2>
 					<p class="text-xs text-muted">{t('reg.card.lines_help')}</p>
 					<div class="overflow-x-auto">
@@ -256,7 +256,7 @@
 					</div>
 				</section>
 
-				<section class="card card-body gap-3">
+				<section class="card card-body card-hl gap-3">
 					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Tag size={16} aria-hidden="true" /> {t('reg.card.discount')}</h2>
 					<div class="grid gap-3 md:grid-cols-[12rem_1fr]">
 						<div class="form-control">

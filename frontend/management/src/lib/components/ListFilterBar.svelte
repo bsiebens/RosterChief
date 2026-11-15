@@ -50,7 +50,7 @@
 	}
 </script>
 
-<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 	<div class="flex flex-wrap items-center gap-2" role="search">
 		{#if onsearch}
 			<div class="relative">

@@ -99,7 +99,7 @@
 		<label class="flex h-9 items-center gap-2 text-sm"><input type="checkbox" class="checkbox" bind:checked={onlyDiff} /> {t('shop.count.only_diff')}</label>
 	</ListFilterBar>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		<p class="text-sm text-muted">{t('shop.count.hint')}</p>
 		{#if result}<Alert kind="success">{t('shop.count.done', { applied: result.applied, unchanged: result.unchanged })}</Alert>{/if}
 		{#if errorText && !open}<Alert kind="error" title={t('shop.action_failed')}>{errorText}</Alert>{/if}
@@ -123,7 +123,7 @@
 					<tbody>
 						{#each visible as r (key(r))}
 							{@const d = diff(r)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td class="font-semibold">{r.product_name}{#if r.variant_name}<span class="ml-1.5 font-normal text-muted">- {r.variant_name}</span>{/if}</td>
 								<td class="text-sm text-muted">{r.category_name ?? ''}</td>
 								<td class="text-right font-mono text-sm font-bold">{r.on_hand}</td>

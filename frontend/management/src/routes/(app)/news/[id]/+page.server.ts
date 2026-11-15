@@ -46,7 +46,9 @@ export const actions: Actions = {
 			// The page converts the picked wall-clock time to an ISO instant (in the club's time zone).
 			publish = { published_at: String(form.get('published_at') ?? '') || null, notify: form.get('notify') === 'on' };
 		}
-		const res = await api<NewsDetail>('POST', `/news/${params.id}/${op}`, { body: publish, f: fetch });
+		// A reviewer can explain a send-back; the API stores it as the item's review note.
+		const note = op === 'send-back' ? String(form.get('note') ?? '').trim() : '';
+		const res = await api<NewsDetail>('POST', `/news/${params.id}/${op}`, { body: publish, query: note ? { note } : undefined, f: fetch });
 		return res.ok ? { done: op } : failed(op, res);
 	},
 	delete: async ({ params, fetch }) => {

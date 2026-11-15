@@ -76,7 +76,7 @@
 
 	{#if data.shared}<Alert kind="success">{t('eval.release.done', { n: Number(data.shared) })}</Alert>{/if}
 	{#if data.seasonTotal > 0}
-		<section class="card card-body gap-3" aria-labelledby="release-title">
+		<section class="card card-body card-hl gap-3" aria-labelledby="release-title">
 			<h2 id="release-title" class="card-title"><Send size={16} aria-hidden="true" /> {t('eval.release.title')}</h2>
 			<p class="text-sm text-muted">{data.unreleased > 0 ? t('eval.release.help', { n: data.unreleased }) : t('eval.release.all_shared')}</p>
 			<form class="flex flex-wrap items-end gap-2" method="GET" action="/evaluations/{data.checklist.id}/release">
@@ -113,7 +113,7 @@
 				<ul class="grid max-h-[60vh] gap-0.5 overflow-y-auto">
 					{#each data.players as p (p.id)}
 						<li>
-							<a href={to(p.id)} aria-current={p.id === data.selected ? 'true' : undefined} data-sveltekit-noscroll class="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm {p.id === data.selected ? 'bg-primary text-primary-content' : 'hover:bg-surface'}">
+							<a href={to(p.id)} aria-current={p.id === data.selected ? 'true' : undefined} data-sveltekit-noscroll class="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm {p.id === data.selected ? 'bg-primary text-primary-content' : 'hover:bg-paper'}">
 								<span class="truncate">{p.name}</span>
 								{#if decided.has(p.id)}<Check size={14} aria-label={t('eval.meeting.has_decision')} />{/if}
 							</a>
