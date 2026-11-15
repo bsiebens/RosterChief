@@ -144,8 +144,8 @@ def submit_for_review(actor, item: News) -> News:
     access.require_edit_news(actor, item)
     if item.status != News.Status.DRAFT:
         raise Invalid("Only a draft can be submitted for review.")
-    item.status = News.Status.PENDING_REVIEW
-    item.save(update_fields=["status", "modified"])
+    item.status, item.review_note, item.sent_back_at = News.Status.PENDING_REVIEW, "", None
+    item.save(update_fields=["status", "review_note", "sent_back_at", "modified"])
     from news.services import notifications
 
     transaction.on_commit(lambda: notifications.dispatch_notify_editors_of_pending_review(item.pk))
@@ -181,12 +181,19 @@ def unpublish(actor, item: News) -> News:
 
 
 @transaction.atomic
-def send_back(actor, item: News) -> News:
+def send_back(actor, item: News, note: str = "") -> News:
+    """Back to draft, with an optional note for the author about what to change; the author is told."""
     access.require_publish_news(actor)
     if item.status != News.Status.PENDING_REVIEW:
         raise Invalid("Only an item pending review can be sent back.")
-    item.status = News.Status.DRAFT
-    item.save(update_fields=["status", "modified"])
+    note = (note or "").strip()
+    if len(note) > 2000:
+        raise Invalid("The note is too long.", {"note": ["At most 2000 characters."]})
+    item.status, item.review_note, item.sent_back_at = News.Status.DRAFT, note, timezone.now()
+    item.save(update_fields=["status", "review_note", "sent_back_at", "modified"])
+    from news.services import notifications
+
+    transaction.on_commit(lambda: notifications.notify_author_of_send_back(item.pk, getattr(actor, "pk", None)))
     return item
 
 

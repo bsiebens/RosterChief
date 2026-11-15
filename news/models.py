@@ -50,6 +50,9 @@ class News(UUIDModel):
 
     visibility = models.CharField(_("visibility"), max_length=10, choices=Visibility.choices, default=Visibility.INTERNAL)
     status = models.CharField(_("status"), max_length=20, choices=Status.choices, default=Status.DRAFT)
+    #: Why a reviewer sent the item back to its author; cleared when it is submitted again.
+    review_note = models.TextField(_("review note"), blank=True)
+    sent_back_at = models.DateTimeField(_("sent back at"), null=True, blank=True)
     published_at = models.DateTimeField(_("publish date"), null=True, blank=True, help_text=_("When this goes live. In the future to schedule it ahead of time."))
     notified_at = models.DateTimeField(_("notified at"), null=True, blank=True, help_text=_("When the audience notification was sent, or set at publish time when the publisher opted out of notifying."))
 

@@ -32,6 +32,9 @@ export type NewsDetail = NewsListItem & {
 	body_en: string;
 	body_html: string;
 	notified_at: string | null;
+	/** Why a reviewer sent the item back to its author (empty otherwise). */
+	review_note?: string;
+	sent_back_at?: string | null;
 	photos: NewsPhoto[];
 	teams: { id: string; name: string }[];
 	can_publish: boolean;

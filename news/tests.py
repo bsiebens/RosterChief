@@ -228,6 +228,16 @@ class EditorNotificationTests(NewsClubMixin, TestCase):
         for call in notify.call_args_list:
             self.assertFalse(call.kwargs["send_email"])
 
+    def test_author_is_told_with_the_reviewers_note_when_sent_back(self):
+        item = self.news(status=News.Status.DRAFT, author=self.ann, published_at=None)
+        item.review_note = "Please add a photo."
+        item.save()
+        self.assertEqual(notifications.notify_author_of_send_back(item.pk, self.owner.pk), 1)
+        (note,) = self.inbox(self.ann_user)
+        self.assertEqual(note.body, "Please add a photo.")
+        self.assertIn("needs changes", note.title)
+        self.assertEqual(notifications.notify_author_of_send_back(item.pk, self.ann_user.pk), 0)  # not to the person who did it
+
     def test_task_wrapper(self):
         item = self.news(status=News.Status.PENDING_REVIEW, author=self.ann, published_at=None)
         self.assertEqual(tasks.notify_editors_of_pending_review(str(item.pk)), "told 2 editor(s)")

@@ -181,14 +181,19 @@ class LineupTests(TestCase):
         self.assertEqual(AuditEntry.objects.filter(action="lineup.published").count(), 1)
 
     def test_unpublish_returns_to_a_draft_and_withdraws(self):
+        Attendance.objects.filter(event=self.game, member=self.bob).update(status=S.MAYBE)  # an answer the publish would overwrite
+        members = (self.ann, self.cid, self.bob, self.out, self.dan)
+        before = [self.status(m) for m in members]
         svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.cid.pk])
         svc.publish_lineup(self.coach_user, self.lineup)
+        self.assertEqual(self.status(self.bob), S.NOT_SELECTED)
         InboxNotification.objects.all().delete()
         svc.unpublish_lineup(self.coach_user, self.lineup)
         self.lineup.refresh_from_db()
         self.assertIsNone(self.lineup.published_at)
         self.assertEqual(svc.status(self.lineup), "draft")  # the picks stay
-        self.assertEqual([self.status(m) for m in (self.ann, self.cid, self.bob, self.out, self.dan)], [S.PRESENT, S.PRESENT, S.PRESENT, S.PRESENT, S.ABSENT])
+        self.assertEqual([self.status(m) for m in members], before)  # every earlier answer is back, "maybe" included
+        self.assertEqual(self.status(self.bob), S.MAYBE)
         self.assertEqual(self.inbox_titles(self.ann), ["The line-up for U16 vs Rivals was withdrawn"])
         self.assertEqual(self.inbox_titles(self.bob), [])  # never told they were out, so nothing now
         self.assertEqual(AuditEntry.objects.filter(action="lineup.unpublished").count(), 1)

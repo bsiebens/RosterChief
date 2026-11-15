@@ -117,6 +117,26 @@ def notify_editors_of_pending_review(item: News) -> int:
     return told
 
 
+def notify_author_of_send_back(news_id, actor_user_id=None) -> int:
+    """Tell the author their item was sent back, with the reviewer's note. Never raises (a push hiccup must not undo the send-back)."""
+    from notifications import inbox
+
+    try:
+        item = News.objects.select_related("created_by__user").filter(pk=news_id).first()
+        club = _current_club()
+        user = item.created_by.user if item is not None and item.created_by_id and item.created_by.user_id else None
+        if club is None or user is None or user.pk == actor_user_id:
+            return 0
+        body = item.review_note or "A reviewer sent this news item back to you. Please check it and submit it again."
+        inbox.notify(user, club, title=f"“{item.title}” needs changes", body=body, kind=inbox.Kind.WARNING, href=_href(item), push=True, category="news", send_email=False)
+        return 1
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception("news.send_back_notify_failed")
+        return 0
+
+
 def _claim(news_id, now) -> News | None:
     """Atomically take the right to notify: sets ``notified_at`` only if still empty, so a publish and the sweep never both send."""
     claimed = News.objects.filter(pk=news_id, status=News.Status.PUBLISHED, published_at__lte=now, notified_at__isnull=True).update(notified_at=now)

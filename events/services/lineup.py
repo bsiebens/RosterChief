@@ -18,6 +18,7 @@ event's teams). Audit actions: ``lineup.created``, ``lineup.published``, ``lineu
 (target = the line-up; ``actor`` None when the scheduled sweep published it)."""
 
 from django.db import connection, transaction
+from django.db.models import F, Q
 from django.utils import timezone
 from django_tenants.utils import get_public_schema_name, get_tenant_model
 
@@ -256,6 +257,9 @@ def _publish(actor, lineup, *, club=None) -> dict:
     lineup.save(update_fields=["published_at", "scheduled_publish_at"])
     given.published_at, given.scheduled_publish_at = lineup.published_at, None  # keep the caller's instance current
 
+    # Remember what each player had answered (only when it is not a line-up status already), so unpublishing can put it back.
+    published_statuses = [Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NOT_SELECTED]
+    Attendance.objects.filter(event=event).exclude(status__in=published_statuses).filter(Q(member_id__in=selected) | ~Q(status__in=UNAVAILABLE_STATUSES)).update(status_before_lineup=F("status"))
     Attendance.objects.filter(event=event, member_id__in=selected).update(status=Attendance.AttendanceStatus.SELECTED)
     Attendance.objects.filter(event=event).exclude(member_id__in=selected).exclude(status__in=UNAVAILABLE_STATUSES).update(status=Attendance.AttendanceStatus.NOT_SELECTED)
 
@@ -284,7 +288,7 @@ def _publish(actor, lineup, *, club=None) -> dict:
 
 @transaction.atomic
 def unpublish_lineup(actor, lineup) -> Lineup:
-    """Take a published line-up back to a draft: the picks stay, "selected" / "not selected" players are available (present) again, and the
+    """Take a published line-up back to a draft: the picks stay, "selected" / "not selected" players get their earlier answer back, and the
     people who had been told they were in are told it was withdrawn. A no-op for a line-up that is not published."""
     require_lineup_manager(actor, lineup.event)
     lineup = Lineup.objects.select_for_update().select_related("event").get(pk=lineup.pk)
@@ -294,7 +298,10 @@ def unpublish_lineup(actor, lineup) -> Lineup:
     was_selected = set(Attendance.objects.filter(event=event, status=Attendance.AttendanceStatus.SELECTED).values_list("member_id", flat=True))
     lineup.published_at = None
     lineup.save(update_fields=["published_at"])
-    Attendance.objects.filter(event=event, status__in=[Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NOT_SELECTED]).update(status=Attendance.AttendanceStatus.PRESENT)
+    # Everyone goes back to what they had answered before the publish (present when that was not recorded, e.g. a line-up published earlier).
+    for row in Attendance.objects.filter(event=event, status__in=[Attendance.AttendanceStatus.SELECTED, Attendance.AttendanceStatus.NOT_SELECTED]):
+        row.status, row.status_before_lineup = row.status_before_lineup or Attendance.AttendanceStatus.PRESENT, ""
+        row.save(update_fields=["status", "status_before_lineup", "modified"])
     when = timezone.localtime(event.start).strftime("%d/%m/%Y %H:%M")
     _notify_members(
         Member.objects.filter(pk__in=was_selected).select_related("user"),

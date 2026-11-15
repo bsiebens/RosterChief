@@ -45,6 +45,9 @@ class NewsDetail(NewsListItem):
     body_en: str
     body_html: str
     notified_at: datetime.datetime | None = None
+    #: The reviewer's note when the item was sent back to its author (empty otherwise).
+    review_note: str = ""
+    sent_back_at: datetime.datetime | None = None
     photos: list[NewsPhotoOut]
     can_publish: bool
     can_delete: bool

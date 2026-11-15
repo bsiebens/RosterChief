@@ -47,7 +47,7 @@ def _detail(user, item: News) -> dict:
     return {
         **_list_item(user, item),
         "body": item.body, "title_en": item.title_en, "body_en": item.body_en, "body_html": svc.render_body_html(item.body),
-        "notified_at": item.notified_at, "photos": [_photo_out(p) for p in item.photos.all()],
+        "notified_at": item.notified_at, "review_note": item.review_note, "sent_back_at": item.sent_back_at, "photos": [_photo_out(p) for p in item.photos.all()],
         "can_publish": access.can_publish_news(user), "can_delete": access.can_edit_news(user, item),
     }  # fmt: skip
 
@@ -151,10 +151,11 @@ def unpublish_news(request, news_id: uuid.UUID):
 
 
 @router.post("/{news_id}/send-back", response=NewsDetail, summary="Send an item pending review back to draft (publishers)", operation_id="send_news_back")
-def send_back(request, news_id: uuid.UUID):
+def send_back(request, news_id: uuid.UUID, note: str = ""):
+    """Optional query parameter ``note``: what the author should change; it is kept on the item and sent to them."""
     access.require_publish_news(request.user)
     item = _visible(request, news_id)
-    svc.send_back(request.user, item)
+    svc.send_back(request.user, item, note)
     return _detail(request.user, item)
 
 

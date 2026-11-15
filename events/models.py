@@ -409,6 +409,8 @@ class Attendance(UUIDModel):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("event"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="attendances", verbose_name=_("member"))
     status = models.CharField(_("status"), max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.NO_RESPONSE)
+    #: The answer this row had before a line-up was published over it (selected / not selected), so withdrawing the line-up can restore it exactly.
+    status_before_lineup = models.CharField(_("status before the line-up"), max_length=20, blank=True, default="")
     showed_up = models.BooleanField(
         _("showed up"),
         null=True,

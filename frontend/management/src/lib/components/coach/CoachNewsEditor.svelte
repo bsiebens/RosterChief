@@ -73,7 +73,9 @@
 	let publishOpen = $state(false);
 	let at = $state('');
 	let notify = $state(false);
-	let confirm = $state<'delete' | 'unpublish' | null>(null);
+	let confirm = $state<'delete' | 'unpublish' | 'sendback' | null>(null);
+	// What the reviewer tells the author when sending an item back.
+	let backNote = $state('');
 	const iso = $derived(wallToIso(at));
 	const future = $derived(!!iso && new Date(iso) > new Date());
 	function openPublish() {
@@ -124,7 +126,7 @@
 	async function step(op: 'send-back' | 'unpublish', notice: string) {
 		busy = true;
 		error = '';
-		const res = await api<NewsDetail>('POST', `/news/${id}/${op}`);
+		const res = await api<NewsDetail>('POST', `/news/${id}/${op}`, { query: op === 'send-back' ? { note: backNote.trim() } : undefined });
 		if (!res.ok) return fail(res);
 		confirm = null;
 		await leave(notice);
@@ -156,6 +158,7 @@
 	</div>
 
 	{#if error}<Alert kind="error" title={t('news.save_failed')}>{error}</Alert>{/if}
+	{#if item?.review_note && status === 'draft'}<Alert kind="warning" title={t('coach.news_sent_back')}><span class="whitespace-pre-line">{item.review_note}</span></Alert>{/if}
 	{#if item && !canEdit}<Alert kind="info">{status === 'published' ? t('news.locked') : t('news.read_only')}</Alert>{:else}<p class="text-sm text-muted">{stateText}</p>{/if}
 
 	<fieldset class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3" disabled={!canEdit || busy}>
@@ -227,7 +230,7 @@
 	{#if item && ((canPublish && (status === 'published' || status === 'pending_review')) || item.can_delete)}
 		<section class="card card-body gap-2 p-3.5">
 			{#if canPublish && status === 'pending_review'}
-				<button type="button" class="btn btn-outline min-h-12 w-full gap-2" disabled={busy} onclick={() => step('send-back', 'sent_back')}><Undo2 size={16} aria-hidden="true" />{t('news.send_back')}</button>
+				<button type="button" class="btn btn-outline min-h-12 w-full gap-2" disabled={busy} onclick={() => (confirm = 'sendback')}><Undo2 size={16} aria-hidden="true" />{t('news.send_back')}</button>
 				<p class="text-xs text-muted">{t('news.send_back_help')}</p>
 			{/if}
 			{#if canPublish && status === 'published'}
@@ -268,13 +271,22 @@
 	</form>
 </Sheet>
 
-<Sheet open={confirm !== null} title={confirm === 'delete' ? t('news.delete.title') : t('news.unpublish.title')} onclose={() => (confirm = null)}>
+<Sheet open={confirm !== null} title={confirm === 'delete' ? t('news.delete.title') : confirm === 'sendback' ? t('news.send_back') : t('news.unpublish.title')} onclose={() => (confirm = null)}>
 	{#if confirm}
 		<div class="grid gap-4 p-4 pt-0">
-			<p>{confirm === 'delete' ? t('news.delete.body', { title: item?.title ?? '' }) : t('news.unpublish.body', { title: item?.title ?? '' })}</p>
+			{#if confirm === 'sendback'}
+				<label class="grid gap-1 text-sm font-semibold">{t('coach.news_back_note')}
+					<textarea class="textarea textarea-bordered w-full font-normal" rows="4" maxlength="2000" bind:value={backNote} placeholder={t('coach.news_back_note_placeholder')}></textarea>
+					<span class="text-xs font-normal text-muted">{t('coach.news_back_note_help')}</span>
+				</label>
+			{:else}
+				<p>{confirm === 'delete' ? t('news.delete.body', { title: item?.title ?? '' }) : t('news.unpublish.body', { title: item?.title ?? '' })}</p>
+			{/if}
 			<div class="grid grid-cols-2 gap-2">
 				<button class="btn btn-outline min-h-12" type="button" onclick={() => (confirm = null)}>{t('common.cancel')}</button>
-				{#if confirm === 'delete'}
+				{#if confirm === 'sendback'}
+					<button class="btn btn-primary min-h-12 gap-2" type="button" disabled={busy} onclick={() => step('send-back', 'sent_back')}><Undo2 size={16} aria-hidden="true" />{t('news.send_back')}</button>
+				{:else if confirm === 'delete'}
 					<button class="btn btn-error min-h-12 gap-2" type="button" disabled={busy} onclick={remove}><Trash2 size={16} aria-hidden="true" />{t('news.delete')}</button>
 				{:else}
 					<button class="btn btn-warning min-h-12 gap-2" type="button" disabled={busy} onclick={() => step('unpublish', 'unpublished')}><EyeOff size={16} aria-hidden="true" />{t('news.unpublish')}</button>
