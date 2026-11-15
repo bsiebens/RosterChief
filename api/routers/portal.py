@@ -506,9 +506,7 @@ def coach_home(request):
     if not access.can_access_management(request.user):
         raise HttpError(403, "Management access is required.")
     team_ids = access.staffed_team_ids(request.user)
-    teams = Team.objects.filter(pk__in=team_ids)
-    if access.can_manage_settings(request.user):
-        teams = Team.objects.all()
+    teams = Team.objects.filter(pk__in=team_ids)  # the coach app is about the teams this person is staff of, administrators included
     now = timezone.localtime()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     events = (

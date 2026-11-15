@@ -67,7 +67,7 @@
 <div class="relative" bind:this={root}>
 	<button
 		type="button"
-		class="btn btn-square relative {dark ? 'border-sidebar-hairline bg-transparent text-sidebar-fg' : 'btn-outline'}"
+		class="btn btn-square relative {dark ? 'btn-ghost border-sidebar-hairline text-sidebar-fg! hover:bg-sidebar-hairline' : 'btn-outline'}"
 		aria-label={notifications.unread ? t('notifications.bell_unread', { n: notifications.unread }) : t('notifications.title')}
 		aria-expanded={open}
 		aria-controls={open ? panelId : undefined}

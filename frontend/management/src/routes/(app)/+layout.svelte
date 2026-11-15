@@ -83,7 +83,7 @@
 							</details>
 						{/if}
 						{#if portal}<NotificationBell dark={coach} portal={portal} />{/if}
-						{#if !portal || coach}<AccountMenu {email} dark />{/if}
+						{#if !portal}<AccountMenu {email} dark />{/if}
 					</div>
 				</div>
 				{#if data.me?.has_member_portal_role}<div class="px-3 pb-2 sm:px-5"><AppSwitcher member={parent} tone={parent ? 'light' : 'sidebar'} /></div>{/if}
