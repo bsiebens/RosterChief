@@ -9,12 +9,15 @@ from ninja.errors import HttpError
 
 from api.auth import CookieAuth, TokenAuth
 from api.routers.portal import _people, _viewer
+from events.models import Event
 from members.models import Member
 from members.services import members as member_services
 from members.services.errors import Invalid
+from events.models import EventFollow
+from events.services import follows
 from notifications import preferences
 from notifications.models import Category, Channel
-from teams.models import TeamMembership
+from teams.models import Team, TeamMembership
 
 router = Router(auth=[TokenAuth(door=False), CookieAuth(door=False)])
 
@@ -139,3 +142,50 @@ def update_notification_settings(request, payload: SettingsIn):
         raise HttpError(422, str(error)) from error
     user.refresh_from_db()
     return _settings(request)
+
+
+def _follows(request, people):
+    """The club's teams with whether this account follows them (live game pushes and the cards on Home), the family's own teams first,
+    plus the single games followed directly that are still to come."""
+    mine = set(TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values_list("team_id", flat=True))
+    followed = follows.followed_team_ids(request.user)
+    teams = Team.objects.filter(tournament_only=False).order_by("ordering", "name")
+    games = EventFollow.objects.filter(user=request.user, event__start__gte=timezone.now()).select_related("event").order_by("event__start")
+    return {
+        "teams": sorted(({"id": team.pk, "name": team.name, "mine": team.pk in mine, "followed": team.pk in followed} for team in teams), key=lambda team: not team["mine"]),
+        "games": [{"event_id": row.event_id, "title": row.event.title, "start": row.event.start} for row in games],
+    }
+
+
+@router.get("/follows", summary="Which teams and games I follow for live updates")
+def follows_state(request):
+    viewer = _viewer(request)
+    return _follows(request, _people(viewer))
+
+
+@router.put("/follows/teams/{team_id}", summary="Follow a team's games")
+def follow_team(request, team_id: UUID):
+    viewer = _viewer(request)
+    team = Team.objects.filter(pk=team_id).first()
+    if team is None:
+        raise HttpError(404, "Not found.")
+    follows.follow_team(request.user, team)
+    return _follows(request, _people(viewer))
+
+
+@router.delete("/follows/teams/{team_id}", summary="Stop following a team's games")
+def unfollow_team(request, team_id: UUID):
+    viewer = _viewer(request)
+    team = Team.objects.filter(pk=team_id).first()
+    if team is not None:
+        follows.unfollow_team(request.user, team)
+    return _follows(request, _people(viewer))
+
+
+@router.delete("/follows/games/{event_id}", summary="Stop following one game")
+def unfollow_game(request, event_id: UUID):
+    viewer = _viewer(request)
+    event = Event.objects.filter(pk=event_id).first()
+    if event is not None:
+        follows.unfollow_event(request.user, event)
+    return _follows(request, _people(viewer))

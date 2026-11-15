@@ -132,3 +132,5 @@ export type FollowedGame = PortalEventDisplay & { status: 'live' | 'scheduled' |
 export type FollowState = { directly: boolean; via_team: boolean };
 
 export type SubmittedForm = { title: string; member_id: string; submitted_at: string; answers: { label: string; value: unknown }[] };
+
+export type TeamFollows = { teams: { id: string; name: string; mine: boolean; followed: boolean }[]; games: { event_id: string; title: string; start: string }[] };

@@ -281,3 +281,17 @@ class PortalProfileTests(ParentPortalTests):
         with schema_context(self.club.schema_name):
             other = Submission.objects.create(send=send, member=self.other)
         self.assertEqual(self.call("get", f"/portal/forms/submissions/{other.pk}", token).status_code, 404)
+
+
+    def test_follow_teams_and_games_from_the_app(self):
+        from teams.models import Team
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            team = Team.objects.create(name="U14", short_name="U14")
+        state = self.call("get", "/portal/me/follows", token).json()
+        self.assertEqual([(t["name"], t["followed"]) for t in state["teams"]], [("U14", False)])
+        state = self.call("put", f"/portal/me/follows/teams/{team.pk}", token).json()
+        self.assertTrue(state["teams"][0]["followed"])
+        state = self.call("delete", f"/portal/me/follows/teams/{team.pk}", token).json()
+        self.assertFalse(state["teams"][0]["followed"])

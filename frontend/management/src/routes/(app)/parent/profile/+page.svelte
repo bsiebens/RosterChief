@@ -3,6 +3,8 @@
 	import { Camera, Check, Shirt, Trash2, UserRound } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
+	import FollowTeams from '#lib/components/portal/FollowTeams.svelte';
+	import SaveStatus from '#lib/components/portal/SaveStatus.svelte';
 	import NotificationSettings from '#lib/components/portal/NotificationSettings.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -28,6 +30,14 @@
 	let saved = $state('');
 	let errors = $state<Record<string, Record<string, string>>>({});
 	let messages = $state<Record<string, string>>({});
+	const fields = ['first_name', 'last_name', 'date_of_birth', 'phone', 'emergency_phone', 'photo_consent'] as const;
+	const dirty = (person: ProfilePerson) => fields.some((key) => (drafts[person.id]?.[key] ?? '') !== (person[key] ?? ''));
+	const reset = (person: ProfilePerson) => {
+		drafts[person.id] = { ...person };
+		errors[person.id] = {};
+		messages[person.id] = '';
+		saved = '';
+	};
 	const draft = (person: ProfilePerson) => drafts[person.id] ?? person;
 
 	async function save(person: ProfilePerson) {
@@ -79,7 +89,7 @@
 				<ClubCrest name={person.name} logoUrl={person.photo_url} size={64} />
 				<div class="min-w-0 flex-1">
 					<h2 class="truncate font-display text-xl font-extrabold text-ink uppercase">{person.name}</h2>
-					<p class="text-xs text-muted">{person.is_self ? t('portal.profile_you') : t('portal.profile_child')}{person.email ? ` · ${person.email}` : ''}</p>
+					<p class="text-xs text-muted">{person.is_self ? t('portal.profile_you') : t('portal.profile_child')}</p>
 				</div>
 				<div class="flex flex-wrap gap-2">
 					<label class="btn btn-outline btn-sm cursor-pointer gap-1.5"><Camera size={14} aria-hidden="true" />{t('portal.photo_change')}
@@ -96,6 +106,7 @@
 					<Field name="date_of_birth" type="date" label={t('portal.date_of_birth')} bind:value={d.date_of_birth as string} error={errors[person.id]?.date_of_birth} />
 					<Field name="phone" type="tel" label={t('portal.phone')} bind:value={d.phone} error={errors[person.id]?.phone} />
 					<Field name="emergency_phone" type="tel" label={t('portal.emergency_phone')} bind:value={d.emergency_phone} error={errors[person.id]?.emergency_phone} />
+					<div class="grid content-start gap-1"><span class="text-sm font-semibold text-ink">{t('portal.email')}</span><div class="input flex items-center bg-subhead text-muted">{person.email || t('portal.email_managed')}</div></div>
 				</div>
 				<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="checkbox mt-0.5" bind:checked={d.photo_consent} /><span>{t('portal.photo_consent')}</span></label>
 				{#if person.teams.length}
@@ -108,12 +119,13 @@
 						</ul>
 					</div>
 				{/if}
-				<div class="flex items-center gap-3">
-					<button class="btn btn-primary gap-2" type="submit" disabled={busy === person.id}><UserRound size={16} aria-hidden="true" />{t('common.save')}</button>
-					{#if saved === person.id}<span class="inline-flex items-center gap-1 text-sm text-ok" role="status"><Check size={14} aria-hidden="true" />{t('portal.saved')}</span>{/if}
+				<div class="flex flex-wrap items-center gap-3 border-t border-line pt-4">
+					<button class="btn btn-primary" type="submit" disabled={busy === person.id || !dirty(person)}>{t('portal.save_changes')}</button>
+					<button class="btn btn-outline" type="button" disabled={busy === person.id || !dirty(person)} onclick={() => reset(person)}>{t('common.cancel')}</button>
+					<SaveStatus status={busy === person.id ? 'saving' : saved === person.id && !dirty(person) ? 'saved' : 'idle'} dirty={dirty(person)} compact />
 				</div>
 			</div>
 		</form>
 	{/each}
-	{#if data.settings}<div class="min-w-0"><NotificationSettings settings={data.settings} /></div>{/if}
+	<div class="grid min-w-0 gap-4">{#if data.settings}<NotificationSettings settings={data.settings} />{/if}{#if data.follows}<FollowTeams initial={data.follows} />{/if}</div>
 </div>
