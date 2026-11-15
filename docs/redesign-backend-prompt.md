@@ -43,7 +43,9 @@ Events have no notes/description field, so the phone event form (coach view) can
 shown to invitees in the member event drawer), an `EventIn/EventOut` field and the form field.
 
 ### 2.4 Line-up lines in notifications and the member app
-Line-up lines (sport-level feature, `Sport.lineup_slots_enabled` + `lineup_template`, `LineupSelection.slot`) are informational only.
+Line-up lines (sport-level feature, `Sport.lineup_slots_enabled` + `lineup_template`, `LineupSlotAssignment`) are informational only.
+A slot holds one player but a player can be in several slots (regular lines plus power play, penalty kill, extra attacker); un-picking
+removes all their slots. `GET /events/{id}/lineup.pdf` renders a PDF overview of the lines (WeasyPrint, English, 503 without it).
 Not done: the player's line in the "You're in the line-up" notification (the body is one shared text; it would need a per-player body in
 `events.services.lineup._publish`), and showing "Line 2 · LW" to families in the member event drawer.
 Decision taken: lines are **not** used in statistics, because lines change during games. A per-team opt-in with a warning was

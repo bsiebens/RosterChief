@@ -16,8 +16,8 @@
 	let lineup = $state<Lineup>($state.snapshot(initial));
 	// svelte-ignore state_referenced_locally
 	let picked = $state<string[]>(initial.members.filter((m) => m.selected).map((m) => m.member.id));
-	/** Slot assignments (member id -> "<group>.<slot>") of the picked players; only used when the sport has lines. */
-	const slotsOf = (l: Lineup) => Object.fromEntries(l.members.filter((m) => m.selected && m.slot).map((m) => [m.member.id, m.slot as string]));
+	/** Slot assignments (slot key "<group>.<slot>" -> member id) of the picked players; a player may hold several slots. Only used when the sport has lines. */
+	const slotsOf = (l: Lineup): Record<string, string> => Object.fromEntries(l.members.filter((m) => m.selected).flatMap((m) => (m.slots ?? []).map((k) => [k, m.member.id])));
 	// svelte-ignore state_referenced_locally
 	let slots = $state<Record<string, string>>(slotsOf(initial));
 	$effect(() => {
@@ -25,9 +25,10 @@
 		picked = initial.members.filter((m) => m.selected).map((m) => m.member.id);
 		slots = slotsOf(initial);
 	});
+	const pdfHref = $derived(`/api/v1/events/${eventId}/lineup.pdf`);
 	const linesOn = $derived(!!lineup.slots_enabled && !!lineup.template?.length);
 	const savedSlots = $derived(slotsOf(lineup));
-	const slotsDirty = $derived(linesOn && (Object.keys(slots).some((id) => picked.includes(id) && slots[id] !== savedSlots[id]) || Object.keys(savedSlots).some((id) => picked.includes(id) && !slots[id])));
+	const slotsDirty = $derived(linesOn && JSON.stringify(Object.entries(slots).filter(([, id]) => picked.includes(id)).sort()) !== JSON.stringify(Object.entries(savedSlots).filter(([, id]) => picked.includes(id)).sort()));
 
 	const manage = $derived(lineup.can_manage && !cancelled);
 	const saved = $derived(lineup.members.filter((m) => m.selected).map((m) => m.member.id));
@@ -74,7 +75,7 @@
 	/** Takes one player out of the pick (saved with "Save draft" or "Publish"). */
 	const drop = (id: string) => {
 		picked = picked.filter((x) => x !== id);
-		if (slots[id]) slots = Object.fromEntries(Object.entries(slots).filter(([k]) => k !== id));
+		slots = Object.fromEntries(Object.entries(slots).filter(([, who]) => who !== id));
 	};
 	const pickedMembers = $derived(lineup.members.filter((m) => picked.includes(m.member.id)));
 	/** The pick grouped by position (the same order as the Players card), jersey number within a position. */
@@ -103,7 +104,7 @@
 		call(
 			() =>
 				api<Lineup>('PUT', `/events/${eventId}/lineup`, {
-					body: { team_id: lineup.team?.id ?? (teamId || null), member_ids: picked, ...(linesOn ? { slots: Object.fromEntries(Object.entries(slots).filter(([id]) => picked.includes(id))) } : {}) }
+					body: { team_id: lineup.team?.id ?? (teamId || null), member_ids: picked, ...(linesOn ? { slots: Object.fromEntries(Object.entries(slots).filter(([, id]) => picked.includes(id))) } : {}) }
 				}), (l) => (apply(l), (okMsg = t('events.lineup.saved')))
 		);
 	async function publish() {
@@ -197,7 +198,7 @@
 				{/each}
 			</section>
 		{:else if view === 'lines' && linesOn}
-			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} />
+			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} />
 		{:else}
 			<section class="card overflow-hidden">
 				{#each pickedGroups as [position, members] (position)}
@@ -316,14 +317,14 @@
 					{#if linesOn}
 						<div class="card card-body gap-2">
 							<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('coach.lu_view_lines')}</h3>
-							<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} />
+							<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} />
 						</div>
 					{/if}
 				</div>
 			</div>
 		{/if}
-	{:else if lineup.status === 'published' && linesOn && lineup.members.some((m) => m.selected && m.slot)}
-		<LineupLines template={lineup.template ?? []} members={lineup.members.filter((m) => m.selected)} slots={savedSlots} />
+	{:else if lineup.status === 'published' && linesOn && lineup.members.some((m) => m.selected && m.slots?.length)}
+		<LineupLines template={lineup.template ?? []} members={lineup.members.filter((m) => m.selected)} slots={savedSlots} {pdfHref} />
 	{:else if lineup.status === 'published'}
 		<div class="card">
 			{#each byPosition(lineup.members.filter((m) => m.selected)) as [position, members] (position)}

@@ -11,14 +11,25 @@ export type Sport = {
 	lineup_template: LineupGroup[];
 };
 
-/** A sensible ice hockey template: two goalies and four lines of five. */
+/** A sensible ice hockey template: two goalies, four lines of five, then the special teams (a player may be in a line and in a special team). */
 export const HOCKEY_PRESET: LineupGroup[] = [
 	{ key: 'goalies', label: 'Goalies', slots: [{ key: 'g1', label: 'G1' }, { key: 'g2', label: 'G2' }] },
 	...[1, 2, 3, 4].map((n) => ({
 		key: `line${n}`,
 		label: `Line ${n}`,
 		slots: ['LW', 'C', 'RW', 'LD', 'RD'].map((l) => ({ key: l.toLowerCase(), label: l }))
-	}))
+	})),
+	...[1, 2].map((n) => ({
+		key: `pp${n}`,
+		label: `Power play ${n}`,
+		slots: ['C', 'LW', 'RW', 'LD', 'RD'].map((l) => ({ key: l.toLowerCase(), label: l }))
+	})),
+	...[1, 2].map((n) => ({
+		key: `pk${n}`,
+		label: `Penalty kill ${n}`,
+		slots: ['F1', 'F2', 'D1', 'D2'].map((l) => ({ key: l.toLowerCase(), label: l }))
+	})),
+	{ key: 'extra', label: 'Extra attacker', slots: ['A1', 'A2', 'A3'].map((l) => ({ key: l.toLowerCase(), label: l })) }
 ];
 export type RefereeKind = 'referee' | 'official';
 export type RefereeType = { id: string; sport_id: string; kind: RefereeKind; name: string; ordering: number };
