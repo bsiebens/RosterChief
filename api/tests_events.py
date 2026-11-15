@@ -522,6 +522,41 @@ class EventsApiTests(TestCase):
         mine = rows[str(self.p1.pk)]
         self.assertEqual((mine["note"], mine["games_rate"], mine["practices_rate"]), ("Sick", 67, None))
 
+    def test_lineup_slots_api(self):
+        from club.models import Sport
+
+        game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")
+        for p in (self.p1, self.p2):
+            self.call("put", f"/events/{game.pk}/attendance/{p.pk}", self.head.user, {"status": "present"})
+        url = f"/events/{game.pk}/lineup"
+        body = self.call("get", url, self.head.user).json()
+        self.assertEqual((body["slots_enabled"], body["template"]), (False, []))
+        picks = {"member_ids": [str(self.p1.pk), str(self.p2.pk)], "slots": {str(self.p1.pk): "goalies.g1"}}
+        r = self.call("put", url, self.head.user, picks)
+        self.assertEqual(r.status_code, 422)  # the sport has no lines
+        self.assertIn("slots", r.json()["errors"])
+        template = [{"key": "goalies", "label": "Goalies", "slots": [{"key": "g1", "label": "G1"}]}]
+        sport = Sport.objects.create(name="Slot sport", lineup_slots_enabled=True, lineup_template=template)
+        self.club.sport = sport
+        self.club.save(update_fields=["sport"])
+        r = self.call("put", url, self.head.user, picks)
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual((body["slots_enabled"], body["template"]), (True, template))
+        self.assertEqual({m["member"]["id"]: m["slot"] for m in body["members"] if m["selected"]}, {str(self.p1.pk): "goalies.g1", str(self.p2.pk): ""})
+        bad = {"member_ids": [str(self.p1.pk)], "slots": {str(self.p1.pk): "goalies.nope"}}
+        self.assertEqual(self.call("put", url, self.head.user, bad).status_code, 422)
+        dup = {"member_ids": [str(self.p1.pk), str(self.p2.pk)], "slots": {str(self.p1.pk): "goalies.g1", str(self.p2.pk): "goalies.g1"}}
+        self.assertEqual(self.call("put", url, self.head.user, dup).status_code, 422)
+        notpicked = {"member_ids": [str(self.p1.pk)], "slots": {str(self.p2.pk): "goalies.g1"}}
+        self.assertEqual(self.call("put", url, self.head.user, notpicked).status_code, 422)
+        cleared = self.call("put", url, self.head.user, {"member_ids": [str(self.p1.pk)], "slots": {}}).json()
+        self.assertEqual([m["slot"] for m in cleared["members"] if m["selected"]], [""])
+        self.call("put", url, self.head.user, picks)
+        sport.lineup_template = []  # template edited away: unassigned, no crash
+        sport.save()
+        self.assertEqual([m["slot"] for m in self.call("get", url, self.head.user).json()["members"] if m["selected"]], ["", ""])
+
     def test_lineup_flow(self):
         game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")
         r = self.call("get", f"/events/{game.pk}/lineup", self.head.user)

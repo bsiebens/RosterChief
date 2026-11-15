@@ -193,6 +193,12 @@ class Sport(UUIDModel):
 
     name = models.CharField(_("name"), max_length=250)
     slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"])
+    lineup_slots_enabled = models.BooleanField(
+        _("line-up lines"), default=False, help_text=_("Game line-ups of this sport can place picked players in lines/slots (set by platform admins). Informational only, never used for statistics.")
+    )
+    lineup_template = models.JSONField(
+        _("line-up template"), default=list, blank=True, help_text=_('Ordered groups: [{"key", "label", "slots": [{"key", "label"}]}]. A slot is stored as "<group key>.<slot key>".')
+    )
 
     def __str__(self) -> str:
         return self.name

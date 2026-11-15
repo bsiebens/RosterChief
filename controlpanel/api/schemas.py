@@ -370,10 +370,19 @@ class SportOut(Schema):
     club_count: int
     competition_count: int
     referee_type_count: int
+    lineup_slots_enabled: bool = False
+    lineup_template: list[dict] = []
 
 
 class SportIn(Schema):
     name: str
+
+
+class SportLineupSlotsIn(Schema):
+    """Informational only: slots are never used for statistics."""
+
+    enabled: bool
+    template: list[dict] = []
 
 
 class RefereeTypeOut(Schema):

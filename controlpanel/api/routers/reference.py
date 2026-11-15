@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404
 from ninja import Router
 from ninja.pagination import paginate
 
+from club.lineup_template import TemplateError, clean_template
 from club.models import Competition, RefereeType, Sport
 from controlpanel import audit
 from features.catalog import CATALOG
@@ -24,6 +25,7 @@ from ..schemas import (
     RefereeTypeReorderIn,
     RefereeTypeUpdateIn,
     SportIn,
+    SportLineupSlotsIn,
     SportOut,
 )
 
@@ -40,6 +42,8 @@ def _sport_out(sport) -> SportOut:
         club_count=sport.clubs.count(),
         competition_count=sport.competitions.count(),
         referee_type_count=sport.referee_types.count(),
+        lineup_slots_enabled=sport.lineup_slots_enabled,
+        lineup_template=sport.lineup_template or [],
     )
 
 
@@ -79,6 +83,22 @@ def rename_sport(request, sport_id: UUID, payload: SportIn):
     sport.name = name
     sport.save(update_fields=["name", "modified"])
     audit.record(request.user, "sport.renamed", target=sport, data={"name": name})
+    return _sport_out(sport)
+
+
+@router.put("/sports/{sport_id}/lineup-slots", response=SportOut, summary="Switch line-up lines on or off for a sport and set its template (informational only, never used for statistics)")
+def set_sport_lineup_slots(request, sport_id: UUID, payload: SportLineupSlotsIn):
+    sport = get_object_or_404(Sport, pk=sport_id)
+    try:
+        template = clean_template(payload.template)
+    except TemplateError as exc:
+        raise _invalid("template", str(exc))
+    if payload.enabled and not template:
+        raise _invalid("template", "Add at least one group with a slot before switching line-up lines on.")
+    before = {"enabled": sport.lineup_slots_enabled, "template": sport.lineup_template}
+    sport.lineup_slots_enabled, sport.lineup_template = payload.enabled, template
+    sport.save(update_fields=["lineup_slots_enabled", "lineup_template", "modified"])
+    audit.record(request.user, "sport.lineup_slots_changed", target=sport, data={"before": before, "after": {"enabled": payload.enabled, "template": template}})
     return _sport_out(sport)
 
 

@@ -811,6 +811,8 @@ def _lineup_out(request, event, lineup=None) -> dict:
     team = lineup.team if lineup is not None else (teams[0] if len(teams) == 1 else None)
     available = lineup_svc.has_lineup(event)
     members = []
+    config = lineup_svc.slots_config() if available else (False, [])
+    slots = {}
     if available and team is not None:
         rows = lineup_svc.selectable_members(lineup if lineup is not None else Lineup(event=event, team=team))
         show_picks = manager or (lineup is not None and lineup.published_at is not None)
@@ -818,9 +820,12 @@ def _lineup_out(request, event, lineup=None) -> dict:
         if manager:
             notes = dict(Attendance.objects.filter(event=event).values_list("member_id", "note"))
             turnout = attendance_svc.member_kind_turnout([r["member"].pk for r in rows], attendance_svc.resolve_season(event))
+        if show_picks:
+            slots = lineup_svc.selection_slots(lineup, config)
         members = [
             {
                 "member": _ref(r["member"]),
+                "slot": slots.get(r["member"].pk, "") if r["selected"] else "",
                 "position": r["position"],
                 "jersey_number": r["jersey_number"],
                 "status": r["status"],
@@ -842,6 +847,8 @@ def _lineup_out(request, event, lineup=None) -> dict:
         "published_at": lineup.published_at if lineup else None,
         "scheduled_publish_at": lineup.scheduled_publish_at if lineup else None,
         "members": members,
+        "slots_enabled": config[0],
+        "template": config[1],
     }
 
 
@@ -872,7 +879,7 @@ def set_lineup(request, event_id: uuid.UUID, payload: LineupIn):
             raise Invalid("Unknown team.", {"team_id": ["Unknown team."]})
     with transaction.atomic():
         lineup = lineup_svc.get_or_create_lineup(request.user, event, team)
-        lineup_svc.set_selection(request.user, lineup, payload.member_ids)
+        lineup_svc.set_selection(request.user, lineup, payload.member_ids, payload.slots)
     return _lineup_out(request, event)
 
 

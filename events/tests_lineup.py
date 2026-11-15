@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 from django_tenants.utils import schema_context
 
-from club.models import Club, Domain
+from club.models import Club, Domain, Sport
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
 from events.models import Attendance, Event, Lineup, LineupSelection, Season
@@ -274,6 +274,71 @@ class LineupTests(TestCase):
                     with self.assertRaises(NotAllowed):
                         call(refused)
         self.assertEqual(svc._selected_ids(self.lineup), {self.ann.pk, self.bob.pk})
+
+    # --- slots (lines) ----------------------------------------------------------------------------------------------
+
+    TEMPLATE = [
+        {"key": "goalies", "label": "Goalies", "slots": [{"key": "g1", "label": "G1"}, {"key": "g2", "label": "G2"}]},
+        {"key": "line1", "label": "Line 1", "slots": [{"key": "lw", "label": "LW"}, {"key": "c", "label": "C"}]},
+    ]
+
+    def enable_slots(self, template=None, enabled=True):
+        sport = self.club.sport or Sport.objects.create(name="Slot hockey")
+        sport.lineup_slots_enabled, sport.lineup_template = enabled, self.TEMPLATE if template is None else template
+        sport.save()
+        self.club.sport = sport
+        self.club.save(update_fields=["sport"])
+        return sport
+
+    def slot_of(self, member):
+        return LineupSelection.objects.get(lineup=self.lineup, member=member).slot
+
+    def test_slots_refused_when_the_sport_has_none(self):
+        with self.assertRaises(Invalid) as ctx:
+            svc.set_selection(self.coach_user, self.lineup, [self.ann.pk], {self.ann.pk: "goalies.g1"})
+        self.assertIn("slots", ctx.exception.errors)
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk], {})  # empty is fine
+        self.assertEqual(svc.slots_config(), (False, []))
+
+    def test_assign_move_clear_and_validate_slots(self):
+        self.enable_slots()
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "goalies.g1", self.bob.pk: "line1.c"})
+        self.assertEqual((self.slot_of(self.ann), self.slot_of(self.bob)), ("goalies.g1", "line1.c"))
+        self.assertEqual(AuditEntry.objects.filter(action="lineup.slots_changed").count(), 1)
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "line1.c", self.bob.pk: "goalies.g1"})  # swap
+        self.assertEqual((self.slot_of(self.ann), self.slot_of(self.bob)), ("line1.c", "goalies.g1"))
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk])  # slots omitted: unchanged
+        self.assertEqual(self.slot_of(self.ann), "line1.c")
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "line1.c"})  # bob cleared
+        self.assertEqual(self.slot_of(self.bob), "")
+        for slots, picks in (
+            ({self.ann.pk: "nope.x"}, [self.ann.pk]),
+            ({self.ann.pk: "line1.c", self.bob.pk: "line1.c"}, [self.ann.pk, self.bob.pk]),
+            ({self.cid.pk: "line1.lw"}, [self.ann.pk]),  # cid is not picked
+        ):
+            with self.assertRaises(Invalid) as ctx:
+                svc.set_selection(self.coach_user, self.lineup, picks, slots)
+            self.assertIn("slots", ctx.exception.errors)
+        self.assertEqual(self.slot_of(self.ann), "line1.c")  # nothing changed by the failures
+        svc.set_selection(self.coach_user, self.lineup, [self.bob.pk])  # un-picking drops the slot with the pick
+        self.assertEqual(svc.selection_slots(self.lineup), {})
+
+    def test_slots_do_not_touch_publishing_and_survive_template_changes(self):
+        sport = self.enable_slots()
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "goalies.g1", self.bob.pk: "line1.c"})
+        svc.publish_lineup(self.coach_user, self.lineup)
+        self.assertEqual((self.status(self.ann), self.status(self.bob)), (S.SELECTED, S.SELECTED))
+        sport.lineup_template = [{"key": "line1", "label": "Line 1", "slots": [{"key": "c", "label": "C"}]}]  # goalies removed
+        sport.save()
+        self.assertEqual(svc.selection_slots(self.lineup), {self.bob.pk: "line1.c"})  # unknown ignored, no crash
+        sport.lineup_slots_enabled = False
+        sport.save()
+        self.assertEqual(svc.selection_slots(self.lineup), {})
+        self.assertEqual(self.slot_of(self.bob), "line1.c")  # kept in the database
+        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk])  # saving without slots still works
+        self.assertEqual(self.slot_of(self.bob), "line1.c")
+        self.assertEqual(svc.slot_label(self.TEMPLATE, "line1.c"), "Line 1 · C")
+        self.assertEqual(svc.slot_label(self.TEMPLATE, "x.y"), "")
 
     # --- dropouts ---------------------------------------------------------------------------------------------------
 

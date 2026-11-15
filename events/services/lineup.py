@@ -1,4 +1,9 @@
-"""A game's selection ("line-up"): a plain yes/no pick per player (``LineupSelection``), no lines or slots.
+"""A game's selection ("line-up"): a yes/no pick per player (``LineupSelection``), optionally placed in a slot ("line").
+
+Slots exist only when the club's sport has them switched on by a platform admin (``Sport.lineup_slots_enabled`` with a
+``lineup_template``); a slot is stored as ``"<group key>.<slot key>"``, one player per slot, only for picked players. They are
+informational only: they never change attendance and are never used for statistics. Unknown slot values (template edited,
+feature switched off later) are ignored when reading (``selection_slots``).
 
 Ported from the old app's ``events.services.lineup`` (and the rules its coach screens / app API enforced):
 
@@ -23,6 +28,7 @@ from django.utils import timezone
 from django_tenants.utils import get_public_schema_name, get_tenant_model
 
 from events.models import Attendance, Event, Lineup, LineupSelection, Season
+from club.lineup_template import slot_keys
 from members.models import Member
 from members.services import audit
 from members.services.access import can_manage_attendance
@@ -186,9 +192,12 @@ def toggle_selection(actor, lineup, member) -> bool:
 
 
 @transaction.atomic
-def set_selection(actor, lineup, member_ids) -> set:
+def set_selection(actor, lineup, member_ids, slots=None) -> set:
     """Replace the whole pick with ``member_ids``. Newly picked ids must be available roster players (otherwise nothing
-    is saved, ``Invalid`` on ``member_ids``); keeping an existing pick is always fine. Returns the selected ids."""
+    is saved, ``Invalid`` on ``member_ids``); keeping an existing pick is always fine. Returns the selected ids.
+
+    ``slots`` (``{member_id: slot key}``) replaces the slot assignments; ``None`` leaves them as they are. It needs the sport's
+    slots switched on (else ``Invalid`` unless empty); every slot must exist in the template, be used once and belong to a picked player."""
     require_lineup_manager(actor, lineup.event)
     Lineup.objects.select_for_update().filter(pk=lineup.pk).first()
     wanted = {_as_uuid(member_id) for member_id in member_ids}
@@ -196,9 +205,70 @@ def set_selection(actor, lineup, member_ids) -> set:
     invalid = wanted - current - _pickable_ids(lineup)
     if invalid:
         raise Invalid("Some of these players cannot be selected.", {"member_ids": sorted(str(i) for i in invalid)})
+    assigned = _checked_slots(slots, wanted) if slots is not None else None
+    before = dict(LineupSelection.objects.filter(lineup=lineup).exclude(slot="").values_list("member_id", "slot"))
     LineupSelection.objects.filter(lineup=lineup, member_id__in=current - wanted).delete()
     LineupSelection.objects.bulk_create([LineupSelection(lineup=lineup, member_id=member_id) for member_id in wanted - current])
+    if assigned is not None:
+        LineupSelection.objects.filter(lineup=lineup).exclude(slot="").update(slot="")  # clear first so players can swap slots
+        for member_id, slot in assigned.items():
+            LineupSelection.objects.filter(lineup=lineup, member_id=member_id).update(slot=slot)
+        if {str(k): v for k, v in before.items() if k in wanted} != {str(k): v for k, v in assigned.items()}:
+            audit.record(actor, "lineup.slots_changed", target=lineup, changes={"slots": {str(k): v for k, v in assigned.items()}})
     return wanted
+
+
+def _checked_slots(slots, picked) -> dict:
+    """Validate a ``{member_id: slot}`` map against the sport's template and the picked ids; blank slots are dropped."""
+    given = {}
+    for member_id, slot in (slots or {}).items():
+        slot = (slot or "").strip()
+        if slot:
+            given[_as_uuid(member_id)] = slot
+    if not given:
+        return {}
+    enabled, template = slots_config()
+    if not enabled:
+        _fail("slots", "Line-up lines are not switched on for this sport.")
+    valid = slot_keys(template)
+    if any(slot not in valid for slot in given.values()):
+        _fail("slots", "Unknown line-up slot.")
+    if len(set(given.values())) != len(given):
+        _fail("slots", "A slot can hold only one player.")
+    if set(given) - set(picked):
+        _fail("slots", "Only picked players can have a slot.")
+    return given
+
+
+def slots_config(club=None) -> tuple[bool, list]:
+    """``(enabled, template)`` of the current club's sport (switched on only by platform admins)."""
+    from club.models import Sport
+
+    club = club or current_club()
+    sport = Sport.objects.filter(pk=club.sport_id).first() if club is not None and club.sport_id else None
+    if sport is None or not sport.lineup_slots_enabled or not isinstance(sport.lineup_template, list):
+        return False, []
+    return True, sport.lineup_template
+
+
+def selection_slots(lineup, config=None) -> dict:
+    """``{member_id: slot key}`` of the picked players with a slot that exists in the sport's current template (else empty)."""
+    enabled, template = config if config is not None else slots_config()
+    if not enabled or lineup is None or lineup.pk is None:
+        return {}
+    valid = slot_keys(template)
+    return {m: slot for m, slot in LineupSelection.objects.filter(lineup=lineup).exclude(slot="").values_list("member_id", "slot") if slot in valid}
+
+
+def slot_label(template, slot) -> str:
+    """"Line 1 · C" for a slot key of ``template`` ("" when unknown)."""
+    group_key, _dot, key = (slot or "").partition(".")
+    for g in template if isinstance(template, list) else []:
+        if g.get("key") == group_key:
+            for sl in g.get("slots") or []:
+                if sl.get("key") == key:
+                    return f"{g.get('label', '')} · {sl.get('label', '')}"
+    return ""
 
 
 def _as_uuid(value):

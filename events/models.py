@@ -494,11 +494,17 @@ class LineupSelection(UUIDModel):
 
     lineup = models.ForeignKey(Lineup, on_delete=models.CASCADE, related_name="selections", verbose_name=_("line-up"))
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="lineup_selections", verbose_name=_("member"))
+    slot = models.CharField(
+        _("slot"), max_length=100, blank=True, help_text=_('Optional place in the sport\'s line-up template: "<group key>.<slot key>". Informational only (never used for statistics).')
+    )
 
     class Meta:
         verbose_name = _("line-up selection")
         verbose_name_plural = _("line-up selections")
-        constraints = [models.UniqueConstraint(fields=["lineup", "member"], name="unique_selection_per_lineup_per_member")]
+        constraints = [
+            models.UniqueConstraint(fields=["lineup", "member"], name="unique_selection_per_lineup_per_member"),
+            models.UniqueConstraint(fields=["lineup", "slot"], condition=~models.Q(slot=""), name="unique_slot_per_lineup"),
+        ]
 
     def __str__(self):
         return f"{self.lineup} - {self.member}"
