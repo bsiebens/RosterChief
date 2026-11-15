@@ -26,7 +26,7 @@
     const past = $derived(new Date(ev.start).getTime() < Date.now());
     const series = $derived(ev.series ? describeRecurrence(ev.series.recurrence, ev.series.description) : '');
     const mapsHref = $derived(ev.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([ev.location.name, ev.location.city].filter(Boolean).join(', '))}` : '');
-    const calendarHref = $derived(data.coachView ? '/coach?tab=calendar' : '/calendar');
+    const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}` : '/calendar');
 
     const tabs = $derived([
         {key: 'overview', label: t('events.tab.overview')},

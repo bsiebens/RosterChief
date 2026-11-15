@@ -131,7 +131,7 @@
 
 <div class="grid w-full max-w-4xl min-w-0 gap-3">
 	<div class="flex items-center justify-between gap-2">
-		<a class="btn btn-outline min-h-11 gap-2" href="/coach?tab=calendar"><ArrowLeft size={16} aria-hidden="true" />{t('shell.nav.events')}</a>
+		<a class="btn btn-outline min-h-11 gap-2" href="/coach?tab=calendar&team={data.event.teams.map((team) => team.id).join(',')}"><ArrowLeft size={16} aria-hidden="true" />{t('shell.nav.events')}</a>
 		<a class="link-more" href="/calendar/events/{data.event.id}?view=coach">{t('coach.event_details')} →</a>
 	</div>
 

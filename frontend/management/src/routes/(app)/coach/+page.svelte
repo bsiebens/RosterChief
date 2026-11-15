@@ -11,9 +11,11 @@
 	import CoachToday from '#lib/components/coach/CoachToday.svelte';
 
 	let { data } = $props();
-	let selected = $state(page.url.searchParams.get('team') ?? '');
+	// `?team=` may list several teams (the teams of the event the coach is coming back from): the first one this coach is staff of is shown.
+	const preferred = (page.url.searchParams.get('team') ?? '').split(',').filter(Boolean);
+	let selected = $state('');
 	const teams = $derived(data.coach.teams);
-	const activeTeam = $derived(teams.find((team) => team.id === selected) ?? teams[0]);
+	const activeTeam = $derived(teams.find((team) => team.id === selected) ?? teams.find((team) => preferred.includes(team.id)) ?? teams[0]);
 	const events = $derived(data.coach.events.filter((event) => !activeTeam || event.team_ids.includes(activeTeam.id)));
 	const roster = $derived(data.rosters.find((team) => team.id === activeTeam?.id) ?? null);
 	// Coaches see their own drafts and published items; the list the API gives (null when it failed) falls back to the published items of the home payload.
