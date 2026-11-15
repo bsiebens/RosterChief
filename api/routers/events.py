@@ -704,7 +704,16 @@ def event_attendance(request, event_id: uuid.UUID):
         "checked_in": sum(1 for a in rows if a.showed_up is True),
         "no_shows": sum(1 for a in rows if a.showed_up is False and a.status in ("present", "selected")),
         "rows": [_attendance_row(a, manager=manager, roster=roster, selected=selected, latest=latest) for a in rows],
+        "blocked": _blocked(event) if manager else [],
     }
+
+
+def _blocked(event) -> list[dict]:
+    found = attendance_svc.blocked_members(event)
+    if not found:
+        return []
+    people = Member.objects.filter(pk__in=found).order_by("last_name", "first_name")
+    return [{"member_id": m.pk, "first_name": m.first_name, "last_name": m.last_name, "requirements": found[m.pk]} for m in people]
 
 
 @router.get("/{event_id}/attendance/{member_id}/history", response=list[AttendanceChangeOut], summary="Who changed a member's answer, when (newest first)", operation_id="event_attendance_history")

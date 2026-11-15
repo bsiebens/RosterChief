@@ -20,7 +20,7 @@ from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
 from events.models import Attendance, Event, EventAttachment, EventSeries, EventTask, Lineup, Location, Season
 from events.services import event_notifications as notices
-from members.models import AuditEntry, Group, GroupMembership, Member
+from members.models import AuditEntry, Family, FamilyMembership, Group, GroupMembership, Member
 from members.services import access
 from notifications.models import InboxNotification
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -393,6 +393,18 @@ class EventsApiTests(TestCase):
         self.assertIn("later occurrences", InboxNotification.objects.filter(user=self.p1.user, title="Rescheduled: Run").get().body)
         with self.assertRaises(ValueError):
             notices.notify_event_changed(e, "exploded")
+
+    def test_event_invitation_reaches_other_guardian_for_child_without_login(self):
+        family = Family.objects.create(name="Family")
+        FamilyMembership.objects.create(family=family, member=self.head, role=FamilyMembership.FamilyRole.PARENT)
+        FamilyMembership.objects.create(family=family, member=self.bcoach, role=FamilyMembership.FamilyRole.GUARDIAN)
+        FamilyMembership.objects.create(family=family, member=self.p2, role=FamilyMembership.FamilyRole.CHILD)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.call("post", "/events", self.head.user, self.body(title="Family practice"))
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(self.inbox(self.head), [])
+        self.assertEqual(self.inbox(self.bcoach), ["For Bob: New event: Family practice"])
 
     # -- attendance --
 

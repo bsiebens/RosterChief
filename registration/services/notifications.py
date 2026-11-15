@@ -5,13 +5,14 @@ fails the registration. No account is created and no notification preferences ap
 
 import logging
 import re
+from decimal import Decimal
 
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
 
 from registration.models import RegistrationBatch
-from registration.services import config, invoicing
+from registration.services import config, installments, invoicing
 from rosterchief.mail import send_message
 from shop.services.emails import _logo_url, branding, money
 from shop.services.invoices import PDFUnavailable
@@ -44,6 +45,7 @@ TEXTS = {
             "intro_confirmed": "Your registration for {season} is confirmed. Your invoice number is {number}; the invoice itself follows separately.",
             "total": "Total",
             "due": "Please pay before {due}.",
+            "installments": "Instalment schedule",
             "early": "Pay on or before {deadline} and {person} pays {fee} instead.",
             "how_to_pay": "How to pay",
             "button": "Follow your registration",
@@ -74,6 +76,7 @@ TEXTS = {
             "intro_confirmed": "Je inschrijving voor {season} is bevestigd. Je factuurnummer is {number}; de factuur zelf volgt apart.",
             "total": "Totaal",
             "due": "Gelieve te betalen voor {due}.",
+            "installments": "Betalingsschema",
             "early": "Betaal op of voor {deadline} en {person} betaalt {fee} in plaats daarvan.",
             "how_to_pay": "Hoe betalen",
             "button": "Volg je inschrijving",
@@ -104,6 +107,7 @@ TEXTS = {
             "intro_confirmed": "Votre inscription pour {season} est confirmée. Votre numéro de facture est {number} ; la facture elle-même suit séparément.",
             "total": "Total",
             "due": "Merci de payer avant le {due}.",
+            "installments": "Échéancier",
             "early": "Payez au plus tard le {deadline} et {person} paie {fee} au lieu de cela.",
             "how_to_pay": "Comment payer",
             "button": "Suivre votre inscription",
@@ -193,6 +197,18 @@ def invoice_lines(batch: RegistrationBatch, labels: dict) -> list[dict]:
 
 def invoice_context(batch: RegistrationBatch, club, labels: dict | None = None) -> dict:
     labels = labels or {"order_discount": TEXTS["en"]["invoice"]["order_discount"], "credit": TEXTS["en"]["invoice"]["credit"]}
+    if history := batch.legacy_invoice_history:
+        lines = [
+            {"title": line["member"], "sub": line["description"], "amount": money(Decimal(line["price"]) - Decimal(line["discount_amount"])), "negative": False}
+            for line in history["lines"] if not line.get("excluded_from_invoice")
+        ]
+        discount = Decimal(history["manual_discount_amount"])
+        return {
+            "club": club, "batch": batch, "lines": lines, "unused_credit": "",
+            "discount": money(discount) if discount else "", "discount_note": batch.manual_discount_note,
+            "total": money(Decimal(history["total"])), "early": [],
+            "payment_instructions": config.get_settings().payment_instructions, "installments": [],
+        }
     credit_total, credit_applied = invoicing.credits(batch)
     unused_credit = credit_total - credit_applied
     early = [
@@ -204,6 +220,7 @@ def invoice_context(batch: RegistrationBatch, club, labels: dict | None = None) 
         "club": club, "batch": batch, "lines": invoice_lines(batch, labels), "unused_credit": money(unused_credit) if unused_credit > 0 else "",
         "discount": money(batch.manual_discount_amount) if batch.manual_discount_amount else "", "discount_note": batch.manual_discount_note,
         "total": money(invoicing.total(batch)), "early": early, "payment_instructions": config.get_settings().payment_instructions,
+        "installments": [{"due_date": due_date, "amount": money(amount)} for due_date, amount in installments.invoice_amounts(batch)],
     }  # fmt: skip
 
 
@@ -251,6 +268,7 @@ def _send_confirmed(batch_id, *, attach: bool) -> bool:
             "discount_note": base["discount_note"],
             "total": base["total"],
             "due": bool(batch.invoice_due_date),
+            "installments": base["installments"],
             "how_to_pay": base["payment_instructions"],
             "status_url": status_url(club, batch.status_token),
         }

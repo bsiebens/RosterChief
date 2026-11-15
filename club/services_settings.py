@@ -7,6 +7,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from PIL import Image
 
 from club.models import Club
 from members.services import audit
@@ -22,6 +23,7 @@ FIELDS = TEXT_FIELDS + COLOR_FIELDS
 def settings_out(club: Club) -> dict:
     data = {name: str(getattr(club, name) or "") for name in FIELDS}
     data["logo_url"] = club.logo.url if club.logo else None
+    data["event_background_url"] = club.event_background.url if club.event_background else None
     return data
 
 
@@ -67,25 +69,30 @@ def update_settings(actor, club: Club, values: dict) -> Club:
     return club
 
 
-@transaction.atomic
-def set_logo(actor, club: Club, image) -> Club:
-    """Replace the club logo (JPEG, PNG or WebP up to 5 MB, verified by decoding). ``Club.save`` regenerates the icons."""
-    from PIL import Image, UnidentifiedImageError
-
-    require_settings(actor)
+def _image_extension(image, label: str) -> str:
     if image.size > MAX_PHOTO_BYTES:
-        raise Invalid("The logo is larger than 5 MB.", {"file": ["The logo is larger than 5 MB."]})
+        message = f"The {label} is larger than 5 MB."
+        raise Invalid(message, {"file": [message]})
     try:
         with Image.open(image) as img:
             fmt = img.format
             img.verify()
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as e:
+    except (Image.DecompressionBombError, OSError, SyntaxError, ValueError) as e:
         raise Invalid("This is not a valid image.", {"file": ["This is not a valid image."]}) from e
     if fmt not in PHOTO_FORMATS:
-        raise Invalid("Use a JPEG, PNG or WebP logo.", {"file": ["Use a JPEG, PNG or WebP logo."]})
+        message = f"Use a JPEG, PNG or WebP {label}."
+        raise Invalid(message, {"file": [message]})
     image.seek(0)
+    return PHOTO_FORMATS[fmt]
+
+
+@transaction.atomic
+def set_logo(actor, club: Club, image) -> Club:
+    """Replace the club logo (JPEG, PNG or WebP up to 5 MB). ``Club.save`` regenerates the icons."""
+    require_settings(actor)
+    extension = _image_extension(image, "logo")
     old = club.logo.name if club.logo else ""
-    club.logo.save(f"logo-{uuid.uuid4().hex[:12]}.{PHOTO_FORMATS[fmt]}", image, save=False)
+    club.logo.save(f"logo-{uuid.uuid4().hex[:12]}.{extension}", image, save=False)
     club.save(update_fields=["logo", "modified"])
     if old:
         club.logo.storage.delete(old)
@@ -104,4 +111,32 @@ def remove_logo(actor, club: Club) -> Club:
     club.save(update_fields=["logo", "modified"])
     storage.delete(old)
     audit.record(actor, "club.logo_changed", target=club, changes={"logo": {"from": True, "to": False}}, target_label=club.name)
+    return club
+
+
+def update_event_background(actor, club: Club, image=None) -> Club:
+    """Replace or remove the club's event image without discarding it before commit."""
+    require_settings(actor)
+    extension = _image_extension(image, "event background") if image is not None else None
+    storage = Club._meta.get_field("event_background").storage
+    uploaded = None
+    try:
+        with transaction.atomic():
+            club = Club.objects.select_for_update().get(pk=club.pk)
+            old = club.event_background.name or ""
+            if extension:
+                club.event_background.save(f"background-{uuid.uuid4().hex[:12]}.{extension}", image, save=False)
+                uploaded = club.event_background.name
+            elif old:
+                club.event_background = ""
+            else:
+                return club
+            club.save(update_fields=["event_background", "modified"])
+            audit.record(actor, "club.event_background_changed", target=club, changes={"event_background": {"from": old, "to": uploaded or ""}}, target_label=club.name)
+            if old:
+                transaction.on_commit(lambda: storage.delete(old), robust=True)
+    except Exception:
+        if uploaded:
+            storage.delete(uploaded)
+        raise
     return club

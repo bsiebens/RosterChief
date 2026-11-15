@@ -71,6 +71,8 @@ class RosterEntryOut(Schema):
     jersey_number: int | None = None
     is_captain: bool
     is_alternate_captain: bool
+    #: Names of the open requirements that keep this player out of some events (only for those who manage the team).
+    open_requirements: list[str] = []
 
 
 class StaffEntryOut(Schema):

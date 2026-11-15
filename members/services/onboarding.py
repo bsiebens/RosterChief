@@ -381,15 +381,15 @@ def reopen(actor, membership: ClubMembership, requirement: OnboardingRequirement
 # --- gating ---------------------------------------------------------------------------------------------------------
 
 
-def blocked_member_ids(groups: dict[tuple[str, object], set]) -> dict[tuple[str, object], set]:
-    """Who may not be invited to / selected for an event because of an open requirement.
+def blocking_reasons(groups: dict[tuple[str, object], set]) -> dict[tuple[str, object], dict]:
+    """Who may not be invited to / selected for an event because of an open requirement, and which ones.
 
-    ``groups`` maps ``(event kind, season id)`` to the member ids to check; the result maps the same keys to the blocked
-    subset. A member is blocked when, in that season, an *active* requirement that lists the kind in ``blocked_event_kinds``
-    is open for them (missing, or completed but expired). A member with no membership that season has no checklist and is
-    never blocked. Costs two queries, none when no requirement blocks anything."""
-    blocking = list(OnboardingRequirement.objects.filter(is_active=True).exclude(blocked_event_kinds=[]))
-    result = {key: set() for key in groups}
+    ``groups`` maps ``(event kind, season id)`` to the member ids to check; the result maps the same keys to ``{member id: [names of the open
+    requirements that block]}`` for the blocked ones only. A member is blocked when, in that season, an *active* requirement that lists the kind
+    in ``blocked_event_kinds`` is open for them (missing, or completed but expired). A member with no membership that season has no checklist and
+    is never blocked. Costs two queries, none when no requirement blocks anything. A kind of ``None`` means any kind: every blocking requirement counts."""
+    blocking = list(OnboardingRequirement.objects.filter(is_active=True).exclude(blocked_event_kinds=[]).order_by("name"))
+    result = {key: {} for key in groups}
     if not blocking or not groups:
         return result
     today = timezone.localdate()
@@ -398,13 +398,19 @@ def blocked_member_ids(groups: dict[tuple[str, object], set]) -> dict[tuple[str,
     memberships = {(m.member_id, m.season_id): m.pk for m in ClubMembership.objects.filter(season_id__in=seasons, member_id__in=members)}
     statuses: dict[tuple, MemberRequirementStatus] = {(s.membership_id, s.requirement_id): s for s in MemberRequirementStatus.objects.filter(membership_id__in=memberships.values(), requirement__in=blocking)}
     for (kind, season), member_ids in groups.items():
-        needed = [r for r in blocking if kind in r.blocked_event_kinds]
+        needed = [r for r in blocking if kind is None or kind in r.blocked_event_kinds]
         if not needed or not season:
             continue
         for member_id in member_ids:
             membership_id = memberships.get((member_id, season))
             if membership_id is None:
                 continue
-            if any(not item_for(r, statuses.get((membership_id, r.pk)), today).resolved for r in needed):
-                result[(kind, season)].add(member_id)
+            open_names = [r.name for r in needed if not item_for(r, statuses.get((membership_id, r.pk)), today).resolved]
+            if open_names:
+                result[(kind, season)][member_id] = open_names
     return result
+
+
+def blocked_member_ids(groups: dict[tuple[str, object], set]) -> dict[tuple[str, object], set]:
+    """The members of ``blocking_reasons`` only: who may not be invited to / selected for an event because of an open requirement."""
+    return {key: set(found) for key, found in blocking_reasons(groups).items()}

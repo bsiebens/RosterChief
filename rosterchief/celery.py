@@ -33,6 +33,7 @@ app.conf.beat_schedule = {
     # Mondays 02:00.
     "events-create-missing-seasons": {"task": "events.create_missing_seasons", "schedule": crontab(hour=2, minute=0, day_of_week=1)},
     "events-publish-scheduled-lineups": {"task": "events.publish_scheduled_lineups", "schedule": crontab()},  # every minute
+    "events-notify-officiating-opportunities": {"task": "events.notify_officiating_opportunities", "schedule": crontab(minute="*/10")},
     "news-notify-due-news": {"task": "news.notify_due_news", "schedule": crontab()},  # every minute
     "formbuilder-notify-due-sends": {"task": "formbuilder.notify_due_sends", "schedule": crontab()},  # every minute: scheduled sends opening
     "formbuilder-send-form-reminders": {"task": "formbuilder.send_form_reminders", "schedule": crontab(minute=10)},  # hourly

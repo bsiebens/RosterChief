@@ -107,7 +107,7 @@ def get_page(request):
     return {
         "club": _brand(request.tenant), "is_open": settings.is_open and bool(products), "intro_text": settings.intro_text, "terms_text": settings.terms_text, "products": products,
         "teams": [{"id": t.pk, "name": t.name} for t in Team.objects.order_by("name")], "positions": [{"id": p.pk, "name": p.name} for p in Position.objects.filter(staff_position=False).order_by("ordering", "name")],
-        "max_entries": submission.MAX_ENTRIES,
+        "max_entries": submission.MAX_ENTRIES, "installment_offsets": settings.installment_offsets,
     }  # fmt: skip
 
 
@@ -178,7 +178,10 @@ def submit(request, payload: RegistrationIn):
         return limited
     if payload.website.strip():
         return 201, {"token": secrets.token_urlsafe(32)}
-    batch = submission.submit_registration(request.tenant, contact=payload.contact.dict(), entries=_entries(payload.entries), language=_language(request, payload.language), features=getattr(request, "features", None))
+    batch = submission.submit_registration(
+        request.tenant, contact=payload.contact.dict(), entries=_entries(payload.entries), language=_language(request, payload.language),
+        features=getattr(request, "features", None), use_installments=payload.use_installments,
+    )  # fmt: skip
     return 201, {"token": batch.status_token}
 
 

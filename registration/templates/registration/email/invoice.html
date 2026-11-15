@@ -9,7 +9,9 @@
           {% if discount %}<tr><td style="padding:8px 0;color:#b91c1c;">{{ t.discount }}{% if discount_note %}: {{ discount_note }}{% endif %}</td><td align="right" style="padding:8px 0;color:#b91c1c;white-space:nowrap;">-{{ discount }}</td></tr>{% endif %}
           <tr><td style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;">{{ t.total }}</td><td align="right" style="padding:12px 0 4px;border-top:2px solid #0f172a;font-weight:700;color:#0f172a;white-space:nowrap;">{{ total }}</td></tr>
         </table>
-        {% if due %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.due }}</p>{% endif %}
+        {% if installments %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.installments }}</p>
+        {% for row in installments %}<p style="margin:6px 0 0;font-size:13px;">{{ row.due_date|date:"d/m/Y" }} · {{ row.amount }}</p>{% endfor %}
+        {% elif due %}<p style="margin:12px 0 0;font-size:14px;color:#0f172a;font-weight:600;">{{ t.due }}</p>{% endif %}
         {% for line in t.early_lines %}<p style="margin:6px 0 0;font-size:13px;color:#15803d;">{{ line }}</p>{% endfor %}
       </td></tr>
       {% if how_to_pay %}

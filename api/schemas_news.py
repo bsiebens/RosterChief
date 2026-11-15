@@ -34,6 +34,7 @@ class NewsListItem(Schema):
     created: datetime.datetime
     created_by: NewsPersonOut | None = None
     team_ids: list[uuid.UUID]
+    teams: list[NewsTeamOut]
     main_photo_url: str | None = None
     can_edit: bool
 
@@ -45,7 +46,6 @@ class NewsDetail(NewsListItem):
     body_html: str
     notified_at: datetime.datetime | None = None
     photos: list[NewsPhotoOut]
-    teams: list[NewsTeamOut]
     can_publish: bool
     can_delete: bool
 

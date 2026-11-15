@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 from django.core.cache import cache
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from django_tenants.utils import schema_context
 
@@ -189,7 +189,7 @@ def ijnl_game_data(state="live", home="2", away="1"):
 # -- RBIHF ---------------------------------------------------------------------------------------------------------------
 
 
-class RBIHFPastGamesTests(TestCase):
+class RBIHFPastGamesTests(SimpleTestCase):
     """The played-games table of a team page is only read with include_past."""
 
     def page(self):
@@ -218,7 +218,7 @@ class RBIHFPastGamesTests(TestCase):
         self.assertEqual(played.opponent_name, "Amsterdam Tigers")
 
 
-class RBIHFParseTests(TestCase):
+class RBIHFParseTests(SimpleTestCase):
     """Pure parsing: no network, no database."""
 
     def test_parses_team_name_and_fixtures(self):
@@ -393,7 +393,7 @@ class RBIHFImportPlanTests(ClubTestBase):
 # -- DFEL ---------------------------------------------------------------------------------------------------------------
 
 
-class DFELTests(TestCase):
+class DFELTests(SimpleTestCase):
     def test_extract_ids(self):
         for url in ["https://ehv-nrw.de/leagues/team/70779/21691/", "https://www.ehv-nrw.de/leagues/team/70779/21691", "  https://ehv-nrw.de/leagues/team/70779/21691/  "]:
             with self.subTest(url=url):
@@ -500,7 +500,7 @@ class DFELImportPlanTests(ClubTestBase):
 # -- IJNL ---------------------------------------------------------------------------------------------------------------
 
 
-class IJNLTests(TestCase):
+class IJNLTests(SimpleTestCase):
     def test_extract_ids(self):
         for url in [IJNL_URL, "https://ijshockey.nl/competities/team/64414/?seizoen=2026/27", f"  {IJNL_URL}  "]:
             with self.subTest(url=url):

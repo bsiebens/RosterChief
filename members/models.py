@@ -346,9 +346,12 @@ class FeePayment(UUIDModel):
         BANK_TRANSFER = "bank_transfer", _("bank transfer")
         CASH = "cash", _("cash")
         CARD = "card", _("card")
+        VOUCHER = "voucher", _("voucher")
         OTHER = "other", _("other")
 
     membership = models.ForeignKey(ClubMembership, on_delete=models.CASCADE, related_name="payments", verbose_name=_("membership"))
+    #: For ``method="voucher"``: the shop voucher the amount was taken from (given back when the payment is deleted).
+    voucher = models.ForeignKey("shop.Voucher", on_delete=models.PROTECT, null=True, blank=True, related_name="fee_payments", verbose_name=_("voucher"))
     amount = models.DecimalField(_("amount"), max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     method = models.CharField(_("method"), max_length=20, choices=Method.choices, default=Method.BANK_TRANSFER)
     reference = models.CharField(_("reference"), max_length=255, blank=True, help_text=_("Bank reference, transaction id — whatever lets you find this again."))

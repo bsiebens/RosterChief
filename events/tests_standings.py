@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from unittest import mock
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import SimpleTestCase
 from django_tenants.utils import schema_context
 
 from club.services import create_club
@@ -54,7 +54,7 @@ def standings_rows(standings, competition=0):
     return [(row["position"], row["team_name"], row["played"], row["points"]) for row in standings["competitions"][competition]["rows"]]
 
 
-class RBIHFStandingsParsingTests(TestCase):
+class RBIHFStandingsParsingTests(SimpleTestCase):
     PLAYED = [
         ("816", "4448", "Antwerp", "4450", "Sharks", "3-6"),
         ("823", "4445", "Haskey", "4443", "Bulldogs", "9-1"),

@@ -13,7 +13,8 @@ from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
 from events.models import Season
-from members.models import AuditEntry, Member
+from members.models import AuditEntry, ClubMembership, Member
+from members.services.errors import Invalid
 from teams.models import NumberPool, NumberReservation, Position, StaffAssignment, Team, TeamMembership
 
 BASE = "/api/v1/teams"
@@ -63,6 +64,10 @@ class TeamsApiTests(TestCase):
             cls.peer = Member.objects.create(first_name="Pat", last_name="Peer", email="peer@tm.test", date_of_birth=datetime.date(2014, 6, 1))
             cls.nodob = Member.objects.create(first_name="Nod", last_name="Ob", email="nodob@tm.test")
             cls.coach = Member.objects.create(first_name="Coach", last_name="Test", email="coach@tm.test")
+            # Only people with an active membership in the season can be put on a roster or a staff.
+            for person in (cls.kid, cls.teen, cls.peer, cls.nodob, cls.coach):
+                for season in (cls.season, cls.old_season):
+                    ClubMembership.objects.create(member=person, season=season, status=ClubMembership.StatusChoices.ACTIVE)
         cls.coach_user, _ = grant_login(cls.club, cls.coach)
         cls.owner = type(cls.owner).objects.get(pk=cls.owner.pk)
 
@@ -128,15 +133,27 @@ class TeamsApiTests(TestCase):
         Image.new("RGB", (8, 6), "red").save(buf, "PNG")
         return buf.getvalue()
 
-    def test_add_people(self):
-        from members.services import memberships
+    def test_lapsed_members_cannot_be_added_to_a_team_or_a_group(self):
+        from members.models import Group
+        from members.services import groups
 
         with schema_context(self.club.schema_name):
-            for m in (self.kid, self.teen, self.peer, self.coach):
-                ms = memberships.create_membership(self.owner, m, self.season)
-                memberships.set_fee_waived(self.owner, ms)
-                memberships.activate(self.owner, ms)
-            memberships.create_membership(self.owner, self.nodob, self.season)  # pending: not allowed
+            ClubMembership.objects.filter(member__in=(self.kid, self.coach), season=self.season).update(status=ClubMembership.StatusChoices.LAPSED)
+            group = Group.objects.create(name="Parents")
+        r = self.roster_add(self.u12, self.kid, season_id=str(self.season.pk))
+        self.assertEqual(r.status_code, 422, r.content)
+        self.assertIn("member_id", r.json()["errors"])
+        r = self.admin("post", f"/{self.u12.pk}/staff", {"member_id": str(self.coach.pk), "position_id": str(self.coach_pos.pk), "season_id": str(self.season.pk)})
+        self.assertEqual(r.status_code, 422, r.content)
+        with schema_context(self.club.schema_name):
+            with self.assertRaises(Invalid):
+                groups.add_member(self.owner, group, self.kid)
+            groups.add_member(self.owner, group, self.teen)  # active: fine
+        self.assertEqual(self.roster_add(self.u12, self.teen, season_id=str(self.season.pk)).status_code, 201)
+
+    def test_add_people(self):
+        with schema_context(self.club.schema_name):
+            ClubMembership.objects.filter(member=self.nodob, season=self.season).update(status=ClubMembership.StatusChoices.PENDING)  # pending: not allowed
         row = lambda m, pos, **kw: {"member_id": str(m.pk), "position_id": str(pos.pk) if pos else None, **kw}  # noqa: E731
         body = {
             "season_id": str(self.season.pk),

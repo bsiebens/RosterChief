@@ -43,7 +43,7 @@ class Club(TenantBase):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_("name"), max_length=100)
-    slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"])
+    slug = AutoSlugField(_("slug"), unique=True, populate_from=["name"], overwrite_on_add=False)
 
     sport = models.ForeignKey("club.Sport", verbose_name=_("sport"), null=True, on_delete=models.PROTECT, related_name="clubs")
 

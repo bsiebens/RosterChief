@@ -60,6 +60,13 @@ def add_member(actor, group: Group, member: Member, *, is_admin: bool = False, m
         require_admin(actor)
     if GroupMembership.objects.filter(group=group, member=member).exists():
         raise Invalid("This person is already in the group.")
+    # Parents and volunteers have no membership and may join; someone whose membership this season has lapsed or been cancelled may not.
+    from events.models import Season
+    from members.models import ClubMembership
+
+    season = Season.get_current()
+    if season and ClubMembership.objects.filter(member=member, season=season, status__in=[ClubMembership.StatusChoices.LAPSED, ClubMembership.StatusChoices.CANCELLED]).exists():
+        raise Invalid("This person's membership has lapsed, so they cannot be added to a group.", {"member_id": ["Membership lapsed or cancelled this season."]})
     link = GroupMembership.objects.create(group=group, member=member, is_admin=is_admin, must_respond=must_respond)
     audit.record(actor, "group.member_added", member=member, target=group, changes={"group": {"from": None, "to": group.name}})
     return link

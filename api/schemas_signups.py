@@ -97,6 +97,8 @@ class CancelOut(Schema):
 class PositionOpt(Schema):
     id: uuid.UUID
     name: str
+    #: A staff position (coach, manager, ...): placing a sign-up with it puts them on the team's staff, for volunteers.
+    staff: bool = False
 
 
 class SignupOptionsOut(Schema):

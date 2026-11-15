@@ -251,6 +251,10 @@ def _not_configured(provider: str) -> GatewayResult | None:
     return GatewayResult(FAILED, f"{provider} is not configured (missing {', '.join(status['missing'])})")
 
 
+def webpush_public_key() -> str:
+    return _env("DJANGO_VAPID_PUBLIC_KEY") if credentials_status("webpush")["configured"] else ""
+
+
 #: The browser vendors' push services. The endpoint is client-supplied and the server POSTs to it, so anything else is refused.
 ALLOWED_PUSH_HOSTS = frozenset({"fcm.googleapis.com", "web.push.apple.com"})
 ALLOWED_PUSH_HOST_SUFFIXES = (".push.services.mozilla.com", ".notify.windows.com")

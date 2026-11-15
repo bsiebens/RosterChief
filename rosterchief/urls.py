@@ -13,8 +13,6 @@ Class-based views
 Including another URLconf
     1. Import the include() function: from django.urls import include, path
 
-from api.api import api
-from controlpanel.api.urls import api as platform_api
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.conf import settings
@@ -23,12 +21,17 @@ from django.contrib import admin
 from django.urls import include, path
 
 from api.api import api
+from api.legacy.urls import api as legacy_public_api
 from controlpanel.api.urls import api as platform_api
+from rosterchief.health import health
 
 urlpatterns = [
+    path('healthz', health, name='health'),
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
+    path('_allauth/', include('club.headless')),
     path('_allauth/', include('allauth.headless.urls')),
+    path('api/v1/', legacy_public_api.urls),
     path('api/v1/', api.urls),
     path('api/platform/v1/', platform_api.urls),
     path('', include('members.urls')),  # private member photos (streamed after a permission check)

@@ -189,6 +189,28 @@ class RequirementsApiTests(TestCase):
         MemberRequirementStatus.objects.update(valid_until=timezone.localdate() - datetime.timedelta(days=1))  # expired: blocked again
         self.assertEqual(set(attendance.effective_members(game).values_list("pk", flat=True)), {self.bob.pk})
 
+    def test_blocked_people_are_shown_on_the_event_and_the_team_page(self):
+        from teams.models import Team, TeamMembership
+
+        def get(path):
+            return Client().get(f"/api/v1{path}", HTTP_HOST=self.host, HTTP_X_SESSION_TOKEN=login_session(self.owner))
+
+        req = self.requirement(name="Medical certificate", blocked_event_kinds=["game"])
+        team = Team.objects.create(name="Under 12", short_name="U12")
+        TeamMembership.objects.create(member=self.alice, team=team, season=self.season)
+        game = Event.objects.create(title="Game", kind="game", start=timezone.now() + datetime.timedelta(days=3), season=self.season)
+        game.teams.add(team)
+        training = Event.objects.create(title="Training", kind="training", start=timezone.now() + datetime.timedelta(days=3), season=self.season)
+        training.teams.add(team)
+        blocked = get(f"/events/{game.pk}/attendance").json()["blocked"]
+        self.assertEqual([(b["first_name"], b["requirements"]) for b in blocked], [("Alice", ["Medical certificate"])])
+        self.assertEqual(get(f"/events/{training.pk}/attendance").json()["blocked"], [])
+        roster = get(f"/teams/{team.pk}?season={self.season.pk}").json()["roster"]
+        self.assertEqual(roster[0]["open_requirements"], ["Medical certificate"])
+        self.complete(req)
+        self.assertEqual(get(f"/events/{game.pk}/attendance").json()["blocked"], [])
+        self.assertEqual(get(f"/teams/{team.pk}?season={self.season.pk}").json()["roster"][0]["open_requirements"], [])
+
     # -- reminders --
     def reminders(self, now=None):
         return requirement_reminders.send_due(now)

@@ -16,7 +16,7 @@ from django.utils import timezone
 from members.models import ClubMembership, Member
 from members.services import audit
 from members.services import memberships as fees
-from members.services.access import require_admin
+from members.services.access import require_finance
 from members.services.errors import Invalid
 from registration.models import RegistrationBatch, RegistrationDetails
 from registration.services import config, pricing
@@ -41,6 +41,8 @@ def awaiting_only_member_ids():
 
 
 def _editable(batch: RegistrationBatch) -> None:
+    if batch.legacy_invoice_history and not batch.details.exists():
+        raise Invalid("This imported invoice is available as read-only history.", code="legacy_invoice")
     if batch.cancelled_at:
         raise Invalid("This registration was cancelled.", {"__all__": ["This registration was cancelled."]}, code="cancelled")
     if batch.confirmed_at:
@@ -155,7 +157,8 @@ def reprice(actor, batch: RegistrationBatch, *, today: datetime.date | None = No
 @transaction.atomic
 def update_review(actor, batch: RegistrationBatch, *, lines=None, manual_discount_amount=None, manual_discount_note=None) -> RegistrationBatch:
     """Edit the review: ``lines`` = ``[{id, price (a number, or null to go back to the computed price), excluded}]`` (only the keys present change)."""
-    require_admin(actor)
+    require_finance(actor)
+    batch = RegistrationBatch.objects.select_for_update().get(pk=batch.pk)
     _editable(batch)
     by_id = {d.pk: d for d in batch.details.all()}
     errors = {}
@@ -263,15 +266,20 @@ def number_state(d: RegistrationDetails) -> str | None:
 def confirm_invoice(actor, batch: RegistrationBatch, *, due_date: datetime.date | None = None, send: bool = True) -> RegistrationBatch:
     """Number the invoice, set its due date, roster the requested teams and email the contact that the registration is confirmed (with the invoice PDF
     attached unless ``send`` is false). After this the memberships show up in the Sign-ups queue and the review can no longer be edited."""
-    require_admin(actor)
+    require_finance(actor)
+    batch = RegistrationBatch.objects.select_for_update().get(pk=batch.pk)
     _editable(batch)
     today = timezone.localdate()
+    batch.invoice_due_date = due_date or today + datetime.timedelta(days=config.get_settings().invoice_due_days)
+    if batch.installment_offsets and (datetime.date.max - batch.invoice_due_date).days < batch.installment_offsets[-1]:
+        raise Invalid("The instalment schedule would end beyond the last supported date.", {"due_date": ["Choose an earlier date."]})
     recompute(actor, batch)
     batch.invoice_number = _next_number(today)
-    batch.invoice_due_date = due_date or today + datetime.timedelta(days=config.get_settings().invoice_due_days)
     batch.confirmed_at = timezone.now()
     batch.save(update_fields=["invoice_number", "invoice_due_date", "confirmed_at", "modified"])
     batch.numbers_dropped = _place_requested_teams(actor, batch)  # read by the API response
+    for d in batch.details.select_related("membership"):
+        fees.sync_fee_status(d.membership)  # a fee of 0 (a volunteer, a credit line) is settled from now on
     for d in batch.details.select_related("member", "membership"):
         audit.record(actor, "registration.confirmed", member=d.member, target=batch, changes={"invoice_number": {"from": None, "to": batch.invoice_number}}, target_label=batch.invoice_number)
     from registration.services import notifications
@@ -292,7 +300,10 @@ def cancel_batch(actor, batch: RegistrationBatch) -> RegistrationBatch:
     """Turn the whole registration down. Each person who is nothing but this registration is removed together with the roster spot and family link
     it created; anyone else keeps their record and only the membership is cancelled (payments stay). The contact goes too when nothing else
     keeps them (no membership, login or other family member)."""
-    require_admin(actor)
+    require_finance(actor)
+    batch = RegistrationBatch.objects.select_for_update().get(pk=batch.pk)
+    if batch.legacy_invoice_history and not batch.details.exists():
+        raise Invalid("This imported invoice is available as read-only history.", code="legacy_invoice")
     if batch.cancelled_at:
         raise Invalid("This registration was cancelled.", {"__all__": ["Already cancelled."]}, code="cancelled")
     from members.models import Family
@@ -304,17 +315,17 @@ def cancel_batch(actor, batch: RegistrationBatch) -> RegistrationBatch:
         if m.status != ClubMembership.StatusChoices.PENDING:
             continue
         if _removable(m):
-            member_services.delete_member(actor, d.member)
+            member_services.delete_member(actor, d.member, authorized=True)
         else:
             if d.resulting_team_membership_id:
                 d.resulting_team_membership.delete()
-            fees.cancel(actor, m)
+            fees.cancel(actor, m, authorized=True)
     if contact is not None and Member.objects.filter(pk=contact.pk).exists() and not contact.user_id and not ClubMembership.objects.filter(member=contact).exists():
         families = list(Family.objects.filter(memberships__member=contact))
         if all(not f.memberships.exclude(member=contact).exists() for f in families):
             for f in families:
                 f.delete()
-            member_services.delete_member(actor, contact)
+            member_services.delete_member(actor, contact, authorized=True)
             batch.contact = None
     batch.cancelled_at = timezone.now()
     batch.save(update_fields=["cancelled_at", "modified"])

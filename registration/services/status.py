@@ -11,7 +11,7 @@ from members.services import memberships as fees
 from members.services import onboarding
 from members.services.errors import Invalid
 from registration.models import RegistrationBatch, RegistrationDetails
-from registration.services import invoicing
+from registration.services import installments, invoicing, payments
 
 UPLOAD_NOTE = "Uploaded by the registrant via the status page."
 ANSWER_NOTE = "Answered by the registrant via the status page."
@@ -30,6 +30,7 @@ def _fee(batch: RegistrationBatch, membership: ClubMembership) -> dict | None:
     return {
         "fee_amount": membership.fee_amount, "amount_paid": membership.amount_paid, "amount_due": fees.amount_due(membership), "remaining_balance": fees.remaining_balance(membership),
         "fee_status": membership.fee_status,
+        "payment_allows_activation": fees.payment_allows_activation(membership),
         "early_bird": {"deadline": membership.early_payment_deadline, "discount": discount, "fee_if_paid_in_time": max(membership.fee_amount - discount, 0), "applies": fees.discount_applies(membership)}
         if membership.early_payment_deadline and discount
         else None,
@@ -61,6 +62,16 @@ def invoice_summary(batch: RegistrationBatch) -> dict | None:
     discount and the total (see ``notifications.invoice_lines`` for the same structure on the invoice)."""
     if not batch.confirmed_at:
         return None
+    if history := batch.legacy_invoice_history:
+        return {
+            "lines": [
+                {"kind": "person", "name": line["member"], "description": line["description"],
+                 "amount": Decimal(line["price"]) - Decimal(line["discount_amount"])}
+                for line in history["lines"] if not line.get("excluded_from_invoice")
+            ],
+            "manual_discount_amount": Decimal(history["manual_discount_amount"]), "manual_discount_note": batch.manual_discount_note,
+            "credit_unused": Decimal(0), "total": Decimal(history["total"]),
+        }
     details = [d for d in batch.details.select_related("member") if not d.excluded]
     lines = [{"kind": "person", "name": str(d.member), "description": d.description, "amount": d.price} for d in details if not d.is_credit]
     lines += [{"kind": "order_discount", "name": row["name"], "description": "", "amount": -row["amount"], "percent": row["percent"]} for row in invoicing.order_discounts(batch)]
@@ -73,6 +84,7 @@ def invoice_summary(batch: RegistrationBatch) -> dict | None:
 
 
 def status_data(batch: RegistrationBatch) -> dict:
+    schedule, member_schedules = installments.batch_schedule(batch)
     people = []
     for d in batch.details.select_related("member", "membership", "requested_team", "requested_position"):
         items = onboarding.checklist_for(d.membership)
@@ -80,10 +92,21 @@ def status_data(batch: RegistrationBatch) -> dict:
             {
                 "member_id": d.member_id, "name": str(d.member), "entry_kind": d.entry_kind, "description": d.description, "requested_team": d.requested_team.name if d.requested_team else None,
                 "membership_status": d.membership.status, "is_credit": d.is_credit, "credit": (-d.price if d.is_credit else Decimal("0.00")) if batch.confirmed_at else None, "fee": _fee(batch, d.membership),
-                "checklist": [_checklist_row(i) for i in items],
+                "checklist": [_checklist_row(i) for i in items], "next_installment": installments.next_unpaid(member_schedules.get(d.membership_id, [])),
             }
         )  # fmt: skip
-    return {"status": batch.status, "season_name": batch.season.name, "submitted_at": batch.submitted_at, "invoice_number": batch.invoice_number, "invoice_due_date": batch.invoice_due_date, "invoice": invoice_summary(batch), "people": people}
+    return {
+        "status": batch.status,
+        "season_name": batch.season.name,
+        "submitted_at": batch.submitted_at,
+        "invoice_number": batch.invoice_number,
+        "invoice_due_date": batch.invoice_due_date,
+        "installment_offsets": batch.installment_offsets,
+        "installments": schedule,
+        "invoice": invoice_summary(batch),
+        "early_bird": payments.early_bird(batch),
+        "people": people,
+    }
 
 
 @transaction.atomic

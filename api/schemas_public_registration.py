@@ -70,6 +70,7 @@ class PublicRegistrationOut(Schema):
     teams: list[Ref]
     positions: list[Ref]
     max_entries: int
+    installment_offsets: list[int] = []
 
 
 class ContactIn(Schema):
@@ -106,6 +107,7 @@ class RegistrationIn(Schema):
     #: Honeypot: real visitors leave it empty (hidden field named ``website``); anything in it is silently dropped.
     website: str = ""
     language: str = ""
+    use_installments: bool = False
 
 
 class PreviewLine(Schema):
@@ -165,6 +167,7 @@ class FeeOut(Schema):
     amount_due: Decimal
     remaining_balance: Decimal
     fee_status: str
+    payment_allows_activation: bool
     early_bird: dict | None = None
 
 
@@ -192,6 +195,13 @@ class ChecklistOut(Schema):
     can_answer: bool = False
 
 
+class InstallmentOut(Schema):
+    due_date: datetime.date
+    amount: Decimal
+    remaining: Decimal
+    late: bool
+
+
 class PersonStatus(Schema):
     member_id: uuid.UUID
     name: str
@@ -206,6 +216,7 @@ class PersonStatus(Schema):
     credit: Decimal | None = None
     #: Only once the invoice is confirmed.
     fee: FeeOut | None = None
+    next_installment: InstallmentOut | None = None
     checklist: list[ChecklistOut]
 
 
@@ -233,6 +244,16 @@ class InvoiceSummary(Schema):
     total: Decimal
 
 
+class EarlyBirdOut(Schema):
+    """The early-bird discount, only while it still applies: pay before ``deadline`` and ``discount`` comes off. ``amount_due`` is the invoice total
+    with the discount, ``balance`` what is still open."""
+
+    deadline: datetime.date
+    discount: Decimal
+    amount_due: Decimal
+    balance: Decimal
+
+
 class StatusOut(Schema):
     #: awaiting (under review) / confirmed / cancelled
     status: str
@@ -242,6 +263,9 @@ class StatusOut(Schema):
     invoice_due_date: datetime.date | None = None
     #: Only once the invoice is confirmed.
     invoice: InvoiceSummary | None = None
+    early_bird: EarlyBirdOut | None = None
+    installment_offsets: list[int] = []
+    installments: list[InstallmentOut] = []
     people: list[PersonStatus]
     club: ClubBrand
 

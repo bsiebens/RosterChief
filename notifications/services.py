@@ -84,9 +84,12 @@ def remove_device(user, installation_id) -> bool:
     return bool(count)
 
 
-def subscribe_web(user, *, club, endpoint, p256dh, auth, user_agent="") -> WebPushSubscription:
-    """Upsert by endpoint (a browser keeps one endpoint; a new sign-in takes it over)."""
-    subscription, _created = WebPushSubscription.objects.update_or_create(endpoint=endpoint, defaults={"user": user, "club": club, "p256dh": p256dh, "auth": auth, "user_agent": user_agent[:500]})
+def subscribe_web(user, *, club, endpoint, p256dh, auth, user_agent="", allow_reassignment=True) -> WebPushSubscription:
+    """Trusted callers may move endpoints. Browser clients may update only their own registration."""
+    identity = {"endpoint": endpoint} if allow_reassignment else {"endpoint": endpoint, "user": user, "club": club}
+    subscription, _created = WebPushSubscription.objects.update_or_create(
+        **identity, defaults={"user": user, "club": club, "p256dh": p256dh, "auth": auth, "user_agent": user_agent[:500]}
+    )
     return subscription
 
 

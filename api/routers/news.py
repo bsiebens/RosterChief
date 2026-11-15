@@ -27,11 +27,13 @@ def _photo_url(photo) -> str | None:
 
 
 def _list_item(user, item: News) -> dict:
+    teams = list(item.teams.all())
     return {
         "id": item.pk, "title": item.title, "slug": item.slug, "status": item.status, "visibility": item.visibility,
         "published_at": item.published_at, "is_scheduled": item.is_scheduled, "created": item.created,
         "created_by": {"id": item.created_by_id, "name": _name(item.created_by)} if item.created_by_id else None,
-        "team_ids": [t.pk for t in item.teams.all()], "main_photo_url": _photo_url(item.main_photo),
+        "team_ids": [t.pk for t in teams], "teams": [{"id": t.pk, "name": t.name} for t in teams],
+        "main_photo_url": _photo_url(item.main_photo),
         "can_edit": access.can_edit_news(user, item),
     }  # fmt: skip
 
@@ -46,7 +48,6 @@ def _detail(user, item: News) -> dict:
         **_list_item(user, item),
         "body": item.body, "title_en": item.title_en, "body_en": item.body_en, "body_html": svc.render_body_html(item.body),
         "notified_at": item.notified_at, "photos": [_photo_out(p) for p in item.photos.all()],
-        "teams": [{"id": t.pk, "name": t.name} for t in item.teams.all()],
         "can_publish": access.can_publish_news(user), "can_delete": access.can_edit_news(user, item),
     }  # fmt: skip
 

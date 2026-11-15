@@ -19,7 +19,8 @@ from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
 from events.models import Attendance, Event, EventOfficial, EventReferee, Location, RefereeSignup, Season
 from features.entitlements import Entitlement, Entitlements
-from members.models import AuditEntry, Member
+from members.models import AuditEntry, Family, FamilyMembership, Member
+from notifications.models import InboxNotification, OutboxEntry
 from teams.models import OfficialLevel, OfficialProfile, RefereeLevel, RefereeProfile, Team
 
 BASE = "/api/v1/referee-management"
@@ -272,6 +273,66 @@ class RefereeManagementTests(TestCase):
 
     # -- sign-ups --
 
+    def test_member_officiating_invites_and_unlimited_signups(self):
+        from events.services.officiating_invitations import notify_new_opportunities
+
+        people = (self.alice, self.bob, self.tabler, self.old)
+        users = {member.pk: grant_login(self.club, member)[0] for member in people}
+        tokens = {pk: login_session(user) for pk, user in users.items()}
+        family = Family.objects.create(name="Family")
+        FamilyMembership.objects.create(family=family, member=self.alice, role=FamilyMembership.FamilyRole.CHILD)
+        FamilyMembership.objects.create(family=family, member=self.plain, role=FamilyMembership.FamilyRole.GUARDIAN)
+        game = self.game(max_referees=1, max_officials=1)
+        self.game(location=self.away)
+        self.game(teams=[self.fed])
+        self.game(max_referees=0, max_officials=0)
+        self.game(cancelled=True)
+        self.game(days=-1)
+
+        def portal(member, role=None, *, available=True, acting_for=None):
+            headers = {"HTTP_HOST": self.host, "HTTP_X_SESSION_TOKEN": tokens[member.pk]}
+            if role is None:
+                response = Client().get("/api/v1/portal/home", **headers)
+                self.assertEqual(response.status_code, 200, response.content)
+            else:
+                response = Client().post(
+                    f"/api/v1/portal/officiating/{game.pk}/{role}",
+                    {"member_id": str((acting_for or member).pk), "available": available},
+                    content_type="application/json", **headers,
+                )
+            connection.set_tenant(self.club)
+            return response
+
+        with mock.patch("features.entitlements.resolve_entitlements", return_value=WITH_FEATURE):
+            self.assertEqual(notify_new_opportunities(self.club), 4)
+            self.assertEqual(notify_new_opportunities(self.club), 0)
+        href = f"/parent?tab=calendar&event={game.pk}"
+        self.assertEqual(set(InboxNotification.objects.filter(club=self.club, href=href).values_list("user_id", flat=True)), {
+            self.plain_user.pk, *(users[member.pk].pk for member in people[:3]),
+        })
+        self.assertTrue(InboxNotification.objects.filter(club=self.club, href=href, user=self.plain_user, title__startswith="For Alice:").exists())
+        self.assertEqual(OutboxEntry.objects.filter(payload__club_id=str(self.club.pk), payload__category="crew").count(), 4)
+        self.assertEqual(portal(self.old).json()["officiating"], [])
+        self.assertEqual(portal(self.old, "referee").status_code, 422)
+        self.assertEqual(portal(self.alice, "referee", acting_for=self.bob).status_code, 404)
+        for member, role in ((self.alice, "referee"), (self.bob, "referee"), (self.tabler, "official")):
+            home = portal(member).json()
+            [offer] = home["officiating"]
+            self.assertEqual((offer["event_id"], offer["role"], offer["status"]), (str(game.pk), role, "invited"))
+            self.assertFalse(any(event["event_id"] == str(game.pk) for event in home["events"]))
+            self.assertEqual(portal(member, role).json(), {"status": "signed_up"})
+        self.assertEqual({row["name"] for row in self.admin("get", f"/games/{game.pk}").json()["signups"]}, {
+            "Alice Ref", "Bob Whistle", "Tim Table",
+        })
+        self.assertEqual(self.assign(game, member_id=str(self.bob.pk)).status_code, 201)
+        self.assertEqual(portal(self.bob).json()["officiating"][0]["status"], "assigned")
+        self.assertEqual(portal(self.alice, "referee", available=False).json(), {"status": "declined"})
+        self.assertEqual(portal(self.alice).json()["officiating"][0]["status"], "declined")
+        self.assertFalse(RefereeSignup.objects.filter(event=game).exists())
+        self.features = Entitlements({})
+        self.assertEqual(portal(self.alice).json()["officiating"], [])
+        self.assertEqual(portal(self.alice, "referee").status_code, 404)
+
     def test_signups_flow(self):
         game = self.game()
         r = self.admin("post", f"/games/{game.pk}/signups", {"kind": "referee", "member_id": str(self.alice.pk)})
@@ -290,6 +351,43 @@ class RefereeManagementTests(TestCase):
         # assigning settles the sign-up
         self.assertEqual(self.assign(game, member_id=str(self.alice.pk)).status_code, 201)
         self.assertFalse(RefereeSignup.objects.exists())
+
+    def test_member_officiating_deadline_allows_management_updates(self):
+        from events.services.officiating_invitations import notify_new_opportunities
+
+        user, _ = grant_login(self.club, self.alice)
+        headers = {"HTTP_HOST": self.host, "HTTP_X_SESSION_TOKEN": login_session(user)}
+        game = self.game(deadline=timezone.now() - datetime.timedelta(minutes=1))
+        started_game = self.game(days=-1)
+
+        def reply(fixture, available):
+            response = Client().post(
+                f"/api/v1/portal/officiating/{fixture.pk}/referee",
+                {"member_id": str(self.alice.pk), "available": available},
+                content_type="application/json", **headers,
+            )
+            connection.set_tenant(self.club)
+            return response
+
+        home = Client().get("/api/v1/portal/home", **headers)
+        connection.set_tenant(self.club)
+        self.assertEqual(home.status_code, 200, home.content)
+        [offer] = home.json()["officiating"]
+        self.assertEqual(offer["event_id"], str(game.pk))
+        self.assertFalse(offer["signup_open"])
+        with mock.patch("features.entitlements.resolve_entitlements", return_value=WITH_FEATURE):
+            self.assertEqual(notify_new_opportunities(self.club), 0)
+        self.assertEqual(reply(game, True).status_code, 422)
+        self.assertEqual(reply(started_game, True).status_code, 422)
+
+        signup = self.call("post", f"/games/{game.pk}/signups", self.manager_user, {"kind": "referee", "member_id": str(self.alice.pk)})
+        self.assertEqual(signup.status_code, 201, signup.content)
+        self.assertEqual(reply(game, False).status_code, 422)
+        self.assertEqual(self.call("delete", f"/signups/referee/{signup.json()['id']}", self.manager_user).status_code, 204)
+
+        game.deadline = timezone.now() + datetime.timedelta(hours=1)
+        game.save(update_fields=["deadline"])
+        self.assertEqual(reply(game, True).json(), {"status": "signed_up"})
 
     def test_signup_removal_audit_and_gate(self):
         game = self.game()

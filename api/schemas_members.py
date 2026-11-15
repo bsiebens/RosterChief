@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 from ninja import Field, Schema
 from pydantic import BeforeValidator
 
+from api.schemas_public_registration import InstallmentOut
+
 #: A UUID (or other primary key) rendered as a string.
 UID = Annotated[str, BeforeValidator(str)]
 RoleName = Literal["member", "guardian", "staff", "none"]
@@ -107,6 +109,7 @@ class ClubMembershipOut(Schema):
     early_payment_discount: Decimal | None = None
     signed_up_at: datetime.date | None = None
     activated_at: datetime.date | None = None
+    next_installment: InstallmentOut | None = None
 
 
 class StaffAssignmentOut(Schema):

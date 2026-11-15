@@ -13,6 +13,7 @@ from unittest import mock
 
 from django.db import connection
 from django.test import Client, TestCase
+from django.utils import timezone
 from django_tenants.utils import schema_context
 
 from authorization.services import assign_role, create_role
@@ -20,8 +21,8 @@ from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import login_session, make_user
 from evaluations.testing import evaluations_feature
-from events.models import Season
-from members.models import Member
+from events.models import Event, Lineup, Season
+from members.models import ClubMembership, Family, FamilyMembership, Member
 from teams.models import Position, StaffAssignment, Team
 
 BASE = "/api/v1"
@@ -97,6 +98,57 @@ class PermissionModelTests(TestCase):
         owner = self.call("get", "/me", self.owner).json()
         self.assertEqual((owner["can_manage_members"], owner["can_manage_settings"]), (True, True))
 
+    def test_switcher_requires_membership_or_guardian_role_in_addition_to_management(self):
+        coach = self.users["head_coach"]
+        assistant = self.users["assistant"]
+        self.assertIs(self.call("get", "/me", coach).json()["has_member_portal_role"], False)
+        self.assertIs(self.call("get", "/me", assistant).json()["has_member_portal_role"], False)
+        with schema_context(self.club.schema_name):
+            ClubMembership.objects.create(member=Member.objects.get(user=coach), season=self.season)
+            family = Family.objects.create(name="Coach family")
+            FamilyMembership.objects.create(family=family, member=Member.objects.get(user=assistant), role=FamilyMembership.FamilyRole.GUARDIAN)
+            FamilyMembership.objects.create(family=family, member=self.player, role=FamilyMembership.FamilyRole.CHILD)
+        self.assertIs(self.call("get", "/me", coach).json()["has_member_portal_role"], True)
+        self.assertIs(self.call("get", "/me", assistant).json()["has_member_portal_role"], True)
+
+    def test_coach_home_reports_unpublished_and_published_lineups_for_own_team(self):
+        start = timezone.now() + datetime.timedelta(days=2)
+        with schema_context(self.club.schema_name):
+            draft = Event.objects.create(title="Draft lineup", kind=Event.EventKind.GAME, start=start, season=self.season)
+            published = Event.objects.create(title="Published lineup", kind=Event.EventKind.GAME, start=start, season=self.season)
+            other = Event.objects.create(title="Other team", kind=Event.EventKind.GAME, start=start, season=self.season)
+            draft.teams.add(self.u12)
+            published.teams.add(self.u12)
+            other.teams.add(self.u14)
+            Lineup.objects.create(event=published, team=self.u12, published_at=timezone.now())
+
+        response = self.call("get", "/portal/coach", self.users["head_coach"])
+        self.assertEqual(response.status_code, 200, response.content)
+        rows = {row["id"]: row for row in response.json()["events"]}
+        self.assertEqual(set(rows), {str(draft.pk), str(published.pk)})
+        self.assertIs(rows[str(draft.pk)]["lineup_published"], False)
+        self.assertIs(rows[str(published.pk)]["lineup_published"], True)
+
+    def test_sponsors_require_the_dedicated_permission(self):
+        user = self.users["settings_admin"]
+        path = "/sponsor-management"
+        self.assertEqual(self.call("get", path, user).status_code, 403)
+        self.assertEqual(self.call("get", path, self.owner).status_code, 200)
+        with schema_context(self.club.schema_name):
+            assign_role(user, create_role("Sponsor manager", ["sponsoring.manage_sponsors"]))
+        self.assertIs(self.call("get", "/me", user).json()["can_manage_sponsors"], True)
+        headers = {"HTTP_HOST": self.host, "HTTP_X_SESSION_TOKEN": login_session(user)}
+        fields = {"name": "Rink partner", "url": "https://sponsor.example", "start_date": "2026-10-01"}
+        invalid = Client().post(BASE + path, {**fields, "end_date": "2026-09-01"}, **headers)
+        self.assertEqual(invalid.status_code, 422, invalid.content)
+        created = Client().post(BASE + path, fields, **headers)
+        self.assertEqual(created.status_code, 201, created.content)
+        detail = f"{path}/{created.json()['id']}"
+        updated = Client().post(BASE + detail, {**fields, "name": "New rink partner"}, **headers)
+        self.assertEqual(updated.json()["name"], "New rink partner", updated.content)
+        self.assertEqual(self.call("delete", detail, user).status_code, 204)
+        self.assertEqual(self.call("get", path, user).json(), [])
+
     def test_evaluations_need_their_own_permission(self):
         self.enterContext(evaluations_feature())
         with schema_context(self.club.schema_name):
@@ -158,6 +210,8 @@ class PermissionModelTests(TestCase):
         self.assertEqual(self.call("patch", u12, head, {"age_min": 8}).status_code, 200)  # unchanged value
 
     def test_roster_and_staff_follow_team_management(self):
+        with schema_context(self.club.schema_name):
+            ClubMembership.objects.create(member=self.player, season=self.season, status=ClubMembership.StatusChoices.ACTIVE)
         add = {"member_id": str(self.player.pk), "season_id": str(self.season.pk), "position_id": None, "jersey_number": None, "is_captain": False, "is_alternate_captain": False}
         self.assertEqual(self.call("post", f"/teams/{self.u14.pk}/roster", self.users["head_coach"], add).status_code, 403)
         r = self.call("post", f"/teams/{self.u12.pk}/roster", self.users["head_coach"], add)

@@ -34,6 +34,9 @@ SECRET_KEY = config("DJANGO_SECRET_KEY", cast=str)
 DEBUG = config("DJANGO_DEBUG", cast=bool, default=False)
 
 ALLOWED_HOSTS = [".localhost"] if DEBUG else config("DJANGO_ALLOWED_HOSTS", cast=Csv())
+if config("DJANGO_TRUST_PROXY_SSL_HEADER", cast=bool, default=False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    ALLAUTH_TRUSTED_PROXY_COUNT = 1
 
 
 # Application definition
@@ -90,6 +93,7 @@ MIDDLEWARE = [
     "club.middleware.ArchivedClubMiddleware",
     "controlpanel.middleware.MaintenanceMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "api.legacy.middleware.PublicApiCorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -184,12 +188,13 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = Path(config("DJANGO_STATIC_ROOT", default=str(BASE_DIR / "staticfiles")))
 
 # Uploaded files (club logos). Served by Django itself in development (see rosterchief/urls.py); a real deployment
 # serves MEDIA_ROOT from the web server or object storage.
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
-PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
+MEDIA_ROOT = Path(config("DJANGO_MEDIA_ROOT", default=str(BASE_DIR / "media")))
+PRIVATE_MEDIA_ROOT = Path(config("DJANGO_PRIVATE_MEDIA_ROOT", default=str(BASE_DIR / "private_media")))
 
 
 # Email
@@ -200,6 +205,19 @@ MAILERS = {
         "BACKEND": "django.core.mail.backends.console.EmailBackend",
     },
 }
+if config("DJANGO_SMTP_HOST", default=""):
+    MAILERS["default"] = {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": config("DJANGO_SMTP_HOST"),
+            "port": config("DJANGO_SMTP_PORT", cast=int, default=587),
+            "username": config("DJANGO_SMTP_USER", default=""),
+            "password": config("DJANGO_SMTP_PASSWORD", default=""),
+            "use_tls": config("DJANGO_SMTP_TLS", cast=bool, default=True),
+            "timeout": 20,
+        },
+    }
+DEFAULT_FROM_EMAIL = config("DJANGO_FROM_EMAIL", default="webmaster@localhost")
 
 # Multi-tenancy: base domain whose subdomains resolve to a club, e.g.
 # "ajax-united.rosterchief.app" -> the club with slug "ajax-united". Leave
@@ -240,9 +258,9 @@ HEADLESS_SERVE_SPECIFICATION = DEBUG  # OpenAPI spec of the auth API at /_allaut
 # Every app serves the same /account/... paths, listed in FRONTEND_PATHS.
 HEADLESS_ADAPTER = "club.adapters.HeadlessAdapter"
 FRONTEND_URLS = {
-    "controlpanel": config("FRONTEND_CONTROLPANEL_URL", default="").rstrip("/"),
-    "management": config("FRONTEND_MANAGEMENT_URL", default="").rstrip("/"),
-    "member": config("FRONTEND_MEMBER_URL", default="").rstrip("/"),
+    "controlpanel": config("FRONTEND_CONTROLPANEL_URL", default=""),
+    "management": config("FRONTEND_MANAGEMENT_URL", default=""),
+    "member": config("FRONTEND_MEMBER_URL", default=""),
 }
 FRONTEND_PATHS = {
     "account_confirm_email": "/account/verify-email/{key}",

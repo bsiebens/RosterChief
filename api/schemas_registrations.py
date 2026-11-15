@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from ninja import Field, Schema
 
+from api.schemas_public_registration import EarlyBirdOut, InstallmentOut
+
 
 class RegistrationSettingsOut(Schema):
     is_open: bool
@@ -11,6 +13,9 @@ class RegistrationSettingsOut(Schema):
     terms_text: str
     payment_instructions: str
     invoice_due_days: int
+    installment_offsets: list[int] = []
+    installment_grace_days: int = 0
+    installment_block_kinds: list[str] = []
 
 
 class RegistrationSettingsIn(Schema):
@@ -19,6 +24,9 @@ class RegistrationSettingsIn(Schema):
     terms_text: str | None = None
     payment_instructions: str | None = None
     invoice_due_days: int | None = None
+    installment_offsets: list[int] | None = None
+    installment_grace_days: int | None = None
+    installment_block_kinds: list[str] | None = None
 
 
 class PersonRef(Schema):
@@ -38,6 +46,17 @@ class RegistrationItem(Schema):
     total: Decimal
     invoice_number: str | None = None
     confirmed_at: datetime.datetime | None = None
+    invoice_due_date: datetime.date | None = None
+    #: Finance: what the invoice comes to (fees less early-payment discounts in force, waived fees left out), what was paid and what is left.
+    #: All zero until the invoice is confirmed.
+    amount_due: Decimal = Decimal("0.00")
+    amount_paid: Decimal = Decimal("0.00")
+    balance: Decimal = Decimal("0.00")
+    #: unpaid | partial | paid | overdue (open past its due date); ``null`` until confirmed or when cancelled.
+    payment_status: str | None = None
+    installment_offsets: list[int] = []
+    next_installment: InstallmentOut | None = None
+    legacy_invoice_only: bool = False
 
 
 class RegistrationListOut(Schema):
@@ -81,6 +100,25 @@ class LineOut(Schema):
     fee_amount: Decimal
     early_payment_deadline: datetime.date | None = None
     early_payment_discount: Decimal
+    #: Finance: this person's share of the invoice. ``fee_status`` is unpaid | partially_paid | paid | waived.
+    fee_status: str = "unpaid"
+    amount_due: Decimal = Decimal("0.00")
+    amount_paid: Decimal = Decimal("0.00")
+    balance: Decimal = Decimal("0.00")
+    next_installment: InstallmentOut | None = None
+
+
+class InvoicePaymentOut(Schema):
+    id: uuid.UUID
+    member: PersonRef
+    membership_id: uuid.UUID
+    amount: Decimal
+    method: str
+    reference: str
+    paid_at: datetime.datetime
+    note: str
+    recorded_by: str | None = None
+    voucher_number: str | None = None
 
 
 class OrderDiscountOut(Schema):
@@ -116,6 +154,13 @@ class RegistrationDetail(RegistrationItem):
     status_path: str
     #: Right after confirming: the ids of the lines whose requested number could not be given (taken meanwhile); empty otherwise.
     numbers_dropped: list[uuid.UUID] = []
+    #: Every payment on the invoice (all people), newest first, and whether shop vouchers can be used (the club has the shop).
+    payments: list[InvoicePaymentOut] = []
+    vouchers_enabled: bool = False
+    #: The early-bird discount while it still applies (``deadline``, ``discount``, ``amount_due`` with it, ``balance``); ``null`` once passed or paid.
+    early_bird: EarlyBirdOut | None = None
+    installments: list[InstallmentOut] = []
+    legacy_invoice_history: dict | None = None
 
 
 class LineEdit(Schema):
@@ -142,3 +187,38 @@ class ConfirmIn(Schema):
 
 class SentOut(Schema):
     sent: bool
+
+
+class AllocationIn(Schema):
+    membership_id: uuid.UUID
+    amount: Decimal = Field(..., max_digits=10, decimal_places=2)
+
+
+class InvoicePaymentIn(Schema):
+    amount: Decimal = Field(..., max_digits=10, decimal_places=2)
+    #: bank_transfer | cash | card | voucher | other
+    method: str = "bank_transfer"
+    reference: str = ""
+    paid_at: datetime.datetime | None = None
+    note: str = ""
+    #: For a voucher payment: the shop voucher's number.
+    voucher_number: str | None = None
+    #: How much goes to whom; they must add up to ``amount``. Left out: the amount fills the people in order, each up to what they owe.
+    allocations: list[AllocationIn] | None = None
+
+
+class MarkInvoicePaidIn(Schema):
+    method: str = "bank_transfer"
+    reference: str = ""
+    paid_at: datetime.datetime | None = None
+    note: str = ""
+    voucher_number: str | None = None
+
+
+class VoucherLookupOut(Schema):
+    number: str
+    amount: Decimal
+    available: Decimal
+    expiry_date: datetime.date
+    #: usable | exhausted | expired | inactive
+    status: str

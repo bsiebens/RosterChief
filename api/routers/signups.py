@@ -76,10 +76,10 @@ def summary(request, season_id: uuid.UUID | None = None):
     return {"season_id": season.pk if season else None, **signups.summary(season)}
 
 
-@router.get("/options", response=SignupOptionsOut, summary="Teams and player positions to place a sign-up with (admin)", operation_id="signups_options")
+@router.get("/options", response=SignupOptionsOut, summary="Teams and positions (player and staff) to place a sign-up with (admin)", operation_id="signups_options")
 def options(request):
     _gate(request)
-    return {"teams": [{"id": t.pk, "name": t.name} for t in Team.objects.order_by("name")], "positions": [{"id": p.pk, "name": p.name} for p in signups.positions_for_players()]}
+    return {"teams": [{"id": t.pk, "name": t.name} for t in Team.objects.order_by("name")], "positions": [{"id": p.pk, "name": p.name, "staff": p.staff_position} for p in signups.positions_for_placement()]}
 
 
 @router.post("/approve-clean", response=ApproveAllOut, summary="Approve every sign-up that is ready (admin)", operation_id="approve_clean_signups")
@@ -90,7 +90,7 @@ def approve_clean(request, payload: ApproveAllIn):
 
 @router.post("/{membership_id}/approve", response=SignupOut, summary="Approve one sign-up (admin)", operation_id="approve_signup")
 def approve(request, membership_id: uuid.UUID):
-    """422 when the fee is not paid or waived, or requirements are still open (``errors.requirements`` names them)."""
+    """422 when the payment is not current or requirements are still open (``errors.requirements`` names them)."""
     _gate(request)
     membership = signups.approve(request.user, _membership(membership_id))
     return _out(signups.describe(membership))
@@ -103,7 +103,7 @@ def place(request, membership_id: uuid.UUID, payload: PlaceIn):
     if team is None:
         raise Invalid("Unknown team.", {"team_id": ["Unknown team."]})
     spot = signups.place_in_team(request.user, _membership(membership_id), team, position_id=payload.position_id, jersey_number=payload.jersey_number)
-    return 201, {"team": {"id": team.pk, "name": team.name}, "position": spot.position.name if spot.position_id else None, "jersey_number": spot.jersey_number}
+    return 201, {"team": {"id": team.pk, "name": team.name}, "position": spot.position.name if spot.position_id else None, "jersey_number": getattr(spot, "jersey_number", None)}
 
 
 @router.post("/{membership_id}/cancel", response=CancelOut, summary="Turn down a sign-up (admin)", operation_id="cancel_signup")

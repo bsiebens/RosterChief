@@ -27,7 +27,7 @@ td { padding: 2.5mm 2mm; border-bottom: 1px solid #ddd; vertical-align: top; }
   <div class="brand">{% if logo_data_uri %}<img class="logo" src="{{ logo_data_uri }}" alt="">{% endif %}<div>{{ club.legal_name|default:club.name }}</div></div>
   <div class="right"><h1 class="accent">Invoice</h1><strong>{{ batch.invoice_number }}</strong>
     <div class="muted">Issued {{ issued|date:"j F Y" }}</div>
-    {% if batch.invoice_due_date %}<div class="muted">Due {{ batch.invoice_due_date|date:"j F Y" }}</div>{% endif %}</div>
+    {% if batch.invoice_due_date and not installments %}<div class="muted">Due {{ batch.invoice_due_date|date:"j F Y" }}</div>{% endif %}</div>
 </div>
 {% if contact %}<div><strong>{{ contact }}</strong>{% if contact.email %}<br>{{ contact.email }}{% endif %}</div>{% endif %}
 <table>
@@ -39,6 +39,12 @@ td { padding: 2.5mm 2mm; border-bottom: 1px solid #ddd; vertical-align: top; }
 <tr class="total"><td colspan="2">Total</td><td class="num">{{ total }}</td></tr>
 </tbody>
 </table>
+{% if installments %}
+<h2>Instalment schedule</h2>
+<table><thead><tr><th>Due date</th><th class="num">Amount</th></tr></thead><tbody>
+{% for row in installments %}<tr><td>{{ row.due_date|date:"j F Y" }}</td><td class="num">{{ row.amount }}</td></tr>{% endfor %}
+</tbody></table>
+{% endif %}
 {% if payment_instructions %}<div class="box"><strong>How to pay</strong><br>{{ payment_instructions }}</div>{% endif %}
 </body>
 </html>

@@ -346,7 +346,7 @@ def commit(actor, club, rows: list[dict], season_id=None, *, features=None, prog
                 if season is not None:
                     memberships.create_membership(actor, member, season)
                 if r["team"]:
-                    team_services.add_player(actor, teams[r["team"].casefold()], member_id=member.pk, season_id=season.pk, position_id=None, jersey_number=None, is_captain=False, is_alternate_captain=False)
+                    team_services.add_player(actor, teams[r["team"].casefold()], member_id=member.pk, season_id=season.pk, position_id=None, jersey_number=None, is_captain=False, is_alternate_captain=False, check_membership=False)
             created.append((r, member))
             r["status"] = "created"
         except Invalid as e:

@@ -16,7 +16,7 @@ from PIL import Image, ImageOps
 logger = logging.getLogger(__name__)
 
 #: key -> (file name, edge in pixels, opaque background). The .ico bundles 16/32/48 px.
-PNG_ICONS = {"png_32": ("icon-32.png", 32, False), "png_192": ("icon-192.png", 192, False), "apple_touch": ("apple-touch-icon.png", 180, True)}
+PNG_ICONS = {"png_32": ("icon-32.png", 32, False), "png_192": ("icon-192.png", 192, False), "png_512": ("icon-512.png", 512, False), "apple_touch": ("apple-touch-icon.png", 180, True)}
 ICO_SIZES = [(16, 16), (32, 32), (48, 48)]
 ICO_NAME = "favicon.ico"
 
@@ -75,7 +75,7 @@ def icon_urls(club) -> dict[str, str]:
     if not club.logo:
         return {}
     folder = _folder(club)
-    if not default_storage.exists(f"{folder}/{ICO_NAME}"):
+    if not default_storage.exists(f"{folder}/{ICO_NAME}") or not default_storage.exists(f"{folder}/{PNG_ICONS['png_512'][0]}"):
         return {}
     urls = {"ico": default_storage.url(f"{folder}/{ICO_NAME}")}
     urls.update({key: default_storage.url(f"{folder}/{name}") for key, (name, _, _) in PNG_ICONS.items()})
@@ -85,6 +85,8 @@ def icon_urls(club) -> dict[str, str]:
 def ensure_icons(club) -> dict[str, str]:
     """``icon_urls``, generating the set first when a logo exists that has none yet (clubs from before this existed).
     Never raises: an unreadable logo just means no icons (clients fall back to their default)."""
+    if club.logo and club.logo.name.lower().endswith(".svg"):
+        return {}  # A restored legacy SVG remains usable as the club crest.
     try:
         return icon_urls(club) or generate_icons(club)
     except Exception:

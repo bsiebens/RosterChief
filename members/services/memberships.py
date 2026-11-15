@@ -5,9 +5,10 @@ Money rules (all ``Decimal``, 2 places):
 * Early-payment discount: ``early_payment_discount`` comes off ``fee_amount`` when enough money arrived with
   ``paid_at.date() <= early_payment_deadline`` to cover the discounted fee; before the deadline has passed and
   nothing is paid yet, the discounted amount is what is quoted.
-* ``fee_status``: ``waived`` stays waived; otherwise ``paid`` when nothing remains and ``fee_amount > 0``,
+* ``fee_status``: ``waived`` stays waived; otherwise ``paid`` when nothing remains and ``fee_amount > 0`` (or the fee is 0 because the
+  registration's invoice was confirmed with nothing to pay: a volunteer, a credit line),
   ``partially_paid`` when something is paid but a balance remains, else ``unpaid``.
-* Activation is explicit (``activate``): fee paid or waived and every active onboarding requirement resolved.
+* Activation is explicit (``activate``): payment current and every active onboarding requirement resolved.
 """
 
 import datetime
@@ -20,7 +21,7 @@ from django.utils import timezone
 from members.models import ClubMembership, FeePayment, Member
 
 from . import audit, onboarding
-from .access import require_admin
+from .access import require_admin, require_record_fee_payments
 from .errors import Invalid
 
 CENT = Decimal("0.01")
@@ -76,12 +77,19 @@ def remaining_balance(membership: ClubMembership, *, today: datetime.date | None
     return max(amount_due(membership, today=today) - total_paid(membership), Decimal("0.00"))
 
 
+def _free_by_registration(membership: ClubMembership) -> bool:
+    """A fee of 0 is a final price (nothing to pay, so settled) only when it comes from a registration whose invoice is confirmed; a fresh sign-up with
+    no fee set yet is not."""
+    details = getattr(membership, "registration_details", None)
+    return bool(details and details.batch.confirmed_at and not details.batch.cancelled_at)
+
+
 def compute_fee_status(membership: ClubMembership, *, today: datetime.date | None = None) -> str:
     """Derive the fee status from the payments (see module docstring)."""
     if membership.fee_status == FeeStatus.WAIVED:
         return FeeStatus.WAIVED
     remaining = remaining_balance(membership, today=today)
-    if remaining <= 0 and membership.fee_amount > 0:
+    if remaining <= 0 and (membership.fee_amount > 0 or _free_by_registration(membership)):
         return FeeStatus.PAID
     if total_paid(membership) > 0:
         return FeeStatus.PARTIALLY_PAID
@@ -99,6 +107,16 @@ def sync_fee_status(membership: ClubMembership, *, today: datetime.date | None =
             setattr(membership, k, v)
         membership.save(update_fields=[*new, "modified"])
     return changes
+
+
+def payment_allows_activation(membership: ClubMembership, *, today: datetime.date | None = None) -> bool:
+    """A waiver, settled fee, or confirmed instalment plan that is current."""
+    from registration.services import installments
+
+    schedule = installments.membership_schedule(membership, today=today)
+    if schedule:
+        return installments.can_activate(schedule)
+    return membership.fee_status in (FeeStatus.PAID, FeeStatus.WAIVED)
 
 
 # --- memberships --------------------------------------------------------------------------------------------------
@@ -179,9 +197,10 @@ def _payment_changes(payment: FeePayment, fee_changes: dict, *, deleted: bool = 
 
 
 @transaction.atomic
-def record_payment(actor, membership: ClubMembership, amount, *, method: str = FeePayment.Method.BANK_TRANSFER, reference: str = "", paid_at: datetime.datetime | None = None, note: str = "") -> FeePayment:
-    """Record money received (amount > 0) and re-derive ``amount_paid``/``fee_status``. Not for waived fees."""
-    require_admin(actor)
+def record_payment(actor, membership: ClubMembership, amount, *, method: str = FeePayment.Method.BANK_TRANSFER, reference: str = "", paid_at: datetime.datetime | None = None, note: str = "", voucher=None) -> FeePayment:
+    """Record money received (amount > 0) and re-derive ``amount_paid``/``fee_status``. Not for waived fees.
+    ``method="voucher"`` needs the shop ``voucher`` to take the amount from (its balance moves in the same transaction)."""
+    require_record_fee_payments(actor)
     amount = money(amount)
     if amount <= 0:
         raise Invalid("The amount must be more than zero.", {"amount": ["Must be positive."]})
@@ -189,7 +208,16 @@ def record_payment(actor, membership: ClubMembership, amount, *, method: str = F
         raise Invalid("Invalid payment method.", {"method": ["Invalid choice."]})
     if membership.fee_status == FeeStatus.WAIVED:
         raise Invalid("The fee is waived; there is nothing to pay.")
-    payment = FeePayment.objects.create(membership=membership, amount=amount, method=method, reference=reference, paid_at=paid_at or timezone.now(), note=note, recorded_by=actor)
+    if (method == FeePayment.Method.VOUCHER) != (voucher is not None):
+        raise Invalid("A voucher is needed for (and only for) a voucher payment.", {"voucher_number": ["Required for a voucher payment."]})
+    if voucher is not None:
+        from shop.services import vouchers
+
+        try:
+            vouchers.consume(voucher, amount)
+        except vouchers.VoucherError as error:
+            raise Invalid(str(error), {"voucher_number": [str(error)]}) from error
+    payment = FeePayment.objects.create(membership=membership, amount=amount, method=method, reference=reference, paid_at=paid_at or timezone.now(), note=note, recorded_by=actor, voucher=voucher)
     fee_changes = sync_fee_status(membership)
     audit.record(actor, "payment.recorded", member=membership.member, target=payment, changes=_payment_changes(payment, fee_changes), target_label=f"{membership.season} - {membership.member}: {amount}")
     return payment
@@ -198,7 +226,7 @@ def record_payment(actor, membership: ClubMembership, amount, *, method: str = F
 @transaction.atomic
 def mark_paid(actor, membership: ClubMembership, *, method: str = FeePayment.Method.OTHER, reference: str = "", paid_at: datetime.datetime | None = None, note: str = "") -> FeePayment:
     """Record one payment for the whole remaining balance (as of ``paid_at``, so the early discount is honoured)."""
-    require_admin(actor)
+    require_record_fee_payments(actor)
     when = paid_at or timezone.now()
     # Quote the balance as of the payment date: discount holds if that date is within the deadline.
     deadline = membership.early_payment_deadline
@@ -212,9 +240,13 @@ def mark_paid(actor, membership: ClubMembership, *, method: str = FeePayment.Met
 
 @transaction.atomic
 def delete_payment(actor, payment: FeePayment) -> ClubMembership:
-    """Remove a mistaken payment and re-derive the fee status."""
-    require_admin(actor)
+    """Remove a mistaken payment (a voucher payment gives its amount back to the voucher) and re-derive the fee status."""
+    require_record_fee_payments(actor)
     membership = payment.membership
+    if payment.voucher_id:
+        from shop.services import vouchers
+
+        vouchers.restore(payment.voucher, payment.amount)
     snapshot = _payment_changes(payment, {}, deleted=True)
     pk, label = payment.pk, f"{membership.season} - {membership.member}: {payment.amount}"
     payment.delete()
@@ -227,14 +259,21 @@ def delete_payment(actor, payment: FeePayment) -> ClubMembership:
 
 @transaction.atomic
 def activate(actor, membership: ClubMembership) -> ClubMembership:
-    """Make the membership ACTIVE. Requires fee paid or waived and every active requirement resolved."""
+    """Make the membership ACTIVE once payment is current and every active requirement is resolved."""
     require_admin(actor)
     if membership.status == Status.ACTIVE:
         raise Invalid("The membership is already active.")
     if membership.status == Status.CANCELLED:
         raise Invalid("A cancelled membership cannot be activated.")
     sync_fee_status(membership)
-    if membership.fee_status not in (FeeStatus.PAID, FeeStatus.WAIVED):
+    if not payment_allows_activation(membership):
+        detail = getattr(membership, "registration_details", None)
+        if detail and detail.batch.installment_offsets:
+            raise Invalid(
+                "The first instalment and any overdue instalments must be paid before approval.",
+                {"fee_status": ["The instalment plan is not current."]},
+                code="installment_required",
+            )
         raise Invalid("The fee must be paid or waived first.", {"fee_status": ["Not settled."]})
     open_items = onboarding.unresolved(membership)
     if open_items:
@@ -287,9 +326,10 @@ def delete_membership(actor, membership: ClubMembership) -> None:
 
 
 @transaction.atomic
-def cancel(actor, membership: ClubMembership) -> ClubMembership:
-    """Cancel the membership. Payments are kept."""
-    require_admin(actor)
+def cancel(actor, membership: ClubMembership, *, authorized: bool = False) -> ClubMembership:
+    """Cancel the membership. Payments are kept. ``authorized``: the caller already checked the actor's right (see ``delete_member``)."""
+    if not authorized:
+        require_admin(actor)
     if membership.status == Status.CANCELLED:
         raise Invalid("The membership is already cancelled.")
     before = membership.status

@@ -62,9 +62,13 @@ class TokenAuth(XSessionTokenAuth):
 
 
 class CookieAuth(SessionAuth):
+    def __init__(self, *, door=True):
+        super().__init__()
+        self.door = door
+
     def authenticate(self, request, key):
         user = super().authenticate(request, key)
-        return _enforce_mfa(request, user) if user else user
+        return _enforce_mfa(request, user, door=self.door) if user else user
 
 
 AUTHENTICATORS = [TokenAuth(), CookieAuth()]

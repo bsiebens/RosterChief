@@ -3,7 +3,7 @@
 import datetime
 
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django_tenants.utils import schema_context
 
 from club.models import Club
@@ -16,7 +16,7 @@ from events.tasks import create_missing_seasons
 D = datetime.date
 
 
-class SeasonMathTests(TestCase):
+class SeasonMathTests(SimpleTestCase):
     def test_add_months_clamps_and_season_end(self):
         self.assertEqual(add_months(D(2026, 1, 31), 1), D(2026, 2, 28))
         self.assertEqual(season_end(D(2026, 7, 1), 12), D(2027, 6, 30))

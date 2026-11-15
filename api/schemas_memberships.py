@@ -119,8 +119,10 @@ class PaymentOut(Schema):
 
     @staticmethod
     def resolve_recorded_by(obj):
+        from members.services.members import user_names
+
         u = obj.recorded_by
-        return (u.get_full_name() or u.email) if u else None
+        return user_names([u]).get(u.pk) if u else None
 
 
 class PaymentIn(Schema):

@@ -162,17 +162,20 @@ def _new_member(club, features, first, last, email="", *, phone="", dob=None, co
 
 
 @transaction.atomic
-def submit_registration(club, *, contact: dict, entries: list[dict], language: str = "", features=None, today: datetime.date | None = None) -> RegistrationBatch:
+def submit_registration(club, *, contact: dict, entries: list[dict], language: str = "", features=None, today: datetime.date | None = None, use_installments: bool = False) -> RegistrationBatch:
     """Create the batch, its people, family and pending memberships. Raises ``Invalid`` (422) / ``RegistrationClosed`` / ``LimitExceeded``."""
-    if not config.get_settings().is_open:
+    settings = config.get_settings()
+    if not settings.is_open:
         raise RegistrationClosed()
+    if use_installments and not settings.installment_offsets:
+        raise Invalid("Instalments are no longer available.", {"use_installments": ["Choose payment in full."]}, code="installments_unavailable")
     today = today or timezone.localdate()
     checked = validate(contact, entries)
     priced = pricing.price_entries([e["option"] for e in checked], today=today)
     language = language if language in LANGS else ""
 
     contact_member = _new_member(club, features, _text(contact["first_name"]), _text(contact["last_name"]), _text(contact["email"]), phone=_text(contact.get("phone")), language=language)
-    batch = RegistrationBatch.objects.create(contact=contact_member, season=priced.season, language=language)
+    batch = RegistrationBatch.objects.create(contact=contact_member, season=priced.season, language=language, installment_offsets=settings.installment_offsets if use_installments else [])
     family = None
     if any(e["who"] == "child" for e in checked):
         family = Family.objects.create(name=contact_member.last_name)

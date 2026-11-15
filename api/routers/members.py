@@ -48,6 +48,7 @@ from members.models import AuditEntry, ClubMembership, Family, FamilyMembership,
 from members.services import access, audit, families, groups, importing, officiating, signups
 from members.services import members as member_services
 from members.services.errors import Invalid
+from registration.services import installments
 from teams.models import StaffAssignment, TeamMembership
 
 router = Router()
@@ -103,7 +104,9 @@ def _member_detail(request, member: Member) -> dict:
     # narrower rule here.
     contact = access.can_view_member(request.user, member)
     links = list(member.family_memberships.select_related("family"))
-    memberships = list(member.club_memberships.order_by("-season__start_date"))
+    memberships = member.club_memberships.order_by("-season__start_date")
+    if admin:
+        memberships = memberships.select_related("registration_details__batch").prefetch_related("payments")
     data = {
         "id": member.pk,
         "first_name": member.first_name,
@@ -148,6 +151,7 @@ def _club_membership(cm: ClubMembership, admin: bool) -> dict:
             early_payment_discount=cm.early_payment_discount,
             signed_up_at=cm.signed_up_at,
             activated_at=cm.activated_at,
+            next_installment=installments.membership_next(cm),
         )
     return data
 

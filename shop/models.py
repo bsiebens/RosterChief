@@ -138,6 +138,7 @@ class Product(UUIDModel):
     team = models.ForeignKey("teams.Team", on_delete=models.SET_NULL, related_name="+", null=True, blank=True, verbose_name=_("team"))
     #: Bought in bulk and counted (InventoryMovement) instead of made to order: orders draw down stock and skip production.
     inventory_managed = models.BooleanField(_("inventory managed?"), default=False)
+    ordering_windows = models.JSONField(_("ordering windows"), default=list, blank=True)
 
     class Meta:
         verbose_name = _("product")

@@ -60,6 +60,16 @@ def delete_logo(request):
     return svc.settings_out(club)
 
 
+@router.post("/settings/event-background", response=ClubSettingsOut, summary="Upload the event background (settings permission)")
+def upload_event_background(request, file: File[UploadedFile]):
+    return svc.settings_out(svc.update_event_background(request.user, _club(request), file))
+
+
+@router.delete("/settings/event-background", response=ClubSettingsOut, summary="Remove the event background (settings permission)")
+def delete_event_background(request):
+    return svc.settings_out(svc.update_event_background(request.user, _club(request)))
+
+
 @router.get("/settings/previews", response=list[PreviewOut], summary="Club-branded outgoing documents (settings permission)")
 def list_previews(request):
     _club(request)

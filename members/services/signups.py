@@ -1,6 +1,6 @@
 """The sign-up queue: pending season memberships waiting for an admin to approve them.
 
-A pending membership is *clean* when its fee is paid or waived and every active onboarding requirement is resolved. Paying never
+A pending membership is *clean* when its payment is current and every active onboarding requirement is resolved. Paying never
 activates by itself: approving is the one deliberate step (``memberships.activate``). Everything needs ``members.manage_members``.
 Ported from the old ``club.services.onboarding`` (``is_signup_clean`` / ``approve_one`` / ``approve_all_clean``) and ``cancellation``.
 
@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from events.models import Season
 from members.models import ClubMembership, FamilyMembership, Member
-from teams.models import Position, Team, TeamMembership
+from teams.models import Position, StaffAssignment, Team, TeamMembership
 
 from . import audit, onboarding
 from . import members as member_services
@@ -25,7 +25,6 @@ from .access import require_admin
 from .errors import Invalid
 
 Status = ClubMembership.StatusChoices
-FeeStatus = ClubMembership.FeeStatus
 
 
 def current_season() -> Season | None:
@@ -42,20 +41,20 @@ def pending(season: Season | None):
         return ClubMembership.objects.none()
     qs = ClubMembership.objects.filter(season=season, status=Status.PENDING).exclude(pk__in=awaiting_membership_ids())
     qs = qs.select_related("member", "season", "registration_details__batch__contact", "registration_details__requested_team", "registration_details__requested_position", "registration_details__resulting_team_membership")
-    return qs.order_by("-signed_up_at", "member__last_name", "member__first_name")
+    return qs.prefetch_related("payments").order_by("-signed_up_at", "member__last_name", "member__first_name")
 
 
 def is_clean(membership: ClubMembership) -> bool:
-    """Fee paid or waived, and nothing in the onboarding checklist still open."""
+    """Payment is current, and nothing in the onboarding checklist is still open."""
     fees.sync_fee_status(membership)
-    return membership.fee_status in (FeeStatus.PAID, FeeStatus.WAIVED) and not onboarding.unresolved(membership)
+    return fees.payment_allows_activation(membership) and not onboarding.unresolved(membership)
 
 
 def describe(membership: ClubMembership) -> dict:
     """One queue row: the member, the money, what is still open and where they are already rostered this season."""
     fees.sync_fee_status(membership)
     open_items = onboarding.unresolved(membership)
-    settled = membership.fee_status in (FeeStatus.PAID, FeeStatus.WAIVED)
+    settled = fees.payment_allows_activation(membership)
     teams = list(TeamMembership.objects.filter(member=membership.member, season=membership.season).select_related("team").order_by("team__name"))
     details = getattr(membership, "registration_details", None)  # None for a sign-up that did not come from the public registration page
     return {
@@ -64,7 +63,7 @@ def describe(membership: ClubMembership) -> dict:
         "open_requirements": [r.name for r in open_items],
         "clean": settled and not open_items,
         "remaining_balance": fees.remaining_balance(membership),
-        "teams": [t.team for t in teams],
+        "teams": [t.team for t in teams] + [a.team for a in StaffAssignment.objects.filter(member=membership.member, season=membership.season).select_related("team").order_by("team__name") if a.team not in [t.team for t in teams]],
         "has_login": bool(membership.member.user_id),
     }
 
@@ -118,14 +117,22 @@ def approve_all_clean(actor, season: Season | None) -> int:
 
 
 @transaction.atomic
-def place_in_team(actor, membership: ClubMembership, team: Team, *, position_id=None, jersey_number: int | None = None) -> TeamMembership:
+def place_in_team(actor, membership: ClubMembership, team: Team, *, position_id=None, jersey_number: int | None = None):
     """Put the person on ``team`` for the membership's season, whatever their status (a pending member can be provisionally
     rostered; ``blocked_event_kinds`` then decides what they may still be invited to). Admin-level: the team-manager check of
-    the roster endpoint does not apply here."""
+    the roster endpoint does not apply here. A *staff* position (a volunteer: coach, manager, ...) puts the person on the team's staff instead
+    (no jersey number); returns the ``TeamMembership`` or the ``StaffAssignment``."""
     require_admin(actor)
     from teams.services import teams as team_services
 
     member, season = membership.member, membership.season
+    staff_position = Position.objects.filter(pk=position_id, staff_position=True).first() if position_id else None
+    if staff_position is not None:
+        if StaffAssignment.objects.filter(team=team, season=season, member=member).exists():
+            raise Invalid(f"{member} is already on {team.name}'s staff in {season.name}.", {"team_id": ["Already on this team's staff."]})
+        a = StaffAssignment.objects.create(team=team, member=member, season=season, position=staff_position)
+        audit.record(actor, "team.staff_added", member=member, target=a, target_label=f"{member} - {team.name}", changes={k: {"from": None, "to": v} for k, v in team_services._staff_state(a).items()})
+        return a
     if TeamMembership.objects.filter(team=team, season=season, member=member).exists():
         raise Invalid(f"{member} is already on {team.name} in {season.name}.", {"team_id": ["Already on this team."]})
     position = team_services._position(position_id, staff=False)
@@ -143,6 +150,7 @@ def _has_other_ties(membership: ClubMembership) -> bool:
         or FamilyMembership.objects.filter(member=member).exists()
         or bool(member.user_id)
         or TeamMembership.objects.filter(member=member).exists()
+        or StaffAssignment.objects.filter(member=member).exists()
         or membership.payments.exists()
     )
 
@@ -186,3 +194,8 @@ def enrol(actor, member: Member, season: Season, *, status: str = Status.ACTIVE,
 
 def positions_for_players() -> list[Position]:
     return list(Position.objects.filter(staff_position=False))
+
+
+def positions_for_placement() -> list[Position]:
+    """Every position a sign-up can be placed with: the player positions first, then the staff positions (a volunteer goes on a team's staff)."""
+    return list(Position.objects.order_by("staff_position", "ordering", "name"))

@@ -72,6 +72,11 @@ class VariantRowIn(Schema):
     team_id: uuid.UUID | None = None
 
 
+class OrderingWindow(Schema):
+    deadline: datetime.date
+    estimated_delivery: datetime.date
+
+
 class ProductItem(Schema):
     id: uuid.UUID
     name: str
@@ -87,6 +92,8 @@ class ProductItem(Schema):
     inventory_managed: bool
     variant_count: int
     in_stock: bool
+    ordering_closed: bool
+    next_ordering_window: OrderingWindow | None
     created: datetime.datetime
 
 
@@ -116,6 +123,7 @@ class RegistrantTier(Schema):
 
 
 class ProductDetail(ProductItem):
+    ordering_windows: list[OrderingWindow]
     #: Registration pricing (membership products; ``None`` / empty / defaults for everything else).
     season_id: uuid.UUID | None = None
     season_name: str | None = None
@@ -161,6 +169,7 @@ class ProductIn(Schema):
     is_public: bool = True
     personalization_enabled: bool = False
     inventory_managed: bool = False
+    ordering_windows: list[OrderingWindow] = Field(default_factory=list, max_length=100)
     season_id: uuid.UUID | None = None
     early_bird_discount_type: str = ""
     early_bird_discount_amount: Decimal = Field(Decimal("0"), max_digits=10, decimal_places=2)
@@ -178,6 +187,7 @@ class ProductPatch(Schema):
     price: Decimal | None = Field(None, max_digits=10, decimal_places=2)
     product_type: str | None = None
     is_active: bool | None = None
+    ordering_windows: list[OrderingWindow] | None = Field(None, max_length=100)
     is_public: bool | None = None
     personalization_enabled: bool | None = None
     inventory_managed: bool | None = None

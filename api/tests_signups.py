@@ -96,13 +96,28 @@ class SignupsApiTests(NewsClubMixin, TestCase):
         position = Position.objects.create(name="Forward", short_name="F", staff_position=False)
         opts = self.call("get", "/signups/options").json()
         self.assertIn("Under 12", [t["name"] for t in opts["teams"]])
-        self.assertEqual([p["name"] for p in opts["positions"]], ["Forward"])
+        self.assertEqual([(p["name"], p["staff"]) for p in opts["positions"]], [("Forward", False)])
         r = self.call("post", f"/signups/{m.pk}/place", data={"team_id": str(self.team.pk), "position_id": str(position.pk), "jersey_number": 9})
         self.assertEqual(r.status_code, 201, r.content)
         self.assertTrue(TeamMembership.objects.filter(team=self.team, member=bob, season=self.season, jersey_number=9).exists())
         self.assertEqual(self.call("post", f"/signups/{m.pk}/place", data={"team_id": str(self.team.pk)}).status_code, 422)  # twice
         self.assertEqual([t["name"] for t in self.call("get", "/signups").json()["results"][0]["teams"]], ["Under 12"])
         self.assertEqual(self.call("post", f"/signups/{m.pk}/place", data={"team_id": "00000000-0000-0000-0000-000000000000"}).status_code, 422)
+
+    def test_a_volunteer_is_placed_on_the_staff_with_a_staff_position(self):
+        from teams.models import StaffAssignment
+
+        vera = self.person("Vera")
+        m = self.signup(vera)
+        coach = Position.objects.create(name="Team manager", short_name="TM", staff_position=True)
+        opts = self.call("get", "/signups/options").json()
+        self.assertIn(("Team manager", True), [(p["name"], p["staff"]) for p in opts["positions"]])
+        r = self.call("post", f"/signups/{m.pk}/place", data={"team_id": str(self.team.pk), "position_id": str(coach.pk), "jersey_number": 9})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["position"], r.json()["jersey_number"]), ("Team manager", None))
+        self.assertTrue(StaffAssignment.objects.filter(team=self.team, member=vera, season=self.season, position=coach).exists())
+        self.assertFalse(TeamMembership.objects.filter(member=vera).exists())
+        self.assertEqual(self.call("post", f"/signups/{m.pk}/place", data={"team_id": str(self.team.pk), "position_id": str(coach.pk)}).status_code, 422)  # twice
 
     def test_cancel_removes_a_bare_signup_but_keeps_anyone_with_ties(self):
         with schema_context(self.club.schema_name):

@@ -163,6 +163,37 @@ class ClubSettingsApiTests(TestCase):
         self.assertEqual(self.upload(big).status_code, 422)
         self.assertFalse(self.club_now().logo)
 
+    def test_event_background_can_be_replaced_removed_and_read_by_the_member_app(self):
+        path = "/event-background"
+        headers = {"HTTP_HOST": self.host, "HTTP_X_SESSION_TOKEN": login_session(self.owner)}
+        self.assertEqual(self.call("delete", path, self.coach_user).status_code, 403)
+        invalid = Client().post(BASE + path, {"file": image_file("GIF", "background.gif")}, **headers)
+        self.assertEqual(invalid.status_code, 422)
+        self.assertIn("file", invalid.json()["errors"])
+
+        uploaded = Client().post(BASE + path, {"file": image_file()}, **headers)
+        self.assertEqual(uploaded.status_code, 200, uploaded.content)
+        url = uploaded.json()["event_background_url"]
+        self.assertIn("/event-background/", url)
+        self.assertEqual(self.admin("get", "").json()["event_background_url"], url)
+        home = Client().get("/api/v1/portal/home", **headers)
+        self.assertEqual(home.status_code, 200, home.content)
+        self.assertEqual(home.json()["event_background"], url)
+
+        previous = self.club_now().event_background
+        with self.captureOnCommitCallbacks(execute=True):
+            replacement = Client().post(BASE + path, {"file": image_file()}, **headers)
+        self.assertEqual(replacement.status_code, 200, replacement.content)
+        self.assertNotEqual(replacement.json()["event_background_url"], url)
+        self.assertFalse(previous.storage.exists(previous.name))
+
+        current = self.club_now().event_background
+        with self.captureOnCommitCallbacks(execute=True):
+            removed = self.admin("delete", path)
+        self.assertIsNone(removed.json()["event_background_url"])
+        self.assertFalse(current.storage.exists(current.name))
+        self.assertEqual(len(self.audit("club.event_background_changed")), 3)
+
     # -- previews --
 
     def test_previews_list(self):

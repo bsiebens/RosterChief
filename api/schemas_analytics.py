@@ -118,6 +118,11 @@ class GameRowOut(Schema):
     goals_against: int
     pim_for: int | None = None
     pim_against: int | None = None
+    pim_for_excl: int | None = None
+    pp_goals: int | None = None
+    pp_opportunities: int | None = None
+    pk_goals_against: int | None = None
+    pk_opportunities: int | None = None
     pim_for_pct: int = 0
     pim_against_pct: int = 0
     total_pct: int = 0

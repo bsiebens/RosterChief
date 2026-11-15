@@ -18,6 +18,7 @@ class ClubSettingsOut(Schema):
     vat_id: str
     payment_instructions: str
     logo_url: str | None = None
+    event_background_url: str | None = None
     primary_color: str
     secondary_color: str
     primary_text_color: str

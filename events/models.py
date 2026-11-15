@@ -319,7 +319,7 @@ class EventOfficial(_Assignment):
 
 class _Signup(UUIDModel):
     """A member who offered to referee / officiate a game. Interest only: it takes no place until staff assign the person,
-    which removes the sign-up. Registered by staff on a member's behalf today, by the member in a later member app."""
+    which removes the sign-up."""
 
     class Meta:
         abstract = True
@@ -346,6 +346,19 @@ class OfficialSignup(_Signup):
     class Meta(_Signup.Meta):
         verbose_name = _("official sign-up")
         verbose_name_plural = _("official sign-ups")
+
+
+class OfficiatingInvitation(UUIDModel):
+    """Keep declines and notification history separate from offers and assignments."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="officiating_invitations")
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="officiating_invitations")
+    kind = models.CharField(max_length=8, choices=[("referee", _("referee")), ("official", _("official"))])
+    declined = models.BooleanField(default=False)
+    notified = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["event", "member", "kind"], name="unique_officiating_invitation")]
 
 
 class EventSeries(UUIDModel):

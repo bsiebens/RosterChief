@@ -51,4 +51,4 @@ class HeadlessAdapter(DefaultHeadlessAdapter):
         base, path = settings.FRONTEND_URLS.get(app or ""), settings.FRONTEND_PATHS.get(urlname)
         if not (base and path):
             return None  # app not deployed (yet): allauth falls back to its own /accounts/ page
-        return render_url(self.request, base + path, **kwargs)
+        return render_url(self.request, base.rstrip("/") + path, **kwargs)

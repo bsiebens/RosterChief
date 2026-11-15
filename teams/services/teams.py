@@ -16,7 +16,7 @@ from django.db.models.deletion import ProtectedError, RestrictedError
 
 from events.models import Season
 from members.models import Member
-from members.services import audit
+from members.services import access, audit
 from members.services.access import can_manage_settings, require_settings, require_team_manager
 from members.services.errors import Invalid, NotAllowed
 from teams.models import NumberPool, NumberReservation, Position, StaffAssignment, Team, TeamMembership, TeamPhoto
@@ -333,7 +333,15 @@ def team_detail(actor, team, season) -> dict:
     if season is not None:
         qs = StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name", "member__first_name")
         staff = [staff_out(a) for a in qs]
-    return {**team_out(team), "season_id": season.pk if season else None, "photo_url": photo_url(team, season), "roster": [roster_out(m) for m in roster_for(team, season)], "staff": staff}
+    roster = [roster_out(m) for m in roster_for(team, season)]
+    if season is not None and roster and (access.can_manage_team(actor, team) or access.can_manage_members(actor)):
+        # Players who cannot be picked for some kind of event because a requirement is still open, with the names of those requirements.
+        from members.services import onboarding
+
+        blocked = onboarding.blocking_reasons({(None, season.pk): {r["member_id"] for r in roster}})[(None, season.pk)]
+        for r in roster:
+            r["open_requirements"] = blocked.get(r["member_id"], [])
+    return {**team_out(team), "season_id": season.pk if season else None, "photo_url": photo_url(team, season), "roster": roster, "staff": staff}
 
 
 # -- roster ---------------------------------------------------------------------------------------------------
@@ -380,13 +388,24 @@ def _roster_state(m) -> dict:
     return {"team": m.team.name, "season": m.season.name, "position": m.position.name if m.position_id else None, "jersey_number": m.jersey_number, "is_captain": m.is_captain, "is_alternate_captain": m.is_alternate_captain}
 
 
+def _require_active_membership(member, season) -> None:
+    """Only someone with an *active* (paid up) membership in the season goes on a roster or a staff."""
+    from members.models import ClubMembership
+
+    if not ClubMembership.objects.filter(member=member, season=season, status=ClubMembership.StatusChoices.ACTIVE).exists():
+        _fail("member_id", "Only members with an active (paid up) membership this season can be added.")
+
+
 @transaction.atomic
-def add_player(actor, team, *, member_id, season_id, position_id, jersey_number, is_captain, is_alternate_captain):
+def add_player(actor, team, *, member_id, season_id, position_id, jersey_number, is_captain, is_alternate_captain, check_membership=True):
+    """``check_membership=False``: the caller (the member import) has just made the membership and it is still pending."""
     require_team_manager(actor, team)
     season = resolve_season(season_id)
     member = Member.objects.filter(pk=member_id).first()
     if member is None:
         _fail("member_id", "Unknown member.")
+    if check_membership:
+        _require_active_membership(member, season)
     if TeamMembership.objects.filter(team=team, season=season, member=member).exists():
         _fail("member_id", f"{member} is already on this team in {season.name}.")
     position = _position(position_id, staff=False)
@@ -450,6 +469,7 @@ def add_staff(actor, team, *, member_id, season_id, position_id):
     member = Member.objects.filter(pk=member_id).first()
     if member is None:
         _fail("member_id", "Unknown member.")
+    _require_active_membership(member, season)
     if StaffAssignment.objects.filter(team=team, season=season, member=member).exists():
         _fail("member_id", f"{member} is already on this team's staff in {season.name}.")
     position = _position(position_id, staff=True)

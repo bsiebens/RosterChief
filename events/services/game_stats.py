@@ -444,6 +444,16 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
     for stat in stats:
         if stat.stat_type == PIM:
             per_game_pim[stat.event_id]["for" if stat.is_ours else "against"] += stat.value
+    # Per game, for the progress charts: our game misconducts (leaving the rest), and the power plays / penalty kills with their goals.
+    per_game = defaultdict(lambda: {"gm": 0, "pp_goals": 0, "pp_opps": 0, "pk_goals_against": 0, "pk_opps": 0})
+    for stat in stats:
+        row = per_game[stat.event_id]
+        if stat.stat_type == PIM and stat.is_ours and stat.meta.get("kind") == "game_misconduct":
+            row["gm"] += stat.value
+        elif stat.stat_type == GOAL and stat.meta.get("strength") in POWER_PLAY:
+            row["pp_goals" if stat.is_ours else "pk_goals_against"] += stat.value
+        elif stat.stat_type == PP_OPPORTUNITY:
+            row["pp_opps" if stat.is_ours else "pk_opps"] += stat.value
     game_rows = [
         {
             "event": game,
@@ -452,6 +462,11 @@ def team_analytics(team, season, scope="all", friendlies=True, competition="") -
             "against": game.score_against,
             "pim_for": per_game_pim[game.pk]["for"] if game.pk in per_game_pim else None,
             "pim_against": per_game_pim[game.pk]["against"] if game.pk in per_game_pim else None,
+            "pim_for_excl": per_game_pim[game.pk]["for"] - per_game[game.pk]["gm"] if game.pk in per_game_pim else None,
+            "pp_goals": per_game[game.pk]["pp_goals"] if game.pk in per_game else None,
+            "pp_opportunities": per_game[game.pk]["pp_opps"] if game.pk in per_game else None,
+            "pk_goals_against": per_game[game.pk]["pk_goals_against"] if game.pk in per_game else None,
+            "pk_opportunities": per_game[game.pk]["pk_opps"] if game.pk in per_game else None,
         }
         for game, bar in zip(reversed(games), reversed(game_bars), strict=True)
     ]

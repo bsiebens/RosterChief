@@ -10,8 +10,7 @@ rewritten. Reconciling is done in bulk (a fixed number of queries however many e
 ``sync_attendances``; the signals in ``events/signals.py`` call it whenever a roster, group, club membership or an
 event's audience changes.
 
-Not ported from the old app: the "open onboarding requirement blocks this event kind" exclusion (there is no
-``blocked_member_ids_for_event`` equivalent in ``members/services/onboarding.py`` yet) and member self-service RSVP.
+Self-service replies enforce the event deadline, family access, and the club's late instalment policy.
 """
 
 from __future__ import annotations
@@ -79,9 +78,10 @@ def _season(season):
 # --- audience ------------------------------------------------------------------------------------------------------
 
 
-def _desired_member_ids(events: list, member_ids: set | None = None) -> dict:
+def _desired_member_ids(events: list, member_ids: set | None = None, *, keep_blocked: bool = False) -> dict:
     """``{event.pk: {member ids}}``: the effective audience of every event in ``events``, restricted to ``member_ids``
-    when given. A fixed number of queries regardless of how many events there are."""
+    when given. A fixed number of queries regardless of how many events there are. ``keep_blocked``: also those left out
+    because an open requirement blocks this kind of event (see ``blocked_members``)."""
     if not events:
         return {}
     event_ids = [event.pk for event in events]
@@ -139,7 +139,7 @@ def _desired_member_ids(events: list, member_ids: set | None = None) -> dict:
         ids |= invited[event.pk]
         ids -= excluded[event.pk]
         desired[event.pk] = ids
-    return _without_blocked(events, season_of, desired)
+    return desired if keep_blocked else _without_blocked(events, season_of, desired)
 
 
 def _without_blocked(events: list, season_of: dict, desired: dict) -> dict:
@@ -151,6 +151,15 @@ def _without_blocked(events: list, season_of: dict, desired: dict) -> dict:
         groups[(event.kind, season_of[event.pk])] |= desired[event.pk]
     blocked = onboarding.blocked_member_ids(groups)
     return {event.pk: desired[event.pk] - blocked[(event.kind, season_of[event.pk])] for event in events}
+
+
+def blocked_members(event) -> dict:
+    """``{member id: [names of the open requirements]}``: people who would be invited to ``event`` but are left out because of those requirements."""
+    from members.services import onboarding
+
+    season = _season_resolver()(event)
+    ids = _desired_member_ids([event], keep_blocked=True).get(event.pk, set())
+    return onboarding.blocking_reasons({(event.kind, season): ids})[(event.kind, season)]
 
 
 def effective_members(event):
@@ -283,6 +292,62 @@ def record_status_change(actor, attendance: Attendance, from_status: str, to_sta
 def require_attendance_manager(actor, event) -> None:
     if not access.can_manage_attendance(actor, event):
         raise NotAllowed("You are not allowed to manage the attendance of this event.")
+
+
+def registration_payment_blocked(event, member, *, today: datetime.date | None = None) -> bool:
+    from registration.services import installments
+
+    return installments.blocked_for_event(event, member, resolve_season(event), today=today)
+
+
+@transaction.atomic
+def set_answer_as_member(actor, attendance: Attendance, status: str, note: str = "", *, now: datetime.datetime | None = None) -> Attendance:
+    """Reply to an existing invitation as the player or one of their guardians."""
+    attendance = Attendance.objects.select_for_update(of=("self",)).select_related("event", "member").get(pk=attendance.pk)
+    event, member = attendance.event, attendance.member
+    if change_via(actor, member) not in (AttendanceChange.Via.SELF, AttendanceChange.Via.GUARDIAN):
+        raise NotAllowed("You are not allowed to answer for this member.")
+    if not effective_members(event).filter(pk=member.pk).exists():
+        raise NotAllowed("This member is not invited to this event.")
+
+    now = now or timezone.now()
+    if status not in ("present", "absent", "maybe", "dropout"):
+        raise Invalid("Unknown RSVP status.", code="invalid_status")
+    if event.cancelled:
+        raise Invalid("This event was cancelled.", code="event_cancelled")
+    if event.start <= now:
+        raise Invalid("This event has already started.", code="event_started")
+    was = attendance.status
+    dropping_out = status == "dropout" or (was == Status.SELECTED and status == "absent")
+    if dropping_out and was != Status.SELECTED:
+        raise Invalid("This member is not in the published line-up.", code="not_in_lineup")
+    if not dropping_out and event.deadline and event.deadline < now:
+        raise Invalid("Replies are closed for this event.", code="rsvp_closed")
+    if status in ("present", "maybe") and registration_payment_blocked(event, member, today=timezone.localdate(now)):
+        raise Invalid("An overdue registration instalment must be paid before signing up for this event.", code="late_installment")
+    if status == "maybe" and was == Status.SELECTED:
+        raise Invalid("This member is in the published line-up.", code="in_lineup")
+
+    note = "" if status == "present" else (note or "").strip()
+    if len(note) > COACH_NOTE_MAX:
+        raise Invalid("The reason is too long.", {"note": [f"At most {COACH_NOTE_MAX} characters."]})
+    if (dropping_out or status == "absent") and not any(character.isalnum() for character in note):
+        raise Invalid("Please enter a reason.", {"note": ["Please enter a reason."]}, code="note_required")
+
+    before_note = attendance.note
+    if dropping_out:
+        attendance.status = Status.ABSENT
+    elif not (status == "present" and was in (Status.SELECTED, Status.NOT_SELECTED)):
+        attendance.status = status
+    attendance.note = note
+    attendance.answered_by_coach = False
+    attendance.save(update_fields=["status", "note", "answered_by_coach", "modified"])
+    record_status_change(actor, attendance, was, attendance.status, note_changed=before_note != note)
+    if dropping_out:
+        from events.services.lineup import notify_coach_dropout
+
+        notify_coach_dropout(event, member, actor)
+    return attendance
 
 
 @transaction.atomic

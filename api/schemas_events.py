@@ -286,12 +286,22 @@ class AttendanceChangeOut(Schema):
     note_changed: bool = False
 
 
+class BlockedMemberOut(Schema):
+    member_id: uuid.UUID
+    first_name: str
+    last_name: str
+    #: The open requirements that keep this person out of the event.
+    requirements: list[str]
+
+
 class AttendanceListOut(Schema):
     can_manage: bool
     counts: AttendanceCounts
     checked_in: int
     no_shows: int
     rows: list[AttendanceRowOut]
+    #: People who would be invited but cannot join because of open requirements (only for those who manage the attendance; empty otherwise).
+    blocked: list[BlockedMemberOut] = []
 
 
 class AnswerIn(Schema):

@@ -145,6 +145,15 @@ def _each_club_with(label, work) -> tuple[dict, list]:
     return totals, failed
 
 
+@shared_task(name="events.notify_officiating_opportunities")
+def notify_officiating_opportunities() -> str:
+    from .services.officiating_invitations import notify_new_opportunities
+
+    now = timezone.now()
+    totals, failed = _each_club_with("Notifying referees and officials", lambda club: {"sent": notify_new_opportunities(club, now=now)})
+    return f"sent {totals.get('sent', 0)} officiating notification(s)" + (f"; clubs failed: {', '.join(failed)}" if failed else "")
+
+
 @shared_task(name="events.refresh_fixtures")
 def refresh_fixtures(today: datetime.date | None = None) -> str:
     """Re-check every team's stored fixture import sources (Team.import_sources) for the current season in every active

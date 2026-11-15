@@ -25,7 +25,7 @@ def _text(title: str, body: str) -> dict:
     return {"title": title, "excerpt": svc.render_body_excerpt(body, words=EXCERPT_WORDS), "body": svc.render_body_html(body)}
 
 
-def _item_out(request, item) -> dict:
+def public_news_item(request, item) -> dict:
     return {
         "id": item.pk, "slug": item.slug, "published_at": item.published_at,
         "translations": {"nl": _text(item.title, item.body), "en": _text(item.effective_title_en, item.effective_body_en)},
@@ -42,7 +42,7 @@ def _item_out(request, item) -> dict:
 def list_news(request, limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)):
     _club_schema_only(request)
     qs = svc.public_news().prefetch_related("photos", "teams")
-    return {"count": qs.count(), "limit": limit, "offset": offset, "results": [_item_out(request, i) for i in qs[offset : offset + limit]]}
+    return {"count": qs.count(), "limit": limit, "offset": offset, "results": [public_news_item(request, i) for i in qs[offset : offset + limit]]}
 
 
 @router.get("/{slug}", auth=None, response=PublicNewsItemOut, summary="One published news item", operation_id="public_news_item")
@@ -51,4 +51,4 @@ def get_news_item(request, slug: str):
     item = svc.public_news().filter(slug=slug).prefetch_related("photos", "teams").first()
     if item is None:
         raise HttpError(404, "No such news item.")
-    return _item_out(request, item)
+    return public_news_item(request, item)

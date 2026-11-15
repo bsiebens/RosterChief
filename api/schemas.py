@@ -14,7 +14,7 @@ class BrandingOut(Schema):
     name: str
     is_platform: bool
     logo_url: str | None = None
-    #: Browser icons generated from the logo: keys ico, png_32, png_192, apple_touch (site-relative URLs). Empty without a logo.
+    #: Browser icons generated from the logo: keys ico, png_32, png_192, png_512, apple_touch (site-relative URLs). Empty without a logo.
     icons: dict[str, str] = {}
     primary_color: str = ""
     secondary_color: str = ""
@@ -34,6 +34,7 @@ class MyClubOut(Schema):
 class MeOut(Schema):
     id: str
     member_id: str | None = None
+    has_member_portal_role: bool = False
     email: str
     first_name: str
     last_name: str
@@ -43,6 +44,8 @@ class MeOut(Schema):
     is_club_admin: bool
     can_manage_members: bool = False
     can_manage_settings: bool = False
+    can_manage_finance: bool = False
+    can_manage_sponsors: bool = False
     can_execute_evaluations: bool = False
     can_manage_evaluations: bool = False
     can_manage_roles: bool = False

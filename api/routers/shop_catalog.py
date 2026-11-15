@@ -34,14 +34,17 @@ def _variant(v, levels=None) -> dict:
     if levels is None:
         levels = inventory.stock_levels([p]) if p.inventory_managed else {}
     stock = levels.get((p.pk, v.pk), 0) if p.inventory_managed else None
+    open_for_orders = not p.ordering_windows or svc.next_ordering_window(p) is not None
     return {
         "id": v.pk, "product_id": p.pk, "name": v.name, "price": v.price, "effective_price": v.effective_price, "is_active": v.is_active,
-        "ordering": v.ordering, "stock": stock, "in_stock": stock > 0 if stock is not None else True,
+        "ordering": v.ordering, "stock": stock, "in_stock": open_for_orders and (stock is None or stock > 0),
         "team_id": v.team_id, "team_name": v.team.name if v.team_id else None,
     }  # fmt: skip
 
 
 def _item(p, levels) -> dict:
+    window = svc.next_ordering_window(p)
+    ordering_closed = bool(p.ordering_windows) and window is None
     variants = list(p.variants.all())
     active = [v for v in variants if v.is_active]
     if not p.inventory_managed:
@@ -54,7 +57,8 @@ def _item(p, levels) -> dict:
         "id": p.pk, "name": p.name, "slug": p.slug, "category": {"id": p.category.pk, "name": p.category.name, "system_key": p.category.system_key} if p.category else None,
         "description": p.description, "image_url": p.main_image.image.url if p.main_image else None, "price": p.price, "product_type": p.product_type,
         "is_active": p.is_active, "is_public": p.is_public, "personalization_enabled": p.personalization_enabled,
-        "inventory_managed": p.inventory_managed, "variant_count": len(variants), "in_stock": in_stock, "created": p.created,
+        "inventory_managed": p.inventory_managed, "variant_count": len(variants), "in_stock": in_stock and not ordering_closed, "created": p.created,
+        "ordering_closed": ordering_closed, "next_ordering_window": window,
     }  # fmt: skip
 
 
@@ -62,7 +66,7 @@ def _detail(product_id) -> dict:
     p = svc.products_queryset().get(pk=product_id)
     levels = _levels([p])
     return {
-        **_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count(),
+        **_item(p, levels), "variants": [_variant(v, levels) for v in p.variants.all()], "order_line_count": p.order_lines.count(), "ordering_windows": p.ordering_windows,
         "team_id": p.team_id, "team_name": p.team.name if p.team_id else None,
         "season_id": p.season_id, "season_name": p.season.name if p.season else None, "early_bird_discount_type": p.early_bird_discount_type,
         "early_bird_discount_amount": p.early_bird_discount_amount, "early_bird_deadline": p.early_bird_deadline, "registrant_discount_scope": p.registrant_discount_scope,

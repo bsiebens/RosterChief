@@ -27,6 +27,9 @@ class RegistrationSettings(UUIDModel):
     terms_text = models.TextField(_("terms"), blank=True, help_text=_("Shown above the submit button."))
     payment_instructions = models.TextField(_("payment instructions"), blank=True, help_text=_("Printed on the invoice and in its email."))
     invoice_due_days = models.PositiveSmallIntegerField(_("invoice due days"), default=30)
+    installment_offsets = models.JSONField(_("days between the first due date and later instalments"), default=list, blank=True)
+    installment_grace_days = models.PositiveSmallIntegerField(_("instalment signup grace period in days"), default=0)
+    installment_block_kinds = models.JSONField(_("event types blocked by late instalments"), default=list, blank=True)
 
     class Meta:
         verbose_name = _("registration settings")
@@ -41,6 +44,8 @@ class RegistrationBatch(UUIDModel):
 
     #: The possession of this token is the registrant's credential for the status page (no login).
     status_token = models.CharField(_("status token"), max_length=64, unique=True, editable=False, default=_token)
+    # Original v1 invoice lines kept for finance when a membership appeared on several legacy invoices.
+    legacy_invoice_history = models.JSONField(blank=True, default=dict)
     contact = models.ForeignKey(Member, on_delete=models.SET_NULL, null=True, blank=True, related_name="registration_batches", verbose_name=_("contact"))
     season = models.ForeignKey("events.Season", on_delete=models.PROTECT, related_name="registration_batches", verbose_name=_("season"))
     submitted_at = models.DateTimeField(_("submitted at"), auto_now_add=True)
@@ -50,6 +55,7 @@ class RegistrationBatch(UUIDModel):
     confirmation_sent_at = models.DateTimeField(_("confirmation sent at"), null=True, blank=True)
     invoice_number = models.CharField(_("invoice number"), max_length=50, blank=True, unique=True, null=True)
     invoice_due_date = models.DateField(_("invoice due date"), null=True, blank=True)
+    installment_offsets = models.JSONField(_("days between the first due date and later instalments"), default=list, blank=True)
     invoice_sent_at = models.DateTimeField(_("invoice sent at"), null=True, blank=True)
     manual_discount_amount = models.DecimalField(_("manual discount"), max_digits=10, decimal_places=2, default=Decimal("0.00"))
     manual_discount_note = models.CharField(_("manual discount note"), max_length=255, blank=True)

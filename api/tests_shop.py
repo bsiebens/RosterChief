@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import Client, TestCase
+from django.utils import timezone
 
 from controlpanel.tests import login_session
 from features.entitlements import Entitlements
@@ -139,6 +140,30 @@ class ShopApiTests(ShopClubMixin, TestCase):
         self.assertEqual(self.as_("products", "post", "/products", {"name": "X", "price": "1", "product_type": "membership", "inventory_managed": True}).status_code, 422)
         self.assertEqual(self.as_("products", "get", f"/products/{uuid.uuid4()}").status_code, 404)
         self.assertEqual(self.as_("products", "delete", f"/products/{pid}").status_code, 204)
+
+    def test_ordering_windows_are_inclusive_and_enforced_on_order(self):
+        today = timezone.localdate()
+        yesterday = (today - datetime.timedelta(days=1)).isoformat()
+        next_week = (today + datetime.timedelta(days=7)).isoformat()
+        expired = {"deadline": yesterday, "estimated_delivery": today.isoformat()}
+        open_now = {"deadline": today.isoformat(), "estimated_delivery": next_week}
+        response = self.as_("products", "post", "/products", {"name": "Pre-order jersey", "price": "25", "ordering_windows": [open_now, expired]})
+        self.assertEqual(response.status_code, 201, response.content)
+        product = response.json()
+        self.assertEqual(product["ordering_windows"], [expired, open_now])
+        self.assertEqual(product["next_ordering_window"], open_now)
+        self.assertTrue(product["in_stock"])
+        path = f"/products/{product['id']}"
+        rejected = self.as_("products", "patch", path, {"ordering_windows": [open_now, open_now]})
+        self.assertEqual(rejected.status_code, 422)
+        closed = self.as_("products", "patch", path, {"ordering_windows": [expired]}).json()
+        self.assertFalse(closed["in_stock"])
+        self.assertTrue(closed["ordering_closed"])
+        order = {"purchaser_id": str(self.buyer.pk), "lines": [{"product_id": product["id"], "quantity": 1}]}
+        self.assertEqual(self.as_("orders", "post", "/orders", order).status_code, 422)
+        cleared = self.as_("products", "patch", path, {"ordering_windows": []}).json()
+        self.assertTrue(cleared["in_stock"])
+        self.assertFalse(cleared["ordering_closed"])
 
     def test_negative_prices_are_only_for_membership_products(self):
         """A negative price is a credit on a registration: membership products and their variants only."""

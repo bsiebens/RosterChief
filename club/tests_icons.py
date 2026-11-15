@@ -56,8 +56,8 @@ class ClubIconTests(TestCase):
         club = Club.objects.get(pk=self.club.pk)
         club.logo.save("logo.png", ContentFile(png()), save=True)
         icons = self.branding()["icons"]
-        self.assertEqual(set(icons), {"ico", "png_32", "png_192", "apple_touch"})
-        for key, edge in (("png_32", 32), ("png_192", 192), ("apple_touch", 180)):
+        self.assertEqual(set(icons), {"ico", "png_32", "png_192", "png_512", "apple_touch"})
+        for key, edge in (("png_32", 32), ("png_192", 192), ("png_512", 512), ("apple_touch", 180)):
             path = icons[key].removeprefix("/media/")
             with default_storage.open(path) as fh:
                 self.assertEqual(Image.open(fh).size, (edge, edge))
@@ -81,7 +81,7 @@ class ClubIconTests(TestCase):
         # A logo that predates icon generation: set the file without going through save().
         club.logo.name = default_storage.save("clubs/old/logo.png", ContentFile(png()))
         Club.objects.filter(pk=club.pk).update(logo=club.logo.name)
-        self.assertEqual(set(self.branding()["icons"]), {"ico", "png_32", "png_192", "apple_touch"})
+        self.assertEqual(set(self.branding()["icons"]), {"ico", "png_32", "png_192", "png_512", "apple_touch"})
 
     def test_unreadable_logo_does_not_break_branding(self):
         club = Club.objects.get(pk=self.club.pk)

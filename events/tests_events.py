@@ -2,6 +2,7 @@
 events.services.calendar.events_between."""
 
 import datetime
+from unittest.mock import patch
 
 from django.db import connection
 from django.test import TestCase
@@ -12,10 +13,9 @@ from club.models import Club, Domain
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
 from events.models import Event, EventSeries, EventSubtype, Location, Opponent, Season
-from events.services import calendar
+from events.services import calendar, subtypes
 from events.services import events as svc
 from events.services import recurrence as rec
-from events.services import subtypes
 from members.models import AuditEntry, Group, GroupMembership, Member
 from members.services.errors import Invalid, NotAllowed
 from teams.models import Position, StaffAssignment, Team, TeamMembership
@@ -289,6 +289,7 @@ class EventServiceTests(TestCase):
         self.assertEqual(s.occurrences.filter(start__date=timezone.localdate() + datetime.timedelta(days=2)).count(), 1)
 
     def test_update_all_changes_template_and_time(self):
+        self.enterContext(patch.object(timezone, "now", return_value=at(0, 12)))
         s = self.series(days=-7)
         past = s.occurrences.filter(start__lt=timezone.now()).count()
         self.assertEqual(past, 7)
@@ -325,6 +326,7 @@ class EventServiceTests(TestCase):
         self.assertTrue(all(e.title == "Whole" for e in s.occurrences.all()))
 
     def test_delete_scopes(self):
+        self.enterContext(patch.object(timezone, "now", return_value=at(0, 12)))
         s = self.series(days=-3)
         series_pk = s.pk
         occ = list(s.occurrences.order_by("start"))

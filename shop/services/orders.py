@@ -2,6 +2,7 @@
 foundation services (``inventory``, ``pricing``, ``vouchers``); payments through ``payments``; production through
 ``production``. Every mutation runs in one transaction."""
 
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -12,7 +13,7 @@ from formbuilder.services.management import Conflict
 from members.models import Member
 from members.services.errors import Invalid
 from shop.models import AppliedDiscount, Discount, InventoryMovement, Order, OrderLine, Payment, Product, ProductionBatch, ProductionStatus, ProductVariant, Voucher
-from shop.services import defaults, inventory, notifications, payments, pricing, production, vouchers
+from shop.services import catalog, defaults, inventory, notifications, payments, pricing, production, vouchers
 from shop.settings_models import ShopSettings
 from teams.models import Team
 
@@ -56,6 +57,8 @@ def _resolve_spec(spec: LineSpec, index: int) -> None:
     p, v = spec.product, spec.variant
     if not p.is_active:
         raise Invalid(f"{p.name} is not available.", {key: ["This product is not active."]})
+    if p.ordering_windows and catalog.next_ordering_window(p) is None:
+        raise Invalid(f"{p.name} is not available.", {key: ["All ordering deadlines for this product have passed."]})
     if spec.quantity < 1 or spec.quantity > MAX_QUANTITY:
         raise Invalid("Invalid quantity.", {key: [f"Quantity must be between 1 and {MAX_QUANTITY}."]})
     if v is None and p.variants.filter(is_active=True).exists():
@@ -69,7 +72,7 @@ def _resolve_spec(spec: LineSpec, index: int) -> None:
 
 
 def _price(spec: LineSpec) -> Decimal:
-    return spec.variant.effective_price if spec.variant else spec.product.price
+    return spec.variant.price if spec.variant is not None and spec.variant.price is not None else spec.product.price
 
 
 def _make_line(order, spec: LineSpec) -> OrderLine:
@@ -119,21 +122,24 @@ def ensure_shop_open() -> None:
 
 
 @transaction.atomic
-def create_order(actor, *, purchaser: Member, specs: list[LineSpec], discount_code: str = "", notes: str = "", voucher_payments=()) -> Order:
+def create_order(actor, *, purchaser: Member, specs: list[LineSpec], discount_code: str = "", notes: str = "", voucher_payments=(), order_id: uuid.UUID | None = None) -> Order:
     """Create an order for ``purchaser``: stock checked under lock and booked, prices snapshotted, discount applied,
     optional voucher payments (``[(Voucher, amount)]``) recorded in the same transaction."""
     if not specs:
         raise Invalid("Add at least one line.", {"lines": ["Add at least one line."]})
+    products = {product.pk: product for product in inventory.lock_products({s.product.pk for s in specs})}
     for i, spec in enumerate(specs):
+        if spec.product.pk not in products:
+            raise Invalid("This product is no longer available.", {f"lines.{i}": ["This product is no longer available."]})
+        spec.product = products[spec.product.pk]
         _resolve_spec(spec, i)
-    inventory.lock_products({s.product.pk for s in specs if s.product.inventory_managed})
     try:
         inventory.check_available(specs)
     except inventory.InventoryError as error:
         raise Conflict(str(error), code="insufficient_stock") from error
     discount = find_discount(discount_code, purchaser)
     user = actor if getattr(actor, "pk", None) else None
-    order = Order.objects.create(purchaser=purchaser, total=Decimal("0"), notes=notes, created_by=user)
+    order = Order.objects.create(pk=order_id or uuid.uuid4(), purchaser=purchaser, total=Decimal("0"), notes=notes, created_by=user)
     lines = [_make_line(order, s) for s in specs]
     inventory.take_for_order_lines(lines)
     if discount is not None:
@@ -226,8 +232,11 @@ def _lock(order) -> Order:
 def add_line(order, spec: LineSpec) -> OrderLine:
     order = _lock(order)
     _check_editable(order)
+    products = inventory.lock_products([spec.product.pk])
+    if not products:
+        raise Invalid("This product is no longer available.", {"lines.0": ["This product is no longer available."]})
+    spec.product = products[0]
     _resolve_spec(spec, 0)
-    inventory.lock_products([spec.product.pk] if spec.product.inventory_managed else [])
     try:
         inventory.check_available([spec])
     except inventory.InventoryError as error:
@@ -242,6 +251,8 @@ def add_line(order, spec: LineSpec) -> OrderLine:
 def update_line(order, line: OrderLine, *, quantity=None, variant="keep", beneficiary="keep", team="keep", personalization_number=None, personalization_name=None) -> OrderLine:
     order = _lock(order)
     _check_editable(order)
+    line = order.lines.select_related("product", "variant").get(pk=line.pk)
+    old_quantity = line.quantity
     old_variant_id = line.variant_id
     if quantity is not None:
         if quantity < 1 or quantity > MAX_QUANTITY:
@@ -257,6 +268,10 @@ def update_line(order, line: OrderLine, *, quantity=None, variant="keep", benefi
             line.unit_price = variant.effective_price if variant else line.product.price
             if line.unit_price < 0:
                 raise Invalid("Invalid variant.", {"variant_id": ["A negative price is only a credit on a registration."]})
+    if line.quantity > old_quantity or line.variant_id != old_variant_id:
+        [product] = inventory.lock_products([line.product_id])
+        if product.ordering_windows and catalog.next_ordering_window(product) is None:
+            raise Invalid(f"{product.name} is not available.", {"quantity": ["All ordering deadlines for this product have passed."]})
     if beneficiary != "keep":
         line.beneficiary = beneficiary
     if team != "keep":

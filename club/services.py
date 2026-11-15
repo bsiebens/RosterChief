@@ -67,7 +67,7 @@ def create_account(email: str, first_name: str = "", last_name: str = ""):
 
 
 # Subdomains that must never be handed to a club.
-RESERVED_SLUGS = frozenset({"www", "admin", "api", "app", "accounts", "login", "mail", "media", "public", "static"})
+RESERVED_SLUGS = frozenset({"www", "admin", "api", "app", "accounts", "control", "login", "mail", "media", "public", "static"})
 SLUG_MAX_LENGTH = 40  # keeps "club_" + slug well inside PostgreSQL's 63 character identifier limit
 SCHEMA_PREFIX = "club_"
 
@@ -84,14 +84,14 @@ def generate_club_slug(name: str) -> str:
     """A slug that is a valid, unused subdomain label and schema name."""
     base = slugify(name)[:SLUG_MAX_LENGTH].strip("-") or "club"
     slug, n = base, 1
-    while slug in RESERVED_SLUGS or _slug_taken(slug):
+    while slug in RESERVED_SLUGS or club_slug_taken(slug):
         n += 1
         suffix = f"-{n}"
         slug = base[: SLUG_MAX_LENGTH - len(suffix)].rstrip("-") + suffix
     return slug
 
 
-def _slug_taken(slug: str) -> bool:
+def club_slug_taken(slug: str) -> bool:
     return Club.objects.filter(slug=slug).exists() or Club.objects.filter(schema_name__iexact=schema_name_for(slug)).exists() or Domain.objects.filter(domain__iexact=club_domain(slug)).exists()
 
 
@@ -100,7 +100,7 @@ def club_domain(slug: str) -> str:
 
 
 @transaction.atomic
-def provision_club(club: Club) -> Club:
+def provision_club(club: Club, *, preferred_slug: str | None = None) -> Club:
     """Provision an unsaved ``Club`` that has ``name`` and ``owner`` (and optionally ``sport``) set.
 
     Generates the slug and schema name, creates the schema (and, through the post_schema_sync signal, the
@@ -109,7 +109,7 @@ def provision_club(club: Club) -> Club:
     if not club._state.adding:
         raise ValueError("Club is already provisioned.")
     with schema_context(get_public_schema_name()):
-        club.slug = generate_club_slug(club.name)
+        club.slug = preferred_slug or generate_club_slug(club.name)
         club.schema_name = schema_name_for(club.slug)
         club.save()
         Domain.objects.create(domain=club_domain(club.slug), tenant=club, is_primary=True)

@@ -70,15 +70,47 @@ def update_member(actor, member: Member, **values) -> Member:
     return member
 
 
+SELF_EDITABLE_FIELDS = ("first_name", "last_name", "phone", "emergency_phone", "date_of_birth", "photo_public_consent")
+
+
 @transaction.atomic
-def delete_member(actor, member: Member, *, detach_login: bool = False) -> None:
+def update_own_profile(actor, member: Member, **values) -> Member:
+    """A person (or the parent of a child) correcting contact details: only ``SELF_EDITABLE_FIELDS`` -- never the email (it is the
+    login), the licence or the language. The caller has checked that ``actor`` is this member or manages them. Audited like ``update_member``."""
+    unknown = set(values) - set(SELF_EDITABLE_FIELDS)
+    if unknown:
+        raise Invalid(f"Unknown or read-only fields: {sorted(unknown)}", {f: ["Not editable."] for f in unknown})
+    for name in ("first_name", "last_name"):
+        if name in values and not str(values[name]).strip():
+            raise Invalid("A name is required.", {name: ["Required."]})
+    changes = audit.diff(member, values)
+    for name, value in values.items():
+        setattr(member, name, value)
+    _clean(member)
+    if changes:
+        member.save()
+        audit.record(actor, "member.updated", member=member, target=member, changes=changes)
+    return member
+
+
+def user_names(users) -> dict:
+    """``{user pk: display name}`` for ``users``: the name of the member the login belongs to, else the account's own name, else its email."""
+    users = [u for u in users if u is not None]
+    members = {m.user_id: str(m) for m in Member.objects.filter(user__in=users)}
+    return {u.pk: members.get(u.pk) or u.get_full_name() or u.email for u in users}
+
+
+@transaction.atomic
+def delete_member(actor, member: Member, *, detach_login: bool = False, authorized: bool = False) -> None:
     """Delete a person and everything hanging off them (family links, memberships, team spots).
 
     Refused when: it is the actor's own record; the person has recorded fee payments (financial history must stay);
     the person has a login and ``detach_login`` is not set (then the row is deleted but the user account and its
     club access are left alone -- revoke access through the authorization app); or another app protects a row that
-    points at them. The audit entry survives (member is nulled) and keeps the name as target label."""
-    require_admin(actor)
+    points at them. The audit entry survives (member is nulled) and keeps the name as target label.
+    ``authorized``: the caller already checked the actor's right to do this (cancelling a registration is a finance action, not a member-admin one)."""
+    if not authorized:
+        require_admin(actor)
     if member.user_id and member.user_id == getattr(actor, "pk", None):
         raise Invalid("You cannot delete your own member record.")
     if member.user_id and not detach_login:
@@ -118,14 +150,15 @@ def _photo_field(field: str) -> str:
 
 
 @transaction.atomic
-def set_photo(actor, member: Member, image: UploadedFile, field: str = "profile_photo") -> Member:
+def set_photo(actor, member: Member, image: UploadedFile, field: str = "profile_photo", *, authorized: bool = False) -> Member:
     """Replace the profile picture (self-service, club-wide) or the official player picture (``field="player_photo"``,
     public once ``photo_public_consent`` is set). JPEG, PNG or WebP up to 5 MB (verified by decoding, never by file
     name), stored under a name we choose. The previous file is deleted. Audited without the file content."""
     from PIL import Image, UnidentifiedImageError
 
     prefix = _photo_field(field)
-    require_admin(actor)
+    if not authorized:
+        require_admin(actor)
     if image.size > MAX_PHOTO_BYTES:
         raise Invalid("The picture is larger than 5 MB.", {"photo": ["The picture is larger than 5 MB."]})
     try:
@@ -148,10 +181,11 @@ def set_photo(actor, member: Member, image: UploadedFile, field: str = "profile_
 
 
 @transaction.atomic
-def remove_photo(actor, member: Member, field: str = "profile_photo") -> Member:
+def remove_photo(actor, member: Member, field: str = "profile_photo", *, authorized: bool = False) -> Member:
     """Delete the picture (no-op, no audit entry, when there is none)."""
     prefix = _photo_field(field)
-    require_admin(actor)
+    if not authorized:
+        require_admin(actor)
     current = getattr(member, field)
     if not current:
         return member

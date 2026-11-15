@@ -1,10 +1,12 @@
 """Categories, products, variants and their images; and discount codes. Writes need the matching shop permission."""
 
+import datetime
 import os
 import uuid
 
 from django.db import transaction
 from django.db.models import Count, F
+from django.utils import timezone
 
 from formbuilder.services.management import Conflict
 from members.services import access
@@ -80,6 +82,31 @@ def products_queryset():
     return Product.objects.select_related("category", "season", "team").prefetch_related("variants__team", "images", "attachments", "registrant_tiers")
 
 
+def next_ordering_window(product, today=None):
+    date = (today or timezone.localdate()).isoformat()
+    return next((window for window in product.ordering_windows if window["deadline"] >= date), None)
+
+
+def _ordering_windows(windows):
+    normalized = []
+    deadlines = set()
+    for index, window in enumerate(windows):
+        deadline = window["deadline"]
+        delivery = window["estimated_delivery"]
+        if isinstance(deadline, str):
+            deadline = datetime.date.fromisoformat(deadline)
+        if isinstance(delivery, str):
+            delivery = datetime.date.fromisoformat(delivery)
+        field = f"ordering_windows.{index}"
+        if deadline in deadlines:
+            raise Invalid("Ordering deadlines must be unique.", {f"{field}.deadline": ["This deadline is already used."]})
+        if delivery < deadline:
+            raise Invalid("Delivery cannot be before the deadline.", {f"{field}.estimated_delivery": ["Enter a date on or after the deadline."]})
+        deadlines.add(deadline)
+        normalized.append({"deadline": deadline.isoformat(), "estimated_delivery": delivery.isoformat()})
+    return sorted(normalized, key=lambda window: window["deadline"])
+
+
 def _validate_product(product):
     membership = product.product_type == Product.ProductType.MEMBERSHIP
     if product.team_id and not team_allowed(product):
@@ -129,9 +156,10 @@ def set_registrant_tiers(product, tiers) -> None:
 
 
 @transaction.atomic
-def create_product(actor, *, variants=(), registrant_tiers=None, **fields) -> Product:
+def create_product(actor, *, variants=(), registrant_tiers=None, ordering_windows=(), **fields) -> Product:
     access.require_manage_shop_products(actor)
     product = Product(**{k: v for k, v in fields.items() if k in PRODUCT_FIELDS})
+    product.ordering_windows = _ordering_windows(ordering_windows)
     if not product.name.strip():
         raise Invalid("A name is required.", {"name": ["Required."]})
     _validate_product(product)
@@ -146,6 +174,9 @@ def create_product(actor, *, variants=(), registrant_tiers=None, **fields) -> Pr
 @transaction.atomic
 def update_product(actor, product, **fields) -> Product:
     access.require_manage_shop_products(actor)
+    product = Product.objects.select_for_update().get(pk=product.pk)
+    if "ordering_windows" in fields:
+        product.ordering_windows = _ordering_windows(fields.pop("ordering_windows"))
     tiers = fields.pop("registrant_tiers", None)
     for k, v in fields.items():
         if k in PRODUCT_FIELDS:

@@ -30,6 +30,8 @@ from members.models import ClubMembership, Member
 
 MANAGE_MEMBERS = "members.manage_members"
 MANAGE_SETTINGS = "admin.manage_settings"
+MANAGE_FINANCE = "registration.manage_finance"
+MANAGE_SPONSORS = "sponsoring.manage_sponsors"
 EXECUTE_EVALUATIONS = "evaluations.execute_evaluations"
 MANAGE_EVALUATIONS = "evaluations.manage_evaluations"
 MANAGE_REFEREES = "events.manage_referees"
@@ -40,6 +42,33 @@ def can_manage_members(user) -> bool:
     if user is None or not user.is_authenticated or not user.is_active:
         return False
     return is_platform_owner(user) or user.has_perm(MANAGE_MEMBERS)
+
+
+def can_manage_finance(user) -> bool:
+    """Platform owner, the club's Owner role, or a user holding ``registration.manage_finance``: the billing review of registrations, their
+    invoices and the payments against them. Separate from ``members.manage_members``, which neither implies nor is implied by it."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or _is_club_owner(user) or user.has_perm(MANAGE_FINANCE)
+
+
+def can_manage_sponsors(user) -> bool:
+    """The platform owner, club Owner and dedicated sponsor managers can edit sponsorships."""
+    if user is None or not user.is_authenticated or not user.is_active:
+        return False
+    return is_platform_owner(user) or user.has_perm(MANAGE_SPONSORS) or _is_club_owner(user)
+
+
+def require_sponsors(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_manage_sponsors(actor):
+        raise NotAllowed("You are not allowed to manage sponsors.")
+
+
+def can_record_fee_payments(user) -> bool:
+    """Who may record or remove a payment on a membership fee: member admins (the member page) and finance (the finance page)."""
+    return can_manage_members(user) or can_manage_finance(user)
 
 
 def staffed_team_ids(user, *, on: datetime.date | None = None) -> set:
@@ -251,6 +280,21 @@ def require_admin(actor) -> None:
 
     if not can_manage_members(actor):
         raise NotAllowed("You are not allowed to manage members.")
+
+
+def require_finance(actor) -> None:
+    """Raise ``NotAllowed`` unless ``actor`` may handle registration finance."""
+    from .errors import NotAllowed
+
+    if not can_manage_finance(actor):
+        raise NotAllowed("You are not allowed to manage registration finance.")
+
+
+def require_record_fee_payments(actor) -> None:
+    from .errors import NotAllowed
+
+    if not can_record_fee_payments(actor):
+        raise NotAllowed("You are not allowed to record payments.")
 
 
 def require_group_manager(actor, group) -> None:

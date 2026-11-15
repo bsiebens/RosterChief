@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
+from django.db.models import Exists, OuterRef
 from django_tenants.utils import get_public_schema_name
 from ninja import NinjaAPI
 
@@ -18,6 +19,7 @@ from .routers import club_settings as club_settings_router
 from .routers import evaluations as evaluations_router
 from .routers import event_subtypes as event_subtypes_router
 from .routers import events as events_router
+from .routers import finance as finance_router
 from .routers import fixture_imports as fixture_imports_router
 from .routers import forms as forms_router
 from .routers import member_stats as member_stats_router
@@ -27,6 +29,9 @@ from .routers import news as news_router
 from .routers import notifications_inbox as notifications_router
 from .routers import officiating_levels as officiating_levels_router
 from .routers import overview as overview_router
+from .routers import portal as portal_router
+from .routers import portal_profile as portal_profile_router
+from .routers import portal_shop as portal_shop_router
 from .routers import public_forms as public_forms_router
 from .routers import public_news as public_news_router
 from .routers import public_registration as public_registration_router
@@ -45,8 +50,10 @@ from .routers import shop_payments as shop_payments_router
 from .routers import shop_pickup as shop_pickup_router
 from .routers import shop_production as shop_production_router
 from .routers import signups as signups_router
+from .routers import sponsors as sponsors_router
 from .routers import team_settings as team_settings_router
 from .routers import teams as teams_router
+from .routers import web_push as web_push_router
 from .schemas import BrandingOut, MeOut, MyClubOut
 
 api = NinjaAPI(
@@ -55,9 +62,13 @@ api = NinjaAPI(
     description="Authentication (login, MFA, passkeys) is served by allauth headless under /_allauth/.",
     auth=AUTHENTICATORS,
     urls_namespace="api",
-    docs_url="/docs" if settings.DEBUG else None,
+    docs_url="/management/docs" if settings.DEBUG else None,
+    openapi_url="/management/openapi.json",
 )
 register_error_handlers(api)
+api.add_router("/portal", portal_router.router, tags=["club app"])
+api.add_router("/portal/shop", portal_shop_router.router, tags=["club app"])
+api.add_router("/portal/me", portal_profile_router.router, tags=["club app"])
 api.add_router("/members", members_router.router, tags=["members"])
 api.add_router("/memberships", memberships_router.router, tags=["memberships"])
 api.add_router("/club", club_settings_router.router, tags=["club settings"])
@@ -86,6 +97,7 @@ api.add_router("/shop/pickup", shop_pickup_router.router, tags=["shop"])
 api.add_router("/shop/delivery", shop_delivery_router.router, tags=["shop"])
 api.add_router("/public/shop", shop_payments_router.public_router, tags=["public"])
 api.add_router("/notifications", notifications_router.router, tags=["notifications"])
+api.add_router("/web-push", web_push_router.router, tags=["notifications"])
 api.add_router("/overview", overview_router.router, tags=["overview"])
 api.add_router("/locations", calendar_data_router.locations_router, tags=["calendar"])
 api.add_router("/opponents", calendar_data_router.opponents_router, tags=["calendar"])
@@ -101,18 +113,23 @@ api.add_router("/public/news", public_news_router.router, tags=["public"])
 api.add_router("/public/forms", public_forms_router.router, tags=["public"])
 api.add_router("/public/registration", public_registration_router.router, tags=["public"])
 api.add_router("/registrations", registrations_router.router, tags=["registrations"])
+api.add_router("/finance", finance_router.router, tags=["finance"])
+api.add_router("/sponsor-management", sponsors_router.router, tags=["sponsor management"])
 api.add_router("/registration", registrations_router.settings_router, tags=["registrations"])
 api.add_router("/events", analytics_router.events_router, tags=["analytics"])
 api.add_router("", team_settings_router.router, tags=["team settings"])
 api.add_router("", event_subtypes_router.router, tags=["event subtypes"])
 
 
-def _member_id(user, club) -> str | None:
-    """The user's own member record in this club (none on the platform host or for a login without one)."""
+def _member_profile(user, club) -> Member | None:
     if club.schema_name == get_public_schema_name():
         return None
-    member = Member.objects.filter(user=user).first()
-    return str(member.pk) if member else None
+    return Member.objects.filter(user=user).annotate(
+        has_member_portal_role=(
+            Exists(Member.objects.members().filter(pk=OuterRef("pk")))
+            | Exists(Member.objects.guardians().filter(pk=OuterRef("pk")))
+        ),
+    ).first()
 
 
 @api.get("/me", response=MeOut, auth=AUTHENTICATORS, summary="The signed-in user in the current club")
@@ -125,9 +142,11 @@ def me(request):
         roles = sorted(user.tenant_perms.groups.values_list("name", flat=True))
     except ObjectDoesNotExist:
         raise PermissionDenied from None  # signed in, but not a user of this club
+    member = _member_profile(user, club)
     return {
         "id": str(user.pk),
-        "member_id": _member_id(user, club),
+        "member_id": str(member.pk) if member else None,
+        "has_member_portal_role": bool(member and member.has_member_portal_role),
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
@@ -137,6 +156,8 @@ def me(request):
         "is_club_admin": is_club_admin(user),
         "can_manage_members": access.can_manage_members(user),
         "can_manage_settings": access.can_manage_settings(user),
+        "can_manage_finance": access.can_manage_finance(user),
+        "can_manage_sponsors": club.schema_name != get_public_schema_name() and access.can_manage_sponsors(user),
         "can_execute_evaluations": evaluations_on and access.can_execute_evaluations(user),
         "can_manage_evaluations": evaluations_on and access.can_manage_evaluations(user),
         "can_manage_roles": club.schema_name != get_public_schema_name() and access.can_manage_roles(user),
