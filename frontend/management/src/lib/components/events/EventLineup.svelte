@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { CalendarClock, Check, Megaphone, Plus, Save, Trash2, Users, X } from '@lucide/svelte';
+	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import LineupMeta from '#lib/components/events/LineupMeta.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Alert from '#lib/components/Alert.svelte';
@@ -102,6 +103,24 @@
 		if (dirty && !(await save())) return;
 		await call(() => api<Lineup>('POST', `/events/${eventId}/lineup/schedule`, { body: { when: new Date(when).toISOString() } }), (l) => (apply(l), (okMsg = t('events.lineup.scheduled_msg'))));
 	}
+	// Publishing asks what to do: now, or later at a chosen time (an already published line-up just publishes its changes).
+	let publishOpen = $state(false);
+	let mode = $state<'now' | 'later'>('now');
+	function openPublish() {
+		if (lineup.published_at) return void publish();
+		mode = lineup.scheduled_publish_at ? 'later' : 'now';
+		if (lineup.scheduled_publish_at) when = toLocalInput(lineup.scheduled_publish_at);
+		publishOpen = true;
+	}
+	async function confirmPublish(e: SubmitEvent) {
+		e.preventDefault();
+		if (mode === 'now') await publish();
+		else {
+			if (lineup.scheduled_publish_at && !(await unschedule())) return;
+			await schedule(e);
+		}
+		if (!errorMsg) publishOpen = false;
+	}
 	const unschedule = () => call(() => api<Lineup>('DELETE', `/events/${eventId}/lineup/schedule`), apply);
 	const chooseTeam = () => teamId && call(() => api<Lineup>('PUT', `/events/${eventId}/lineup`, { body: { team_id: teamId, member_ids: [] } }), apply);
 </script>
@@ -170,29 +189,13 @@
 					<p class="px-4 py-6 text-center text-sm text-muted">{t('events.lineup.none_picked')}</p>
 				{/each}
 			</section>
-			{#if !lineup.published_at}
-				<details class="card card-body gap-2" open={!!lineup.scheduled_publish_at}>
-					<summary class="flex min-h-10 cursor-pointer items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('events.lineup.schedule')}</summary>
-					{#if lineup.scheduled_publish_at}
-						<p class="mt-2 text-sm">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</p>
-						<button class="btn btn-outline min-h-11 gap-2 self-start" type="button" disabled={busy} onclick={unschedule}><X size={14} /> {t('events.lineup.unschedule')}</button>
-					{:else}
-						<form class="mt-2 grid gap-2" onsubmit={schedule}>
-							<label class="grid gap-1 text-sm font-semibold">{t('events.lineup.schedule_when')}
-								<input class="input w-full font-normal" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
-							</label>
-							<button class="btn btn-outline min-h-11" type="submit" disabled={busy || !when || !picked.length}>{t('events.lineup.schedule_button')}</button>
-						</form>
-					{/if}
-				</details>
-			{/if}
 		{/if}
 		<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
 		<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 grid gap-1.5 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm">
 			{#if dirty}<p class="text-center text-xs font-semibold text-warn-text">{t('coach.lu_unsaved')} · {t('events.lineup.picked', { n: picked.length })}</p>{/if}
 			<div class="flex items-center gap-2">
 				<button class="btn btn-outline min-h-12 flex-1 gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={16} /> {t('events.lineup.save')}</button>
-				<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={publish}><Megaphone size={16} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
+				<button class="btn btn-primary min-h-12 flex-1 gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={openPublish}><Megaphone size={16} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
 			</div>
 		</div>
 	</div>
@@ -280,27 +283,10 @@
 						</ul>
 						<div class="mt-2 flex flex-wrap gap-2">
 							<button class="btn btn-outline btn-sm gap-2" type="button" disabled={!dirty || busy} onclick={save}><Save size={14} /> {t('events.lineup.save')}</button>
-							<button class="btn btn-primary btn-sm gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={publish}><Megaphone size={14} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
+							<button class="btn btn-primary btn-sm gap-2" type="button" disabled={busy || (!picked.length && !lineup.published_at)} onclick={openPublish}><Megaphone size={14} /> {lineup.published_at ? t('events.lineup.publish_changes') : t('events.lineup.publish')}</button>
 						</div>
 						<p class="text-xs text-muted">{lineup.published_at ? t('events.lineup.notify_hint_published') : t('events.lineup.notify_hint')}</p>
 					</div>
-					{#if !lineup.published_at}
-						<div class="card card-body gap-2">
-							<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('events.lineup.schedule')}</h3>
-							{#if lineup.scheduled_publish_at}
-								<p class="text-sm">{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}</p>
-								<button class="btn btn-outline btn-sm gap-2 self-start" type="button" disabled={busy} onclick={unschedule}><X size={14} /> {t('events.lineup.unschedule')}</button>
-							{:else}
-								<form class="flex flex-wrap items-end gap-2" onsubmit={schedule}>
-									<label class="form-control">
-										<span class="label"><span class="label-text">{t('events.lineup.schedule_when')}</span></span>
-										<input class="input input-sm w-56 max-w-full" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
-									</label>
-									<button class="btn btn-outline btn-sm" type="submit" disabled={busy || !when || !picked.length}>{t('events.lineup.schedule_button')}</button>
-								</form>
-							{/if}
-						</div>
-					{/if}
 				</div>
 			</div>
 		{/if}
@@ -321,3 +307,36 @@
 		<div class="card card-body items-center py-10 text-center text-muted"><Users size={28} aria-hidden="true" /><p>{t('events.lineup.not_published')}</p></div>
 	{/if}
 </div>
+
+<Sheet open={publishOpen} title={t('events.lineup.publish')} onclose={() => (publishOpen = false)}>
+	<form class="grid gap-4 p-4 pt-0" onsubmit={confirmPublish}>
+		<div>
+			<h2 class="font-display text-xl font-extrabold text-ink uppercase">{t('events.lineup.publish')}</h2>
+			<p class="text-sm text-muted">{t('events.lineup.notify_hint')}</p>
+		</div>
+		<div class="grid gap-2" role="radiogroup" aria-label={t('events.lineup.publish')}>
+			<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'now' ? 'border-club bg-club/10' : 'border-line'}">
+				<input type="radio" class="radio mt-0.5" name="publish-mode" value="now" bind:group={mode} />
+				<span><b class="block text-ink">{t('coach.lu_publish_now')}</b><span class="block text-xs text-muted">{t('coach.lu_publish_now_help')}</span></span>
+			</label>
+			<label class="flex cursor-pointer items-start gap-3 rounded-box border p-3 {mode === 'later' ? 'border-club bg-club/10' : 'border-line'}">
+				<input type="radio" class="radio mt-0.5" name="publish-mode" value="later" bind:group={mode} />
+				<span class="min-w-0 flex-1"><b class="block text-ink">{t('coach.lu_publish_later')}</b><span class="block text-xs text-muted">{t('coach.lu_publish_later_help')}</span></span>
+			</label>
+		</div>
+		{#if mode === 'later'}
+			<label class="grid gap-1 text-sm font-semibold">{t('events.lineup.schedule_when')}
+				<input class="input w-full font-normal" type="datetime-local" required min={toLocalInput(new Date().toISOString())} bind:value={when} />
+			</label>
+		{/if}
+		{#if lineup.scheduled_publish_at}
+			<p class="flex flex-wrap items-center gap-2 rounded-box bg-info-bg px-3 py-2 text-sm text-info-text"><CalendarClock size={14} aria-hidden="true" />{t('events.lineup.scheduled_at', { when: formatDateTime(lineup.scheduled_publish_at) })}
+				<button class="link ml-auto text-xs font-semibold" type="button" disabled={busy} onclick={unschedule}>{t('events.lineup.unschedule')}</button></p>
+		{/if}
+		{#if errorMsg}<Alert kind="error">{errorMsg}</Alert>{/if}
+		<div class="flex flex-wrap justify-end gap-2">
+			<button type="button" class="btn btn-outline" onclick={() => (publishOpen = false)}>{t('common.cancel')}</button>
+			<button type="submit" class="btn btn-primary gap-2" disabled={busy || (mode === 'later' && !when) || (!picked.length)}><Megaphone size={15} aria-hidden="true" />{mode === 'now' ? t('coach.lu_publish_now') : t('events.lineup.schedule_button')}</button>
+		</div>
+	</form>
+</Sheet>

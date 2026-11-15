@@ -47,6 +47,7 @@
 {:else if tab === 'teams'}
 	<CoachSquad team={roster} positions={data.positions} />
 {:else if tab === 'calendar'}
+	{#if data.coach.can_create_events}<a class="btn btn-primary mb-3 min-h-11 w-full gap-2 sm:w-auto" href="/calendar/events/new?view=coach"><Plus size={18} aria-hidden="true" />{t('coach.add_event')}</a>{/if}
 	<CoachEvents {events} />
 {:else}
 	<CoachToday {events} background={data.coach.event_background} crest={data.branding?.logo_url} />

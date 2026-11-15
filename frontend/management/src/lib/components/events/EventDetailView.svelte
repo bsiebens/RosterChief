@@ -153,7 +153,10 @@
     <div class="grid min-w-0 gap-3 md:hidden">
         <div class="flex items-center justify-between gap-2">
             <a class="btn btn-outline min-h-11 gap-2" href={calendarHref}><ArrowLeft size={16} aria-hidden="true"/> {t('portal.schedule')}</a>
-            <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
+            <div class="flex items-center gap-2">
+                {#if ev.can_edit}<a class="btn btn-primary min-h-11 gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('common.edit')}</a>{/if}
+                <button type="button" class="btn btn-outline btn-square min-h-11" aria-label={t('coach.ev_actions')} onclick={() => (menuOpen = true)}><Ellipsis size={20} aria-hidden="true"/></button>
+            </div>
         </div>
         <section class="card min-w-0 overflow-hidden border-l-4 {style.bar}">
             <div class="grid min-w-0 gap-2.5 p-4">
