@@ -531,11 +531,15 @@ class EventsApiTests(TestCase):
         url = f"/events/{game.pk}/lineup"
         body = self.call("get", url, self.head.user).json()
         self.assertEqual((body["slots_enabled"], body["template"]), (False, []))
-        picks = {"member_ids": [str(self.p1.pk), str(self.p2.pk)], "slots": {str(self.p1.pk): "goalies.g1"}}
+        both = [str(self.p1.pk), str(self.p2.pk)]
+        picks = {"member_ids": both, "slots": {"goalies.g1": str(self.p1.pk)}}
         r = self.call("put", url, self.head.user, picks)
         self.assertEqual(r.status_code, 422)  # the sport has no lines
         self.assertIn("slots", r.json()["errors"])
-        template = [{"key": "goalies", "label": "Goalies", "slots": [{"key": "g1", "label": "G1"}]}]
+        template = [
+            {"key": "goalies", "label": "Goalies", "slots": [{"key": "g1", "label": "G1"}]},
+            {"key": "pp", "label": "Power play", "slots": [{"key": "c", "label": "C"}, {"key": "lw", "label": "LW"}]},
+        ]
         sport = Sport.objects.create(name="Slot sport", lineup_slots_enabled=True, lineup_template=template)
         self.club.sport = sport
         self.club.save(update_fields=["sport"])
@@ -543,19 +547,46 @@ class EventsApiTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         body = r.json()
         self.assertEqual((body["slots_enabled"], body["template"]), (True, template))
-        self.assertEqual({m["member"]["id"]: m["slot"] for m in body["members"] if m["selected"]}, {str(self.p1.pk): "goalies.g1", str(self.p2.pk): ""})
-        bad = {"member_ids": [str(self.p1.pk)], "slots": {str(self.p1.pk): "goalies.nope"}}
+        slots_of = lambda b: {m["member"]["id"]: m["slots"] for m in b["members"] if m["selected"]}  # noqa: E731
+        self.assertEqual(slots_of(body), {str(self.p1.pk): ["goalies.g1"], str(self.p2.pk): []})
+        # one player in two slots, as a mapping and as a list
+        multi = {"member_ids": both, "slots": {"goalies.g1": str(self.p1.pk), "pp.c": str(self.p1.pk), "pp.lw": str(self.p2.pk)}}
+        self.assertEqual(slots_of(self.call("put", url, self.head.user, multi).json()), {str(self.p1.pk): ["goalies.g1", "pp.c"], str(self.p2.pk): ["pp.lw"]})
+        as_list = {"member_ids": both, "slots": [{"slot": "pp.c", "member_id": str(self.p2.pk)}, {"slot": "pp.lw", "member_id": None}]}
+        self.assertEqual(slots_of(self.call("put", url, self.head.user, as_list).json()), {str(self.p1.pk): [], str(self.p2.pk): ["pp.c"]})
+        bad = {"member_ids": [str(self.p1.pk)], "slots": {"goalies.nope": str(self.p1.pk)}}
         self.assertEqual(self.call("put", url, self.head.user, bad).status_code, 422)
-        dup = {"member_ids": [str(self.p1.pk), str(self.p2.pk)], "slots": {str(self.p1.pk): "goalies.g1", str(self.p2.pk): "goalies.g1"}}
+        dup = {"member_ids": both, "slots": [{"slot": "pp.c", "member_id": str(self.p1.pk)}, {"slot": "pp.c", "member_id": str(self.p2.pk)}]}
         self.assertEqual(self.call("put", url, self.head.user, dup).status_code, 422)
-        notpicked = {"member_ids": [str(self.p1.pk)], "slots": {str(self.p2.pk): "goalies.g1"}}
+        notpicked = {"member_ids": [str(self.p1.pk)], "slots": {"goalies.g1": str(self.p2.pk)}}
         self.assertEqual(self.call("put", url, self.head.user, notpicked).status_code, 422)
         cleared = self.call("put", url, self.head.user, {"member_ids": [str(self.p1.pk)], "slots": {}}).json()
-        self.assertEqual([m["slot"] for m in cleared["members"] if m["selected"]], [""])
+        self.assertEqual([m["slots"] for m in cleared["members"] if m["selected"]], [[]])
         self.call("put", url, self.head.user, picks)
         sport.lineup_template = []  # template edited away: unassigned, no crash
         sport.save()
-        self.assertEqual([m["slot"] for m in self.call("get", url, self.head.user).json()["members"] if m["selected"]], ["", ""])
+        self.assertEqual([m["slots"] for m in self.call("get", url, self.head.user).json()["members"] if m["selected"]], [[], []])
+
+    def test_lineup_pdf(self):
+        from unittest import mock
+
+        from shop.services.invoices import PDFUnavailable
+
+        game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")
+        url = f"/events/{game.pk}/lineup.pdf"
+        self.assertEqual(self.call("get", url, self.head.user).status_code, 404)  # no line-up yet
+        self.call("put", f"/events/{game.pk}/attendance/{self.p1.pk}", self.head.user, {"status": "present"})
+        self.call("put", f"/events/{game.pk}/lineup", self.head.user, {"member_ids": [str(self.p1.pk)]})
+        with mock.patch("events.services.lineup.render_overview_pdf", return_value=b"%PDF-fake"):
+            r = self.call("get", url, self.head.user)
+            self.assertEqual((r.status_code, r["Content-Type"], r.content), (200, "application/pdf", b"%PDF-fake"))
+            self.assertEqual(self.call("get", url, self.p1.user).status_code if self.p1.user else 404, 404)  # a draft is for managers only
+            self.call("post", f"/events/{game.pk}/lineup/publish", self.head.user)
+            if self.p1.user:
+                self.assertEqual(self.call("get", url, self.p1.user).status_code, 200)
+        with mock.patch("events.services.lineup.render_overview_pdf", side_effect=PDFUnavailable("no")):
+            r = self.call("get", url, self.head.user)
+            self.assertEqual(r.status_code, 503)
 
     def test_lineup_flow(self):
         game = self.event(teams=[self.team_a], kind=Event.EventKind.GAME, title="U12 vs Rivals")

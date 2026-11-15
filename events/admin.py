@@ -20,6 +20,7 @@ from .models import (
     GameTimeline,
     Lineup,
     LineupSelection,
+    LineupSlotAssignment,
     Location,
     OfficialSignup,
     Opponent,
@@ -213,6 +214,14 @@ class EventFollowAdmin(ClubAdminMixin, admin.ModelAdmin):
 class LineupSelectionAdmin(ClubAdminMixin, admin.ModelAdmin):
     list_display = ["lineup", "member", "created"]
     search_fields = ["lineup__event__title", "member__first_name", "member__last_name"]
+    list_select_related = ["lineup__event", "lineup__team", "member"]
+    raw_id_fields = ["lineup", "member"]
+
+
+@admin.register(LineupSlotAssignment)
+class LineupSlotAssignmentAdmin(ClubAdminMixin, admin.ModelAdmin):
+    list_display = ["lineup", "member", "slot"]
+    search_fields = ["lineup__event__title", "member__first_name", "member__last_name", "slot"]
     list_select_related = ["lineup__event", "lineup__team", "member"]
     raw_id_fields = ["lineup", "member"]
 

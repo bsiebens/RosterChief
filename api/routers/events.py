@@ -22,7 +22,7 @@ from typing import Annotated
 
 from django.db import transaction
 from django.db.models import Count
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from ninja import File, Query, Router, UploadedFile
 from ninja.errors import HttpError
@@ -65,6 +65,7 @@ from events.services import calendar as calendar_svc
 from events.services import event_notifications as notices
 from events.services import events as svc
 from events.services import lineup as lineup_svc
+from shop.services.invoices import PDFUnavailable
 from events.services import recurrence as rec
 from events.services import tasks as task_svc
 from members.models import Group, Member
@@ -825,7 +826,7 @@ def _lineup_out(request, event, lineup=None) -> dict:
         members = [
             {
                 "member": _ref(r["member"]),
-                "slot": slots.get(r["member"].pk, "") if r["selected"] else "",
+                "slots": slots.get(r["member"].pk, []) if r["selected"] else [],
                 "position": r["position"],
                 "jersey_number": r["jersey_number"],
                 "status": r["status"],
@@ -866,6 +867,24 @@ def get_lineup(request, event_id: uuid.UUID):
     return _lineup_out(request, _event(event_id))
 
 
+@router.get("/{event_id}/lineup.pdf", summary="The line-up as a PDF overview (managers; others once it is published)", operation_id="event_lineup_pdf")
+def lineup_pdf(request, event_id: uuid.UUID):
+    """Header (club, event, date, location, opponent), the lines with each slot's player, who is not in a line, the number of players not
+    selected and the status. Attendance managers always; everyone else only when the line-up is published (as the JSON line-up)."""
+    event = _event(event_id)
+    lineup = Lineup.objects.filter(event=event).select_related("event", "team").first()
+    if not lineup_svc.has_lineup(event) or lineup is None or (lineup.published_at is None and not access.can_manage_attendance(request.user, event)):
+        raise HttpError(404, "Not found.")
+    try:
+        pdf = lineup_svc.render_overview_pdf(lineup)
+    except PDFUnavailable:
+        raise HttpError(503, "PDF rendering is not available on this server.") from None
+    response = HttpResponse(pdf, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="lineup-{event.start:%Y-%m-%d}.pdf"'
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
 @router.put("/{event_id}/lineup", response=LineupOut, summary="Save the picks (attendance manager)", operation_id="set_event_lineup")
 def set_lineup(request, event_id: uuid.UUID, payload: LineupIn):
     """Replaces the whole pick. ``team_id`` is needed for the first save when the event has several teams. Nobody is
@@ -879,7 +898,10 @@ def set_lineup(request, event_id: uuid.UUID, payload: LineupIn):
             raise Invalid("Unknown team.", {"team_id": ["Unknown team."]})
     with transaction.atomic():
         lineup = lineup_svc.get_or_create_lineup(request.user, event, team)
-        lineup_svc.set_selection(request.user, lineup, payload.member_ids, payload.slots)
+        slots = payload.slots
+        if isinstance(slots, list):
+            slots = [(item.slot, item.member_id) for item in slots]
+        lineup_svc.set_selection(request.user, lineup, payload.member_ids, slots)
     return _lineup_out(request, event)
 
 

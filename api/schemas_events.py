@@ -346,7 +346,7 @@ class LineupMemberOut(Schema):
     available: bool
     on_roster: bool
     selected: bool
-    slot: str = ""  # "<group key>.<slot key>" of the sport's line-up template; "" = not in a line
+    slots: list[str] = []  # "<group key>.<slot key>" of the sport's line-up template, in template order; [] = not in a line (a player may hold several)
     # Only for attendance managers: the player's own reason for this event and their season turnout (None: too little data).
     note: str = ""
     games_rate: int | None = None
@@ -366,10 +366,16 @@ class LineupOut(Schema):
     template: list[dict] = []  # [{key, label, slots: [{key, label}]}]
 
 
+class LineupSlotIn(Schema):
+    slot: str
+    member_id: uuid.UUID | None = None  # None / omitted = the slot stays empty
+
+
 class LineupIn(Schema):
     team_id: uuid.UUID | None = None
     member_ids: list[uuid.UUID]
-    slots: dict[uuid.UUID, str] | None = None  # member id -> slot key; omitted = leave the slots as they are
+    # slot key -> member id (a slot holds one player, a player may hold several slots), or a list of {slot, member_id}; omitted = leave the slots as they are
+    slots: dict[str, uuid.UUID | None] | list[LineupSlotIn] | None = None
 
 
 class LineupScheduleIn(Schema):

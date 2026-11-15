@@ -1,8 +1,10 @@
 """Line-up service (events.services.lineup) and the scheduled-publish task."""
 
 import datetime
+from unittest import mock
 
 from django.db import connection
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.utils import timezone
 from django_tenants.utils import schema_context
@@ -10,7 +12,7 @@ from django_tenants.utils import schema_context
 from club.models import Club, Domain, Sport
 from club.services import create_club, grant_login
 from controlpanel.tests import make_user
-from events.models import Attendance, Event, Lineup, LineupSelection, Season
+from events.models import Attendance, Event, Lineup, LineupSelection, LineupSlotAssignment, Season
 from events.services import lineup as svc
 from events.tasks import publish_scheduled_lineups
 from members.models import AuditEntry, Member
@@ -290,55 +292,114 @@ class LineupTests(TestCase):
         self.club.save(update_fields=["sport"])
         return sport
 
-    def slot_of(self, member):
-        return LineupSelection.objects.get(lineup=self.lineup, member=member).slot
+    def slots_of(self, member):
+        return sorted(LineupSlotAssignment.objects.filter(lineup=self.lineup, member=member).values_list("slot", flat=True))
+
+    def pick(self, members, slots=None):
+        return svc.set_selection(self.coach_user, self.lineup, [m.pk for m in members], slots)
 
     def test_slots_refused_when_the_sport_has_none(self):
         with self.assertRaises(Invalid) as ctx:
-            svc.set_selection(self.coach_user, self.lineup, [self.ann.pk], {self.ann.pk: "goalies.g1"})
+            svc.set_selection(self.coach_user, self.lineup, [self.ann.pk], {"goalies.g1": self.ann.pk})
         self.assertIn("slots", ctx.exception.errors)
         svc.set_selection(self.coach_user, self.lineup, [self.ann.pk], {})  # empty is fine
         self.assertEqual(svc.slots_config(), (False, []))
 
-    def test_assign_move_clear_and_validate_slots(self):
+    def test_assign_swap_clear_and_validate_slots(self):
         self.enable_slots()
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "goalies.g1", self.bob.pk: "line1.c"})
-        self.assertEqual((self.slot_of(self.ann), self.slot_of(self.bob)), ("goalies.g1", "line1.c"))
+        self.pick([self.ann, self.bob], {"goalies.g1": self.ann.pk, "line1.c": self.bob.pk})
+        self.assertEqual((self.slots_of(self.ann), self.slots_of(self.bob)), (["goalies.g1"], ["line1.c"]))
         self.assertEqual(AuditEntry.objects.filter(action="lineup.slots_changed").count(), 1)
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "line1.c", self.bob.pk: "goalies.g1"})  # swap
-        self.assertEqual((self.slot_of(self.ann), self.slot_of(self.bob)), ("line1.c", "goalies.g1"))
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk])  # slots omitted: unchanged
-        self.assertEqual(self.slot_of(self.ann), "line1.c")
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "line1.c"})  # bob cleared
-        self.assertEqual(self.slot_of(self.bob), "")
+        self.pick([self.ann, self.bob], {"goalies.g1": self.bob.pk, "line1.c": self.ann.pk})  # swap
+        self.assertEqual((self.slots_of(self.ann), self.slots_of(self.bob)), (["line1.c"], ["goalies.g1"]))
+        self.pick([self.ann, self.bob])  # slots omitted: unchanged
+        self.assertEqual(self.slots_of(self.ann), ["line1.c"])
+        self.pick([self.ann, self.bob], {"line1.c": self.ann.pk})  # bob cleared
+        self.assertEqual(self.slots_of(self.bob), [])
+        self.pick([self.ann, self.bob], {"line1.c": self.ann.pk, "goalies.g2": None})  # an empty slot is simply not stored
         for slots, picks in (
-            ({self.ann.pk: "nope.x"}, [self.ann.pk]),
-            ({self.ann.pk: "line1.c", self.bob.pk: "line1.c"}, [self.ann.pk, self.bob.pk]),
-            ({self.cid.pk: "line1.lw"}, [self.ann.pk]),  # cid is not picked
+            ({"nope.x": self.ann.pk}, [self.ann]),
+            ([("line1.c", self.ann.pk), ("line1.c", self.bob.pk)], [self.ann, self.bob]),  # a slot holds one player
+            ({"line1.lw": self.cid.pk}, [self.ann]),  # cid is not picked
         ):
             with self.assertRaises(Invalid) as ctx:
-                svc.set_selection(self.coach_user, self.lineup, picks, slots)
+                self.pick(picks, slots)
             self.assertIn("slots", ctx.exception.errors)
-        self.assertEqual(self.slot_of(self.ann), "line1.c")  # nothing changed by the failures
-        svc.set_selection(self.coach_user, self.lineup, [self.bob.pk])  # un-picking drops the slot with the pick
+        self.assertEqual(self.slots_of(self.ann), ["line1.c"])  # nothing changed by the failures
+
+    def test_a_player_can_hold_several_slots(self):
+        self.enable_slots()
+        both = {"line1.c": self.ann.pk, "goalies.g1": self.ann.pk, "line1.lw": self.bob.pk}
+        self.pick([self.ann, self.bob], both)
+        self.assertEqual(self.slots_of(self.ann), ["goalies.g1", "line1.c"])
+        self.assertEqual(svc.selection_slots(self.lineup), {self.ann.pk: ["goalies.g1", "line1.c"], self.bob.pk: ["line1.lw"]})  # template order
+        self.pick([self.ann, self.bob], {"line1.c": self.ann.pk, "goalies.g1": self.bob.pk, "line1.lw": self.bob.pk})  # clear one of ann's two
+        self.assertEqual((self.slots_of(self.ann), self.slots_of(self.bob)), (["line1.c"], ["goalies.g1", "line1.lw"]))
+        self.pick([self.ann], {"line1.c": self.ann.pk})  # un-picking bob removes all his slots
+        self.assertEqual(LineupSlotAssignment.objects.filter(lineup=self.lineup, member=self.bob).count(), 0)
+        self.pick([self.ann])  # un-picking with slots omitted too
+        self.assertEqual(self.slots_of(self.ann), ["line1.c"])
+        self.pick([self.bob])
         self.assertEqual(svc.selection_slots(self.lineup), {})
 
     def test_slots_do_not_touch_publishing_and_survive_template_changes(self):
         sport = self.enable_slots()
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk], {self.ann.pk: "goalies.g1", self.bob.pk: "line1.c"})
+        self.pick([self.ann, self.bob], {"goalies.g1": self.ann.pk, "line1.c": self.bob.pk, "line1.lw": self.ann.pk})
         svc.publish_lineup(self.coach_user, self.lineup)
         self.assertEqual((self.status(self.ann), self.status(self.bob)), (S.SELECTED, S.SELECTED))
-        sport.lineup_template = [{"key": "line1", "label": "Line 1", "slots": [{"key": "c", "label": "C"}]}]  # goalies removed
+        sport.lineup_template = [{"key": "line1", "label": "Line 1", "slots": [{"key": "c", "label": "C"}]}]  # goalies and lw removed
         sport.save()
-        self.assertEqual(svc.selection_slots(self.lineup), {self.bob.pk: "line1.c"})  # unknown ignored, no crash
+        self.assertEqual(svc.selection_slots(self.lineup), {self.bob.pk: ["line1.c"]})  # unknown ignored, no crash
         sport.lineup_slots_enabled = False
         sport.save()
         self.assertEqual(svc.selection_slots(self.lineup), {})
-        self.assertEqual(self.slot_of(self.bob), "line1.c")  # kept in the database
-        svc.set_selection(self.coach_user, self.lineup, [self.ann.pk, self.bob.pk])  # saving without slots still works
-        self.assertEqual(self.slot_of(self.bob), "line1.c")
+        self.assertEqual(self.slots_of(self.bob), ["line1.c"])  # kept in the database
+        self.pick([self.ann, self.bob])  # saving without slots still works
+        self.assertEqual(self.slots_of(self.bob), ["line1.c"])
         self.assertEqual(svc.slot_label(self.TEMPLATE, "line1.c"), "Line 1 · C")
         self.assertEqual(svc.slot_label(self.TEMPLATE, "x.y"), "")
+
+    # --- the PDF overview ---------------------------------------------------------------------------------------------
+
+    def groups(self, ctx):
+        return {g["label"]: [(s["label"], s["player"]["name"] if s["player"] else None) for s in g["slots"]] for g in ctx["groups"]}
+
+    def test_overview_context_with_lines(self):
+        self.enable_slots()
+        self.pick([self.ann, self.bob], {"goalies.g1": self.ann.pk, "line1.c": self.ann.pk, "line1.lw": self.bob.pk})
+        ctx = svc.overview_context(self.lineup)
+        self.assertEqual(
+            self.groups(ctx),
+            {
+                "Goalies": [("G1", self.ann.get_full_name()), ("G2", None)],  # the empty slot prints as a dash
+                "Line 1": [("LW", self.bob.get_full_name()), ("C", self.ann.get_full_name())],  # ann is in two groups
+            },
+        )
+        self.assertEqual(ctx["loose"], [])
+        self.pick([self.ann, self.bob], {"line1.c": self.ann.pk})
+        ctx = svc.overview_context(self.lineup)
+        self.assertEqual([p["name"] for p in ctx["loose"]], [self.bob.get_full_name()])
+        self.assertEqual((ctx["picked_count"], ctx["status"], ctx["not_selected"]), (2, "draft", len(svc.selectable_members(self.lineup)) - 2))
+        html = render_to_string("events/lineup_overview.html", {**ctx, "logo_data_uri": None})
+        for needle in ("Goalies", "Line 1", "Not in a line (1)", self.bob.get_full_name(), "&ndash;", self.game.title):
+            self.assertIn(needle, html)
+
+    def test_overview_context_without_lines_groups_by_position(self):
+        self.pick([self.ann, self.bob])
+        ctx = svc.overview_context(self.lineup)
+        self.assertEqual(ctx["groups"], [])
+        names = [p["name"] for g in ctx["by_position"] for p in g["players"]]
+        self.assertEqual(sorted(names), sorted([self.ann.get_full_name(), self.bob.get_full_name()]))
+        html = render_to_string("events/lineup_overview.html", {**ctx, "logo_data_uri": None})
+        self.assertIn(self.ann.get_full_name(), html)
+        self.assertNotIn("Not in a line", html)
+
+    def test_render_pdf_unavailable_without_weasyprint(self):
+        from shop.services.invoices import PDFUnavailable
+
+        with mock.patch.dict("sys.modules", {"weasyprint": None}):
+            with self.assertRaises(PDFUnavailable):
+                svc.render_overview_pdf(self.lineup)
 
     # --- dropouts ---------------------------------------------------------------------------------------------------
 
