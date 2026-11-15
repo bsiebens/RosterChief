@@ -74,12 +74,11 @@
 						{#if item.kind === 'question' && item.answer !== null && item.answer !== undefined && item.state !== 'missing'}
 							<p class="rounded-box bg-subhead px-3 py-2 text-sm"><span class="text-xs text-muted">{t('portal.req_answer')}</span><br />{show(item.answer)}</p>
 						{/if}
-						{#if item.kind === 'document' && item.has_document}<p class="flex items-center gap-1.5 text-xs text-muted"><FileText size={13} aria-hidden="true" />{t('portal.req_received')}{#if item.completed_at} · {day(item.completed_at)}{/if}</p>{/if}
+						{#if item.kind === 'document' && item.has_document}<p class="flex items-center gap-1.5 text-xs text-muted"><FileText size={13} aria-hidden="true" />{t('portal.req_received')}{#if item.completed_at}{' · '}{day(item.completed_at)}{/if}</p>{/if}
 						{#if item.valid_until}
 							<p class="flex items-center gap-1.5 text-xs {item.state === 'expired' ? 'font-semibold text-danger' : item.state === 'expiring_soon' ? 'font-semibold text-warn-text' : 'text-muted'}">{#if item.state !== 'complete'}<TriangleAlert size={13} aria-hidden="true" />{/if}{t(item.state === 'expired' ? 'portal.req_expired_on' : 'portal.req_valid_until', { date: day(item.valid_until) })}</p>
 						{/if}
 						{#if item.state === 'pending'}<p class="text-xs text-info-text">{t('portal.req_pending_help')}</p>{/if}
-						{#if item.locked && item.state !== 'bypassed'}<p class="text-xs text-muted">{t('portal.req_locked')}</p>{/if}
 						{#if needsAction(item)}
 							<form class="grid gap-2 rounded-box border border-line p-3" onsubmit={(e) => { e.preventDefault(); if (item.kind === 'question') void submit(row, item); }}>
 								{#if item.kind === 'question'}
