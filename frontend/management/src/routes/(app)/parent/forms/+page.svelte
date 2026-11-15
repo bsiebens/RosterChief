@@ -1,5 +1,9 @@
 <script lang="ts">
+	import { goto, invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import { ChevronRight, CircleCheck, ClipboardList, MessageSquareQuote, Star } from '@lucide/svelte';
+	import FormResponse from '#lib/components/forms/FormResponse.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
@@ -7,6 +11,8 @@
 	import { answerText } from '#lib/forms.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import type { PublicForm } from '#lib/form-response.ts';
+	import { api } from '#lib/management-api.ts';
 	import type { SharedEvaluation } from '#lib/portal.ts';
 
 	let { data } = $props();
@@ -18,6 +24,32 @@
 	const forms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
 	const evaluations = $derived(data.evaluations.filter((evaluation) => !selected || evaluation.member_id === selected));
 	let opened = $state<SharedEvaluation | null>(null);
+
+	// The form being filled in opens in the drawer; `?fill=<send>.<member>` (old links, notifications) opens it straight away.
+	type ParentForm = PublicForm & { member: string; submitted: number; limit: number | null };
+	let filling = $state<{ endpoint: string; form: ParentForm | null; title: string; failed: boolean } | null>(null);
+	async function fill(send: string, member: string) {
+		const endpoint = `/portal/forms/${encodeURIComponent(send)}/${encodeURIComponent(member)}`;
+		const title = data.home.forms.find((form) => form.id === send && form.member_id === member)?.title ?? t('portal.forms');
+		filling = { endpoint, form: null, title, failed: false };
+		const result = await api<ParentForm>('GET', endpoint);
+		if (filling?.endpoint === endpoint) filling = { endpoint, form: result.ok ? (result.data ?? null) : null, title: result.data?.title ?? title, failed: !result.ok };
+	}
+	const closeForm = () => {
+		filling = null;
+		if (page.url.searchParams.has('fill')) void goto('/parent/forms', { replaceState: true, noScroll: true });
+	};
+	// Done: let the thank-you show for a moment, then close and refresh the list.
+	function filled() {
+		setTimeout(async () => {
+			closeForm();
+			await invalidateAll();
+		}, 1400);
+	}
+	onMount(() => {
+		const [send, member] = (page.url.searchParams.get('fill') ?? '').split('.');
+		if (send && member) void fill(send, member);
+	});
 	const shown = (answer: SharedEvaluation['answers'][number]) => answerText({ field_type: answer.field_type, options: answer.options } as never, answer.value, t('common.yes'), t('common.no'));
 	const scores = (evaluation: SharedEvaluation) => evaluation.answers.filter((answer) => answer.field_type !== 'text' && answer.field_type !== 'textarea' && shown(answer));
 	const comments = (evaluation: SharedEvaluation) => evaluation.answers.filter((answer) => (answer.field_type === 'text' || answer.field_type === 'textarea') && shown(answer));
@@ -33,7 +65,7 @@
 					<div class="flex min-h-16 items-center gap-3 px-5 py-3">
 						<ClubCrest name={person(form.member_id)?.name ?? ''} logoUrl={person(form.member_id)?.photo_url} size={36} />
 						<span class="min-w-0 flex-1"><b class="block text-ink">{form.title}</b><span class="block text-xs text-muted">{person(form.member_id)?.name}{form.closes_at ? ` · ${t('pubform.closes', { date: formatDateTime(form.closes_at) })}` : ''}</span></span>
-						<a class="btn btn-primary btn-sm" href="/parent/forms/{form.id}/{form.member_id}">{t('portal.form_fill')}</a>
+						<button type="button" class="btn btn-primary btn-sm" onclick={() => fill(form.id, form.member_id)}>{t('portal.form_fill')}</button>
 					</div>
 				{:else}
 					<p class="flex items-center gap-2 px-5 py-4 text-sm text-muted"><CircleCheck size={16} class="text-ok" aria-hidden="true" />{t('portal.no_forms')}</p>
@@ -58,6 +90,26 @@
 		{/if}
 	</div>
 </div>
+
+<Sheet open={!!filling} wide title={filling?.title ?? t('portal.forms')} onclose={closeForm}>
+	{#if filling}
+		<div class="grid gap-3 p-4 pt-0">
+			<h2 class="font-display text-xl font-extrabold text-ink uppercase">{filling.title}</h2>
+			{#if filling.form}
+				<p class="text-sm font-semibold">{filling.form.member}</p>
+				{#if filling.form.limit !== null && filling.form.submitted >= filling.form.limit}
+					<p class="flex items-center gap-2 text-sm text-muted"><CircleCheck size={16} class="text-ok" aria-hidden="true" />{t('pubform.thanks.title')}</p>
+				{:else}
+					<FormResponse form={filling.form} endpoint={filling.endpoint} ondone={filled} />
+				{/if}
+			{:else if filling.failed}
+				<p class="text-sm text-error" role="alert">{t('common.error.generic')}</p>
+			{:else}
+				<p class="text-sm text-muted">{t('common.loading')}</p>
+			{/if}
+		</div>
+	{/if}
+</Sheet>
 
 <Sheet open={!!opened} title={opened?.checklist ?? t('portal.evals_title')} onclose={() => (opened = null)}>
 	{#if opened}

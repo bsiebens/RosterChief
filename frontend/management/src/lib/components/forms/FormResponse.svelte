@@ -4,7 +4,7 @@
 	import type { PublicField, PublicForm, PublicFormStatus } from '#lib/form-response.ts';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 
-	let { form, endpoint }: { form: PublicForm; endpoint: string } = $props();
+	let { form, endpoint, ondone }: { form: PublicForm; endpoint: string; ondone?: () => void } = $props();
 
 	// svelte-ignore state_referenced_locally
 	let status = $state<PublicFormStatus>(form.state.status);
@@ -42,7 +42,8 @@
 		busy = false;
 		if (res.ok) {
 			done = true;
-			window.scrollTo({ top: 0 });
+			if (ondone) ondone();
+			else window.scrollTo({ top: 0 });
 			return;
 		}
 		if (res.code === 'closed' || res.code === 'not_open_yet' || res.code === 'inactive') {

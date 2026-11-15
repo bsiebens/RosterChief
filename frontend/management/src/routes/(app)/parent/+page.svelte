@@ -395,7 +395,7 @@
 			{/each}
 			
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
-				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
+				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms?fill={form.id}.{form.member_id}">
 					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
 					<span class="badge badge-warn">{t('portal.forms')}</span>
