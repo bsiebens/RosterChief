@@ -577,6 +577,20 @@ class BlockedAccountLockoutTests(TestCase):
         self.assertTrue(r.json()["meta"]["is_authenticated"])
         self.assertTrue(r.json()["meta"]["session_token"])
 
+    def test_headless_login_preserves_password_whitespace(self):
+        password = f"  {PASSWORD} "
+        self.victim.set_password(password)
+        self.victim.save(update_fields=["password"])
+        self.assertEqual(self.login("victim@club.test").status_code, 400)
+        response = Client().post(
+            "/_allauth/app/v1/auth/login",
+            data={"email": "victim@club.test", "password": password},
+            content_type="application/json",
+            HTTP_HOST="testserver",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["meta"]["session_token"])
+
     def test_blocked_user_cannot_sign_in(self):
         self.client.post(f"/users/{self.victim.pk}/block", json={"reason": "x"}, tenant=PUBLIC, META=dict(META), headers={"X-Session-Token": login_session(self.admin)})
         self.assertFalse(User.objects.get(pk=self.victim.pk).is_active)

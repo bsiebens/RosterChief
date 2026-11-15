@@ -72,7 +72,7 @@
         <Alert kind="error">{message}</Alert>
     {/each}
 
-    <form class="flex flex-col gap-4" onsubmit={submit}>
+    <form class="flex flex-col gap-4" method="POST" onsubmit={submit}>
         <Field label="Email" type="email" name="email" autocomplete="username webauthn" required bind:value={email} error={fieldErrors.email}/>
         <Field label="Password" type="password" name="password" autocomplete="current-password" required bind:value={password} error={fieldErrors.password}/>
         <button class="btn btn-primary w-full" type="submit" disabled={busy}>Sign in</button>

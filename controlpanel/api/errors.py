@@ -23,32 +23,34 @@ STATUS_CODES = {
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str | None = None, message: str = "", fields: dict | None = None):
+    def __init__(self, status: int, code: str | None = None, message: str = "", fields: dict | None = None, report: dict | None = None):
         super().__init__(message)
-        self.status, self.code, self.message, self.fields = status, code or STATUS_CODES.get(status, "error"), message, fields
+        self.status, self.code, self.message, self.fields, self.report = status, code or STATUS_CODES.get(status, "error"), message, fields, report
 
 
 class MFAEnrollmentRequired(Exception):
     pass
 
 
-def envelope(status: int, code: str, message: str, fields: dict | None = None) -> dict:
+def envelope(status: int, code: str, message: str, fields: dict | None = None, report: dict | None = None) -> dict:
     body = {"code": code, "message": message}
     if fields:
         body["fields"] = fields
+    if report:
+        body["report"] = report
     return {"error": body}
 
 
 def install(api: NinjaAPI) -> None:
-    def respond(request: HttpRequest, status: int, code: str, message: str, fields=None):
-        response = api.create_response(request, envelope(status, code, message, fields), status=status)
+    def respond(request: HttpRequest, status: int, code: str, message: str, fields=None, report=None):
+        response = api.create_response(request, envelope(status, code, message, fields, report), status=status)
         if status == 401:
             response["WWW-Authenticate"] = "Bearer"
         return response
 
     @api.exception_handler(ApiError)
     def _api_error(request, exc: ApiError):
-        return respond(request, exc.status, exc.code, exc.message, exc.fields)
+        return respond(request, exc.status, exc.code, exc.message, exc.fields, exc.report)
 
     @api.exception_handler(ValidationError)
     def _validation(request, exc: ValidationError):

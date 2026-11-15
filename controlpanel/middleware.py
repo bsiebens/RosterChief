@@ -20,7 +20,7 @@ class MaintenanceMiddleware:
             return self.get_response(request)
         club = getattr(request, "tenant", None)
         on_base_domain = club is None or club.schema_name == get_public_schema_name()
-        if on_base_domain and request.path.startswith(OPEN_PREFIXES):
+        if on_base_domain and (request.path == "/healthz" or request.path.startswith(OPEN_PREFIXES)):
             return self.get_response(request)
         message = maintenance.message or DEFAULT_MESSAGE
         if request.path.startswith("/api/") or "application/json" in request.headers.get("Accept", ""):

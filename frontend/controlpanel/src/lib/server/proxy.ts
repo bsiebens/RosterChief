@@ -1,6 +1,8 @@
 import { dev } from '$app/env';
 import type { Cookies, RequestEvent } from '@sveltejs/kit';
 
+import { hostFetch } from './http.ts';
+
 /**
  * The browser never talks to Django directly. This app forwards two prefixes and keeps the allauth
  * session token in an httpOnly cookie, so the token is never readable by page scripts and the backend
@@ -56,7 +58,8 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	if (isMedia && !['GET', 'HEAD'].includes(request.method)) return new Response('Method not allowed', { status: 405 });
 	const token = cookies.get(SESSION_COOKIE);
 	if (token && !isMedia) headers.set('x-session-token', token);
-	if (env.BACKEND_HOST) headers.set('host', env.BACKEND_HOST);
+	headers.set('host', env.BACKEND_HOST ?? env.ROSTERCHIEF_BASE_DOMAIN ?? url.host);
+	headers.set('x-forwarded-proto', url.protocol.slice(0, -1));
 	try {
 		headers.set('x-forwarded-for', event.getClientAddress());
 	} catch {
@@ -64,13 +67,15 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	}
 
 	const hasBody = !['GET', 'HEAD'].includes(request.method);
+	const backupUpload = hasBody && url.pathname.startsWith(`${PLATFORM_PREFIX}club-backups/`);
+	const length = request.headers.get('content-length');
+	if (backupUpload && length) headers.set('content-length', length);
 	let upstream: Response;
 	try {
-		upstream = await fetch(backend + url.pathname + url.search, {
+		upstream = await hostFetch(backend + url.pathname + url.search, {
 			method: request.method,
 			headers,
-			body: hasBody ? await request.arrayBuffer() : undefined,
-			redirect: 'manual'
+			body: backupUpload ? request.body ?? undefined : hasBody ? await request.arrayBuffer() : undefined
 		});
 	} catch {
 		return Response.json(
@@ -101,7 +106,7 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	}
 
 	const out = new Headers();
-	for (const name of ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'www-authenticate', 'retry-after']) {
+	for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'etag', 'last-modified', 'www-authenticate', 'retry-after']) {
 		const value = upstream.headers.get(name);
 		if (value) out.set(name, value);
 	}

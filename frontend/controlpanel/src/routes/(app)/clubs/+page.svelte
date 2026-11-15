@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto, refreshAll } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { ChevronLeft, ChevronRight, Plus, Search } from '@lucide/svelte';
+	import { ChevronLeft, ChevronRight, Plus, Search, Upload } from '@lucide/svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 
@@ -52,7 +52,12 @@
 		<h1 class="font-display text-2xl leading-none font-extrabold tracking-[.04em] text-ink uppercase">Clubs</h1>
 		<p class="mt-1.5 font-mono text-[11px] text-muted">{data.total} club{data.total === 1 ? '' : 's'}{data.query.status === 'all' ? '' : ` · ${data.query.status}`}</p>
 	</div>
-	<a class="btn btn-primary" href="/clubs/new"><Plus size={14} aria-hidden="true" /> New club</a>
+	<div class="flex flex-wrap gap-2">
+		{#if data.auth.status === 'authenticated' && data.auth.me.level === 'superuser'}
+			<a class="btn btn-outline" href="/clubs/restore"><Upload size={14} aria-hidden="true" /> Restore backup</a>
+		{/if}
+		<a class="btn btn-primary" href="/clubs/new"><Plus size={14} aria-hidden="true" /> New club</a>
+	</div>
 </div>
 
 {#each data.requests as job (job.id)}

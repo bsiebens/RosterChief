@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
-	import { ArrowLeft, ChartPie as PieChartIcon, ExternalLink, UserPlus } from '@lucide/svelte';
+	import { ArrowLeft, ChartPie as PieChartIcon, Download, ExternalLink, UserPlus } from '@lucide/svelte';
 	import { money } from '#lib/dashboard.ts';
 	import AdminsCard from '#lib/components/club/AdminsCard.svelte';
 	import BillingCard from '#lib/components/club/BillingCard.svelte';
@@ -114,6 +114,13 @@
 		<PlanCard {club} subscriptions={data.subscriptions} plans={data.plans} billing={data.billing} {isSuperuser} {canEdit} onchange={refresh} />
 		<BillingCard {club} billing={data.billing} {canEdit} onchange={refresh} archiveDays={data.archiveAfterDays} />
 		<HomeLocationCard {club} location={data.overview?.home_location ?? null} countries={data.countries} {canEdit} onchange={refresh} />
+		{#if isSuperuser}
+			<section class="card flex flex-col gap-3 p-4">
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold uppercase"><Download size={16} aria-hidden="true" /> Club backup</h2>
+				<p class="text-sm text-muted">Download this club’s records and files for restoration in RosterChief.</p>
+				<a class="btn btn-outline self-start" href="/api/platform/v1/clubs/{club.id}/backup" download data-sveltekit-reload>Download backup</a>
+			</section>
+		{/if}
 	</div>
 </div>
 
