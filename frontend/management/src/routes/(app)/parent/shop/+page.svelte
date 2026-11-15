@@ -211,9 +211,9 @@
 				{/if}
 				<div class="flex flex-wrap items-center gap-2">
 					{#if categories.length}
-						<div class="inline-flex flex-wrap overflow-hidden rounded-box border border-line bg-paper" role="group" aria-label={t('portal.shop.all_categories')}>
-							<button type="button" class="min-h-9 px-3.5 text-sm font-semibold {category === '' ? 'bg-ink text-white' : 'text-slate hover:bg-subhead'}" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
-							{#each categories as name (name)}<button type="button" class="min-h-9 border-l border-line px-3.5 text-sm font-semibold {category === name ? 'bg-ink text-white' : 'text-slate hover:bg-subhead'}" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
+						<div class="flex flex-wrap gap-2" role="group" aria-label={t('portal.shop.all_categories')}>
+							<button type="button" class="portal-person compact" aria-pressed={category === ''} onclick={() => (category = '')}>{t('portal.shop.all_categories')}</button>
+							{#each categories as name (name)}<button type="button" class="portal-person compact" aria-pressed={category === name} onclick={() => (category = name)}>{name}</button>{/each}
 						</div>
 					{/if}
 					<label class="relative ml-auto w-full sm:w-64">
