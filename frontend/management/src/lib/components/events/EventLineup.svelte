@@ -198,7 +198,7 @@
 				{/each}
 			</section>
 		{:else if view === 'lines' && linesOn}
-			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} />
+			<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} onsave={save} saveDisabled={!dirty} />
 		{:else}
 			<section class="card overflow-hidden">
 				{#each pickedGroups as [position, members] (position)}
@@ -316,8 +316,7 @@
 					</div>
 					{#if linesOn}
 						<div class="card card-body gap-2">
-							<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('coach.lu_view_lines')}</h3>
-							<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} />
+							<LineupLines template={lineup.template ?? []} members={pickedMembers} bind:slots editable busy={busy} {pdfHref} title={t('coach.lu_view_lines')} onsave={save} saveDisabled={!dirty} />
 						</div>
 					{/if}
 				</div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, FileDown, X } from '@lucide/svelte';
+	import { Check, FileDown, Save, Users, X } from '@lucide/svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 	import LineupMeta from '#lib/components/events/LineupMeta.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -17,8 +17,11 @@
 		slots = $bindable(),
 		editable = false,
 		busy = false,
-		pdfHref = ''
-	}: { template: LineupTemplateGroup[]; members: LineupMember[]; slots: Record<string, string>; editable?: boolean; busy?: boolean; pdfHref?: string } = $props();
+		pdfHref = '',
+		title = '',
+		onsave = undefined,
+		saveDisabled = false
+	}: { template: LineupTemplateGroup[]; members: LineupMember[]; slots: Record<string, string>; editable?: boolean; busy?: boolean; pdfHref?: string; title?: string; onsave?: () => void; saveDisabled?: boolean } = $props();
 
 	const isOut = (m: LineupMember) => ['absent', 'excused', 'dropout'].includes(m.status);
 	const keyOf = (g: LineupTemplateGroup, s: { key: string }) => `${g.key}.${s.key}`;
@@ -67,10 +70,15 @@
 {/snippet}
 
 <div class="@container grid min-w-0 gap-3">
-	<div class="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold text-ink">
-		<span>{t('coach.lu_slots_filled', { n: filled, total })}</span>
-		{#if editable && !members.length}<span class="text-xs font-normal text-muted">{t('coach.lu_lines_pick_first')}</span>{/if}
-		{#if pdfHref}<a class="btn btn-outline btn-sm gap-1" href={pdfHref} target="_blank" rel="noopener"><FileDown size={14} aria-hidden="true" /> {t('coach.lu_pdf')}</a>{/if}
+	<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+		<div class="min-w-0">
+			{#if title}<h3 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} class="shrink-0" aria-hidden="true" /> {title}</h3>{/if}
+			<p class="text-sm font-semibold text-ink">{t('coach.lu_slots_filled', { n: filled, total })}{#if editable && !members.length} <span class="text-xs font-normal text-muted">· {t('coach.lu_lines_pick_first')}</span>{/if}</p>
+		</div>
+		<div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+			{#if editable && onsave}<button type="button" class="btn btn-primary btn-sm gap-1" disabled={busy || saveDisabled} onclick={onsave}><Save size={14} aria-hidden="true" /> {t('coach.lu_save_lines')}</button>{/if}
+			{#if pdfHref}<a class="btn btn-outline btn-sm gap-1" href={pdfHref} target="_blank" rel="noopener"><FileDown size={14} aria-hidden="true" /> {t('coach.lu_pdf')}</a>{/if}
+		</div>
 	</div>
 	<div class="grid min-w-0 grid-cols-1 items-start gap-3 @xl:grid-cols-2">
 	{#each template as g (g.key)}
