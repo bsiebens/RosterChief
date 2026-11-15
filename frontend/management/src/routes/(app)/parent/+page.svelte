@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
+	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { formatDateTime, formatLongDay, formatTime, kindLabelKey, kindStyle, statusLabelKey, statusStyle } from '#lib/events/types.ts';
@@ -33,7 +33,6 @@
 	let errors = $state<Record<string, string>>({});
 	let month = $state(new Date());
 	let pickedDay = $state('');
-	let monthOpen = $state(false);
 	const dateKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const crewOnly = $derived(tab === 'calendar' && page.url.searchParams.get('crew') === '1');
@@ -460,19 +459,18 @@
 	<div class="flex items-center justify-between gap-2 md:hidden">
 		<h1 class="font-display text-2xl font-extrabold text-ink uppercase">{title}</h1>
 		{#if tab === 'calendar' && !crewOnly}
-			<button type="button" class="btn btn-outline gap-2 md:hidden" aria-expanded={monthOpen} onclick={() => (monthOpen = !monthOpen)}>
-				{#if monthOpen}<List size={16} aria-hidden="true" />{t('portal.schedule')}{:else}<CalendarDays size={16} aria-hidden="true" />{t('portal.month_view')}{/if}
-			</button>
+			<a class="btn btn-outline gap-2 md:hidden" href={viewLink(view === 'list' ? 'month' : 'list')}>
+				{#if view === 'list'}<CalendarDays size={16} aria-hidden="true" />{t('portal.month_view')}{:else}<List size={16} aria-hidden="true" />{t('portal.schedule')}{/if}
+			</a>
 		{/if}
 	</div>
 {/if}
 
 {#if tab === 'calendar'}
-	<div class="flex flex-wrap items-center gap-2 md:hidden">{@render viewSwitch()}</div>
 	{@render peoplePicker()}
 	{#if view === 'month'}
 		<div class="grid min-w-0 items-start gap-4 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-			<div class="grid gap-3 {monthOpen ? '' : 'hidden md:grid'}">
+			<div class="grid gap-3">
 				<MonthPicker bind:month bind:selected={pickedDay} events={eventDays} />
 				<p class="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted">{#each kindsPresent as kind (kind)}<span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {kindStyle(kind).dot}"></span>{t(kindLabelKey(kind))}</span>{/each}</p>
 			</div>
@@ -534,6 +532,9 @@
 		</div>
 		<div class="grid gap-4">
 			<section class="card divide-y divide-rule overflow-hidden">
+				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile"><UserRound size={17} aria-hidden="true" />{t('portal.profile_details')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
+				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/notifications"><Bell size={17} aria-hidden="true" />{t('portal.notifications')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
+				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/profile#follow"><Shirt size={17} aria-hidden="true" />{t('portal.follow_title')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
 				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent/stats"><ChartColumn size={17} aria-hidden="true" />{t('portal.stats_page')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
 				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/parent?tab=payments"><Wallet size={17} aria-hidden="true" />{t('portal.payments')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
 				<a class="flex min-h-12 items-center gap-2 px-4 font-semibold hover:bg-subhead" href="/account/security"><KeyRound size={17} aria-hidden="true" />{t('shell.menu.security')}<ChevronRight size={16} class="ml-auto text-muted" aria-hidden="true" /></a>
@@ -566,7 +567,7 @@
 							<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
 							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-hairline px-4 py-3 text-sidebar-fg xl:border-t-0 xl:border-l xl:px-5">
 								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
-								<div class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-1">
+								<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-x-8 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)]">
 									{#each rows as row (row.id)}{@render rsvp(row, true, true)}{/each}
 								</div>
 								<a class="inline-flex min-h-11 items-center text-sm font-semibold text-sidebar-fg hover:underline" href={eventLink(event.event_id)} data-sveltekit-reset="false">{t('portal.event_details')} →</a>

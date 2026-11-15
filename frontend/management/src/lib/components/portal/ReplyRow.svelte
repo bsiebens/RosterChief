@@ -38,7 +38,7 @@
 	}
 </script>
 
-<div class="grid gap-2 py-1.5">
+<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 py-1.5">
 	<div class="flex items-center gap-3">
 		<ClubCrest {name} logoUrl={photo} size={32} bg={dark ? 'var(--color-club)' : undefined} />
 		<div class="min-w-0 flex-1">

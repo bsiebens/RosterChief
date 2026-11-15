@@ -1298,7 +1298,8 @@ textarea[name="note"] {
 }
 
 .portal-tab.active, .portal-tab:hover { color: var(--portal-tab-active); }
-.portal-tab.active { box-shadow: inset 0 2px var(--color-club); }
+.portal-tab { position: relative; }
+.portal-tab.active::before { content: ''; position: absolute; top: 0; left: 50%; width: 2.25rem; height: 2px; transform: translateX(-50%); border-radius: 0 0 2px 2px; background: var(--color-club); }
 
 .portal-ui .portal-masthead {
     padding-top: env(safe-area-inset-top);

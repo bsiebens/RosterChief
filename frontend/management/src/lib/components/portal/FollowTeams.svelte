@@ -31,7 +31,7 @@
 </script>
 
 <SaveStatus {status} />
-<section class="card" aria-labelledby="follow-title">
+<section id="follow" class="card scroll-mt-4" aria-labelledby="follow-title">
 	<div class="card-h"><Radio size={17} aria-hidden="true" /><h2 id="follow-title">{t('portal.follow_title')}</h2></div>
 	<p class="px-5 pt-4 text-sm text-muted">{t('portal.follow_teams_help')}</p>
 	{#if status === 'error'}<div class="p-5 pb-0"><Alert kind="error">{t('portal.save_failed')}</Alert></div>{/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ChevronRight, Newspaper, Search } from '@lucide/svelte';
+	import { ArrowLeft, ChevronRight, Newspaper, Search } from '@lucide/svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { formatDay } from '#lib/events/types.ts';
@@ -9,6 +10,16 @@
 	import Sheet from './Sheet.svelte';
 
 	let { articles, home = false, path = '/parent' }: { articles: PortalArticle[]; home?: boolean; path?: string } = $props();
+	// From tablet width an article opens in the reading drawer; on a phone it takes the whole page (the back button returns to the list).
+	let desktop = $state(false);
+	onMount(() => {
+		const query = matchMedia('(min-width: 48rem)');
+		desktop = query.matches;
+		const update = () => (desktop = query.matches);
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
+	});
+	const closeHref = $derived(home ? path : path + '?tab=news');
 	let team = $state('');
 	let query = $state('');
 	const teamNames = $derived([...new Set(articles.flatMap((article) => article.teams ?? []))].sort());
@@ -27,7 +38,25 @@
 	const photo = (article: PortalArticle) => article.photos.find((image) => image.is_main) ?? article.photos[0];
 </script>
 
-{#if home}
+{#snippet articleView()}
+	{#if selected}
+		{@const lead = photo(selected)}
+		{#if lead}<img class="aspect-video max-h-96 w-full object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" />{/if}
+		<article class="mx-auto grid max-w-2xl gap-4 px-6 py-6">
+			<p class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{(selected.teams ?? []).join(', ') || t('portal.news')}{#if selected.published_at} · {formatDay(selected.published_at)}{/if}</p>
+			<h2 class="font-display text-4xl leading-none font-extrabold text-ink uppercase">{translation(selected).title}</h2>
+			<div class="prose max-w-none text-base leading-relaxed">{@html translation(selected).body}</div>
+			{#each selected.photos.filter((image) => image !== lead) as image (image.url)}
+				<img class="w-full rounded-box object-cover" src={mediaPath(image.url)} style:object-position={image.object_position} alt="" loading="lazy" />
+			{/each}
+		</article>
+	{/if}
+{/snippet}
+
+{#if selected && !desktop}
+	<a class="btn btn-outline mb-3 justify-self-start gap-2" href={closeHref} data-sveltekit-reset="false"><ArrowLeft size={16} aria-hidden="true" />{t('portal.news')}</a>
+	<div class="card overflow-hidden">{@render articleView()}</div>
+{:else if home}
 	<div class="mb-2 flex items-center justify-between gap-2">
 		<h2 class="card-title"><Newspaper size={16} aria-hidden="true" />{t('portal.news')}</h2>
 		<a class="link-more" href={path + '?tab=news'}>{t('overview.news.view_all')} →</a>
@@ -80,17 +109,8 @@
 {:else}
 	<p class="card card-body text-sm text-muted">{t('portal.no_news')}</p>
 {/if}
-<Sheet wide open={!!selected} title={selected ? translation(selected).title : t('portal.news')} onclose={() => void goto(home ? path : path + '?tab=news', { reset: false, replace: true })}>
-	{#if selected}
-		{@const lead = photo(selected)}
-		{#if lead}<img class="aspect-video max-h-96 w-full object-cover" src={mediaPath(lead.url)} style:object-position={lead.object_position} alt="" />{/if}
-		<article class="mx-auto grid max-w-2xl gap-4 px-6 py-6">
-			<p class="font-mono text-[11px] tracking-[.14em] text-muted uppercase">{(selected.teams ?? []).join(', ') || t('portal.news')}{#if selected.published_at} · {formatDay(selected.published_at)}{/if}</p>
-			<h2 class="font-display text-4xl leading-none font-extrabold text-ink uppercase">{translation(selected).title}</h2>
-			<div class="prose max-w-none text-base leading-relaxed">{@html translation(selected).body}</div>
-			{#each selected.photos.filter((image) => image !== lead) as image (image.url)}
-				<img class="w-full rounded-box object-cover" src={mediaPath(image.url)} style:object-position={image.object_position} alt="" loading="lazy" />
-			{/each}
-		</article>
-	{/if}
+{#if selected && desktop}
+<Sheet wide open={true} title={translation(selected).title} onclose={() => void goto(closeHref, { replaceState: true })}>
+	{@render articleView()}
 </Sheet>
+{/if}

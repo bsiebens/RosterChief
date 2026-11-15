@@ -10,7 +10,7 @@
 	const meActive = $derived(ME_PAGES.includes(active));
 </script>
 
-<nav class={compact ? 'portal-tabs grid auto-cols-fr grid-flow-col' : 'flex flex-col gap-0.5 px-2.5'} aria-label={t('shell.nav.label')}>
+<nav class={compact ? 'portal-tabs grid auto-cols-[minmax(0,1fr)] grid-flow-col' : 'flex flex-col gap-0.5 px-2.5'} aria-label={t('shell.nav.label')}>
 	{#each items as item (item.href)}
 		{@const selected = active === item.key || (item.key === 'me' && meActive)}
 		<a class="{compact ? 'portal-tab' : 'nav-item'} {selected ? 'active' : ''}" href={item.href} aria-current={selected ? 'page' : undefined}>

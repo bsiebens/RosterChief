@@ -222,7 +222,7 @@
 						<input class="input w-full pl-9" type="search" placeholder={t('portal.shop.search')} aria-label={t('portal.shop.search')} bind:value={q} />
 					</label>
 				</div>
-				<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+				<div class="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3">
 					{#each products as product (product.id)}
 						<article class="card flex flex-col overflow-hidden">
 							{#if product.image_url}
@@ -230,16 +230,16 @@
 							{:else}
 								<div class="grid aspect-4/3 place-items-center bg-subhead text-dim"><Package size={32} aria-hidden="true" /></div>
 							{/if}
-							<div class="flex flex-1 flex-col justify-between gap-3 p-3.5">
+							<div class="flex flex-1 flex-col justify-between gap-2 p-2.5 sm:gap-3 sm:p-3.5">
 								<div class="grid gap-1">
-									<h3 class="font-semibold text-ink">{product.name}</h3>
-									{#if product.description}<p class="line-clamp-2 text-xs whitespace-pre-line text-muted">{product.description}</p>{/if}
+									<h3 class="text-sm font-semibold text-ink sm:text-base">{product.name}</h3>
+									{#if product.description}<p class="line-clamp-2 hidden text-xs whitespace-pre-line text-muted sm:block">{product.description}</p>{/if}
 									{#if product.variants.length > 1}<p class="text-xs text-muted">{t('portal.shop.options_n', { n: product.variants.length })}</p>{/if}
 								</div>
-								<div class="flex items-center gap-2">
-									<span class="font-display text-xl font-extrabold text-ink tabular-nums">{money(product.price)}</span>
+								<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+									<span class="font-display text-lg font-extrabold text-ink tabular-nums sm:text-xl">{money(product.price)}</span>
 									{#if product.in_stock}
-										<button class="btn btn-primary btn-sm ml-auto" type="button" disabled={busy} onclick={() => choose(product)}>{needsOptions(product) ? t('portal.shop.choose') : t('portal.shop.add')}</button>
+										<button class="btn btn-primary btn-sm ml-auto max-sm:w-full" type="button" disabled={busy} onclick={() => choose(product)}>{needsOptions(product) ? t('portal.shop.choose') : t('portal.shop.add')}</button>
 									{:else}
 										<span class="badge badge-outline ml-auto">{t('shop.out_of_stock')}</span>
 									{/if}
@@ -247,7 +247,7 @@
 							</div>
 						</article>
 					{:else}
-						<p class="text-sm text-muted sm:col-span-2 xl:col-span-3">{t('portal.shop.no_products')}</p>
+						<p class="col-span-2 text-sm text-muted xl:col-span-3">{t('portal.shop.no_products')}</p>
 					{/each}
 				</div>
 			{/if}

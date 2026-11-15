@@ -30,7 +30,7 @@
 				<span class="min-w-0 flex-1 truncate">{title}</span>
 				{#if game.final}<span class="rounded-full border border-sidebar-chip px-2 py-0.5 text-[10px] font-bold text-sidebar-fg">{t('portal.final')}</span>{/if}
 				{#if game.updated_at}<span class="hidden normal-case sm:inline">{t('portal.updated', { when: formatDateTime(game.updated_at) })}</span>{/if}
-				<button type="button" class="btn btn-square btn-sm border-sidebar-chip bg-transparent! text-sidebar-fg hover:bg-sidebar-hairline" aria-label={t('portal.close')} onclick={() => dialog?.close()}><X size={16} aria-hidden="true" /></button>
+				<button type="button" class="btn btn-square size-9 shrink-0 border-sidebar-fg bg-sidebar-fg! text-sidebar-bg!" aria-label={t('portal.close')} onclick={() => dialog?.close()}><X size={18} strokeWidth={3} aria-hidden="true" /></button>
 			</div>
 			<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-5 py-6">
 				<p class="text-right font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">{game.ours_label}</p>
