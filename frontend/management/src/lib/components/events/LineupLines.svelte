@@ -47,10 +47,13 @@
 		slots = next;
 		target = null;
 	}
-	/** The sheet: unplaced players first, then those who would move from another slot. */
+	/** The sheet: only players who are not in another slot yet (plus the one already in this slot). Moving someone means clearing their slot first. */
 	const candidates = $derived(
-		[...members].sort((a, b) => Number(known.has(slots[a.member.id] ?? '')) - Number(known.has(slots[b.member.id] ?? '')) || Number(b.available) - Number(a.available) || (a.jersey_number ?? 999) - (b.jersey_number ?? 999))
+		members
+			.filter((m) => !known.has(slots[m.member.id] ?? '') || slots[m.member.id] === target?.key)
+			.sort((a, b) => Number(b.available) - Number(a.available) || (a.jersey_number ?? 999) - (b.jersey_number ?? 999))
 	);
+	const placedElsewhere = $derived(members.filter((m) => known.has(slots[m.member.id] ?? '') && slots[m.member.id] !== target?.key).length);
 </script>
 
 {#snippet player(m: LineupMember)}
@@ -110,7 +113,6 @@
 				<ul class="divide-y divide-rule overflow-hidden rounded-box border border-line">
 					{#each candidates as m (m.member.id)}
 						{@const here = slots[m.member.id] === target.key}
-						{@const from = known.has(slots[m.member.id] ?? '') && !here ? labelOf(slots[m.member.id]) : ''}
 						{@const locked = !m.available}
 						<li>
 							<button type="button" class="flex min-h-14 w-full items-center gap-3 px-3.5 py-2 text-left {locked ? 'cursor-not-allowed bg-subhead/60 opacity-60' : ''} {here ? 'bg-club/10' : ''}" disabled={locked} onclick={() => assign(m)}>
@@ -119,7 +121,6 @@
 									<span class="block truncate text-sm font-semibold text-ink {isOut(m) ? 'line-through decoration-1' : ''}">{m.member.name}</span>
 									<span class="flex flex-wrap items-center gap-x-2">
 										<span class="badge badge-xs border {statusStyle(m.status)}">{t(statusLabelKey(m.status))}</span>
-										{#if from}<span class="text-xs text-muted">{t('coach.lu_slot_move_from', { slot: from })}</span>{/if}
 										<LineupMeta {m} class="min-w-0" />
 									</span>
 								</span>
@@ -130,6 +131,7 @@
 						<li class="px-4 py-6 text-center text-sm text-muted">{t('coach.lu_lines_pick_first')}</li>
 					{/each}
 				</ul>
+				{#if placedElsewhere}<p class="text-xs text-muted">{t('coach.lu_slot_hidden', { n: placedElsewhere })}</p>{/if}
 			</div>
 		{/if}
 	</Sheet>
