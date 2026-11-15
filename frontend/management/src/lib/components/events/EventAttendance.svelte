@@ -193,12 +193,12 @@
 
 <div class="grid gap-4">
     <!-- Tablet and desktop: the four KPI cards of the approved design (plus check-in numbers once the event is over). -->
-    <div class="hidden gap-3 md:grid md:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
-        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.kpi_going')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ok-text">{kpi.going}</span></div>
-        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.kpi_out')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-danger">{kpi.out}</span></div>
-        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t(statusLabelKey('maybe'))}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ink">{kpi.maybe}</span></div>
-        <div class="card px-4 py-3">
-            <span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t(statusLabelKey('no_response'))}</span>
+    <div class="hidden gap-3 md:grid md:auto-cols-[minmax(0,1fr)] md:grid-flow-col">
+        <div class="card min-w-0 px-3 py-3 xl:px-4"><span class="block truncate font-mono text-xs tracking-[.04em] text-muted uppercase">{t('events.att.kpi_going')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ok-text">{kpi.going}</span></div>
+        <div class="card min-w-0 px-3 py-3 xl:px-4"><span class="block truncate font-mono text-xs tracking-[.04em] text-muted uppercase">{t('events.att.kpi_out')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-danger">{kpi.out}</span></div>
+        <div class="card min-w-0 px-3 py-3 xl:px-4"><span class="block truncate font-mono text-xs tracking-[.04em] text-muted uppercase">{t(statusLabelKey('maybe'))}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ink">{kpi.maybe}</span></div>
+        <div class="card min-w-0 px-3 py-3 xl:px-4">
+            <span class="block truncate font-mono text-xs tracking-[.04em] text-muted uppercase">{t(statusLabelKey('no_response'))}</span>
             <span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ink">{kpi.none}</span>
             {#if manage && !past && kpi.none > 0}
                 <button type="button" class="link mt-1 text-xs font-semibold" disabled={remindBusy} onclick={nudge}>{t('events.att.send_reminder')}</button>
