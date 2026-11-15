@@ -117,7 +117,7 @@
 <svelte:head><title>{pageTitle(team?.name ?? '')}</title></svelte:head>
 
 {#if team}
-<div class="grid gap-5">
+<div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
 	<!-- Header: the team photo of the season (when there is one) behind the name, with the upload controls. -->
 	<section class="card relative isolate overflow-hidden border-ink bg-ink text-white">
 		{#if team.photo_url}
@@ -169,7 +169,7 @@
 	{#if form?.teamAction === 'photo' && form.teamError}<Alert kind="error" title={t('teampage.photo_failed')}>{form.teamError}</Alert>{/if}
 
 	<!-- Attendance of the season: turnout = present / (present + absent) over the team's past events. -->
-	<div class="grid gap-4 lg:grid-cols-3">
+	<div class="grid gap-4 lg:grid-cols-[repeat(3,minmax(0,1fr))]">
 		<div class="card card-body">
 			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><CalendarCheck size={16} class="shrink-0" aria-hidden="true" /> {t('teampage.att.rate')}</h2>
 			<span class="font-display text-5xl leading-none font-extrabold {hasRate ? TONE[rateTone(attendance?.rate)].text : 'text-muted'}">{formatRate(attendance?.rate)}</span>
@@ -194,7 +194,7 @@
 			</div>
 		{/each}
 	</div>
-	<div class="grid gap-4 lg:grid-cols-2">
+	<div class="grid gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
 		<div class="card card-body gap-2">
 			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><TriangleAlert size={16} aria-hidden="true" /> {t('teampage.att.missed')}</h2>
 			{#if !attendance}
@@ -314,7 +314,7 @@
 	</div>
 
 	{#if data.referees !== null}
-		<div class="grid gap-4 lg:grid-cols-2">
+		<div class="grid gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
 			{#each [{ kind: 'referee', list: data.referees ?? [] }, { kind: 'official', list: data.officials ?? [] }] as const as group (group.kind)}
 				{@const KindIcon = kindIcon[group.kind]}
 				<div class="card card-body h-full gap-2">
