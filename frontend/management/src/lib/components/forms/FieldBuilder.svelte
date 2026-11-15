@@ -130,17 +130,21 @@
 							</div>
 						</div>
 					{/if}
-					<label class="mt-3 flex w-fit cursor-pointer items-center gap-2 text-sm">
-						<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.required} />
-						{t('forms.field.required')}
-					</label>
-					{#if family}
-						<label class="mt-2 flex w-fit cursor-pointer items-center gap-2 text-sm">
-							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.visible_to_family} />
-							{t('eval.field.family')}
+					<div class="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+						<label class="flex w-fit cursor-pointer items-center gap-2 text-sm">
+							<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.required} />
+							{t('forms.field.required')}
 						</label>
-						<p class="text-xs text-muted">{t('eval.field.family_help')}</p>
-					{/if}
+						{#if family}
+							<div>
+								<label class="flex w-fit cursor-pointer items-center gap-2 text-sm">
+									<input type="checkbox" class="checkbox checkbox-sm" bind:checked={f.visible_to_family} />
+									{t('eval.field.family')}
+								</label>
+								<p class="mt-1 text-xs text-muted">{t('eval.field.family_help')}</p>
+							</div>
+						{/if}
+					</div>
 
 					{#if hasOptions(f.field_type)}
 						<div class="mt-4 grid gap-2 border-t border-rule pt-3" role="group" aria-labelledby="{base}-{f.uid}-opts">
