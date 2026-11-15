@@ -55,7 +55,7 @@
 				{#if canManage}<button type="button" class="btn btn-primary btn-sm min-h-10 shrink-0 gap-1.5" onclick={() => openPlayer(null)}><Plus size={16} aria-hidden="true" />{t('coach.add_player')}</button>{/if}
 			</div>
 			<div class="grid gap-1 text-xs text-muted">
-				<ul class="flex flex-wrap gap-x-3 gap-y-1" aria-label={t('coach.rate_overall')}>
+				<ul class="flex flex-nowrap items-center gap-x-3" aria-label={t('coach.rate_overall')}>
 					{#each LEGEND as [tone, key] (key)}<li class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-full {TONE[tone].bar}"></span>{t(key)}</li>{/each}
 				</ul>
 				<p>{t('coach.rate_help')}</p>
