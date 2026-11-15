@@ -9,7 +9,9 @@
 	import Modal from '#lib/components/Modal.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { documentsHref, feeBadge, type Duplicate, type SignupRow } from '#lib/signups.ts';
+	import Avatar from '#lib/components/Avatar.svelte';
+	import RequirementsDialog from '#lib/components/signups/RequirementsDialog.svelte';
+	import { feeBadge, type Duplicate, type SignupRow } from '#lib/signups.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
@@ -34,6 +36,12 @@
 	let busy = $state(false);
 	let target = $state<SignupRow | null>(null);
 	let placeOpen = $state(false);
+	// The position chosen in the place dialog (starts at the one asked for); a staff position (a volunteer) has no jersey number.
+	let placePos = $state('');
+	const placeStaff = $derived(!!data.options.positions.find((p) => p.id === placePos)?.staff);
+	$effect(() => {
+		if (placeOpen) placePos = target?.registration?.requested_position_id ?? '';
+	});
 	let cancelOpen = $state(false);
 	let allOpen = $state(false);
 	let linkOpen = $state(false);
@@ -68,9 +76,15 @@
 		const m = String(form.message ?? '');
 		if (form.op === 'link' && form.fields && 'member_id' in (form.fields as object)) return t('signups.err.already_member');
 		if (m.startsWith('requirements:')) return t('signups.err.requirements', { names: m.slice(13) });
+		if ('code' in form && form.code === 'installment_required') return t('installments.approval_required');
 		if (form.fields && 'fee_status' in (form.fields as object)) return t('signups.err.fee');
 		return m || t('common.error.generic');
 	});
+
+	let reqOpen = $state(false);
+	let reqTarget = $state<SignupRow | null>(null);
+	// Keep the pop-up on the row's fresh data after a reload.
+	const reqRow = $derived(reqTarget ? (data.rows.find((x) => x.membership_id === reqTarget!.membership_id) ?? reqTarget) : null);
 
 	usePageHeader(() => ({ title: t('signups.title'), context: data.seasonName ?? '', actions }));
 </script>
@@ -137,12 +151,14 @@
 									{#if Number(r.remaining_balance) > 0}<p class="mt-0.5 font-mono text-xs text-muted">{t('signups.fee_due', { amount: r.remaining_balance })}</p>{/if}
 								</td>
 								<td>
-									{#if r.open_requirements.length}
-										<a class="flex flex-wrap items-center gap-1" href={documentsHref(r.member.id)} aria-label={t('signups.open_documents', { name: r.member.name })}>
-											<FileText size={13} class="text-warn-text" aria-hidden="true" />
-											{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}
-										</a>
-									{:else}<span class="text-sm text-muted">{t('signups.none_open')}</span>{/if}
+									<div class="grid justify-items-start gap-1.5">
+										<button class="btn btn-outline btn-xs gap-1" type="button" onclick={() => ((reqTarget = r), (reqOpen = true))} aria-label={t('signups.open_documents', { name: r.member.name })}>
+											<FileText size={13} aria-hidden="true" /> {t('signups.req_open')}{#if r.open_requirements.length}<span class="badge badge-warning badge-xs">{r.open_requirements.length}</span>{/if}
+										</button>
+										{#if r.open_requirements.length}
+											<div class="flex flex-wrap gap-1">{#each r.open_requirements as name (name)}<span class="badge badge-sm badge-warning">{name}</span>{/each}</div>
+										{/if}
+									</div>
 								</td>
 								<td class="text-sm">{r.teams.length ? r.teams.map((x) => x.name).join(', ') : '–'}</td>
 								<td class="text-right whitespace-nowrap">
@@ -168,7 +184,19 @@
 <Modal bind:open={allOpen} title={t('signups.approve_all_title')}>
 	<form method="POST" action="?/approveClean" class="grid gap-3" use:enhance={run(() => (allOpen = false))}>
 		<input type="hidden" name="season" value={data.filters.season} />
-		<p>{t('signups.approve_all_body', { n: data.clean })}</p>
+		<p class="text-sm text-muted">{t('signups.approve_all_body', { n: data.clean })}</p>
+		<ul class="grid max-h-80 gap-2 overflow-y-auto" aria-label={t('signups.approve_all_list')}>
+			{#each data.cleanRows as r (r.membership_id)}
+				<li class="flex items-center gap-3 rounded-lg border border-line px-3 py-2">
+					<Avatar first_name={r.member.name.split(' ')[0]} last_name={r.member.name.split(' ').slice(1).join(' ')} size="h-8 w-8" text="text-xs" />
+					<div class="min-w-0 flex-1">
+						<p class="truncate text-sm font-semibold text-ink">{r.member.name}</p>
+						<p class="truncate text-xs text-muted">{[r.registration?.product, r.teams.length ? r.teams.map((x) => x.name).join(', ') : ''].filter(Boolean).join(' · ') || r.season_name}</p>
+					</div>
+					<span class="badge badge-sm {feeBadge(r.fee_status)}">{t(`signups.fee.${r.fee_status}`)}</span>
+				</li>
+			{/each}
+		</ul>
 		<div class="modal-action mt-2 flex justify-end gap-2">
 			<button class="btn btn-outline" type="button" onclick={() => (allOpen = false)}>{t('common.cancel')}</button>
 			<button class="btn btn-primary gap-2" type="submit" disabled={busy}><CheckCheck size={16} /> {t('signups.approve_all', { n: data.clean })}</button>
@@ -181,6 +209,7 @@
 		{@const want = target?.registration}
 		<form method="POST" action="?/place" class="grid gap-3" use:enhance={run(() => (placeOpen = false))}>
 			<input type="hidden" name="id" value={target?.membership_id ?? ''} />
+			<p class="text-sm text-muted">{placeStaff ? t('signups.place_staff_help') : ''}</p>
 			<p class="text-sm text-muted">{want && (want.requested_team_id || want.requested_position_id || want.requested_jersey_number !== null) ? t('signups.place_help_requested') : t('signups.place_help')}</p>
 			<div class="form-control">
 				<label class="label" for="place-team"><span class="label-text">{t('signups.team')}</span></label>
@@ -192,14 +221,21 @@
 			<div class="grid grid-cols-2 gap-3">
 				<div class="form-control">
 					<label class="label" for="place-pos"><span class="label-text">{t('signups.position')}</span></label>
-					<select id="place-pos" name="position_id" class="select select-bordered w-full">
+					<select id="place-pos" name="position_id" class="select select-bordered w-full" bind:value={placePos}>
 						<option value="">{t('signups.no_position')}</option>
-						{#each data.options.positions as p (p.id)}<option value={p.id} selected={p.id === want?.requested_position_id}>{p.name}</option>{/each}
+						<optgroup label={t('signups.positions_players')}>
+							{#each data.options.positions.filter((p) => !p.staff) as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+						</optgroup>
+						{#if data.options.positions.some((p) => p.staff)}
+							<optgroup label={t('signups.positions_staff')}>
+								{#each data.options.positions.filter((p) => p.staff) as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+							</optgroup>
+						{/if}
 					</select>
 				</div>
 				<div class="form-control">
 					<label class="label" for="place-jersey"><span class="label-text">{t('signups.jersey')}</span></label>
-					<input id="place-jersey" name="jersey_number" type="number" min="0" class="input input-bordered w-full" value={want?.requested_jersey_number ?? ''} />
+					<input id="place-jersey" name="jersey_number" type="number" min="0" class="input input-bordered w-full" value={placeStaff ? '' : (want?.requested_jersey_number ?? '')} disabled={placeStaff} />
 				</div>
 			</div>
 			<div class="modal-action mt-2 flex justify-end gap-2">
@@ -262,3 +298,5 @@
 		</div>
 	</form>
 </Modal>
+
+<RequirementsDialog bind:open={reqOpen} row={reqRow} {form} version={data.rows} />

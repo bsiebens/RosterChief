@@ -2,6 +2,7 @@
     import {goto} from '$app/navigation';
     import {page} from '$app/state';
     import {KeyRound} from '@lucide/svelte';
+    import {onMount} from 'svelte';
     import {auth, getCredential, isPending, splitErrors, webauthnMessage, webauthnSupported} from '#lib/api.ts';
     import {safeNext} from '#lib/next.ts';
     import {t} from '#lib/i18n.svelte.ts';
@@ -12,15 +13,15 @@
 
     let {data} = $props();
 
-    let email = $state('');
-    let password = $state('');
     let busy = $state(false);
     let formErrors = $state<string[]>([]);
     let fieldErrors = $state<Record<string, string>>({});
     let notice = $state('');
 
     const next = $derived(safeNext(page.url.searchParams.get('next')));
-    const passkeys = $derived(data.passkeyLogin && webauthnSupported());
+    let supportsPasskeys = $state(false);
+    onMount(() => { supportsPasskeys = webauthnSupported(); });
+    const passkeys = $derived(data.passkeyLogin && supportsPasskeys);
 
     async function finish(r: Awaited<ReturnType<typeof auth>>) {
         if (r.ok) return afterSignIn(next, data.mode);
@@ -32,7 +33,7 @@
             return;
         }
         const e = splitErrors(r);
-        formErrors = e.form;
+        formErrors = e.form.length || Object.keys(e.fields).length ? e.form : [t('auth.err.generic')];
         fieldErrors = e.fields;
     }
 
@@ -49,12 +50,19 @@
 
     async function submit(event: SubmitEvent) {
         event.preventDefault();
+        if (busy) return;
+        const fields = new FormData(event.currentTarget as HTMLFormElement);
+        const email = String(fields.get('email') ?? '').trim();
+        const password = String(fields.get('password') ?? '');
         busy = true;
         formErrors = [];
         fieldErrors = {};
         notice = '';
-        await finish(await freshLogin(() => auth('POST', '/auth/login', {email, password})));
-        busy = false;
+        try {
+            await finish(await freshLogin(() => auth('POST', '/auth/login', {email, password})));
+        } finally {
+            busy = false;
+        }
     }
 
     async function passkeyLogin() {
@@ -85,9 +93,9 @@
         <Alert kind="error">{message}</Alert>
     {/each}
 
-    <form class="flex flex-col gap-4" onsubmit={submit}>
-        <Field label={t('auth.email')} type="email" name="email" autocomplete="username webauthn" required bind:value={email} error={fieldErrors.email}/>
-        <Field label={t('auth.password')} type="password" name="password" autocomplete="current-password" required bind:value={password} error={fieldErrors.password}/>
+    <form class="flex flex-col gap-4" method="POST" onsubmit={submit}>
+        <Field label={t('auth.email')} type="email" name="email" autocomplete="username webauthn" required error={fieldErrors.email}/>
+        <Field label={t('auth.password')} type="password" name="password" autocomplete="current-password" required error={fieldErrors.password}/>
         <button class="btn btn-primary w-full" type="submit" disabled={busy}>{t('auth.login.submit')}</button>
 
         {#if passkeys}

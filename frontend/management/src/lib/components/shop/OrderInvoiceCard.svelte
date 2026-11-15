@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { FileDown, FilePlus, FileText } from '@lucide/svelte';
+	import { FileDown, FilePlus, ReceiptText } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import InvoiceOutcomeNote from '#lib/components/shop/InvoiceOutcomeNote.svelte';
@@ -19,7 +19,7 @@
 </script>
 
 <section class="card card-body gap-3" aria-labelledby="inv-h">
-	<h2 id="inv-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><FileText size={16} aria-hidden="true" /> {t('shop.orders.card.invoice')}</h2>
+	<h2 id="inv-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ReceiptText size={16} aria-hidden="true" /> {t('shop.orders.card.invoice')}</h2>
 	{#if failure && !open}<Alert kind="error">{failure}</Alert>{/if}
 	{#if order.invoice}
 		<div class="flex flex-wrap items-center justify-between gap-2">

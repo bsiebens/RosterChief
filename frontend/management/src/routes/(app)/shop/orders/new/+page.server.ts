@@ -15,9 +15,9 @@ export const load: PageServerLoad = async ({ fetch, parent }) => {
 	const items = asList(res.data).results;
 	const products = await Promise.all(
 		items.map(async (p): Promise<ProductDetail> => {
-			if (!p.variant_count) return { ...p, variants: [], order_line_count: 0 };
+			if (!p.variant_count) return { ...p, variants: [], order_line_count: 0, ordering_windows: [] };
 			const d = await api<ProductDetail>('GET', `/shop/products/${p.id}`, { f: fetch });
-			return d.ok ? d.data! : { ...p, variants: [], order_line_count: 0 };
+			return d.ok ? d.data! : { ...p, variants: [], order_line_count: 0, ordering_windows: [] };
 		})
 	);
 	return { products, shopOpen: settings.ok ? settings.data!.shop_open : true, error: res.ok ? null : res.status };

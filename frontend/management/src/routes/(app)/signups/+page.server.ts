@@ -1,5 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { api, type ApiCall } from '#lib/management-api.ts';
+import { requirementActions } from '#lib/requirements-server.ts';
 import type { Season } from '#lib/members/detail-types.ts';
 import { SIGNUP_FILTERS, type SignupFilter, type SignupList, type SignupOptions } from '#lib/signups.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -22,6 +23,8 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 		filters: { q, only, season },
 		rows,
 		total: all.length,
+		/** Everyone who is ready, whatever tab is open: who "approve all" will activate. */
+		cleanRows: all.filter((r) => r.clean),
 		clean: list.data?.clean_count ?? 0,
 		seasonName: list.data?.season_name ?? null,
 		seasons: seasons.data ?? [],
@@ -31,9 +34,10 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 };
 
 const failed = (op: string, res: ApiCall<unknown>, id = '') =>
-	fail(res.status >= 400 && res.status < 600 ? res.status : 500, { op, id, message: res.fields.__all__ || (res.fields.requirements ? `requirements:${res.fields.requirements}` : '') || res.message || '', fields: res.fields });
+	fail(res.status >= 400 && res.status < 600 ? res.status : 500, { op, id, code: res.code, message: res.fields.__all__ || (res.fields.requirements ? `requirements:${res.fields.requirements}` : '') || res.message || '', fields: res.fields });
 
 export const actions: Actions = {
+	...requirementActions,
 	approve: async ({ request, fetch }) => {
 		const id = String((await request.formData()).get('id') ?? '');
 		const res = await api('POST', `/signups/${id}/approve`, { f: fetch });

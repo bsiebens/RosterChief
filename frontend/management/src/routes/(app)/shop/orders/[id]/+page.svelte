@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, ArrowRight, Bell, CircleCheck, Package, PackageCheck, RotateCcw, Save, X } from '@lucide/svelte';
+	import { Activity, NotebookPen, UserRound, ArrowLeft, ArrowRight, Bell, CircleCheck, PackageCheck, RotateCcw, Save, X, ListOrdered } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -91,7 +91,7 @@
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3" aria-labelledby="lines-h">
-				<h2 id="lines-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Package size={16} aria-hidden="true" /> {t('shop.orders.card.lines')}</h2>
+				<h2 id="lines-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" /> {t('shop.orders.card.lines')}</h2>
 				<div class="overflow-x-auto">
 					<table class="table">
 						<thead>
@@ -142,7 +142,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-label={t('shop.orders.card.side')}>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.card.status')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Activity size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.card.status')}</h2>
 				<div class="font-display text-[32px] leading-none font-extrabold text-ink tabular-nums">{money(order.total)}</div>
 				<OrderBadges payment={order.payment_status} fulfillment={order.fulfillment_status} production={order.production_status} readyToConfirm={order.ready_to_confirm && !order.is_closed} />
 				<div class="text-xs text-muted">{t('shop.orders.placed', { date: dateTime(order.created) })}{#if order.created_by}{' '}· {order.created_by}{/if}</div>
@@ -182,14 +182,14 @@
 			</section>
 
 			<section class="card card-body gap-2">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.card.purchaser')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><UserRound size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.card.purchaser')}</h2>
 				<a class="link text-lg font-semibold" href="/members/{order.purchaser.id}">{order.purchaser.name}</a>
 			</section>
 
 			<OrderInvoiceCard {order} canInvoice={data.canInvoice} {form} />
 
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.card.notes')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><NotebookPen size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.card.notes')}</h2>
 				<form method="POST" action="?/saveNotes" class="grid gap-3" use:enhance={run()}>
 					<label class="form-control w-full">
 						<span class="label"><span class="label-text">{t('shop.orders.notes')}</span></span>

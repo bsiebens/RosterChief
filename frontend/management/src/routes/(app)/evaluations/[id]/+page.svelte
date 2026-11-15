@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, ClipboardCheck, Presentation, Save, Table2, Trash2 } from '@lucide/svelte';
+	import { ClipboardList, ListChecks, Settings2, ArrowLeft, ClipboardCheck, Presentation, Save, Table2, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -117,7 +117,7 @@
 					}}>
 					<input type="hidden" name="payload" value={payload} />
 					<section class="card card-body gap-3" aria-labelledby="{formId}-details">
-						<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('eval.card.details')}</h2>
+						<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.details')}</h2>
 						<div class="form-control">
 							<label class="label" for="{formId}-name"><span class="label-text">{t('eval.field.name')}</span></label>
 							<input id="{formId}-name" class="input input-bordered w-full {errs.name || (tried && !v.name.trim()) ? 'input-error' : ''}" bind:value={v.name} maxlength="255" />
@@ -136,7 +136,7 @@
 					</section>
 					<section class="card card-body gap-3" aria-labelledby="{formId}-fields">
 						<header class="grid gap-0.5">
-							<h2 id="{formId}-fields" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('eval.card.criteria')}</h2>
+							<h2 id="{formId}-fields" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.criteria')}</h2>
 							<p class="text-xs text-muted">{t('eval.card.criteria_desc')}</p>
 						</header>
 						{#if item.evaluation_count}<Alert kind="info">{t('eval.criteria.has_evaluations', { n: item.evaluation_count })}</Alert>{/if}
@@ -152,7 +152,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-side">
 			<section class="card card-body gap-3">
-				<h2 id="{formId}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('eval.card.actions')}</h2>
+				<h2 id="{formId}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('eval.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 					<span class="badge badge-sm {item.is_active ? 'badge-success' : 'badge-warning'}">{item.is_active ? t('eval.active') : t('eval.inactive')}</span>
 					<span class="font-mono">{t('eval.counts', { criteria: item.criteria_count, evaluations: item.evaluation_count })}</span>

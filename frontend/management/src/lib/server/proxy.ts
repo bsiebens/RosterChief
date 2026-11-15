@@ -88,6 +88,7 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	// django-tenants picks the club from the Host header: forward the host the browser used (acme.rosterchief.app,
 	// or the bare domain for the club picker). BACKEND_HOST overrides it for odd setups.
 	headers.set('host', env.BACKEND_HOST ?? requestHostname(event));
+	headers.set('x-forwarded-proto', url.protocol.slice(0, -1));
 	try {
 		headers.set('x-forwarded-for', event.getClientAddress());
 	} catch {
@@ -131,7 +132,11 @@ export async function proxy(event: RequestEvent): Promise<Response> {
 	}
 
 	const out = new Headers();
-	for (const name of ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'www-authenticate', 'retry-after']) {
+	for (const name of [
+		'content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'www-authenticate', 'retry-after',
+		'access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers',
+		'content-security-policy', 'x-content-type-options', 'vary'
+	]) {
 		const value = upstream.headers.get(name);
 		if (value) out.set(name, value);
 	}

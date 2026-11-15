@@ -2,7 +2,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
-	import { Hash, Lock, LockOpen, X } from '@lucide/svelte';
+	import { Bookmark, Users, Hash, Lock, LockOpen, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import NumberLegend from '#lib/components/teams/NumberLegend.svelte';
@@ -83,7 +83,7 @@
 		{#each data.overview as o (o.pool?.id ?? 'none')}
 									<div class="card card-body">
 				<div class="flex flex-wrap items-baseline justify-between gap-2">
-					<h2 class="font-display text-sm font-extrabold tracking-[.06em] text-club-dark uppercase">{o.pool?.name ?? t('teams.numbers.no_pool')}</h2>
+					<h2 class="font-display text-sm font-extrabold tracking-[.06em] text-club-dark uppercase flex items-center gap-2"><Hash size={16} class="shrink-0" aria-hidden="true" /> {o.pool?.name ?? t('teams.numbers.no_pool')}</h2>
 					{#if o.pool}
 						<span class="font-mono text-xs text-muted">{o.pool.min_number}–{o.pool.max_number} · {t('teams.numbers.age_gap', { n: o.pool.min_age_gap_years })}</span>
 					{/if}
@@ -119,7 +119,7 @@
 
 			{#if n.holders.length}
 				<div>
-					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('teams.numbers.held_by')}</h3>
+					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('teams.numbers.held_by')}</h3>
 					<ul class="mt-2 grid gap-2">
 						{#each n.holders as h (h.member_id + h.team_id)}
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm">
@@ -135,7 +135,7 @@
 
 			{#if n.reservation}
 				<div>
-					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('teams.num.reserved')}</h3>
+					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><Bookmark size={16} class="shrink-0" aria-hidden="true" /> {t('teams.num.reserved')}</h3>
 					<p class="text-sm">{n.reservation.note || '—'}</p>
 					<p class="text-xs text-muted">{n.reservation.reserved_by_name ? t('teams.numbers.reserved_by', { name: n.reservation.reserved_by_name }) : t('teams.numbers.reserved_by_unknown')}</p>
 				</div>

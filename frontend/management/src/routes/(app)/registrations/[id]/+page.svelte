@@ -2,11 +2,13 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Ban, ExternalLink, FileDown, Mail, MailCheck, ReceiptText, Save, Send } from '@lucide/svelte';
+	import { ArrowLeft, Ban, ClipboardList, ExternalLink, FileDown, Mail, MailCheck, ReceiptText, Save, Send, Tag, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import LegacyInvoiceHistory from '#lib/components/registration/LegacyInvoiceHistory.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import InstallmentSchedule from '#lib/components/registration/InstallmentSchedule.svelte';
 	import { formatDay } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -208,12 +210,17 @@
 	{#if item.status === 'confirmed'}<Alert kind="info">{t('reg.readonly_confirmed', { number: item.invoice_number ?? '' })}</Alert>{/if}
 	{#if item.status === 'cancelled'}<Alert kind="warning">{t('reg.readonly_cancelled')}</Alert>{/if}
 
+	{#if item.legacy_invoice_history}
+		<LegacyInvoiceHistory invoice={item.legacy_invoice_history} invoiceNumber={item.invoice_number} downloadId={item.status === 'confirmed' && item.invoice_number ? item.id : null} />
+	{/if}
+
+	{#if !item.legacy_invoice_only}
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<form id={formId} method="POST" action="?/save" class="grid gap-5" use:enhance={run()}>
 				<input type="hidden" name="payload" value={payload} />
 				<section class="card card-body gap-3">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('reg.card.lines')}</h2>
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('reg.card.lines')}</h2>
 					<p class="text-xs text-muted">{t('reg.card.lines_help')}</p>
 					<div class="overflow-x-auto">
 						<table class="table">
@@ -250,7 +257,7 @@
 				</section>
 
 				<section class="card card-body gap-3">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('reg.card.discount')}</h2>
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Tag size={16} aria-hidden="true" /> {t('reg.card.discount')}</h2>
 					<div class="grid gap-3 md:grid-cols-[12rem_1fr]">
 						<div class="form-control">
 							<label class="label" for="{formId}-disc"><span class="label-text">{t('reg.discount.amount')}</span></label>
@@ -270,7 +277,7 @@
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-label={t('reg.card.summary')}>
 			<section class="card card-body gap-3">
 				<div class="flex items-center justify-between gap-2">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('reg.card.registration_details')}</h2>
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" /> {t('reg.card.registration_details')}</h2>
 					<span class="badge badge-sm {statusBadge(item.status)}">{t(`reg.status.${item.status}`)}</span>
 				</div>
 				<dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
@@ -279,13 +286,14 @@
 					{#if item.contact?.email}<dt class="text-muted">{t('reg.sum.email')}</dt><dd class="truncate text-right">{item.contact.email}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.season')}</dt><dd class="text-right">{item.season_name}</dd>
 					<dt class="text-muted">{t('reg.sum.submitted')}</dt><dd class="text-right">{formatDay(item.submitted_at)}</dd>
-					{#if item.invoice_due_date}<dt class="text-muted">{t('reg.sum.due')}</dt><dd class="text-right">{formatDay(item.invoice_due_date)}</dd>{/if}
+					{#if item.invoice_due_date}<dt class="text-muted">{t(item.installment_offsets.length ? 'installments.first_due' : 'reg.sum.due')}</dt><dd class="text-right">{formatDay(item.invoice_due_date)}</dd>{/if}
 					{#if (editable ? orderTotal : Number(item.order_discount_total)) > 0}<dt class="text-muted">{t('reg.sum.order_discount')}</dt><dd class="text-right font-mono text-ok-text">−{money(editable ? orderTotal : item.order_discount_total)}</dd>{/if}
 					{#if (editable ? creditTotal : Number(item.credit_total)) > 0}<dt class="text-muted">{t('regr.sum.credit')}</dt><dd class="text-right font-mono text-ok-text">−{money(editable ? creditApplied : item.credit_applied)}</dd>{/if}
 					{#if (editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied)) > 0}<dt class="text-xs text-muted">{t('regr.sum.credit_unused')}</dt><dd class="text-right font-mono text-xs text-muted">{money(editable ? creditTotal - creditApplied : Number(item.credit_total) - Number(item.credit_applied))}</dd>{/if}
 					<dt class="text-muted">{t('reg.sum.subtotal')}</dt><dd class="text-right font-mono">{money(editable ? subtotal : item.subtotal)}</dd>
 					{#if (editable ? manual : Number(item.manual_discount_amount)) > 0}<dt class="text-muted">{t('reg.sum.manual')}</dt><dd class="text-right font-mono">−{money(editable ? manual : item.manual_discount_amount)}</dd>{/if}
 				</dl>
+				{#if item.installment_offsets.length && editable}<p class="text-sm text-muted">{t('installments.requested', { n: item.installment_offsets.length + 1 })}</p>{/if}
 				<div class="flex items-baseline justify-between border-t border-rule pt-2"><span class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('reg.sum.total')}</span><span class="font-display text-2xl font-extrabold text-ink tabular-nums">{money(editable ? total : item.total)}</span></div>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('reg.unsaved')}</p>{/if}
 				{#if editable}
@@ -303,17 +311,20 @@
 					{#if item.status !== 'cancelled'}<ActionRow icon={Ban} danger disabled={busy} onclick={() => (cancelOpen = true)}>{t('reg.act.cancel')}</ActionRow>{/if}
 				</ActionList>
 			</section>
+			{#if item.installments.length}<InstallmentSchedule rows={item.installments} />{/if}
 		</aside>
 	</div>
+	{/if}
 </div>
 
 <Modal bind:open={confirmOpen} title={t('reg.confirm_title')}>
 	<form method="POST" action="?/confirm" class="grid gap-4" use:enhance={run(() => (confirmOpen = false))}>
 		<p class="text-sm text-muted">{t('reg.confirm_body', { total: money(total) })}</p>
 		<div class="form-control">
-			<label class="label" for="{formId}-due"><span class="label-text">{t('reg.confirm_due')}</span></label>
+			<label class="label" for="{formId}-due"><span class="label-text">{t(item.installment_offsets.length ? 'installments.first_due' : 'reg.confirm_due')}</span></label>
 			<input id="{formId}-due" class="input input-bordered w-full" type="date" name="due_date" bind:value={dueDate} />
 			<span class="label-text-alt mt-1 block">{t('reg.confirm_due_help', { days: data.dueDays })}</span>
+			{#if item.installment_offsets.length}<p class="mt-1 text-xs text-muted">{t('installments.when', { days: item.installment_offsets.join(', ') })}</p>{/if}
 		</div>
 		<label class="flex items-start gap-3 text-sm"><input type="checkbox" name="send" class="checkbox checkbox-sm mt-0.5" checked /> <span>{t('reg.confirm_send')}</span></label>
 		<div class="modal-action mt-2 flex justify-end gap-2">

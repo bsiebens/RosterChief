@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Paperclip } from '@lucide/svelte';
+	import { ClipboardList, ListChecks, Paperclip } from '@lucide/svelte';
 	import { bySection, hasOptions, optionsOf, type FieldDraft, type FieldOut } from '#lib/forms.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
@@ -17,13 +17,13 @@
 
 <div class="card card-body gap-5">
 	<header class="grid gap-1">
-		<h2 class="font-display text-2xl font-extrabold tracking-wide text-ink uppercase">{title || t('forms.untitled')}</h2>
+		<h2 class="flex items-center gap-2 font-display text-2xl font-extrabold tracking-wide text-ink uppercase"><ClipboardList size={20} class="shrink-0" aria-hidden="true" /> {title || t('forms.untitled')}</h2>
 		{#if description}<p class="text-sm whitespace-pre-line text-muted">{description}</p>{/if}
 	</header>
 	{#if !items.length}<p class="text-sm text-muted">{t('forms.preview.empty')}</p>{/if}
 	{#each groups as g, gi (gi)}
 		<section class="grid gap-4">
-			{#if g.section}<h3 class="border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{g.section}</h3>{/if}
+			{#if g.section}<h3 class="flex items-center gap-2 border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {g.section}</h3>{/if}
 			{#each g.items as f (f.uid)}
 				{@const fid = `${id}-${f.uid}`}
 				<div class="form-control w-full">

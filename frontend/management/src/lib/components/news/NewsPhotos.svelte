@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Crosshair, Image as ImageIcon, ImagePlus, Star, Trash2 } from '@lucide/svelte';
+	import { Crosshair, Image as ImageIcon, ImagePlus, Star, Trash2, Camera } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -104,7 +104,7 @@
 <section class="card card-body" aria-labelledby="news-photos-h">
 	<header class="mb-3 flex flex-wrap items-start justify-between gap-3">
 		<div class="grid gap-0.5">
-			<h2 id="news-photos-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ImageIcon size={16} aria-hidden="true" /> {t('news.card.photos')} <span class="font-mono text-xs font-normal text-muted">· {photos.length}</span></h2>
+			<h2 id="news-photos-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Camera size={16} aria-hidden="true" /> {t('news.card.photos')} <span class="font-mono text-xs font-normal text-muted">· {photos.length}</span></h2>
 			<p class="text-xs text-muted">{t('news.card.photos_desc')}</p>
 		</div>
 		{#if canEdit}

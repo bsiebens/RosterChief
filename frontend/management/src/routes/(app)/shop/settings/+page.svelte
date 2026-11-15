@@ -3,7 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { beforeNavigate } from '$app/navigation';
-	import { KeyRound, Save } from '@lucide/svelte';
+	import { CreditCard, FileText, PackageCheck, ReceiptText, Settings2, Store, Webhook, KeyRound, Save } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import ShopNumbering from '#lib/components/shop/ShopNumbering.svelte';
@@ -101,7 +101,7 @@
 			<input type="hidden" name="payload" value={payload} />
 			<section class="card card-body gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-2">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.card.availability')}</h2>
+					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Store size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.availability')}</h2>
 					<span class="badge {s.shop_open ? 'badge-success' : 'badge-warning'}">{s.shop_open ? t('shop.set.status_open') : t('shop.set.status_closed')}</span>
 				</div>
 				<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-3">
@@ -118,7 +118,7 @@
 				</div>
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.card.payments')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><CreditCard size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.payments')}</h2>
 				<p class="text-xs text-muted">{t('shop.set.payments_help')}</p>
 				<div class="grid items-start gap-3 md:grid-cols-2">
 					<div class="form-control w-full">
@@ -136,7 +136,7 @@
 					</div>
 				</div>
 				{#if info && info.credential_fields.length}
-					<h3 class="mt-2 font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.credentials')}</h3>
+					<h3 class="mt-2 font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><KeyRound size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.credentials')}</h3>
 					<div class="grid gap-3 md:grid-cols-2">
 						{#each info.credential_fields as f (f)}
 							<Field label={f} type="password" autocomplete="new-password" bind:value={() => creds[f] ?? '', (v) => (creds[f] = v)} placeholder={s.credentials_configured && provider === s.payment_provider ? t('shop.set.keep') : ''} disabled={clear} error={errs[`credentials.${f}`] ?? errs.credentials} />
@@ -149,21 +149,21 @@
 				{/if}
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.card.pickup')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><PackageCheck size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.pickup')}</h2>
 				<div class="form-control w-full">
 					<label class="label" for="{formId}-pickup"><span class="label-text">{t('shop.set.pickup_label')}</span></label>
 					<textarea id="{formId}-pickup" class="textarea textarea-bordered min-h-24 w-full" maxlength="2000" bind:value={pickupText} aria-describedby="{formId}-pickup-help"></textarea>
 					<span id="{formId}-pickup-help" class="label-text-alt mt-1 block {errs.pickup_instructions ? 'text-error' : ''}">{errs.pickup_instructions || t('shop.set.pickup_help')}</span>
 				</div>
 				<div class="grid gap-1 rounded-lg border border-line p-3">
-					<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.card.payment_text')}</h3>
+					<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><FileText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.payment_text')}</h3>
 					{#if s.club_payment_instructions}<p class="text-sm whitespace-pre-line">{s.club_payment_instructions}</p>{:else}<p class="text-sm text-muted">{t('shop.set.payment_text_empty')}</p>{/if}
 					<p class="text-xs text-muted">{t('shop.set.payment_text_help')}{#if data.me.can_manage_settings}<a class="link ml-1" href="/settings">{t('shop.set.payment_text_link')}</a>{/if}</p>
 				</div>
 			</section>
 			<ShopNumbering rows={s.numbering} placeholders={s.numbering_placeholders} errors={errs} canEditInvoice={s.can_edit_invoice_numbering} bind:changes={numberingChanges} />
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.card.invoices')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ReceiptText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.card.invoices')}</h2>
 				<div class="grid gap-3 md:grid-cols-2">
 					<Field label={t('shop.set.due_days')} type="number" min="0" max="365" bind:value={dueDays} error={errs.invoice_due_days} help={t('shop.set.due_days_help')} />
 				</div>
@@ -172,13 +172,13 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.actions')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 				{#if dirty}<p class="text-xs font-semibold text-warn-text">{t('shop.unsaved')}</p>{/if}
 				<button class="btn btn-primary gap-2" type="submit" form={formId} disabled={busy || !dirty}><Save size={16} /> {t('common.save')}</button>
 			</section>
 			{#if info}
 				<section class="card card-body gap-2">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.set.webhook')}</h2>
+					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Webhook size={16} class="shrink-0" aria-hidden="true" /> {t('shop.set.webhook')}</h2>
 					<p class="text-xs text-muted">{t('shop.set.webhook_help')}</p>
 					<input class="input input-bordered input-sm w-full font-mono text-xs" readonly value={webhook(info.key)} aria-label={t('shop.set.webhook')} onfocus={(e) => e.currentTarget.select()} />
 				</section>

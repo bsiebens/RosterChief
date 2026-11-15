@@ -14,12 +14,16 @@ export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 export const actions: Actions = {
 	save: async ({ request, fetch }) => {
 		const f = await request.formData();
+		const offsets = String(f.get('installment_offsets') ?? '').trim();
 		const body = {
 			is_open: f.get('is_open') === 'on',
 			intro_text: String(f.get('intro_text') ?? ''),
 			terms_text: String(f.get('terms_text') ?? ''),
 			payment_instructions: String(f.get('payment_instructions') ?? ''),
-			invoice_due_days: Number(f.get('invoice_due_days') || 0)
+			invoice_due_days: Number(f.get('invoice_due_days') || 0),
+			installment_offsets: offsets ? offsets.split(',').map((offset) => /^\d+$/.test(offset.trim()) ? Number(offset) : 0) : [],
+			installment_grace_days: Number(f.get('installment_grace_days') || 0),
+			installment_block_kinds: f.getAll('installment_block_kinds').map(String)
 		};
 		const res = await api<RegistrationSettings>('PUT', '/registration/settings', { body, f: fetch });
 		if (!res.ok) return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { fields: res.fields, message: res.fields.__all__ || res.message || '', values: body });

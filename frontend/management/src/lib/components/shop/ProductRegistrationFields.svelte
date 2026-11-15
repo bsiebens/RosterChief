@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Plus, Trash2 } from '@lucide/svelte';
+	import { ClipboardList, Plus, Trash2 } from '@lucide/svelte';
 	import Field from '#lib/components/Field.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { ProductIn } from '#lib/shop.ts';
@@ -27,7 +27,7 @@
 
 <section class="grid gap-4 rounded-lg border border-line p-4" aria-labelledby="{uid}-h">
 	<header class="grid gap-0.5">
-		<h3 id="{uid}-h" class="font-display text-xs font-bold tracking-[.08em] text-ink uppercase">{t('shop.reg.title')}</h3>
+		<h3 id="{uid}-h" class="font-display text-xs font-bold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('shop.reg.title')}</h3>
 		<p class="text-xs text-muted">{t('shop.reg.help')}</p>
 	</header>
 

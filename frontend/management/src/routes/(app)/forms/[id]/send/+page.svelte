@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, CalendarClock, Link2, Send, Users } from '@lucide/svelte';
+	import { ArrowLeft, CalendarClock, Send, Users, ListChecks } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EventFormAudience from '#lib/components/events/EventFormAudience.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -110,7 +110,7 @@
 
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3" aria-labelledby="{uid}-opt">
-				<h2 id="{uid}-opt" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Link2 size={16} aria-hidden="true" /> {t('forms.send.card.options')}</h2>
+				<h2 id="{uid}-opt" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {t('forms.send.card.options')}</h2>
 				<label class="flex items-start gap-3 rounded-lg border border-line p-3 {item.login_required ? 'opacity-60' : 'cursor-pointer'}">
 					<input type="checkbox" class="checkbox mt-0.5" bind:checked={isPublic} disabled={item.login_required} aria-describedby="{uid}-pub-help" />
 					<span class="grid gap-0.5">

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { CircleCheck, CircleQuestionMark, Clock, Download, FileCheck2, FileClock, FileWarning, FileX2, Save, Upload, UserCheck, XCircle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import InstallmentSchedule from '#lib/components/registration/InstallmentSchedule.svelte';
 	import PublicShell from '#lib/components/registration/PublicShell.svelte';
 	import AnswerInput from '#lib/components/requirements/AnswerInput.svelte';
 	import { page } from '$app/state';
@@ -93,7 +94,7 @@
 		if (p.membership_status === 'active') return { label: t('regs.membership.active'), cls: 'badge-success' };
 		if (p.membership_status === 'lapsed') return { label: t('regs.membership.lapsed'), cls: 'badge-warning' };
 		if (reg.status === 'awaiting') return { label: t('regs.pill.review'), cls: 'badge-warning' };
-		if (p.fee && Number(p.fee.amount_due) > 0 && !['paid', 'waived'].includes(p.fee.fee_status)) return { label: t('regs.pill.payment'), cls: 'badge-warning' };
+		if (p.fee && Number(p.fee.amount_due) > 0 && !p.fee.payment_allows_activation) return { label: t('regs.pill.payment'), cls: 'badge-warning' };
 		if (p.checklist.some((c) => c.display === 'missing' || c.display === 'expired')) return { label: t('regs.pill.documents'), cls: 'badge-warning' };
 		return { label: t('regs.pill.activation'), cls: 'badge-info' };
 	}
@@ -120,8 +121,9 @@
 			<div><dt class="text-xs text-muted">{t('regs.season')}</dt><dd class="font-semibold text-ink">{reg.season_name}</dd></div>
 			<div><dt class="text-xs text-muted">{t('regs.submitted')}</dt><dd class="font-semibold text-ink">{day(reg.submitted_at)}</dd></div>
 			{#if reg.invoice_number}<div><dt class="text-xs text-muted">{t('regs.invoice')}</dt><dd class="font-mono font-semibold text-ink">{reg.invoice_number}</dd></div>{/if}
-			{#if reg.invoice_due_date}<div><dt class="text-xs text-muted">{t('regs.due')}</dt><dd class="font-semibold text-ink">{day(reg.invoice_due_date)}</dd></div>{/if}
+			{#if reg.invoice_due_date}<div><dt class="text-xs text-muted">{t(reg.installment_offsets.length ? 'installments.first_due' : 'regs.due')}</dt><dd class="font-semibold text-ink">{day(reg.invoice_due_date)}</dd></div>{/if}
 		</dl>
+		{#if reg.status === 'awaiting' && reg.installment_offsets.length}<p class="text-sm text-muted">{t('installments.pending')}</p>{/if}
 	</section>
 
 	{#if reg.invoice}
@@ -143,14 +145,29 @@
 						<span class="font-mono whitespace-nowrap text-ok-text">−{money(reg.invoice.manual_discount_amount)}</span>
 					</li>
 				{/if}
+				{#if reg.early_bird}
+					<li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+						<span><span class="font-semibold text-ink">{t('regs.early.title')}</span> <span class="text-xs text-muted">{t('regs.early.until', { date: day(reg.early_bird.deadline) })}</span></span>
+						<span class="font-mono whitespace-nowrap text-ok-text">−{money(reg.early_bird.discount)}</span>
+					</li>
+				{/if}
 			</ul>
 			{#if Number(reg.invoice.credit_unused) > 0}<p class="text-xs text-muted">{t('join.price.credit_unused', { amount: money(reg.invoice.credit_unused) })}</p>{/if}
 			<div class="flex items-baseline justify-between gap-4 border-t border-rule pt-3">
 				<span class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('reg.price.total')}</span>
-				<span class="font-display text-2xl font-extrabold text-ink">{money(reg.invoice.total)}</span>
+				{#if reg.early_bird}
+					<span class="flex items-baseline gap-3">
+						<span class="font-display text-lg font-bold text-muted line-through decoration-2"><span class="sr-only">{t('regs.early.was')} </span>{money(reg.invoice.total)}</span>
+						<span class="font-display text-2xl font-extrabold text-ok-text">{money(Math.max(0, Number(reg.invoice.total) - Number(reg.early_bird.discount)))}</span>
+					</span>
+				{:else}
+					<span class="font-display text-2xl font-extrabold text-ink">{money(reg.invoice.total)}</span>
+				{/if}
 			</div>
 		</section>
 	{/if}
+
+	{#if reg.installments.length}<InstallmentSchedule rows={reg.installments} />{/if}
 
 	{#each reg.people as p (p.member_id)}
 		<section class="card card-body gap-4" aria-labelledby="p-{p.member_id}">
@@ -173,6 +190,12 @@
 						<span class="font-semibold text-ink">{t('regs.fee.due')}</span><span class="font-mono font-bold {Number(p.fee.remaining_balance) > 0 ? 'text-ink' : 'text-ok-text'}">{money(p.fee.remaining_balance)}</span>
 					</div>
 					{#if p.fee.fee_status === 'paid' || p.fee.fee_status === 'waived'}<p class="text-xs text-ok-text">{t(`regs.fee.${p.fee.fee_status}`)}</p>{/if}
+					{#if p.next_installment}
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<span class="text-muted">{#if p.next_installment.late}<span class="badge badge-error badge-sm">{t('installments.late')}</span>{:else}{t('installments.next_due')}{/if} · {day(p.next_installment.due_date)}</span>
+							<span class="font-mono font-semibold">{money(p.next_installment.remaining)}</span>
+						</div>
+					{/if}
 					{#if p.fee.early_bird && Number(p.fee.remaining_balance) > 0}
 						<p class="rounded-md px-3 py-2 text-xs {p.fee.early_bird.applies ? 'bg-ok-bg text-ok-text' : 'bg-surface text-muted'}">
 							{p.fee.early_bird.applies ? t('regs.fee.early_applies', { date: day(p.fee.early_bird.deadline), discount: money(p.fee.early_bird.discount), amount: money(p.fee.early_bird.fee_if_paid_in_time) }) : t('regs.fee.early_gone', { date: day(p.fee.early_bird.deadline) })}

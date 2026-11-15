@@ -9,7 +9,7 @@
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import SearchSelect from '#lib/components/SearchSelect.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { money, type Preview } from '#lib/shop-orders.ts';
+	import { day, money, type Preview } from '#lib/shop-orders.ts';
 	import type { ProductDetail } from '#lib/shop.ts';
 
 	/** The product lines of a new order: product and variant pickers, quantity, optional beneficiary and personalisation, live line totals. */
@@ -28,6 +28,7 @@
 	/** Stock warning from the catalogue data: more than is on hand. */
 	function warning(l: LineDraft): string {
 		const p = productOf(l.product_id);
+		if (p?.ordering_closed) return t('shop.out_of_stock');
 		if (!p?.inventory_managed) return '';
 		const v = p.variants.find((x) => x.id === l.variant_id);
 		if (v && v.stock !== null && l.quantity > v.stock) return t('shop.orders.new.stock_warn', { n: v.stock });
@@ -67,10 +68,11 @@
 					<span class="text-xs font-semibold text-muted">{t('shop.orders.line.total')}{#if estimate}<span title={t('shop.orders.new.estimate_hint')}> ~</span>{/if}</span>
 					<span class="flex h-10 items-center justify-end font-mono text-sm font-semibold">{p ? money(preview?.[i]?.line_total ?? unitPrice(l) * (l.quantity || 0)) : '—'}</span>
 				</div>
-				<button class="btn btn-outline btn-error btn-square" type="button" aria-label={t('shop.orders.new.remove_line')} disabled={lines.length === 1} onclick={() => (lines = lines.filter((x) => x.key !== l.key))}><Trash2 size={16} /></button>
+				<button class="btn btn-outline btn-error btn-square" type="button" aria-label={t('shop.orders.new.remove_line')} onclick={() => (lines = lines.filter((x) => x.key !== l.key))}><Trash2 size={16} /></button>
 			</div>
 			{#if errors[`lines.${i}`]}<p class="text-xs text-error">{errors[`lines.${i}`]}</p>{/if}
 			{#if w}<p class="flex items-center gap-1.5 text-xs font-semibold text-warn-text"><TriangleAlert size={14} aria-hidden="true" /> {w}</p>{/if}
+			{#if p?.next_ordering_window}<p class="text-xs text-muted">{t('shop.window.summary', { deadline: day(p.next_ordering_window.deadline), estimated_delivery: day(p.next_ordering_window.estimated_delivery) })}</p>{/if}
 			{#if p}
 				<div class="grid gap-3 md:grid-cols-2">
 					<EntityPicker kind="member" name="beneficiary-{l.key}" label={t('shop.orders.line.beneficiary_optional')} bind:value={l.beneficiary_id} />

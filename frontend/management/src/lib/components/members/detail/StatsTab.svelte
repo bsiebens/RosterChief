@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Activity, BarChart3, LoaderCircle } from '@lucide/svelte';
+	import { Activity, BarChart3, Flag, ListChecks, LoaderCircle, Users, ShieldHalf } from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import Alert from '#lib/components/Alert.svelte';
@@ -36,8 +36,8 @@
 	const official = $derived(officiating?.official ?? null);
 </script>
 
-{#snippet heading(label: string)}
-	<h2 class="font-display text-sm font-bold tracking-[.12em] text-muted uppercase">{label}</h2>
+{#snippet heading(label: string, Icon: typeof Activity)}
+	<h2 class="flex items-center gap-2 font-display text-sm font-bold tracking-[.12em] text-muted uppercase"><Icon size={16} aria-hidden="true" /> {label}</h2>
 {/snippet}
 
 {#if updating}
@@ -56,7 +56,7 @@
 	<div class="grid gap-6">
 		{#if stats?.player || stats?.goalie}
 			<section class="grid gap-3">
-				{@render heading(t('stats.section.games'))}
+				{@render heading(t('stats.section.games'), Activity)}
 				{#if canShare && stats?.analytics_available}<StatsShare {memberId} token={stats.share_token ?? null} />{/if}
 				{#if gameStats && stats?.player}
 					<!-- The totals take two thirds, the four headline rates sit in a smaller box beside them. -->
@@ -72,26 +72,26 @@
 				{/if}
 				{#if stats?.player}<PlayerStats player={stats.player} />{/if}
 				{#if stats?.goalie}
-					<h3 class="font-display text-base font-bold text-ink">{t('stats.section.goalie')}</h3>
+					<h3 class="font-display text-base font-bold text-ink flex items-center gap-2"><ShieldHalf size={16} class="shrink-0" aria-hidden="true" /> {t('stats.section.goalie')}</h3>
 					<GoalieStats goalie={stats.goalie} />
 				{/if}
 			</section>
 		{/if}
 		{#if stats?.attendance}
 			<section class="grid gap-3">
-				{@render heading(t('stats.section.attendance'))}
+				{@render heading(t('stats.section.attendance'), ListChecks)}
 				<AttendanceStats attendance={stats.attendance} />
 			</section>
 		{/if}
 		{#if stats && stats.staff.length}
 			<section class="grid gap-3">
-				{@render heading(t('stats.section.staff'))}
+				{@render heading(t('stats.section.staff'), Users)}
 				<StaffStats staff={stats.staff} canOpenAnalytics={stats.analytics_available} />
 			</section>
 		{/if}
 		{#if referee || official}
 			<section class="grid gap-3">
-				{@render heading(t('stats.section.officiating'))}
+				{@render heading(t('stats.section.officiating'), Flag)}
 				<div class="grid gap-4">
 					{#if referee}<OfficiatingStats kind="referee" profile={referee} stats={stats?.officiating?.referee ?? null} />{/if}
 					{#if official}<OfficiatingStats kind="official" profile={official} stats={stats?.officiating?.official ?? null} />{/if}

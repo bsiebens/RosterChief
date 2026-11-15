@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Lock, Save, Send, Trash2 } from '@lucide/svelte';
+	import { ClipboardList, ListChecks, Settings2, ArrowLeft, Lock, Save, Send, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -118,12 +118,12 @@
 					}}>
 					<input type="hidden" name="payload" value={payload} />
 					<section class="card card-body gap-3" aria-labelledby="{formId}-details">
-						<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.card.details')}</h2>
+						<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('forms.card.details')}</h2>
 						<FormDetailsFields bind:v fields={errs} {tried} />
 					</section>
 					<section class="card card-body gap-3" aria-labelledby="{formId}-fields">
 						<header class="grid gap-0.5">
-							<h2 id="{formId}-fields" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.card.fields')}</h2>
+							<h2 id="{formId}-fields" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t('forms.card.fields')}</h2>
 							<p class="text-xs text-muted">{t('forms.card.fields_desc')}</p>
 						</header>
 						{#if item.response_count}<Alert kind="info">{t('forms.fields.has_responses', { n: item.response_count })}</Alert>{/if}
@@ -139,7 +139,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-side">
 			<section class="card card-body gap-3">
-				<h2 id="{formId}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.card.actions')}</h2>
+				<h2 id="{formId}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('forms.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 					<span class="badge badge-sm {item.is_active ? 'badge-success' : 'badge-warning'}">{item.is_active ? t('forms.active') : t('forms.inactive')}</span>
 					{#if item.login_required}<span class="badge badge-sm gap-1"><Lock size={10} aria-hidden="true" /> {t('forms.login_required')}</span>{/if}

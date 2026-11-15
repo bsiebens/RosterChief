@@ -35,6 +35,7 @@ export type Variant = {
 	team_id?: string | null;
 	team_name?: string | null;
 };
+export type OrderingWindow = { deadline: string; estimated_delivery: string };
 export type ProductItem = {
 	id: string;
 	name: string;
@@ -50,6 +51,8 @@ export type ProductItem = {
 	inventory_managed: boolean;
 	variant_count: number;
 	in_stock: boolean;
+	ordering_closed: boolean;
+	next_ordering_window: OrderingWindow | null;
 	created: string;
 };
 export type ProductImageItem = { id: string; url: string; is_main: boolean; ordering: number; alt: string };
@@ -57,7 +60,7 @@ export type ProductAttachmentItem = { id: string; title: string; name: string; u
 /** Registration pricing of a membership product (the API sends nothing useful for other types). */
 export type RegistrantTier = { min_registrants: number; discount_type: 'percentage' | 'fixed_amount'; discount_amount: string };
 export type RegistrationPricing = { season_id: string | null; season_name: string | null; early_bird_discount_type: '' | 'percentage' | 'fixed_amount'; early_bird_discount_amount: string; early_bird_deadline: string | null; registrant_discount_scope: 'per_person' | 'per_order'; registrant_tiers: RegistrantTier[]; team_id: string | null; team_name: string | null };
-export type ProductDetail = ProductItem & Partial<RegistrationPricing> & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[] };
+export type ProductDetail = ProductItem & Partial<RegistrationPricing> & { variants: Variant[]; order_line_count: number; images?: ProductImageItem[]; attachments?: ProductAttachmentItem[]; ordering_windows: OrderingWindow[] };
 export type ProductIn = {
 	name: string;
 	category_id: string | null;
@@ -68,6 +71,7 @@ export type ProductIn = {
 	is_public: boolean;
 	personalization_enabled: boolean;
 	inventory_managed: boolean;
+	ordering_windows: OrderingWindow[];
 	// Membership products only (the form hides them for other types and then sends them cleared).
 	season_id: string | null;
 	early_bird_discount_type: '' | 'percentage' | 'fixed_amount';
@@ -88,6 +92,7 @@ export const emptyProduct = (): ProductIn => ({
 	is_public: true,
 	personalization_enabled: false,
 	inventory_managed: false,
+	ordering_windows: [],
 	season_id: null,
 	early_bird_discount_type: '',
 	early_bird_discount_amount: '',
@@ -106,6 +111,7 @@ export const productInOf = (p: ProductDetail): ProductIn => ({
 	is_public: p.is_public,
 	personalization_enabled: p.personalization_enabled,
 	inventory_managed: p.inventory_managed,
+	ordering_windows: (p.ordering_windows ?? []).map((window) => ({ ...window })),
 	season_id: p.season_id ?? null,
 	early_bird_discount_type: p.early_bird_discount_type ?? '',
 	early_bird_discount_amount: p.early_bird_discount_type ? String(Number(p.early_bird_discount_amount ?? 0)) : '',

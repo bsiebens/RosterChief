@@ -1,9 +1,10 @@
 import type { Me } from '#lib/types.ts';
 
 /** What the signed-in user may do. The API enforces all of it; this only decides what to show. */
-type Who = Pick<Me, 'can_manage_members' | 'can_manage_settings' | 'can_manage_referees' | 'can_manage_roles' | 'can_publish_news' | 'can_add_news' | 'can_manage_forms' | 'can_manage_shop_products' | 'can_manage_shop_inventory' | 'can_manage_shop_orders' | 'can_manage_shop_discounts' | 'can_manage_shop_invoices' | 'can_execute_evaluations' | 'can_manage_evaluations' | 'managed_team_ids'> | null | undefined;
+type Who = Pick<Me, 'can_manage_members' | 'can_manage_finance' | 'can_manage_settings' | 'can_manage_referees' | 'can_manage_roles' | 'can_publish_news' | 'can_add_news' | 'can_manage_forms' | 'can_manage_shop_products' | 'can_manage_shop_inventory' | 'can_manage_shop_orders' | 'can_manage_shop_discounts' | 'can_manage_shop_invoices' | 'can_execute_evaluations' | 'can_manage_evaluations' | 'managed_team_ids'> | null | undefined;
 
 export const canManageMembers = (me: Who) => !!me?.can_manage_members;
+export const canManageFinance = (me: Who) => !!me?.can_manage_finance;
 /** Arrange referees and officials for home games and print their payment forms. */
 export const canManageReferees = (me: Who) => !!me?.can_manage_referees;
 /** Creates roles, sets their permissions and gives them to people. */

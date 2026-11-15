@@ -3,7 +3,7 @@
 	import { applyAction, enhance, type SubmitFunction } from '$app/forms';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { ArrowLeft, CalendarDays, Check, CircleCheck, Download, FileUp, MapPin, RefreshCw, Shield } from '@lucide/svelte';
+	import { CircleHelp, ClipboardCheck, ArrowLeft, CalendarDays, Check, CircleCheck, Download, FileUp, MapPin, RefreshCw, Shield } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import LocationMapping, { type LocationChoice } from '#lib/components/fixtures/LocationMapping.svelte';
@@ -328,7 +328,7 @@
 		</div>
 
 		<div class="card card-body gap-2">
-			<h2 class="card-title text-base">{t('fixtures.how.title')}</h2>
+			<h2 class="card-title text-base flex items-center gap-2"><CircleHelp size={16} class="shrink-0" aria-hidden="true" /> {t('fixtures.how.title')}</h2>
 			<ol class="grid list-inside list-decimal gap-1.5 text-sm text-slate">
 				<li>{t('fixtures.how.1')}</li>
 				<li>{t('fixtures.how.2')}</li>
@@ -367,7 +367,7 @@
 
 		<div class="card">
 			<div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
-				<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('fixtures.review.games')} <span class="font-mono text-xs font-normal text-muted">· {shown.length}</span></h2>
+				<h2 class="flex flex-wrap items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><CalendarDays size={16} class="shrink-0" aria-hidden="true" /> {t('fixtures.review.games')} <span class="font-mono text-xs font-normal text-muted">· {shown.length}</span></h2>
 				{#if filter !== 'all'}<button class="btn btn-ghost btn-xs" type="button" onclick={() => (filter = 'all')}>{t('fixtures.review.show_all')}</button>{/if}
 			</div>
 			<div class="overflow-x-auto">
@@ -462,7 +462,7 @@
 
 	</div>
 	<aside class="card card-body gap-3 lg:sticky lg:top-20">
-		<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('fixtures.bar.title')}</h2>
+		<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><ClipboardCheck size={16} class="shrink-0" aria-hidden="true" /> {t('fixtures.bar.title')}</h2>
 		<p class="text-sm text-muted">
 			{#if changeCount}
 				{t('fixtures.bar.summary', { create: preview.counts.create, update: preview.counts.update, remove: preview.counts.remove })}

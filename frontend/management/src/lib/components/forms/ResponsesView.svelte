@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Download, Paperclip, Trash2 } from '@lucide/svelte';
+	import { Clock, Table, Download, Paperclip, Trash2, ClipboardList } from '@lucide/svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { formatDateTime } from '#lib/events/types.ts';
 	import { answerFileHref, answerText, optionLabel, optionsOf, reportCsvHref, type Report, type ReportRow } from '#lib/forms.ts';
@@ -32,7 +32,7 @@
 <div class="grid gap-5">
 	{#if summarised.length}
 		<section class="card card-body gap-4" aria-labelledby="{uid}-sum">
-			<h2 id="{uid}-sum" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.resp.summary')}</h2>
+			<h2 id="{uid}-sum" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('forms.resp.summary')}</h2>
 			<div class="grid gap-5 md:grid-cols-2">
 				{#each summarised as c (c.id)}
 					{@const b = bars(c)}
@@ -55,7 +55,7 @@
 
 	<section class="card" aria-labelledby="{uid}-tbl">
 		<header class="flex flex-wrap items-center justify-between gap-3 p-4 pb-2">
-			<h2 id="{uid}-tbl" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.resp.table', { n: report.count })}</h2>
+			<h2 id="{uid}-tbl" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Table size={16} class="shrink-0" aria-hidden="true" /> {t('forms.resp.table', { n: report.count })}</h2>
 			{#if report.count}<a class="btn btn-outline btn-sm gap-2" href={reportCsvHref(sendId)} download><Download size={14} /> {t('forms.resp.csv')}</a>{/if}
 		</header>
 		{#if !report.rows.length}
@@ -97,7 +97,7 @@
 	</section>
 
 	<section class="card card-body gap-2" aria-labelledby="{uid}-nr">
-		<h2 id="{uid}-nr" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.resp.not_responded', { n: report.not_responded.length })}</h2>
+		<h2 id="{uid}-nr" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Clock size={16} class="shrink-0" aria-hidden="true" /> {t('forms.resp.not_responded', { n: report.not_responded.length })}</h2>
 		{#if report.not_responded.length}
 			<ul class="flex flex-wrap gap-1.5">
 				{#each report.not_responded as m (m.id)}<li class="rounded-full border border-line bg-subhead px-3 py-0.5 text-sm"><a class="link" href="/members/{m.id}">{m.name}</a></li>{/each}

@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Check, Copy, Power, Save, Trash2, Undo2 } from '@lucide/svelte';
+	import { History, Settings2, Ticket, ArrowLeft, Check, Copy, Power, Save, Trash2, Undo2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -116,7 +116,7 @@
 			</form>
 
 			<section class="card card-body gap-3" aria-labelledby="{formId}-hist">
-				<h2 id="{formId}-hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.vch.history')}</h2>
+				<h2 id="{formId}-hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('shop.vch.history')}</h2>
 				{#if item.history.length}
 					<div class="overflow-x-auto">
 						<table class="table">
@@ -150,7 +150,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.actions')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2">
 					<span class="font-mono text-lg font-bold">{item.number}</span>
 					<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('shop.vch.copy_named', { number: item.number })} onclick={copy}>{#if copied}<Check size={14} />{:else}<Copy size={14} />{/if}</button>
@@ -173,7 +173,7 @@
 				</ActionList>
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.vch.use_title')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Ticket size={16} class="shrink-0" aria-hidden="true" /> {t('shop.vch.use_title')}</h2>
 				<p class="text-xs text-muted">{t('shop.vch.use_help')}</p>
 				<form method="POST" action="?/consume" class="grid gap-3" use:enhance={() => { busy = true; return async ({ update, result }) => { await update({ reset: false }); busy = false; if (result.type === 'success') { useAmount = ''; useNote = ''; } }; }}>
 					<Field label={t('shop.vch.amount')} name="amount" type="number" step="0.01" min="0.01" bind:value={useAmount} error={useErrs.amount} required />

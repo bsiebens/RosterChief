@@ -67,7 +67,7 @@
 	<div class="grid gap-x-8 gap-y-5 lg:grid-cols-2">
 		<div class="grid content-start gap-3">
 			<!-- Same heading style and place as the voucher column, so both stay aligned whatever the state. -->
-			<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.adj.code')}</h3>
+			<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Tag size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.adj.code')}</h3>
 		{#if order.applied_discounts.length}
 			<ul class="grid gap-2">
 				{#each order.applied_discounts as d (d.id)}
@@ -101,7 +101,7 @@
 		</div>
 		{#if order.can_apply_voucher}
 			<div class="grid content-start gap-3 border-t border-line pt-5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
-				<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.adj.vlist')}</h3>
+				<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Ticket size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.adj.vlist')}</h3>
 				{#if vouchers.length}
 					<ul class="grid gap-2">
 						{#each vouchers as v (v.id)}

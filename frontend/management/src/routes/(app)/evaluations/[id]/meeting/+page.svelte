@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, ArrowRight, Check, ClipboardCheck, FileDown, Play, Square, Trash2 } from '@lucide/svelte';
+	import { ArrowLeft, ArrowRight, ChartLine, Check, ClipboardCheck, FileDown, ListChecks, NotebookPen, Play, Square, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import AttendancePanel from '#lib/components/evaluations/AttendancePanel.svelte';
 	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
@@ -128,11 +128,11 @@
 
 					{#each groups as g, gi (gi)}
 						<section class="grid gap-3">
-							{#if g.section}<h3 class="border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{g.section}</h3>{/if}
+							{#if g.section}<h3 class="flex items-center gap-2 border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {g.section}</h3>{/if}
 							<div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(18rem,1fr))]">
 								{#each g.items as { q } (q.field.id)}
 									<section class="card card-body gap-2 p-4">
-										<h4 class="font-semibold text-ink">{q.field.label}{#if !q.field.is_active}<span class="badge badge-sm badge-warning ml-2">{t('eval.meeting.removed')}</span>{/if}</h4>
+										<h4 class="flex flex-wrap items-center gap-2 font-semibold text-ink"><ChartLine size={16} aria-hidden="true" /> {q.field.label}{#if !q.field.is_active}<span class="badge badge-sm badge-warning">{t('eval.meeting.removed')}</span>{/if}</h4>
 										{#if q.trend.length}
 											<TrendChart label={q.field.label} points={q.trend.map((p) => ({ id: p.evaluation_id, label: day(p.at), value: p.value }))} />
 										{:else}
@@ -151,7 +151,7 @@
 					{/each}
 
 					<section class="card card-body gap-3">
-						<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('eval.notes.title')}</h3>
+						<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><NotebookPen size={16} class="shrink-0" aria-hidden="true" /> {t('eval.notes.title')}</h3>
 						<form method="POST" action="?/note" class="grid gap-2" use:enhance={submit}>
 							<input type="hidden" name="player_id" value={review.player.id} />
 							<label class="sr-only" for="note">{t('eval.notes.label')}</label>
@@ -176,7 +176,7 @@
 
 					{#if active}
 						<section class="card card-body gap-3">
-							<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('eval.outcome.title')}</h3>
+							<h3 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardCheck size={16} class="shrink-0" aria-hidden="true" /> {t('eval.outcome.title')}</h3>
 							<p class="text-xs text-muted">{t('eval.outcome.help')}</p>
 							{#key review.player.id}
 								<form method="POST" action="?/outcome" class="grid gap-2" use:enhance={() => { busy = true; return async ({ update }) => { await update({ reset: false }); busy = false; }; }}>

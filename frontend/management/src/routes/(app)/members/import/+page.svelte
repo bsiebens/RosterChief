@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, Check, CircleAlert, CircleCheck, Download, FileSpreadsheet, Upload, Users } from '@lucide/svelte';
+	import { Table, ArrowLeft, Check, CircleAlert, CircleCheck, Download, FileSpreadsheet, Upload, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -97,7 +97,7 @@
 		</form>
 
 		<div class="card card-body">
-			<h2 class="card-title text-base">{t('import.columns.title')}</h2>
+			<h2 class="card-title text-base flex items-center gap-2"><Table size={16} class="shrink-0" aria-hidden="true" /> {t('import.columns.title')}</h2>
 			<p class="text-sm text-muted">{t('import.columns.intro')}</p>
 			<ul class="grid gap-1.5 text-sm">
 				{#each ['first_name', 'last_name', 'email', 'phone', 'emergency_phone', 'date_of_birth', 'language', 'license_number', 'team', 'family', 'family_role'] as c (c)}

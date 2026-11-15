@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	/** Full-width underline tab bar in a card (the member profile's look), URL-synced: each tab links to `?tab=<key>`. */
 	let { tabs, active, label }: { tabs: { key: string; label: string }[]; active: string; label: string } = $props();
 </script>
@@ -7,7 +8,7 @@
 	<div class="flex flex-wrap">
 		{#each tabs as item (item.key)}
 			<a
-				href="?tab={item.key}"
+				href="?tab={item.key}{page.url.searchParams.get('view') === 'coach' ? '&view=coach' : ''}"
 				data-sveltekit-noscroll
 				data-sveltekit-keepfocus
 				aria-current={active === item.key ? 'page' : undefined}

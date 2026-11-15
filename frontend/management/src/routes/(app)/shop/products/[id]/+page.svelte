@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Save, Trash2 } from '@lucide/svelte';
+	import { Images, Layers, Paperclip, Settings2, ArrowLeft, Save, Trash2, ClipboardList } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -115,13 +115,13 @@
 				}}>
 				<input type="hidden" name="payload" value={JSON.stringify(productPayload(v))} />
 				<section class="card card-body gap-3" aria-labelledby="{formId}-details">
-					<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
+					<h2 id="{formId}-details" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.details')}</h2>
 					<ProductFields bind:v categories={data.categories} seasons={data.seasons} teams={data.teams} fields={errs} {tried} />
 				</section>
 			</form>
 			<section class="card card-body gap-3" aria-labelledby="{formId}-variants">
 				<header class="grid gap-0.5">
-					<h2 id="{formId}-variants" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
+					<h2 id="{formId}-variants" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Layers size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc_saved')}</p>
 				</header>
 				<ProductVariants productId={item.id} bind:variants price={item.price} inventoryManaged={item.inventory_managed} membership={v.product_type === 'membership'} teams={teamsForVariants} />
@@ -130,7 +130,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.actions')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 					<span class="badge badge-sm {item.is_active ? 'badge-success' : 'badge-warning'}">{item.is_active ? t('shop.active') : t('shop.inactive')}</span>
 					{#if item.inventory_managed}<span class="badge badge-sm {item.in_stock ? 'badge-success' : 'badge-error'}">{item.in_stock ? t('shop.in_stock') : t('shop.out_of_stock')}</span>{/if}
@@ -141,11 +141,11 @@
 				<ActionList><ActionRow icon={Trash2} danger disabled={busy} onclick={() => (deleteOpen = true)}>{t('common.delete')}</ActionRow></ActionList>
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.image')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Images size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.image')}</h2>
 				<ProductImages productId={item.id} bind:images name={item.name} />
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.files')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Paperclip size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.files')}</h2>
 				<ProductAttachments productId={item.id} bind:attachments />
 			</section>
 		</aside>

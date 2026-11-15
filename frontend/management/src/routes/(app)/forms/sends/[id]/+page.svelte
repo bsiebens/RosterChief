@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, CalendarClock, Check, Copy, Lock, LockOpen, Trash2 } from '@lucide/svelte';
+	import { Activity, ArrowLeft, CalendarClock, Check, Copy, Link2, Lock, LockOpen, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -119,7 +119,7 @@
 					{#each [[t('forms.audience.teams'), s.teams], [t('forms.audience.groups'), s.groups], [t('forms.audience.invited'), s.invited_members], [t('forms.audience.excluded'), s.excluded_members]] as [label, list] (label)}
 						{#if Array.isArray(list) && list.length}
 							<div class="grid gap-1">
-								<h3 class="font-display text-xs font-bold tracking-wide text-ink uppercase">{label}</h3>
+								<h3 class="flex items-center gap-2 font-display text-xs font-bold tracking-wide text-ink uppercase"><Users size={14} aria-hidden="true" /> {label}</h3>
 								<ul class="flex flex-wrap gap-1.5">{#each list as r (r.id)}<li class="rounded-full border border-line bg-subhead px-3 py-0.5 text-sm">{r.name}</li>{/each}</ul>
 							</div>
 						{/if}
@@ -130,7 +130,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{id}-side">
 			<section class="card card-body gap-3">
-				<h2 id="{id}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.sends.card.status')}</h2>
+				<h2 id="{id}-side" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Activity size={16} class="shrink-0" aria-hidden="true" /> {t('forms.sends.card.status')}</h2>
 				<div class="flex flex-wrap items-center gap-2"><SendStatusBadge status={s.status} /><span class="font-mono text-xs text-muted">{t('forms.sends.x_of_y', { x: s.response_count, y: s.audience_count })}</span></div>
 				{#if s.opens_at || s.closes_at}
 					<p class="text-xs text-muted">
@@ -156,7 +156,7 @@
 			</section>
 
 			<section class="card card-body gap-2" aria-labelledby="{id}-pub">
-				<h2 id="{id}-pub" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('forms.send.public_link')}</h2>
+				<h2 id="{id}-pub" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Link2 size={16} class="shrink-0" aria-hidden="true" /> {t('forms.send.public_link')}</h2>
 				{#if s.is_public && fullUrl}
 					<div class="flex items-center gap-2">
 						<input class="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs" readonly value={fullUrl} aria-label={t('forms.send.public_link')} onfocus={(e) => e.currentTarget.select()} />

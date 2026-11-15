@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ClipboardCheck, Star, Trash2 } from '@lucide/svelte';
+	import { TrendingUp, ClipboardCheck, Star, Trash2 } from '@lucide/svelte';
 	import TrendChart from '#lib/components/evaluations/TrendChart.svelte';
 	import { answerShown, evaluateHref, fmt, num, overall, type ChecklistItem, type EvaluationOut } from '#lib/evaluations.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -49,7 +49,7 @@
 		{/if}
 		{#if points.length}
 			<div class="card card-body">
-				<h2 class="card-title text-base">{t('profile.eval.trend')}</h2>
+				<h2 class="card-title text-base flex items-center gap-2"><TrendingUp size={16} class="shrink-0" aria-hidden="true" /> {t('profile.eval.trend')}</h2>
 				<TrendChart {points} label={t('profile.eval.trend')} />
 			</div>
 		{/if}

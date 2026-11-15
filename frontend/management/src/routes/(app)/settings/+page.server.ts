@@ -16,6 +16,7 @@ export type ClubSettings = {
 	vat_id: string;
 	payment_instructions: string;
 	logo_url: string | null;
+	event_background_url: string | null;
 	primary_color: string;
 	secondary_color: string;
 	primary_text_color: string;
@@ -26,6 +27,7 @@ export type PreviewItem = { key: string; kind: 'email' | 'pdf'; title: string; d
 
 const DETAIL_FIELDS = ['name', 'legal_name', 'contact_email', 'website', 'legal_address', 'legal_zip_code', 'legal_city', 'legal_country', 'vat_id', 'payment_instructions'];
 const COLOR_FIELDS = ['primary_color', 'secondary_color', 'primary_text_color', 'secondary_text_color'];
+const IMAGES = { logo: 'logo', event_background: 'event-background' };
 
 export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 	// Someone who only manages roles lands on the roles page.
@@ -52,18 +54,21 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const res = await api('PATCH', '/club/settings', { body: pick(form, [...DETAIL_FIELDS, ...COLOR_FIELDS]), f: event.fetch });
 		if (!res.ok) return failed('save', res);
-		const file = form.get('logo');
-		if (file instanceof File && file.size > 0) {
-			const up = new FormData();
-			up.set('file', file);
-			const pr = await api('POST', '/club/settings/logo', { form: up, f: event.fetch });
-			if (!pr.ok) {
-				clearHostInfo(event);
-				return failed('save', { ...pr, fields: { logo: pr.fields.file || pr.message || '' } });
+		for (const [field, endpoint] of Object.entries(IMAGES)) {
+			const path = `/club/settings/${endpoint}`;
+			const file = form.get(field);
+			let pr;
+			if (file instanceof File && file.size > 0) {
+				const upload = new FormData();
+				upload.set('file', file);
+				pr = await api('POST', path, { form: upload, f: event.fetch });
+			} else if (form.get(`remove_${field}`) === 'on') {
+				pr = await api('DELETE', path, { f: event.fetch });
 			}
-		} else if (form.get('remove_logo') === 'on') {
-			const pr = await api('DELETE', '/club/settings/logo', { f: event.fetch });
-			if (!pr.ok) return failed('save', { ...pr, fields: { logo: pr.message || '' } });
+			if (pr && !pr.ok) {
+				clearHostInfo(event);
+				return failed('save', { ...pr, fields: { [field]: pr.fields.file || pr.message || '' } });
+			}
 		}
 		clearHostInfo(event);
 		return { settingsAction: 'save', saved: true };

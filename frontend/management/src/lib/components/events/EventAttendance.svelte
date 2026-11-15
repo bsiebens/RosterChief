@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {Check, CircleHelp, History, Lock, NotebookPen, UserCheck, UserX, X} from '@lucide/svelte';
+    import {Check, CircleHelp, History, Lock, NotebookPen, UserCheck, UserX, X, TriangleAlert} from '@lucide/svelte';
     import Alert from '#lib/components/Alert.svelte';
     import Avatar from '#lib/components/Avatar.svelte';
     import Modal from '#lib/components/Modal.svelte';
@@ -339,6 +339,21 @@
             </table>
         </div>
     </div>
+
+    {#if list.blocked?.length}
+        <div class="card card-body gap-3">
+            <h3 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><TriangleAlert size={16} class="text-warn-text" aria-hidden="true" /> {t('events.att.blocked_title', {n: list.blocked.length})}</h3>
+            <p class="text-xs text-muted">{t('events.att.blocked_help')}</p>
+            <ul class="grid gap-2">
+                {#each list.blocked as b (b.member_id)}
+                    <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <a class="link font-semibold" href="/members/{b.member_id}?tab=documents">{b.first_name} {b.last_name}</a>
+                        {#each b.requirements as name (name)}<span class="badge badge-warning badge-sm">{name}</span>{/each}
+                    </li>
+                {/each}
+            </ul>
+        </div>
+    {/if}
 </div>
 
 <Modal bind:open={historyOpen} title={t('events.att.history_title')}>

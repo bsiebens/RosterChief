@@ -1,7 +1,7 @@
 <script lang="ts">
     import {pageTitle} from '#lib/title.svelte.ts';
     import {enhance} from '$app/forms';
-    import {ArrowLeft, Ban, CalendarClock, ClipboardList, Clock, Flag, MapPin, Paperclip, Pencil, RefreshCw, Repeat, RotateCcw, Shirt, Users} from '@lucide/svelte';
+    import { ArrowLeft, Ban, CalendarClock, ClipboardList, Clock, Flag, MapPin, Paperclip, Pencil, RefreshCw, Repeat, RotateCcw, Shirt, Users } from '@lucide/svelte';
     import Alert from '#lib/components/Alert.svelte';
     import ClubCrest from '#lib/components/ClubCrest.svelte';
     import Modal from '#lib/components/Modal.svelte';
@@ -26,14 +26,14 @@
     const past = $derived(new Date(ev.start).getTime() < Date.now());
     const series = $derived(ev.series ? describeRecurrence(ev.series.recurrence, ev.series.description) : '');
     const mapsHref = $derived(ev.location ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([ev.location.name, ev.location.city].filter(Boolean).join(', '))}` : '');
-    const calendarHref = $derived(`/calendar`);
+    const calendarHref = $derived(data.coachView ? '/coach?tab=calendar' : '/calendar');
 
     const tabs = $derived([
         {key: 'overview', label: t('events.tab.overview')},
         {key: 'attendance', label: `${t('events.tab.attendance')} · ${ev.attendance.total}`},
         ...(ev.lineup.available ? [{key: 'lineup', label: t('events.tab.lineup')}] : []),
         ...(data.sheet ? [{key: 'sheet', label: t('events.tab.sheet')}] : []),
-        {key: 'tasks', label: `${t('events.tab.tasks')} · ${data.tasks?.tasks.length ?? ev.task_count}`},
+        ...(!data.coachView ? [{key: 'tasks', label: `${t('events.tab.tasks')} · ${data.tasks?.tasks.length ?? ev.task_count}`}] : []),
         {key: 'files', label: `${t('events.tab.files')} · ${data.attachments?.attachments.length ?? ev.attachment_count}`}
     ]);
 
@@ -61,7 +61,7 @@
                 <Icon size={14} aria-hidden="true"/> {t(`events.officiating.${key}`)}</dt>
             <dd class="flex flex-wrap gap-x-3 gap-y-0.5">
                 {#each list as p, i (`${p.name}-${i}`)}
-                    <span>{#if p.member_id}<a class="link font-semibold" href="/members/{p.member_id}">{p.name}</a>{:else}<span class="font-semibold">{p.name}</span>{/if}
+                    <span>{#if p.member_id && !data.coachView}<a class="link font-semibold" href="/members/{p.member_id}">{p.name}</a>{:else}<span class="font-semibold">{p.name}</span>{/if}
                         {#if p.type_name}&nbsp;<span class="text-xs text-muted">({p.type_name})</span>{/if}</span>
                 {/each}
             </dd>
@@ -74,13 +74,13 @@
     {#if ev.kind === 'game' && !ev.cancelled}
         <FollowButton kind="event" id={ev.id}/>
     {/if}
-    {#if canUpdate}
+    {#if canUpdate && !data.coachView}
         <form method="POST" action="?/updateGame" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; }; }}>
             <button class="btn btn-outline gap-2" type="submit" disabled={updating}>
                 <RefreshCw size={16} class={updating ? 'animate-spin' : ''}/> {t('events.update_game')}</button>
         </form>
     {/if}
-    {#if ev.can_edit}
+    {#if ev.can_edit && !data.coachView}
         <a class="btn btn-outline gap-2" href={eventEditHref(ev.id)}>
             <Pencil size={16}/> {t('common.edit')}</a>
         <button class="btn btn-outline gap-2 {ev.cancelled ? '' : 'btn-error'}" type="button" onclick={() => (cancelOpen = true)}>
@@ -89,8 +89,11 @@
                 <Ban size={16}/> {t('events.cancel')}{/if}
         </button>
     {/if}
+    {#if data.coachView && ev.can_manage_attendance && !ev.cancelled}
+        <a class="btn btn-outline gap-2" href="/coach/attendance/{ev.id}"><ClipboardList size={16} aria-hidden="true"/> {t('events.att.checked_in')}</a>
+    {/if}
     <a class="btn btn-outline gap-2" href={calendarHref}>
-        <ArrowLeft size={16}/> {t('events.back')}</a>
+        <ArrowLeft size={16}/> {t(data.coachView ? 'portal.schedule' : 'events.back')}</a>
 {/snippet}
 
 <svelte:head><title>{pageTitle(ev.title)}</title></svelte:head>
@@ -155,7 +158,7 @@
                             <Users size={14} aria-hidden="true"/> {t('events.audience')}</dt>
                         <dd class="flex flex-wrap gap-x-2 gap-y-0.5">
                             {#if ev.club_wide}<span class="font-semibold">{t('events.whole_club')}</span>{/if}
-                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href="/teams/{team.id}">{team.name}</a>{/each}
+                            {#each ev.teams as team (team.id)}<a class="link font-semibold" href={data.coachView ? `/coach/teams/${team.id}` : `/teams/${team.id}`}>{team.name}</a>{/each}
                             {#each ev.groups as g (g.id)}<span class="font-semibold">{g.name}</span>{/each}
                             {#if !ev.club_wide && !ev.teams.length && !ev.groups.length}<span class="text-muted">{ev.invited_members.length ? t('events.only_invited') : '—'}</span>{/if}
                         </dd>
@@ -234,7 +237,7 @@
                 <p class="text-sm {ev.attachment_count ? '' : 'text-muted'}">{ev.attachment_count ? t('events.files.count', {n: ev.attachment_count}) : t('events.files.none')}</p>
             </a>
             <div class="card card-body gap-2 lg:col-span-2">
-                <h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">{t('events.details')}</h2>
+                <h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('events.details')}</h2>
                 <dl class="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
                     {#if ev.season}
                         <dt class="text-muted">{t('events.season')}</dt>

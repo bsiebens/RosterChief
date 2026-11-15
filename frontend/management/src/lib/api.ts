@@ -73,18 +73,53 @@ export async function withReauth<T>(call: () => Promise<ApiResult<T>>): Promise<
 }
 
 // --- WebAuthn ------------------------------------------------------------------------------------
-export const webauthnSupported = () => typeof window !== 'undefined' && !!window.PublicKeyCredential && 'parseCreationOptionsFromJSON' in PublicKeyCredential;
+export const webauthnSupported = () => typeof window !== 'undefined' && window.isSecureContext && !!window.PublicKeyCredential && !!navigator.credentials;
 
-export async function createCredential(creationOptions: any) {
-	const options = (PublicKeyCredential as any).parseCreationOptionsFromJSON(creationOptions.publicKey ?? creationOptions);
-	const cred = (await navigator.credentials.create({ publicKey: options })) as PublicKeyCredential | null;
-	return cred ? (cred as any).toJSON() : null;
+const decodeWebauthn = (value: string) => Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const encodeWebauthn = (value: ArrayBuffer) => btoa(Array.from(new Uint8Array(value), (n) => String.fromCharCode(n)).join('')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const credentialDescriptor = (credential: PublicKeyCredentialDescriptorJSON) => ({ ...credential, id: decodeWebauthn(credential.id) }) as PublicKeyCredentialDescriptor;
+
+function credentialJSON(credential: PublicKeyCredential) {
+	if (typeof credential.toJSON === 'function') return credential.toJSON();
+	const response = credential.response;
+	const clientDataJSON = encodeWebauthn(response.clientDataJSON);
+	return {
+		id: credential.id,
+		rawId: encodeWebauthn(credential.rawId),
+		type: credential.type,
+		authenticatorAttachment: credential.authenticatorAttachment,
+		clientExtensionResults: credential.getClientExtensionResults(),
+		response: 'attestationObject' in response
+			? { clientDataJSON, attestationObject: encodeWebauthn((response as AuthenticatorAttestationResponse).attestationObject), transports: (response as AuthenticatorAttestationResponse).getTransports?.() ?? [] }
+			: assertionJSON(response as AuthenticatorAssertionResponse, clientDataJSON)
+	};
 }
 
-export async function getCredential(requestOptions: any) {
-	const options = (PublicKeyCredential as any).parseRequestOptionsFromJSON(requestOptions.publicKey ?? requestOptions);
+function assertionJSON(response: AuthenticatorAssertionResponse, clientDataJSON: string) {
+	return {
+		clientDataJSON,
+		authenticatorData: encodeWebauthn(response.authenticatorData),
+		signature: encodeWebauthn(response.signature),
+		userHandle: response.userHandle ? encodeWebauthn(response.userHandle) : null
+	};
+}
+
+export async function createCredential(creationOptions: PublicKeyCredentialCreationOptionsJSON | { publicKey: PublicKeyCredentialCreationOptionsJSON }) {
+	const raw = 'publicKey' in creationOptions ? creationOptions.publicKey : creationOptions;
+	const options = typeof PublicKeyCredential.parseCreationOptionsFromJSON === 'function'
+		? PublicKeyCredential.parseCreationOptionsFromJSON(raw)
+		: { ...raw, challenge: decodeWebauthn(raw.challenge), user: { ...raw.user, id: decodeWebauthn(raw.user.id) }, excludeCredentials: raw.excludeCredentials?.map(credentialDescriptor) } as PublicKeyCredentialCreationOptions;
+	const cred = (await navigator.credentials.create({ publicKey: options })) as PublicKeyCredential | null;
+	return cred ? credentialJSON(cred) : null;
+}
+
+export async function getCredential(requestOptions: PublicKeyCredentialRequestOptionsJSON | { publicKey: PublicKeyCredentialRequestOptionsJSON }) {
+	const raw = 'publicKey' in requestOptions ? requestOptions.publicKey : requestOptions;
+	const options = typeof PublicKeyCredential.parseRequestOptionsFromJSON === 'function'
+		? PublicKeyCredential.parseRequestOptionsFromJSON(raw)
+		: { ...raw, challenge: decodeWebauthn(raw.challenge), allowCredentials: raw.allowCredentials?.map(credentialDescriptor) } as PublicKeyCredentialRequestOptions;
 	const cred = (await navigator.credentials.get({ publicKey: options })) as PublicKeyCredential | null;
-	return cred ? (cred as any).toJSON() : null;
+	return cred ? credentialJSON(cred) : null;
 }
 
 /** A cancelled or timed-out browser prompt is not an error worth shouting about. */

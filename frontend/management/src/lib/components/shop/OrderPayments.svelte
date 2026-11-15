@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Banknote, Copy, Link2, Pencil, Receipt, Trash2, Undo2 } from '@lucide/svelte';
+	import { Banknote, Copy, Link2, Pencil, Trash2, Undo2, FileText } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import PaymentFields, { type PaymentDraft } from '#lib/components/shop/PaymentFields.svelte';
@@ -67,7 +67,7 @@
 
 <section class="card card-body gap-3" aria-labelledby="pay-h">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<h2 id="pay-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Receipt size={16} aria-hidden="true" /> {t('shop.orders.card.payments')}</h2>
+		<h2 id="pay-h" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Banknote size={16} aria-hidden="true" /> {t('shop.orders.card.payments')}</h2>
 		{#if editable}
 			<div class="flex flex-wrap gap-2">
 				<button class="btn btn-outline btn-sm gap-2" type="button" onclick={openAdd}><Banknote size={14} /> {t('shop.pay.record')}</button>
@@ -123,7 +123,7 @@
 	{/if}
 	{#if Number(order.amount_due) > 0 && order.payment_instructions}
 		<div class="rounded-lg border border-line p-3">
-			<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.payment_instructions')}</h3>
+			<h3 class="font-display text-xs font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><FileText size={16} class="shrink-0" aria-hidden="true" /> {t('shop.orders.payment_instructions')}</h3>
 			<p class="mt-1 text-sm whitespace-pre-line">{order.payment_instructions}</p>
 			<p class="mt-1 text-xs text-muted">{t('shop.orders.payment_instructions_note')}</p>
 		</div>

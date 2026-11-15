@@ -2,7 +2,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { ArrowLeft, BarChart3, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, UserX } from '@lucide/svelte';
+	import { ArrowLeft, BarChart3, CalendarCheck, Hash, Pencil, Trash2, TrendingDown, TrendingUp, TriangleAlert, Upload, UserMinus, UserPlus, Users, UsersRound, UserX } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -171,7 +171,7 @@
 	<!-- Attendance of the season: turnout = present / (present + absent) over the team's past events. -->
 	<div class="grid gap-4 lg:grid-cols-3">
 		<div class="card card-body">
-			<span class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('teampage.att.rate')}</span>
+			<h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase"><CalendarCheck size={16} class="shrink-0" aria-hidden="true" /> {t('teampage.att.rate')}</h2>
 			<span class="font-display text-5xl leading-none font-extrabold {hasRate ? TONE[rateTone(attendance?.rate)].text : 'text-muted'}">{formatRate(attendance?.rate)}</span>
 			{#if attendance && attendance.sessions > 0}
 				<span class="text-sm text-muted">{attendance.sessions === 1 ? t('attbox.based_on_one') : t('attbox.based_on', { n: attendance.sessions })}</span>
@@ -223,7 +223,7 @@
 
 	<div class="card">
 		<div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
-			<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('teams.card.players')} <span class="font-mono text-xs font-normal text-muted">· {team.roster.length}</span></h2>
+			<h2 class="flex flex-wrap items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('teams.card.players')} <span class="font-mono text-xs font-normal text-muted">· {team.roster.length}</span></h2>
 			{#if manage}<a class="btn btn-outline btn-sm gap-2" href={addHref}><UserPlus size={16} /> {t('teams.player.add_many')}</a>{/if}
 		</div>
 		{#if errorFor('removePlayer')}<div class="px-6 pb-3"><Alert kind="error">{errorFor('removePlayer')}</Alert></div>{/if}
@@ -242,6 +242,7 @@
 									<a class="link font-semibold" href="/members/{p.member_id}">{p.first_name} {p.last_name}</a>
 									{#if p.is_captain}<span class="badge badge-primary badge-sm" title={t('teams.captain')}>C</span>{/if}
 									{#if p.is_alternate_captain}<span class="badge badge-outline badge-sm" title={t('teams.alt_captain')}>A</span>{/if}
+									{#if p.open_requirements?.length}<a class="badge badge-warning badge-sm gap-1" href="/members/{p.member_id}?tab=documents" title={t('teams.req_missing', { names: p.open_requirements.join(', ') })}><TriangleAlert size={11} aria-hidden="true" /> {p.open_requirements.join(', ')}</a>{/if}
 								</div>
 							</td>
 							<td class="text-sm text-muted">{p.position_name ?? '—'}</td>
@@ -267,7 +268,7 @@
 
 	<div class="card">
 		<div class="flex flex-wrap items-center justify-between gap-2 px-6 py-4">
-			<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('teams.card.staff')} <span class="font-mono text-xs font-normal text-muted">· {team.staff.length}</span></h2>
+			<h2 class="flex flex-wrap items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><UsersRound size={16} class="shrink-0" aria-hidden="true" /> {t('teams.card.staff')} <span class="font-mono text-xs font-normal text-muted">· {team.staff.length}</span></h2>
 			{#if manage}<a class="btn btn-outline btn-sm gap-2" href={addHref}><UserPlus size={16} /> {t('teams.staff.add_many')}</a>{/if}
 		</div>
 		{#if errorFor('removeStaff')}<div class="px-6 pb-3"><Alert kind="error">{errorFor('removeStaff')}</Alert></div>{/if}
@@ -297,7 +298,7 @@
 	</div>
 
 	<div class="card card-body">
-		<h2 class="font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase">{t('teams.card.numbers')}{#if numbers?.pool}<span class="ml-1.5 font-mono text-xs font-normal text-muted">· {numbers.pool.name} ({numbers.pool.min_number}–{numbers.pool.max_number})</span>{/if}</h2>
+		<h2 class="flex flex-wrap items-center gap-2 font-display text-lg font-extrabold tracking-[.04em] text-ink uppercase"><Hash size={16} class="shrink-0" aria-hidden="true" /> {t('teams.card.numbers')}{#if numbers?.pool}<span class="ml-1.5 font-mono text-xs font-normal text-muted">· {numbers.pool.name} ({numbers.pool.min_number}–{numbers.pool.max_number})</span>{/if}</h2>
 		{#if !team.pool_id}
 			<p class="text-sm text-muted">{t('teams.num.no_pool')}</p>
 		{:else if !numbers?.pool}

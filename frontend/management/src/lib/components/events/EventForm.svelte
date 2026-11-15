@@ -11,7 +11,7 @@
 		Clock,
 		Dumbbell,
 		ExternalLink,
-		FilePenLine,
+		ClipboardList,
 		House,
 		PartyPopper,
 		Presentation,
@@ -320,7 +320,7 @@
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<!-- Details -->
 			<section class="card card-body" aria-labelledby="{uid}-h-details">
-				{@render head(`${uid}-h-details`, t('eventform.card.details'), generated ? t('eventform.card.details_desc') : t('eventform.card.details_desc_plain'), FilePenLine)}
+				{@render head(`${uid}-h-details`, t('eventform.card.details'), generated ? t('eventform.card.details_desc') : t('eventform.card.details_desc_plain'), ClipboardList)}
 				<div class="grid gap-4">
 					{#if generated}
 						<div class="rounded-lg border border-line bg-subhead px-3 py-2.5" aria-live="polite">

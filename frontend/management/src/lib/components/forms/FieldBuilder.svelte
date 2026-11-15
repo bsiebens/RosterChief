@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { ArrowDown, ArrowUp, EyeOff, Plus, RotateCcw, Trash2, X } from '@lucide/svelte';
+	import { ListChecks, ArrowDown, ArrowUp, EyeOff, Plus, RotateCcw, Trash2, X } from '@lucide/svelte';
 	import { blankField, blankOption, FIELD_TYPES, hasOptions, type FieldDraft, type FieldType } from '#lib/forms.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
@@ -136,7 +136,7 @@
 
 					{#if hasOptions(f.field_type)}
 						<div class="mt-4 grid gap-2 border-t border-rule pt-3" role="group" aria-labelledby="{base}-{f.uid}-opts">
-							<h3 id="{base}-{f.uid}-opts" class="font-display text-xs font-bold tracking-wide text-ink uppercase">{t('forms.options')}</h3>
+							<h3 id="{base}-{f.uid}-opts" class="font-display text-xs font-bold tracking-wide text-ink uppercase flex items-center gap-2"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t('forms.options')}</h3>
 							<ul class="grid gap-2">
 								{#each f.options as o, k (o.uid)}
 									<li class="flex items-center gap-1.5">

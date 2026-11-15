@@ -6,7 +6,7 @@ export const safeColor = (v: unknown): string => (typeof v === 'string' && /^#[0
 /** Logos are site-relative /media/... URLs served by our proxy; refuse anything else (no external or script URLs). */
 export const safeLogo = (v: unknown): string | null => (typeof v === 'string' && /^\/media\/[^\s"'<>()\\]+$/.test(v) ? v : null);
 
-const ICON_KEYS = ['ico', 'png_32', 'png_192', 'apple_touch'] as const;
+const ICON_KEYS = ['ico', 'png_32', 'png_192', 'png_512', 'apple_touch'] as const;
 
 /** Generated icon URLs: same restriction as logos (site-relative /media/...), unknown keys dropped. */
 function cleanIcons(raw: any): Branding['icons'] {

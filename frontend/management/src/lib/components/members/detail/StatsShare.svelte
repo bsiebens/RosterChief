@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Copy, ExternalLink, Link as LinkIcon, RefreshCw, Trash2 } from '@lucide/svelte';
+	import { Check, Copy, ExternalLink, Link as LinkIcon, RefreshCw, Trash2, Link2 } from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
 	import Alert from '#lib/components/Alert.svelte';
 	import { api } from '#lib/management-api.ts';
@@ -34,7 +34,7 @@
 
 <div class="card card-body gap-2 p-4">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<h3 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase"><LinkIcon size={16} aria-hidden="true" /> {t('publicstats.share.title')}</h3>
+		<h3 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase"><Link2 size={16} aria-hidden="true" /> {t('publicstats.share.title')}</h3>
 		{#if !token}<button class="btn btn-outline btn-sm gap-1.5" type="button" disabled={busy} onclick={() => change('POST')}><LinkIcon size={14} /> {t('publicstats.share.create')}</button>{/if}
 	</div>
 	<p class="text-xs text-muted">{t('publicstats.share.hint')}</p>

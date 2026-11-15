@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
+import { Banknote, CalendarDays, ClipboardCheck, ClipboardList, LayoutDashboard, Newspaper, Settings, Shirt, ShoppingBag, Users, Whistle } from '@lucide/svelte';
 import type { Me } from './types.ts';
 
 /**
@@ -8,7 +8,7 @@ import type { Me } from './types.ts';
  * is active). Sections that are not built yet (Teams, Calendar, Finance, Settings ...) are deliberately absent.
  */
 /** A count shown as a small badge next to a nav entry; the sidebar fetches the numbers (see `Sidebar.svelte`). */
-export type NavBadge = 'signups' | 'registrations' | 'members';
+export type NavBadge = 'signups' | 'registrations' | 'members' | 'payments' | 'finance';
 export type NavChild = { href: string; label: string; match?: (path: string) => boolean; visible?: (me: Me) => boolean; badge?: NavBadge };
 export type NavItem = {
 	key: string;
@@ -32,12 +32,11 @@ export const NAV: NavItem[] = [
 		href: '/members',
 		label: 'shell.nav.members',
 		icon: Users,
-		match: (p) => p.startsWith('/members') || p.startsWith('/families') || p.startsWith('/groups') || p.startsWith('/signups') || p.startsWith('/registrations'),
+		match: (p) => p.startsWith('/members') || p.startsWith('/families') || p.startsWith('/groups') || p.startsWith('/signups'),
 		badge: 'members',
 		children: [
 			{ href: '/members', label: 'shell.nav.all_members', match: (p) => p.startsWith('/members') },
 			{ href: '/signups', label: 'signups.nav', match: (p) => p.startsWith('/signups'), visible: (me) => me.can_manage_members, badge: 'signups' },
-			{ href: '/registrations', label: 'reg.nav', match: (p) => p.startsWith('/registrations'), visible: (me) => me.can_manage_members, badge: 'registrations' },
 			{ href: '/families', label: 'shell.nav.families', match: (p) => p.startsWith('/families'), visible: (me) => me.can_manage_members },
 			{ href: '/groups', label: 'shell.nav.groups', match: (p) => p.startsWith('/groups'), visible: (me) => me.can_manage_members || (me.admin_group_ids?.length ?? 0) > 0 }
 		]
@@ -121,6 +120,20 @@ export const NAV: NavItem[] = [
 		visible: (me) => me.can_manage_referees && me.features.includes('referee_officials')
 	},
 	{
+		key: 'finance',
+		href: '/finance',
+		label: 'fin.nav',
+		icon: Banknote,
+		match: (p) => p.startsWith('/finance') || p.startsWith('/registrations'),
+		visible: (me) => me.can_manage_finance || me.can_manage_sponsors,
+		badge: 'finance',
+		children: [
+			{ href: '/finance', label: 'fin.nav.payments', match: (p) => p.startsWith('/finance') && !p.startsWith('/finance/sponsors'), visible: (me) => me.can_manage_finance, badge: 'payments' },
+			{ href: '/registrations', label: 'reg.nav', match: (p) => p.startsWith('/registrations'), visible: (me) => me.can_manage_finance, badge: 'registrations' },
+			{ href: '/finance/sponsors', label: 'sponsors.title', match: (p) => p.startsWith('/finance/sponsors'), visible: (me) => me.can_manage_sponsors }
+		]
+	},
+	{
 		key: 'settings',
 		href: '/settings',
 		label: 'shell.nav.settings',
@@ -143,5 +156,9 @@ export const NAV: NavItem[] = [
 export const isActive = (item: NavItem, path: string) => (item.match ? item.match(path) : path === item.href || path.startsWith(`${item.href}/`));
 
 export function visibleNav(me: Me): NavItem[] {
-	return NAV.filter((i) => !i.visible || i.visible(me)).map((i) => ({ ...i, children: i.children?.filter((c) => !c.visible || c.visible(me)) }));
+	return NAV.filter((i) => !i.visible || i.visible(me)).map((i) => ({
+		...i,
+		href: i.key === 'finance' && !me.can_manage_finance ? '/finance/sponsors' : i.href,
+		children: i.children?.filter((c) => !c.visible || c.visible(me))
+	}));
 }

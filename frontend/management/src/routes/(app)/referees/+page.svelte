@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import { pageTitle } from '#lib/title.svelte.ts';
-	import { ChevronDown, ChevronRight, FileText, Settings2, Whistle } from '@lucide/svelte';
+	import { ChartBar, ChevronDown, ChevronRight, FileText, Settings2, Whistle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
 	import AssignDialog from '#lib/components/referees/AssignDialog.svelte';
@@ -190,7 +190,7 @@
 				{:else}
 					<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
 						<div class="card card-body gap-2">
-							<h2 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('referees.workload.chart')}</h2>
+							<h2 class="card-title"><ChartBar size={16} class="shrink-0" aria-hidden="true" /> {t('referees.workload.chart')}</h2>
 							<WorkloadChart rows={summary.workload} />
 						</div>
 						<div class="card overflow-x-auto">

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Plus, Trash2 } from '@lucide/svelte';
+	import { IdCard, KeyRound, UsersRound, Plus, Trash2 } from '@lucide/svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -49,7 +49,7 @@
 
 <input type="hidden" name="ob_payload" value={payload} />
 
-<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('members.form.section.membership')}</h2>
+<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><IdCard size={16} class="shrink-0" aria-hidden="true" /> {t('members.form.section.membership')}</h2>
 {#if noSeason}<Alert kind="warning">{t('members.form.no_season')}</Alert>{/if}
 <div class="grid gap-3" aria-disabled={noSeason}>
 	<label class="flex cursor-pointer items-center gap-3 text-sm">
@@ -83,7 +83,7 @@
 	{/if}
 </div>
 
-<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('members.form.section.family')}</h2>
+<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><UsersRound size={16} class="shrink-0" aria-hidden="true" /> {t('members.form.section.family')}</h2>
 <div class="grid gap-3">
 	<fieldset class="flex flex-wrap gap-x-5 gap-y-1">
 		<legend class="sr-only">{t('members.form.section.family')}</legend>
@@ -129,7 +129,7 @@
 	{/if}
 </div>
 
-<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('members.form.section.login')}</h2>
+<h2 class="mt-6 mb-3 border-b border-rule pb-1 font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><KeyRound size={16} class="shrink-0" aria-hidden="true" /> {t('members.form.section.login')}</h2>
 <label class="flex cursor-pointer items-start gap-3 text-sm">
 	<input type="checkbox" class="checkbox mt-0.5" bind:checked={invite} />
 	<span>{t('members.form.invite')}<span class="block text-xs {invite && !email.trim() ? 'text-error' : 'text-muted'}">{invite && !email.trim() ? t('members.form.invite_needs_email') : t('members.form.invite_help')}</span></span>

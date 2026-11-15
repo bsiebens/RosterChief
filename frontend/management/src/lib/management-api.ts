@@ -51,8 +51,12 @@ function parseError(json: any, status: number): { message?: string; code?: strin
 	const fields: Record<string, string> = {};
 	if (Array.isArray(json?.detail)) {
 		for (const e of json.detail) {
-			const name = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : undefined;
-			if (name !== undefined && name !== 'body') fields[String(name)] = e.msg;
+			const location = Array.isArray(e.loc) ? e.loc : [];
+			const name = location.at(-1);
+			if (name !== undefined && name !== 'body') fields[String(name)] ??= e.msg;
+			if (location[0] === 'body' && location[1] === 'payload' && location.length > 3) {
+				fields[location.slice(2).join('.')] = e.msg;
+			}
 		}
 		return { message: json.detail[0]?.msg, code: 'invalid', fields };
 	}

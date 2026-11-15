@@ -5,6 +5,8 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { notifications, type AppNotification } from '#lib/notifications.svelte.ts';
 
+	let { dark = false, portal }: { dark?: boolean; portal?: 'parent' | 'coach' } = $props();
+	const panelId = $props.id();
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
 
@@ -37,8 +39,22 @@
 		if (!n.read) void notifications.markRead(n.id);
 		if (n.href) {
 			open = false;
-			await goto(n.href);
+			await goto(notificationHref(n.href));
 		}
+	}
+
+	function notificationHref(href: string) {
+		if (!portal) return href;
+		const event = href.match(/^\/calendar\/events\/([0-9a-f-]{36})(?:[/?#]|$)/i);
+		if (event) return portal === 'coach' ? `/calendar/events/${event[1]}?view=coach` : `/parent?tab=calendar&event=${event[1]}`;
+		const article = href.match(/^\/news\/([0-9a-f-]{36})(?:[/?#]|$)/i);
+		if (article) return `/${portal}?tab=news&article=${article[1]}`;
+		if (portal === 'parent') {
+			if (/^\/forms(?:\/|$)/.test(href)) return '/parent?tab=forms';
+			if (/^\/shop(?:\/|$)/.test(href)) return '/parent/shop';
+			if (/^\/(registrations|finance)(?:\/|$)/.test(href)) return '/parent?tab=payments';
+		}
+		return href;
 	}
 
 	function onWindowClick(e: MouseEvent) {
@@ -51,10 +67,10 @@
 <div class="relative" bind:this={root}>
 	<button
 		type="button"
-		class="btn btn-outline btn-square relative"
+		class="btn btn-square relative {dark ? 'border-sidebar-hairline bg-transparent text-sidebar-fg' : 'btn-outline'}"
 		aria-label={notifications.unread ? t('notifications.bell_unread', { n: notifications.unread }) : t('notifications.title')}
 		aria-expanded={open}
-		aria-controls="notification-panel"
+		aria-controls={open ? panelId : undefined}
 		onclick={() => (open = !open)}>
 		<Bell size={18} aria-hidden="true" />
 		{#if notifications.unread}
@@ -63,9 +79,9 @@
 	</button>
 
 	{#if open}
-		<div id="notification-panel" class="absolute top-full right-0 z-30 mt-2 w-[26rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-white shadow-xl" role="region" aria-label={t('notifications.title')}>
+		<div id={panelId} class="absolute top-full right-0 z-30 mt-2 w-[26rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-white text-slate shadow-xl" role="region" aria-label={t('notifications.title')}>
 			<div class="flex items-center justify-between gap-2 border-b border-line bg-white px-4 py-3">
-				<h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">{t('notifications.title')}</h2>
+				<h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><Bell size={16} class="shrink-0" aria-hidden="true" /> {t('notifications.title')}</h2>
 				<div class="flex items-center gap-1.5">
 					<button class="btn btn-outline btn-xs gap-1" type="button" disabled={!notifications.unread} onclick={() => notifications.markAllRead()}><CheckCheck size={13} aria-hidden="true" /> {t('notifications.read_all')}</button>
 					<button class="btn btn-outline btn-error btn-xs gap-1" type="button" disabled={!notifications.items.length} onclick={() => notifications.clearAll()}><Trash2 size={13} aria-hidden="true" /> {t('notifications.clear_all')}</button>

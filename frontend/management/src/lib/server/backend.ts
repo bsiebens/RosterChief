@@ -8,6 +8,7 @@ import { cleanBranding } from './branding.ts';
 export async function backendFetch(event: RequestEvent, path: string, opts: { session?: boolean } = {}): Promise<Response> {
 	const backend = (process.env.BACKEND_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 	const headers = new Headers({ accept: 'application/json', host: process.env.BACKEND_HOST ?? requestHostname(event) });
+	headers.set('x-forwarded-proto', event.url.protocol.slice(0, -1));
 	const token = event.cookies.get(SESSION_COOKIE);
 	if (opts.session && token) headers.set('x-session-token', token);
 	return hostFetch(backend + path, { headers, signal: AbortSignal.timeout(8000) });

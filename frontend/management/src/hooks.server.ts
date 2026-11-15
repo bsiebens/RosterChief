@@ -61,6 +61,13 @@ async function resolveAuth(event: Event, mode: HostMode): Promise<{ auth: AuthSt
 	if (meRes.status === 403) {
 		const err = await meRes.json().catch(() => null);
 		const code = err?.code ?? err?.error?.code;
+		if (code === 'no_access') {
+			const portal = await backendFetch(event, `${API_PREFIX}portal/access`, { session: true }).catch(() => null);
+			if (portal?.ok) {
+				const info = await portal.json().catch(() => null);
+				return { auth: { status: 'authenticated', user, me: null, memberShopEnabled: info?.shop_enabled === true }, myClubs: [] };
+			}
+		}
 		return { auth: { status: code === 'mfa_required' ? 'mfa_enrollment_required' : 'no_access', user }, myClubs: [] };
 	}
 	console.warn(`[auth] ${API_PREFIX}me answered ${meRes.status}`);
@@ -84,7 +91,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.hostError = null;
 
 	const { pathname } = event.url;
-	const isStatic = pathname.startsWith('/fonts/') || pathname.startsWith('/images/') || pathname.startsWith('/_app/');
+	const isStatic = pathname.startsWith('/fonts/') || pathname.startsWith('/images/') || pathname.startsWith('/_app/') || pathname === '/service-worker.js';
 	let branding = null;
 	let notFoundStatus = 0;
 
@@ -94,7 +101,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 			branding = info.branding;
 			event.locals.branding = info.branding;
 			event.locals.mode = info.branding.is_platform ? 'platform' : 'club';
-			if (pathname !== '/lang') {
+			if (pathname !== '/lang' && pathname !== '/manifest.webmanifest') {
 				const r = await resolveAuth(event, event.locals.mode);
 				event.locals.auth = r.auth;
 				event.locals.myClubs = r.myClubs;

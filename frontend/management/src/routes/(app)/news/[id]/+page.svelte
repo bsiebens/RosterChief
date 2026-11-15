@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, EyeOff, Save, Send, Trash2, Undo2, Upload } from '@lucide/svelte';
+	import { Users, Workflow, ArrowLeft, EyeOff, Save, Send, Trash2, Undo2, Upload } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -124,11 +124,11 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20" aria-labelledby="{formId}-wf">
 			<section class="card card-body gap-3">
-				<h2 id="{formId}-wf" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('news.card.workflow')}</h2>
+				<h2 id="{formId}-wf" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Workflow size={16} class="shrink-0" aria-hidden="true" /> {t('news.card.workflow')}</h2>
 				<div class="flex flex-wrap items-center gap-2"><NewsStatusBadge {item} /><span class="font-mono text-xs text-dim">{t(`news.visibility.short.${item.visibility}`)}</span></div>
 				<p class="text-sm text-muted">{stateText}</p>
 				<div class="grid gap-1.5">
-					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('news.card.audience')}</p>
+					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase flex items-center gap-2"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('news.card.audience')}</p>
 					{#if teamNames.length}
 						<div class="flex flex-wrap gap-1.5">{#each teamNames as name (name)}<span class="badge badge-neutral">{name}</span>{/each}</div>
 					{:else}

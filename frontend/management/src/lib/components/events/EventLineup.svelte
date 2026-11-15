@@ -118,7 +118,7 @@
 				<div class="card">
 					<div class="flex items-start justify-between gap-3 border-b border-line px-5 py-3">
 						<div>
-							<h3 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">{t('events.lineup.players')}</h3>
+							<h3 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('events.lineup.players')}</h3>
 							<p class="text-xs text-muted">{t('events.lineup.players_help')}</p>
 						</div>
 						<div class="flex shrink-0 flex-col items-end gap-1">

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarCheck, CircleCheck, CircleX, Minus } from '@lucide/svelte';
+	import { ChartLine, History, CalendarCheck, CircleCheck, CircleX, Minus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { eventHref, formatEventDate, formatRate, kindLabel, rateTone, SPARK_STYLE, sparkLabel, statusLabel, statusTone, TONE, type MemberAttendance } from '#lib/attendance.ts';
@@ -44,7 +44,7 @@
 				</ul>
 			</div>
 			<div class="card card-body">
-				<h2 class="card-title text-base">{t('attbox.sparkline', { n: 12 })}</h2>
+				<h2 class="card-title text-base flex items-center gap-2"><ChartLine size={16} class="shrink-0" aria-hidden="true" /> {t('attbox.sparkline', { n: 12 })}</h2>
 				{#if attendance.sparkline.length}
 					<div class="grid grid-cols-6 gap-2">
 						{#each attendance.sparkline as bar (bar.id)}
@@ -62,7 +62,7 @@
 		</div>
 
 		<div class="card card-body">
-			<h2 class="card-title text-base">{t('profile.att.recent')}</h2>
+			<h2 class="card-title text-base flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('profile.att.recent')}</h2>
 			<div class="overflow-x-auto">
 				<table class="table">
 					<thead><tr><th>{t('attbox.col.event')}</th><th>{t('attbox.col.date')}</th><th>{t('attbox.col.kind')}</th><th>{t('attbox.col.status')}</th><th class="text-center">{t('attbox.col.showed_up')}</th></tr></thead>

@@ -202,7 +202,7 @@ export type AttendanceRow = {
 };
 
 /** GET /events/{id}/attendance */
-export type AttendanceList = { can_manage: boolean; counts: AttendanceCounts; checked_in: number; no_shows: number; rows: AttendanceRow[] };
+export type AttendanceList = { can_manage: boolean; counts: AttendanceCounts; checked_in: number; no_shows: number; rows: AttendanceRow[]; /** People who would be invited but cannot join because of open requirements (attendance managers only). */ blocked?: { member_id: string; first_name: string; last_name: string; requirements: string[] }[] };
 export type BulkResult = { member_id: string; ok: boolean; status: string | null; error: string };
 export type BulkAnswerOut = { results: BulkResult[] };
 

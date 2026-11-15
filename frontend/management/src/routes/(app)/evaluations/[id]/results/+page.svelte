@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ArrowLeft, ClipboardCheck } from '@lucide/svelte';
+	import { ArrowLeft, ChartBar, ClipboardCheck, ListChecks } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import ListFilterBar from '#lib/components/ListFilterBar.svelte';
@@ -56,12 +56,12 @@
 		<p class="font-mono text-xs text-muted">{t('eval.results.count', { n: data.stats.evaluation_count })}</p>
 		{#each groups as g, gi (gi)}
 			<section class="grid gap-3">
-				{#if g.section}<h2 class="border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{g.section}</h2>{/if}
+				{#if g.section}<h2 class="flex items-center gap-2 border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {g.section}</h2>{/if}
 				<div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
 			{#each g.items as { r } (r.field.id)}
 				<section class="card card-body gap-2 p-4">
 					<header>
-						<h2 class="font-semibold text-ink">{r.field.label}</h2>
+						<h2 class="flex items-center gap-2 font-semibold text-ink"><ChartBar size={16} class="shrink-0" aria-hidden="true" /> {r.field.label}</h2>
 						<p class="font-mono text-xs text-muted">{t('eval.results.responses', { n: r.response_count })}</p>
 					</header>
 					{#if r.kind === 'numeric'}

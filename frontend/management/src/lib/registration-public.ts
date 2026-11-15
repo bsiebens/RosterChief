@@ -1,4 +1,6 @@
 /** The public registration pages (`/join`, `/join/status/{token}`): the shapes of GET /public/registration and the status page, no login. */
+import type { Installment } from '#lib/registrations.ts';
+
 export type ClubBrand = { name: string; logo_url: string | null };
 export type Ref = { id: string; name: string };
 /** One thing to register for: a variant, or the product itself (as is) when it has no variants. `option_id` is what the form sends back. */
@@ -16,7 +18,7 @@ export type ProductOffer = {
 	registrant_discount_scope: string;
 	registrant_tiers: { min_registrants: number; discount_type: string; discount_amount: string }[];
 };
-export type PublicRegistration = { club: ClubBrand; is_open: boolean; intro_text: string; terms_text: string; products: ProductOffer[]; teams: Ref[]; positions: Ref[]; max_entries: number };
+export type PublicRegistration = { club: ClubBrand; is_open: boolean; intro_text: string; terms_text: string; products: ProductOffer[]; teams: Ref[]; positions: Ref[]; max_entries: number; installment_offsets: number[] };
 
 /** GET /public/registration/numbers: `pool` and `numbers` are null for a team without a number pool (any number); `taken` lists the numbers not free. */
 export type NumbersInfo = { pool: { name: string; min: number; max: number } | null; numbers: number[] | null; taken: number[] };
@@ -44,11 +46,13 @@ export type ChecklistItem = {
 	answer: unknown;
 	can_answer: boolean;
 };
-export type Fee = { fee_amount: string; amount_paid: string; amount_due: string; remaining_balance: string; fee_status: string; early_bird: { deadline: string; discount: string; fee_if_paid_in_time: string; applies: boolean } | null };
-export type PersonStatus = { member_id: string; name: string; entry_kind: string; description: string; is_credit: boolean; credit: string | null; requested_team: string | null; membership_status: string; fee: Fee | null; checklist: ChecklistItem[] };
+export type Fee = { fee_amount: string; amount_paid: string; amount_due: string; remaining_balance: string; fee_status: string; payment_allows_activation: boolean; early_bird: { deadline: string; discount: string; fee_if_paid_in_time: string; applies: boolean } | null };
+export type PersonStatus = { member_id: string; name: string; entry_kind: string; description: string; is_credit: boolean; credit: string | null; requested_team: string | null; membership_status: string; fee: Fee | null; next_installment: Installment | null; checklist: ChecklistItem[] };
 export type InvoiceLine = { kind: 'person' | 'order_discount' | 'credit' | string; name: string; description: string; amount: string; percent?: string | null };
 export type InvoiceSummary = { lines: InvoiceLine[]; manual_discount_amount: string; manual_discount_note: string; credit_unused: string; total: string };
-export type RegistrationStatus = { status: 'awaiting' | 'confirmed' | 'cancelled'; season_name: string; submitted_at: string; invoice_number: string | null; invoice_due_date: string | null; /** Only once the invoice is confirmed: a line per person, separate multi-registration discount and credit lines, a manual discount and the total. */ invoice: InvoiceSummary | null; people: PersonStatus[]; club: ClubBrand };
+/** The early-bird discount while it still applies (gone once the deadline has passed or everything is paid): `amount_due` is the invoice total with it. */
+export type EarlyBird = { deadline: string; discount: string; amount_due: string; balance: string };
+export type RegistrationStatus = { status: 'awaiting' | 'confirmed' | 'cancelled'; season_name: string; submitted_at: string; invoice_number: string | null; invoice_due_date: string | null; /** Only once the invoice is confirmed: a line per person, separate multi-registration discount and credit lines, a manual discount and the total. */ invoice: InvoiceSummary | null; early_bird: EarlyBird | null; people: PersonStatus[]; club: ClubBrand; installment_offsets: number[]; installments: Installment[] };
 
 export type EntryDraft = {
 	uid: number;

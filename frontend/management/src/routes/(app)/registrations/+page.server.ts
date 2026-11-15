@@ -7,7 +7,7 @@ const PAGE_SIZE = 25;
 
 export const load: PageServerLoad = async ({ url, fetch, parent }) => {
 	const { me } = await parent();
-	if (!me.can_manage_members) redirect(303, '/');
+	if (!me.can_manage_finance) redirect(303, '/');
 	const q = (url.searchParams.get('q') ?? '').trim();
 	const asked = url.searchParams.get('status') as RegistrationTab;
 	const status: RegistrationTab = REGISTRATION_TABS.includes(asked) ? asked : 'awaiting';

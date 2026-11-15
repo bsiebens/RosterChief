@@ -5,7 +5,7 @@
 	import LangSwitcher from './LangSwitcher.svelte';
 
 	/** Light dropdown for the shells without a sidebar (club picker, no-access, MFA enrolment). */
-	let { email }: { email: string } = $props();
+	let { email, dark = false }: { email: string; dark?: boolean } = $props();
 
 	let menu: HTMLDetailsElement | undefined = $state();
 	const close = () => menu && (menu.open = false);
@@ -14,7 +14,7 @@
 <svelte:window onclick={(e) => menu?.open && !menu.contains(e.target as Node) && close()} onkeydown={(e) => e.key === 'Escape' && close()} />
 
 <details class="account-menu relative shrink-0" bind:this={menu}>
-	<summary class="flex cursor-pointer items-center rounded px-1.5 py-1 text-muted hover:bg-rule hover:text-ink" aria-label={t('shell.menu.account')}>
+	<summary class="flex min-h-10 min-w-10 cursor-pointer items-center justify-center rounded {dark ? 'text-sidebar-fg hover:bg-sidebar-chip' : 'text-muted hover:bg-rule hover:text-ink'}" aria-label={t('shell.menu.account')}>
 		<CircleUser size={20} aria-hidden="true" />
 	</summary>
 	<div class="absolute top-full right-0 z-20 mt-2 w-64 rounded border border-edge bg-white py-1.5 shadow-lg">

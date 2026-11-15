@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import { ArrowLeft, Download, Factory, Pencil, Send, Trash2, Truck } from '@lucide/svelte';
+	import { History, ArrowLeft, Download, Factory, Pencil, Send, Trash2, Truck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -171,7 +171,7 @@
 		</div>
 		{#if data.received.length}
 			<section class="card card-body gap-2" aria-labelledby="hist">
-				<h2 id="hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.prod.history')}</h2>
+				<h2 id="hist" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('shop.prod.history')}</h2>
 				<div class="overflow-x-auto">
 					<table class="table table-sm">
 						<thead><tr><th>{t('shop.prod.batch')}</th><th>{t('shop.prod.supplier')}</th><th class="text-right">{t('shop.prod.qty')}</th><th>{t('shop.prod.received_at')}</th><th></th></tr></thead>

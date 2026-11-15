@@ -21,6 +21,7 @@ export type NewsListItem = {
 	created: string;
 	created_by: { id: string; name: string } | null;
 	team_ids: string[];
+	teams?: { id: string; name: string }[];
 	main_photo_url: string | null;
 	can_edit: boolean;
 };

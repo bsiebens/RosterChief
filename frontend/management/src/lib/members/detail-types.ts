@@ -1,4 +1,6 @@
 /** Shapes of the members API used by the detail / form / history pages (see api/schemas_members.py). */
+import type { Installment } from '#lib/registrations.ts';
+
 export type ShellMe = { id: string; email: string; is_club_admin: boolean; can_manage_members: boolean; can_manage_settings: boolean; can_execute_evaluations: boolean; can_manage_evaluations: boolean; member_id: string | null; managed_team_ids: string[]; admin_group_ids?: string[]; permissions: string[] };
 
 export type MemberFamily = { id: string; name: string; role: string };
@@ -11,6 +13,7 @@ export type ClubMembership = {
 	amount_paid?: string | null;
 	signed_up_at?: string | null;
 	activated_at?: string | null;
+	next_installment?: Installment | null;
 };
 export type StaffAssignment = { id: string; team_id: string; team_name: string; season_id: string; position: string };
 export type TeamMembership = { id: string; team_id: string; team_name: string; season_id: string; position: string | null; jersey_number: number | null };

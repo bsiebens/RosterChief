@@ -22,6 +22,8 @@ export const load: LayoutServerLoad = ({ locals, url }) => {
 	if (a.status === 'mfa_enrollment_required' && !OPEN_WHILE_ENROLLING.includes(url.pathname)) redirect(303, `${SECURITY}?required=1`);
 	if (a.status === 'authenticated' && url.pathname === '/no-access') redirect(303, '/');
 	if (locals.mode === 'platform' && !PLATFORM_PATHS.includes(url.pathname)) redirect(303, '/');
+	const parentRoute = url.pathname === '/parent' || url.pathname.startsWith('/parent/');
+	if (locals.mode === 'club' && a.status === 'authenticated' && !a.me && !parentRoute && url.pathname !== '/app' && !OPEN_WHILE_ENROLLING.includes(url.pathname)) redirect(303, '/parent');
 
 	return {
 		me: (a.status === 'authenticated' ? a.me : null) as Me,

@@ -3,18 +3,19 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { ArrowLeft, BarChart3, Check, Clock, Crosshair, Goal, House, Plane, ShieldHalf, Swords, TriangleAlert, Trophy, Wrench } from '@lucide/svelte';
+	import { ArrowLeft, BarChart3, Check, Clock, TrendingUp, Goal, House, Plane, ShieldHalf, Swords, TriangleAlert, Trophy, Wrench, ListOrdered } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ForAgainstBars from '#lib/components/analytics/ForAgainstBars.svelte';
 	import PeriodBars from '#lib/components/analytics/PeriodBars.svelte';
 	import PlayerFace from '#lib/components/analytics/PlayerFace.svelte';
 	import Leaderboard from '#lib/components/analytics/Leaderboard.svelte';
+	import ProgressChart from '#lib/components/analytics/ProgressChart.svelte';
 	import Ring from '#lib/components/analytics/Ring.svelte';
 	import TrendChart from '#lib/components/analytics/TrendChart.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { eventHref, formatEventDate, memberHref } from '#lib/attendance.ts';
-	import { num, pct, RESULT_CHIP, SCOPES, shortDate, signed, type ForAgainst, type Scope, type SplitRow } from '#lib/analytics.ts';
+	import { num, pct, progress, RESULT_CHIP, SCOPES, shortDate, signed, type ForAgainst, type Scope, type SplitRow } from '#lib/analytics.ts';
 
 	import type { ActionData, PageData } from '../../../routes/(app)/teams/[id]/analytics/$types';
 
@@ -49,6 +50,9 @@
 	const splits = $derived(a ? ([{ key: 'home', row: a.split.home, Icon: House }, { key: 'away', row: a.split.away, Icon: Plane }] as { key: string; row: SplitRow; Icon: typeof House }[]) : []);
 	const hasSheets = $derived(!!a && a.timeline_games > 0);
 	const showCompetitions = $derived(!!a && (a.competitions.length > 1 || !!data.competition));
+	const ppProgress = $derived(progress(a?.game_rows ?? [], (r) => r.pp_goals, (r) => r.pp_opportunities, 100));
+	const pkProgress = $derived(progress(a?.game_rows ?? [], (r) => (r.pk_opportunities === null || r.pk_goals_against === null ? null : r.pk_opportunities - r.pk_goals_against), (r) => r.pk_opportunities, 100));
+	const pimProgress = $derived(progress(a?.game_rows ?? [], (r) => r.pim_for_excl, (r) => (r.pim_for_excl === null ? null : 1)));
 	let busyKey = $state<string | null>(null);
 </script>
 
@@ -63,8 +67,7 @@
 
 {#if data.unavailable}
 	<div class="card card-body mx-auto max-w-xl items-center gap-3 py-10 text-center">
-		<BarChart3 size={32} class="text-muted" aria-hidden="true" />
-		<h2 class="font-display text-2xl font-extrabold text-ink uppercase">{t('analytics.unavailable.title')}</h2>
+		<h2 class="flex items-center gap-2 font-display text-2xl font-extrabold text-ink uppercase"><BarChart3 size={22} class="shrink-0" aria-hidden="true" /> {t('analytics.unavailable.title')}</h2>
 		<p class="text-sm text-muted">{t('analytics.unavailable.body')}</p>
 		<a class="btn btn-primary mt-2 gap-2" href={teamHref}><ArrowLeft size={16} /> {t('analytics.back')}</a>
 	</div>
@@ -147,7 +150,7 @@
 				<div class="flex flex-col justify-between gap-6 lg:pr-8">
 					<div>
 						<p class="font-mono text-[11px] tracking-[.14em] text-on-dark uppercase">{a.games === 1 ? t('analytics.record_one') : t('analytics.record', { n: a.games })}</p>
-						<p class="mt-2 font-display text-7xl leading-none font-extrabold tracking-tight">{a.record.won}–{a.record.drawn}–{a.record.lost}</p>
+						<p class="mt-2 flex items-baseline gap-3 font-display text-7xl leading-none font-extrabold tracking-tight"><span>{a.record.won}</span><span class="text-4xl font-medium text-on-dark-faint">–</span><span>{a.record.drawn}</span><span class="text-4xl font-medium text-on-dark-faint">–</span><span>{a.record.lost}</span></p>
 						<p class="mt-2 text-sm text-on-dark">{t('analytics.points', { n: a.points_table })}</p>
 					</div>
 					<div>
@@ -189,10 +192,9 @@
 			</section>
 
 			{#if a.timeline_games < a.games}<p class="text-sm text-muted">{t('analytics.cover.sheets', { n: a.timeline_games, total: a.games })}</p>{/if}
-			{#if a.shot_games && a.shot_games < a.games}<p class="text-sm text-muted">{t('analytics.cover.shots', { n: a.shot_games, total: a.games })}</p>{/if}
 
-			<!-- Special teams, discipline, shooting. -->
-			<div class="grid gap-4 lg:grid-cols-3">
+			<!-- Special teams and discipline. -->
+			<div class="grid gap-4 lg:grid-cols-2">
 				<section class="card card-body gap-4">
 					<h2 class="card-title"><Swords size={18} aria-hidden="true" /> {t('analytics.special')}</h2>
 					<div class="grid grid-cols-2 gap-4">
@@ -250,27 +252,20 @@
 						<p class="text-xs text-muted">{t('analytics.pim_per_game')}</p>
 					{/if}
 				</section>
-
-				<section class="card card-body gap-3">
-					<h2 class="card-title"><Crosshair size={18} aria-hidden="true" /> {t('analytics.shooting')}</h2>
-					{#if a.shot_games}
-						<div class="rounded-xl bg-paper p-3">
-							<p class="text-xs text-muted">{t('analytics.shots_fa')}</p>
-							<p class="mt-1 font-mono text-xl font-semibold text-ink">{a.shots_for} <span class="text-dim">/</span> <span class="text-club-dark">{a.shots_against}</span></p>
-						</div>
-						<div class="grid grid-cols-2 gap-3">
-							<div class="rounded-xl bg-paper p-3"><p class="text-xs text-muted">{t('analytics.shooting_pct')}</p><p class="mt-1 font-mono text-xl font-semibold text-ink">{pct(a.shooting_pct)}</p></div>
-							<div class="rounded-xl bg-paper p-3"><p class="text-xs text-muted">{t('analytics.save_pct')}</p><p class="mt-1 font-mono text-xl font-semibold text-ink">{pct(a.save_pct)}</p></div>
-						</div>
-					{:else}
-						<p class="text-sm text-muted">{t('analytics.no_shots')}</p>
-					{/if}
-					<div class="mt-auto grid grid-cols-2 gap-3">
-						<div class="rounded-xl bg-paper p-3"><p class="text-xs text-muted">{t('analytics.gwg')}</p><p class="mt-1 font-mono text-xl font-semibold text-ink">{a.game_winning_goals}</p></div>
-						<div class="rounded-xl bg-paper p-3"><p class="text-xs text-muted">{t('analytics.eng')}</p><p class="mt-1 font-mono text-xl font-semibold text-ink">{a.empty_net_goals}</p></div>
-					</div>
-				</section>
 			</div>
+
+			<!-- Progress: have the power play, the penalty kill and the discipline improved over the season? -->
+			<section class="card card-body gap-4" aria-labelledby="progress-title">
+				<div>
+					<h2 id="progress-title" class="card-title"><TrendingUp size={18} aria-hidden="true" /> {t('analytics.progress.title')}</h2>
+					<p class="mt-1 text-sm text-slate">{t('analytics.progress.help')}</p>
+				</div>
+				<div class="grid gap-4 lg:grid-cols-3">
+					<ProgressChart title={t('analytics.progress.pp')} data={ppProgress} format={pct} max={100} />
+					<ProgressChart title={t('analytics.progress.pk')} data={pkProgress} format={pct} max={100} />
+					<ProgressChart title={t('analytics.progress.pim')} data={pimProgress} format={(v) => num(v)} lowerIsBetter />
+				</div>
+			</section>
 
 			<!-- When goals happen. -->
 			<section class="card card-body gap-4">
@@ -402,7 +397,7 @@
 			<!-- Game by game, newest first. -->
 			<section class="card">
 				<div class="flex flex-wrap items-baseline justify-between gap-3 px-6 pt-5 pb-2">
-					<h2 class="card-title">{t('analytics.results')} <span class="font-mono text-xs font-normal text-muted">· {a.games}</span></h2>
+					<h2 class="flex flex-wrap items-center gap-2 card-title"><ListOrdered size={16} class="shrink-0" aria-hidden="true" /> {t('analytics.results')} <span class="font-mono text-xs font-normal text-muted">· {a.games}</span></h2>
 				</div>
 				<div class="overflow-x-auto">
 					<table class="table min-w-[40rem]">

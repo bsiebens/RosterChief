@@ -1,22 +1,34 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { Check, Copy, ExternalLink, Save, TriangleAlert } from '@lucide/svelte';
+	import { CalendarClock, Check, ClipboardList, Copy, ExternalLink, Link2, ReceiptText, Save, TriangleAlert } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
+	import { EVENT_KINDS, kindLabelKey } from '#lib/events/types.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import type { RegistrationSettings } from '#lib/registrations.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
 	const s = $derived(data.settings);
+	const draft = (stored: RegistrationSettings | null) => ({
+		is_open: !!stored?.is_open,
+		intro_text: stored?.intro_text ?? '',
+		terms_text: stored?.terms_text ?? '',
+		payment_instructions: stored?.payment_instructions ?? '',
+		invoice_due_days: stored?.invoice_due_days ?? 30,
+		installment_offsets: stored?.installment_offsets.join(', ') ?? '',
+		installment_grace_days: stored?.installment_grace_days ?? 0,
+		installment_block_kinds: [...(stored?.installment_block_kinds ?? [])]
+	});
 	// svelte-ignore state_referenced_locally
-	let v = $state({ is_open: !!data.settings?.is_open, intro_text: data.settings?.intro_text ?? '', terms_text: data.settings?.terms_text ?? '', payment_instructions: data.settings?.payment_instructions ?? '', invoice_due_days: String(data.settings?.invoice_due_days ?? 30) });
+	let v = $state(draft(data.settings));
 	$effect(() => {
 		const stored = data.settings;
 		if (!stored) return;
-		untrack(() => (v = { is_open: stored.is_open, intro_text: stored.intro_text, terms_text: stored.terms_text, payment_instructions: stored.payment_instructions, invoice_due_days: String(stored.invoice_due_days) }));
+		untrack(() => (v = draft(stored)));
 	});
-	const dirty = $derived(!!s && (v.is_open !== s.is_open || v.intro_text !== s.intro_text || v.terms_text !== s.terms_text || v.payment_instructions !== s.payment_instructions || Number(v.invoice_due_days) !== s.invoice_due_days));
+	const dirty = $derived(!!s && JSON.stringify(v) !== JSON.stringify(draft(s)));
 	const errs = $derived((form && 'fields' in form ? form.fields : {}) as Record<string, string>);
 	const done = $derived(form && 'done' in form ? String(form.done) : '');
 	const errorText = $derived(form && 'message' in form && form.message && !Object.keys(errs).some((k) => k !== '__all__') ? String(form.message) : '');
@@ -50,7 +62,7 @@
 			<div class="grid items-start gap-5 xl:grid-cols-3">
 				<div class="grid content-start gap-5 xl:col-span-2">
 					<section class="card card-body gap-3">
-						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('regset.card.page')}</h2>
+						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" /> {t('regset.card.page')}</h2>
 						<label class="flex items-start gap-3 rounded-lg border border-line p-3">
 							<input type="checkbox" class="checkbox mt-0.5" name="is_open" bind:checked={v.is_open} />
 							<span class="grid gap-0.5"><span class="text-sm font-semibold text-ink">{t('regset.open')}</span><span class="text-xs text-muted">{t('regset.open_help')}</span></span>
@@ -67,7 +79,7 @@
 						</div>
 					</section>
 					<section class="card card-body gap-3">
-						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('regset.card.invoice')}</h2>
+						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ReceiptText size={16} aria-hidden="true" /> {t('regset.card.invoice')}</h2>
 						<div class="form-control">
 							<label class="label" for="pay"><span class="label-text">{t('regset.payment')}</span></label>
 							<textarea id="pay" name="payment_instructions" class="textarea textarea-bordered min-h-24 w-full" bind:value={v.payment_instructions}></textarea>
@@ -79,12 +91,32 @@
 							<span class="label-text-alt mt-1 block {errs.invoice_due_days ? 'text-error' : ''}">{errs.invoice_due_days || t('regset.due_days_help')}</span>
 						</div>
 					</section>
+					<section class="card card-body gap-3">
+						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('installments.title')}</h2>
+						<div class="form-control">
+							<label class="label" for="installment-offsets"><span class="label-text">{t('installments.offsets')}</span></label>
+							<input id="installment-offsets" name="installment_offsets" class="input input-bordered w-full" aria-describedby="installment-offsets-help" aria-invalid={!!errs.installment_offsets} bind:value={v.installment_offsets} />
+							<span id="installment-offsets-help" class="label-text-alt mt-1 block {errs.installment_offsets ? 'text-error' : ''}">{errs.installment_offsets || t('installments.offsets_help')}</span>
+						</div>
+						<div class="form-control max-w-xs">
+							<label class="label" for="installment-grace"><span class="label-text">{t('installments.grace')}</span></label>
+							<input id="installment-grace" name="installment_grace_days" type="number" min="0" max="365" class="input input-bordered w-full" aria-describedby="installment-grace-help" aria-invalid={!!errs.installment_grace_days} bind:value={v.installment_grace_days} />
+							<span id="installment-grace-help" class="label-text-alt mt-1 block {errs.installment_grace_days ? 'text-error' : ''}">{errs.installment_grace_days || t('installments.grace_help')}</span>
+						</div>
+						<fieldset class="flex flex-wrap gap-x-5 gap-y-2">
+							<legend class="mb-2 text-sm font-semibold">{t('installments.event_types')}</legend>
+							{#each EVENT_KINDS as kind (kind)}
+								<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="checkbox checkbox-sm" name="installment_block_kinds" value={kind} bind:group={v.installment_block_kinds} /> {t(kindLabelKey(kind))}</label>
+							{/each}
+							{#if errs.installment_block_kinds}<p class="basis-full text-xs text-error">{errs.installment_block_kinds}</p>{/if}
+						</fieldset>
+					</section>
 				</div>
 
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 					<section class="card card-body gap-2">
 						<div class="flex items-center justify-between gap-2">
-							<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('regset.card.link')}</h2>
+							<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Link2 size={16} aria-hidden="true" /> {t('regset.card.link')}</h2>
 							{#if s.is_open && data.offerable}<span class="badge badge-sm badge-success">{t('regset.status_open')}</span>
 							{:else}<span class="badge badge-sm badge-warning gap-1"><TriangleAlert size={10} aria-hidden="true" /> {t('regset.status_closed')}</span>{/if}
 						</div>

@@ -103,11 +103,13 @@
 									{#if r.description}<p class="text-sm text-muted">{r.description}</p>{/if}
 								</td>
 								<td class="text-sm">
-									{#if r.kind === 'question'}
-										<span class="badge badge-sm badge-outline">{t('req.kind.question')}</span> <span class="text-muted">{t(`req.qtype.${r.question_type}`)}</span>
-									{:else}
-										<span class="badge badge-sm badge-outline">{t('req.kind.document')}</span>{#if r.requires_document} <span class="text-muted">{t('req.with_file')}</span>{/if}
-									{/if}
+									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+										{#if r.kind === 'question'}
+											<span class="badge badge-sm badge-outline">{t('req.kind.question')}</span><span class="text-muted">{t(`req.qtype.${r.question_type}`)}</span>
+										{:else}
+											<span class="badge badge-sm badge-outline">{t('req.kind.document')}</span>{#if r.requires_document}<span class="text-muted">{t('req.with_file')}</span>{/if}
+										{/if}
+									</div>
 								</td>
 								<td class="text-sm whitespace-nowrap">{r.valid_for_months ? t('req.valid_months', { n: r.valid_for_months }) : t('req.valid_forever')}</td>
 								<td class="text-sm whitespace-nowrap">{r.valid_for_months ? t('req.reminder_days', { n: r.reminder_days_before }) : '–'}</td>

@@ -136,7 +136,7 @@ export default {
 		'eventform.members.remove': 'Remove {name}',
 
 		'eventform.notify_create': 'Tell the invited people',
-		'eventform.notify_create_help': 'People with a login get a message in the app (once, also for a series).',
+		'eventform.notify_create_help': 'Invited members and the parents or guardians of invited children get an app notification. You won’t get a copy for an event you create. A series sends one notification.',
 		'eventform.notify_edit': 'Tell the invited people when the date or time changes',
 		'eventform.notify_edit_help': 'Other changes are saved without a message.',
 
@@ -312,7 +312,7 @@ export default {
 		'eventform.members.remove': '{name} verwijderen',
 
 		'eventform.notify_create': 'Breng de genodigden op de hoogte',
-		'eventform.notify_create_help': 'Wie een login heeft, krijgt een bericht in de app (één keer, ook voor een reeks).',
+		'eventform.notify_create_help': 'Uitgenodigde leden en de ouders of voogden van uitgenodigde kinderen krijgen een melding in de app. Je krijgt geen kopie als je het evenement zelf aanmaakt. Voor een reeks wordt één melding verstuurd.',
 		'eventform.notify_edit': 'Breng de genodigden op de hoogte als de datum of het uur wijzigt',
 		'eventform.notify_edit_help': 'Andere wijzigingen worden zonder bericht opgeslagen.',
 
@@ -488,7 +488,7 @@ export default {
 		'eventform.members.remove': 'Retirer {name}',
 
 		'eventform.notify_create': 'Prévenir les invités',
-		'eventform.notify_create_help': 'Les personnes avec un compte reçoivent un message dans l’app (une fois, même pour une série).',
+		'eventform.notify_create_help': 'Les membres invités et les parents ou tuteurs des enfants invités reçoivent une notification dans l’app. Vous ne recevez pas de copie pour un événement que vous créez. Une série envoie une seule notification.',
 		'eventform.notify_edit': 'Prévenir les invités si la date ou l’heure change',
 		'eventform.notify_edit_help': 'Les autres modifications sont enregistrées sans message.',
 

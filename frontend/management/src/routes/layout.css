@@ -1177,3 +1177,149 @@ textarea[name="note"] {
 .sample-stripes-dark {
     background-image: repeating-linear-gradient(135deg, transparent 0 10px, rgb(255 255 255 / 0.07) 10px 20px);
 }
+
+/* Club portal surfaces and the mobile tab bar. */
+.portal-ui {
+    --portal-panel: #ffffff;
+    --portal-hero: var(--tenant-sidebar-bg, #172942);
+    --portal-hero-content: var(--tenant-sidebar-fg, #fff);
+    --portal-tab-active: var(--color-club-dark);
+    min-height: 100dvh;
+}
+
+.portal-ui .card, .portal-ui .portal-topbar, .portal-ui .portal-tabs {
+    background-color: var(--portal-panel);
+}
+
+.portal-ui .portal-tabs {
+    border-top: 1px solid var(--color-line);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.portal-tab {
+    display: flex;
+    min-width: 0;
+    min-height: 3.5rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    color: var(--color-muted);
+    font: 700 0.72rem/1.1 var(--font-display);
+    letter-spacing: 0.045em;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.portal-tab.active, .portal-tab:hover { color: var(--portal-tab-active); }
+.portal-tab.active { box-shadow: inset 0 2px var(--color-club); }
+
+.portal-ui .portal-masthead {
+    padding-top: env(safe-area-inset-top);
+    background: var(--portal-panel);
+    color: var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
+}
+
+.portal-mode-label { color: var(--color-muted); }
+
+.portal-coach .portal-masthead {
+    background: var(--portal-hero);
+    color: var(--portal-hero-content);
+    border-bottom: 3px solid var(--color-club);
+}
+
+.portal-coach .portal-mode-label { color: inherit; }
+
+.portal-event-banner {
+    background: var(--portal-hero);
+    color: var(--portal-hero-content);
+    border-inline-start: 3px solid var(--color-club);
+}
+
+.portal-event-banner, .event-background-preview {
+    --event-backdrop: var(--tenant-sidebar-bg, #172942);
+}
+
+.portal-person {
+    display: inline-flex;
+    min-height: 2.75rem;
+    flex: none;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-box);
+    padding: 0.25rem 0.75rem 0.25rem 0.3rem;
+    background: var(--portal-panel);
+    color: var(--color-ink);
+    font: 700 0.8rem/1 var(--font-display);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.portal-person[aria-pressed="true"] {
+    border-color: var(--color-club);
+    background: var(--color-club);
+    color: var(--color-club-content);
+}
+
+.portal-coach .portal-person[aria-pressed="true"] {
+    border-color: var(--portal-hero);
+    background: var(--portal-hero);
+    color: var(--portal-hero-content);
+}
+
+.portal-ui .portal-sheet {
+    inset: auto 0 0;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 42rem;
+    max-height: min(92dvh, 60rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-box) var(--radius-box) 0 0;
+    background: var(--portal-panel);
+    color: var(--color-slate);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.portal-sheet::backdrop { background: rgb(0 0 0 / 0.65); }
+
+@media (min-width: 48rem) {
+    .portal-ui .portal-sheet { inset: 0; margin: auto; width: calc(100% - 3rem); border-radius: var(--radius-box); }
+}
+
+@media (prefers-color-scheme: dark) {
+    .portal-ui {
+        color-scheme: dark;
+        --portal-panel: #191f2b;
+        --portal-tab-active: color-mix(in srgb, var(--color-club) 70%, white);
+        --color-paper: #101318;
+        --color-white: #191f2b;
+        --color-ink: #f2f4f8;
+        --color-slate: #d4dce8;
+        --color-muted: #a5b0c1;
+        --color-dim: #91a0b4;
+        --color-subhead: #202939;
+        --color-line: #2e394c;
+        --color-rule: #2a3444;
+        --color-edge: #343f50;
+        --color-stroke: #45536a;
+        --color-danger: #ff9da8;
+        --color-ok-bg: #122e24;
+        --color-ok-border: #295944;
+        --color-ok-text: #82e0ad;
+        --color-warn-bg: #352819;
+        --color-warn-border: #76592e;
+        --color-warn-text: #ffd08d;
+        --color-danger-bg: #3b2229;
+        --color-danger-border: #71414b;
+        --color-info-bg: #163044;
+        --color-info-border: #355978;
+        --color-info-text: #a3d8f5;
+    }
+
+    .portal-ui :is(.input, .select, .textarea, .modal-box, .btn-outline) { background-color: var(--portal-panel); }
+    .portal-ui .btn-outline:hover { background-color: var(--color-subhead); }
+}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowDown, ArrowUp } from '@lucide/svelte';
+	import { RefreshCw, ArrowDown, ArrowUp } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { Overview } from '#lib/overview.ts';
 
@@ -8,7 +8,7 @@
 </script>
 
 <div class="card card-body">
-	<h2 class="card-title">{t('overview.renewal.title')}</h2>
+	<h2 class="card-title flex items-center gap-2"><RefreshCw size={16} class="shrink-0" aria-hidden="true" /> {t('overview.renewal.title')}</h2>
 	{#if !renewal}
 		<p class="text-sm text-muted">{t('overview.renewal.none')}</p>
 	{:else}

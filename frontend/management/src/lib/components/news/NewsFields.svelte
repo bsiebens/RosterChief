@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Building2, FilePenLine, Shield } from '@lucide/svelte';
+	import { Building2, FilePenLine, Users } from '@lucide/svelte';
 	import Field from '#lib/components/Field.svelte';
 	import RichTextEditor from '#lib/components/news/RichTextEditor.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -38,7 +38,7 @@
 
 	<section class="card card-body" aria-labelledby="{uid}-audience">
 		<header class="mb-3 grid gap-0.5">
-			<h2 id="{uid}-audience" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Shield size={16} aria-hidden="true" /> {t('news.card.audience')}</h2>
+			<h2 id="{uid}-audience" class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Users size={16} aria-hidden="true" /> {t('news.card.audience')}</h2>
 			<p class="text-xs text-muted">{t('news.card.audience_desc')}</p>
 		</header>
 		<div class="grid gap-5">

@@ -33,7 +33,7 @@ export type SignupRegistration = {
 };
 export type Duplicate = { member_id: string; name: string; email: string; date_of_birth: string | null; same_email: boolean; has_membership: boolean };
 export type SignupList = { count: number; clean_count: number; season_id: string | null; season_name: string | null; results: SignupRow[] };
-export type SignupOptions = { teams: { id: string; name: string }[]; positions: { id: string; name: string }[] };
+export type SignupOptions = { teams: { id: string; name: string }[]; /** `staff`: a staff position; placing a sign-up with it puts them on the team's staff (volunteers), without a jersey number. */ positions: { id: string; name: string; staff?: boolean }[] };
 
 export const SIGNUP_FILTERS = ['all', 'clean', 'open'] as const;
 export type SignupFilter = (typeof SIGNUP_FILTERS)[number];

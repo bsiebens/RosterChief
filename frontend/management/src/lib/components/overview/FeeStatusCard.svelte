@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Wallet } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { Overview } from '#lib/overview.ts';
 
@@ -19,7 +20,7 @@
 </script>
 
 <div class="card card-body">
-	<h2 class="card-title">{t('overview.fees.title')}</h2>
+	<h2 class="card-title flex items-center gap-2"><Wallet size={16} class="shrink-0" aria-hidden="true" /> {t('overview.fees.title')}</h2>
 	{#if !total}
 		<p class="text-sm text-muted">{t('overview.fees.empty')}</p>
 	{:else}

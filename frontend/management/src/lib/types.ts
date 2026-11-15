@@ -19,6 +19,8 @@ export type Me = {
 	email: string;
 	/** The user's own member record in this club, if they have one. */
 	member_id: string | null;
+	/** The account has a club membership or is a parent or guardian of a child. */
+	has_member_portal_role: boolean;
 	first_name: string;
 	last_name: string;
 	club: { slug: string; name: string; is_platform: boolean };
@@ -27,6 +29,9 @@ export type Me = {
 	is_club_admin: boolean;
 	/** members.manage_members (or the Owner role): edit members, families, groups, memberships. */
 	can_manage_members: boolean;
+	/** registration.manage_finance (or the Owner role): the billing review of registrations, their invoices and the payments against them. */
+	can_manage_finance: boolean;
+	can_manage_sponsors: boolean;
 	/** admin.manage_settings (or the Owner role): club settings, levels, positions, pools, creating and ordering teams. */
 	can_manage_settings: boolean;
 	/** evaluations.execute_evaluations (or the Owner role): give evaluations, run evaluation meetings and see the Evaluations tab on a member. */
@@ -62,7 +67,7 @@ export type Branding = {
 	is_platform: boolean;
 	logo_url: string | null;
 	/** Browser icons the backend generated from the logo (site-relative); empty without a logo. */
-	icons: { ico?: string; png_32?: string; png_192?: string; apple_touch?: string };
+	icons: { ico?: string; png_32?: string; png_192?: string; png_512?: string; apple_touch?: string };
 	primary_color: string;
 	secondary_color: string;
 	primary_content_color: string;
@@ -112,4 +117,4 @@ export type AuthState =
 	/** Club staff without a second factor: only the security screens work. */
 	| { status: 'mfa_enrollment_required'; user: User }
 	/** `me` is set in club mode; on the bare domain (platform mode) it is null and `locals.myClubs` is used instead. */
-	| { status: 'authenticated'; user: User; me: Me | null };
+	| { status: 'authenticated'; user: User; me: Me | null; memberShopEnabled?: boolean };

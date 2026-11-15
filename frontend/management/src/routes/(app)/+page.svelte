@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowRight } from '@lucide/svelte';
+	import { Building2, House, ArrowRight } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
@@ -53,7 +53,7 @@
 	{:else}
 		<div class="card">
 			<div class="card-body gap-1">
-				<h2 class="font-display text-xl font-extrabold tracking-[.04em] text-ink uppercase">{first ? t('home.welcome_name', { name: first }) : t('home.welcome')}</h2>
+				<h2 class="font-display text-xl font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><House size={16} class="shrink-0" aria-hidden="true" /> {first ? t('home.welcome_name', { name: first }) : t('home.welcome')}</h2>
 				<p class="text-sm text-muted">{t('home.welcome_body', { club: club.name })}</p>
 			</div>
 		</div>
@@ -61,7 +61,7 @@
 {:else if data.clubs.length === 0}
 	<div class="card max-w-xl">
 		<div class="card-body gap-3">
-			<h2 class="font-display text-xl font-extrabold tracking-[.04em] text-ink uppercase">{t('home.no_clubs.title')}</h2>
+			<h2 class="font-display text-xl font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><Building2 size={16} class="shrink-0" aria-hidden="true" /> {t('home.no_clubs.title')}</h2>
 			<p class="text-sm text-muted">{t('home.no_clubs.body')}</p>
 			<button class="btn btn-outline self-start" onclick={signOut}>{t('shell.menu.logout')}</button>
 		</div>

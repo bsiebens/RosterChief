@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, Save } from '@lucide/svelte';
+	import { Layers, ArrowLeft, Save, ClipboardList } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ProductFields from '#lib/components/shop/ProductFields.svelte';
 	import ProductVariantsEditor from '#lib/components/shop/ProductVariantsEditor.svelte';
@@ -55,12 +55,12 @@
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.details')}</h2>
+				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.details')}</h2>
 				<ProductFields bind:v categories={data.categories} seasons={data.seasons} teams={data.teams} {fields} {tried} />
 			</section>
 			<section class="card card-body gap-3">
 				<header class="grid gap-0.5">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.variants')}</h2>
+					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Layers size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.variants')}</h2>
 					<p class="text-xs text-muted">{t('shop.card.variants_desc')}</p>
 				</header>
 				<ProductVariantsEditor bind:variants membership={v.product_type === 'membership'} teams={teamsForVariants} />

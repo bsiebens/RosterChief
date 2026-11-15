@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Save, Trash2 } from '@lucide/svelte';
+	import { Settings2, ArrowLeft, Save, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ActionList from '#lib/components/actions/ActionList.svelte';
 	import ActionRow from '#lib/components/actions/ActionRow.svelte';
@@ -93,7 +93,7 @@
 			<DiscountFields bind:v fields={errs} {tried} />
 		</form>
 		<aside class="card card-body gap-3 xl:sticky xl:top-20">
-			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.card.actions')}</h2>
+			<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('shop.card.actions')}</h2>
 			<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 				<span class="badge badge-sm {statusBadge(item.status)}">{t(`shop.status.${item.status}`)}</span>
 				<span class="font-mono">{t('shop.disc.used_n', { n: item.used_count })}</span>

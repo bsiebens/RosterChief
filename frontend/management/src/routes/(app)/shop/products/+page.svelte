@@ -2,7 +2,7 @@
 		import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { Package, Pencil, Plus, Tags, Trash2, Lock } from '@lucide/svelte';
+	import { FolderTree, Package, Pencil, Plus, Tags, Trash2, Lock } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -11,7 +11,7 @@
 	import Pager from '#lib/components/Pager.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
-	import { money, productHref, type Category, type ProductItem } from '#lib/shop.ts';
+	import { day, money, productHref, type Category, type ProductItem } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 
 	let { data, form } = $props();
@@ -119,7 +119,8 @@
 									<td class="text-sm">{#if p.category?.system_key}<span class="inline-flex items-center gap-1" title={t('shop.cat.system_reason')}><Lock size={11} class="text-muted" aria-hidden="true" />{p.category.name}</span>{:else}{p.category?.name ?? t('common.none')}{/if}</td>
 									<td class="text-right font-mono text-sm whitespace-nowrap">{money(p.price)}</td>
 									<td>
-										{#if p.inventory_managed}<span class="badge badge-sm {p.in_stock ? 'badge-success' : 'badge-error'}">{p.in_stock ? t('shop.in_stock') : t('shop.out_of_stock')}</span>{:else}<span class="text-xs text-muted">{t('shop.not_tracked')}</span>{/if}
+										{#if p.inventory_managed || p.ordering_closed}<span class="badge badge-sm {p.in_stock ? 'badge-success' : 'badge-error'}">{p.in_stock ? t('shop.in_stock') : t('shop.out_of_stock')}</span>{:else if !p.next_ordering_window}<span class="text-xs text-muted">{t('shop.not_tracked')}</span>{/if}
+										{#if p.next_ordering_window}<p class="mt-1 text-xs text-muted">{t('shop.window.summary', { deadline: day(p.next_ordering_window.deadline), estimated_delivery: day(p.next_ordering_window.estimated_delivery) })}</p>{/if}
 									</td>
 									<td class="text-right whitespace-nowrap">
 										<div class="flex justify-end gap-1">
@@ -138,7 +139,7 @@
 
 		<aside class="card card-body gap-3 xl:sticky xl:top-20" aria-labelledby="cat-h">
 			<div class="flex items-center justify-between gap-2">
-				<h2 id="cat-h" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.cat.title')}</h2>
+				<h2 id="cat-h" class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><FolderTree size={16} class="shrink-0" aria-hidden="true" /> {t('shop.cat.title')}</h2>
 				<button class="btn btn-outline btn-sm gap-2" type="button" onclick={() => askCat(null)}><Plus size={14} /> {t('shop.cat.add')}</button>
 			</div>
 			{#if done === 'category_saved'}<Alert kind="success">{t('shop.cat.saved')}</Alert>{/if}

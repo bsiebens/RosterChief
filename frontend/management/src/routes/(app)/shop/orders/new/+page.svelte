@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { beforeNavigate } from '$app/navigation';
-	import { ArrowLeft, Check, Save, Ticket, X } from '@lucide/svelte';
+	import { ArrowLeft, Check, ListOrdered, NotebookPen, Save, Tag, Ticket, UserRound, X, ClipboardList } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -43,6 +43,7 @@
 		const body = { purchaser_id: purchaser, lines: valid.map(lineIn), discount_code: discountCode.trim() || undefined, notes: undefined };
 		const ready = !!purchaser && valid.length > 0 && valid.length === lines.length;
 		const mine = ++seqNo;
+		preview = null;
 		if (!ready) {
 			untrack(() => {
 				preview = null;
@@ -74,6 +75,7 @@
 	const estimateTotal = $derived(valid.reduce((s, l) => s + unit(l) * l.quantity, 0));
 	const total = $derived(preview ? Number(preview.total) : estimateTotal);
 	const voucherSum = $derived(vouchers.reduce((s, v) => s + (Number(v.amount) || 0), 0));
+	const due = $derived(Math.max(0, total - voucherSum));
 
 	async function addVoucher() {
 		const number = voucherNumber.trim().toUpperCase();
@@ -157,26 +159,26 @@
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.card.purchaser')}</h2>
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><UserRound size={16} aria-hidden="true" />{t('shop.orders.card.purchaser')}</h2>
 				<EntityPicker kind="member" name="purchaser_id_picker" label={t('shop.orders.col.purchaser')} bind:value={purchaser} error={errs.purchaser_id ?? (tried && !purchaser ? t('shop.orders.new.purchaser_required') : undefined)} />
 			</section>
 			<section class="card card-body gap-3">
 				<header class="grid gap-0.5">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.card.lines')}</h2>
+					<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListOrdered size={16} aria-hidden="true" />{t('shop.orders.card.lines')}</h2>
 					<p class="text-xs text-muted">{t('shop.orders.new.lines_help')}</p>
 				</header>
 				{#if tried && (!valid.length || valid.length !== lines.length)}<p class="text-xs text-error">{t('shop.orders.new.lines_required')}</p>{/if}
 				<OrderLinesEditor products={data.products} bind:lines preview={preview?.lines ?? null} estimate={!preview} errors={errs} />
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.notes')}</h2>
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><NotebookPen size={16} aria-hidden="true" />{t('shop.orders.notes')}</h2>
 				<textarea class="textarea textarea-bordered w-full" rows="3" bind:value={notes} aria-label={t('shop.orders.notes')}></textarea>
 			</section>
 		</div>
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.new.discount')}</h2>
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><Tag size={16} aria-hidden="true" />{t('shop.orders.new.discount')}</h2>
 				<Field label={t('shop.orders.new.discount_code')} name="discount_code_input" bind:value={discountCode} error={discountErr || errs.discount_code} autocomplete="off" />
 				{#if preview?.discount}<p class="flex items-center gap-1.5 text-sm text-success"><Check size={14} aria-hidden="true" /> {preview.discount.description}: −{money(preview.discount.amount)}</p>{/if}
 
@@ -197,14 +199,25 @@
 			</section>
 
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.orders.new.summary')}</h2>
-				<dl class="grid gap-1 text-sm">
-					<div class="flex justify-between"><dt class="text-muted">{t('shop.orders.subtotal')}</dt><dd class="font-mono">{money(preview ? preview.subtotal : estimateTotal)}</dd></div>
-					{#if preview?.discount}<div class="flex justify-between"><dt class="text-muted">{t('shop.orders.discount')}</dt><dd class="font-mono">−{money(preview.discount.amount)}</dd></div>{/if}
-					{#if voucherSum > 0}<div class="flex justify-between"><dt class="text-muted">{t('shop.orders.new.paid_by_voucher')}</dt><dd class="font-mono">−{money(voucherSum)}</dd></div>{/if}
-					<div class="flex justify-between border-t border-line pt-1 text-base font-semibold"><dt>{t('shop.orders.total')}</dt><dd class="font-mono">{money(total)}</dd></div>
+				<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" />{t('shop.orders.new.summary')}</h2>
+				<dl class="grid gap-1.5 text-sm">
+					{#each valid as line, i (line.key)}
+						{@const product = data.products.find((item) => item.id === line.product_id)}
+						{@const variant = product?.variants.find((item) => item.id === line.variant_id)}
+						<div class="flex justify-between gap-3">
+							<dt><span class="font-mono text-muted">{line.quantity} ×</span> {product?.name}{variant ? ` · ${variant.name}` : ''}</dt>
+							<dd class="shrink-0 font-mono">{money(preview?.lines[i]?.line_total ?? unit(line) * line.quantity)}</dd>
+						</div>
+					{/each}
+					<div class="flex justify-between gap-3 border-t border-line pt-1"><dt class="text-muted">{t('shop.orders.subtotal')}</dt><dd class="font-mono">{money(preview ? preview.subtotal : estimateTotal)}</dd></div>
+					{#if preview?.discount}<div class="flex justify-between gap-3"><dt class="text-muted">{t('shop.orders.discount')} · {preview.discount.description}</dt><dd class="shrink-0 font-mono">−{money(preview.discount.amount)}</dd></div>{/if}
+					<div class="flex justify-between gap-3 text-base font-semibold"><dt>{t('shop.orders.total')}</dt><dd class="font-mono">{money(total)}</dd></div>
+					{#each vouchers.filter((voucher) => Number(voucher.amount) > 0) as voucher (voucher.number)}
+						<div class="flex justify-between gap-3"><dt class="text-muted">{t('shop.orders.new.paid_by_voucher')} · {voucher.number}</dt><dd class="shrink-0 font-mono">−{money(voucher.amount)}</dd></div>
+					{/each}
+					{#if voucherSum > 0}<div class="flex justify-between gap-3 border-t border-line pt-1 text-base font-semibold"><dt>{t('shop.receipt.balance')}</dt><dd class="font-mono">{money(due)}</dd></div>{/if}
 				</dl>
-				{#if !preview}<p class="text-xs text-muted">{t('shop.orders.new.estimate_hint')}</p>{/if}
+				{#if valid.length && !preview}<p class="text-xs text-muted">{t('shop.orders.new.estimate_hint')}</p>{/if}
 				<div class="grid gap-2">
 					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('shop.orders.new.save')}</button>
 					<a class="btn btn-outline w-full" href="/shop/orders">{t('common.cancel')}</a>

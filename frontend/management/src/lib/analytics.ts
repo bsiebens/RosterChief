@@ -27,7 +27,7 @@ export type Goalie = Leader & { seconds: number; minutes: number | null; gaa: nu
 export type ForAgainst = { label: string; goals_for: number; goals_against: number; for_pct: number; against_pct: number };
 export type SplitRow = { games: number; won: number; drawn: number; lost: number; gf: number; ga: number; diff: number; avg_for: number | null; avg_against: number | null; share_for: number };
 export type OpponentRow = { name: string; games: number; won: number; drawn: number; lost: number; gf: number; ga: number };
-export type GameRow = { event: GameRef; result: Result; goals_for: number; goals_against: number; pim_for: number | null; pim_against: number | null; pim_for_pct: number; pim_against_pct: number; total_pct: number };
+export type GameRow = { event: GameRef; result: Result; goals_for: number; goals_against: number; pim_for: number | null; pim_against: number | null; pim_for_excl: number | null; pp_goals: number | null; pp_opportunities: number | null; pk_goals_against: number | null; pk_opportunities: number | null; pim_for_pct: number; pim_against_pct: number; total_pct: number };
 export type TrendPoint = { x: number; y: number; value: number; game: GameRef | null };
 export type Trend = { points: TrendPoint[]; line: string; area: string; zero_y: number; last: number };
 export type PenaltyRef = { time: string; player: string; kind: string; side: string; ours: boolean };
@@ -132,3 +132,36 @@ export const RESULT_CHIP: Record<Result, string> = {
 
 /** The analytics page of a team, keeping the season. */
 export const analyticsHref = (teamId: string, season?: string | null) => `/teams/${teamId}/analytics${season ? `?season=${season}` : ''}`;
+
+export type ProgressPoint = { game: GameRef; value: number; game_value: number | null };
+export type Progress = { points: ProgressPoint[]; first: number | null; second: number | null; change: number | null; current: number | null };
+
+/**
+ * A season-to-date series over the games (oldest first): `part` and `whole` give one game's contribution to the
+ * numerator and denominator (null: the game has no data for it). The value after each game is `scale × Σpart / Σwhole`
+ * so far; `first`/`second` are the same ratio over the first and the second half of the games with data, and `change` the difference.
+ */
+export function progress(rows: GameRow[], part: (r: GameRow) => number | null, whole: (r: GameRow) => number | null, scale = 1): Progress {
+	const chronological = [...rows].reverse();
+	let p = 0;
+	let w = 0;
+	const points: ProgressPoint[] = [];
+	const used: { p: number; w: number }[] = [];
+	for (const row of chronological) {
+		const a = part(row);
+		const b = whole(row);
+		if (a === null || b === null) continue;
+		p += a;
+		w += b;
+		used.push({ p: a, w: b });
+		if (w > 0) points.push({ game: row.event, value: (scale * p) / w, game_value: b > 0 ? (scale * a) / b : null });
+	}
+	const ratio = (items: { p: number; w: number }[]) => {
+		const sw = items.reduce((n, i) => n + i.w, 0);
+		return sw > 0 ? (scale * items.reduce((n, i) => n + i.p, 0)) / sw : null;
+	};
+	const half = Math.floor(used.length / 2);
+	const first = used.length >= 4 ? ratio(used.slice(0, half)) : null;
+	const second = used.length >= 4 ? ratio(used.slice(used.length - half)) : null;
+	return { points, first, second, change: first !== null && second !== null ? second - first : null, current: points.length ? points[points.length - 1].value : null };
+}

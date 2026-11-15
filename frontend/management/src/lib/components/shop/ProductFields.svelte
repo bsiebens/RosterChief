@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CalendarDays, Plus, Trash2 } from '@lucide/svelte';
 	import Field from '#lib/components/Field.svelte';
 	import ProductRegistrationFields from '#lib/components/shop/ProductRegistrationFields.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -58,4 +59,16 @@
 		{/each}
 	</div>
 	{#if v.product_type === 'membership'}<ProductRegistrationFields bind:v {seasons} {teams} {volunteer} {fields} />{/if}
+	<fieldset aria-labelledby="{uid}-ordering-windows" class="grid min-w-0 gap-3 rounded-lg border border-line p-3">
+		<h3 id="{uid}-ordering-windows" class="flex items-center gap-3 text-sm font-semibold text-ink"><CalendarDays size={16} class="shrink-0" aria-hidden="true" />{t('shop.window.title')}</h3>
+		{#each v.ordering_windows as window, index}
+			<div class="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+				<Field label={t('shop.window.deadline')} type="date" bind:value={window.deadline} error={fields[`ordering_windows.${index}.deadline`]} required />
+				<Field label={t('shop.window.delivery')} type="date" bind:value={window.estimated_delivery} error={fields[`ordering_windows.${index}.estimated_delivery`]} required />
+				<button type="button" class="btn btn-outline btn-error btn-square justify-self-start" aria-label={t('common.delete')} onclick={() => v.ordering_windows.splice(index, 1)}><Trash2 size={16} /></button>
+			</div>
+		{/each}
+		{#if fields.ordering_windows}<p class="text-sm text-error">{fields.ordering_windows}</p>{/if}
+		<button type="button" class="btn btn-outline justify-self-start gap-2" onclick={() => v.ordering_windows.push({ deadline: '', estimated_delivery: '' })}><Plus size={16} />{t('shop.window.add')}</button>
+	</fieldset>
 </div>

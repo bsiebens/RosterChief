@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { ArrowLeft, Save } from '@lucide/svelte';
+	import { Users, ArrowLeft, Save } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import NewsFields from '#lib/components/news/NewsFields.svelte';
 	import NewsPreview from '#lib/components/news/NewsPreview.svelte';
@@ -64,7 +64,7 @@
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
 				<div class="grid gap-1.5">
-					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t('news.card.audience')}</p>
+					<p class="font-display text-xs font-bold tracking-[.08em] text-muted uppercase flex items-center gap-2"><Users size={16} class="shrink-0" aria-hidden="true" /> {t('news.card.audience')}</p>
 					{#if teamNames.length}
 						<div class="flex flex-wrap gap-1.5">{#each teamNames as name (name)}<span class="badge badge-neutral">{name}</span>{/each}</div>
 					{:else}

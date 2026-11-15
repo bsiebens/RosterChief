@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Whistle } from '@lucide/svelte';
+	import { Whistle, CalendarDays, CalendarRange, Trophy } from '@lucide/svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { monthLabel, type OfficiatingKind } from '#lib/member-stats.ts';
 	import type { EligibilityProfile } from '#lib/members/eligibility.ts';
@@ -65,19 +65,19 @@
 		</div>
 		<div class="grid gap-4 lg:grid-cols-2">
 			<div class="grid gap-2">
-				<h4 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('stats.off.months')}</h4>
+				<h4 class="flex flex-wrap items-center gap-2 font-display text-sm font-bold tracking-[.08em] text-ink uppercase"><CalendarDays size={16} class="shrink-0" aria-hidden="true" /> {t('stats.off.months')}</h4>
 				<BarChart items={monthItems} label={t('stats.off.months')} height="h-32" />
 				<div class="flex flex-wrap gap-x-4 text-xs text-muted">
 					{#each types as ty, i (ty)}<span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm {shade(i)}"></span>{typeName(ty)}</span>{/each}
 				</div>
 			</div>
 			<div class="grid gap-2">
-				<h4 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('stats.off.seasons')}</h4>
+				<h4 class="flex flex-wrap items-center gap-2 font-display text-sm font-bold tracking-[.08em] text-ink uppercase"><CalendarRange size={16} class="shrink-0" aria-hidden="true" /> {t('stats.off.seasons')}</h4>
 				<BarChart items={seasonItems} label={t('stats.off.seasons')} height="h-32" />
 			</div>
 		</div>
 		<div class="grid gap-2">
-			<h4 class="font-display text-sm font-bold tracking-[.08em] text-ink uppercase">{t('stats.off.competitions')}</h4>
+			<h4 class="flex flex-wrap items-center gap-2 font-display text-sm font-bold tracking-[.08em] text-ink uppercase"><Trophy size={16} class="shrink-0" aria-hidden="true" /> {t('stats.off.competitions')}</h4>
 			<HBars rows={competitions} label={t('stats.off.competitions')} />
 		</div>
 	{/if}

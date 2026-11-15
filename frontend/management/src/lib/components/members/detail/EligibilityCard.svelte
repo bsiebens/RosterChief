@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Pencil, Plus, Trash2 } from '@lucide/svelte';
+	import { Ban, ListChecks, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import { kindIcon } from '#lib/officiating-icons.ts';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -63,7 +63,7 @@
 			</div>
 		</dl>
 		<div>
-			<h3 class="mb-2 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t(`eligibility.${kind}.can`)}</h3>
+			<h3 class="mb-2 font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t(`eligibility.${kind}.can`)}</h3>
 			{#if profile.eligible_teams.length}
 				<div class="flex flex-wrap gap-2">
 					{#each profile.eligible_teams as team (team.id)}<span class="badge badge-outline rounded-sm font-display text-xs font-bold tracking-[.06em] uppercase">{team.name}</span>{/each}
@@ -74,7 +74,7 @@
 		</div>
 		{#if kind === 'referee' && profile.excluded_teams.length}
 			<div>
-				<h3 class="mb-2 font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('eligibility.not_allowed')}</h3>
+				<h3 class="mb-2 font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><Ban size={16} class="shrink-0" aria-hidden="true" /> {t('eligibility.not_allowed')}</h3>
 				<div class="flex flex-wrap gap-2">
 					{#each profile.excluded_teams as team (team.id)}<span class="badge badge-outline badge-error rounded-sm font-display text-xs font-bold tracking-[.06em] uppercase">{team.name}</span>{/each}
 				</div>

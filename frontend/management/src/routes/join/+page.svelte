@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { CircleAlert, Lock, Plus, Trash2 } from '@lucide/svelte';
+	import { CalendarClock, CircleAlert, Lock, Plus, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import JerseyNumberField from '#lib/components/registration/JerseyNumberField.svelte';
 	import PublicShell from '#lib/components/registration/PublicShell.svelte';
@@ -44,6 +44,8 @@
 	let entries = $state<EntryDraft[]>([fresh({ who: 'self' })]);
 	let website = $state('');
 	let accepted = $state(false);
+	let useInstallments = $state(false);
+	let installmentsUnavailable = $state(false);
 	let busy = $state(false);
 	let errors = $state<Record<string, string>>({});
 	// Bumped when the server refused a jersey number (another registration just took it): every number list is fetched again.
@@ -150,13 +152,18 @@
 			return;
 		}
 		busy = true;
-		const res = await api<{ token: string }>('POST', '/public/registration', { body: { contact: { ...contact, first_name: contact.first_name.trim(), last_name: contact.last_name.trim(), email: contact.email.trim(), phone: contact.phone.trim() }, entries: entries.map(entryBody), website, language: getLang() } });
+		const res = await api<{ token: string }>('POST', '/public/registration', { body: { contact: { ...contact, first_name: contact.first_name.trim(), last_name: contact.last_name.trim(), email: contact.email.trim(), phone: contact.phone.trim() }, entries: entries.map(entryBody), website, language: getLang(), use_installments: useInstallments } });
 		busy = false;
 		if (res.ok && res.data) {
 			await goto(statusHref(res.data.token));
 			return;
 		}
 		if (res.code === 'closed') closedNow = true;
+		else if (res.code === 'installments_unavailable') {
+			useInstallments = false;
+			installmentsUnavailable = true;
+			formError = t('installments.unavailable');
+		}
 		else if (res.status === 429 || res.code === 'rate_limited') formError = t('reg.err.rate_limited');
 		else if (res.status === 0) formError = t('reg.err.network');
 		else if (Object.keys(res.fields).length) {
@@ -390,6 +397,17 @@
 					<p class="text-xs text-muted">{t('reg.price.note')}</p>
 				{/if}
 			</section>
+
+			{#if cfg.installment_offsets.length && !installmentsUnavailable}
+				<section class="card card-body gap-3">
+					<fieldset class="grid gap-2" aria-describedby="reg-installment-dates">
+						<legend class="mb-2 flex items-center gap-2 font-display text-base font-bold text-ink"><CalendarClock size={16} aria-hidden="true" /> {t('installments.payment_option')}</legend>
+						<label class="flex items-center gap-3 text-sm"><input type="radio" class="radio radio-sm" name="payment_option" value={false} bind:group={useInstallments} /> {t('installments.full')}</label>
+						<label class="flex items-center gap-3 text-sm"><input type="radio" class="radio radio-sm" name="payment_option" value={true} bind:group={useInstallments} /> {t('installments.choose', { n: cfg.installment_offsets.length + 1 })}</label>
+						<p id="reg-installment-dates" class="text-xs text-muted">{t('installments.when', { days: cfg.installment_offsets.join(', ') })}</p>
+					</fieldset>
+				</section>
+			{/if}
 
 			{#if cfg.terms_text}
 				<section class="card card-body gap-3" aria-labelledby="reg-terms">

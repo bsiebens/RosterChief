@@ -33,6 +33,8 @@ export type RosterEntry = {
 	jersey_number: number | null;
 	is_captain: boolean;
 	is_alternate_captain: boolean;
+	/** Open requirements that keep this player out of some events (only for those who manage the team). */
+	open_requirements?: string[];
 };
 export type StaffEntry = { id: string; member_id: string; first_name: string; last_name: string; photo_url: string | null; position_id: string | null; position_name: string | null };
 export type TeamDetail = TeamRow & { season_id: string; photo_url?: string | null; analytics_available?: boolean; roster: RosterEntry[]; staff: StaffEntry[] };

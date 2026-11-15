@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ListChecks } from '@lucide/svelte';
 	import { bySection, optionsOf, type FieldOut } from '#lib/forms.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 
@@ -13,7 +14,7 @@
 
 {#each groups as g, gi (gi)}
 	<section class="grid gap-4">
-		{#if g.section}<h3 class="border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{g.section}</h3>{/if}
+		{#if g.section}<h3 class="flex items-center gap-2 border-b border-rule pb-1 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ListChecks size={16} aria-hidden="true" /> {g.section}</h3>{/if}
 		{#each g.items as f (f.id)}
 			{@const fid = `${id}-${f.key}`}
 			{@const err = errors[f.key]}

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Banknote, BadgeCheck, HandCoins, IdCard, Plus, Trash2, Users } from '@lucide/svelte';
+	import { History, Banknote, BadgeCheck, HandCoins, IdCard, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import RecordPaymentModal from '#lib/components/members/detail/RecordPaymentModal.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import AddMembershipModal from '#lib/components/members/detail/AddMembershipModal.svelte';
+	import { formatDay } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { currentMembership, feeBadge, feeStatusLabel, roleInfoKeys, seasonName, statusBadge, statusLabel } from '#lib/members/detail-helpers.ts';
 	import type { MemberDetail, Season } from '#lib/members/detail-types.ts';
@@ -75,7 +76,16 @@
 			{#if isAdmin && current.fee_status}
 				<div class="flex items-center justify-between gap-4 py-2">
 					<dt class="text-sm text-muted">{t('members.detail.fee_status')}</dt>
-					<dd><span class="badge badge-sm {feeBadge(current.fee_status)}">{feeStatusLabel(current.fee_status)}</span></dd>
+					<dd class="flex flex-wrap justify-end gap-1.5">
+						<span class="badge badge-sm {feeBadge(current.fee_status)}">{feeStatusLabel(current.fee_status)}</span>
+						{#if current.next_installment?.late}<span class="badge badge-error badge-sm">{t('installments.late')}</span>{/if}
+					</dd>
+				</div>
+			{/if}
+			{#if isAdmin && current.next_installment}
+				<div class="flex items-center justify-between gap-4 py-2">
+					<dt class="text-sm text-muted">{t('installments.next_due')}</dt>
+					<dd class="text-sm font-semibold text-ink">{formatDay(current.next_installment.due_date)} · {money(current.next_installment.remaining)}</dd>
 				</div>
 			{/if}
 			{#if isAdmin && current.fee_amount != null}
@@ -103,7 +113,7 @@
 
 	{#if member.club_memberships.length}
 		<div class="my-1 h-px bg-rule"></div>
-		<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('members.detail.season_history')}</h3>
+		<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><History size={16} class="shrink-0" aria-hidden="true" /> {t('members.detail.season_history')}</h3>
 		<table class="table">
 			<thead>
 				<tr>
@@ -118,7 +128,10 @@
 						<td class="font-semibold">{seasonName(seasons, cm.season_id) || '—'}</td>
 						<td>{statusLabel(cm.status)}</td>
 						{#if isAdmin}
-							<td>{cm.fee_status ? feeStatusLabel(cm.fee_status) : '—'}</td>
+								<td>
+									{cm.fee_status ? feeStatusLabel(cm.fee_status) : '—'}
+									{#if cm.next_installment?.late}<span class="badge badge-error badge-sm">{t('installments.late')}</span>{/if}
+								</td>
 							<td class="text-right">
 								{#if deletable(cm)}
 									<button

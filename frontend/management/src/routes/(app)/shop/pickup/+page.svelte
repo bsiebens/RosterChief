@@ -130,7 +130,7 @@
 
 				<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 					<section class="card card-body gap-3">
-						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase">{t('shop.pickup.card.notify')}</h2>
+						<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Bell size={16} class="shrink-0" aria-hidden="true" /> {t('shop.pickup.card.notify')}</h2>
 						<div class="form-control w-full">
 							<label class="label" for="{formId}-pickup"><span class="label-text">{t('shop.orders.pickup_instructions')}</span></label>
 							<textarea id="{formId}-pickup" class="textarea textarea-bordered w-full" rows="4" maxlength="2000" bind:value={pickup}></textarea>

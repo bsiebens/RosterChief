@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { AlertTriangle, CalendarDays, FileText, Minus, Plus, UserPlus, X } from '@lucide/svelte';
+	import { AlertTriangle, CalendarDays, FileText, ListChecks, Minus, Plus, UserPlus, X } from '@lucide/svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import { api } from '#lib/management-api.ts';
 	import { t } from '#lib/i18n.svelte.ts';
+	import { kindIcon } from '#lib/officiating-icons.ts';
 	import { eur, fmtDay, fmtRange, fmtTime, gameLabel, REF_KINDS, ROW_GRID, type Game, type RefKind, type Signup, type TypeRef } from '#lib/referees.ts';
 	import AssignmentRow from './AssignmentRow.svelte';
 
@@ -77,9 +78,10 @@
 			{#if error}<p class="text-sm text-error" role="alert">{error}</p>{/if}
 
 			{#each sections as kind (kind)}
+				{@const KindIcon = kindIcon[kind]}
 				<section aria-label={t(`referees.kind.${kind}`)} class="card overflow-hidden">
 					<div class="flex flex-wrap items-center gap-2 border-b border-line bg-subhead px-4 py-2.5">
-						<h3 class="font-display text-sm font-bold tracking-[.1em] text-ink uppercase">{t(`referees.kind.${kind}`)}</h3>
+						<h3 class="card-title"><KindIcon size={16} class="shrink-0" aria-hidden="true" /> {t(`referees.kind.${kind}`)}</h3>
 						<span class="badge badge-sm {short(g, kind) ? 'badge-warning' : 'badge-success'}">{t('referees.slots', { n: rows(g, kind).length, max: max(g, kind) })}</span>
 						<div class="flex-1"></div>
 						{#if needs(g, kind)}
@@ -104,7 +106,7 @@
 			{/each}
 
 			<section aria-label={t('referees.signups.title')} class="card overflow-hidden">
-				<div class="flex items-center gap-2 border-b border-line bg-subhead px-4 py-2.5"><h3 class="font-display text-sm font-bold tracking-[.1em] text-ink uppercase">{t('referees.signups.title')}</h3><div class="flex-1"></div>{#each REF_KINDS.filter((k) => needs(g, k)) as k (k)}<button class="btn btn-outline btn-xs" type="button" onclick={() => onassign(g, k, undefined, true)}><UserPlus size={12} aria-hidden="true" /> {t('referees.signups.register', { kind: t(`referees.kind_one.${k}`) })}</button>{/each}</div>
+				<div class="flex items-center gap-2 border-b border-line bg-subhead px-4 py-2.5"><h3 class="card-title"><ListChecks size={16} class="shrink-0" aria-hidden="true" /> {t('referees.signups.title')}</h3><div class="flex-1"></div>{#each REF_KINDS.filter((k) => needs(g, k)) as k (k)}<button class="btn btn-outline btn-xs" type="button" onclick={() => onassign(g, k, undefined, true)}><UserPlus size={12} aria-hidden="true" /> {t('referees.signups.register', { kind: t(`referees.kind_one.${k}`) })}</button>{/each}</div>
 				{#if g.signups.length}
 					<ul>
 						{#each g.signups as s (s.kind + s.id)}

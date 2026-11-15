@@ -8,27 +8,29 @@ type Tab = (typeof TABS)[number];
 
 export const load: PageServerLoad = async ({ params, url, fetch }) => {
 	const id = params.id;
+	const coachView = url.searchParams.get('view') === 'coach';
 	const [event, attendance, lineup, tasks, attachments, sheet] = await Promise.all([
 		api<EventDetail>('GET', `/events/${id}`, { f: fetch }),
 		api<AttendanceList>('GET', `/events/${id}/attendance`, { f: fetch }),
 		api<Lineup>('GET', `/events/${id}/lineup`, { f: fetch }),
-		api<TaskList>('GET', `/events/${id}/tasks`, { f: fetch }),
+		coachView ? null : api<TaskList>('GET', `/events/${id}/tasks`, { f: fetch }),
 		api<AttachmentList>('GET', `/events/${id}/attachments`, { f: fetch }),
-		api<GameSheet>('GET', `/events/${id}/game-sheet`, { f: fetch })
+		coachView ? null : api<GameSheet>('GET', `/events/${id}/game-sheet`, { f: fetch })
 	]);
 	if (!event.ok) error(event.status === 404 ? 404 : event.status || 500, event.message);
 	const requested = url.searchParams.get('tab') as Tab;
 	let tab: Tab = TABS.includes(requested) ? requested : 'overview';
 	if (tab === 'lineup' && !event.data!.lineup.available) tab = 'overview';
-	if (tab === 'sheet' && !sheet.data) tab = 'overview';
+	if ((tab === 'sheet' && !sheet?.data) || (tab === 'tasks' && coachView)) tab = 'overview';
 	return {
 		event: event.data!,
 		tab,
+		coachView,
 		attendance: attendance.data ?? null,
 		lineup: lineup.data ?? null,
-		tasks: tasks.data ?? null,
+		tasks: tasks?.data ?? null,
 		attachments: attachments.data ?? null,
-		sheet: sheet.data ?? null
+		sheet: sheet?.data ?? null
 	};
 };
 

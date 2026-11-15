@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ArrowRight, ChevronRight } from '@lucide/svelte';
+	import { CalendarDays, ArrowRight, ChevronRight } from '@lucide/svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { eventHref, kindLabelKey, kindStyle, type EventRow } from '#lib/events/types.ts';
 
@@ -17,7 +17,7 @@
 </script>
 
 <div class="card card-body h-full gap-1 border-ink bg-ink text-white">
-	<h2 class="mb-2 font-display text-lg font-extrabold tracking-[.04em] uppercase">{t('overview.upcoming.title')}</h2>
+	<h2 class="mb-2 font-display text-lg font-extrabold tracking-[.04em] uppercase flex items-center gap-2"><CalendarDays size={16} class="shrink-0" aria-hidden="true" /> {t('overview.upcoming.title')}</h2>
 	{#if events.length}
 		<!-- The list is positioned inside this box, so its rows do not make the card taller than its neighbours. -->
 		<div class="relative min-h-[20rem] flex-1" bind:clientHeight={boxHeight}>

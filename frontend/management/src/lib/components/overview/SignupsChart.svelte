@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { UserRoundPlus } from '@lucide/svelte';
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import type { Overview } from '#lib/overview.ts';
 
@@ -26,7 +27,7 @@
 </script>
 
 <div class="card card-body">
-	<h2 class="card-title">{t('overview.signups.title')}</h2>
+	<h2 class="card-title flex items-center gap-2"><UserRoundPlus size={16} class="shrink-0" aria-hidden="true" /> {t('overview.signups.title')}</h2>
 	<p class="text-sm text-muted">{t('overview.signups.sub')}</p>
 	{#if empty}
 		<p class="py-8 text-center text-sm text-muted">{t('overview.signups.empty')}</p>

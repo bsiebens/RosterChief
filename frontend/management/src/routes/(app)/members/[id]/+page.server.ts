@@ -8,7 +8,7 @@ import { addPersonToFamily, familyCall } from '#lib/families/server.ts';
 import type { FamilyDetail, GuardianContact, MemberDetail, Season, ShellMe } from '#lib/members/detail-types.ts';
 import type { Officiating, OfficiatingOptions } from '#lib/members/eligibility.ts';
 import type { ChecklistItem, EvaluationOut } from '#lib/evaluations.ts';
-import { answerFromForm } from '#lib/requirements.ts';
+import { requirementActions } from '#lib/requirements-server.ts';
 import type { Checklist } from '#lib/requirements.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -77,31 +77,7 @@ export const load: PageServerLoad = async ({ params, fetch, parent }) => {
 };
 
 export const actions: Actions = {
-	completeRequirement: async ({ request, fetch }) => {
-		const f = await request.formData();
-		const out = new FormData();
-		out.set('note', String(f.get('note') ?? '').trim());
-		const until = String(f.get('valid_until') ?? '').trim();
-		if (until) out.set('valid_until', until);
-		const file = f.get('document');
-		if (file instanceof File && file.size > 0) out.set('document', file);
-		return docResult('complete', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/complete`, { form: out, f: fetch }));
-	},
-	answerRequirement: async ({ request, fetch }) => {
-		const f = await request.formData();
-		const type = String(f.get('question_type') ?? '');
-		const until = String(f.get('valid_until') ?? '').trim();
-		const body = { answer: answerFromForm(type, f.getAll('answer').map(String)), note: String(f.get('note') ?? '').trim(), valid_until: until || null };
-		return docResult('answer', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/answer`, { body, f: fetch }));
-	},
-	bypassRequirement: async ({ request, fetch }) => {
-		const f = await request.formData();
-		return docResult('bypass', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/bypass`, { body: { note: String(f.get('note') ?? '') }, f: fetch }));
-	},
-	reopenRequirement: async ({ request, fetch }) => {
-		const f = await request.formData();
-		return docResult('reopen', await api('POST', `/requirements/memberships/${String(f.get('membership_id') ?? '')}/${String(f.get('requirement_id') ?? '')}/reopen`, { f: fetch }));
-	},
+	...requirementActions,
 	saveEligibility: async ({ params, request, fetch }) => {
 		const form = await request.formData();
 		const kind = form.get('kind') === 'official' ? 'official' : 'referee';
@@ -189,10 +165,4 @@ async function membershipAction(request: Request, f: typeof fetch, action: strin
 	const res = await api('POST', path(id), { body: body ? body(form) : undefined, f });
 	if (!res.ok) return fail(res.status || 500, { membershipActionError: res.message || 'failed', membershipActionFields: res.fields, membershipAction: action });
 	return { membershipActionDone: action };
-}
-
-/** The result of a Documents-tab action as `fail()` data for the card, or `{ docDone }`. */
-function docResult(action: string, res: { ok: boolean; status: number; message?: string; fields: Record<string, string> }) {
-	if (res.ok) return { docDone: action };
-	return fail(res.status >= 400 && res.status < 600 ? res.status : 500, { docAction: action, docError: res.fields.__all__ || res.message || 'failed', docFields: res.fields });
 }

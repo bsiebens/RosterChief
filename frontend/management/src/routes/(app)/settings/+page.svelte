@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { Building2, Check, ExternalLink, Eye, FileText, Image as ImageIcon, Mail, MapPin, Palette, Save, Wallet, X } from '@lucide/svelte';
+	import { Contrast, Building2, CalendarDays, Check, ExternalLink, Eye, FileText, Image as ImageIcon, Mail, MapPin, Palette, Save, Wallet, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ColorField from '#lib/components/ColorField.svelte';
 	import Field from '#lib/components/Field.svelte';
+	import EventBackdrop from '#lib/components/portal/EventBackdrop.svelte';
 	import Tabs from '#lib/components/Tabs.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -36,7 +37,21 @@
 	let logoPreview = $state<string | null>(null);
 	let removeLogo = $state(false);
 	const logoUrl = $derived(logoPreview ?? (removeLogo ? null : (s?.logo_url ?? null)));
+	let backgroundInput: HTMLInputElement | undefined = $state();
+	let backgroundPreview = $state<string | null>(null);
+	let removeBackground = $state(false);
+	const backgroundUrl = $derived(backgroundPreview ?? (removeBackground ? null : (s?.event_background_url ?? null)));
 
+	$effect(() => {
+		const preview = backgroundPreview;
+		return () => { if (preview) URL.revokeObjectURL(preview); };
+	});
+
+	function onBackground(e: Event & { currentTarget: HTMLInputElement }) {
+		const file = e.currentTarget.files?.[0];
+		backgroundPreview = file ? URL.createObjectURL(file) : null;
+		if (file) removeBackground = false;
+	}
 	function onLogo(e: Event & { currentTarget: HTMLInputElement }) {
 		if (logoPreview) URL.revokeObjectURL(logoPreview);
 		const file = e.currentTarget.files?.[0];
@@ -54,6 +69,9 @@
 			if (result.type === 'success') {
 				logoPreview = null;
 				removeLogo = false;
+				backgroundPreview = null;
+				removeBackground = false;
+				if (backgroundInput) backgroundInput.value = '';
 			}
 		};
 	};
@@ -232,6 +250,26 @@
 				{/snippet}
 				{@render card(t('settings.card.logo'), ImageIcon, logoBody)}
 
+				{#snippet backgroundBody()}
+					<div class="grid gap-3">
+						<div class="event-background-preview relative isolate flex min-h-28 items-end overflow-hidden rounded-box px-4 py-3" style:background-color={primaryBg} style:color={primaryFg} style:--event-backdrop={primaryBg}>
+							<EventBackdrop src={backgroundUrl} />
+							<span class="font-display text-xl font-extrabold uppercase">{t('settings.event_background.preview')}</span>
+						</div>
+						<div>
+							<input id="event-background" type="file" name="event_background" aria-label={t('settings.card.event_background')} aria-describedby="event-background-help" aria-invalid={fe('event_background') ? 'true' : undefined} accept="image/jpeg,image/png,image/webp" class="file-input file-input-bordered file-input-sm w-full {fe('event_background') ? 'input-error' : ''}" bind:this={backgroundInput} onchange={onBackground} />
+							<p id="event-background-help" class="mt-1 block text-xs {fe('event_background') ? 'text-error' : 'text-muted'}">{fe('event_background') || t('settings.event_background.help')}</p>
+							{#if s.event_background_url && !backgroundPreview}
+								<label class="label mt-1 cursor-pointer justify-start gap-2">
+									<input type="checkbox" name="remove_event_background" class="checkbox checkbox-sm" bind:checked={removeBackground} />
+									<span class="label-text">{t('settings.event_background.remove')}</span>
+								</label>
+							{/if}
+						</div>
+					</div>
+				{/snippet}
+				{@render card(t('settings.card.event_background'), CalendarDays, backgroundBody)}
+
 				{#snippet coloursBody()}
 					<div class="grid gap-3 sm:grid-cols-2">
 						<ColorField label={t('settings.primary_color')} name="primary_color" bind:value={colors.primary_color} error={fe('primary_color')} />
@@ -240,7 +278,7 @@
 						<ColorField label={t('settings.secondary_text_color')} name="secondary_text_color" bind:value={colors.secondary_text_color} placeholder={t('settings.text_auto')} error={fe('secondary_text_color')} />
 					</div>
 					<p class="label-text-alt">{t('settings.text_help')}</p>
-					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('settings.contrast')}</h3>
+					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><Contrast size={16} class="shrink-0" aria-hidden="true" /> {t('settings.contrast')}</h3>
 					<div class="grid gap-2 sm:grid-cols-2">
 						{#each [[t('settings.contrast.on_primary'), primaryBg, onPrimary], [t('settings.contrast.on_secondary'), secondaryBg, onSecondary]] as [label, bg, c] (label)}
 							<div class="flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm font-semibold" style="background:{bg};color:{(c as any)?.fg ?? '#ffffff'}">
@@ -274,7 +312,7 @@
 							</div>
 						</div>
 					</div>
-					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('settings.preview.hint')}</h3>
+					<h3 class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase flex items-center gap-2"><Eye size={16} class="shrink-0" aria-hidden="true" /> {t('settings.preview.hint')}</h3>
 					<ul class="grid gap-1.5 text-sm">
 						{#each [t('settings.preview.l1'), t('settings.preview.l2'), t('settings.preview.l3')] as line (line)}
 							<li class="flex items-center gap-2"><span class="h-2 w-2 shrink-0" style="background:{secondaryBg}"></span>{line}</li>

@@ -13,7 +13,7 @@
 	 * marking received (with a file and an expiry date), "not needed", reopening and downloading need `members.manage_members`.
 	 * `form` is the page's action result, for the errors of the dialogs.
 	 */
-	let { checklist, canManage = false, form }: { checklist: Checklist | null; canManage?: boolean; form: any } = $props();
+	let { checklist, canManage = false, form, actionBase = '?tab=documents&' }: { checklist: Checklist | null; canManage?: boolean; form: any; /** Where the form actions live: `?tab=documents&` on the member page, `?` on a page that spreads `requirementActions`. */ actionBase?: string } = $props();
 	const items = $derived(checklist?.items ?? []);
 	const membership = $derived(checklist?.membership ?? null);
 
@@ -105,7 +105,7 @@
 								{#if canManage && i.has_document}<a class="btn btn-ghost btn-xs btn-square" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener" aria-label={t('req.doc.download')} title={t('req.doc.download')}><Download size={14} /></a>{/if}
 								{#if canManage && isQuestion(i) && i.display === 'complete'}<button class="btn btn-ghost btn-xs btn-square" type="button" aria-label={t('req.doc.q.edit')} title={t('req.doc.q.edit')} onclick={() => ((answerFor = i), (answerOpen = true))}><Pencil size={14} /></button>{/if}
 								{#if canManage}
-									<form method="POST" action="?tab=documents&/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
+									<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
 										<input type="hidden" name="membership_id" value={membership.id} />
 										<input type="hidden" name="requirement_id" value={i.requirement.id} />
 										<button class="btn btn-ghost btn-xs btn-square" type="submit" aria-label={t('req.doc.reopen')} title={t('req.doc.reopen')}><RotateCcw size={14} /></button>
@@ -117,7 +117,7 @@
 							<div class="ml-auto flex flex-wrap items-center justify-end gap-1.5">
 								{#if i.has_document}<a class="btn btn-outline btn-xs gap-1" href={documentHref(membership.id, i.requirement.id)} target="_blank" rel="noopener"><Download size={13} /> {t('req.doc.download')}</a>{/if}
 								{#if i.display !== 'missing'}
-									<form method="POST" action="?tab=documents&/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
+									<form method="POST" action="{actionBase}/reopenRequirement" use:enhance={({ cancel }) => { if (!confirm(t('req.doc.reopen_confirm'))) cancel(); }}>
 										<input type="hidden" name="membership_id" value={membership.id} />
 										<input type="hidden" name="requirement_id" value={i.requirement.id} />
 										<button class="btn btn-outline btn-error btn-xs gap-1" type="submit"><RotateCcw size={13} /> {t('req.doc.reopen')}</button>
@@ -143,7 +143,7 @@
 
 {#if membership}
 	<Modal bind:open={completeOpen} title={t('req.doc.complete_title', { name: completeFor?.requirement.name ?? '' })}>
-		<form method="POST" action="?tab=documents&/completeRequirement" enctype="multipart/form-data" class="grid gap-3" use:enhance={submit(() => (completeOpen = false))}>
+		<form method="POST" action="{actionBase}/completeRequirement" enctype="multipart/form-data" class="grid gap-3" use:enhance={submit(() => (completeOpen = false))}>
 			<input type="hidden" name="membership_id" value={membership.id} />
 			<input type="hidden" name="requirement_id" value={completeFor?.requirement.id ?? ''} />
 			{#if errText}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}
@@ -173,7 +173,7 @@
 
 	<Modal bind:open={answerOpen} title={t('req.doc.q.title', { name: answerFor?.requirement.name ?? '' })}>
 		{#key answerFor?.requirement.id}
-			<form method="POST" action="?tab=documents&/answerRequirement" class="grid gap-3" use:enhance={submit(() => (answerOpen = false))}>
+			<form method="POST" action="{actionBase}/answerRequirement" class="grid gap-3" use:enhance={submit(() => (answerOpen = false))}>
 				<input type="hidden" name="membership_id" value={membership.id} />
 				<input type="hidden" name="requirement_id" value={answerFor?.requirement.id ?? ''} />
 				<input type="hidden" name="question_type" value={answerFor?.requirement.question_type ?? ''} />
@@ -206,7 +206,7 @@
 	</Modal>
 
 	<Modal bind:open={bypassOpen} title={t('req.doc.bypass_title', { name: bypassFor?.requirement.name ?? '' })}>
-		<form method="POST" action="?tab=documents&/bypassRequirement" class="grid gap-3" use:enhance={submit(() => (bypassOpen = false))}>
+		<form method="POST" action="{actionBase}/bypassRequirement" class="grid gap-3" use:enhance={submit(() => (bypassOpen = false))}>
 			<input type="hidden" name="membership_id" value={membership.id} />
 			<input type="hidden" name="requirement_id" value={bypassFor?.requirement.id ?? ''} />
 			{#if errText && !fieldErr('note')}<Alert kind="error" title={t('req.doc.failed')}>{errText}</Alert>{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Bug, CircleDot, CirclePause, LoaderCircle, ShieldUser, Target, Timer } from '@lucide/svelte';
+	import { Clock, Zap, Bug, CircleDot, CirclePause, LoaderCircle, ShieldUser, Target, Timer } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EventGameRoster from '#lib/components/events/EventGameRoster.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
@@ -91,7 +91,7 @@
 		<section class="card card-body gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div>
-					<h3 class="font-display text-base font-extrabold tracking-[.06em] text-ink uppercase">{t('events.sheet.moments')}</h3>
+					<h3 class="font-display text-base font-extrabold tracking-[.06em] text-ink uppercase flex items-center gap-2"><Zap size={16} class="shrink-0" aria-hidden="true" /> {t('events.sheet.moments')}</h3>
 					<p class="text-xs text-muted">{t('events.sheet.moments_help')}</p>
 				</div>
 				<button class="btn btn-outline btn-sm gap-2" type="button" aria-expanded={momentsOpen} onclick={toggleMoments}>
@@ -130,7 +130,7 @@
 	<section class="card overflow-hidden">
 		{#each sheet.periods as period (period.label)}
 			<header class="flex items-center justify-between border-b border-line bg-subhead px-4 py-2 {period !== sheet.periods[0] ? 'border-t' : ''}">
-				<h3 class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{period.title}</h3>
+				<h3 class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase flex items-center gap-2"><Clock size={16} class="shrink-0" aria-hidden="true" /> {period.title}</h3>
 				{#if period.score}<span class="font-mono text-xs font-bold text-ink">{period.score}</span>{/if}
 			</header>
 			{#if period.rows.length}
