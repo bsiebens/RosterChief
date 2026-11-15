@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Ban, CheckCheck, Check, FileText, Link2, Receipt, Shirt, UserCheck } from '@lucide/svelte';
+	import { Ban, CheckCheck, Check, FileText, Link2, Mail, Receipt, Shirt, UserCheck } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import FilterTabs from '#lib/components/FilterTabs.svelte';
@@ -90,6 +90,7 @@
 </script>
 
 {#snippet actions()}
+	<a class="btn btn-outline" href="/settings/registration">{t('signups.settings')}</a>
 	<button class="btn btn-primary gap-2" type="button" disabled={!data.clean} onclick={() => (allOpen = true)}><CheckCheck size={16} /> {t('signups.approve_all', { n: data.clean })}</button>
 {/snippet}
 
@@ -129,7 +130,10 @@
 						{#each data.rows as r (r.membership_id)}
 							<tr class="hover:bg-surface">
 								<td>
-									<a class="link font-semibold" href="/members/{r.member.id}">{r.member.name}</a>
+									<div class="flex items-center gap-3">
+										<Avatar first_name={r.member.name.split(' ')[0]} last_name={r.member.name.split(' ').slice(1).join(' ')} size="h-8 w-8" text="text-xs" />
+										<a class="link font-semibold" href="/members/{r.member.id}">{r.member.name}</a>
+									</div>
 									{#if r.clean}<span class="badge badge-sm badge-success ml-2">{t('signups.ready')}</span>{/if}
 									<p class="text-xs text-muted">{r.member.email || t('signups.no_email')}</p>
 									{#if r.registration}
@@ -177,6 +181,7 @@
 					</tbody>
 				</table>
 			</div>
+			<div class="card card-body flex-row items-center gap-3 border-info-border bg-info-bg py-3 text-sm text-info-text"><Mail size={16} class="shrink-0" aria-hidden="true" /> {t('signups.approve_note')}</div>
 		{/if}
 	</div>
 </div>
