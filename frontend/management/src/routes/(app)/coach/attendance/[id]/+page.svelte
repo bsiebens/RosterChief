@@ -32,7 +32,7 @@
 		noting = null;
 	}
 	let busy = $state('');
-	// A check-in shows at once and stays until the refreshed data arrives.
+	// Check-ins are set here and saved together with the answers; they stay until the refreshed data arrives.
 	let checks = $state<Record<string, boolean | null>>({});
 	const shownUp = (row: AttendanceRow) => (row.member.id in checks ? checks[row.member.id] : row.showed_up);
 	let saving = $state(false);
@@ -44,7 +44,9 @@
 	const bucket = (row: AttendanceRow) => (current(row) === 'present' ? 'in' : current(row) === 'absent' ? 'out' : 'unknown');
 	const counts = $derived({ all: data.attendance.rows.length, in: data.attendance.rows.filter((row) => bucket(row) === 'in').length, out: data.attendance.rows.filter((row) => bucket(row) === 'out').length, unknown: data.attendance.rows.filter((row) => bucket(row) === 'unknown').length });
 	const rows = $derived(data.attendance.rows.filter((row) => (filter === 'all' || bucket(row) === filter) && (!query.trim() || `${row.last_name} ${row.first_name} ${row.first_name} ${row.last_name}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))));
+	const checkChanged = $derived(data.attendance.rows.filter((row) => row.member.id in checks && checks[row.member.id] !== row.showed_up));
 	const changed = $derived(data.attendance.rows.filter((row) => (edits[row.member.id] && edits[row.member.id] !== answerOf(row)) || (notes[row.member.id] !== undefined && notes[row.member.id] !== (row.coach_note ?? ''))));
+	const pending = $derived(new Set([...changed.map((row) => row.member.id), ...checkChanged.map((row) => row.member.id)]).size);
 	const upcoming = $derived(!data.event.cancelled && Date.parse(data.event.start) > Date.now());
 	const when = $derived([formatDateTime(data.event.start), data.event.location?.name].filter(Boolean).join(' · '));
 	usePageHeader(() => ({ title: data.event.title, context: when }));
@@ -62,13 +64,14 @@
 	};
 
 	async function save() {
-		if (saving || !changed.length) return;
+		if (saving || !pending) return;
 		saving = true;
 		message = '';
 		failed = false;
 		const refused: string[] = [];
 		// What was saved keeps showing as edited until the refreshed data is in, so the old answer never flashes back.
 		const saved: string[] = [];
+		const savedChecks: string[] = [];
 		// Absences carry the coach's note, so they go one by one; the others in one call per answer.
 		for (const row of changed.filter((entry) => current(entry) === 'absent')) {
 			const response = await api('PUT', `/events/${data.event.id}/attendance/${row.member.id}`, { body: { status: edits[row.member.id] === 'absent' && answerOf(row) !== 'absent' ? 'absent' : null, coach_note: noteOf(row) } });
@@ -89,7 +92,13 @@
 				else refused.push(`${nameOf(result.member_id)}${result.error ? ` (${result.error})` : ''}`);
 			}
 		}
+		for (const row of checkChanged) {
+			const response = await api('PUT', `/events/${data.event.id}/attendance/${row.member.id}/check-in`, { body: { showed_up: checks[row.member.id] } });
+			if (response.ok) savedChecks.push(row.member.id);
+			else refused.push(`${nameOf(row.member.id)}${response.message ? ` (${response.message})` : ''}`);
+		}
 		await invalidateAll();
+		for (const id of savedChecks) delete checks[id];
 		for (const id of saved) {
 			delete edits[id];
 			delete notes[id];
@@ -105,21 +114,9 @@
 		return row ? `${row.last_name}, ${row.first_name}` : '';
 	};
 
-	async function checkIn(row: AttendanceRow, showedUp: boolean | null) {
-		if (busy) return;
-		busy = row.member.id;
-		message = '';
-		failed = false;
+	const checkIn = (row: AttendanceRow, showedUp: boolean | null) => {
 		checks[row.member.id] = showedUp;
-		const response = await api('PUT', `/events/${data.event.id}/attendance/${row.member.id}/check-in`, { body: { showed_up: showedUp } });
-		if (response.ok) await invalidateAll();
-		else {
-			failed = true;
-			message = response.message ?? t('common.error.generic');
-		}
-		delete checks[row.member.id];
-		busy = '';
-	}
+	};
 
 	async function nudge() {
 		busy = 'remind';
@@ -140,16 +137,19 @@
 
 	<p class="text-sm text-muted sm:hidden">{when}</p>
 	<section class="card overflow-hidden">
-		<div class="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-3">
-			<span class="inline-flex gap-1" role="group" aria-label={t('events.tab.attendance')}>
-				{#each SEGMENTS as [key, label] (key)}
-					<button type="button" class="portal-person compact text !px-3" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? '?' : t(label)} {counts[key]}</button>
+		<div class="grid gap-3 border-b border-line px-3.5 py-3">
+			<div class="grid grid-cols-2 gap-1 rounded-box bg-subhead p-1" role="group" aria-label={t('events.tab.attendance')}>
+				{#each [['answers', t('coach.mode_replies')], ['checkin', `${t('coach.check_in_mode')} ${data.attendance.checked_in}/${counts.in}`]] as [key, label] (key)}
+					<button type="button" class="min-h-10 rounded-md px-3 font-display text-sm font-bold tracking-wide uppercase {mode === key ? 'bg-(--portal-panel) text-ink shadow-sm' : 'text-muted'}" aria-pressed={mode === key} onclick={() => (mode = key as typeof mode)}>{label}</button>
 				{/each}
-			</span>
-			<span class="flex-1"></span>
-			<div class="flex flex-col items-end gap-2">
-				<button type="button" class="portal-person compact text" aria-pressed={mode === 'checkin'} onclick={() => (mode = mode === 'checkin' ? 'answers' : 'checkin')}>{t('coach.check_in_mode')} {data.attendance.checked_in}/{counts.in}</button>
-				{#if upcoming}<button type="button" class="btn btn-primary btn-sm min-h-9 gap-1.5" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind')}</button>{/if}
+			</div>
+			<div class="flex items-center gap-2">
+				<div class="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label={t('portal.all')}>
+					{#each SEGMENTS as [key, label] (key)}
+						<button type="button" class="portal-person compact text shrink-0 !px-3" aria-pressed={filter === key} onclick={() => (filter = key)}>{key === 'unknown' ? '?' : t(label)} {counts[key]}</button>
+					{/each}
+				</div>
+				{#if mode === 'answers' && upcoming}<button type="button" class="btn btn-primary btn-sm min-h-9 shrink-0" disabled={busy === 'remind' || counts.unknown === 0} onclick={nudge}>{t('coach.remind')}</button>{/if}
 			</div>
 		</div>
 		<div class="border-b border-line px-3.5 py-2">
@@ -176,9 +176,9 @@
 						</div>
 					{:else}
 						<div class="inline-flex shrink-0 gap-1">
-							<button type="button" class="grid size-10 place-items-center rounded-lg border {shownUp(row) === true ? 'border-ok bg-ok text-[#fff]' : 'border-line bg-(--portal-panel) text-muted'}" disabled={!!busy} aria-pressed={shownUp(row) === true} aria-label={t('portal.check_in') + ' · ' + row.member.name} onclick={() => checkIn(row, true)}><Check size={18} aria-hidden="true" /></button>
-							<button type="button" class="grid size-10 place-items-center rounded-lg border {shownUp(row) === false ? 'border-club bg-club text-club-content' : 'border-line bg-(--portal-panel) text-muted'}" disabled={!!busy} aria-pressed={shownUp(row) === false} aria-label={t('events.att.no_show') + ' · ' + row.member.name} onclick={() => checkIn(row, false)}><X size={18} aria-hidden="true" /></button>
-							<button type="button" class="grid size-10 place-items-center rounded-lg border border-line bg-(--portal-panel) text-muted disabled:opacity-40" disabled={!!busy || shownUp(row) === null} aria-label={t('portal.clear_check_in') + ' · ' + row.member.name} onclick={() => checkIn(row, null)}><RotateCcw size={16} aria-hidden="true" /></button>
+							<button type="button" class="grid size-10 place-items-center rounded-lg border {shownUp(row) === true ? 'border-ok bg-ok text-[#fff]' : 'border-line bg-(--portal-panel) text-muted'}" aria-pressed={shownUp(row) === true} aria-label={t('portal.check_in') + ' · ' + row.member.name} onclick={() => checkIn(row, true)}><Check size={18} aria-hidden="true" /></button>
+							<button type="button" class="grid size-10 place-items-center rounded-lg border {shownUp(row) === false ? 'border-club bg-club text-club-content' : 'border-line bg-(--portal-panel) text-muted'}" aria-pressed={shownUp(row) === false} aria-label={t('events.att.no_show') + ' · ' + row.member.name} onclick={() => checkIn(row, false)}><X size={18} aria-hidden="true" /></button>
+							<button type="button" class="grid size-10 place-items-center rounded-lg border border-line bg-(--portal-panel) text-muted disabled:opacity-40" disabled={shownUp(row) === null} aria-label={t('portal.clear_check_in') + ' · ' + row.member.name} onclick={() => checkIn(row, null)}><RotateCcw size={16} aria-hidden="true" /></button>
 						</div>
 					{/if}
 				</li>
@@ -190,7 +190,7 @@
 
 	<div class="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 flex items-center gap-2 rounded-box border border-line bg-(--portal-panel) p-2.5 shadow-sm md:bottom-2">
 		{#if isGame(data.event)}<a class="btn btn-outline min-h-12 flex-1 gap-2" href="/calendar/events/{data.event.id}?tab=lineup&view=coach"><Shirt size={16} aria-hidden="true" />{t('portal.lineup')}</a>{/if}
-		<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={saving || !changed.length} onclick={save}>{t('coach.save_attendance')}{#if changed.length} ({changed.length}){/if}</button>
+		<button type="button" class="btn btn-primary min-h-12 flex-1" disabled={saving || !pending} onclick={save}>{t('coach.save_attendance')}{#if pending} ({pending}){/if}</button>
 	</div>
 </div>
 
