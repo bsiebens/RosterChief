@@ -31,7 +31,7 @@
 	const todayKey = dateKey(new Date());
 	const list = $derived(shown.filter((event) => (picked ? dateKey(new Date(event.start)) === picked : Date.parse(event.start) >= startOfToday().getTime())));
 	const step = (by: number) => (month = new Date(month.getFullYear(), month.getMonth() + by, 1));
-	const href = (event: CoachEvent) => (event.can_manage_attendance ? `/coach/attendance/${event.id}` : `/calendar/events/${event.id}?view=coach`);
+	const href = (event: CoachEvent) => (event.can_manage_attendance ? `/calendar/events/${event.id}?tab=attendance&view=coach` : `/calendar/events/${event.id}?view=coach`);
 </script>
 
 <div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">

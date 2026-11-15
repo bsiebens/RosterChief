@@ -14,7 +14,7 @@
 	const isToday = $derived(!!session && new Date(session.start).toDateString() === new Date().toDateString());
 	const week = $derived(events.filter((event) => isUpcoming(event) && event.id !== session?.id && Date.parse(event.start) < Date.now() + 7 * 864e5).slice(0, 5));
 	const needs = $derived(attention(events));
-	const href = (event: CoachEvent) => (event.can_manage_attendance ? `/coach/attendance/${event.id}` : `/calendar/events/${event.id}?view=coach`);
+	const href = (event: CoachEvent) => (event.can_manage_attendance ? `/calendar/events/${event.id}?tab=attendance&view=coach` : `/calendar/events/${event.id}?view=coach`);
 	const place = (event: CoachEvent) => (event.location ? ' · ' + event.location : '');
 
 	async function nudge(event: CoachEvent) {
@@ -38,7 +38,7 @@
 					</div>
 				{/each}
 				{#if session.can_manage_attendance}
-					<a class="btn btn-primary ml-auto min-h-11 gap-2" href="/coach/attendance/{session.id}"><ClipboardCheck size={16} aria-hidden="true" />{t('portal.take_attendance')}</a>
+					<a class="btn btn-primary ml-auto min-h-11 gap-2" href="/calendar/events/{session.id}?tab=attendance&view=coach"><ClipboardCheck size={16} aria-hidden="true" />{t('portal.take_attendance')}</a>
 				{/if}
 			</div>
 		</article>

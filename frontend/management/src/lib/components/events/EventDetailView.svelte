@@ -6,7 +6,7 @@
     import ClubCrest from '#lib/components/ClubCrest.svelte';
     import Modal from '#lib/components/Modal.svelte';
     import Sheet from '#lib/components/portal/Sheet.svelte';
-    import EventAttendanceCards from '#lib/components/events/EventAttendanceCards.svelte';
+    import CoachAttendance from '#lib/components/coach/CoachAttendance.svelte';
     import {MediaQuery} from 'svelte/reactivity';
     import TabBar from '#lib/components/TabBar.svelte';
     import EventAttachments from '#lib/components/events/EventAttachments.svelte';
@@ -38,6 +38,13 @@
     const tabHref = (key: string) => `?tab=${key}${data.coachView ? '&view=coach' : ''}`;
     const calendarHref = $derived(data.coachView ? `/coach?tab=calendar&team=${(data.event.teams ?? []).map((team) => team.id).join(',')}` : '/calendar');
 
+    // Phone coach view: Details, Attendance and (games and tournaments) Line-up; files live under Details.
+    const phoneTabs = $derived([
+        {key: 'overview', label: t('events.tab.details'), count: 0},
+        {key: 'attendance', label: t('events.tab.attendance'), count: ev.attendance.total},
+        ...(ev.lineup.available ? [{key: 'lineup', label: t('events.tab.lineup'), count: 0}] : [])
+    ]);
+    const shownTab = $derived(phone && !phoneTabs.some((item) => item.key === data.tab) ? 'overview' : data.tab);
     const tabs = $derived([
         {key: 'overview', label: t('events.tab.overview')},
         {key: 'attendance', label: `${t('events.tab.attendance')} · ${ev.attendance.total}`},
@@ -102,13 +109,45 @@
         </button>
     {/if}
     {#if data.coachView && ev.can_manage_attendance && !ev.cancelled}
-        <a class="btn btn-outline gap-2" href="/coach/attendance/{ev.id}"><ClipboardList size={16} aria-hidden="true"/> {t('events.att.checked_in')}</a>
+        <a class="btn btn-outline gap-2" href={`?tab=attendance&view=coach`}><ClipboardList size={16} aria-hidden="true"/> {t('coach.ev_manage_att')}</a>
     {/if}
     <a class="btn btn-outline gap-2" href={calendarHref}>
         <ArrowLeft size={16}/> {t(data.coachView ? 'portal.schedule' : 'events.back')}</a>
   </div>
 {/snippet}
 
+
+{#snippet details(wide = false)}
+            <div class="card card-body gap-2 {wide ? 'lg:col-span-2' : ''}">
+                <h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('events.details')}</h2>
+                <dl class="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
+                    {#if ev.season}
+                        <dt class="text-muted">{t('events.season')}</dt>
+                        <dd>{ev.season.name}</dd>
+                    {/if}
+                    {#if ev.invited_members.length}
+                        <dt class="text-muted">{t('events.also_invited')}</dt>
+                        <dd class="flex flex-wrap gap-x-2">
+                            {#each ev.invited_members as m (m.id)}<a class="link" href="/members/{m.id}">{m.name}</a>{/each}
+                        </dd>
+                    {/if}
+                    {#if ev.excluded_members.length}
+                        <dt class="text-muted">{t('events.excluded')}</dt>
+                        <dd class="flex flex-wrap gap-x-2">
+                            {#each ev.excluded_members as m (m.id)}<a class="link" href="/members/{m.id}">{m.name}</a>{/each}
+                        </dd>
+                    {/if}
+                    {#if ev.created_by}
+                        <dt class="text-muted">{t('events.created_by')}</dt>
+                        <dd>{ev.created_by.name}</dd>
+                    {/if}
+                    {#if ev.series}
+                        <dt class="text-muted">{t('events.series')}</dt>
+                        <dd>{series}</dd>
+                    {/if}
+                </dl>
+            </div>
+{/snippet}
 
 {#snippet mobileTop()}
     <div class="grid min-w-0 gap-3 md:hidden">
@@ -164,16 +203,13 @@
                         {@render officiating('official', ev.officials)}
                     </dl>
                 {/if}
-                {#if ev.can_manage_attendance && !ev.cancelled}
-                    <a class="btn btn-outline min-h-11 gap-2" href="/coach/attendance/{ev.id}"><ClipboardList size={16} aria-hidden="true"/> {t('coach.ev_manage_att')}</a>
-                {/if}
             </div>
         </section>
         <nav class="card min-w-0" aria-label={t('events.tabs')}>
-            <div class="flex overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {#each tabs as item (item.key)}
-                    <a href={tabHref(item.key)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={data.tab === item.key ? 'page' : undefined}
-                       class="-mb-px shrink-0 border-b-2 px-3 py-3.5 font-display text-sm font-bold tracking-[.06em] whitespace-nowrap uppercase {data.tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted'}">{item.label}</a>
+            <div class="grid px-1" style="grid-template-columns: repeat({phoneTabs.length}, minmax(0, 1fr))">
+                {#each phoneTabs as item (item.key)}
+                    <a href={tabHref(item.key)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={shownTab === item.key ? 'page' : undefined}
+                       class="-mb-px flex min-w-0 items-center justify-center gap-1.5 border-b-2 px-1 py-3.5 font-display text-[13px] font-bold tracking-[.03em] uppercase {shownTab === item.key ? 'border-club text-ink' : 'border-transparent text-muted'}"><span class="truncate">{item.label}</span>{#if item.count}<span class="badge badge-sm shrink-0 border-line bg-subhead px-1.5 text-muted">{item.count}</span>{/if}</a>
                 {/each}
             </div>
         </nav>
@@ -281,7 +317,14 @@
 
     <div class={data.coachView ? 'hidden md:block' : ''}><TabBar {tabs} active={data.tab} label={t('events.tabs')}/></div>
 
-    {#if data.tab === 'overview'}
+    {#if phone && shownTab === 'overview'}
+        <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
+            {@render details()}
+            {#if data.attachments}
+                <EventAttachments eventId={ev.id} initial={data.attachments}/>
+            {/if}
+        </div>
+    {:else if data.tab === 'overview'}
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-3">
             <a class="card card-body gap-2 hover:shadow-md" href="?tab=attendance">
                 <h2 class="flex items-center gap-2 font-display text-base font-extrabold tracking-[.04em] text-ink uppercase">
@@ -322,42 +365,15 @@
                     <Paperclip size={16} aria-hidden="true"/> {t('events.tab.files')}</h2>
                 <p class="text-sm {ev.attachment_count ? '' : 'text-muted'}">{ev.attachment_count ? t('events.files.count', {n: ev.attachment_count}) : t('events.files.none')}</p>
             </a>
-            <div class="card card-body gap-2 lg:col-span-2">
-                <h2 class="font-display text-base font-extrabold tracking-[.04em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('events.details')}</h2>
-                <dl class="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
-                    {#if ev.season}
-                        <dt class="text-muted">{t('events.season')}</dt>
-                        <dd>{ev.season.name}</dd>
-                    {/if}
-                    {#if ev.invited_members.length}
-                        <dt class="text-muted">{t('events.also_invited')}</dt>
-                        <dd class="flex flex-wrap gap-x-2">
-                            {#each ev.invited_members as m (m.id)}<a class="link" href="/members/{m.id}">{m.name}</a>{/each}
-                        </dd>
-                    {/if}
-                    {#if ev.excluded_members.length}
-                        <dt class="text-muted">{t('events.excluded')}</dt>
-                        <dd class="flex flex-wrap gap-x-2">
-                            {#each ev.excluded_members as m (m.id)}<a class="link" href="/members/{m.id}">{m.name}</a>{/each}
-                        </dd>
-                    {/if}
-                    {#if ev.created_by}
-                        <dt class="text-muted">{t('events.created_by')}</dt>
-                        <dd>{ev.created_by.name}</dd>
-                    {/if}
-                    {#if ev.series}
-                        <dt class="text-muted">{t('events.series')}</dt>
-                        <dd>{series}</dd>
-                    {/if}
-                </dl>
-            </div>
+            {@render details(true)}
         </div>
     {:else if data.tab === 'attendance'}
         {#if data.attendance}
-            {#if data.coachView}
-                <div class="md:hidden"><EventAttendanceCards eventId={ev.id} list={data.attendance} manage={ev.can_manage_attendance && !ev.cancelled}/></div>
+            {#if phone && data.attendance.can_manage}
+                <CoachAttendance event={ev} list={data.attendance}/>
+            {:else}
+                <EventAttendance eventId={ev.id} initial={data.attendance} {past} cancelled={ev.cancelled}/>
             {/if}
-            <div class={data.coachView ? 'hidden md:block' : ''}><EventAttendance eventId={ev.id} initial={data.attendance} {past} cancelled={ev.cancelled}/></div>
         {:else}
             <Alert kind="error">{t('common.error.generic')}</Alert>
         {/if}
@@ -391,9 +407,6 @@
         <h2 class="font-display text-xl font-extrabold text-ink uppercase">{t('coach.ev_actions')}</h2>
         {#if ev.can_edit}
             <a class="btn btn-outline min-h-12 justify-start gap-2" href={editHref}><Pencil size={16} aria-hidden="true"/> {t('coach.ev_menu_edit')}</a>
-        {/if}
-        {#if ev.can_manage_attendance && !ev.cancelled}
-            <a class="btn btn-outline min-h-12 justify-start gap-2" href="/coach/attendance/{ev.id}"><ClipboardList size={16} aria-hidden="true"/> {t('coach.ev_manage_att')}</a>
         {/if}
         {#if canUpdate}
             <form method="POST" action="?/updateGame&view=coach" use:enhance={() => { updating = true; return async ({ update }) => { await update({ reset: false }); updating = false; menuOpen = false; }; }}>
