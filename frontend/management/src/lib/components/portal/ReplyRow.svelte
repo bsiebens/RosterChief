@@ -2,7 +2,7 @@
 	import { statusLabelKey, statusStyle, formatDateTime } from '#lib/events/types.ts';
 	import { t } from '#lib/i18n.svelte.ts';
 	import type { PortalEvent } from '#lib/portal.ts';
-	import { MessageSquareText } from '@lucide/svelte';
+	import { CircleAlert, MessageSquareText } from '@lucide/svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 
 	/**
@@ -39,6 +39,17 @@
 	function reveal(node: HTMLElement) {
 		node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 		node.querySelector('textarea')?.focus({ preventScroll: true });
+	}
+	// A reason is required: ask for it right here, next to the field, instead of a loose line below the form.
+	let localError = $state('');
+	const reasonError = $derived(localError || error);
+	function submitReason() {
+		if (!(note || event.note).trim()) {
+			localError = t('portal.reason_required');
+			document.getElementById(`reason-${event.id}`)?.focus();
+			return;
+		}
+		void answer(event.status === 'selected' ? 'dropout' : 'absent', note || event.note);
 	}
 	const lateInstalment = $derived(event.blocked === 'late_installment' && !going);
 	const settled = $derived(event.cancelled || !canReply || going);
@@ -79,9 +90,9 @@
 	</div>
 	{#if lateInstalment && canReply}<p class="rounded-box px-3 py-2 text-xs {dark ? 'bg-sidebar-hairline text-sidebar-fg' : 'bg-warn-bg text-warn-text'}" role="status">{t('portal.late')}</p>{/if}
 	{#if canReply && open && !noInvite}
-		<form use:reveal class="grid gap-3 rounded-box border-2 border-club p-3.5 {dark ? 'bg-sidebar-hairline' : 'bg-subhead'}" onsubmit={(e) => { e.preventDefault(); void answer(event.status === 'selected' ? 'dropout' : 'absent', note || event.note); }}>
+		<form use:reveal class="grid gap-3 rounded-box border p-3.5 {dark ? 'border-sidebar-chip bg-sidebar-hairline' : 'border-line bg-subhead'}" onsubmit={(e) => { e.preventDefault(); submitReason(); }}>
 			<div>
-				<p class="flex items-center gap-2 font-display text-base font-extrabold uppercase {dark ? 'text-sidebar-fg' : 'text-ink'}"><MessageSquareText size={16} class="shrink-0 text-club" aria-hidden="true" />{t('portal.reason_title')}</p>
+				<p class="flex items-center gap-2 font-display text-base font-extrabold uppercase {dark ? 'text-sidebar-fg' : 'text-ink'}"><MessageSquareText size={16} class="shrink-0" aria-hidden="true" />{t('portal.reason_title')}</p>
 				<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('portal.reason_help')}</p>
 			</div>
 			<div class="flex flex-wrap gap-1.5">
@@ -89,12 +100,13 @@
 					<button type="button" class="portal-person compact text" aria-pressed={note === t(key)} onclick={() => (note = note === t(key) ? '' : t(key))}>{t(key)}</button>
 				{/each}
 			</div>
-			<textarea id="reason-{event.id}" class="textarea textarea-bordered w-full text-ink" rows="3" maxlength="2000" aria-label={t('portal.reason')} bind:value={note} placeholder={event.note || t('portal.reason_placeholder')}></textarea>
+			<textarea id="reason-{event.id}" class="textarea textarea-bordered w-full text-ink {reasonError ? 'border-danger! ring-2 ring-danger/40' : ''}" rows="3" maxlength="2000" aria-label={t('portal.reason')} aria-invalid={reasonError ? 'true' : undefined} aria-describedby={reasonError ? `reason-err-${event.id}` : undefined} bind:value={note} oninput={() => (localError = '')} placeholder={event.note || t('portal.reason_placeholder')}></textarea>
+			{#if reasonError}<p id="reason-err-{event.id}" class="flex items-start gap-2 rounded-box border border-danger-border bg-danger-bg px-3 py-2 text-sm font-semibold text-danger" role="alert"><CircleAlert size={16} class="mt-0.5 shrink-0" aria-hidden="true" />{reasonError}</p>{/if}
 			<div class="flex flex-wrap justify-end gap-2">
 				<button class="btn btn-sm btn-outline min-h-11 md:h-8 md:min-h-0 {dark ? 'border-sidebar-chip bg-transparent! text-sidebar-fg' : ''}" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
 				<button class="btn btn-sm btn-primary min-h-11 flex-1 sm:flex-none md:h-8 md:min-h-0" type="submit" disabled={busy}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
 			</div>
 		</form>
 	{/if}
-	{#if error}<p class="text-sm {dark ? 'text-sidebar-fg' : 'text-error'}" role="alert">{error}</p>{/if}
+	{#if error && !(canReply && open && !noInvite)}<p class="text-sm {dark ? 'text-sidebar-fg' : 'text-error'}" role="alert">{error}</p>{/if}
 </div>
