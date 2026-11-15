@@ -164,23 +164,20 @@
 
 {#snippet card(title: string, icon: typeof Building2, body: import('svelte').Snippet, aside?: string)}
 	{@const Icon = icon}
-	<section class="card card-body gap-3">
-		<div class="flex items-center justify-between gap-2">
-			<h2 class="card-title"><Icon size={18} /> {title}</h2>
-			{#if aside}<span class="font-mono text-xs text-muted">{aside}</span>{/if}
-		</div>
-		{@render body()}
+	<section class="card">
+		<div class="card-h"><Icon size={16} class="shrink-0" aria-hidden="true" /><h2>{title}</h2>{#if aside}<span class="ml-auto font-mono text-xs text-muted">{aside}</span>{/if}</div>
+		<div class="card-body gap-3">{@render body()}</div>
 	</section>
 {/snippet}
 
 <!-- Full-bleed like the members list: a filter-bar strip with the toggle on the right, content below. -->
 <div class="-mx-7 -my-6 flex flex-col">
-<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 	<div class="flex-1"></div>
 	<Tabs {tabs} active={data.tab} label={t('settings.tabs')} />
 </div>
 
-<div class="grid gap-5 px-7 py-5">
+<div class="grid gap-4 px-6 py-4">
 
 	{#if data.error}
 		<Alert kind="error">{t('settings.load_failed')}</Alert>
@@ -332,7 +329,7 @@
 				<ul class="card divide-y divide-line self-start overflow-hidden">
 					{#each list as p (p.key)}
 						<li>
-							<button type="button" class="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface {selected === p.key ? 'bg-surface' : ''}" aria-current={selected === p.key ? 'true' : undefined} onclick={() => (selected = p.key)}>
+							<button type="button" class="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-paper {selected === p.key ? 'bg-paper' : ''}" aria-current={selected === p.key ? 'true' : undefined} onclick={() => (selected = p.key)}>
 								<span class="mt-0.5 text-muted">{#if p.kind === 'email'}<Mail size={16} />{:else}<FileText size={16} />{/if}</span>
 								<span class="min-w-0">
 									<span class="block font-semibold text-ink">{p.title}</span>
@@ -347,8 +344,8 @@
 					{#if !current}
 						<p class="text-muted">{t('settings.previews.pick')}</p>
 					{:else}
-						<div class="flex flex-wrap items-center justify-between gap-2">
-							<h2 class="card-title">{current.title}</h2>
+						<div class="card-h -mx-[1.125rem] -mt-[1.125rem] flex-wrap">
+							<h2>{current.title}</h2><span class="ml-auto"></span>
 							{#if current.kind === 'pdf' && pv.pdfUrl}
 								<a class="btn btn-outline btn-sm gap-2" href={pv.pdfUrl} target="_blank" rel="noopener"><ExternalLink size={14} /> {t('settings.previews.open_pdf')}</a>
 							{/if}

@@ -53,7 +53,7 @@
 <svelte:head><title>{pageTitle(t('officials.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<div class="flex flex-wrap items-center gap-2" role="search">
 			<div class="relative">
 				<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
@@ -85,7 +85,7 @@
 		<InfoTip label={t('officials.info_label')} text={t('officials.info')} align="right" />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		<p class="flex flex-wrap items-center gap-2 text-xs text-muted"><span class="badge badge-sm badge-outline">{t('officials.legend_own')}</span><span class="badge badge-sm border-dashed border-club bg-club/10 text-club-dark">{t('officials.legend_inherited')}</span></p>
 		{#if data.error}
 			<Alert kind="error">{t('officials.load_failed')}</Alert>
@@ -98,19 +98,19 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('officials.col.name')}</th><th>{t('officials.col.kind')}</th><th>{t('officials.col.level')}</th><th>{t('officials.col.valid_until')}</th><th>{t('officials.col.teams')}</th></tr>
+						<tr><th>{t('officials.col.name')}</th><th class="hidden md:table-cell">{t('officials.col.kind')}</th><th>{t('officials.col.level')}</th><th>{t('officials.col.valid_until')}</th><th class="hidden lg:table-cell">{t('officials.col.teams')}</th></tr>
 					</thead>
 					<tbody>
 						{#each data.people as p (p.member_id + p.kind)}
 						{@const KindIcon = kindIcon[p.kind]}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td>
 									<a class="group flex items-center gap-3 font-semibold" href="/members/{p.member_id}">
 										<Avatar first_name={p.first_name} last_name={p.last_name} photoUrl={p.photo_url} />
 										<span class="group-hover:underline">{p.first_name} {p.last_name}</span>
 									</a>
 								</td>
-								<td><span class="badge badge-sm badge-ghost gap-1"><KindIcon size={11} aria-hidden="true" /> {t(`officials.kind_pill.${p.kind}`)}</span></td>
+								<td class="hidden md:table-cell"><span class="badge badge-sm badge-ghost gap-1"><KindIcon size={11} aria-hidden="true" /> {t(`officials.kind_pill.${p.kind}`)}</span></td>
 								<td>{p.level_name ?? t('common.none')}</td>
 								<td>
 									<div class="flex flex-wrap items-center gap-2">
@@ -118,7 +118,7 @@
 										<span class="badge badge-sm {p.is_valid ? 'badge-success' : 'badge-error'}">{p.is_valid ? t('officials.status.valid') : t('officials.status.expired')}</span>
 									</div>
 								</td>
-								<td>
+								<td class="hidden lg:table-cell">
 									<div class="flex flex-wrap items-center gap-1">
 										{#each p.eligible_team_names as n (n)}
 											{#if p.inherited_team_names?.includes(n)}<span class="badge badge-sm border-dashed border-club bg-club/10 text-club-dark" title={t('officials.inherited')}>{n}</span>{:else}<span class="badge badge-sm badge-outline">{n}</span>{/if}

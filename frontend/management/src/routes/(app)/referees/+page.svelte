@@ -92,31 +92,31 @@
 <svelte:head><title>{pageTitle(t('referees.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5">
 		{#if shown.tab === 'games'}
 			<div class="flex flex-wrap items-center gap-1" role="group" aria-label={t('referees.range')}>
 				{#each RANGES as r (r)}
-					<a href={href({ range: r })} onclick={go(href({ range: r }))} aria-current={f.range === r ? 'true' : undefined} class="btn btn-sm {f.range === r ? 'btn-primary' : 'btn-outline'}">{t(`referees.range.${r}`)}</a>
+					<a href={href({ range: r })} onclick={go(href({ range: r }))} aria-current={f.range === r ? 'true' : undefined} class="portal-person compact text">{t(`referees.range.${r}`)}</a>
 				{/each}
 			</div>
 		{/if}
 		<div class="flex-1"></div>
-		<div class="flex w-fit items-center gap-1 " role="group" aria-label={t('referees.tabs')}>
+		<div class="flex w-fit flex-wrap items-center gap-1.5" role="group" aria-label={t('referees.tabs')}>
 			{#each tabs as tab (tab.key)}
-				<a href={href({ tab: tab.key })} onclick={go(href({ tab: tab.key }))} aria-current={shown.tab === tab.key ? 'true' : undefined} class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {shown.tab === tab.key ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{tab.label}</a>
+				<a href={href({ tab: tab.key })} onclick={go(href({ tab: tab.key }))} aria-current={shown.tab === tab.key ? 'true' : undefined} class="portal-person compact text">{tab.label}</a>
 			{/each}
 		</div>
 		<InfoTip label={t('referees.info_label')} text={t('referees.info')} align="right" />
 	</div>
 	{#if shown.tab === 'games'}
-		<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5" role="group" aria-label={t('referees.need')}>
+		<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5" role="group" aria-label={t('referees.need')}>
 			{#each NEEDS as n (n)}
 				<a href={href({ need: n })} onclick={go(href({ need: n }))} aria-current={f.need === n ? 'true' : undefined} class="badge gap-1.5 px-2.5 py-1 {f.need === n ? 'border-club bg-club/10 text-club-dark' : 'hover:border-stroke'}">{t(`referees.need.${n}`)}<span class="font-mono">{counts[n] ?? 0}</span></a>
 			{/each}
 		</div>
 	{/if}
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if shown.error || !summary}
 			<Alert kind="error">{t('referees.load_failed')}</Alert>
 		{:else}
@@ -136,10 +136,9 @@
 					<div class="card card-body items-center py-10 text-center text-muted"><FileText size={28} /><p>{t('referees.empty_payments')}</p></div>
 				{:else}
 					<div class="card overflow-x-auto">
-						<table class="table w-full table-fixed">
-							<colgroup><col class="w-[30%]" /><col /><col class="w-28" /><col class="w-80" /></colgroup>
+						<table class="table w-full">
 							<thead>
-								<tr><th class="px-4">{t('referees.payments.col.game')}</th><th class="px-4">{t('referees.payments.col.people')}</th><th class="px-4 text-right">{t('referees.payments.col.total')}</th><th class="px-4"></th></tr>
+								<tr><th class="px-4">{t('referees.payments.col.game')}</th><th class="hidden px-4 lg:table-cell">{t('referees.payments.col.people')}</th><th class="px-4 text-right">{t('referees.payments.col.total')}</th><th class="px-4"></th></tr>
 							</thead>
 							{#each groups.filter((g) => g.games.length) as group (group.key)}
 								<tbody>
@@ -148,19 +147,19 @@
 											<button type="button" class="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-paper" aria-expanded={open[group.key]} onclick={() => (open[group.key] = !open[group.key])}>
 												{#if open[group.key]}<ChevronDown size={16} aria-hidden="true" />{:else}<ChevronRight size={16} aria-hidden="true" />{/if}
 												<span class="font-display text-sm font-extrabold tracking-[.06em] text-ink uppercase">{t(`referees.payments.${group.key}`)}</span>
-												<span class="rounded-full border border-muted bg-white px-2 py-0.5 font-mono text-xs font-semibold text-slate">{group.games.length}</span>
+												<span class="rounded-full border border-muted bg-(--portal-panel) px-2 py-0.5 font-mono text-xs font-semibold text-slate">{group.games.length}</span>
 												<span class="ml-auto font-mono text-xs text-muted">{eur(group.games.reduce((n, g) => n + Number(g.total), 0))}</span>
 											</button>
 										</th>
 									</tr>
 									{#if open[group.key]}
 									{#each group.games as game (game.id)}
-										<tr class="hover:bg-surface {game.fees_pending ? 'bg-row-warn' : ''}">
+										<tr class="hover:bg-paper {game.fees_pending ? 'bg-row-warn' : ''}">
 											<td>
 												<div class="font-semibold">{gameLabel(game)}</div>
 												<div class="font-mono text-xs text-muted">{fmtDay(game.start)} {fmtTime(game.start)}</div>
 											</td>
-											<td class="max-w-xs text-sm">{people(game)}{#if game.fees_pending}<span class="badge badge-xs badge-info ml-1">{t('referees.status.fees')}</span>{/if}</td>
+											<td class="hidden max-w-xs text-sm lg:table-cell">{people(game)}{#if game.fees_pending}<span class="badge badge-xs badge-info ml-1">{t('referees.status.fees')}</span>{/if}</td>
 											<td class="text-right font-mono font-semibold">{eur(game.total)}</td>
 											<td class="px-4"><div class="flex flex-wrap justify-end gap-1.5">
 												<button class="btn btn-outline btn-xs" type="button" onclick={() => openDrawer(game)}><Settings2 size={12} aria-hidden="true" /> {t('referees.manage')}</button>
@@ -189,9 +188,9 @@
 					<div class="card card-body items-center py-10 text-center text-muted"><Whistle size={28} /><p>{t('referees.empty_workload')}</p></div>
 				{:else}
 					<div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-						<div class="card card-body gap-2">
-							<h2 class="card-title"><ChartBar size={16} class="shrink-0" aria-hidden="true" /> {t('referees.workload.chart')}</h2>
-							<WorkloadChart rows={summary.workload} />
+						<div class="card">
+							<div class="card-h"><ChartBar size={16} class="shrink-0" aria-hidden="true" /><h2>{t('referees.workload.chart')}</h2></div>
+							<div class="p-4"><WorkloadChart rows={summary.workload} /></div>
 						</div>
 						<div class="card overflow-x-auto">
 							<table class="table">
@@ -200,7 +199,7 @@
 								</thead>
 								<tbody>
 									{#each summary.workload as w (w.key)}
-										<tr class="hover:bg-surface">
+										<tr class="hover:bg-paper">
 											<td>{#if w.member_id}<a class="font-semibold hover:underline" href="/members/{w.member_id}">{w.name}</a>{:else}<span class="font-semibold">{w.name}</span> <span class="badge badge-xs badge-outline">{t('referees.external')}</span>{/if}</td>
 											<td><span class="badge badge-sm badge-ghost">{t(`referees.kind_one.${w.kind}`)}</span></td>
 											<td class="text-right font-mono">{w.games}</td>

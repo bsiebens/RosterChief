@@ -54,13 +54,13 @@
 <svelte:head><title>{pageTitle(t('roles.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<div class="flex-1"></div>
 		<FilterTabs {tabs} active={data.tab} label={t('roles.tab.label')} hrefFor={(key) => (key === 'roles' ? '?' : `?tab=${key}`)} onnavigate={navigate} />
 		<InfoTip label={t('roles.info_label')} text={data.tab === 'people' ? t('roles.people_intro') : t('roles.intro')} align="right" />
 	</div>
 
-	<div class="grid gap-4 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 	{#if page.url.searchParams.get('deleted') === '1' || (form && 'done' in form && form.done === 'delete')}<Alert kind="success">{t('roles.deleted')}</Alert>{/if}
 	{#if failure}<Alert kind="error" title={t('roles.action_failed')}>{failure}</Alert>{/if}
 
@@ -72,7 +72,7 @@
 				<thead><tr><th>{t('roles.col.role')}</th><th class="text-right">{t('roles.col.permissions')}</th><th class="text-right">{t('roles.col.people')}</th><th><span class="sr-only">{t('roles.col.actions')}</span></th></tr></thead>
 				<tbody>
 					{#each data.roles as r (r.id)}
-						<tr class="hover:bg-surface">
+						<tr class="hover:bg-paper">
 							<td>
 								<a class="link font-semibold" href={roleHref(r.id)}>{r.name}</a>
 								{#if r.is_system}<span class="badge badge-sm ml-2 gap-1"><Lock size={10} aria-hidden="true" /> {t('roles.system')}</span>{/if}
@@ -82,7 +82,7 @@
 							<td class="text-right font-mono text-sm">{r.member_count}</td>
 							<td class="text-right whitespace-nowrap">
 								<div class="flex justify-end gap-1">
-									<a class="btn btn-outline btn-xs gap-1" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><Pencil size={13} /> {t('common.edit')}</a>
+									<a class="btn btn-ghost btn-xs btn-square text-muted" href={roleHref(r.id)} aria-label={t('roles.edit_named', { name: r.name })}><ChevronRight size={16} /></a>
 									{#if !r.is_system}<button class="btn btn-outline btn-error btn-xs btn-square" type="button" aria-label={t('roles.delete_named', { name: r.name })} onclick={() => ((deleting = r), (deleteOpen = true))}><Trash2 size={13} /></button>{/if}
 								</div>
 							</td>
@@ -116,7 +116,7 @@
 						</tr>
 						{#if opened[r.id]}
 							{#each r.members as m (m.id)}
-								<tr class="hover:bg-surface">
+								<tr class="hover:bg-paper">
 									<td class="px-4 pl-10"><a class="link font-semibold" href="/members/{m.id}">{m.name}</a></td>
 									<td class="truncate text-sm text-muted">{m.email}</td>
 									<td class="text-right">

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { Hash, Pencil, Plus, Trash2, Bookmark } from '@lucide/svelte';
+	import { ChevronRight, Hash, Pencil, Plus, Trash2, Bookmark } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -92,12 +92,12 @@
 <svelte:head><title>{pageTitle(t('pools.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<div class="flex-1"></div>
 		<InfoTip label={t('pools.info_label')} text={t('pools.info')} align="right" />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('pools.load_failed')}</Alert>
 		{:else if !data.pools.length}
@@ -109,15 +109,15 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th>{t('pools.col.name')}</th><th>{t('pools.col.range')}</th><th>{t('pools.col.gap')}</th><th>{t('pools.col.teams')}</th><th class="text-right">{t('pools.col.reservations')}</th><th></th></tr>
+						<tr><th>{t('pools.col.name')}</th><th>{t('pools.col.range')}</th><th class="hidden lg:table-cell">{t('pools.col.gap')}</th><th class="hidden md:table-cell">{t('pools.col.teams')}</th><th class="text-right">{t('pools.col.reservations')}</th><th></th></tr>
 					</thead>
 					<tbody>
 						{#each data.pools as p (p.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(p)}>{p.name}</button></td>
 								<td class="font-mono text-xs">{p.min_number}–{p.max_number}</td>
-								<td class="font-mono text-xs">{t('pools.years', { n: p.min_age_gap_years })}</td>
-								<td>
+								<td class="hidden font-mono text-xs lg:table-cell">{t('pools.years', { n: p.min_age_gap_years })}</td>
+								<td class="hidden md:table-cell">
 									<div class="flex flex-wrap gap-1">
 										{#each p.teams as team (team.id)}<span class="badge badge-sm badge-outline">{team.name}</span>{:else}<span class="text-sm text-muted">—</span>{/each}
 									</div>
@@ -125,8 +125,8 @@
 								<td class="text-right font-mono text-xs">{p.reservation_count}</td>
 								<td class="text-right whitespace-nowrap">
 									<button class="btn btn-outline btn-xs" type="button" onclick={() => openReservations(p)}><Bookmark size={13} /> {t('pools.reservations')}</button>
-									<button class="btn btn-outline btn-xs" type="button" aria-label={t('pools.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={13} /> {t('common.edit')}</button>
-									<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
+									<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('pools.edit_named', { name: p.name })} onclick={() => openForm(p)}><ChevronRight size={16} /></button>
+									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('pools.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={14} /></button>
 								</td>
 							</tr>
 						{/each}

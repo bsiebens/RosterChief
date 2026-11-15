@@ -62,9 +62,9 @@
 			<div class="grid items-start gap-5 xl:grid-cols-3">
 				<div class="grid content-start gap-5 xl:col-span-2">
 					<section class="card card-body gap-3">
-						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ClipboardList size={16} aria-hidden="true" /> {t('regset.card.page')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ClipboardList size={16} aria-hidden="true" /> {t('regset.card.page')}</h2></div>
 						<label class="flex items-start gap-3 rounded-lg border border-line p-3">
-							<input type="checkbox" class="checkbox mt-0.5" name="is_open" bind:checked={v.is_open} />
+							<input type="checkbox" class="toggle mt-0.5" name="is_open" bind:checked={v.is_open} />
 							<span class="grid gap-0.5"><span class="text-sm font-semibold text-ink">{t('regset.open')}</span><span class="text-xs text-muted">{t('regset.open_help')}</span></span>
 						</label>
 						<div class="form-control">
@@ -79,7 +79,7 @@
 						</div>
 					</section>
 					<section class="card card-body gap-3">
-						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><ReceiptText size={16} aria-hidden="true" /> {t('regset.card.invoice')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ReceiptText size={16} aria-hidden="true" /> {t('regset.card.invoice')}</h2></div>
 						<div class="form-control">
 							<label class="label" for="pay"><span class="label-text">{t('regset.payment')}</span></label>
 							<textarea id="pay" name="payment_instructions" class="textarea textarea-bordered min-h-24 w-full" bind:value={v.payment_instructions}></textarea>
@@ -92,7 +92,7 @@
 						</div>
 					</section>
 					<section class="card card-body gap-3">
-						<h2 class="flex items-center gap-2 font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase"><CalendarClock size={16} aria-hidden="true" /> {t('installments.title')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><CalendarClock size={16} aria-hidden="true" /> {t('installments.title')}</h2></div>
 						<div class="form-control">
 							<label class="label" for="installment-offsets"><span class="label-text">{t('installments.offsets')}</span></label>
 							<input id="installment-offsets" name="installment_offsets" class="input input-bordered w-full" aria-describedby="installment-offsets-help" aria-invalid={!!errs.installment_offsets} bind:value={v.installment_offsets} />

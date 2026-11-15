@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { FileCheck, Pencil, Plus, Trash2 } from '@lucide/svelte';
+	import { ChevronRight, FileCheck, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -71,12 +71,12 @@
 <svelte:head><title>{pageTitle(t('req.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<div class="flex-1"></div>
 		<InfoTip label={t('req.info_label')} text={t('req.info')} align="right" />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('req.load_failed')}</Alert>
 		{:else if !data.requirements.length}
@@ -89,12 +89,12 @@
 				<table class="table">
 					<thead>
 						<tr>
-							<th>{t('req.col.name')}</th><th>{t('req.col.kind')}</th><th>{t('req.col.valid')}</th><th>{t('req.col.reminder')}</th><th>{t('req.col.blocks')}</th><th class="text-right">{t('req.col.used')}</th><th><span class="sr-only">{t('req.col.actions')}</span></th>
+							<th>{t('req.col.name')}</th><th class="hidden md:table-cell">{t('req.col.kind')}</th><th class="hidden lg:table-cell">{t('req.col.valid')}</th><th class="hidden xl:table-cell">{t('req.col.reminder')}</th><th class="hidden lg:table-cell">{t('req.col.blocks')}</th><th class="text-right">{t('req.col.used')}</th><th><span class="sr-only">{t('req.col.actions')}</span></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each data.requirements as r (r.id)}
-							<tr class="hover:bg-surface {r.is_active ? '' : 'opacity-70'}">
+							<tr class="hover:bg-paper {r.is_active ? '' : 'opacity-70'}">
 								<td>
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<button type="button" class="link text-left font-semibold" onclick={() => openForm(r)}>{r.name}</button>
@@ -102,7 +102,7 @@
 									</div>
 									{#if r.description}<p class="text-sm text-muted">{r.description}</p>{/if}
 								</td>
-								<td class="text-sm">
+								<td class="hidden text-sm md:table-cell">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										{#if r.kind === 'question'}
 											<span class="badge badge-sm badge-outline">{t('req.kind.question')}</span><span class="text-muted">{t(`req.qtype.${r.question_type}`)}</span>
@@ -111,9 +111,9 @@
 										{/if}
 									</div>
 								</td>
-								<td class="text-sm whitespace-nowrap">{r.valid_for_months ? t('req.valid_months', { n: r.valid_for_months }) : t('req.valid_forever')}</td>
-								<td class="text-sm whitespace-nowrap">{r.valid_for_months ? t('req.reminder_days', { n: r.reminder_days_before }) : '–'}</td>
-								<td>
+								<td class="hidden text-sm whitespace-nowrap lg:table-cell">{r.valid_for_months ? t('req.valid_months', { n: r.valid_for_months }) : t('req.valid_forever')}</td>
+								<td class="hidden text-sm whitespace-nowrap xl:table-cell">{r.valid_for_months ? t('req.reminder_days', { n: r.reminder_days_before }) : '–'}</td>
+								<td class="hidden lg:table-cell">
 									{#if r.blocked_event_kinds.length}
 										<div class="flex flex-wrap gap-1">{#each r.blocked_event_kinds as k (k)}<span class="badge badge-sm badge-outline">{t(`eventform.kind.${k}`)}</span>{/each}</div>
 									{:else}<span class="text-sm text-muted">{t('req.blocks_none')}</span>{/if}
@@ -121,8 +121,8 @@
 								<td class="text-right font-mono text-xs">{r.usage_count}</td>
 								<td class="text-right whitespace-nowrap">
 									<div class="flex justify-end gap-1">
-										<button class="btn btn-outline btn-xs" type="button" aria-label={t('req.edit') + ': ' + r.name} onclick={() => openForm(r)}><Pencil size={13} /> {t('common.edit')}</button>
-										<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('req.delete_title') + ': ' + r.name} onclick={() => openDelete(r)}><Trash2 size={13} /> {t('common.delete')}</button>
+										<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('req.edit') + ': ' + r.name} onclick={() => openForm(r)}><ChevronRight size={16} /></button>
+										<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('req.delete_title') + ': ' + r.name} onclick={() => openDelete(r)}><Trash2 size={14} /></button>
 									</div>
 								</td>
 							</tr>
@@ -177,7 +177,7 @@
 			{/if}
 		{:else}
 			<label class="label cursor-pointer justify-start gap-2 py-1">
-				<input type="checkbox" name="requires_document" class="checkbox checkbox-sm" bind:checked={requiresDocument} />
+				<input type="checkbox" name="requires_document" class="toggle" bind:checked={requiresDocument} />
 				<span class="label-text">{t('req.f.requires_document')}</span>
 			</label>
 		{/if}
@@ -196,7 +196,7 @@
 			{#if err('blocked_event_kinds')}<span class="block text-xs text-error">{err('blocked_event_kinds')}</span>{/if}
 		</fieldset>
 		<label class="label cursor-pointer justify-start gap-2 py-1">
-			<input type="checkbox" name="is_active" class="checkbox checkbox-sm" bind:checked={active} />
+			<input type="checkbox" name="is_active" class="toggle" bind:checked={active} />
 			<span class="label-text">{t('req.f.active')}</span>
 		</label>
 		<p class="-mt-1 text-xs text-muted">{t('req.f.active_help')}</p>

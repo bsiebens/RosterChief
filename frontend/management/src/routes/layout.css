@@ -1469,3 +1469,10 @@ textarea[name="note"] {
     .portal-ui :is(.badge-outline, .badge-ghost) { background-color: var(--portal-panel); }
     .portal-ui .badge-neutral { color: var(--color-white); }
 }
+
+/* Manage list pages (settings, referees): link pills mark their current tab with aria-current, like aria-pressed on buttons. */
+.portal-person[aria-current="true"] {
+    border-color: var(--color-club);
+    background: var(--color-club);
+    color: var(--color-club-content);
+}

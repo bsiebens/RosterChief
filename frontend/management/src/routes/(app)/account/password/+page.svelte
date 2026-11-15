@@ -3,6 +3,7 @@
 	import { t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
+	import { KeyRound } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 
@@ -41,7 +42,8 @@
 
 <svelte:head><title>{pageTitle(t('account.password.title'))}</title></svelte:head>
 
-<div class="card max-w-xl">
+<div class="px-0 md:px-3 md:py-1"><div class="card max-w-xl">
+	<div class="card-h"><KeyRound size={16} class="shrink-0" aria-hidden="true" /><h2>{t('account.password.title')}</h2></div>
 	<form class="card-body gap-4" onsubmit={submit}>
 		{#if done}<Alert kind="success">{t('account.password.done')}</Alert>{/if}
 		{#each errors as message (message)}<Alert kind="error">{message}</Alert>{/each}
@@ -50,4 +52,5 @@
 		<Field label={t('account.password.confirm')} type="password" autocomplete="new-password" required bind:value={confirm} error={fieldErrors.confirm} />
 		<div class="card-actions"><button class="btn btn-primary" type="submit" disabled={busy}>{t('account.password.submit')}</button></div>
 	</form>
+</div>
 </div>

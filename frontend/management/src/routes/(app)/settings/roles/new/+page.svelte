@@ -49,7 +49,7 @@
 	<div class="grid items-start gap-5 xl:grid-cols-3">
 		<div class="grid content-start gap-5 xl:col-span-2">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.details')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.details')}</h2></div>
 				<div class="form-control">
 					<label class="label" for="name"><span class="label-text">{t('roles.field.name')}</span></label>
 					<input id="name" name="name" class="input input-bordered w-full {nameError ? 'input-error' : ''}" bind:value={name} maxlength="150" aria-invalid={nameError ? 'true' : undefined} />
@@ -61,14 +61,14 @@
 				</div>
 			</section>
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ShieldCheck size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.permissions')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ShieldCheck size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.permissions')}</h2></div>
 				<p class="text-xs text-muted">{t('roles.card.permissions_desc')}</p>
 				<PermissionPicker permissions={data.permissions} bind:selected />
 			</section>
 		</div>
 		<div class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.actions')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.actions')}</h2></div>
 				<div class="grid gap-2">
 					<button class="btn btn-primary w-full gap-2" type="submit" disabled={busy}><Save size={16} /> {t('roles.create')}</button>
 					<a class="btn btn-outline w-full" href="/settings/roles">{t('common.cancel')}</a>

@@ -104,7 +104,7 @@
 <svelte:head><title>{pageTitle(t('eventtypes.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<label class="input input-sm flex w-64 max-w-full items-center gap-2">
 			<Search size={14} aria-hidden="true" />
 			<input type="search" class="min-w-0 grow" placeholder={t('eventtypes.search')} aria-label={t('eventtypes.search')} bind:value={query} />
@@ -117,7 +117,7 @@
 		<InfoTip label={t('eventtypes.info_label')} text={t('eventtypes.info')} align="right" />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if form?.subAction === 'reorder'}<Alert kind="error" title={t('eventtypes.reorder_failed')}>{form.subError}</Alert>{/if}
 		{#if data.error}
 			<Alert kind="error">{t('eventtypes.load_failed')}</Alert>
@@ -151,7 +151,7 @@
 							{#if !closed[sec.kind]}
 								{#each sec.rows as s, i (s.id)}
 									<tr
-										class="hover:bg-surface {overId === s.id && dragId !== s.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === s.id ? 'opacity-50' : ''}"
+										class="hover:bg-paper {overId === s.id && dragId !== s.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === s.id ? 'opacity-50' : ''}"
 										draggable={canOrder}
 										ondragstart={(e) => {
 											dragId = s.id;
@@ -186,8 +186,8 @@
 										</td>
 										<td class="px-4 text-right font-mono text-xs">{s.in_use_count}</td>
 										<td class="px-4 text-right whitespace-nowrap">
-											<button class="btn btn-outline btn-xs" type="button" aria-label={t('eventtypes.edit_named', { name: s.name })} onclick={() => openForm(s)}><Pencil size={13} /> {t('common.edit')}</button>
-											<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('eventtypes.delete_named', { name: s.name })} onclick={() => openDelete(s)}><Trash2 size={13} /> {t('common.delete')}</button>
+											<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('eventtypes.edit_named', { name: s.name })} onclick={() => openForm(s)}><ChevronRight size={16} /></button>
+											<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('eventtypes.delete_named', { name: s.name })} onclick={() => openDelete(s)}><Trash2 size={14} /></button>
 										</td>
 									</tr>
 								{/each}

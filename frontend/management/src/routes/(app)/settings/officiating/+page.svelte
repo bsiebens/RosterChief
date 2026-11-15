@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { Pencil, Plus, Trash2, Whistle } from '@lucide/svelte';
+	import { ChevronRight, Pencil, Plus, Trash2, Whistle } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -70,13 +70,13 @@
 
 <!-- Full-bleed like the members list: a filter-bar strip with the toggle on the right, content below. -->
 <div class="-mx-7 -my-6 flex flex-col">
-<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 	<div class="flex-1"></div>
 	<Tabs {tabs} active={data.tab} label={t('levels.tabs')} />
 	<InfoTip label={t('levels.info_label')} text={t('levels.info')} />
 </div>
 
-<div class="grid gap-5 px-7 py-5">
+<div class="grid gap-4 px-6 py-4">
 
 	{#if data.error}
 		<Alert kind="error">{t('levels.load_failed')}</Alert>
@@ -90,14 +90,14 @@
 		<div class="card overflow-x-auto">
 			<table class="table">
 				<thead>
-					<tr><th>{t('levels.col.name')}</th><th>{t('levels.col.inherits')}</th><th>{t('levels.col.teams')}</th><th class="text-right">{t('levels.col.members')}</th><th></th></tr>
+					<tr><th>{t('levels.col.name')}</th><th class="hidden md:table-cell">{t('levels.col.inherits')}</th><th class="hidden lg:table-cell">{t('levels.col.teams')}</th><th class="text-right">{t('levels.col.members')}</th><th></th></tr>
 				</thead>
 				<tbody>
 					{#each data.levels as l (l.id)}
-						<tr class="hover:bg-surface">
+						<tr class="hover:bg-paper">
 							<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(l)}>{l.name}</button></td>
-							<td>{levelName(l.inherits_from_id) || t('common.none')}</td>
-							<td>
+							<td class="hidden md:table-cell">{levelName(l.inherits_from_id) || t('common.none')}</td>
+							<td class="hidden lg:table-cell">
 								<div class="flex flex-wrap gap-1">
 									{#each l.team_ids as id (id)}<span class="badge badge-sm badge-outline">{teamName(id)}</span>{/each}
 									{#each inheritedTeams(l) as it (it.id)}<span class="badge badge-sm border-dashed border-club bg-club/10 text-club-dark" title={t('levels.inherited_from', { level: it.from })}>{teamName(it.id)}</span>{/each}
@@ -106,8 +106,8 @@
 							</td>
 							<td class="text-right font-mono text-xs">{l.member_count}</td>
 							<td class="text-right whitespace-nowrap">
-								<button class="btn btn-outline btn-xs" type="button" aria-label={t('levels.edit_named', { name: l.name })} onclick={() => openForm(l)}><Pencil size={13} /> {t('common.edit')}</button>
-								<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('levels.delete_named', { name: l.name })} onclick={() => openDelete(l)}><Trash2 size={13} /> {t('common.delete')}</button>
+								<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('levels.edit_named', { name: l.name })} onclick={() => openForm(l)}><ChevronRight size={16} /></button>
+								<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('levels.delete_named', { name: l.name })} onclick={() => openDelete(l)}><Trash2 size={14} /></button>
 							</td>
 						</tr>
 					{/each}

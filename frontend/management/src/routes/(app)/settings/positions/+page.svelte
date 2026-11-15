@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
-	import { ArrowDown, ArrowUp, GripVertical, Pencil, Plus, Trash2, Users } from '@lucide/svelte';
+	import { ChevronRight, ArrowDown, ArrowUp, GripVertical, Pencil, Plus, Trash2, Users } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
@@ -88,12 +88,12 @@
 <svelte:head><title>{pageTitle(t('positions.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 		<div class="flex-1"></div>
 		<InfoTip label={t('positions.info_label')} text={t('positions.info')} align="right" />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if form?.posAction === 'reorder'}<Alert kind="error" title={t('positions.reorder_failed')}>{form.posError}</Alert>{/if}
 		{#if data.error}
 			<Alert kind="error">{t('positions.load_failed')}</Alert>
@@ -107,12 +107,12 @@
 			<div class="card overflow-x-auto">
 				<table class="table">
 					<thead>
-						<tr><th class="w-16"><span class="sr-only">{t('positions.col.move')}</span></th><th>{t('positions.col.name')}</th><th>{t('positions.col.short')}</th><th>{t('positions.col.type')}</th><th class="text-right">{t('positions.col.in_use')}</th><th></th></tr>
+						<tr><th class="w-16"><span class="sr-only">{t('positions.col.move')}</span></th><th>{t('positions.col.name')}</th><th class="hidden md:table-cell">{t('positions.col.short')}</th><th>{t('positions.col.type')}</th><th class="text-right">{t('positions.col.in_use')}</th><th></th></tr>
 					</thead>
 					<tbody>
 						{#each list as p, i (p.id)}
 							<tr
-								class="hover:bg-surface {overId === p.id && dragId !== p.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === p.id ? 'opacity-50' : ''}"
+								class="hover:bg-paper {overId === p.id && dragId !== p.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === p.id ? 'opacity-50' : ''}"
 								draggable="true"
 								ondragstart={(e) => {
 									dragId = p.id;
@@ -136,7 +136,7 @@
 									</span>
 								</td>
 								<td><button type="button" class="link text-left font-semibold" onclick={() => openForm(p)}>{p.name}</button></td>
-								<td>{p.short_name}</td>
+								<td class="hidden md:table-cell">{p.short_name}</td>
 								<td>
 									<div class="flex flex-wrap gap-1">
 										{#if p.management_position}<span class="badge badge-sm badge-primary">{t('positions.type.management')}</span>{/if}
@@ -145,8 +145,8 @@
 								</td>
 								<td class="text-right font-mono text-xs">{p.in_use_count}</td>
 								<td class="text-right whitespace-nowrap">
-									<button class="btn btn-outline btn-xs" type="button" aria-label={t('positions.edit_named', { name: p.name })} onclick={() => openForm(p)}><Pencil size={13} /> {t('common.edit')}</button>
-									<button class="btn btn-outline btn-error btn-xs" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={13} /> {t('common.delete')}</button>
+									<button class="btn btn-ghost btn-xs btn-square text-muted" type="button" aria-label={t('positions.edit_named', { name: p.name })} onclick={() => openForm(p)}><ChevronRight size={16} /></button>
+									<button class="btn btn-ghost btn-xs btn-square text-error" type="button" aria-label={t('positions.delete_named', { name: p.name })} onclick={() => openDelete(p)}><Trash2 size={14} /></button>
 								</td>
 							</tr>
 						{/each}
@@ -175,11 +175,11 @@
 		<Field label={t('positions.short_name')} name="short_name" bind:value={shortName} error={err('short_name')} autocomplete="off" />
 		{#if !editing}<input type="hidden" name="ordering" value={nextOrdering} />{/if}
 		<label class="label cursor-pointer justify-start gap-2 py-1">
-			<input type="checkbox" name="staff_position" class="checkbox checkbox-sm" bind:checked={staff} onchange={onStaff} />
+			<input type="checkbox" name="staff_position" class="toggle" bind:checked={staff} onchange={onStaff} />
 			<span class="label-text">{t('positions.staff')}</span>
 		</label>
 		<label class="label cursor-pointer justify-start gap-2 py-1">
-			<input type="checkbox" name="management_position" class="checkbox checkbox-sm" bind:checked={management} onchange={onManagement} />
+			<input type="checkbox" name="management_position" class="toggle" bind:checked={management} onchange={onManagement} />
 			<span class="label-text">{t('positions.management')}</span>
 		</label>
 		{#if err('management_position')}<span class="block text-xs text-error">{err('management_position')}</span>{/if}

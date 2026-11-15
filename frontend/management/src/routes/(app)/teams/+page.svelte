@@ -3,7 +3,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
-	import { ArrowDown, ArrowUp, GripVertical, Pencil, Plus, Search, Shirt, X } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Plus, Search, Shirt, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import TeamFormModal from '#lib/components/teams/TeamFormModal.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -78,7 +78,7 @@
 <svelte:head><title>{pageTitle(t('teams.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5" role="search">
+	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5" role="search">
 		<div class="relative">
 			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
 			<input type="search" aria-label={t('teams.search')} placeholder={t('teams.search_placeholder')} class="input w-56 pl-9" bind:value={q} oninput={onType} />
@@ -96,7 +96,7 @@
 		{/if}
 	</div>
 
-	<div class="px-7 py-5">
+	<div class="px-6 py-4">
 		{#if form?.teamAction === 'reorder'}<Alert kind="error" title={t('teams.reorder_failed')}>{form.teamError}</Alert>{/if}
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
@@ -110,14 +110,14 @@
 				<table class="table">
 					<thead>
 						<tr>
-							<th class="w-24"><span class="sr-only">{t('teams.col.move')}</span></th><th>{t('teams.col.name')}</th><th>{t('teams.col.short')}</th><th>{t('teams.col.age')}</th><th>{t('teams.col.pool')}</th>
-							<th class="text-right">{t('teams.col.players')}</th><th class="text-right">{t('teams.col.staff')}</th><th>{t('teams.col.feeds')}</th><th></th>
+							<th class="w-24"><span class="sr-only">{t('teams.col.move')}</span></th><th>{t('teams.col.name')}</th><th class="hidden lg:table-cell">{t('teams.col.short')}</th><th>{t('teams.col.age')}</th><th class="hidden xl:table-cell">{t('teams.col.pool')}</th>
+							<th class="text-right">{t('teams.col.players')}</th><th class="text-right">{t('teams.col.staff')}</th><th class="hidden xl:table-cell">{t('teams.col.feeds')}</th><th></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each list as r, i (r.id)}
 							<tr
-								class="hover:bg-surface {overId === r.id && dragId !== r.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === r.id ? 'opacity-50' : ''}"
+								class="hover:bg-paper {overId === r.id && dragId !== r.id ? 'outline outline-2 -outline-offset-2 outline-club' : ''} {dragId === r.id ? 'opacity-50' : ''}"
 								draggable={canSort}
 								ondragstart={(e) => {
 									dragId = r.id;
@@ -147,22 +147,22 @@
 									<a class="link" href="/teams/{r.id}{data.filters.season ? `?season=${data.filters.season}` : ''}">{r.name}</a>
 									{#if r.tournament_only}<span class="badge badge-ghost badge-sm ml-2">{t('teams.tournament_only')}</span>{/if}
 								</td>
-								<td class="text-sm text-muted">{r.short_name || '—'}</td>
+								<td class="hidden text-sm text-muted lg:table-cell">{r.short_name || '—'}</td>
 								<td class="font-mono text-xs">{age(r.age_min, r.age_max)}</td>
-								<td class="text-sm">{r.pool_name ?? '—'}</td>
+								<td class="hidden text-sm xl:table-cell">{r.pool_name ?? '—'}</td>
 								<td class="text-right font-mono text-xs">{r.player_count}</td>
 								<td class="text-right font-mono text-xs">{r.staff_count}</td>
-								<td class="text-sm">{r.feeds_into_name ?? '—'}</td>
+								<td class="hidden text-sm xl:table-cell">{r.feeds_into_name ?? '—'}</td>
 								<td class="text-right whitespace-nowrap">
 									{#if canManageTeam(data.me, r.id)}
 									<button
-										class="btn btn-outline btn-xs gap-1"
+										class="btn btn-ghost btn-xs btn-square text-muted"
 										type="button"
 										aria-label={t('teams.edit_named', { name: r.name })}
 										onclick={() => {
 											editing = r;
 											editOpen = true;
-										}}><Pencil size={13} /> {t('common.edit')}</button>
+										}}><ChevronRight size={16} /></button>
 									{/if}
 								</td>
 							</tr>

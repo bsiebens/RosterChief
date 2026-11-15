@@ -57,7 +57,7 @@
 <svelte:head><title>{pageTitle(t('teams.numbers.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5">
+	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5">
 		<select class="select w-auto" aria-label={t('teams.season')} value={data.filters.season} onchange={(e) => goto(href({ season: e.currentTarget.value }), { reset: false })}>
 			<option value="">{t('members.list.season_current')}</option>
 			{#each data.seasons as s (s.id)}<option value={s.id}>{s.name}{s.is_current ? ` (${t('members.list.current')})` : ''}</option>{/each}
@@ -71,7 +71,7 @@
 		<NumberLegend statuses={STATUS_ORDER} />
 	</div>
 
-	<div class="grid gap-5 px-7 py-5">
+	<div class="grid gap-4 px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.overview.length}
@@ -81,9 +81,9 @@
 			</div>
 		{/if}
 		{#each data.overview as o (o.pool?.id ?? 'none')}
-									<div class="card card-body">
-				<div class="flex flex-wrap items-baseline justify-between gap-2">
-					<h2 class="font-display text-sm font-extrabold tracking-[.06em] text-club-dark uppercase flex items-center gap-2"><Hash size={16} class="shrink-0" aria-hidden="true" /> {o.pool?.name ?? t('teams.numbers.no_pool')}</h2>
+		<div class="card card-body">
+				<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1 flex-wrap justify-between">
+					<h2 class="flex items-center gap-2"><Hash size={16} class="shrink-0" aria-hidden="true" /> {o.pool?.name ?? t('teams.numbers.no_pool')}</h2>
 					{#if o.pool}
 						<span class="font-mono text-xs text-muted">{o.pool.min_number}–{o.pool.max_number} · {t('teams.numbers.age_gap', { n: o.pool.min_age_gap_years })}</span>
 					{/if}

@@ -77,7 +77,7 @@
 					};
 				}}>
 				<section class="card card-body gap-3">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.details')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ClipboardList size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.details')}</h2></div>
 					<div class="form-control">
 						<label class="label" for="name"><span class="label-text">{t('roles.field.name')}</span></label>
 						<input id="name" name="name" class="input input-bordered w-full {op === 'save' && fields.name || (tried && !name.trim()) ? 'input-error' : ''}" bind:value={name} maxlength="150" disabled={locked} />
@@ -89,7 +89,7 @@
 					</div>
 				</section>
 				<section class="card card-body gap-3">
-					<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><ShieldCheck size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.permissions')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><ShieldCheck size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.permissions')}</h2></div>
 					<p class="text-xs text-muted">{t('roles.card.permissions_desc')}</p>
 					<PermissionPicker permissions={data.permissions} bind:selected disabled={locked} />
 				</section>
@@ -99,7 +99,7 @@
 
 		<aside class="grid content-start gap-5 xl:sticky xl:top-20">
 			<section class="card card-body gap-3">
-				<h2 class="font-display text-sm font-extrabold tracking-[.08em] text-ink uppercase flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.actions')}</h2>
+	<div class="card-h -mx-[1.125rem] -mt-[1.125rem] mb-1"><h2 class="flex items-center gap-2"><Settings2 size={16} class="shrink-0" aria-hidden="true" /> {t('roles.card.actions')}</h2></div>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-muted">
 					{#if role.is_system}<span class="badge badge-sm gap-1"><Lock size={10} aria-hidden="true" /> {t('roles.system')}</span>{/if}
 					<span class="font-mono">{t('roles.counts', { permissions: locked ? t('roles.all') : role.permissions.length, people: role.member_count })}</span>
