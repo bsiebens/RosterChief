@@ -1,0 +1,20 @@
+[Unit]
+Description=RosterChief platform control panel
+After=network.target rosterchief-web.service
+
+[Service]
+User=rosterchief-frontend
+Group=rosterchief-frontend
+WorkingDirectory=/opt/rosterchief/current/frontend/controlpanel
+EnvironmentFile=/etc/rosterchief/site.env
+Environment=NODE_ENV=production HOST=127.0.0.1 PORT=5173 BACKEND_URL=http://127.0.0.1:8000
+Environment=PROTOCOL_HEADER=x-forwarded-proto HOST_HEADER=x-forwarded-host ADDRESS_HEADER=x-forwarded-for XFF_DEPTH=1 BODY_SIZE_LIMIT=520M
+ExecStart=/usr/bin/node-24 build
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

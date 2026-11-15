@@ -1,0 +1,22 @@
+[Unit]
+Description=RosterChief Celery worker
+After=network.target postgresql.service valkey.service
+Requires=postgresql.service valkey.service
+
+[Service]
+User=rosterchief
+Group=rosterchief
+WorkingDirectory=/opt/rosterchief/current
+EnvironmentFile=/etc/rosterchief/app.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/rosterchief/current/.venv/bin/celery -A rosterchief worker --loglevel=INFO --concurrency=2
+Restart=on-failure
+TimeoutStopSec=180
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rosterchief/media /var/lib/rosterchief/private_media
+
+[Install]
+WantedBy=multi-user.target

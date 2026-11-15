@@ -1,0 +1,22 @@
+[Unit]
+Description=RosterChief Django web
+After=network.target postgresql.service valkey.service
+Requires=postgresql.service valkey.service
+
+[Service]
+User=rosterchief
+Group=rosterchief
+WorkingDirectory=/opt/rosterchief/current
+EnvironmentFile=/etc/rosterchief/app.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/rosterchief/current/.venv/bin/gunicorn rosterchief.wsgi:application --bind 127.0.0.1:8000 --workers 2 --threads 4 --timeout 180 --graceful-timeout 60
+Restart=on-failure
+TimeoutStopSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rosterchief/media /var/lib/rosterchief/private_media
+
+[Install]
+WantedBy=multi-user.target
