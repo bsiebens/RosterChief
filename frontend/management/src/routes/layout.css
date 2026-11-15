@@ -1393,7 +1393,9 @@ textarea[name="note"] {
     color: var(--portal-hero-content);
 }
 
-:root { --portal-panel: #ffffff; } /* the sheets and dialogs also open inside the manage app, which is not a .portal-ui page */
+:root { --portal-panel: #ffffff; }
+/* The hero surface also appears in the manage app (analytics), which is not a .portal-ui page. */
+:root, body { --portal-hero: var(--tenant-sidebar-bg, #172942); --portal-hero-content: var(--tenant-sidebar-fg, #fff); } /* the sheets and dialogs also open inside the manage app, which is not a .portal-ui page */
 
 .portal-sheet {
     inset: auto 0 0;
