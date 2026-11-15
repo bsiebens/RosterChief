@@ -93,7 +93,7 @@
 						<div class="flex min-h-11 min-w-0 items-center gap-3">
 							<Avatar first_name={member.first_name} last_name={member.last_name} photoUrl={member.photo_url} size="size-9" text="text-xs" />
 							<span class="min-w-0 flex-1">
-								<b class="block truncate text-sm text-ink">{member.first_name} {member.last_name}{#if member.is_self} <span class="badge badge-ghost badge-sm align-middle">{t('coach.you')}</span>{/if}</b>
+								<b class="flex min-w-0 items-center gap-2 text-sm text-ink"><span class="truncate">{member.first_name} {member.last_name}</span>{#if member.is_self}<span class="badge badge-ghost badge-sm shrink-0">{t('coach.you')}</span>{/if}</b>
 								{#if member.position_name}<span class="block truncate text-xs text-muted">{member.position_name}</span>{/if}
 							</span>
 							{#if canManage && !member.is_self}
