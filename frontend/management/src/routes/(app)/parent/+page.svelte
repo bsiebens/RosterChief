@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { ArrowLeft, Bell, CalendarDays, ChartColumn, Shirt, Info, ListChecks, MapPin, Users, ChevronRight, CircleCheck, ClipboardList, FileText, Handshake, KeyRound, List, UserRound, UsersRound, Wallet, Whistle } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
@@ -37,7 +38,16 @@
 	const tab = $derived(page.url.searchParams.get('tab') || page.url.hash.slice(1) || 'home');
 	const crewOnly = $derived(tab === 'calendar' && page.url.searchParams.get('crew') === '1');
 	const VIEWS = ['month', 'week', 'list'] as const;
-	const view = $derived(VIEWS.find((v) => v === page.url.searchParams.get('view')) ?? 'month');
+	// Without an explicit choice the calendar opens as the list on a phone and as the month on larger screens.
+	let phone = $state(false);
+	onMount(() => {
+		const query = matchMedia('(max-width: 47.99rem)');
+		phone = query.matches;
+		const update = () => (phone = query.matches);
+		query.addEventListener('change', update);
+		return () => query.removeEventListener('change', update);
+	});
+	const view = $derived(VIEWS.find((v) => v === page.url.searchParams.get('view')) ?? (phone ? 'list' : 'month'));
 	const mondayOf = (date: Date) => {
 		const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 		day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
@@ -166,7 +176,7 @@
 	const openTasks = $derived<OpenTask[]>(data.home?.tasks ?? []);
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length || openTasks.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length + openTasks.length);
-	const viewLink = (v: string) => `/parent?tab=calendar${v === 'month' ? '' : `&view=${v}`}`;
+	const viewLink = (v: string) => `/parent?tab=calendar&view=${v}`;
 	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : viewLink(view));
 	const eventLink = (id: string) => tab === 'calendar' ? `${calendarLink}&event=${id}` : `/parent?event=${id}`;
 
