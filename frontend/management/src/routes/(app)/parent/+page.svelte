@@ -6,7 +6,7 @@
 	import { getLang, t } from '#lib/i18n.svelte.ts';
 	import { usePageHeader } from '#lib/header.svelte.ts';
 	import { api } from '#lib/management-api.ts';
-	import type { EventExtras, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
+	import type { CalendarEntry, EventExtras, OfficiatingOpportunity, OpenTask, PortalEvent, PortalEventDisplay, PortalTask } from '#lib/portal.ts';
 	import { day, money } from '#lib/shop.ts';
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import AccountMenu from '#lib/components/AccountMenu.svelte';
@@ -20,6 +20,9 @@
 	import News from '#lib/components/portal/News.svelte';
 	import SampleBadge from '#lib/components/SampleBadge.svelte';
 	import OfficiatingRow from '#lib/components/portal/OfficiatingRow.svelte';
+	import GameTimelineDialog from '#lib/components/portal/GameTimelineDialog.svelte';
+	import PortalAgenda from '#lib/components/portal/PortalAgenda.svelte';
+	import PortalWeekGrid from '#lib/components/portal/PortalWeekGrid.svelte';
 	import Sheet from '#lib/components/portal/Sheet.svelte';
 
 	let { data } = $props();
@@ -85,7 +88,6 @@
 	const monthKey = $derived(dateKey(month).slice(0, 7));
 	const offers = $derived((data.home.officiating ?? []).filter((offer) => !selected || offer.member_id === selected));
 	const officiatingInvites = $derived(offers.filter((offer) => offer.status === 'invited' && offer.signup_open));
-	type CalendarEntry = { event: PortalEventDisplay; attendance: PortalEvent[]; officiating: OfficiatingOpportunity[] };
 	function calendarEntries(rows: PortalEvent[], opportunities: OfficiatingOpportunity[]) {
 		const grouped = new Map<string, CalendarEntry>();
 		const groupFor = (event: PortalEventDisplay) => {
@@ -112,23 +114,6 @@
 		return days;
 	});
 	const kindsPresent = $derived([...new Set(calendar.map(({ event }) => event.kind))]);
-	const entriesOn = (day: Date) => calendar.filter(({ event }) => dateKey(new Date(event.start)) === dateKey(day));
-	const listGroups = $derived.by(() => {
-		const groups = new Map<string, { key: string; date: Date; entries: CalendarEntry[] }>();
-		for (const entry of calendar) {
-			const date = new Date(entry.event.start);
-			const key = dateKey(date);
-			groups.set(key, groups.get(key) ?? { key, date, entries: [] });
-			groups.get(key)?.entries.push(entry);
-		}
-		return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
-	});
-	const todayKey = $derived(listGroups.find((group) => group.key >= dateKey(new Date()))?.key ?? '');
-	/** Opens the list at today: the past stays above, scrolled out of sight. */
-	function scrollToToday(node: HTMLElement) {
-		const target = node.querySelector<HTMLElement>('[data-today]');
-		if (target) node.scrollTop = target.offsetTop - node.offsetTop;
-	}
 	const agenda = $derived(calendar.filter(({ event, officiating }) => {
 		if (crewOnly) return officiating.length > 0;
 		const key = dateKey(new Date(event.start));
@@ -160,6 +145,7 @@
 
 	// The event drawer's line-up, tasks and attachments: read when it opens.
 	let extras = $state<EventExtras | null>(null);
+	let timelineOpen = $state(false);
 	const detailId = $derived(detail?.event.event_id ?? '');
 	async function loadExtras(id: string) {
 		const result = await api<EventExtras>('GET', `/portal/events/${id}`);
@@ -168,6 +154,7 @@
 	$effect(() => {
 		const id = detailId;
 		extras = null;
+		timelineOpen = false;
 		if (id) void loadExtras(id);
 	});
 	async function claim(eventId: string, taskId: string, take: boolean) {
@@ -229,7 +216,7 @@
 {/snippet}
 
 {#snippet officiating(offer: OfficiatingOpportunity)}
-	<OfficiatingRow {offer} name={memberName(offer.member_id)} busy={!!busy} error={errors[offerKey(offer)] ?? ''} onreply={(available) => officiate(offer, available)} />
+	<OfficiatingRow {offer} name={memberName(offer.member_id)} photo={people.find((person) => person.id === offer.member_id)?.photo_url} busy={!!busy} error={errors[offerKey(offer)] ?? ''} onreply={(available) => officiate(offer, available)} />
 {/snippet}
 
 {#snippet formsList()}
@@ -284,24 +271,33 @@
 	</div>
 {/snippet}
 
+{#snippet scoreMark(entry: CalendarEntry)}
+	{#if entry.event.score_for != null && entry.event.score_against != null}
+		<span class="shrink-0 px-2 font-display text-3xl leading-none font-extrabold tabular-nums {entry.event.score_for > entry.event.score_against ? 'text-ok-text' : entry.event.score_for < entry.event.score_against ? 'text-danger' : 'text-ink'}" aria-label="{entry.event.score_for} – {entry.event.score_against}">{entry.event.score_for}–{entry.event.score_against}</span>
+	{/if}
+{/snippet}
+
+{#snippet replyStack(entry: CalendarEntry)}
+	{#each entry.attendance as row (row.id)}{@render rsvp(row, true)}{/each}
+	{#each entry.officiating as offer (offerKey(offer))}{@render officiating(offer)}{/each}
+{/snippet}
+
 {#snippet eventRow(entry: CalendarEntry, tile = true)}
 	{@const event = entry.event}
-	<div class="grid gap-x-4 gap-y-1 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,25rem)]">
-		<div class="flex min-w-0 gap-3">
+	<div class="grid gap-x-4 gap-y-1 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] md:items-center">
+		<div class="flex min-w-0 items-center gap-3">
 			{#if tile}<PortalEventDate start={event.start} />{:else}<span class="w-12 shrink-0 pt-2.5 font-mono text-xs text-muted">{formatTime(event.start)}</span>{/if}
 			<a class="flex min-h-10 min-w-0 flex-1 items-start gap-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
-				<span class="mt-2 size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>
+				<span class="size-2 shrink-0 rounded-full {kindStyle(event.kind).dot}"></span>
 				<span class="min-w-0 flex-1">
 					<span class="block font-semibold text-ink">{event.title}</span>
 					<span class="block truncate text-xs text-muted">{tile ? formatTime(event.start) : ''}{tile && event.location ? ' · ' : ''}{event.location}</span>
 				</span>
-				{#if event.score_for != null && event.score_against != null}<span class="font-mono text-sm font-bold">{event.score_for}–{event.score_against}</span>{:else}<ChevronRight size={16} class="mt-1 shrink-0 text-muted md:hidden" aria-hidden="true" />{/if}
+				{#if !(event.score_for != null && event.score_against != null)}<ChevronRight size={16} class="mt-1 shrink-0 text-muted md:hidden" aria-hidden="true" />{/if}
 			</a>
+			{@render scoreMark(entry)}
 		</div>
-		<div class="min-w-0 divide-y divide-rule pl-[3.75rem] md:pl-0">
-			{#each entry.attendance as row (row.id)}{@render rsvp(row, true)}{/each}
-			{#each entry.officiating as offer (offerKey(offer))}{@render officiating(offer)}{/each}
-		</div>
+		<div class="min-w-0 divide-y divide-rule pl-[3.75rem] md:pl-0">{@render replyStack(entry)}</div>
 	</div>
 {/snippet}
 
@@ -448,7 +444,7 @@
 			</section>
 		</div>
 	{:else if view === 'week'}
-		<section class="card card-body min-w-0">
+		<section class="grid min-w-0 gap-3">
 			<div class="flex flex-wrap items-center gap-2">
 				<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{formatLongDay(weekDays[0])} – {formatLongDay(weekDays[6])}</h2>
 				<div class="ml-auto flex gap-1">
@@ -457,39 +453,23 @@
 					<button type="button" class="btn btn-outline btn-square" aria-label={t('portal.week_next')} onclick={() => moveWeek(1)}><ChevronRight size={16} aria-hidden="true" /></button>
 				</div>
 			</div>
-			<div class="grid gap-3 xl:grid-cols-7">
+			<div class="hidden lg:block"><PortalWeekGrid days={weekDays} entries={calendar} href={eventLink} {firstName} many={people.length > 1} /></div>
+			<div class="card card-body divide-y divide-rule lg:hidden">
 				{#each weekDays as day (dateKey(day))}
-					{@const entries = entriesOn(day)}
-					{@const today = dateKey(day) === dateKey(new Date())}
-					<div class="min-w-0 rounded-box border p-2 {today ? 'border-club' : 'border-line'} {entries.length ? '' : 'hidden xl:block'}">
-						<p class="mb-1 flex items-baseline gap-1.5 font-mono text-[11px] tracking-wide uppercase {today ? 'font-bold text-club-dark' : 'text-muted'}">{new Intl.DateTimeFormat(getLang(), { weekday: 'short' }).format(day)}<span class="font-display text-lg leading-none font-extrabold {today ? 'text-club-dark' : 'text-ink'}">{day.getDate()}</span></p>
-						<div class="grid gap-1.5 xl:hidden">{#each entries as entry (entry.event.event_id)}{@render eventRow(entry, false)}{/each}</div>
-						<div class="hidden gap-1.5 xl:grid">
-							{#each entries as entry (entry.event.event_id)}
-								<a class="grid gap-0.5 rounded border border-line bg-white p-1.5 text-xs hover:border-club {kindStyle(entry.event.kind).bar} border-l-4" href={eventLink(entry.event.event_id)} data-sveltekit-reset="false">
-									<span class="font-mono text-muted">{formatTime(entry.event.start)}</span>
-									<span class="font-semibold text-ink">{entry.event.title}</span>
-									{#each entry.attendance as row (row.id)}<span class="badge badge-sm border {statusStyle(row.status)}">{people.length > 1 ? `${firstName(row.member_id)} · ` : ''}{t(statusLabelKey(row.status))}</span>{/each}
-								</a>
-							{/each}
+					{@const dayEntries = calendar.filter(({ event }) => dateKey(new Date(event.start)) === dateKey(day))}
+					{#if dayEntries.length}
+						<div class="pt-2 first:pt-0">
+							<p class="font-display text-sm font-extrabold tracking-[.04em] uppercase {dateKey(day) === dateKey(new Date()) ? 'text-club-dark' : 'text-ink'}">{formatLongDay(day)}</p>
+							{#each dayEntries as entry (entry.event.event_id)}{@render eventRow(entry, false)}{/each}
 						</div>
-					</div>
+					{/if}
+				{:else}
+					<p class="py-2 text-sm text-muted">{t('portal.no_events')}</p>
 				{/each}
 			</div>
 		</section>
 	{:else}
-		<section class="card min-w-0">
-			<div class="max-h-[calc(100dvh-13rem)] overflow-y-auto px-4 pb-2" use:scrollToToday>
-				{#each listGroups as group (group.key)}
-					<div data-today={group.key === todayKey ? '' : undefined}>
-						<h3 class="sticky top-0 z-10 flex items-center gap-2 bg-(--portal-panel) py-2 font-mono text-xs tracking-[.12em] uppercase {group.key === dateKey(new Date()) ? 'font-bold text-club-dark' : 'text-muted'}">{formatLongDay(group.date)}{#if group.key === dateKey(new Date())}<span class="badge badge-sm badge-error">{t('portal.go_today')}</span>{/if}</h3>
-						<div class="divide-y divide-rule">{#each group.entries as entry (entry.event.event_id)}{@render eventRow(entry, false)}{/each}</div>
-					</div>
-				{:else}
-					<p class="py-4 text-sm text-muted">{t('portal.no_events')}</p>
-				{/each}
-			</div>
-		</section>
+		<PortalAgenda entries={calendar} href={eventLink} replies={replyStack} score={scoreMark} />
 	{/if}
 {:else if tab === 'news'}
 	<News articles={data.home.news} />
@@ -599,7 +579,22 @@
 				</section>
 			{/if}
 			<!-- A request to referee or officiate is only that: line-up, tasks and files are for the people invited to play. -->
-			{#if audience && extras?.lineup}
+			{#if audience && extras?.game}
+				{@const game = extras.game}
+				{@const mine = new Set(people.map((person) => person.id))}
+				<section class="card card-body">
+					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup_dressed')}<button class="btn btn-outline btn-sm ml-auto md:h-8" type="button" onclick={() => (timelineOpen = true)}>{t('portal.timeline_view')}</button></h2>
+					<p class="text-center font-display text-4xl leading-none font-extrabold tabular-nums text-ink">{game.score}</p>
+					{#if game.lineup?.ours.length}
+						<div class="flex flex-wrap gap-1.5">
+							{#each game.lineup.ours as player (`${player.number}-${player.name}`)}
+								<span class="badge border {player.member_id && mine.has(player.member_id) ? 'border-club text-club-dark' : 'badge-outline'}">{player.number !== null ? `#${player.number} ` : ''}{player.name}{#if player.goals || player.assists} · {player.goals ?? 0}+{player.assists ?? 0}{/if}</span>
+							{/each}
+						</div>
+					{/if}
+				</section>
+				<GameTimelineDialog {game} title={event.title} bind:open={timelineOpen} />
+			{:else if audience && extras?.lineup}
 				<section class="card card-body">
 					<h2 class="card-title"><Users size={16} aria-hidden="true" />{t('portal.lineup')}</h2>
 					<div class="flex flex-wrap gap-1.5">

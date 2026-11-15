@@ -98,7 +98,24 @@ export type NotificationSettings = {
 export type PortalTask = { id: string; title: string; description: string; needed: number; claimed: number; open_slots: number; claimed_by_me: boolean; claimed_by: string[] };
 export type EventExtras = {
 	lineup: { players: { id: string; name: string; number: number | null; mine: boolean }[]; going: number; out: number; waiting: number } | null;
+	/** The game as the competition's page captured it (played games only): lineup and timeline by period. */
+	game: GameSheet | null;
 	tasks: PortalTask[];
 	attachments: { id: string; name: string; size: number; download_url: string }[];
 };
 export type OpenTask = { id: string; event_id: string; event_title: string; start: string; title: string; open_slots: number };
+
+export type GameSheetRow = { time: string; type: string; ours: boolean | null; team: string; icon: string; kind: string; who: string; detail: string; tag: string; score: string; serious: boolean };
+export type GameSheetPlayer = { pos: string; number: number | null; name: string; member_id?: string | null; photo_url?: string | null; initials: string; goals?: number; assists?: number; penalty_minutes?: number };
+export type GameSheet = {
+	ours_label: string;
+	theirs_label: string;
+	score: string;
+	final: boolean;
+	period_scores: { label: string; score: string }[];
+	periods: { label: string; title: string; score: string; rows: GameSheetRow[] }[];
+	lineup: { ours_label: string; theirs_label: string; ours: GameSheetPlayer[]; theirs: GameSheetPlayer[] } | null;
+};
+
+/** One event of the member calendar with what the family answered to it and any request to referee or officiate. */
+export type CalendarEntry = { event: PortalEventDisplay; attendance: PortalEvent[]; officiating: OfficiatingOpportunity[] };

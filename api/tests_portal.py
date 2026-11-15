@@ -189,6 +189,7 @@ class PortalProfileTests(ParentPortalTests):
         self.assertEqual(extras.status_code, 404)  # not under /me
         extras = self.call("get", f"/portal/events/{event.pk}", token).json()
         self.assertEqual([p["mine"] for p in extras["lineup"]["players"]], [True])
+        self.assertIsNone(extras["game"])
         self.assertEqual([t["title"] for t in extras["tasks"]], ["Timekeeper"])
         self.assertEqual(extras["attachments"][0]["name"], "info.pdf")
         # open on Home until someone takes it
@@ -203,3 +204,21 @@ class PortalProfileTests(ParentPortalTests):
         with schema_context(self.club.schema_name):
             stranger = Event.objects.create(title="Other", kind=Event.EventKind.TRAINING, start=timezone.now() + datetime.timedelta(days=3))
         self.assertEqual(self.call("get", f"/portal/events/{stranger.pk}", token).status_code, 404)
+
+
+    def test_event_extras_give_the_captured_game_sheet(self):
+        from events.models import GameTimeline
+
+        token = self.token()
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            document = {
+                "score": {"home": 3, "away": 1},
+                "periods": [{"label": "1", "home": 2, "away": 0}],
+                "lineups": {"home": [], "away": [{"pos": "F", "number": 12, "name": "Child, My", "license": "x"}]},
+                "events": [{"id": "g1", "type": "goal", "side": "away", "period": "1", "time": "03:10", "goal": {"scorer": {"name": "Child, My", "number": 12}, "assists": [], "score_after": {"home": 1, "away": 0}}}],
+            }
+            GameTimeline.objects.create(event=event, source="test", data=document, status=GameTimeline.Status.FINAL)
+        game = self.call("get", f"/portal/events/{event.pk}", token).json()["game"]
+        self.assertEqual(game["periods"][0]["rows"][0]["kind"], "Goal")
+        self.assertEqual(game["lineup"]["ours"][0]["number"], 12)

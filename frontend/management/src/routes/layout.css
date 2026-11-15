@@ -1331,6 +1331,21 @@ textarea[name="note"] {
     padding-bottom: env(safe-area-inset-bottom);
 }
 
+.portal-ui .portal-modal {
+    margin: auto;
+    width: min(44rem, calc(100% - 2rem));
+    max-height: min(90dvh, 60rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-box);
+    background: var(--portal-panel);
+    color: var(--color-slate);
+    padding: 0;
+}
+
+.portal-modal::backdrop { background: rgb(0 0 0 / 0.65); }
+
 .portal-sheet::backdrop { background: rgb(0 0 0 / 0.65); }
 
 @media (min-width: 48rem) {

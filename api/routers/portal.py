@@ -14,7 +14,7 @@ from ninja.errors import HttpError
 from api.auth import CookieAuth, TokenAuth
 from api.routers.public_forms import _field as form_field
 from api.routers.public_news import public_news_item
-from events.models import Attendance, Event, EventAttachment, EventTask, Lineup, LineupSelection, Season
+from events.models import Attendance, Event, EventAttachment, EventTask, GameTimeline, Lineup, LineupSelection, Season
 from events.services import attachments as attachment_svc
 from events.services import attendance, officiating_invitations, referees
 from events.services import tasks as task_svc
@@ -295,7 +295,7 @@ def _visible_event(request, event_id):
 def event_extras(request, event_id: UUID):
     viewer, people, event, in_audience = _visible_event(request, event_id)
     if not in_audience:
-        return {"lineup": None, "tasks": [], "attachments": []}
+        return {"lineup": None, "game": None, "tasks": [], "attachments": []}
     lineup = Lineup.objects.filter(event=event, published_at__isnull=False).select_related("team").first()
     lineup_out = None
     if lineup is not None:
@@ -312,9 +312,27 @@ def event_extras(request, event_id: UUID):
             ),
             **counts,
         }
+    game = _game_sheet(event)
     tasks = [_task_out(task, viewer.pk) for task in task_svc.list_tasks(request.user, event)]
     files = [{"id": a.pk, "name": a.name, "size": a.size, "download_url": f"/api/v1/portal/events/{event.pk}/attachments/{a.pk}/download"} for a in attachment_svc.list_attachments(request.user, event)]
-    return {"lineup": lineup_out, "tasks": tasks, "attachments": files}
+    return {"lineup": lineup_out, "game": game, "tasks": tasks, "attachments": files}
+
+
+def _game_sheet(event):
+    """The game as the competition's page captured it, for a game that has been played: the score, who dressed (ours first, with goals, assists
+    and penalty minutes) and the timeline of goals, penalties and goalie changes by period. None when there is no game sheet."""
+    import json
+
+    from api.routers.events import _game_lineup
+    from events.services import game_timeline
+
+    timeline = GameTimeline.objects.filter(event=event).first()
+    if timeline is None or not timeline.data:
+        return None
+    out = game_timeline.display_timeline(timeline, event)
+    out["lineup"] = _game_lineup(event, timeline, out)
+    out["final"] = timeline.finalized_at is not None
+    return json.loads(json.dumps(out, default=str))  # lazy translations -> plain strings
 
 
 def _task_of(request, event_id, task_id):
