@@ -75,8 +75,23 @@ def _event_display(event):
     }
 
 
-def _attendance(row):
-    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note}
+def _attendance(row, blocked=None):
+    return {**_event_display(row.event), "id": row.pk, "member_id": row.member_id, "status": row.status, "note": row.note, "blocked": blocked}
+
+
+def _blocker(row, now, invited):
+    """Why this person cannot sign up for the event right now, so the app can say so instead of offering buttons that fail:
+    ``not_invited`` (no longer in the audience) or ``late_installment`` (an overdue registration instalment; they can still decline)."""
+    event = row.event
+    if event.cancelled or event.start <= now:
+        return None
+    if event.pk not in invited:
+        invited[event.pk] = set(attendance.effective_members(event).values_list("pk", flat=True))
+    if row.member_id not in invited[event.pk]:
+        return "not_invited"
+    if row.status not in (Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.SELECTED) and attendance.registration_payment_blocked(event, row.member, today=timezone.localdate(now)):
+        return "late_installment"
+    return None
 
 
 def _home_branding(request, today):
@@ -98,6 +113,7 @@ def portal_home(request):
     now = timezone.now()
     team_ids = TeamMembership.objects.filter(member_id__in=people, season__end_date__gte=timezone.localdate()).values("team_id")
     news = member_news().filter(Q(teams__isnull=True) | Q(teams__in=team_ids)).distinct().prefetch_related("teams", "photos")[:12]
+    invited = {}
     events = (
         Attendance.objects.filter(member_id__in=people, event__start__range=(now - timedelta(days=90), now + timedelta(days=90)))
         .select_related("event__location", "event__opponent")
@@ -116,7 +132,7 @@ def portal_home(request):
         **_home_branding(request, timezone.localdate(now)),
         "shop_enabled": request.features.has("shop"),
         "people": [{"id": member.pk, "name": str(member), "first_name": member.first_name, "photo_url": member.photo_url} for member in people.values()],
-        "events": [_attendance(row) for row in events],
+        "events": [_attendance(row, _blocker(row, now, invited)) for row in events],
         "officiating": [
             {
                 **_event_display(offer.event), "role": offer.kind, "member_id": offer.member_id,

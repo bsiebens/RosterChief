@@ -40,7 +40,7 @@
 	const memberName = (id: string) => people.find((person) => person.id === id)?.name ?? '';
 	const crest = $derived(data.branding?.logo_url);
 	const background = $derived(data.home.event_background);
-	const canReply = (event: PortalEvent) => !event.cancelled && Date.parse(event.start) > Date.now() && (event.status === 'selected' || !event.deadline || Date.parse(event.deadline) >= Date.now());
+	const canReply = (event: PortalEvent) => !event.cancelled && event.blocked !== 'not_invited' && Date.parse(event.start) > Date.now() && (event.status === 'selected' || !event.deadline || Date.parse(event.deadline) >= Date.now());
 	const going = (event: PortalEvent) => event.status === 'present' || event.status === 'selected';
 	const nextEvents = $derived.by(() => {
 		const next = new Map<string, PortalEvent[]>();
@@ -110,6 +110,7 @@
 	const filteredFees = $derived(data.home.fees.filter((fee) => !selected || fee.member_id === selected));
 	const openFees = $derived(filteredFees.filter((fee) => Number(fee.balance) > 0));
 	const filteredForms = $derived(data.home.forms.filter((form) => !selected || form.member_id === selected));
+	const calendarLabel = $derived(people.length > 1 ? t('portal.calendar') : t('shell.nav.calendar'));
 	const hasAttention = $derived(!!(needsReply.length || filteredForms.length || openFees.length || officiatingInvites.length));
 	const attentionCount = $derived(needsReply.length + filteredForms.length + openFees.length + officiatingInvites.length);
 	const calendarLink = $derived(crewOnly ? '/parent?tab=calendar&crew=1' : '/parent?tab=calendar');
@@ -213,13 +214,13 @@
 {/snippet}
 
 {#snippet headerPeople()}
-	<div class="hidden xl:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} /></div>
+	<div class="hidden xl:block"><PersonFilter {people} bind:selected viewer={data.home.viewer} compact /></div>
 {/snippet}
 
 {#snippet week()}
 	{#if upcomingWeek.length}
 		<section class="card card-body" aria-label={t('portal.next_seven_days')}>
-			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_seven_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{t('portal.calendar')} →</a></h2>
+			<h2 class="card-title"><CalendarDays size={16} aria-hidden="true" />{t('portal.next_seven_days')}<a class="link ml-auto text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel} →</a></h2>
 			<div class="divide-y divide-rule">
 				{#each upcomingWeek as event (event.event_id)}
 					<a class="flex items-center gap-3 py-2.5 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
@@ -245,27 +246,30 @@
 		<div class="divide-y divide-rule">
 			{#each officiatingInvites.slice(0, 4) as offer (offerKey(offer))}
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(offer.event_id)} data-sveltekit-reset="false">
-					<Whistle size={16} class="shrink-0" aria-hidden="true" />
+					<Whistle size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{offer.title}</span><span class="block text-xs text-muted">{t(`portal.crew_${offer.role}`)} · {memberName(offer.member_id)} · {formatDateTime(offer.start)}</span></span>
 					<span class="badge badge-outline">{t('portal.crew_invited')}</span>
 				</a>
 			{/each}
 			{#each needsReply.slice(0, 4) as event (event.id)}
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href={eventLink(event.event_id)} data-sveltekit-reset="false">
+					<CalendarDays size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{event.title}</span><span class="block text-xs text-muted">{formatDateTime(event.start)} · {memberName(event.member_id)}</span></span>
 					<span class="badge badge-warn">{t('portal.reply')}</span>
 				</a>
 			{/each}
 			{#if officiatingInvites.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar&crew=1">{t('portal.crew_title')}</a>{/if}
-			{#if needsReply.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar">{t('portal.calendar')}</a>{/if}
+			{#if needsReply.length > 4}<a class="link flex min-h-11 items-center text-sm font-semibold" href="/parent?tab=calendar">{calendarLabel}</a>{/if}
 			{#each filteredForms as form (`${form.id}-${form.member_id}`)}
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent/forms/{form.id}/{form.member_id}">
+					<ClipboardList size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{form.title}</span><span class="block text-xs text-muted">{memberName(form.member_id)}{form.closes_at ? ' · ' + t('pubform.closes', { date: formatDateTime(form.closes_at) }) : ''}</span></span>
 					<span class="badge badge-outline">{t('portal.forms')}</span>
 				</a>
 			{/each}
 			{#each openFees as fee (`${fee.member_id}-${fee.season}`)}
 				<a class="flex min-h-11 items-center gap-2 py-2 hover:text-brand" href="/parent?tab=payments">
+					<Wallet size={18} class="shrink-0 text-muted" aria-hidden="true" />
 					<span class="min-w-0 flex-1"><span class="block font-semibold">{t(fee.next_installment ? 'portal.membership_installment' : 'portal.payments')}</span><span class="block text-xs {fee.next_installment?.late ? 'text-danger' : 'text-muted'}">{memberName(fee.member_id)}{fee.next_installment ? ' · ' + t('portal.due_by', { when: day(fee.next_installment.due_date) }) : ' · ' + fee.season}</span></span>
 					<span class="shrink-0 font-semibold">{money(fee.next_installment?.remaining ?? fee.balance)}</span>
 				</a>
@@ -332,7 +336,7 @@
 				<h2 class="card-title">
 					{#if crewOnly}<Whistle size={16} aria-hidden="true" />{t('portal.crew_title')}{:else}<CalendarDays size={16} aria-hidden="true" />{t('portal.schedule')}{/if}
 				</h2>
-				{#if crewOnly}<a class="btn btn-outline btn-sm min-h-11" href="/parent?tab=calendar">{t('portal.calendar')}</a>{/if}
+				{#if crewOnly}<a class="btn btn-outline btn-sm min-h-11" href="/parent?tab=calendar">{calendarLabel}</a>{/if}
 			</div>
 			<div class="divide-y divide-rule">
 				{#each agenda as entry (entry.event.event_id)}
@@ -405,7 +409,7 @@
 					{@const event = rows[0]}
 					<article class="card overflow-hidden">
 						<div class="grid xl:grid-cols-[1.1fr_1fr]">
-							<a class="block" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
+							<a class="flex" href={eventLink(event.event_id)} data-sveltekit-reset="false" aria-label={event.title}><EventHero {event} {background} {crest} /></a>
 							<div class="grid content-center gap-1 border-t border-sidebar-hairline bg-sidebar-bg px-4 py-3 text-white xl:border-t-0 xl:border-l xl:px-5">
 								<p class="font-mono text-[11px] tracking-[.14em] text-sidebar-fg-dim uppercase">{t('portal.who_coming')}</p>
 								<div class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-1">
@@ -434,7 +438,7 @@
 	</div>
 {/if}
 
-<Sheet open={!!detail} title={detail?.event.title ?? t('portal.calendar')} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/parent', { reset: false, replace: true })}>
+<Sheet open={!!detail} title={detail?.event.title ?? calendarLabel} onclose={() => void goto(tab === 'calendar' ? calendarLink : '/parent', { reset: false, replace: true })}>
 	{#if detail}
 		{@const event = detail.event}
 		<div class="grid gap-4 p-3 pt-0">

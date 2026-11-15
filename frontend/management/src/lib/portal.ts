@@ -19,6 +19,8 @@ export type PortalEvent = PortalEventDisplay & {
 	member_id: string;
 	status: string;
 	note: string;
+	/** Why this person cannot sign up right now, so the app says so instead of offering buttons: not invited any more, or an overdue instalment (they can still decline). */
+	blocked?: 'not_invited' | 'late_installment' | null;
 };
 
 export type OfficiatingOpportunity = PortalEventDisplay & {

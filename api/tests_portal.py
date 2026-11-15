@@ -131,3 +131,15 @@ class PortalProfileTests(ParentPortalTests):
         self.assertIs(next(row for row in data["categories"] if row["key"] == "news")["push"], False)
         self.assertEqual(data["quiet_hours"]["start"], "22:00")
         self.assertEqual(self.call("put", "/portal/me/notifications", token, {"categories": {"admin": {"push": False}}}).status_code, 422)
+
+    def test_home_says_why_a_reply_is_not_possible_instead_of_offering_it(self):
+        token = self.token()
+        [row] = self.call("get", "/portal/home", token).json()["events"]
+        self.assertIsNone(row["blocked"])
+        with schema_context(self.club.schema_name):
+            event = self.child_reply.event
+            event.invited_members.remove(self.child)
+            Attendance.objects.get_or_create(event=event, member=self.child)  # a stale row, as left behind by an audience change
+        [row] = self.call("get", "/portal/home", token).json()["events"]
+        self.assertEqual(row["blocked"], "not_invited")
+        self.assertEqual(self.call("post", f"/portal/attendance/{row['id']}", token, {"status": "present"}).status_code, 403)

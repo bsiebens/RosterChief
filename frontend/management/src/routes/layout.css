@@ -1283,6 +1283,12 @@ textarea[name="note"] {
     text-transform: uppercase;
 }
 
+/* In the top bar the chips are as tall as the bell button next to them. */
+.portal-person.compact {
+    min-height: 2.25rem;
+    padding-block: 0.125rem;
+}
+
 .portal-person[aria-pressed="true"] {
     border-color: var(--color-club);
     background: var(--color-club);

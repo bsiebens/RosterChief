@@ -24,6 +24,8 @@
 	let open = $state(false);
 	let note = $state('');
 	const going = $derived(event.status === 'present' || event.status === 'selected');
+	const noInvite = $derived(event.blocked === 'not_invited');
+	const lateInstalment = $derived(event.blocked === 'late_installment' && !going);
 	const settled = $derived(event.cancelled || !canReply || going);
 
 	async function answer(status: string, reason?: string) {
@@ -39,20 +41,27 @@
 			{#if canReply && !going && event.deadline}<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('portal.reply_by', { when: formatDateTime(event.deadline) })}</p>
 			{:else if event.status === 'selected'}<p class="text-xs {dark ? 'text-on-dark' : 'text-muted'}">{t('events.status.selected')}</p>{/if}
 		</div>
-		<div class="flex shrink-0 flex-wrap items-center justify-end gap-1.5 {quick ? 'w-36' : ''}">
-			{#if settled}
-				<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
-			{/if}
-			{#if canReply}
-				{#if !going}
-					<button type="button" class="btn btn-sm btn-primary min-h-11" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
-					{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11" disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
+		<div class="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
+			{#if noInvite}
+				<span class="badge badge-sm badge-outline {dark ? 'border-sidebar-chip text-white' : ''}">{t('portal.not_invited')}</span>
+			{:else}
+				{#if settled}
+					<span class="badge badge-sm border {event.cancelled ? 'badge-error' : statusStyle(event.status)}">{event.cancelled ? t('portal.cancelled') : t(statusLabelKey(event.status))}</span>
 				{/if}
-				<button type="button" class="btn btn-sm btn-outline min-h-11 {dark ? 'border-sidebar-chip bg-transparent text-white hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+				{#if canReply && !lateInstalment}
+					{#if !going}
+						<button type="button" class="btn btn-sm btn-primary min-h-11" disabled={busy} onclick={() => answer('present')}>{t('portal.going')}</button>
+						{#if !quick}<button type="button" class="btn btn-sm btn-outline min-h-11" disabled={busy} onclick={() => answer('maybe')}>{t('portal.maybe')}</button>{/if}
+					{/if}
+				{/if}
+				{#if canReply}
+					<button type="button" class="btn btn-sm btn-outline min-h-11 {dark ? 'border-sidebar-chip bg-transparent text-white hover:bg-sidebar-hairline' : ''}" disabled={busy} aria-expanded={open} onclick={() => (open = !open)}>{t(going ? 'portal.cant_make_it' : 'portal.cant_go')}</button>
+				{/if}
 			{/if}
 		</div>
 	</div>
-	{#if canReply && open}
+	{#if lateInstalment && canReply}<p class="rounded-box px-3 py-2 text-xs {dark ? 'bg-sidebar-hairline text-white' : 'bg-warn-bg text-warn-text'}" role="status">{t('portal.late')}</p>{/if}
+	{#if canReply && open && !noInvite}
 		<form class="grid gap-2 rounded-box border p-3 {dark ? 'border-sidebar-chip bg-sidebar-hairline' : 'border-line bg-subhead'}" onsubmit={(e) => { e.preventDefault(); void answer(event.status === 'selected' ? 'dropout' : 'absent', note || event.note); }}>
 			<label class="grid gap-1 text-sm {dark ? 'text-white' : ''}">{t('portal.reason')}
 				<textarea class="textarea textarea-bordered w-full text-ink" rows="2" maxlength="2000" bind:value={note} placeholder={event.note}></textarea>

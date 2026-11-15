@@ -11,7 +11,7 @@
 	} = $props();
 </script>
 
-<div class="portal-event-banner relative isolate flex min-h-40 flex-col xl:min-h-60 items-start justify-end gap-1.5 overflow-hidden px-4 py-3">
+<div class="portal-event-banner relative isolate flex grow min-h-40 flex-col xl:min-h-60 items-start justify-end gap-1.5 overflow-hidden px-4 py-3">
 	<EventBackdrop src={background} />
 	{#if event.opponent_logo}
 		{#if crest}<img class="pointer-events-none absolute -z-10 size-36 object-contain opacity-25 {event.is_home ? '-left-7' : '-right-7'}" src={crest} alt="" />{/if}
