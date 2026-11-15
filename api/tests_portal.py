@@ -137,10 +137,13 @@ class PortalProfileTests(ParentPortalTests):
             mine = self.call("get", f"/portal/me/stats/{self.child.pk}", token)
             self.assertEqual((mine.status_code, mine.json()["first_name"]), (200, "My"), mine.content)
             self.assertEqual(self.call("get", f"/portal/me/stats/{self.other.pk}", token).status_code, 404)
+            self.assertIn("attendance", mine.json())
             self.assertEqual(self.call("put", f"/portal/me/stats/{self.other.pk}/share", token).status_code, 404)
             self.assertEqual(self.call("delete", f"/portal/me/stats/{self.child.pk}/share", token).status_code, 204)
             self.assertIsNone(self.call("get", f"/portal/me/stats/{self.child.pk}", token).json()["share_token"])
         self.assertFalse(self.call("get", "/portal/me/stats", token).json()["available"])  # no game analytics for this club
+        plain = self.call("get", f"/portal/me/stats/{self.child.pk}", token)  # attendance and refereeing still work without them
+        self.assertEqual((plain.status_code, plain.json()["game_stats"]), (200, None), plain.content)
 
     def test_notification_switches_round_trip(self):
         token = self.token()

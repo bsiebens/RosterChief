@@ -64,17 +64,21 @@ export type ParentHome = {
 	forms: { id: string; title: string; member_id: string; opens_at: string | null; closes_at: string | null }[];
 };
 
+export type CoachEvent = {
+	id: string; title: string; start: string; end: string | null; gathering: string | null; location: string; kind: string; deadline: string | null;
+	team_ids: string[]; opponent: string; opponent_logo: string | null; is_home: boolean;
+	going: number; out: number; unanswered: number; maybe: number; invited: number;
+	cancelled: boolean; lineup: boolean; lineup_published: boolean; has_game_sheet: boolean; can_manage_attendance: boolean;
+};
+
 export type CoachHome = {
 	season: string | null;
 	event_background: string | null;
 	teams: Person[];
+	can_create_events: boolean;
+	can_add_news: boolean;
 	news: PortalArticle[];
-	events: {
-		id: string; title: string; start: string; location: string; kind: string; deadline: string | null;
-		team_ids: string[]; opponent_logo: string | null; is_home: boolean;
-		going: number; out: number; unanswered: number;
-		cancelled: boolean; lineup: boolean; lineup_published: boolean; can_manage_attendance: boolean;
-	}[];
+	events: CoachEvent[];
 };
 
 export type ProfilePerson = {

@@ -12,7 +12,7 @@
 	 * type, per season, fees this season, penalties per game (from the recorded game timelines) and the games per
 	 * competition bucket ("{federation} {team}"). The level and validity come from the profile.
 	 */
-	let { kind, profile, stats }: { kind: 'referee' | 'official'; profile: EligibilityProfile; stats: OfficiatingKind | null } = $props();
+	let { kind, profile = null, stats }: { kind: 'referee' | 'official'; profile?: EligibilityProfile | null; stats: OfficiatingKind | null } = $props();
 
 	const isReferee = $derived(kind === 'referee');
 	const SHADES = ['bg-ink', 'bg-club', 'bg-ice', 'bg-muted'];
@@ -48,7 +48,7 @@
 
 <div class="card card-body gap-4">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<h3 class="card-title"><Whistle size={18} aria-hidden="true" /> {isReferee ? t('stats.off.referee') : t('stats.off.official')}{#if profile.level}<span class="badge badge-outline badge-sm">{profile.level.name}</span>{/if}</h3>
+		<h3 class="card-title"><Whistle size={18} aria-hidden="true" /> {isReferee ? t('stats.off.referee') : t('stats.off.official')}{#if profile?.level}<span class="badge badge-outline badge-sm">{profile.level.name}</span>{/if}</h3>
 	</div>
 	{#if !stats}
 		<p class="py-4 text-center text-sm text-muted">{t('stats.off.empty')}</p>

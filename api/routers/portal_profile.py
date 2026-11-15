@@ -21,7 +21,8 @@ from members.services import members as member_services
 from members.services import stats_sharing
 from members.services.errors import Invalid
 from api.routers.analytics import member_document
-from api.schemas_member_stats import PublicPlayerStatsOut
+from api.schemas_analytics import MemberGameStatsOut
+from api.schemas_member_stats import AttendanceStats, OfficiatingStats, PlayerStats, GoalieStats, PublicPlayerStatsOut
 from events.models import EventFollow, Season
 from events.services import game_stats, member_stats
 from events.services import follows
@@ -282,6 +283,13 @@ def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None =
 
 
 class MyStatsOut(PublicPlayerStatsOut):
+    """Game numbers only for a club with game analytics; attendance and refereeing need nothing."""
+
+    game_stats: MemberGameStatsOut | None = None
+    player: PlayerStats | None = None
+    goalie: GoalieStats | None = None
+    attendance: AttendanceStats | None = None
+    officiating: OfficiatingStats | None = None
     #: The secret in the personal public link (``/stats/<token>``); null while the link is off.
     share_token: str | None = None
 
@@ -298,18 +306,20 @@ def stats_people(request):
     }
 
 
-@router.get("/stats/{member_id}", response=MyStatsOut, summary="My (or my child's) game statistics, the same numbers as the public link")
+@router.get("/stats/{member_id}", response=MyStatsOut, summary="My (or my child's) statistics: games, attendance and refereeing")
 def my_stats(request, member_id: UUID, season: UUID | None = None):
     _viewer_, member = _own(request, member_id)
-    if not game_stats.analytics_supported(request.tenant, request.features):
-        raise HttpError(404, "Not found.")
     chosen = None
     if season is not None:
         chosen = Season.objects.filter(pk=season).first()
         if chosen is None:
             raise HttpError(404, "Not found.")
-    player, goalie = member_stats.game_sections(member)
-    return {"first_name": member.first_name, "last_name": member.last_name, "game_stats": member_document(member, chosen), "player": player, "goalie": goalie, "share_token": member.stats_share_token}
+    games = game_stats.analytics_supported(request.tenant, request.features)
+    document = member_stats.member_stats_document(member, with_games=games)
+    return {
+        "first_name": member.first_name, "last_name": member.last_name, "game_stats": member_document(member, chosen) if games else None,
+        "player": document["player"], "goalie": document["goalie"], "attendance": document["attendance"], "officiating": document["officiating"], "share_token": member.stats_share_token,
+    }
 
 
 @router.put("/stats/{member_id}/share", summary="Switch the personal public link on (rotate=true replaces it, the old link stops working)")

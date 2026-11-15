@@ -10,7 +10,7 @@
 	 * Personal statistics for one person: a link to their statistics page and the switch for the public link. The link carries a secret;
 	 * switching it off or replacing it makes the old link stop working at once.
 	 */
-	let { person }: { person: StatsPerson } = $props();
+	let { person, banner = false }: { person: StatsPerson; banner?: boolean } = $props();
 	let busy = $state(false);
 	let copied = $state(false);
 	let failed = $state(false);
@@ -35,6 +35,21 @@
 	}
 </script>
 
+{#if banner}
+	<section class="card" aria-labelledby="stats-share-title">
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+			<Link2 size={18} class="shrink-0 text-muted" aria-hidden="true" />
+			<div class="min-w-0 flex-1"><b id="stats-share-title" class="block text-ink">{t('portal.stats_public')}</b><span class="block text-xs text-muted">{t('portal.stats_public_help', { name: person.first_name })}</span></div>
+			{#if person.share_token}
+				<div class="input flex min-w-0 flex-1 items-center gap-2 bg-subhead text-sm sm:max-w-md"><span class="truncate" title={url}>{url}</span></div>
+				<button class="btn btn-outline btn-sm gap-1.5" type="button" onclick={copy}>{#if copied}<Check size={14} aria-hidden="true" />{t('portal.stats_copied')}{:else}<Copy size={14} aria-hidden="true" />{t('portal.stats_copy')}{/if}</button>
+				<button class="btn btn-outline btn-sm gap-1.5" type="button" disabled={busy} onclick={() => set(true, true)}><RefreshCw size={13} aria-hidden="true" />{t('portal.stats_replace_short')}</button>
+			{/if}
+			<input type="checkbox" class="toggle" aria-labelledby="stats-share-title" checked={!!person.share_token} disabled={busy} onchange={(e) => set(e.currentTarget.checked)} />
+		</div>
+		{#if failed}<div class="px-5 pb-3"><Alert kind="error">{t('common.error.generic')}</Alert></div>{/if}
+	</section>
+{:else}
 <section class="card" aria-labelledby="stats-share-title">
 	<div class="card-h"><ChartColumn size={17} aria-hidden="true" /><h2 id="stats-share-title">{t('portal.stats_title')}</h2><a class="link-more ml-auto" href="/parent/stats?who={person.id}">{t('portal.stats_open')} →</a></div>
 	<div class="grid gap-3 p-5">
@@ -53,3 +68,4 @@
 		{#if failed}<Alert kind="error">{t('common.error.generic')}</Alert>{/if}
 	</div>
 </section>
+{/if}
