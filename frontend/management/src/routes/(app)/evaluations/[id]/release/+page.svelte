@@ -43,39 +43,43 @@
 	{#each data.preview.results as row (row.id)}
 		{@const choice = choices[row.id]}
 		<section class="card card-body gap-3" aria-label={row.player.name}>
-			<div>
-				<h2 class="font-display text-lg font-extrabold text-ink uppercase">{row.player.name}</h2>
-				<p class="text-xs text-muted">{stamp(row.submitted_at)}{row.evaluator ? ` · ${t('profile.eval.by', { name: row.evaluator.name })}` : ''}</p>
-			</div>
-			<div class="grid gap-1.5">
-				<p class="text-sm font-semibold text-ink" id="lvl-{row.id}">{t('eval.share.level')}</p>
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-labelledby="lvl-{row.id}">
-					{#each [['', 'eval.share.none'], ['notes', 'eval.share.notes'], ['full', 'eval.share.full']] as [value, label] (value)}
-						<button type="button" role="radio" aria-checked={choice.release === value} class="btn btn-sm h-10 min-h-0 {choice.release === value ? 'btn-primary' : 'btn-outline'}" onclick={() => (choice.release = value as Choice['release'])}>{t(label)}</button>
-					{/each}
+			<div class="flex flex-wrap items-start justify-between gap-3">
+				<div>
+					<h2 class="font-display text-lg font-extrabold text-ink uppercase">{row.player.name}</h2>
+					<p class="text-xs text-muted">{stamp(row.submitted_at)}{row.evaluator ? ` · ${t('profile.eval.by', { name: row.evaluator.name })}` : ''}</p>
 				</div>
+				<label class="grid gap-1 text-sm">{t('eval.share.level')}
+					<select class="select select-bordered select-sm" bind:value={choice.release}>
+						<option value="">{t('eval.share.none')}</option>
+						<option value="notes">{t('eval.share.notes')}</option>
+						<option value="full">{t('eval.share.full')}</option>
+					</select>
+				</label>
 			</div>
 			<div class="grid items-start gap-4 lg:grid-cols-2">
-				<label class="grid content-start gap-1 text-sm font-semibold">{t('eval.public_note')}
-					<textarea class="textarea textarea-bordered w-full font-normal" rows="4" maxlength="2000" bind:value={choice.note}></textarea>
-				</label>
-				<div class="rounded-box border border-line bg-subhead p-4">
-					<p class="mb-2 text-xs font-semibold tracking-wide text-muted uppercase">{t('eval.release.family_sees')}</p>
-					{#if !choice.release}
-						<p class="flex items-center gap-2 text-sm text-muted"><Lock size={14} aria-hidden="true" />{t('eval.release.stays_private')}</p>
-					{:else}
-						{#if choice.note.trim()}<p class="text-sm whitespace-pre-line text-ink">{choice.note}</p>{:else}<p class="text-sm text-muted">{t('eval.release.no_note')}</p>{/if}
-						{#if choice.release === 'full'}
-							<dl class="mt-3 divide-y divide-rule rounded-box border border-line">
-								{#each row.answers.filter((answer) => answer.visible && shown(answer)) as answer, i (i)}
-									<div class="flex items-center justify-between gap-3 px-3 py-2 text-sm"><dt class="text-muted">{answer.label}</dt><dd class="font-mono font-semibold text-ink">{shown(answer)}</dd></div>
-								{/each}
-							</dl>
-							{#if row.answers.some((answer) => !answer.visible)}
-								<p class="mt-2 flex items-center gap-1.5 text-xs text-muted"><EyeOff size={13} aria-hidden="true" />{t('eval.release.hidden', { list: row.answers.filter((answer) => !answer.visible).map((answer) => answer.label).join(', ') })}</p>
+				<div class="grid gap-1.5">
+					<label class="text-sm font-semibold text-ink" for="note-{row.id}">{t('eval.public_note')}</label>
+					<textarea id="note-{row.id}" class="textarea textarea-bordered min-h-40 w-full" rows="5" maxlength="2000" bind:value={choice.note}></textarea>
+				</div>
+				<div class="grid gap-1.5">
+					<p class="text-sm font-semibold text-ink">{t('eval.release.family_sees')}</p>
+					<div class="min-h-40 rounded-box border border-line bg-subhead p-4">
+						{#if !choice.release}
+							<p class="flex items-center gap-2 text-sm text-muted"><Lock size={14} aria-hidden="true" />{t('eval.release.stays_private')}</p>
+						{:else}
+							{#if choice.note.trim()}<p class="text-sm whitespace-pre-line text-ink">{choice.note}</p>{:else}<p class="text-sm text-muted">{t('eval.release.no_note')}</p>{/if}
+							{#if choice.release === 'full'}
+								<dl class="mt-3 divide-y divide-rule rounded-box border border-line">
+									{#each row.answers.filter((answer) => answer.visible && shown(answer)) as answer, i (i)}
+										<div class="flex items-center justify-between gap-3 px-3 py-2 text-sm"><dt class="text-muted">{answer.label}</dt><dd class="font-mono font-semibold text-ink">{shown(answer)}</dd></div>
+									{/each}
+								</dl>
+								{#if row.answers.some((answer) => !answer.visible)}
+									<p class="mt-2 flex items-center gap-1.5 text-xs text-muted"><EyeOff size={13} aria-hidden="true" />{t('eval.release.hidden', { list: row.answers.filter((answer) => !answer.visible).map((answer) => answer.label).join(', ') })}</p>
+								{/if}
 							{/if}
 						{/if}
-					{/if}
+					</div>
 				</div>
 			</div>
 		</section>
