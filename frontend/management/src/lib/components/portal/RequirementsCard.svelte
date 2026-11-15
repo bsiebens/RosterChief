@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { CircleCheck, FileText, ShieldCheck, TriangleAlert } from '@lucide/svelte';
+	import { CircleCheck, FileText, ShieldCheck, TriangleAlert, Upload } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import { formatDay, parseIsoDate } from '#lib/events/types.ts';
@@ -18,7 +18,6 @@
 	let errors = $state<Record<string, string>>({});
 	let values = $state<Record<string, string>>({});
 	let multi = $state<Record<string, string[]>>({});
-	let expiry = $state<Record<string, string>>({});
 	const key = (row: MembershipRow, item: RequirementItem) => `${row.member_id}:${item.id}`;
 	const person = (id: string) => people.find((entry) => entry.id === id);
 	const day = (value: string) => formatDay(parseIsoDate(value) ?? value);
@@ -40,7 +39,7 @@
 		} else {
 			const form = new FormData();
 			if (file) form.append('document', file);
-			result = await api('POST', `/portal/me/requirements/${row.member_id}/${item.id}`, { form, query: { valid_until: expiry[id] } });
+			result = await api('POST', `/portal/me/requirements/${row.member_id}/${item.id}`, { form });
 		}
 		busy = '';
 		if (result.ok) await invalidateAll();
@@ -97,10 +96,10 @@
 									{/if}
 									<button class="btn btn-primary btn-sm w-fit" type="submit" disabled={busy === id}>{item.state === 'pending' ? t('portal.req_change') : t('portal.req_send')}</button>
 								{:else}
-									<label class="grid gap-1 text-sm font-semibold">{t('portal.req_file')}
-										<input class="input w-full font-normal" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" disabled={busy === id} onchange={(e) => { const file = e.currentTarget.files?.[0]; if (file) void submit(row, item, file); e.currentTarget.value = ''; }} />
+									<label class="flex min-h-16 cursor-pointer items-center justify-center gap-2 rounded-box border-2 border-dashed border-club bg-club/10 px-4 py-3 text-sm font-semibold text-club hover:bg-club/20 focus-within:ring-2 focus-within:ring-club {busy === id ? 'pointer-events-none opacity-60' : ''}">
+										<Upload size={18} aria-hidden="true" />{t('portal.req_file')}
+										<input class="sr-only" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" disabled={busy === id} onchange={(e) => { const file = e.currentTarget.files?.[0]; if (file) void submit(row, item, file); e.currentTarget.value = ''; }} />
 									</label>
-									<label class="grid gap-1 text-sm font-semibold sm:max-w-56">{t('portal.req_expiry')}<input class="input w-full font-normal" type="date" bind:value={expiry[id]} /></label>
 									<p class="text-xs text-muted">{t('portal.req_expiry_help')}</p>
 								{/if}
 								{#if errors[id]}<Alert kind="error">{errors[id]}</Alert>{/if}
