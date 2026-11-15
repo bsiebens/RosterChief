@@ -328,6 +328,42 @@ def eligible_officials(team) -> list[dict]:
     return sorted(out, key=lambda r: (r["last_name"].lower(), r["first_name"].lower()))
 
 
+def _kind_turnout(team, season, member_ids) -> dict:
+    """``{member_id: {"games", "practices"}}``: each player's turnout (percent, None below three answers) on this team's past games
+    (games and tournaments) and practices in the season."""
+    from django.db.models import Count
+    from django.utils import timezone
+
+    from events.models import Attendance, Event
+    from events.services import attendance as att
+
+    result = {pk: {"games": None, "practices": None} for pk in member_ids}
+    groups = {"games": [Event.EventKind.GAME, Event.EventKind.TOURNAMENT], "practices": [Event.EventKind.TRAINING]}
+    for key, kinds in groups.items():
+        rows = (
+            Attendance.objects.filter(att._in_season(season), member_id__in=list(result), event__teams=team, event__kind__in=kinds, event__cancelled=False, event__start__lt=timezone.now(), status__in=[Attendance.AttendanceStatus.PRESENT, Attendance.AttendanceStatus.ABSENT])
+            .values("member_id")
+            .annotate(present=Count("id", filter=Q(status=Attendance.AttendanceStatus.PRESENT)), responses=Count("id"))
+            .order_by()
+        )
+        for row in rows:
+            if row["responses"] >= 3:
+                result[row["member_id"]][key] = round(100 * row["present"] / row["responses"])
+    return result
+
+
+def _is_self(actor, member_id) -> bool:
+    """True when ``member_id`` is the signed-in person's own member record."""
+    return bool(actor is not None and getattr(actor, "is_authenticated", False) and Member.objects.filter(pk=member_id, user=actor).exists())
+
+
+def _require_not_own_staff_entry(actor, a: StaffAssignment) -> None:
+    """A team manager who is not a settings holder can't edit or remove their own staff entry (so a coach can't lock themselves
+    out or promote themselves); administrators can."""
+    if not access.can_manage_settings(actor) and _is_self(actor, a.member_id):
+        raise NotAllowed("You can't change or remove your own staff entry.")
+
+
 def team_detail(actor, team, season) -> dict:
     staff = []
     if season is not None:
@@ -338,8 +374,11 @@ def team_detail(actor, team, season) -> dict:
         from events.services import attendance as attendance_svc
 
         rates = {entry["member"].pk: entry["rate"] for entry in attendance_svc.player_attendance_rankings(team, season)}
+        kinds = _kind_turnout(team, season, [r["member_id"] for r in roster])
         for r in roster:
             r["attendance_rate"] = rates.get(r["member_id"])
+            r["games_rate"] = kinds[r["member_id"]]["games"]
+            r["practices_rate"] = kinds[r["member_id"]]["practices"]
     if season is not None and roster and (access.can_manage_team(actor, team) or access.can_manage_members(actor)):
         # Players who cannot be picked for some kind of event because a requirement is still open, with the names of those requirements.
         from members.services import onboarding
@@ -347,7 +386,9 @@ def team_detail(actor, team, season) -> dict:
         blocked = onboarding.blocking_reasons({(None, season.pk): {r["member_id"] for r in roster}})[(None, season.pk)]
         for r in roster:
             r["open_requirements"] = blocked.get(r["member_id"], [])
-    return {**team_out(team), "season_id": season.pk if season else None, "photo_url": photo_url(team, season), "roster": roster, "staff": staff}
+    for entry in staff:
+        entry["is_self"] = _is_self(actor, entry["member_id"])
+    return {**team_out(team), "season_id": season.pk if season else None, "photo_url": photo_url(team, season), "can_manage": access.can_manage_team(actor, team), "roster": roster, "staff": staff}
 
 
 # -- roster ---------------------------------------------------------------------------------------------------
@@ -538,6 +579,7 @@ def add_people(actor, team, *, season_id, rows: list[dict]) -> dict:
 @transaction.atomic
 def update_staff(actor, a: StaffAssignment, *, position_id):
     require_team_manager(actor, a.team)
+    _require_not_own_staff_entry(actor, a)
     before = _staff_state(a)
     position = _position(position_id, staff=True)
     if position is None:
@@ -554,6 +596,7 @@ def update_staff(actor, a: StaffAssignment, *, position_id):
 @transaction.atomic
 def remove_staff(actor, a: StaffAssignment) -> None:
     require_team_manager(actor, a.team)
+    _require_not_own_staff_entry(actor, a)
     state, label, member, pk = _staff_state(a), f"{a.member} - {a.team.name}", a.member, a.pk
     a.delete()
     entry = audit.record(actor, "team.staff_removed", member=member, changes={k: {"from": v, "to": None} for k, v in state.items()})
