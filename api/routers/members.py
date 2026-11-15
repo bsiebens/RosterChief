@@ -297,6 +297,10 @@ def list_members(request, filters: Query[MemberFilters]):
             qs = qs.filter(Q(first_name__icontains=term) | Q(last_name__icontains=term) | Q(email__icontains=term) | Q(license_number__icontains=term))
 
     season = Season.objects.filter(pk=filters.season).first() if filters.season else Season.get_current()
+    if filters.documents == "pending":
+        from members.models import MemberRequirementStatus
+
+        qs = qs.filter(pk__in=MemberRequirementStatus.objects.filter(is_pending_review=True, membership__season=season).values("membership__member_id")) if season else qs.none()
     if filters.status or filters.fee_status or filters.team:
         if season is None:
             return Member.objects.none()

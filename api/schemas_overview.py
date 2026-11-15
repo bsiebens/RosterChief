@@ -14,6 +14,7 @@ class KpisOut(Schema):
     total_members: int
     previous_total_members: int | None = None
     awaiting_approval: int
+    documents_to_review: int = 0
     teams_without_coach: int
     unrostered_members: int
     new_members: int

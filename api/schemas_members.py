@@ -25,6 +25,7 @@ class MemberFilters(Schema):
     status: str | None = Field(None, description="Club membership status (active, pending, lapsed, cancelled, or open = active or pending) in the season (default: the current one).")
     fee_status: str | None = Field(None, description="Fee status (unpaid, paid, partially_paid, waived) of that membership.")
     team: str | None = Field(None, description='A team id: on this team\'s roster or staff in the season (default: the current one); or "none": on no team at all that season.')
+    documents: str | None = Field(None, description="pending = only people with a document or answer waiting for staff review in the season.")
     include_guardians: bool = Field(False, description="Also list people who are only a guardian or only staff. Implied by role=guardian|staff.")
     ordering: str = Field("last_name", description="One of last_name, first_name, date_of_birth, license_number, email; prefix with - to reverse.")
 

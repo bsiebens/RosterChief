@@ -382,7 +382,37 @@ def submit_as(actor, membership: ClubMembership, requirement: OnboardingRequirem
     status.submitted_at = timezone.now()
     status.save()
     audit.record(actor, "onboarding.submitted", member=membership.member, target=status, changes={}, target_label=f"{requirement.name} ({membership.season})")
+    _tell_staff(actor, membership, requirement)
     return status
+
+
+def reviewers():
+    """The users of this club who may review hand-ins: everyone holding ``members.manage_members`` (the Owner role included)."""
+    from tenant_users.permissions.models import UserTenantPermissions
+
+    from .access import can_manage_members
+
+    return [perms.profile for perms in UserTenantPermissions.objects.select_related("profile").filter(profile__is_active=True) if can_manage_members(perms.profile)]
+
+
+def _tell_staff(actor, membership: ClubMembership, requirement: OnboardingRequirement) -> None:
+    """Inbox entry plus push for each reviewer (the submitter themself, if they are one, is left out). Never blocks the hand-in."""
+    from events.services.attendance import current_club
+    from notifications import inbox
+
+    club = current_club()
+    if club is None:
+        return
+    title = f"{membership.member}: {requirement.name}"
+    for user in reviewers():
+        if actor is not None and user.pk == getattr(actor, "pk", None):
+            continue
+        try:
+            inbox.notify(user, club, title=title, body="Handed in and waiting for your review.", kind=inbox.Kind.INFO, href=f"/members/{membership.member_id}", push=True, category="admin")
+        except Exception:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).exception("onboarding.notify_failed")
 
 
 @transaction.atomic

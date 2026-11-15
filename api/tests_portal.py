@@ -317,6 +317,11 @@ class PortalProfileTests(ParentPortalTests):
         self.assertEqual((item["state"], item["answer"], item["locked"]), ("pending", "Peanuts", False))
         with schema_context(self.club.schema_name):
             self.assertEqual(len(onboarding.unresolved(membership)), 1)  # still open: it keeps blocking until approved
+        with schema_context(self.club.schema_name):
+            from notifications.models import InboxNotification
+
+            self.assertEqual(InboxNotification.objects.filter(user=self.club.owner, title__contains="Allergies").count(), 1)  # the reviewers heard about it
+            self.assertEqual(InboxNotification.objects.filter(user=self.parent).count(), 0)  # a parent without that permission did not
         # while waiting, the member can still change it
         self.assertEqual(Client().post(url + "Nuts", HTTP_X_SESSION_TOKEN=token, HTTP_HOST=self.host).status_code, 200)
         with schema_context(self.club.schema_name):

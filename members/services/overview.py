@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from events.models import Event, Season
 from events.services.attendance_report import club_report
-from members.models import ClubMembership, Member
+from members.models import ClubMembership, Member, MemberRequirementStatus
 from teams.models import StaffAssignment, Team, TeamMembership
 
 Status = ClubMembership.StatusChoices
@@ -134,6 +134,7 @@ def overview(*, include_fees: bool, today: datetime.date | None = None) -> dict:
         "total_members": total,
         "previous_total_members": previous_total or None,
         "awaiting_approval": members.filter(status=Status.PENDING).count(),
+        "documents_to_review": MemberRequirementStatus.objects.filter(is_pending_review=True, membership__season=season).count() if include_fees else 0,
         "teams_without_coach": Team.objects.exclude(Exists(coaches)).count(),
         "unrostered_members": open_ms.exclude(Exists(on_roster) | Exists(on_staff)).count(),
         "new_members": _new_members(season),

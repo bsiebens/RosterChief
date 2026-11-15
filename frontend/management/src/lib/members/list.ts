@@ -32,7 +32,7 @@ export type MemberRow = {
 export type TeamOption = { id: string; name: string };
 export type SeasonOption = { id: string; name: string; is_current: boolean };
 
-export type ListFilters = { q: string; kind: Kind; status: string; fee_status: string; team: string; season: string; ordering: string; offset: number };
+export type ListFilters = { q: string; kind: Kind; status: string; fee_status: string; documents: string; team: string; season: string; ordering: string; offset: number };
 
 const oneOf = <T extends string>(v: string | null, allowed: readonly T[]): T | '' => (allowed as readonly string[]).includes(v ?? '') ? (v as T) : '';
 
@@ -45,6 +45,7 @@ export function parseFilters(sp: URLSearchParams): ListFilters {
 		kind: oneOf(sp.get('kind'), KINDS) || DEFAULT_KIND,
 		status: oneOf(sp.get('status'), STATUS_PARAMS),
 		fee_status: oneOf(sp.get('fee_status'), FEE_STATUSES),
+		documents: oneOf(sp.get('documents'), ['pending'] as const),
 		team: sp.get('team') ?? '',
 		season: sp.get('season') ?? '',
 		ordering,
@@ -69,6 +70,7 @@ export function apiQuery(f: ListFilters): Record<string, string | number | boole
 		season: f.season || undefined,
 		status: apiStatus(f),
 		fee_status: f.fee_status || undefined,
+		documents: f.documents || undefined,
 		team: f.team || undefined,
 		ordering: f.ordering,
 		limit: PAGE_SIZE,
@@ -85,6 +87,7 @@ export function pageHref(f: ListFilters, patch: Partial<ListFilters> = {}): stri
 	if (next.kind !== DEFAULT_KIND) sp.set('kind', next.kind);
 	if (next.status) sp.set('status', next.status);
 	if (next.fee_status) sp.set('fee_status', next.fee_status);
+	if (next.documents) sp.set('documents', next.documents);
 	if (next.team) sp.set('team', next.team);
 	if (next.season) sp.set('season', next.season);
 	if (next.ordering !== 'last_name') sp.set('ordering', next.ordering);
@@ -93,7 +96,7 @@ export function pageHref(f: ListFilters, patch: Partial<ListFilters> = {}): stri
 	return qs ? `?${qs}` : '?';
 }
 
-export const hasActiveFilters = (f: ListFilters) => !!(f.q || f.status || f.fee_status || f.team || f.season || f.kind !== DEFAULT_KIND);
+export const hasActiveFilters = (f: ListFilters) => !!(f.q || f.status || f.fee_status || f.documents || f.team || f.season || f.kind !== DEFAULT_KIND);
 
 /** Ordering after clicking a column: same field flips direction, a new field starts ascending. */
 export function toggleOrdering(current: string, field: OrderField): string {

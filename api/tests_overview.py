@@ -68,7 +68,7 @@ class OverviewTests(TestCase):
         r = self.get(self.owner)
         self.assertEqual(r.status_code, 200, r.content)
         b = r.json()
-        self.assertEqual(b["kpis"], {"total_members": 3, "previous_total_members": 3, "awaiting_approval": 2, "teams_without_coach": 1, "unrostered_members": 2, "new_members": 1, "previous_new_members": 3})
+        self.assertEqual(b["kpis"], {"total_members": 3, "previous_total_members": 3, "awaiting_approval": 2, "documents_to_review": 0, "teams_without_coach": 1, "unrostered_members": 2, "new_members": 1, "previous_new_members": 3})
         self.assertEqual((b["fees"]["unpaid"], b["fees"]["waived"], b["fees"]["paid"]), (2, 1, 0))
         self.assertEqual(b["renewal"], {"previous_season": self.old.name, "renewed": 2, "of": 3, "rate": 67, "previous_rate": None})
         self.assertEqual(len(b["signups"]), 12)

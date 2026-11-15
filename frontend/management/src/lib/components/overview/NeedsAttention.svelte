@@ -13,6 +13,7 @@
 			...(registrationClosed ? [{ n: 1, key: 'registration_closed', title: t('overview.attention.registration_closed'), sub: t('overview.attention.registration_closed_sub'), href: '/settings/registration', action: t('overview.attention.shop_action'), tint: 'bg-danger' }] : []),
 			{ n: k.teams_without_coach, key: 'no_coach', href: '/teams?coach=none', action: t('overview.attention.assign'), tint: 'bg-warn' },
 			{ n: k.awaiting_approval, key: 'awaiting', href: '/members?kind=member&status=pending', action: t('overview.attention.review'), tint: 'bg-warn' },
+			{ n: k.documents_to_review ?? 0, key: 'docs', href: '/members?kind=all&documents=pending', action: t('overview.attention.review'), tint: 'bg-warn' },
 			{ n: k.unrostered_members, key: 'unrostered', href: '/members?kind=member&team=none', action: t('overview.attention.review'), tint: 'bg-warn' },
 			{ n: noTypeCount ?? 0, key: 'no_type', href: '/members?kind=none', action: t('overview.attention.review'), tint: 'bg-warn' }
 		]
