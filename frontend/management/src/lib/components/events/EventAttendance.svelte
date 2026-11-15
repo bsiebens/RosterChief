@@ -6,6 +6,7 @@
     import {t} from '#lib/i18n.svelte.ts';
     import {formatDateTime} from '#lib/members/detail-helpers.ts';
     import {api, type ApiCall} from '#lib/management-api.ts';
+    import {remind} from '#lib/coach.ts';
     import {ATTENDANCE_STATUSES, type AttendanceChange, type AttendanceCounts, type AttendanceList, type AttendanceRow, type BulkAnswerOut, COACH_ANSWERS, statusLabelKey, statusStyle} from '#lib/events/types.ts';
 
     /**
@@ -166,6 +167,24 @@
         } else noteError = failText(res);
     }
 
+    // Tablet/desktop KPI row: who is in, out, undecided or silent; a reminder goes to those who have not answered.
+    const kpi = $derived({
+        going: list.counts.present + list.counts.selected,
+        out: list.counts.absent + list.counts.excused,
+        maybe: list.counts.maybe,
+        none: list.counts.no_response
+    });
+    let remindBusy = $state(false);
+    async function nudge() {
+        remindBusy = true;
+        errorMsg = '';
+        bulkMsg = '';
+        const res = await remind(eventId);
+        remindBusy = false;
+        if (res.ok) bulkMsg = t(res.count ? 'coach.reminded' : 'coach.remind_none', {n: res.count});
+        else errorMsg = res.message || t('common.error.generic');
+    }
+
     function toggleAll() {
         const ids = rows.map((r) => r.member.id);
         selected = allShownSelected ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])];
@@ -173,8 +192,26 @@
 </script>
 
 <div class="grid gap-4">
-    <!-- Counts strip. -->
-    <div class="card flex flex-wrap divide-x divide-rule">
+    <!-- Tablet and desktop: the four KPI cards of the approved design (plus check-in numbers once the event is over). -->
+    <div class="hidden gap-3 md:grid md:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
+        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.kpi_going')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ok-text">{kpi.going}</span></div>
+        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.kpi_out')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-danger">{kpi.out}</span></div>
+        <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t(statusLabelKey('maybe'))}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ink">{kpi.maybe}</span></div>
+        <div class="card px-4 py-3">
+            <span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t(statusLabelKey('no_response'))}</span>
+            <span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ink">{kpi.none}</span>
+            {#if manage && !past && kpi.none > 0}
+                <button type="button" class="link mt-1 text-xs font-semibold" disabled={remindBusy} onclick={nudge}>{t('events.att.send_reminder')}</button>
+            {/if}
+        </div>
+        {#if past}
+            <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.checked_in')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-ok-text">{list.checked_in}</span></div>
+            <div class="card px-4 py-3"><span class="block font-mono text-xs tracking-[.06em] text-muted uppercase">{t('events.att.no_shows')}</span><span class="mt-1.5 block font-display text-3xl leading-none font-extrabold text-danger">{list.no_shows}</span></div>
+        {/if}
+    </div>
+
+    <!-- Phones: the counts strip. -->
+    <div class="card flex flex-wrap divide-x divide-rule md:hidden">
         {#each shownStatuses as s (s)}
             <div class="min-w-24 flex-1 px-4 py-3">
                 <span class="block font-display text-xs font-bold tracking-[.08em] text-muted uppercase">{t(statusLabelKey(s))}</span>

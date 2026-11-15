@@ -68,7 +68,8 @@
         };
     };
 
-    usePageHeader(() => ({title: ev.title, context: `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, actions}));
+    usePageHeader(() => ({title: ev.title, context: `${t(kindLabelKey(ev.kind))} · ${formatDay(ev.start)}`, badge, actions}));
+    const whereWhen = $derived([formatRange(ev.start, ev.end), ev.location ? [ev.location.name, ev.location.city].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '));
 </script>
 
 {#snippet officiating(key: 'referee' | 'official', list: { name: string; member_id: string | null; type_name?: string }[])}
@@ -87,6 +88,10 @@
     {/if}
 {/snippet}
 
+
+{#snippet badge()}
+    <span class="badge badge-sm hidden border md:inline-flex {style.chip}">{t(kindLabelKey(ev.kind))}</span>
+{/snippet}
 
 {#snippet actions()}
   <div class={data.coachView ? 'hidden md:contents' : 'contents'}>
@@ -237,7 +242,8 @@
 
     {#if data.coachView}{@render mobileTop()}{/if}
 
-    <section class="card border-l-4 {style.bar} {data.coachView ? 'hidden md:block' : ''}">
+    <!-- From tablet width the hero card is the Overview's; the other tabs get the slim bar below, as in the approved design. -->
+    <section class="card border-l-4 {style.bar} {data.tab === 'overview' ? (data.coachView ? 'hidden md:block' : '') : data.coachView ? 'hidden' : 'md:hidden'}">
         <div class="grid gap-4 p-6 lg:grid-cols-[1fr_auto]">
             <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -318,7 +324,16 @@
         </div>
     </section>
 
-    <div class={data.coachView ? 'hidden md:block' : ''}><TabBar {tabs} active={data.tab} label={t('events.tabs')}/></div>
+    <div class="md:hidden {data.coachView ? 'hidden' : ''}"><TabBar {tabs} active={data.tab} label={t('events.tabs')}/></div>
+    <nav class="hidden flex-wrap items-center gap-x-4 gap-y-2 md:flex" aria-label={t('events.tabs')}>
+        <div class="flex flex-wrap gap-1">
+            {#each tabs as item (item.key)}
+                <a href={tabHref(item.key)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={data.tab === item.key ? 'page' : undefined}
+                   class="btn btn-sm whitespace-nowrap font-display tracking-[.08em] uppercase {data.tab === item.key ? '' : 'btn-outline text-muted'}">{item.label}</a>
+            {/each}
+        </div>
+        <span class="ml-auto min-w-0 font-mono text-xs text-muted">{whereWhen}</span>
+    </nav>
 
     {#if phone && shownTab === 'overview'}
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
