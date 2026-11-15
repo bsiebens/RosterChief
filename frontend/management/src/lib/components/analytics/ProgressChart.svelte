@@ -24,13 +24,13 @@
 </script>
 
 <div class="flex flex-col gap-3 rounded-xl bg-paper p-4">
-	<div class="flex flex-wrap items-start justify-between gap-2">
-		<div>
-			<p class="text-xs text-muted">{title}</p>
+	<div class="flex items-start justify-between gap-2">
+		<div class="min-w-0 flex-1">
+			<p class="text-xs leading-snug text-muted">{title}</p>
 			<p class="mt-1 font-mono text-2xl leading-none font-semibold text-ink">{format(data.current)}</p>
 		</div>
 		{#if data.change !== null}
-			<span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold {good === null ? 'border-line bg-white text-slate' : good ? 'border-ok-border bg-ok-bg text-ok-text' : 'border-danger-border bg-danger-bg text-danger'}">
+			<span class="inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold {good === null ? 'border-line bg-white text-slate' : good ? 'border-ok-border bg-ok-bg text-ok-text' : 'border-danger-border bg-danger-bg text-danger'}">
 				<Arrow size={14} aria-hidden="true" />
 				{good === null ? t('analytics.progress.same') : good ? t('analytics.progress.better') : t('analytics.progress.worse')}
 			</span>
