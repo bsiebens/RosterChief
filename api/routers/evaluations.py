@@ -227,6 +227,18 @@ def release(request, evaluation_id: uuid.UUID, payload: ReleaseIn):
     return _evaluation(svc.evaluations_queryset().get(pk=evaluation_id))
 
 
+@router.get("/checklists/{checklist_id}/release", summary="How many private evaluations of this season the caller could share now", operation_id="evaluation_release_count")
+def release_count(request, checklist_id: uuid.UUID, season_id: uuid.UUID | None = None):
+    _execute(request)
+    return {"count": len(svc.unreleased(request.user, _checklist(checklist_id), _season(season_id)))}
+
+
+@router.post("/checklists/{checklist_id}/release", summary="Share every private evaluation of this season at one level (notes or details); families are told", operation_id="release_checklist_evaluations")
+def release_all(request, checklist_id: uuid.UUID, payload: ReleaseIn, season_id: uuid.UUID | None = None):
+    _execute(request)
+    return {"count": svc.release_many(request.user, _checklist(checklist_id), payload.release, _season(season_id))}
+
+
 @router.delete("/{evaluation_id}", response={204: None}, summary="Delete an evaluation (its evaluator, or a checklist manager)", operation_id="delete_player_evaluation")
 def delete_evaluation(request, evaluation_id: uuid.UUID):
     _execute(request)

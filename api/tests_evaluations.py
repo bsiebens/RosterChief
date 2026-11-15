@@ -176,6 +176,25 @@ class EvaluationsApiTests(NewsClubMixin, TestCase):
         self.assertEqual(shared(), [])
         self.assertEqual(self.call("get", "/portal/evaluations", self.ann_user).json(), [])  # never to someone else
 
+    def test_bulk_release_and_family_notification(self):
+        from notifications.models import InboxNotification
+
+        c = self.checklist()
+        self.evaluate(c, self.cara, {"skating": "4"}, public_note="Well done")
+        self.evaluate(c, self.ann, {"skating": "3"})
+        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 2})
+        self.assertEqual(self.call("post", f"/evaluations/checklists/{c['id']}/release", self.bob_user, {"release": ""}).status_code, 422)
+        r = self.call("post", f"/evaluations/checklists/{c['id']}/release", self.bob_user, {"release": "notes"})
+        self.assertEqual((r.status_code, r.json()), (200, {"count": 2}), r.content)
+        self.assertEqual(self.call("get", f"/evaluations/checklists/{c['id']}/release", self.bob_user).json(), {"count": 0})
+        self.assertEqual(len(self.call("get", "/portal/evaluations", self.cara_user).json()), 1)
+        self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 1)
+        # Sharing one by hand tells the family too, once.
+        again = self.evaluate(c, self.cara, {"skating": "5"}).json()
+        self.call("put", f"/evaluations/{again['id']}/release", self.bob_user, {"release": "full"})
+        self.call("put", f"/evaluations/{again['id']}/release", self.bob_user, {"release": "notes"})
+        self.assertEqual(InboxNotification.objects.filter(user=self.cara_user, title="A new evaluation is available").count(), 2)
+
     def test_evaluate_validation(self):
         c = self.checklist()
         r = self.evaluate(c, self.cara, {"shooting": 3})  # the required "skating" is missing

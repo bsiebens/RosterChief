@@ -156,12 +156,66 @@ def release_evaluation(actor, evaluation: PlayerEvaluation, release: str, public
         raise Invalid("Unknown release level.", {"release": ["Choose nothing, notes or details."]})
     if public_note is not None:
         evaluation.public_note = public_note.strip()
+    shared_now = bool(release) and not evaluation.release
     if release != evaluation.release:
         evaluation.release = release
         evaluation.released_at = timezone.now() if release else None
         evaluation.released_by = Member.objects.filter(user=actor).first() if release else None
     evaluation.save(update_fields=["public_note", "release", "released_at", "released_by", "modified"])
+    if shared_now:
+        tell_family(actor, evaluation)
     return evaluation
+
+
+def tell_family(actor, evaluation: PlayerEvaluation) -> None:
+    """Inbox entry plus push for the player and their guardians (the person who shared it is left out). Never blocks the release."""
+    from events.services.attendance import current_club
+    from members.services import recipients
+    from notifications import inbox
+
+    club = current_club()
+    if club is None:
+        return
+    try:
+        recipients.deliver(
+            evaluation.player, club, title="A new evaluation is available", body=f"{evaluation.checklist.name} · {evaluation.season.name}",
+            skip_user_id=getattr(actor, "pk", None), kind=inbox.Kind.INFO, href="/parent/forms", push=True, category="form",
+        )
+    except Exception:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).exception("evaluations.notify_failed")
+
+
+def unreleased(actor, checklist: EvaluationChecklist, season: Season | None = None):
+    """The private evaluations of ``checklist`` in ``season`` (the current one by default) that ``actor`` may share."""
+    season = season or Season.get_current()
+    rows = evaluations_queryset().filter(checklist=checklist, release="")
+    if season is not None:
+        rows = rows.filter(season=season)
+    if access.can_manage_evaluations(actor):
+        return list(rows)
+    return [e for e in rows if e.submission.submitted_by is not None and e.submission.submitted_by.user_id == actor.pk]
+
+
+@transaction.atomic
+def release_many(actor, checklist: EvaluationChecklist, release: str, season: Season | None = None) -> int:
+    """Share every private evaluation of the checklist (this season) the actor may share, at one level. Each player and their family
+    are told once, however many evaluations they got. Returns how many were shared."""
+    access.require_execute_evaluations(actor)
+    if release not in (PlayerEvaluation.Release.NOTES, PlayerEvaluation.Release.FULL):
+        raise Invalid("Unknown release level.", {"release": ["Choose notes or details."]})
+    rows = unreleased(actor, checklist, season)
+    by = Member.objects.filter(user=actor).first()
+    now = timezone.now()
+    told = set()
+    for evaluation in rows:
+        evaluation.release, evaluation.released_at, evaluation.released_by = release, now, by
+        evaluation.save(update_fields=["release", "released_at", "released_by", "modified"])
+        if evaluation.player_id not in told:
+            told.add(evaluation.player_id)
+            tell_family(actor, evaluation)
+    return len(rows)
 
 
 def player_evaluations(player: Member):
