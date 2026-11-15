@@ -17,12 +17,18 @@
 
 	// svelte-ignore state_referenced_locally
 	let who = $state(data.people.find((person) => person.is_self)?.id ?? data.people[0]?.id ?? '');
-	let drafts = $state<Record<string, ProfilePerson>>({});
+	// One editable copy per person, made up front: state must not be changed while the page renders.
+	const seed = () => Object.fromEntries(data.people.map((person) => [person.id, { ...person }])) as Record<string, ProfilePerson>;
+	// svelte-ignore state_referenced_locally
+	let drafts = $state<Record<string, ProfilePerson>>(seed());
+	$effect(() => {
+		drafts = seed();
+	});
 	let busy = $state('');
 	let saved = $state('');
 	let errors = $state<Record<string, Record<string, string>>>({});
 	let messages = $state<Record<string, string>>({});
-	const draft = (person: ProfilePerson) => (drafts[person.id] ??= { ...person });
+	const draft = (person: ProfilePerson) => drafts[person.id] ?? person;
 
 	async function save(person: ProfilePerson) {
 		const d = draft(person);
@@ -36,7 +42,6 @@
 		busy = '';
 		if (result.ok) {
 			saved = person.id;
-			delete drafts[person.id];
 			await invalidateAll();
 		} else {
 			errors[person.id] = result.fields;
