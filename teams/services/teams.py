@@ -334,6 +334,12 @@ def team_detail(actor, team, season) -> dict:
         qs = StaffAssignment.objects.filter(team=team, season=season).select_related("member", "position").order_by("position__ordering", "position__name", "member__last_name", "member__first_name")
         staff = [staff_out(a) for a in qs]
     roster = [roster_out(m) for m in roster_for(team, season)]
+    if season is not None and roster:
+        from events.services import attendance as attendance_svc
+
+        rates = {entry["member"].pk: entry["rate"] for entry in attendance_svc.player_attendance_rankings(team, season)}
+        for r in roster:
+            r["attendance_rate"] = rates.get(r["member_id"])
     if season is not None and roster and (access.can_manage_team(actor, team) or access.can_manage_members(actor)):
         # Players who cannot be picked for some kind of event because a requirement is still open, with the names of those requirements.
         from members.services import onboarding

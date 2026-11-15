@@ -314,6 +314,10 @@ class CheckInIn(Schema):
     showed_up: bool | None = None
 
 
+class RemindOut(Schema):
+    reminded: int
+
+
 class BulkAnswerIn(Schema):
     member_ids: list[uuid.UUID]
     status: str

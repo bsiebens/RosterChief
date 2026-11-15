@@ -512,13 +512,15 @@ def coach_home(request):
     now = timezone.localtime()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     events = (
-        Event.objects.filter(teams__in=teams, start__range=(start, start + timedelta(days=30)))
-        .select_related("location", "opponent", "lineup")
+        Event.objects.filter(teams__in=teams, start__range=(start - timedelta(days=14), start + timedelta(days=45)))
+        .select_related("location", "opponent", "lineup", "timeline")
         .prefetch_related("teams")
         .annotate(
             going=Count("attendances", filter=Q(attendances__status__in=["present", "selected"]), distinct=True),
             out=Count("attendances", filter=Q(attendances__status__in=["absent", "excused", "dropout"]), distinct=True),
             unanswered=Count("attendances", filter=Q(attendances__status="no_response"), distinct=True),
+            maybe=Count("attendances", filter=Q(attendances__status="maybe"), distinct=True),
+            invited=Count("attendances", distinct=True),
         )
         .order_by("start")
         .distinct()
@@ -527,13 +529,17 @@ def coach_home(request):
     return {
         **_home_branding(request, now.date()),
         "teams": [{"id": team.pk, "name": team.name} for team in teams],
+        "can_create_events": access.can_manage_any_team(request.user),
+        "can_add_news": access.can_add_news(request.user),
         "news": [public_news_item(request, item) for item in news],
         "events": [
             {
                 "id": event.pk, "title": event.title, "start": event.start, "location": event.location.name if event.location else "",
                 "kind": event.kind, "deadline": event.deadline, "team_ids": [team.pk for team in event.teams.all()],
                 "opponent_logo": event.opponent.logo.url if event.opponent and event.opponent.logo else None, "is_home": event.is_home_game,
-                "going": event.going, "out": event.out, "unanswered": event.unanswered,
+                "end": event.end, "gathering": event.gathering, "opponent": event.opponent.name if event.opponent else "",
+                "going": event.going, "out": event.out, "unanswered": event.unanswered, "maybe": event.maybe, "invited": event.invited,
+                "has_game_sheet": hasattr(event, "timeline"),
                 "cancelled": event.cancelled, "lineup": event.kind in (Event.EventKind.GAME, Event.EventKind.TOURNAMENT),
                 "lineup_published": getattr(getattr(event, "lineup", None), "published_at", None) is not None,
                 "can_manage_attendance": access.can_manage_attendance(request.user, event),

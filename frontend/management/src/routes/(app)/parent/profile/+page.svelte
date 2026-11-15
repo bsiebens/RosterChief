@@ -5,6 +5,7 @@
 	import ClubCrest from '#lib/components/ClubCrest.svelte';
 	import FollowTeams from '#lib/components/portal/FollowTeams.svelte';
 	import SaveStatus from '#lib/components/portal/SaveStatus.svelte';
+	import StatsShare from '#lib/components/portal/StatsShare.svelte';
 	import ProfileOverview from '#lib/components/portal/ProfileOverview.svelte';
 	import PersonFilter from '#lib/components/PersonFilter.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -82,6 +83,7 @@
 
 <div class="mb-4"><PersonFilter people={data.people.map((person) => ({ id: person.id, name: person.name, first_name: person.first_name, photo_url: person.photo_url }))} bind:selected={who} viewer={data.people.find((person) => person.is_self)?.id} all={false} /></div>
 <div class="grid min-w-0 items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+	<div class="grid min-w-0 content-start gap-4">
 	{#each data.people.filter((person) => person.id === who) as person (person.id)}
 		{@const d = draft(person)}
 		<form class="card overflow-hidden" onsubmit={(e) => { e.preventDefault(); void save(person); }}>
@@ -127,5 +129,7 @@
 			</div>
 		</form>
 	{/each}
+		{#if data.stats?.available}{@const mine = data.stats.people.find((candidate) => candidate.id === who)}{#if mine}<StatsShare person={mine} />{/if}{/if}
+	</div>
 	<div class="grid min-w-0 gap-4">{#if data.overview}<ProfileOverview overview={data.overview} people={data.people} />{/if}{#if data.follows}<FollowTeams initial={data.follows} />{/if}</div>
 </div>

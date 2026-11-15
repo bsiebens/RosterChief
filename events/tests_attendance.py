@@ -613,6 +613,12 @@ class StatisticsTests(AttendanceTestBase):
         rankings = svc.player_attendance_rankings(self.u12, minimum_responses=4)
         self.assertEqual([r["member"] for r in rankings], [self.alice])  # too few answers for the others
 
+    def test_team_detail_gives_each_player_their_turnout(self):
+        from teams.services import teams as team_svc
+
+        detail = team_svc.team_detail(self.admin, self.u12, self.season)
+        self.assertEqual({r["first_name"]: r["attendance_rate"] for r in detail["roster"]}, {"Cara": 100, "Alice": 75, "Bob": 33})
+
     def test_missed_recent_practices(self):
         self.assertEqual(list(svc.players_who_missed_recent_practices(self.u12)), [self.bob])
         self.assertEqual(list(svc.players_who_missed_recent_practices(self.u12, count=3)), [])  # bob came to the 2nd
@@ -666,3 +672,26 @@ class StatisticsTests(AttendanceTestBase):
         self.assertEqual(svc.player_attendance_rankings(self.u12), [])
         self.assertEqual(svc.member_attendance_sparkline(self.alice), [])
         self.assertEqual(svc.members_attendance_summary([self.alice])[self.alice.pk]["events"], 0)
+
+
+class RemindTests(AttendanceTestBase):
+    def setUp(self):
+        super().setUp()
+        self.roster(self.alice)
+        self.roster(self.cara)
+        self.game = self.event("Game", teams=[self.u12], kind=Event.EventKind.GAME)
+        svc.set_answer_as_coach(self.coach_user, Attendance.objects.get(event=self.game, member=self.alice), "present")
+        InboxNotification.objects.all().delete()
+        OutboxEntry.objects.all().delete()
+
+    def test_only_those_who_have_not_answered_are_nudged(self):
+        self.assertEqual(svc.remind_unanswered(self.coach_user, self.game), 1)
+        self.assertEqual(self.inbox_for(self.cara_user).count(), 1)
+        self.assertEqual(self.inbox_for(self.alice_user).count(), 0)
+
+    def test_only_an_attendance_manager_may_remind_and_not_after_the_start(self):
+        with self.assertRaises(NotAllowed):
+            svc.remind_unanswered(self.other_coach_user, self.game)
+        past = self.event("Old", teams=[self.u12], start=later(-1))
+        with self.assertRaises(Invalid):
+            svc.remind_unanswered(self.coach_user, past)

@@ -73,6 +73,8 @@ class RosterEntryOut(Schema):
     is_alternate_captain: bool
     #: Names of the open requirements that keep this player out of some events (only for those who manage the team).
     open_requirements: list[str] = []
+    #: Turnout in percent on the team's past events this season (present / present + absent); None until the player has three answers.
+    attendance_rate: int | None = None
 
 
 class StaffEntryOut(Schema):

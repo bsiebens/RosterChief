@@ -120,6 +120,28 @@ class PortalProfileTests(ParentPortalTests):
         with schema_context(self.club.schema_name):
             self.assertEqual(Member.objects.get(pk=self.child.pk).email, "")
 
+    def test_personal_stats_link_is_the_familys_to_switch(self):
+        from unittest import mock
+
+        token = self.token()
+        with mock.patch("events.services.game_stats.analytics_supported", return_value=True):
+            people = self.call("get", "/portal/me/stats", token).json()
+            self.assertTrue(people["available"])
+            self.assertEqual({p["id"] for p in people["people"]}, {str(self.viewer.pk), str(self.child.pk)})
+            self.assertTrue(all(p["share_token"] is None for p in people["people"]))
+            on = self.call("put", f"/portal/me/stats/{self.child.pk}/share", token)
+            self.assertEqual(on.status_code, 200, on.content)
+            first = on.json()["share_token"]
+            self.assertEqual(self.call("put", f"/portal/me/stats/{self.child.pk}/share", token).json()["share_token"], first)  # idempotent
+            self.assertNotEqual(self.call("put", f"/portal/me/stats/{self.child.pk}/share?rotate=true", token).json()["share_token"], first)
+            mine = self.call("get", f"/portal/me/stats/{self.child.pk}", token)
+            self.assertEqual((mine.status_code, mine.json()["first_name"]), (200, "My"), mine.content)
+            self.assertEqual(self.call("get", f"/portal/me/stats/{self.other.pk}", token).status_code, 404)
+            self.assertEqual(self.call("put", f"/portal/me/stats/{self.other.pk}/share", token).status_code, 404)
+            self.assertEqual(self.call("delete", f"/portal/me/stats/{self.child.pk}/share", token).status_code, 204)
+            self.assertIsNone(self.call("get", f"/portal/me/stats/{self.child.pk}", token).json()["share_token"])
+        self.assertFalse(self.call("get", "/portal/me/stats", token).json()["available"])  # no game analytics for this club
+
     def test_notification_switches_round_trip(self):
         token = self.token()
         before = self.call("get", "/portal/me/notifications", token).json()

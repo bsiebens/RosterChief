@@ -16,6 +16,18 @@ from .access import require_admin
 def enable(actor, member: Member, *, rotate: bool = False) -> str:
     """The member's share token: created when missing, replaced with ``rotate``."""
     require_admin(actor)
+    return enable_for_owner(actor, member, rotate=rotate)
+
+
+@transaction.atomic
+def disable(actor, member: Member) -> None:
+    require_admin(actor)
+    disable_for_owner(actor, member)
+
+
+@transaction.atomic
+def enable_for_owner(actor, member: Member, *, rotate: bool = False) -> str:
+    """Same as ``enable`` for the person themself or their guardian (the caller has checked that; no admin right needed)."""
     before = member.stats_share_token
     if before and not rotate:
         return before
@@ -26,8 +38,7 @@ def enable(actor, member: Member, *, rotate: bool = False) -> str:
 
 
 @transaction.atomic
-def disable(actor, member: Member) -> None:
-    require_admin(actor)
+def disable_for_owner(actor, member: Member) -> None:
     if member.stats_share_token:
         member.stats_share_token = None
         member.save(update_fields=["stats_share_token", "modified"])

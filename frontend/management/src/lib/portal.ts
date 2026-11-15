@@ -178,3 +178,7 @@ export type SharedEvaluation = {
 	public_note: string;
 	answers: { label: string; field_type: string; section: string; options: unknown; value: unknown }[];
 };
+
+/** Personal statistics: who has them here, and whether their public link is switched on (`share_token` set). */
+export type StatsPerson = { id: string; name: string; first_name: string; photo_url: string | null; is_self: boolean; share_token: string | null };
+export type StatsPeople = { available: boolean; people: StatsPerson[] };

@@ -441,6 +441,21 @@ def set_answer_as_coach(actor, attendance: Attendance, status: str | None, coach
     return attendance
 
 
+def remind_unanswered(actor, event) -> int:
+    """Nudge everyone invited to the upcoming ``event`` who has not answered yet (inbox + push, the parents of a child on
+    their behalf). Returns how many players were reminded."""
+    require_attendance_manager(actor, event)
+    if event.cancelled:
+        raise Invalid(f"“{event.title}” is cancelled.", {"__all__": ["The event is cancelled."]})
+    if event.start < timezone.now():
+        raise Invalid(f"“{event.title}” has already started.", {"__all__": ["The event has already started."]})
+    members = [a.member for a in Attendance.objects.filter(event=event, status=Status.NO_RESPONSE).select_related("member")]
+    when = f"{timezone.localtime(event.start):%d %b %Y %H:%M}"
+    for member in members:
+        _notify(member, title="Please answer", body=f"Your coach is waiting for your answer for {event.title}, {when}.", href=f"/calendar/events/{event.pk}", category="reminder")
+    return len(members)
+
+
 @transaction.atomic
 def record_check_in(actor, attendance: Attendance, showed_up: bool | None) -> Attendance:
     """Record whether the member actually showed up (``None`` clears the check-in), separate from their answer."""

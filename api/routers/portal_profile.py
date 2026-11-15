@@ -18,8 +18,12 @@ from members.models import ClubMembership, Member
 from members.services import memberships as membership_services, onboarding
 from shop.models import Voucher
 from members.services import members as member_services
+from members.services import stats_sharing
 from members.services.errors import Invalid
-from events.models import EventFollow
+from api.routers.analytics import member_document
+from api.schemas_member_stats import PublicPlayerStatsOut
+from events.models import EventFollow, Season
+from events.services import game_stats, member_stats
 from events.services import follows
 from notifications import preferences
 from notifications.models import Category, Channel
@@ -272,3 +276,52 @@ def hand_in(request, member_id: UUID, requirement_id: UUID, answer: str | None =
     except Invalid as error:
         raise HttpError(409 if getattr(error, "code", "") == "locked" else 422, str(error)) from None
     return {"memberships": _membership_rows(_people(viewer))}
+
+
+# --- personal statistics and their public link -----------------------------------------------------------------------------
+
+
+class MyStatsOut(PublicPlayerStatsOut):
+    #: The secret in the personal public link (``/stats/<token>``); null while the link is off.
+    share_token: str | None = None
+
+
+@router.get("/stats", summary="Who has personal statistics here, and whether their public link is on")
+def stats_people(request):
+    viewer = _viewer(request)
+    return {
+        "available": game_stats.analytics_supported(request.tenant, request.features),
+        "people": [
+            {"id": m.pk, "name": str(m), "first_name": m.first_name, "photo_url": m.photo_url, "is_self": m.pk == viewer.pk, "share_token": m.stats_share_token}
+            for m in _people(viewer).values()
+        ],
+    }
+
+
+@router.get("/stats/{member_id}", response=MyStatsOut, summary="My (or my child's) game statistics, the same numbers as the public link")
+def my_stats(request, member_id: UUID, season: UUID | None = None):
+    _viewer_, member = _own(request, member_id)
+    if not game_stats.analytics_supported(request.tenant, request.features):
+        raise HttpError(404, "Not found.")
+    chosen = None
+    if season is not None:
+        chosen = Season.objects.filter(pk=season).first()
+        if chosen is None:
+            raise HttpError(404, "Not found.")
+    player, goalie = member_stats.game_sections(member)
+    return {"first_name": member.first_name, "last_name": member.last_name, "game_stats": member_document(member, chosen), "player": player, "goalie": goalie, "share_token": member.stats_share_token}
+
+
+@router.put("/stats/{member_id}/share", summary="Switch the personal public link on (rotate=true replaces it, the old link stops working)")
+def stats_share_on(request, member_id: UUID, rotate: bool = False):
+    _viewer_, member = _own(request, member_id)
+    if not game_stats.analytics_supported(request.tenant, request.features):
+        raise HttpError(404, "Not found.")
+    return {"share_token": stats_sharing.enable_for_owner(request.user, member, rotate=rotate)}
+
+
+@router.delete("/stats/{member_id}/share", response={204: None}, summary="Switch the personal public link off")
+def stats_share_off(request, member_id: UUID):
+    _viewer_, member = _own(request, member_id)
+    stats_sharing.disable_for_owner(request.user, member)
+    return 204, None
