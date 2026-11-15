@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { KeyRound, Pencil } from '@lucide/svelte';
+	import { ChevronRight, KeyRound } from '@lucide/svelte';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import { t } from '#lib/i18n.svelte.ts';
 	import { formatDate } from '#lib/members/detail-helpers.ts';
@@ -10,10 +10,10 @@
 	const n = $derived(member.family_ids.length);
 </script>
 
-<tr>
+<tr class="hover:bg-paper">
 	<td>
 		<div class="flex items-center gap-2.5">
-			<Avatar first_name={member.first_name} last_name={member.last_name} photoUrl={member.photo_url} />
+			<Avatar first_name={member.first_name} last_name={member.last_name} photoUrl={member.photo_url} size="h-9 w-9" text="text-sm" />
 			<div>
 				<div class="flex items-center gap-1.5">
 					<a class="link link-hover font-semibold text-ink" href="/members/{member.id}">{name}</a>
@@ -77,7 +77,7 @@
 	{/if}
 	<td class="text-right">
 		{#if canManage}
-			<a class="btn btn-outline btn-xs" href="/members/{member.id}" aria-label={t('members.list.edit_named', { name })}><Pencil size={13} /> {t('members.list.edit')}</a>
+			<a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="/members/{member.id}" aria-label={t('members.list.edit_named', { name })} title={t('members.list.edit')}><ChevronRight size={18} /></a>
 		{/if}
 	</td>
 </tr>

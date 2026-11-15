@@ -3,7 +3,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { House, Pencil, Plus, Search, X } from '@lucide/svelte';
+	import { House, ChevronRight, Plus, Search, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import EntityPicker from '#lib/components/EntityPicker.svelte';
 	import Field from '#lib/components/Field.svelte';
@@ -54,7 +54,7 @@
 <svelte:head><title>{pageTitle(t('families.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5" role="search">
+	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5" role="search">
 		<div class="relative">
 			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
 			<input type="search" aria-label={t('families.search')} placeholder={t('families.search_placeholder')} class="input w-64 pl-9" bind:value={q} oninput={onType} />
@@ -68,7 +68,7 @@
 		{/if}
 	</div>
 
-	<div class="px-7 py-5">
+	<div class="px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.rows.length}
@@ -84,7 +84,7 @@
 					</thead>
 					<tbody>
 						{#each data.rows as f (f.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td class="font-semibold"><a class="link" href="/families/{f.id}">{f.display_name}</a></td>
 								<td>
 									<div class="flex flex-wrap gap-1.5">
@@ -94,7 +94,7 @@
 									</div>
 								</td>
 								<td class="text-right font-mono text-xs">{f.members.length}</td>
-								<td class="text-right"><a class="btn btn-outline btn-xs" href="/families/{f.id}" aria-label={t('families.edit_named', { name: f.display_name })}><Pencil size={13} /> {t('common.edit')}</a></td>
+								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="/families/{f.id}" aria-label={t('families.edit_named', { name: f.display_name })} title={t('common.edit')}><ChevronRight size={18} /></a></td>
 							</tr>
 						{/each}
 					</tbody>

@@ -85,7 +85,7 @@
 					data-sveltekit-noscroll
 					data-sveltekit-keepfocus
 					aria-current={tab === item.key ? 'page' : undefined}
-					class="-mb-px border-b-2 px-4 py-3.5 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
+					class="-mb-px border-b-2 px-3.5 py-3.5 md:px-4 font-display text-sm font-bold tracking-[.08em] whitespace-nowrap uppercase {tab === item.key ? 'border-club text-ink' : 'border-transparent text-muted hover:text-ink'}">{item.label}</a>
 			{/each}
 		</div>
 	</nav>
@@ -101,7 +101,7 @@
 	{:else if tab === 'stats'}
 		<StatsTab stats={data.stats} gameStats={data.gameStats} officiating={data.officiating} memberId={data.member.id} canShare={!!data.me?.can_manage_members} />
 	{:else}
-		<div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_34rem]">
+		<div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_21rem] xl:grid-cols-[minmax(0,1fr)_34rem]">
 			<div class="grid gap-4">
 				<PersonalCard {member} guardians={data.guardians} />
 				<MembershipCard {member} seasons={data.seasons} isAdmin={data.isAdmin} {form} />

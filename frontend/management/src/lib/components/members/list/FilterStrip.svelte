@@ -36,11 +36,11 @@
 	const pick = (key: keyof ListFilters) => (e: Event) => onnavigate(pageHref(filters, { [key]: (e.currentTarget as HTMLSelectElement).value }));
 </script>
 
-<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-7 py-2.5">
+<div class="flex flex-wrap items-center gap-3 border-b border-line bg-white px-6 py-2.5">
 	<div class="flex flex-wrap items-center gap-2" role="search">
 		<div class="relative">
 			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
-			<input type="search" aria-label={t('members.list.search')} placeholder={t('members.list.search_placeholder')} class="input w-56 pl-9" bind:value={q} oninput={() => ontype(q)} />
+			<input type="search" aria-label={t('members.list.search')} placeholder={t('members.list.search_placeholder')} class="input w-64 pl-9" bind:value={q} oninput={() => ontype(q)} />
 		</div>
 		<select class="select w-auto" aria-label={t('members.list.status')} value={filters.status} onchange={pick('status')}>
 			<option value="">{filters.kind === 'member' ? t('members.list.status_open') : t('members.list.status_any')}</option>

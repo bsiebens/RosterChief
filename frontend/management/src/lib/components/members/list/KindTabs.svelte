@@ -22,7 +22,7 @@
 					e.preventDefault();
 					onnavigate(pageHref(filters, { kind }));
 				}}
-				class="rounded-md px-3 py-1.5 font-display text-xs font-bold tracking-[.08em] uppercase {active ? 'border border-ink bg-ink text-white' : 'border border-line text-muted hover:text-ink'}">{t(`members.list.kind.${kind}`)}</a>
+				class="rounded-lg border px-3.5 py-1.5 font-display text-sm font-bold tracking-[.08em] uppercase {active ? 'border-ink bg-ink text-white' : 'border-line bg-white text-muted hover:text-ink'}">{t(`members.list.kind.${kind}`)}</a>
 		{/each}
 	</div>
 	<div class="relative" role="presentation" onmouseenter={() => (hover = true)} onmouseleave={() => (hover = false)}>

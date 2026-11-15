@@ -28,7 +28,7 @@
 	</th>
 {/snippet}
 
-<div class="card overflow-x-auto">
+<div class="card overflow-x-auto overflow-y-hidden">
 	<table class="table">
 		<thead>
 			<tr>

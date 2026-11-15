@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Upload, UserPlus } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
-	import Pager from '#lib/components/Pager.svelte';
+	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
 	import FilterStrip from '#lib/components/members/list/FilterStrip.svelte';
 	import MembersTable from '#lib/components/members/list/MembersTable.svelte';
 	import { usePageHeader } from '#lib/header.svelte.ts';
@@ -40,12 +40,19 @@
 <div class="-mx-7 -my-6 flex flex-col">
 <FilterStrip filters={data.filters} teams={data.teams} seasons={data.seasons} showFees={data.showFees} onnavigate={navigate} ontype={onType} />
 
-<div class="px-7 py-5">
+<div class="px-6 py-4">
 	{#if data.error}
 		<Alert kind="error">{t(errorKey(data.error.status))}</Alert>
 	{:else}
 		<MembersTable rows={data.rows} filters={data.filters} canManage={data.canManage} showFees={data.showFees} onnavigate={navigate} />
-		<Pager count={data.count} offset={data.filters.offset} limit={PAGE_SIZE} href={(offset) => pageHref(data.filters, { offset })} />
+		{#if data.count > 0}
+			<div class="mt-3 flex items-center gap-2 text-xs text-muted">
+				<span class="font-mono">{t('members.list.range', { from: data.filters.offset + 1, to: Math.min(data.count, data.filters.offset + PAGE_SIZE), n: data.count })}</span>
+				<span class="flex-1"></span>
+				<a class="btn btn-sm btn-outline gap-1 {data.filters.offset <= 0 ? 'pointer-events-none opacity-45' : ''}" href={pageHref(data.filters, { offset: Math.max(0, data.filters.offset - PAGE_SIZE) })} aria-disabled={data.filters.offset <= 0}><ChevronLeft size={14} /> {t('common.previous')}</a>
+				<a class="btn btn-sm btn-outline gap-1 {data.filters.offset + PAGE_SIZE >= data.count ? 'pointer-events-none opacity-45' : ''}" href={pageHref(data.filters, { offset: data.filters.offset + PAGE_SIZE })} aria-disabled={data.filters.offset + PAGE_SIZE >= data.count}>{t('common.next')} <ChevronRight size={14} /></a>
+			</div>
+		{/if}
 	{/if}
 </div>
 </div>

@@ -3,7 +3,7 @@
 	import { pageTitle } from '#lib/title.svelte.ts';
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Layers, Pencil, Plus, Search, X } from '@lucide/svelte';
+	import { Layers, ChevronRight, Plus, Search, X } from '@lucide/svelte';
 	import Alert from '#lib/components/Alert.svelte';
 	import Field from '#lib/components/Field.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -49,7 +49,7 @@
 <svelte:head><title>{pageTitle(t('groups.title'))}</title></svelte:head>
 
 <div class="-mx-7 -my-6 flex flex-col">
-	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-7 py-2.5" role="search">
+	<div class="flex flex-wrap items-center gap-2 border-b border-line bg-white px-6 py-2.5" role="search">
 		<div class="relative">
 			<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-dim"><Search size={14} /></span>
 			<input type="search" aria-label={t('groups.search')} placeholder={t('groups.search_placeholder')} class="input w-64 pl-9" bind:value={q} oninput={onType} />
@@ -59,7 +59,7 @@
 		{/if}
 	</div>
 
-	<div class="px-7 py-5">
+	<div class="px-6 py-4">
 		{#if data.error}
 			<Alert kind="error">{t('common.error.generic')}</Alert>
 		{:else if !data.rows.length}
@@ -75,10 +75,10 @@
 					</thead>
 					<tbody>
 						{#each data.rows as g (g.id)}
-							<tr class="hover:bg-surface">
+							<tr class="hover:bg-paper">
 								<td class="font-semibold"><a class="link" href="/groups/{g.id}">{g.name}</a></td>
 								<td class="text-right font-mono text-xs">{g.member_count}</td>
-								<td class="text-right"><a class="btn btn-outline btn-xs" href="/groups/{g.id}" aria-label={t('groups.edit_named', { name: g.name })}><Pencil size={13} /> {t('common.edit')}</a></td>
+								<td class="text-right"><a class="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-rule hover:text-ink" href="/groups/{g.id}" aria-label={t('groups.edit_named', { name: g.name })} title={t('common.edit')}><ChevronRight size={18} /></a></td>
 							</tr>
 						{/each}
 					</tbody>

@@ -13,7 +13,8 @@ export default {
 		'members.list.role.member': 'Member', 'members.list.role.guardian': 'Guardian', 'members.list.role.staff': 'Staff',
 		'members.list.status.active': 'Active', 'members.list.status.pending': 'Pending', 'members.list.status.lapsed': 'Lapsed', 'members.list.status.cancelled': 'Cancelled',
 		'members.list.fee.unpaid': 'Unpaid', 'members.list.fee.partially_paid': 'Partially paid', 'members.list.fee.paid': 'Paid', 'members.list.fee.waived': 'Waived',
-		'members.list.edit': 'Edit', 'members.list.edit_named': 'Edit {name}', 'members.list.empty': 'No members yet.', 'members.list.empty_filtered': 'No members match these filters.', 'members.list.unknown': 'unknown'
+		'members.list.edit': 'Edit', 'members.list.edit_named': 'Edit {name}', 'members.list.empty': 'No members yet.', 'members.list.empty_filtered': 'No members match these filters.', 'members.list.unknown': 'unknown',
+		'members.list.range': '{from}–{to} of {n}'
 	},
 	nl: {
 		'members.list.title': 'Leden', 'members.list.count': '{n} leden', 'members.list.count_one': '1 lid', 'members.list.add': 'Lid toevoegen',
@@ -29,7 +30,8 @@ export default {
 		'members.list.role.member': 'Lid', 'members.list.role.guardian': 'Voogd', 'members.list.role.staff': 'Staf',
 		'members.list.status.active': 'Actief', 'members.list.status.pending': 'In behandeling', 'members.list.status.lapsed': 'Verlopen', 'members.list.status.cancelled': 'Geannuleerd',
 		'members.list.fee.unpaid': 'Onbetaald', 'members.list.fee.partially_paid': 'Gedeeltelijk betaald', 'members.list.fee.paid': 'Betaald', 'members.list.fee.waived': 'Kwijtgescholden',
-		'members.list.edit': 'Bewerken', 'members.list.edit_named': '{name} bewerken', 'members.list.empty': 'Nog geen leden.', 'members.list.empty_filtered': 'Geen leden voor deze filters.', 'members.list.unknown': 'onbekend'
+		'members.list.edit': 'Bewerken', 'members.list.edit_named': '{name} bewerken', 'members.list.empty': 'Nog geen leden.', 'members.list.empty_filtered': 'Geen leden voor deze filters.', 'members.list.unknown': 'onbekend',
+		'members.list.range': '{from}–{to} van {n}'
 	},
 	fr: {
 		'members.list.title': 'Membres', 'members.list.count': '{n} membres', 'members.list.count_one': '1 membre', 'members.list.add': 'Ajouter un membre',
@@ -45,6 +47,7 @@ export default {
 		'members.list.role.member': 'Membre', 'members.list.role.guardian': 'Tuteur', 'members.list.role.staff': 'Staff',
 		'members.list.status.active': 'Actif', 'members.list.status.pending': 'En attente', 'members.list.status.lapsed': 'Expiré', 'members.list.status.cancelled': 'Annulé',
 		'members.list.fee.unpaid': 'Impayé', 'members.list.fee.partially_paid': 'Partiellement payé', 'members.list.fee.paid': 'Payé', 'members.list.fee.waived': 'Exonéré',
-		'members.list.edit': 'Modifier', 'members.list.edit_named': 'Modifier {name}', 'members.list.empty': 'Aucun membre pour le moment.', 'members.list.empty_filtered': 'Aucun membre ne correspond à ces filtres.', 'members.list.unknown': 'inconnu'
+		'members.list.edit': 'Modifier', 'members.list.edit_named': 'Modifier {name}', 'members.list.empty': 'Aucun membre pour le moment.', 'members.list.empty_filtered': 'Aucun membre ne correspond à ces filtres.', 'members.list.unknown': 'inconnu',
+		'members.list.range': '{from}–{to} sur {n}'
 	}
 };

@@ -37,7 +37,7 @@
 			</div>
 		</div>
 
-		<dl class="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line lg:grid-cols-4">
+		<dl class="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line md:grid-cols-4">
 			<div class="bg-white p-4">
 				<dt class="font-display text-xs font-bold tracking-[.1em] text-muted uppercase">{t('profile.stat.membership')}</dt>
 				<dd class="mt-1.5 flex items-center gap-2">
